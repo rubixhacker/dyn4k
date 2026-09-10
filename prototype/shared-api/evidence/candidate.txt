@@ -1,0 +1,12 @@
+step.events=world.enter,listener.begin,world.enter,listener.nested,listener.update,body.velocity,solver.initialize:0,body.position,solver.position:0,listener.post,listener.end,world.exit,body.velocity,solver.initialize:0,body.position,solver.position:0,listener.post,listener.end,world.exit
+step.position=2.5
+step.velocity=6.0
+step.aliases=identical;snapshot=independent;solver=identical
+view.add=UnsupportedOperationException
+view.set=UnsupportedOperationException
+view.iterator.remove=UnsupportedOperationException
+owner.iterator.removeBeforeNext=IllegalStateException
+owner.iterator.doubleRemove=IllegalStateException
+owner.iterator.exhausted=IndexOutOfBoundsException
+view.live=true;snapshot.size=1
+JAVA_JOURNEY_PASS

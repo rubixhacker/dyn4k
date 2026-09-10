@@ -1,0 +1,5 @@
+runtime.node=v24.10.0
+kotlin.position=2
+kotlin.velocity=4;snapshot=2;callbacks=2
+kotlin.context=explicit-equivalent;members=live;structural-mutation=rejected
+KOTLIN_JOURNEY_PASS

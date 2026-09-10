@@ -1,0 +1,2 @@
+b227e1c50795c646fc5c2e5c0e8b08787d760bf497a6a1029e01ef4088dfaae8  fixtures/Consumer.java
+bdbdc622dcc0f1f0faf752be8d11e8225c4744c6979d2ecc41efaf0bc34ca196  fixtures/Mixed.kt

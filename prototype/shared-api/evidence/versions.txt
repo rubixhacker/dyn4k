@@ -1,0 +1,21 @@
+2026-09-10T02:37:41Z
+
+------------------------------------------------------------
+Gradle 9.7.1
+------------------------------------------------------------
+
+Build time:    2026-08-19 14:16:09 UTC
+Revision:      92f0512e7f06d84621afba191f75e265363890cf
+
+Kotlin:        2.4.0
+Groovy:        4.0.32
+Ant:           Apache Ant(TM) version 1.10.17 compiled on April 6 2026
+Launcher JVM:  25.0.3 (JetBrains s.r.o. 25.0.3+-15898627-b508.16)
+Daemon JVM:    /var/home/stewart/.local/share/JetBrains/Toolbox/apps/android-studio/jbr (no Daemon JVM specified, using current Java home)
+OS:            Linux 7.2.1-ogc4.1.fc44.x86_64 amd64
+
+openjdk version "25.0.3" 2026-04-21
+OpenJDK Runtime Environment (build 25.0.3+-15898627-b508.16)
+OpenJDK 64-Bit Server VM (build 25.0.3+-15898627-b508.16, mixed mode)
+Kotlin compiler/plugin: 2.4.10; JVM bytecode target: 17; context parameters: enabled by language version 2.4
+runtime.node=v24.10.0

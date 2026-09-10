@@ -1,0 +1,4 @@
+kotlin.position=2.0
+kotlin.velocity=4.0;snapshot=2.0;callbacks=2
+kotlin.context=explicit-equivalent;members=live;structural-mutation=rejected
+KOTLIN_JOURNEY_PASS

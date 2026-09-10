@@ -1,0 +1,45 @@
+Compiled from "Geometry.kt"
+public class org.dyn4j.geometry.Vector2 {
+  public double x;
+  public double y;
+  public org.dyn4j.geometry.Vector2(double, double);
+  public org.dyn4j.geometry.Vector2();
+  public org.dyn4j.geometry.Vector2 add(double, double);
+  public org.dyn4j.geometry.Vector2 copy();
+}
+Compiled from "Dynamics.kt"
+public abstract class org.dyn4j.dynamics.AbstractPhysicsBody extends org.dyn4j.collision.AbstractCollisionBody<org.dyn4j.dynamics.BodyFixture> implements org.dyn4j.dynamics.PhysicsBody {
+  protected final org.dyn4j.geometry.Vector2 linearVelocity;
+  public org.dyn4j.dynamics.AbstractPhysicsBody();
+  public org.dyn4j.geometry.Vector2 getLinearVelocity();
+  public void setLinearVelocity(double, double);
+  public void integrateVelocity(org.dyn4j.geometry.Vector2, org.dyn4j.dynamics.TimeStep, org.dyn4j.dynamics.Settings);
+  public void integratePosition(org.dyn4j.dynamics.TimeStep, org.dyn4j.dynamics.Settings);
+}
+Compiled from "World.kt"
+public class org.dyn4j.world.World<T extends org.dyn4j.dynamics.Body> implements org.dyn4j.world.PhysicsWorld<T, kotlin.Unit> {
+  protected final java.util.List<T> bodies;
+  protected final org.dyn4j.dynamics.Settings settings;
+  protected final org.dyn4j.geometry.Vector2 gravity;
+  protected final org.dyn4j.dynamics.TimeStep timeStep;
+  private final java.util.List<T> view;
+  private final java.util.List<org.dyn4j.world.listener.StepListener<T>> listeners;
+  private boolean updateRequired;
+  private org.dyn4j.dynamics.contact.ContactConstraintSolver<T> solver;
+  public org.dyn4j.world.World();
+  public T getBody(int);
+  public java.util.List<T> getBodies();
+  public int getBodyCount();
+  public void addBody(T);
+  public boolean removeBody(T);
+  public boolean removeBody(int);
+  public boolean addStepListener(org.dyn4j.world.listener.StepListener<T>);
+  public void setContactConstraintSolver(org.dyn4j.dynamics.contact.ContactConstraintSolver<T>);
+  public org.dyn4j.dynamics.contact.ContactConstraintSolver<T> getContactConstraintSolver();
+  public void step(int, double);
+  protected void step();
+  public java.util.Iterator<T> getBodyIterator();
+  public org.dyn4j.dynamics.PhysicsBody getBody(int);
+  public void addBody(org.dyn4j.dynamics.PhysicsBody);
+  public boolean removeBody(org.dyn4j.dynamics.PhysicsBody);
+}

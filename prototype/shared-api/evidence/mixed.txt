@@ -1,0 +1,2 @@
+mixed.dsl-body=java-body;velocity=shared;java-to-kotlin-reentry=immediate;position=1.5
+MIXED_JOURNEY_PASS

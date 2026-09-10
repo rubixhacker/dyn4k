@@ -1,0 +1,56 @@
+> Task :baselineJar UP-TO-DATE
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :compileKotlinJvm UP-TO-DATE
+> Task :compileJvmMainJava NO-SOURCE
+> Task :jvmProcessResources NO-SOURCE
+> Task :processJvmMainResources SKIPPED
+> Task :jvmMainClasses UP-TO-DATE
+> Task :jvmJar UP-TO-DATE
+> Task :runtimeClasspath
+> Task :compileBaseline UP-TO-DATE
+> Task :compileCandidate UP-TO-DATE
+> Task :compileMixedKotlinJvm UP-TO-DATE
+> Task :compileJvmMixedJava NO-SOURCE
+> Task :jvmMixedProcessResources NO-SOURCE
+> Task :processJvmMixedResources SKIPPED
+> Task :jvmMixedClasses UP-TO-DATE
+
+> Task :mixedJourney
+mixed.dsl-body=java-body;velocity=shared;java-to-kotlin-reentry=immediate;position=1.5
+MIXED_JOURNEY_PASS
+
+> Task :journey
+kotlin.position=2.0
+kotlin.velocity=4.0;snapshot=2.0;callbacks=2
+kotlin.context=explicit-equivalent;members=live;structural-mutation=rejected
+KOTLIN_JOURNEY_PASS
+
+> Task :compileKotlinJs UP-TO-DATE
+> Task :jsProcessResources NO-SOURCE
+> Task :jsMainClasses UP-TO-DATE
+> Task :compileDevelopmentExecutableKotlinJs UP-TO-DATE
+> Task :jsDevelopmentExecutableCompileSync UP-TO-DATE
+> Task :kotlinNodeJsSetup UP-TO-DATE
+> Task :kotlinKotlinNpmCachesSetup
+> Task :kotlinRestoreYarnLock UP-TO-DATE
+> Task :kotlinYarnSetup UP-TO-DATE
+> Task :jsPackageJson UP-TO-DATE
+> Task :jsTestPackageJson UP-TO-DATE
+> Task :jsPublicPackageJson UP-TO-DATE
+> Task :jsTestPublicPackageJson UP-TO-DATE
+> Task :kotlinPackageJsonUmbrella UP-TO-DATE
+> Task :rootPackageJson UP-TO-DATE
+> Task :kotlinNpmInstall UP-TO-DATE
+> Task :kotlinStoreYarnLock UP-TO-DATE
+
+> Task :jsNodeDevelopmentRun
+runtime.node=v24.10.0
+kotlin.position=2
+kotlin.velocity=4;snapshot=2;callbacks=2
+kotlin.context=explicit-equivalent;members=live;structural-mutation=rejected
+KOTLIN_JOURNEY_PASS
+
+BUILD SUCCESSFUL in 694ms
+25 actionable tasks: 6 executed, 19 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.7.1/userguide/configuration_cache_enabling.html

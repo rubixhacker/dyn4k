@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+case "${1:---help}" in
+  --help|-h)
+    echo 'Throwaway shared mutable API prototype'
+    echo 'Usage: ./prototype/shared-api/run verify | play | --help'
+    ;;
+  play)
+    ./gradlew --console=plain -q runtimeClasspath
+    exec java -cp "$(cat build/runtime-classpath.txt)" probe.PlayKt
+    ;;
+  verify)
+    mkdir -p evidence
+    ./gradlew --console=plain baselineJar runtimeClasspath compileBaseline compileCandidate mixedJourney journey jsNodeDevelopmentRun > evidence/build.log 2>&1
+    echo '204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e  build/baseline/dyn4j-6.0.0.jar' | sha256sum --check > evidence/baseline-checksum.txt
+    ./gradlew --console=plain -q runBaseline > evidence/baseline.txt
+    ./gradlew --console=plain -q runCandidate > evidence/candidate.txt
+    diff -u evidence/baseline.txt evidence/candidate.txt > evidence/java-comparison.diff
+    ./gradlew --console=plain -q mixedJourney > evidence/mixed.txt
+    ./gradlew --console=plain -q journey > evidence/kotlin-jvm.txt
+    ./gradlew --console=plain -q jsNodeDevelopmentRun > evidence/kotlin-js.txt
+    {
+      date -u '+%Y-%m-%dT%H:%M:%SZ'
+      ./gradlew --version
+      java -version 2>&1
+      echo 'Kotlin compiler/plugin: 2.4.10; JVM bytecode target: 17; context parameters: enabled by language version 2.4'
+    } > evidence/versions.txt
+    rg '^runtime.node=' evidence/kotlin-js.txt >> evidence/versions.txt
+    sha256sum fixtures/Consumer.java fixtures/Mixed.kt > evidence/fixture-checksums.txt
+    javap -classpath build/libs/shared-api-prototype-jvm.jar -p org.dyn4j.geometry.Vector2 org.dyn4j.dynamics.AbstractPhysicsBody org.dyn4j.world.World > evidence/jvm-declarations.txt
+    echo 'PASS: identical baseline/candidate Java output; mixed Java/Kotlin; Kotlin JVM and JS runtime journeys.'
+    ;;
+  *) echo "Unknown mode: $1. Use verify, play, or --help." >&2; exit 2 ;;
+esac
