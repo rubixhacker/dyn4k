@@ -11,7 +11,7 @@ These requirements were agreed directly with the user during initial Wayfinder c
 - Compatibility API available on every supported target; existing Java source must compile unchanged on JVM, including org.dyn4j imports. Binary compatibility with already compiled consumers is outside the initial contract.
 - Every non-deprecated target available in the chosen Kotlin version is in scope, including experimental targets. Exact target list, chosen toolchain, and runtime-verification coverage remain to be decided.
 - Preserve baseline algorithms and double precision. Numerical parity is verified with explicit tolerances; bit-for-bit cross-platform determinism is outside the initial contract.
-- Workspace: /var/home/stewart/Workspace/dyn4k. Use the local Markdown tracker initially.
+- Public repository: [rubixhacker/dyn4k](https://github.com/rubixhacker/dyn4k), under the owner's personal GitHub account. GitHub Issues are the canonical tracker; they supersede the initial local Markdown tracker.
 
 ## Open boundaries
 
