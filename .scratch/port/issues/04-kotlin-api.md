@@ -16,3 +16,5 @@ What Kotlin API conventions and ownership/mutability model should dyn4k expose, 
 
 Created during initial map charting. Requires live user discussion before resolution.
 
+
+Research input: [Shim feasibility](../../../docs/research/shim.md). Discuss one canonical mutable model with two API surfaces versus shared algorithms behind explicit model contracts. Neither is approved. Use the concrete retained-velocity field-write, protected-state subclass, custom-world override, and solver/listener identity journeys to choose a prototype. Ordinary forwarding or Kotlin type aliases alone are not a proven solution.

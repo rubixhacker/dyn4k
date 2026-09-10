@@ -16,3 +16,5 @@ Which candidate Kotlin version is the initial toolchain, and what exact compilat
 
 Created during initial map charting. Requires live user discussion before resolution.
 
+
+Research input: [Target matrix](../../../docs/research/targets.md). Explicitly reconcile watchosArm32 documentation versus tagged-source deprecation before freezing the manifest; decide whether a pinned-plugin diagnostic probe is needed. Candidate Kotlin/Gradle/AGP versions are research recommendations, not approved choices. Include consumer platform floors and custom harness requirements in this decision.

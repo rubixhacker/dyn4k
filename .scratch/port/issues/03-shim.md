@@ -4,7 +4,7 @@ Id: 03
 Parent: ../map.md
 Label: wayfinder:research
 Type: research
-Status: claimed
+Status: resolved
 Assignee: Codex research-03-shim
 Blocked by: none
 
@@ -16,3 +16,11 @@ Can a thin multiplatform shim preserve the complete dyn4j 6.0.0 API while delega
 
 Created during initial map charting. Research may resolve factual questions; recommendations remain inputs to human decisions.
 
+
+Research context: branch `research/shim`; working tree `/var/home/stewart/Workspace/dyn4k-research/shim`; report `docs/research/shim.md`. Research is in progress; no result is accepted yet.
+
+## Answer
+
+Resolved as a source/documentation investigation. A complete thin shim is not yet proven feasible. Public mutable fields, live aliases, protected state and internal virtual dispatch constrain the engine's authoritative model. JVM declarations need explicit field/static/overload/generic shaping; user callbacks and solvers need identity-preserving bidirectional behavior. The report identifies candidate boundaries and concrete feasibility experiments, without selecting a Kotlin API or claiming a compiled prototype.
+
+[Shim feasibility report](../../../docs/research/shim.md). Research branch: `research/shim`; report commit: `5617a64211ad6077702179bfe88ef70231f9bdf8`. [Choose the idiomatic Kotlin API and shim boundary](04-kotlin-api.md) owns design selection and the decision to prototype the boundary.

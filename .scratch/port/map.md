@@ -17,7 +17,11 @@ An implementation-ready specification for an idiomatic Kotlin Multiplatform fork
 
 ## Decisions so far
 
-None. The initial charter is user-provided scope; research and decision-ticket resolutions will be indexed here.
+- [Establish the immutable dyn4j 6.0.0 baseline](issues/01-baseline.md) — Source and published artifacts pinned; functionality, tests and portability surfaces inventoried.
+
+- [Establish the complete Kotlin target and verification matrix](issues/02-targets.md) — Candidate targets and evidence gaps enumerated; disputed watchOS deprecation remains an explicit input to the support decision.
+
+- [Assess thin-shim compatibility feasibility](issues/03-shim.md) — Mutable state, identity and subclass dispatch constrain the core; candidate boundaries need a selected prototype before feasibility can be claimed.
 
 ## Not yet specified
 
