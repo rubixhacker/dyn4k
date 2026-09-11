@@ -1,0 +1,75 @@
+
+Node 22.0.0 js production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 22.0.0 wasmJs production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 22.0.0 wasmWasi production
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #19 failed: invalid heap type 'exn', enable with --experimental-wasm-exnref @+3590
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10:20
+
+Node.js v22.0.0
+exit=1
+
+Node 24.14.1 js production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 24.14.1 wasmJs production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 24.14.1 wasmWasi production
+(node:2874178) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #19 failed: invalid heap type 'exn', enable with --experimental-wasm-exnref @+3590
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10:20
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1
+exit=1
+
+Node 24.15.0 js production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 24.15.0 wasmJs production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 24.15.0 wasmWasi production
+(node:2874202) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0
+
+Node 26.8.2 js production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 26.8.2 wasmJs production
+WEB_FLOOR_OK 42
+exit=0
+
+Node 26.8.2 wasmWasi production
+(node:2874238) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0
+
+Wasmtime 37.0.0 production
+WEB_FLOOR_OK 42
+
+Wasmtime 48.0.2 production
+WEB_FLOOR_OK 42

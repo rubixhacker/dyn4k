@@ -1,0 +1,25 @@
+Downloading native dependencies (LLVM, sysroot etc). This is a one-time action performed only on the first run of the compiler.
+Downloading dependency https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (0/101793914). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (54304393/101793914). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (101793914/101793914). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz into /tmp/dyn4k-native-source/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/lldb-4-linux.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz (0/52150087). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz (52150087/52150087). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/lldb-4-linux.tar.gz into /tmp/dyn4k-native-source/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/llvm-21-x86_64-linux-essentials-116.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (0/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (56233028/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (116655238/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (189595380/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (189782367/189782367). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/llvm-21-x86_64-linux-essentials-116.tar.gz into /tmp/dyn4k-native-source/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/libffi-3.2.1-2-linux-x86-64.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz (0/56412). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz (56412/56412). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/libffi-3.2.1-2-linux-x86-64.tar.gz into /tmp/dyn4k-native-source/data/dependencies

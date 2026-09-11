@@ -1,0 +1,57 @@
+openjdk version "21.0.12.1" 2026-08-18 LTS
+OpenJDK Runtime Environment Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)
+OpenJDK 64-Bit Server VM Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS, mixed mode, sharing)
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0 25 209.7M  25 52.51M   0      0 46.38M      0   00:04   00:01   00:03 52.51M 55 209.7M  55 116.2M   0      0 54.56M      0   00:03   00:02   00:01 58.17M 91 209.7M  91 191.1M   0      0 61.05M      0   00:03   00:03         63.75M100 209.7M 100 209.7M   0      0 62.20M      0   00:03   00:03         63.75M100 209.7M 100 209.7M   0      0 62.20M      0   00:03   00:03         63.75M100 209.7M 100 209.7M   0      0 62.20M      0   00:03   00:03         63.75M
+/tmp/dyn4k-native-repro.Scvmqc/kotlin-native-prebuilt-linux-x86_64-2.4.20.tar.gz: OK
+info: kotlinc-native 2.4.20 (JRE 21.0.12.1+1-LTS)
+Kotlin/Native: 2.4.20
+Downloading native dependencies (LLVM, sysroot etc). This is a one-time action performed only on the first run of the compiler.
+Downloading dependency https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (0/101793914). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (58531753/101793914). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz (101793914/101793914). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/lldb-4-linux.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz (0/52150087). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/lldb-4-linux.tar.gz (52150087/52150087). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/lldb-4-linux.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/llvm-21-x86_64-linux-essentials-116.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (0/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (68551306/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (140836152/189782367). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/resources/llvm/21-x86_64-linux/llvm-21-x86_64-linux-essentials-116.tar.gz (189782367/189782367). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/llvm-21-x86_64-linux-essentials-116.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/libffi-3.2.1-2-linux-x86-64.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz (0/56412). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/libffi-3.2.1-2-linux-x86-64.tar.gz (56412/56412). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/libffi-3.2.1-2-linux-x86-64.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+Downloading native dependencies (LLVM, sysroot etc). This is a one-time action performed only on the first run of the compiler.
+Downloading dependency https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (0/90283015). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (56068332/90283015). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (90283015/90283015). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz to /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/qemu-aarch64-static-5.1.0-linux-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz (0/2401518). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz (2401518/2401518). Done.
+Extracting dependency: /tmp/dyn4k-native-repro.Scvmqc/data/dependencies/cache/qemu-aarch64-static-5.1.0-linux-2.tar.gz into /tmp/dyn4k-native-repro.Scvmqc/data/dependencies
+native-probe:3.0
+native-probe:3.0
+native-probe:3.0
+native-probe:3.0
+native-probe:3.0
+native-probe:3.0
+e986ae4fb0040d58a842378fdcbbc6e043f749c6af50f0cbd7c427d0f6a0d027  /tmp/dyn4k-native-repro.Scvmqc/linux_arm64-debug.kexe
+f1f27ac9b0998d15e5ea147f690ac8ac00c89b0222f0db052bb7b09133751b88  /tmp/dyn4k-native-repro.Scvmqc/linux_arm64-optimized.kexe
+c25c71775816b8ce433094fa2d1b1e9d774e38c26eb92d3722ddbab5cce5149f  /tmp/dyn4k-native-repro.Scvmqc/linux_x64-debug.kexe
+4ba45a17b5a00b1eb56b6a484a62e7e70065249be2ab04bb2823e8a1ddd42fc7  /tmp/dyn4k-native-repro.Scvmqc/linux_x64-optimized.kexe
+Artifacts: /tmp/dyn4k-native-repro.Scvmqc

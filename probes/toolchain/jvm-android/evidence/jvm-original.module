@@ -1,0 +1,102 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "url": "../../toolchain-probe/0.0.1/toolchain-probe-0.0.1.module",
+    "group": "local.dyn4k.probe",
+    "module": "toolchain-probe",
+    "version": "0.0.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.5.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "jvmApiElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "toolchain-probe-jvm-0.0.1.jar",
+          "url": "toolchain-probe-jvm-0.0.1.jar",
+          "size": 1447,
+          "sha512": "b63288a07f5a903a4fb53819edd659c3d0b850170b12b786b0cfc365ea3bb2468f0b9ef976edcc2c82224bd318a5128af67c0b24b73afc94fde78fa45686cda1",
+          "sha256": "8a1259b1992d3c17edcbc8f3771bb91696e312a5afa67391ddc313cec4d07bb0",
+          "sha1": "7386f6a617b535f2d5b939209df74f85860ef7b2",
+          "md5": "590cf0c9e2981abc62e5f0ce80b288de"
+        }
+      ]
+    },
+    {
+      "name": "jvmRuntimeElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "toolchain-probe-jvm-0.0.1.jar",
+          "url": "toolchain-probe-jvm-0.0.1.jar",
+          "size": 1447,
+          "sha512": "b63288a07f5a903a4fb53819edd659c3d0b850170b12b786b0cfc365ea3bb2468f0b9ef976edcc2c82224bd318a5128af67c0b24b73afc94fde78fa45686cda1",
+          "sha256": "8a1259b1992d3c17edcbc8f3771bb91696e312a5afa67391ddc313cec4d07bb0",
+          "sha1": "7386f6a617b535f2d5b939209df74f85860ef7b2",
+          "md5": "590cf0c9e2981abc62e5f0ce80b288de"
+        }
+      ]
+    },
+    {
+      "name": "jvmSourcesElements-published",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "files": [
+        {
+          "name": "toolchain-probe-jvm-0.0.1-sources.jar",
+          "url": "toolchain-probe-jvm-0.0.1-sources.jar",
+          "size": 695,
+          "sha512": "92db3e2c2fc4660e7ed7d4a8676b2e579304040b77497d3cc3390f335fee329c84b0f13aaa7764fdd1d6fac3f29d806f8a951a668ad77b3118ae7f8b38915dad",
+          "sha256": "5c50338bdd00dd7b98e8fd48f8fd972fc1dafc423532336e07e3adfb3dc52001",
+          "sha1": "13a0eb1213fdba2cbda3458d47a038f151a8d72a",
+          "md5": "1f0fea22ac07a92637cd13c0bea601d7"
+        }
+      ]
+    }
+  ]
+}

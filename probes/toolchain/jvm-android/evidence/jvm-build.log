@@ -1,0 +1,35 @@
+
+Welcome to Gradle 9.5.0!
+
+Here are the highlights of this release:
+ - Task provenance in reports and failure messages
+ - Type-safe accessors for precompiled Kotlin Settings plugins
+
+For more details see https://docs.gradle.org/9.5.0/release-notes.html
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jvmProcessResources NO-SOURCE
+> Task :processJvmMainResources SKIPPED
+> Task :jvmSourcesJar
+> Task :generatePomFileForJvmPublication
+> Task :generateProjectStructureMetadata
+> Task :allMetadataJar
+> Task :buildKotlinToolingMetadata
+> Task :sourcesJar
+> Task :generateMetadataFileForKotlinMultiplatformPublication
+> Task :generatePomFileForKotlinMultiplatformPublication
+> Task :publishKotlinMultiplatformPublicationToMavenRepository
+> Task :compileKotlinJvm
+> Task :compileJvmMainJava NO-SOURCE
+> Task :jvmMainClasses
+> Task :jvmJar
+> Task :generateMetadataFileForJvmPublication
+> Task :publishJvmPublicationToMavenRepository
+> Task :publish
+
+BUILD SUCCESSFUL in 22s
+14 actionable tasks: 14 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

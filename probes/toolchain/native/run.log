@@ -1,0 +1,19 @@
+info: kotlinc-native 2.4.20 (JRE 21.0.12.1+1-LTS)
+Kotlin/Native: 2.4.20
+7.2.1-ogc4.1.fc44.x86_64
+ldd (GNU libc) 2.43
+native-probe:3.0
+native-probe:3.0
+native-probe:3.0
+
+Displaying notes found in: .note.ABI-tag
+  Owner                Data size 	Description
+  GNU                  0x00000010	NT_GNU_ABI_TAG (ABI version tag)
+    OS: Linux, ABI: 2.6.16
+
+Displaying notes found in: .note.ABI-tag
+  Owner                Data size 	Description
+  GNU                  0x00000010	NT_GNU_ABI_TAG (ABI version tag)
+    OS: Linux, ABI: 4.9.156
+      [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+      [Requesting program interpreter: /lib/ld-linux-aarch64.so.1]

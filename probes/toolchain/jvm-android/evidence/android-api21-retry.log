@@ -1,0 +1,191 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+w: [33m[1m⚠️ Unused Kotlin Source Sets[0m[0m
+The Kotlin source set commonTest was configured but not added to any Kotlin compilation.
+[32m[1mSolution:[0m[0m
+[32m[3mYou can add a source set to a target's compilation by connecting it with the compilation's default source set using 'dependsOn'.[0m[0m
+[36mSee [0m[34mhttps://kotl.in/connecting-source-sets[0m[36m[0m
+
+
+> Task :androidSourcesJar
+> Task :androidPreBuild UP-TO-DATE
+> Task :preAndroidMainBuild UP-TO-DATE
+> Task :checkAndroidMainAarMetadata
+> Task :mergeAndroidMainJniLibFolders
+> Task :mergeAndroidMainNativeLibs NO-SOURCE
+> Task :copyAndroidMainJniLibsProjectOnly
+> Task :extractAndroidMainAnnotations
+> Task :generateAndroidMainEmptyResourceFiles
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :prepareAndroidMainArtProfile
+> Task :prepareLintJarForPublish
+> Task :writeAndroidMainAarMetadata
+> Task :processAndroidMainManifest
+> Task :generatePomFileForAndroidPublication
+> Task :generateProjectStructureMetadata
+> Task :allMetadataJar
+> Task :buildKotlinToolingMetadata
+> Task :sourcesJar
+> Task :generateMetadataFileForKotlinMultiplatformPublication
+> Task :generatePomFileForKotlinMultiplatformPublication
+> Task :publishKotlinMultiplatformPublicationToMavenRepository
+
+> Task :tasks
+
+------------------------------------------------------------
+Tasks runnable from root project 'toolchain-probe'
+------------------------------------------------------------
+
+Build tasks
+-----------
+allMetadataJar - Assembles a jar archive containing the metadata for all Kotlin source sets.
+androidSourcesJar - Assembles a jar archive containing the sources of target 'android'.
+assemble - Assembles the outputs of this project.
+assembleAndroidTest - Assembles all the Test applications.
+assembleUnitTest - Assembles all the unit test applications.
+build - Assembles and tests this project.
+buildDependents - Assembles and tests this project and all projects that depend on it.
+buildKotlinToolingMetadata - Build metadata json file containing information about the used Kotlin tooling
+buildNeeded - Assembles and tests this project and all projects it depends on.
+clean - Deletes the build directory.
+extractAndroidMainAnnotations - Extracts Android annotations for the androidMain variant into the archive file
+metadataMainClasses - Assembles outputs for compilation 'main' of target 'metadata'
+metadataSourcesJar - Assembles a jar archive containing the sources of target 'metadata'.
+sourcesJar - Assembles a jar archive containing the sources of target 'kotlin'.
+
+Build Setup tasks
+-----------------
+init - Initializes a new Gradle build.
+updateDaemonJvm - Generates or updates the Gradle Daemon JVM criteria.
+wrapper - Generates Gradle wrapper files.
+
+Help tasks
+----------
+artifactTransforms - Displays the Artifact Transforms that can be executed in root project 'toolchain-probe'.
+buildEnvironment - Displays all buildscript dependencies declared in root project 'toolchain-probe'.
+dependencies - Displays all dependencies declared in root project 'toolchain-probe'.
+dependencyInsight - Displays the insight into a specific dependency in root project 'toolchain-probe'.
+help - Displays a help message.
+javaToolchains - Displays the detected java toolchains.
+kotlinDslAccessorsReport - Prints the Kotlin code for accessing the currently available project extensions.
+outgoingVariants - Displays the outgoing variants of root project 'toolchain-probe'.
+projects - Displays the sub-projects of root project 'toolchain-probe'.
+properties - Displays the properties of root project 'toolchain-probe'.
+resolvableConfigurations - Displays the configurations that can be resolved in root project 'toolchain-probe'.
+tasks - Displays the tasks runnable from root project 'toolchain-probe'.
+
+Ide tasks
+---------
+resolveIdeDependencies - Debugging/Diagnosing task that will resolve dependencies for the IDE
+
+Install tasks
+-------------
+androidUninstallAll - Uninstall all applications.
+
+Publishing tasks
+----------------
+generateMetadataFileForAndroidPublication - Generates the Gradle metadata file for publication 'android'.
+generateMetadataFileForKotlinMultiplatformPublication - Generates the Gradle metadata file for publication 'kotlinMultiplatform'.
+generatePomFileForAndroidPublication - Generates the Maven POM file for publication 'android'.
+generatePomFileForKotlinMultiplatformPublication - Generates the Maven POM file for publication 'kotlinMultiplatform'.
+publish - Publishes all publications produced by this project.
+publishAllPublicationsToMavenRepository - Publishes all Maven publications produced by this project to the maven repository.
+publishAndroidPublicationToMavenLocal - Publishes Maven publication 'android' to the local Maven repository.
+publishAndroidPublicationToMavenRepository - Publishes Maven publication 'android' to Maven repository 'maven'.
+publishKotlinMultiplatformPublicationToMavenLocal - Publishes Maven publication 'kotlinMultiplatform' to the local Maven repository.
+publishKotlinMultiplatformPublicationToMavenRepository - Publishes Maven publication 'kotlinMultiplatform' to Maven repository 'maven'.
+publishToMavenLocal - Publishes all Maven publications produced by this project to the local Maven cache.
+
+Validation tasks
+----------------
+checkPomFileForAndroidPublication
+checkPomFileForKotlinMultiplatformPublication
+
+Verification tasks
+------------------
+androidConnectedCheck - Runs all device checks on currently connected devices.
+androidDeviceCheck - Runs all device checks using Device Providers and Test Servers.
+check - Runs all checks.
+checkKotlinGradlePluginConfigurationErrors - Checks that Kotlin Gradle Plugin hasn't reported project configuration errors, failing otherwise. This task always runs before compileKotlin* or similar tasks.
+
+Other tasks
+-----------
+androidCompileLintChecks
+androidJar
+androidPreBuild
+assembleAndroidMain - Assembles main Android output for variant <androidMain>
+bundleAndroidMainAar
+bundleAndroidMainClassesToCompileJar
+bundleAndroidMainClassesToRuntimeJar
+bundleAndroidMainLocalLintAar
+bundleLibRuntimeToDirAndroidMain
+checkAndroidMainAarMetadata
+cleanSwiftImportFingerprintArtifacts
+compileAndroidMain - Compiles the compilation 'main' in target 'android'.
+compileKotlinMetadata - Compiles the kotlin sources in compilation 'main' in target 'metadata' to Metadata.
+compileLint
+computeLocalPackageDependencyInputFiles
+consumeConfigAttr
+copyAndroidMainJniLibsProjectOnly
+createFullJarAndroidMain
+exportAndroidMainConsumerProguardFiles
+exportCommonSourceSetsMetadataLocationsForMetadataApiElements
+exportRootPublicationCoordinatesForMetadataApiElements
+exportTargetPublicationCoordinatesForAndroidApiElements
+exportTargetPublicationCoordinatesForAndroidRuntimeElements
+extractProguardFiles
+fetchSyntheticImportProjectPackages
+fingerprintSyntheticPackage
+generateAndroidMainEmptyResourceFiles
+generateProjectStructureMetadata - Generates serialized project structure metadata of the current project (for tooling)
+generateSyntheticLinkageSwiftPMImportProjectForCinteropsAndLdDump
+generateSyntheticLinkageSwiftPMImportProjectForEmbedAndSignLinkage
+generateSyntheticLinkageSwiftPMImportProjectForLinkageForCli
+integrateEmbedAndSign
+integrateLinkagePackage
+kmpPartiallyResolvedDependenciesChecker
+mergeAndroidMainConsumerProguardFiles
+mergeAndroidMainGeneratedProguardFiles
+mergeAndroidMainJavaResource
+mergeAndroidMainJniLibFolders
+mergeAndroidMainNativeLibs
+metadataProcessResources - Processes file collection.
+preAndroidMainBuild
+prepareAndroidMainArtProfile
+prepareKotlinBuildScriptModel
+prepareKotlinIdeaImport - Umbrella for all tasks required to run before IDEA/Gradle import
+prepareLintJarForPublish
+processAndroidMainJavaRes
+processAndroidMainManifest
+resolveConfigAttr
+setupLldbScript - Generate lldbinit file with imported konan_lldb.py script
+syncAndroidMainLibJars
+syncPersistedPackageResolvedToSynthetic
+syncSyntheticPackageResolvedToPersisted
+validateLocalSwiftPMDependencies
+writeAndroidMainAarMetadata
+
+Rules
+-----
+Pattern: clean<TaskName>: Cleans the output files of a task.
+Pattern: build<ConfigurationName>: Assembles the artifacts of a configuration.
+
+> Task :compileAndroidMain
+> Task :mergeAndroidMainGeneratedProguardFiles
+> Task :mergeAndroidMainConsumerProguardFiles
+> Task :processAndroidMainJavaRes
+> Task :mergeAndroidMainJavaResource
+> Task :syncAndroidMainLibJars
+> Task :bundleAndroidMainAar
+> Task :generateMetadataFileForAndroidPublication
+> Task :publishAndroidPublicationToMavenRepository
+> Task :publish
+
+[Incubating] Problems report is available at: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/jvm-android/android/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 11s
+29 actionable tasks: 29 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

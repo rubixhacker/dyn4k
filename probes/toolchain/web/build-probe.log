@@ -1,0 +1,19 @@
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jsProcessResources NO-SOURCE
+> Task :wasmJsProcessResources NO-SOURCE
+> Task :wasmWasiProcessResources NO-SOURCE
+> Task :compileKotlinWasmJs
+> Task :compileKotlinWasmWasi
+> Task :compileKotlinJs
+> Task :wasmJsMainClasses
+> Task :jsMainClasses
+> Task :wasmWasiMainClasses
+> Task :compileDevelopmentExecutableKotlinWasmWasi
+> Task :compileDevelopmentExecutableKotlinWasmJs
+> Task :compileDevelopmentExecutableKotlinJs
+> Task :jsDevelopmentExecutableCompileSync
+
+BUILD SUCCESSFUL in 7s
+8 actionable tasks: 8 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

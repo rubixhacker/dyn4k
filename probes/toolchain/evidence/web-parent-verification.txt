@@ -1,0 +1,176 @@
+
+Node 22.0.0 target js mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 22.0.0 target wasmJs mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 22.0.0 target wasmWasi mode development
+(node:2914636) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/developmentExecutable/kotlin/web-floor-probe.mjs:11
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #2706:"kotlin.coroutines.CoroutineImpl.resumeWith" failed: invalid value type 'exn', enable with --experimental-wasm-exnref @+217373
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/developmentExecutable/kotlin/web-floor-probe.mjs:11:20
+
+Node.js v22.0.0
+exit=1 expected=1
+
+Node 24.14.1 target js mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.14.1 target wasmJs mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.14.1 target wasmWasi mode development
+(node:2914662) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/developmentExecutable/kotlin/web-floor-probe.mjs:11
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #2706:"kotlin.coroutines.CoroutineImpl.resumeWith" failed: invalid value type 'exn', enable with --experimental-wasm-exnref @+217373
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/developmentExecutable/kotlin/web-floor-probe.mjs:11:20
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1
+exit=1 expected=1
+
+Node 24.15.0 target js mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.15.0 target wasmJs mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.15.0 target wasmWasi mode development
+(node:2914716) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target js mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target wasmJs mode development
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target wasmWasi mode development
+(node:2914792) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Wasmtime 37.0.0 mode development
+wasmtime 37.0.0 (7b3d6ae79 2025-09-20)
+Error: failed to parse WebAssembly module
+
+Caused by:
+    array indexed types not supported without the gc feature (at offset 0x10)
+exit=1 expected=1
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Wasmtime 48.0.2 mode development
+wasmtime 48.0.2 (e9f1ea232 2026-09-10)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 22.0.0 target js mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 22.0.0 target wasmJs mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 22.0.0 target wasmWasi mode production
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #19 failed: invalid heap type 'exn', enable with --experimental-wasm-exnref @+3590
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10:20
+
+Node.js v22.0.0
+exit=1 expected=1
+
+Node 24.14.1 target js mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.14.1 target wasmJs mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.14.1 target wasmWasi mode production
+(node:2915099) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10
+const wasmModule = new WebAssembly.Module(wasmBuffer);
+                   ^
+
+CompileError: WebAssembly.Module(): Compiling function #19 failed: invalid heap type 'exn', enable with --experimental-wasm-exnref @+3590
+    at file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/wasmWasi/main/productionExecutable/optimized/web-floor-probe.mjs:10:20
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.1
+exit=1 expected=1
+
+Node 24.15.0 target js mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.15.0 target wasmJs mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 24.15.0 target wasmWasi mode production
+(node:2915120) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target js mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target wasmJs mode production
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Node 26.8.2 target wasmWasi mode production
+(node:2915141) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Wasmtime 37.0.0 mode production
+wasmtime 37.0.0 (7b3d6ae79 2025-09-20)
+Error: failed to parse WebAssembly module
+
+Caused by:
+    array indexed types not supported without the gc feature (at offset 0xc)
+exit=1 expected=1
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Wasmtime 48.0.2 mode production
+wasmtime 48.0.2 (e9f1ea232 2026-09-10)
+WEB_FLOOR_OK 42
+exit=0 expected=0
+WEB_FLOOR_OK 42
+exit=0 expected=0
+
+Unexpected exit results: 0

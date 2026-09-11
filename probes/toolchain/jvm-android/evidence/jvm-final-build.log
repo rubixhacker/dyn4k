@@ -1,0 +1,26 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jvmProcessResources NO-SOURCE
+> Task :processJvmMainResources SKIPPED
+> Task :jvmSourcesJar UP-TO-DATE
+> Task :generatePomFileForJvmPublication
+> Task :generateProjectStructureMetadata UP-TO-DATE
+> Task :allMetadataJar UP-TO-DATE
+> Task :buildKotlinToolingMetadata UP-TO-DATE
+> Task :sourcesJar UP-TO-DATE
+> Task :generateMetadataFileForKotlinMultiplatformPublication
+> Task :generatePomFileForKotlinMultiplatformPublication
+> Task :publishKotlinMultiplatformPublicationToMavenRepository
+> Task :compileKotlinJvm
+> Task :compileJvmMainJava NO-SOURCE
+> Task :jvmMainClasses
+> Task :jvmJar
+> Task :generateMetadataFileForJvmPublication
+> Task :publishJvmPublicationToMavenRepository
+> Task :publish
+
+BUILD SUCCESSFUL in 3s
+14 actionable tasks: 9 executed, 5 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

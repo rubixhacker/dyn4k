@@ -1,0 +1,50 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+w: [33m[1m⚠️ Unused Kotlin Source Sets[0m[0m
+The Kotlin source set commonTest was configured but not added to any Kotlin compilation.
+[32m[1mSolution:[0m[0m
+[32m[3mYou can add a source set to a target's compilation by connecting it with the compilation's default source set using 'dependsOn'.[0m[0m
+[36mSee [0m[34mhttps://kotl.in/connecting-source-sets[0m[36m[0m
+
+
+> Task :androidSourcesJar UP-TO-DATE
+> Task :androidPreBuild UP-TO-DATE
+> Task :preAndroidMainBuild UP-TO-DATE
+> Task :checkAndroidMainAarMetadata UP-TO-DATE
+> Task :mergeAndroidMainJniLibFolders UP-TO-DATE
+> Task :mergeAndroidMainNativeLibs NO-SOURCE
+> Task :copyAndroidMainJniLibsProjectOnly UP-TO-DATE
+> Task :extractAndroidMainAnnotations UP-TO-DATE
+> Task :generateAndroidMainEmptyResourceFiles UP-TO-DATE
+> Task :kmpPartiallyResolvedDependenciesChecker
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :compileAndroidMain UP-TO-DATE
+> Task :mergeAndroidMainGeneratedProguardFiles UP-TO-DATE
+> Task :mergeAndroidMainConsumerProguardFiles UP-TO-DATE
+> Task :prepareAndroidMainArtProfile UP-TO-DATE
+> Task :prepareLintJarForPublish UP-TO-DATE
+> Task :processAndroidMainJavaRes UP-TO-DATE
+> Task :mergeAndroidMainJavaResource UP-TO-DATE
+> Task :syncAndroidMainLibJars UP-TO-DATE
+> Task :writeAndroidMainAarMetadata UP-TO-DATE
+> Task :processAndroidMainManifest
+> Task :generatePomFileForAndroidPublication
+> Task :bundleAndroidMainAar
+> Task :generateMetadataFileForAndroidPublication
+> Task :publishAndroidPublicationToMavenRepository
+> Task :generateProjectStructureMetadata UP-TO-DATE
+> Task :allMetadataJar UP-TO-DATE
+> Task :buildKotlinToolingMetadata UP-TO-DATE
+> Task :sourcesJar UP-TO-DATE
+> Task :generateMetadataFileForKotlinMultiplatformPublication
+> Task :generatePomFileForKotlinMultiplatformPublication
+> Task :publishKotlinMultiplatformPublicationToMavenRepository
+> Task :publish
+
+[Incubating] Problems report is available at: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/jvm-android/android/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 4s
+28 actionable tasks: 9 executed, 19 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

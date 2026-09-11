@@ -1,0 +1,12 @@
+Downloading native dependencies (LLVM, sysroot etc). This is a one-time action performed only on the first run of the compiler.
+Downloading dependency https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (0/90283015). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (66788117/90283015). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz (90283015/90283015). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz into /tmp/dyn4k-native-source/data/dependencies
+Downloading dependency https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz to /tmp/dyn4k-native-source/data/dependencies/cache/qemu-aarch64-static-5.1.0-linux-2.tar.gz
+
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz (0/2401518). 
+(KonanProperties) Downloading dependency: https://download.jetbrains.com/kotlin/native/qemu-aarch64-static-5.1.0-linux-2.tar.gz (2401518/2401518). Done.
+Extracting dependency: /tmp/dyn4k-native-source/data/dependencies/cache/qemu-aarch64-static-5.1.0-linux-2.tar.gz into /tmp/dyn4k-native-source/data/dependencies

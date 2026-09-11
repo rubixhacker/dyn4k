@@ -1,0 +1,1 @@
+-keep,allowoptimization public class probe.Consumer { public static double run(); }

@@ -1,0 +1,33 @@
+Starting a Gradle Daemon, 1 busy Daemon could not be reused, use --status for details
+
+> Configure project :
+w: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build.gradle.kts:10:2: This declaration needs opt-in. Its usage should be marked with '@org.jetbrains.kotlin.gradle.ExperimentalWasmDsl' or '@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)'
+w: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build.gradle.kts:11:2: This declaration needs opt-in. Its usage should be marked with '@org.jetbrains.kotlin.gradle.ExperimentalWasmDsl' or '@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)'
+e: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build.gradle.kts:11:46: 'fun compilerOptions(configure: KotlinCommonCompilerOptions.() -> Unit): Unit' cannot be called in this context with an implicit receiver. Use an explicit receiver if necessary.
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Build file '/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build.gradle.kts' line: 10
+
+* What went wrong:
+Script compilation errors:
+
+  Line 10:  wasmJs { nodejs(); binaries.executable(); compilerOptions { freeCompilerArgs.add("-Xwasm-use-new-exception-proposal=false") } }
+            ^ This declaration needs opt-in. Its usage should be marked with '@org.jetbrains.kotlin.gradle.ExperimentalWasmDsl' or '@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)'
+
+  Line 11:  wasmWasi { nodejs(); binaries.executable(); compilerOptions { freeCompilerArgs.add("-Xwasm-use-new-exception-proposal") } }
+            ^ This declaration needs opt-in. Its usage should be marked with '@org.jetbrains.kotlin.gradle.ExperimentalWasmDsl' or '@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)'
+
+  Line 11:  wasmWasi { nodejs(); binaries.executable(); compilerOptions { freeCompilerArgs.add("-Xwasm-use-new-exception-proposal") } }
+                                                        ^ 'fun compilerOptions(configure: KotlinCommonCompilerOptions.() -> Unit): Unit' cannot be called in this context with an implicit receiver. Use an explicit receiver if necessary.
+
+3 errors
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 9s

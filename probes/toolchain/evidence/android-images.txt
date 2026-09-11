@@ -1,0 +1,36 @@
+Pkg.Desc=System Image x86_64 with Google APIs.
+Pkg.Revision=17
+Pkg.Dependencies=emulator#30.7.3
+AndroidVersion.ApiLevel=33
+SystemImage.Abi=x86_64
+SystemImage.TagId=google_apis
+SystemImage.TagDisplay=Google APIs
+SystemImage.GpuSupport=true
+Addon.VendorId=google
+Addon.VendorDisplay=Google Inc.
+
+Pkg.Desc=System Image x86_64 with Google Play.
+Pkg.Revision=4
+Pkg.Dependencies=emulator#35.4.9
+AndroidVersion.ApiLevel=36.1
+AndroidVersion.ExtensionLevel=20
+AndroidVersion.IsBaseSdk=true
+SystemImage.Abi=x86_64
+SystemImage.TagId=google_apis_playstore
+SystemImage.TagDisplay=Google Play
+SystemImage.GpuSupport=true
+Addon.VendorId=google
+Addon.VendorDisplay=Google Inc.
+Pkg.Desc=System Image x86_64 with Google APIs.
+Pkg.Revision=6
+Pkg.Dependencies=emulator#36.5.11
+AndroidVersion.ApiLevel=37.0
+AndroidVersion.ExtensionLevel=22
+AndroidVersion.IsBaseSdk=true
+SystemImage.Abi=x86_64
+SystemImage.TagId=google_apis,ai_glasses_compatible
+SystemImage.TagDisplay=Google APIs,AI Glasses Compatible
+SystemImage.GpuSupport=true
+Addon.VendorId=google
+Addon.VendorDisplay=Google Inc.
+

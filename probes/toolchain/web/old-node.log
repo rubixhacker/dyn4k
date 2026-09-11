@@ -1,0 +1,42 @@
+
+Node 0.10.48
+
+/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/kotlin-kotlin-stdlib.js:3758
+      var newCtor = class extends ctor {}
+                    ^^^^^
+SyntaxError: Unexpected reserved word
+    at Module._compile (module.js:439:25)
+    at Object.Module._extensions..js (module.js:474:10)
+    at Module.load (module.js:356:32)
+    at Function.Module._load (module.js:312:12)
+    at Module.require (module.js:364:17)
+    at require (module.js:380:17)
+    at protoOf (/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/web-floor-probe.js:5:29)
+    at Object.<anonymous> (/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/web-floor-probe.js:12:2)
+    at Module._compile (module.js:456:26)
+    at Object.Module._extensions..js (module.js:474:10)
+
+Node 0.12.18
+/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/kotlin-kotlin-stdlib.js:3758
+      var newCtor = class extends ctor {}
+                    ^^^^^
+SyntaxError: Unexpected reserved word
+    at exports.runInThisContext (vm.js:73:16)
+    at Module._compile (module.js:443:25)
+    at Object.Module._extensions..js (module.js:478:10)
+    at Module.load (module.js:355:32)
+    at Function.Module._load (module.js:310:12)
+    at Module.require (module.js:365:17)
+    at require (module.js:384:17)
+    at protoOf (/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/web-floor-probe.js:5:29)
+    at Object.<anonymous> (/var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/web-floor-probe.js:12:2)
+    at Module._compile (module.js:460:26)
+Terminated                 curl -fsSL https://nodejs.org/dist/v${v}/node-v${v}-linux-x64.tar.gz -o /tmp/dyn4k-web-probe/node-${v}.tar.gz
+
+gzip: stdin: invalid compressed data--format violated
+tar: Unexpected EOF in archive
+tar: Unexpected EOF in archive
+tar: Error is not recoverable: exiting now
+
+Node 4.0.0
+/bin/bash: line 1: 2913065 Segmentation fault         /tmp/dyn4k-web-probe/node-v${v}-linux-x64/bin/node probes/toolchain/web/build/compileSync/js/main/developmentExecutable/kotlin/web-floor-probe.js

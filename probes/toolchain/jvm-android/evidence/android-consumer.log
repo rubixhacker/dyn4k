@@ -1,0 +1,130 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :preBuild UP-TO-DATE
+> Task :preDebugBuild UP-TO-DATE
+> Task :mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :generateDebugResources
+> Task :packageDebugResources
+> Task :processDebugNavigationResources
+> Task :generateDebugAssets UP-TO-DATE
+> Task :javaPreCompileDebug
+> Task :mergeDebugAssets
+> Task :compressDebugAssets
+> Task :parseDebugLocalResources
+> Task :generateDebugGlobalSynthetics
+> Task :generateDebugRFile
+> Task :checkDebugDuplicateClasses
+> Task :desugarDebugFileDependencies
+> Task :compileDebugKotlin NO-SOURCE
+
+> Task :compileDebugJavaWithJavac
+Java compiler version 21 has deprecated support for compiling with source/target version 8.
+Try one of the following options:
+    1. [Recommended] Use Java toolchain with a lower language version
+    2. Set a higher source/target version
+    3. Use a lower version of the JDK running the build (if you're not using Java toolchain)
+For more details on how to configure these settings, see https://developer.android.com/build/jdks.
+To suppress this warning, set android.javaCompile.suppressSourceTargetDeprecationWarning=true in gradle.properties.
+Add android.sync.suppressAgpWarnings=JAVA_COMPILE_DEPRECATED_SOURCE_TARGET to the gradle.properties file to suppress this warning.
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+3 warnings
+
+> Task :processDebugJavaRes NO-SOURCE
+> Task :mergeDebugJavaResource
+> Task :mergeLibDexDebug
+> Task :mapDebugSourceSetPaths
+> Task :checkDebugAarMetadata
+> Task :mergeExtDexDebug
+> Task :compileDebugNavigationResources
+> Task :mergeDebugResources
+> Task :createDebugCompatibleScreenManifests
+> Task :extractDeepLinksDebug
+> Task :processDebugMainManifest
+> Task :processDebugManifest
+> Task :mergeDebugJniLibFolders
+> Task :mergeDebugNativeLibs NO-SOURCE
+> Task :stripDebugDebugSymbols NO-SOURCE
+> Task :validateSigningDebug
+> Task :writeDebugAppMetadata
+> Task :writeDebugSigningConfigVersions
+> Task :preReleaseBuild UP-TO-DATE
+> Task :mergeReleaseJniLibFolders
+> Task :mergeReleaseNativeLibs NO-SOURCE
+> Task :stripReleaseDebugSymbols NO-SOURCE
+> Task :extractReleaseNativeSymbolTables NO-SOURCE
+> Task :mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :checkReleaseDuplicateClasses
+> Task :generateReleaseResources
+> Task :packageReleaseResources
+> Task :processReleaseNavigationResources
+> Task :javaPreCompileRelease
+> Task :processDebugManifestForPackage
+> Task :parseReleaseLocalResources
+> Task :checkReleaseAarMetadata
+> Task :generateReleaseRFile
+> Task :mapReleaseSourceSetPaths
+> Task :compileReleaseKotlin NO-SOURCE
+
+> Task :compileReleaseJavaWithJavac
+Java compiler version 21 has deprecated support for compiling with source/target version 8.
+Try one of the following options:
+    1. [Recommended] Use Java toolchain with a lower language version
+    2. Set a higher source/target version
+    3. Use a lower version of the JDK running the build (if you're not using Java toolchain)
+For more details on how to configure these settings, see https://developer.android.com/build/jdks.
+To suppress this warning, set android.javaCompile.suppressSourceTargetDeprecationWarning=true in gradle.properties.
+Add android.sync.suppressAgpWarnings=JAVA_COMPILE_DEPRECATED_SOURCE_TARGET to the gradle.properties file to suppress this warning.
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+3 warnings
+
+> Task :compileReleaseNavigationResources
+> Task :mergeReleaseResources
+> Task :createReleaseCompatibleScreenManifests
+> Task :extractDeepLinksRelease
+> Task :processReleaseMainManifest
+> Task :processReleaseManifest
+> Task :desugarReleaseFileDependencies
+> Task :mergeReleaseStartupProfile
+> Task :processDebugResources
+> Task :dexBuilderDebug
+> Task :mergeProjectDexDebug
+> Task :generateReleaseAssets UP-TO-DATE
+> Task :mergeReleaseArtProfile
+> Task :mergeReleaseAssets
+> Task :compressReleaseAssets
+> Task :extractReleaseVersionControlInfo
+> Task :extractProguardFiles
+> Task :mergeExtDexRelease
+> Task :generateReleaseLintVitalReportModel
+> Task :processReleaseJavaRes NO-SOURCE
+> Task :collectReleaseDependencies
+> Task :mergeReleaseJavaResource
+> Task :sdkReleaseDependencyData
+> Task :writeReleaseAppMetadata
+> Task :writeReleaseSigningConfigVersions
+> Task :packageDebug
+> Task :createDebugApkListingFileRedirect
+> Task :assembleDebug
+> Task :processReleaseManifestForPackage
+> Task :processReleaseResources
+> Task :dexBuilderRelease
+> Task :mergeReleaseGlobalSynthetics
+> Task :optimizeReleaseResources
+> Task :mergeDexRelease
+> Task :compileReleaseArtProfile
+> Task :lintVitalAnalyzeRelease
+> Task :lintVitalReportRelease
+> Task :lintVitalRelease
+> Task :packageRelease
+> Task :createReleaseApkListingFileRedirect
+> Task :assembleRelease
+
+[Incubating] Problems report is available at: file:///var/home/stewart/Workspace/dyn4k-toolchain-probes/probes/toolchain/jvm-android/android-consumer/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 22s
+76 actionable tasks: 76 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

@@ -1,0 +1,2 @@
+package probe
+fun forbiddenApi() = java.util.List.of("Java 9 API")
