@@ -1,6 +1,6 @@
 # Draft numerical calibration manifest
 
-Research for [Specify concrete numerical calibration fixtures](https://github.com/rubixhacker/dyn4k/issues/14), 2026-09-13. **Draft for live approval: no proposed input grid, new fixture, metric supplement, or numerical allowance below is approved or measured.** No engine implementation or simulation run occurred. The approved checkpoints in [Define numerical and migration acceptance](https://github.com/rubixhacker/dyn4k/issues/7) remain authoritative.
+Research for [Specify the concrete numerical calibration manifest](https://github.com/rubixhacker/dyn4k/issues/14), 2026-09-13. **Draft for live approval: no proposed input grid, new fixture, metric supplement, or numerical allowance below is approved or measured.** No engine implementation or simulation run occurred. The approved checkpoints in [Define numerical and migration acceptance](https://github.com/rubixhacker/dyn4k/issues/7) remain authoritative.
 
 ## Frozen evidence and notation
 
