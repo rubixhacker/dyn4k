@@ -295,3 +295,126 @@ P-J-Wheel-stiffness-from-8.0Hz-0x1.f019b59389d7bp10
 P-J-Wheel-interaction
 
 ```
+
+## Approved checkpoint supplement
+
+The live approval recorded in [the calibration decision](https://github.com/rubixhacker/dyn4k/issues/15#issuecomment-5658147012) permits exact later upstream checkpoints to activate previously idle probes. The original `P-J-*` rows above are retained unchanged. Supplemental rows use `P-JCP-*`, so their new bindings cannot silently replace old reference inputs.
+
+Each checkpoint is reconstructed from the exact source setup and preceding steps/actions, retaining the same World, bodies, joint, warm-start impulses and rest state. Every preceding step is recorded under that row's unique `-preparation` ID; successive preparation segments keep their cumulative segment index. Checkpoint actions between segments are reflected in the next input snapshot and the full ordered `checkpoint-provenance` record. The main input header contains the resulting physical state; the first record also carries `checkpoint-input-binding` with source method, ordered actions and variant. Continuation step numbers 201/401 are relative to the new 600-step continuation, not the upstream absolute step count.
+
+| Supplemental checkpoint | Exact source state before continuation | Continuation variants |
+|---|---|---|
+| Motor `caps` | `simple`: preserve 25 steps with caps0/0, then set force100 and torque10 in source order | source control; correction factors0/.3/1; linear/angular target increment before201 |
+| Pulley `taut` | `withAndWithoutSlack`: exact three-body setup; step1; second moving body's velocity(0,10) | source control |
+| Pulley `slack` | Continue the preceding setup step2; velocity(0,10), translation(0,.1), slack=true | source control; slack false/true/toggle |
+| Distance `cap` | `springWithMaxForce` complete initial setup: rest3, frequency8, damping.2, enabled cap200 | source control; force caps0/10/1000; cap-enable false/true/toggle |
+| Weld `cap` | `softConstraint`: left offset anchor, preserve21 steps, cap5 then enabled, force(0,-10) at(.5,2) | source control; torque caps0/.25/10; cap-enable false/true/toggle |
+| Wheel `cap` | `springDamperWithLimits`: vertical axis, preserve20 steps; limits(1,5), step2; limits(-1,-.5), step2; limits(-1.5,1), cap enabled then200 | source control; force caps0/10/1000; cap-enable false/true/toggle |
+| Prismatic `lower` / `upper` | `limits`: exact zero-gravity initial setup, limits(-1,5), velocity(-16,0), step1, limits(6,7); upper further preserves step1 then velocity(16,0), limits(1,3) | source controls; joint/lower/upper limit-enable false/true/toggle |
+| Revolute `lower` / `upper` | `limits`: zero gravity, angular tolerance0, limits±30deg, velocity10deg/s, step1, limits(10,30)deg; upper further preserves step1 then velocity-10deg/s, limits(-30,5)deg | source controls; limit-enable false/true/toggle |
+| Weld `lower` / `upper` | `softConstraintWithLimitsLower/Upper`: exact opposite offset anchors, spring8/.3, limits±.2pi, cap1 enabled; only upper includes source force(0,-10) at(-.5,2) | source controls; limit-enable false/true/toggle |
+| Wheel `lower` / `upper` | `springDamperWithLimits`: preserve20 steps, limits(1,5); upper further preserves step2 then limits(-1,-.5) | source controls; joint/lower/upper limit-enable false/true/toggle; approved range(-1,1) and equal(0,0) |
+
+Focused integration run `/tmp/joint-checkpoints/run3` produced 213 complete segments: 92 independent 600-step continuations and 121 preparation segments, totaling 56,224 recorded physics steps with no rejected/non-finite status. Independent comparison of the preceding run caught a Distance setup mismatch: reusing `fixedDistance` had retained its explicit 10 position iterations, while `springWithMaxForce` uses the pinned default 2. The supplemental binding now explicitly restores 2; the original rows remain unchanged. Fourteen unchanged checkpoint controls permit exact comparison against the corresponding original U segment input and initial state trajectory. Finite capture, source fidelity and actual mode activation are separate checks.
+
+The supplement supplies raw per-step joint getter channels for activation analysis: lower/upper gap together with configured enables and translation/angle; spring force/torque against positive enabled cap; Motor target error and state change; Pulley current length against target plus slack enable. Revolute's source limit correction explicitly has zero reaction torque, so a nonzero-reaction requirement would incorrectly reject its genuine position correction. A toggle at201/401 may occur after an original impulse has decayed; its actual activity must be reported, not assumed from the configuration change.
+
+No new Prismatic/Wheel spring+motor+limits combination, arbitrary stimulus, negative-ratio repair, or replacement for the rejected signed Distance range is introduced by this approval. Those remaining questions are unchanged.
+
+### Supplemental continuation IDs
+
+```text
+P-JCP-Motor-caps-source
+P-JCP-Motor-caps-CorrectionFactor-0.0
+P-JCP-Motor-caps-CorrectionFactor-0.3
+P-JCP-Motor-caps-CorrectionFactor-1.0
+P-JCP-Motor-caps-moving-linear
+P-JCP-Motor-caps-moving-angular
+P-JCP-Distance-cap-source
+P-JCP-Distance-cap-MaximumSpringForce-0.0
+P-JCP-Distance-cap-MaximumSpringForce-10.0
+P-JCP-Distance-cap-MaximumSpringForce-1000.0
+P-JCP-Distance-cap-MaximumSpringForceEnabled-false
+P-JCP-Distance-cap-MaximumSpringForceEnabled-true
+P-JCP-Distance-cap-MaximumSpringForceEnabled-toggle
+P-JCP-Weld-cap-source
+P-JCP-Weld-cap-MaximumSpringTorque-0.0
+P-JCP-Weld-cap-MaximumSpringTorque-0.25
+P-JCP-Weld-cap-MaximumSpringTorque-10.0
+P-JCP-Weld-cap-MaximumSpringTorqueEnabled-false
+P-JCP-Weld-cap-MaximumSpringTorqueEnabled-true
+P-JCP-Weld-cap-MaximumSpringTorqueEnabled-toggle
+P-JCP-Wheel-cap-source
+P-JCP-Wheel-cap-MaximumSpringForce-0.0
+P-JCP-Wheel-cap-MaximumSpringForce-10.0
+P-JCP-Wheel-cap-MaximumSpringForce-1000.0
+P-JCP-Wheel-cap-MaximumSpringForceEnabled-false
+P-JCP-Wheel-cap-MaximumSpringForceEnabled-true
+P-JCP-Wheel-cap-MaximumSpringForceEnabled-toggle
+P-JCP-Pulley-taut-source
+P-JCP-Pulley-slack-source
+P-JCP-Pulley-slack-SlackEnabled-false
+P-JCP-Pulley-slack-SlackEnabled-true
+P-JCP-Pulley-slack-SlackEnabled-toggle
+P-JCP-Prismatic-lower-source
+P-JCP-Prismatic-lower-LimitsEnabled-false
+P-JCP-Prismatic-lower-LimitsEnabled-true
+P-JCP-Prismatic-lower-LimitsEnabled-toggle
+P-JCP-Prismatic-lower-LowerLimitEnabled-false
+P-JCP-Prismatic-lower-LowerLimitEnabled-true
+P-JCP-Prismatic-lower-LowerLimitEnabled-toggle
+P-JCP-Prismatic-lower-UpperLimitEnabled-false
+P-JCP-Prismatic-lower-UpperLimitEnabled-true
+P-JCP-Prismatic-lower-UpperLimitEnabled-toggle
+P-JCP-Prismatic-upper-source
+P-JCP-Prismatic-upper-LimitsEnabled-false
+P-JCP-Prismatic-upper-LimitsEnabled-true
+P-JCP-Prismatic-upper-LimitsEnabled-toggle
+P-JCP-Prismatic-upper-LowerLimitEnabled-false
+P-JCP-Prismatic-upper-LowerLimitEnabled-true
+P-JCP-Prismatic-upper-LowerLimitEnabled-toggle
+P-JCP-Prismatic-upper-UpperLimitEnabled-false
+P-JCP-Prismatic-upper-UpperLimitEnabled-true
+P-JCP-Prismatic-upper-UpperLimitEnabled-toggle
+P-JCP-Revolute-lower-source
+P-JCP-Revolute-lower-LimitsEnabled-false
+P-JCP-Revolute-lower-LimitsEnabled-true
+P-JCP-Revolute-lower-LimitsEnabled-toggle
+P-JCP-Revolute-upper-source
+P-JCP-Revolute-upper-LimitsEnabled-false
+P-JCP-Revolute-upper-LimitsEnabled-true
+P-JCP-Revolute-upper-LimitsEnabled-toggle
+P-JCP-Weld-lower-source
+P-JCP-Weld-lower-LimitsEnabled-false
+P-JCP-Weld-lower-LimitsEnabled-true
+P-JCP-Weld-lower-LimitsEnabled-toggle
+P-JCP-Weld-upper-source
+P-JCP-Weld-upper-LimitsEnabled-false
+P-JCP-Weld-upper-LimitsEnabled-true
+P-JCP-Weld-upper-LimitsEnabled-toggle
+P-JCP-Wheel-lower-source
+P-JCP-Wheel-lower-LimitsEnabled-false
+P-JCP-Wheel-lower-LimitsEnabled-true
+P-JCP-Wheel-lower-LimitsEnabled-toggle
+P-JCP-Wheel-lower-LowerLimitEnabled-false
+P-JCP-Wheel-lower-LowerLimitEnabled-true
+P-JCP-Wheel-lower-LowerLimitEnabled-toggle
+P-JCP-Wheel-lower-UpperLimitEnabled-false
+P-JCP-Wheel-lower-UpperLimitEnabled-true
+P-JCP-Wheel-lower-UpperLimitEnabled-toggle
+P-JCP-Wheel-lower-limits-range
+P-JCP-Wheel-lower-limits-equal
+P-JCP-Wheel-upper-source
+P-JCP-Wheel-upper-LimitsEnabled-false
+P-JCP-Wheel-upper-LimitsEnabled-true
+P-JCP-Wheel-upper-LimitsEnabled-toggle
+P-JCP-Wheel-upper-LowerLimitEnabled-false
+P-JCP-Wheel-upper-LowerLimitEnabled-true
+P-JCP-Wheel-upper-LowerLimitEnabled-toggle
+P-JCP-Wheel-upper-UpperLimitEnabled-false
+P-JCP-Wheel-upper-UpperLimitEnabled-true
+P-JCP-Wheel-upper-UpperLimitEnabled-toggle
+P-JCP-Wheel-upper-limits-range
+P-JCP-Wheel-upper-limits-equal
+
+```

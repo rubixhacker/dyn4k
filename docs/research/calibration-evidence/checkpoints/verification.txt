@@ -1,0 +1,11 @@
+Two integrated captures: checkpoints-final-a and checkpoints-final-b. Both exited0.
+213 gzip traces, queries.jsonl and summary.jsonl: cmp byte-identical.
+Each: 92 continuations*600 +1024 preparation steps =56224 states.
+Audit --complete expected56224: PASS, 213segments,179781listenerEvents,236352rawRecords,zero rejected/missing states.
+14 unchanged controls: EXACT original U input state/settings/world and120 prefix states.
+Source review PASS, JointCases.java SHA25635496351b0655b71a21f2c922f179c49a8bc1bf1f407c9cc69a9e93957cbb850.
+Source review scope: preceding steps/actions, anchors/forces, setup settings, retained live World and solver state, variant order.
+Current source/script hashes matched final-a/harness.sha256 after both captures.
+Measurement parser exercised on real original and supplemental traces; diagnostics do not assign acceptance thresholds.
+Temporary /tmp/joint-checkpoints/run1,run2,run3 excluded from final repeat totals.
+Original full baseline traces preserved. No engine, reference or tolerance approval.

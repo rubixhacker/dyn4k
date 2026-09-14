@@ -9,7 +9,7 @@ for s in 0.01 1.0 100.0; do
     printf '%s\n' "-s$s-o$o-"
   done
 done > "$out/partitions.txt"
-printf '%s\n' 'P-J-' 'U-' 'G-' >> "$out/partitions.txt"
+printf '%s\n' 'P-J-' 'P-JCP-' 'U-' 'G-' >> "$out/partitions.txt"
 export root out
 xargs -d '\n' -P 4 -I '{}' bash -c '
   part=$1

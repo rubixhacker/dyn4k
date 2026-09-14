@@ -36,6 +36,8 @@ java -Xmx768m -cp calibration/classes Analyze /absolute/new-partitioned-director
 
 Expected simulation steps before rejection: 5,980,956. The negative Angle ratio fails before the 600-step horizon, and remaining inactive-mode gaps are documented separately. Scheduling counters printed by the joint driver include filtered-out cases; use retained summaries for executed counts.
 
+The subsequently approved `P-JCP-` checkpoint supplement adds 92 continuations and 121 recorded preparation segments, totaling 56,224 additional steps. Run it alone with `./calibration/run NEW_OUTPUT P-JCP-`; the parallel runner includes its own partition. Original corpus counts above remain historical. See [checkpoint results and remaining coverage gaps](../docs/research/checkpoint-followup.md).
+
 ## Interpretation
 
 `Analyze` reports exact repeat-independent scale/origin and timestep differences at matching physical times, contact/CCD/sleep observations and spring mechanical-energy drift. It does not assign numerical pass thresholds. Different timesteps have distinct reference candidates. Geometry rejection is not supported-domain evidence; no-contact NONE CCD diagnostics are expected controls, not successful CCD cases. Complete activation of every limit/cap/interaction is not inferred from a nonzero aggregate joint reaction.

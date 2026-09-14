@@ -71,7 +71,75 @@ public final class JointCases {
                 },null);
             }
         }
+        runCheckpoints();
         System.err.println("JointCases attempted="+attempted+" completed="+completed+" rejected="+rejected);
+    }
+    public static void runCheckpoints() {
+        checkpointRow("Motor","caps","source",s->{},null);
+        for(double value:new double[]{0,0.3,1}) checkpointRow("Motor","caps","CorrectionFactor-"+value,s->set(s.joint,"CorrectionFactor",value),null);
+        for(String channel:new String[]{"linear","angular"}) checkpointRow("Motor","caps","moving-"+channel,s->{},s->step->{
+            if(step==201){MotorJoint<?> m=(MotorJoint<?>)s.joint;
+                if(channel.equals("linear"))m.setLinearTarget(m.getLinearTarget().sum(0.5,0.5));else m.setAngularTarget(m.getAngularTarget()+Math.PI/6);
+                Capture.action(channel+" target increment before step201: "+(channel.equals("linear")?"(0.5,0.5)":"pi/6"));}
+        });
+        for(String type:new String[]{"Distance","Weld","Wheel"}) {
+            String field=type.equals("Weld")?"MaximumSpringTorque":"MaximumSpringForce";
+            checkpointRow(type,"cap","source",s->{},null);
+            for(double value:type.equals("Weld")?new double[]{0,0.25,10}:new double[]{0,10,1000}) checkpointRow(type,"cap",field+"-"+value,s->set(s.joint,field,value),null);
+            checkpointBoolean(type,"cap",field+"Enabled");
+        }
+        checkpointRow("Pulley","taut","source",s->{},null);
+        checkpointRow("Pulley","slack","source",s->{},null);
+        checkpointBoolean("Pulley","slack","SlackEnabled");
+        for(String type:new String[]{"Prismatic","Revolute","Weld","Wheel"}) for(String side:new String[]{"lower","upper"}) {
+            checkpointRow(type,side,"source",s->{},null);
+            checkpointBoolean(type,side,"LimitsEnabled");
+            if(type.equals("Prismatic")||type.equals("Wheel")){checkpointBoolean(type,side,"LowerLimitEnabled");checkpointBoolean(type,side,"UpperLimitEnabled");}
+            if(type.equals("Wheel")){checkpointRow(type,side,"limits-range",s->limits(s.joint,-1,1),null);checkpointRow(type,side,"limits-equal",s->limits(s.joint,0,0),null);}
+        }
+    }
+    private static void checkpointBoolean(String type,String point,String field){
+        for(boolean value:new boolean[]{false,true})checkpointRow(type,point,field+"-"+value,s->set(s.joint,field,value),null);
+        checkpointRow(type,point,field+"-toggle",s->set(s.joint,field,false),s->step->{if(step==201||step==401){set(s.joint,field,step==201);Capture.action("set"+field+"("+(step==201)+") before step"+step);}});
+    }
+    private record Checkpoint(Seed seed,String method,String actions) {}
+    private static String preparationId;
+    private static void checkpointRow(String type,String point,String variant,Consumer<Seed> configure,Schedule schedule){
+        String id="P-JCP-"+type+"-"+point+"-"+variant;
+        if(!Capture.accepts(id))return;
+        preparationId=id+"-preparation";
+        Checkpoint cp=checkpoint(type,point);Seed s=cp.seed;configure.accept(s);
+        Capture.record(id,"checkpoint-provenance","058bf6d982a0fb89b54050f929f6ea9dae53b714",cp.method,cp.actions,"variant="+variant,"600 continuation steps at 1/60; step201/401 are continuation-relative");
+        IntConsumer actions=schedule==null?step->{}:schedule.bind(s);
+        Capture.run(id,s.world,600,1.0/60,1,0,0,step->{
+            if(step==1)Capture.record(id,"checkpoint-input-binding",cp.method,cp.actions,variant);
+            actions.accept(step);
+        });
+    }
+    private static void advance(Seed s,int count){Capture.run(preparationId,s.world,count,1.0/60,1,0,0,step->{});}
+    private static Checkpoint checkpoint(String type,String point){
+        Seed s;
+        if(type.equals("Motor")){s=seed(type);advance(s,25);MotorJoint<?> m=(MotorJoint<?>)s.joint;m.setMaximumForce(100);m.setMaximumTorque(10);return new Checkpoint(s,"MotorJointSimulationTest.simple","initial; step25; setMaximumForce(100); setMaximumTorque(10); before source step26");}
+        if(type.equals("Pulley")){
+            World<Body>w=new World<>();body(w,Geometry.createRectangle(10,1),MassType.INFINITE,0,-1);Body a=body(w,Geometry.createCircle(0.5),MassType.NORMAL,-1,0),b=body(w,Geometry.createCircle(0.5),MassType.NORMAL,1,0.5);
+            PulleyJoint<Body>p=new PulleyJoint<>(a,b,new Vector2(-1,1),new Vector2(1,1),new Vector2(-1,0),new Vector2(1,0.5));w.addJoint(p);s=new Seed(w,p);advance(s,1);b.setLinearVelocity(0,10);
+            String chain="initial; step1; b2.velocity=(0,10); before source step2";
+            if(point.equals("slack")){advance(s,2);b.setLinearVelocity(0,10);b.translate(0,0.1);p.setSlackEnabled(true);chain="initial; step1; b2.velocity=(0,10); step2; b2.velocity=(0,10); b2.translate(0,0.1); slack=true; before source step4";}
+            return new Checkpoint(s,"PulleyJointSimulationTest.withAndWithoutSlack",chain);
+        }
+        if(type.equals("Prismatic")||type.equals("Revolute")){
+            s=seed(type);s.world.setGravity(World.ZERO_GRAVITY);Body b=s.world.getBody(1);
+            if(type.equals("Prismatic")){PrismaticJoint<?>p=(PrismaticJoint<?>)s.joint;p.setLimitsEnabled(-1,5);b.setLinearVelocity(-16,0);advance(s,1);p.setLimitsEnabled(6,7);if(point.equals("upper")){advance(s,1);b.setLinearVelocity(16,0);p.setLimitsEnabled(1,3);}return new Checkpoint(s,"PrismaticJointSimulationTest.limits","initial ZERO gravity; limits(-1,5); velocity(-16,0); step1; limits(6,7)"+(point.equals("upper")?"; step1; velocity(16,0); limits(1,3); before source step3":"; before source step2"));}
+            RevoluteJoint<?>r=(RevoluteJoint<?>)s.joint;s.world.getSettings().setAngularTolerance(0);r.setLimitsEnabled(-Math.toRadians(30),Math.toRadians(30));b.setAngularVelocity(Math.toRadians(10));advance(s,1);r.setLimitsEnabled(Math.toRadians(10),Math.toRadians(30));if(point.equals("upper")){advance(s,1);b.setAngularVelocity(-Math.toRadians(10));r.setLimitsEnabled(-Math.toRadians(30),Math.toRadians(5));}return new Checkpoint(s,"RevoluteJointSimulationTest.limits","initial ZERO gravity/angularTolerance0; limits(-30,30)deg; velocity10deg/s; step1; limits(10,30)deg"+(point.equals("upper")?"; step1; velocity-10deg/s; limits(-30,5)deg; before source step3":"; before source step2"));
+        }
+        if(type.equals("Distance")){s=seed(type);s.world.getSettings().setPositionConstraintSolverIterations(2);DistanceJoint<?>d=(DistanceJoint<?>)s.joint;d.setRestDistance(3);d.setSpringEnabled(true);d.setSpringFrequency(8);d.setSpringDamperEnabled(true);d.setSpringDampingRatio(0.2);d.setMaximumSpringForceEnabled(true);d.setMaximumSpringForce(200);return new Checkpoint(s,"DistanceJointSimulationTest.springWithMaxForce","exact initial setup; default position iterations2; spring8Hz/damping0.2; rest3; cap enabled200; before source step1");}
+        s=compatibleSeed(type,"Spring");
+        if(type.equals("Wheel")){WheelJoint<?>w=(WheelJoint<?>)s.joint;advance(s,20);w.setLimitsEnabled(1,5);if(point.equals("lower"))return new Checkpoint(s,"WheelJointSimulationTest.springDamperWithLimits","initial vertical axis/limits(-1,5); step20; limits(1,5); before source step21");advance(s,2);w.setLimitsEnabled(-1,-0.5);if(point.equals("upper"))return new Checkpoint(s,"WheelJointSimulationTest.springDamperWithLimits","initial vertical axis/limits(-1,5); step20; limits(1,5); step2; limits(-1,-0.5); before source step23");advance(s,2);w.setLimitsEnabled(-1.5,1);w.setMaximumSpringForceEnabled(true);w.setMaximumSpringForce(200);return new Checkpoint(s,"WheelJointSimulationTest.springDamperWithLimits","initial vertical axis/limits(-1,5); step20; limits(1,5); step2; limits(-1,-0.5); step2; limits(-1.5,1); cap enabled200; before source step25");}
+        WeldJoint<Body>w=(WeldJoint<Body>)s.joint;
+        if(point.equals("cap")){advance(s,21);w.setMaximumSpringTorque(5);w.setMaximumSpringTorqueEnabled(true);s.world.getBody(1).applyForce(new Vector2(0,-10),new Vector2(0.5,2));return new Checkpoint(s,"WeldJointSimulationTest.softConstraint","initial offset(-0.5,0) anchor; step1; step20; cap5; capEnabled=true; force(0,-10) at(0.5,2); before source step22");}
+        if(point.equals("upper")){s.world.removeJoint(w);w=new WeldJoint<>(s.world.getBody(0),s.world.getBody(1),s.world.getBody(1).getWorldCenter().sum(0.5,0));w.setSpringEnabled(true);w.setSpringDamperEnabled(true);w.setSpringDampingRatio(0.3);w.setSpringFrequency(8);s.world.addJoint(w);s=new Seed(s.world,w);}
+        w.setLimitsEnabled(-Math.PI*0.2,Math.PI*0.2);w.setMaximumSpringTorque(1);w.setMaximumSpringTorqueEnabled(true);if(point.equals("upper"))s.world.getBody(1).applyForce(new Vector2(0,-10),new Vector2(-0.5,2));
+        return new Checkpoint(s,"WeldJointSimulationTest.softConstraintWithLimits"+(point.equals("upper")?"Upper":"Lower"),"initial anchor offset("+(point.equals("upper")?"0.5":"-0.5")+",0); spring8Hz/damping0.3; limits +/-0.2pi; cap1 enabled"+(point.equals("upper")?"; force(0,-10) at(-0.5,2)":"")+"; before source step1");
     }
     private interface Schedule { IntConsumer bind(Seed s); }
     private static void row(String type,String name,Consumer<Seed> configure,Schedule schedule) {

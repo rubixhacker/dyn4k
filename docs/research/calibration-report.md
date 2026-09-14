@@ -5,6 +5,8 @@ Baseline: dyn4j 6.0.0 source `058bf6d982a0fb89b54050f929f6ea9dae53b714`, binary 
 
 **Status: two repetitions executed and audited; task remains open for activation bindings and full raw-data publication.** These are unreviewed experimental captures. No numerical limit, baseline exception, supported operating range or frozen reference is approved.
 
+**Approved follow-up:** [Exact upstream checkpoint supplement](checkpoint-followup.md) adds 92 continuation probes, with 56,224 steps per repeat including recorded preparation. Both repeats match byte-for-byte; all 14 source controls match original upstream input snapshots and trajectory prefixes. Supplemental raw traces are published. Original corpus totals below remain unchanged.
+
 ## Executed evidence
 
 Both independent JVM repetitions produced byte-identical canonical gzip traces, query records and summaries. The recorder rejects non-finite output immediately; identical failure observations are not successful finite references. Runtime: OpenJDK 25.0.3 on the recorded Bazzite x86-64 host. This is one host/runtime, not all-target evidence or a performance benchmark.
@@ -64,7 +66,7 @@ Concrete absolute/relative port-parity limits remain unset. Repeated JVM equalit
 
 ## Remaining gates
 
-- Several isolated P mode rows start before an upstream stimulus or with zero caps/speed/error. Complete U schedules do contain activated limit/motor/slack evidence, but that does not prove every new P row. The live clarification asks whether exact later U checkpoints may supply P starting states. Combined Prismatic/Wheel spring+motor+limits, cap prerequisites and a valid additional Distance range still need explicit bindings. See the exact [activation audit](negative-ratio-findings.md#activation-audit-distinguish-existing-u-evidence-from-new-p-decision).
+- Several original isolated P mode rows start before an upstream stimulus or with zero caps/speed/error. The user approved exact later U checkpoints; the [executed supplement](checkpoint-followup.md) supplies Motor target/correction, spring-cap, pulley and limit probes without replacing the original rows. Combined Prismatic/Wheel spring+motor+limits, dormant toggles, nonsaturating high caps and a valid additional Distance range remain explicit gaps. The original [activation audit](negative-ratio-findings.md#activation-audit-distinguish-existing-u-evidence-from-new-p-decision) is historical; the supplement records the approval and its verified scope.
 - The failed stack wake paths and CCD outcomes need review; they cannot be waived by widening numerical limits or counting callbacks.
 - Initial reference review and acceptance-limit decisions remain human gates. No baseline-bug exception was approved. The selected unchanged Java application's headful execution and future shim replay remain separate obligations.
 - **Full raw trace publication is unfinished.** The complete raw data is retained on this host, but is not contained in the GitHub branch. Its hashes and exact local locations are published; a compact report is not represented as a remote copy of the full traces.

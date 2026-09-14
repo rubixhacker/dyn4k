@@ -10,3 +10,11 @@ Scope: accepted checkpoints on the parent decision through comment 5657531221.
 
 Baseline source 058bf6d982a0fb89b54050f929f6ea9dae53b714.
 No production engine changes, no reference approval, no all-target runtime claim.
+
+## Approved checkpoint follow-up
+
+The user approved using exact later upstream checkpoints to activate idle joint probes. This permits reconstructing all preceding source steps/actions and retaining the resulting state; it does not approve invented combined stimuli, new Distance limits, baseline exceptions, references or tolerances.
+
+1. Add source-checked supplemental checkpoint rows and provenance: completed. 92 continuation rows, original P rows preserved; independent source audit passed.
+2. Execute two fresh affected-case captures and independently audit activation: completed. 56,224 states each; all213 traces identical;14 source controls and120 upstream prefix states exact. Source setting drift corrected before final repetitions. Actual nonbinding/dormant outcomes retained.
+3. Prepare supplemental publication: completed. Both complete supplemental raw repeats, manifests, measurements and report retained with checksums; task comment records branch revision. Full original raw archive destination and uncovered combinations remain separate blockers; overall execution task remains open.
