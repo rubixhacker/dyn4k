@@ -1,0 +1,12 @@
+Final integrated harness compiled through calibration/run; upstream filter exited 0.
+All 40 nominal original upstream assertions passed again.
+All 75 corrected scaled gzip traces match the fresh integrated run byte-for-byte.
+Integrated geometry run exited 0 and queries match corrected-geometry-a byte-for-byte.
+Two corrected scale runs: all 75 gzip traces, queries, and summaries byte-identical.
+Two corrected geometry query streams byte-identical.
+Geometry settings corrections preserve original outputs after removing only configuration fields.
+Scaled corrections preserve every original post-input raw record; four exact initial assertion failures retained.
+Commands: ./calibration/run /tmp/dyn4k-final-published-upstream U-
+java -Xmx768m -cp 'calibration/classes:calibration/cache/*:calibration/cache/upstream/src/test/resources' Main /tmp/dyn4k-final-published-geometry G-
+Actual output directories remain local. Supplemental corrected outputs are published beside this record.
+No reference or tolerance approval. No production engine changes.

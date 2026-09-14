@@ -1,0 +1,21 @@
+# Working directory: /var/home/stewart/Workspace/dyn4k-calibration
+# Exact executed capture programs are archived in captured-harness-sources.tar.gz;
+# exact compiled artifacts in captured-classes.tar.gz. JAR hashes: environment.txt.
+./calibration/run /tmp/calibration-final-smoke U-
+./calibration/parallel-run /var/home/stewart/Workspace/dyn4k-calibration/calibration/results/final-a
+./calibration/parallel-run /var/home/stewart/Workspace/dyn4k-calibration/calibration/results/final-b
+# Each original run dispatched the 19 arguments in executed-partitions.txt via:
+# java -Xmx768m -cp 'calibration/classes:calibration/cache/*:calibration/cache/upstream/src/test/resources' Main OUTPUT/PARTITION PARTITION
+# All child captures finished; original aggregation then exited 1 by re-reading its
+# newly created combined directory. Fixed combine.sh repaired indices/hardlinks.
+# One duplicate L-free execution is retained and identified in redundant-summary-rows.jsonl.
+./calibration/scripts/combine.sh calibration/results/final-a calibration/results/final-a/partitions.txt
+./calibration/scripts/combine.sh calibration/results/final-b calibration/results/final-b/partitions.txt
+./calibration/scripts/audit-partitions.sh calibration/results/final-a calibration/results/derived-a
+# Canonical corpora: 909 unique files; expected 5980956 steps; retained 5980526.
+# Each raw gzip, queries.jsonl and summary.jsonl compared using cmp --silent between a/b.
+# Analyzer compiled separately and partitioned 0..3 of 4 over the same full catalog:
+# java -Xmx512m -cp /tmp/analyze-partition-classes Analyze calibration/results/derived-a/combined docs/research/calibration-evidence/measurements-partINDEX INDEX 4
+# Probe controls are diagnostic only, with exact printed commands in source/README:
+java -cp 'calibration/classes:calibration/cache/*' NegativeRatioProbe world
+java -cp 'calibration/classes:calibration/cache/*' NegativeRatioProbe positive

@@ -1,0 +1,797 @@
+{
+  "status": "Exploratory scale/origin diagnostics; not port parity or supported-domain approval",
+  "rows": 585,
+  "constructionRejections": [
+    {
+      "id": "P/G-boundary/triangle/s0/o1/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          1000.0,
+          1000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 0.01,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            1000.0,
+            1000.0
+          ],
+          [
+            1000.01,
+            1000.0
+          ],
+          [
+            1000.005,
+            1000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o2/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          -1000.0,
+          1000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 0.01,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            -1000.0,
+            1000.0
+          ],
+          [
+            -999.99,
+            1000.0
+          ],
+          [
+            -999.995,
+            1000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o3/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          1000000.0,
+          -1000000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 0.01,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            1000000.0,
+            -1000000.0
+          ],
+          [
+            1000000.01,
+            -1000000.0
+          ],
+          [
+            1000000.005,
+            -1000000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o4/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          -1000000.0,
+          1000000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 0.01,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            -1000000.0,
+            1000000.0
+          ],
+          [
+            -999999.99,
+            1000000.0
+          ],
+          [
+            -999999.995,
+            1000000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    },
+    {
+      "id": "P/G-boundary/triangle/s1/o3/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          1000000.0,
+          -1000000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 1.0,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            1000000.0,
+            -1000000.0
+          ],
+          [
+            1000001.0,
+            -1000000.0
+          ],
+          [
+            1000000.5,
+            -1000000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    },
+    {
+      "id": "P/G-boundary/triangle/s1/o4/h2",
+      "payload": {
+        "constructionAccepted": false,
+        "exceptionClass": "java.lang.IllegalArgumentException",
+        "exceptionMessage": "The polygon has zero or near zero area",
+        "nominalHeight": 1.0E-12,
+        "origin": [
+          -1000000.0,
+          1000000.0
+        ],
+        "robustLocation": 0.0,
+        "scale": 1.0,
+        "segmentLocation": 0.0,
+        "vertices": [
+          [
+            -1000000.0,
+            1000000.0
+          ],
+          [
+            -999999.0,
+            1000000.0
+          ],
+          [
+            -999999.5,
+            1000000.0
+          ]
+        ],
+        "winding": 0.0
+      }
+    }
+  ],
+  "overloadDisagreements": [],
+  "discreteDifferences": [
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/0",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/GJK/1",
+      "field": "distanceAvailable",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o3/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o4/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o3/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "detected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s1/o4/d1/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d1/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/0",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/GJK/1",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d2/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d2/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d2/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/0",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/GJK/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/GJK/1",
+      "field": "distanceAvailable",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/0",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/SAT/0",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/0",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o1/d3/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/1",
+      "field": "detected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/circle/s0/o2/d3/SAT/1",
+      "referenceId": "P/G-boundary/circle/s1/o0/d3/SAT/1",
+      "field": "booleanOnlyDetected",
+      "reference": false,
+      "actual": true
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o1/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o2/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o3/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/triangle/s0/o4/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/triangle/s1/o3/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    },
+    {
+      "id": "P/G-boundary/triangle/s1/o4/h2",
+      "referenceId": "P/G-boundary/triangle/s1/o0/h2",
+      "field": "constructionAccepted",
+      "reference": true,
+      "actual": false
+    }
+  ]
+}

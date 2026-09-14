@@ -1,0 +1,1 @@
+909 canonical raw gzip traces plus summary and queries are byte-identical between fresh JVM repetitions

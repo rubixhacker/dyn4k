@@ -1,0 +1,6 @@
+{
+  "rejectedCase": "P-J-Angle-ratio-limits-off--1.0",
+  "quantity": "rotationIncrementSum",
+  "invalidFromStep": 2,
+  "reason": "The baseline's signed rotation clamp does not constrain the runaway negative velocity. At step 2 actual angular velocity times dt exceeds pi in magnitude, so a shortest-increment accumulator cannot recover full revolutions. The trace's rotationStepBoundBelowPi field describes the configured bound only. This entire case is rejected; none of these sums is an approved accumulated-rotation reference."
+}

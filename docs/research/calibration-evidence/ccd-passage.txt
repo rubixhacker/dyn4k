@@ -1,0 +1,8 @@
+hz=60 mode=ALL step=1 centre=(-3.903072937247692E-13, 0.0010952796097571888) velocity=(0.0, -1.2) omega=20.0 polygonMinY=2.0000000000000085E-4 polygonMaxY=0.002081437109796996 entirelyBelowGround=false
+hz=60 mode=ALL step=2 centre=(-9.177434447466177E-5, -0.005522672112641305) velocity=(0.0, -0.41418454670526694) omega=94.24777960769379 polygonMinY=-0.006512913875595605 polygonMaxY=-0.004639635858013107 entirelyBelowGround=true
+hz=60 mode=NONE step=1 centre=(-5.76072666527858E-20, -0.01) velocity=(0.0, -1.2) omega=20.0 polygonMinY=-0.010820137827272579 polygonMaxY=-0.00900018381680963 entirelyBelowGround=true
+hz=60 mode=NONE step=2 centre=(-6.638845344487454E-20, -0.03) velocity=(0.0, -1.2) omega=20.0 polygonMinY=-0.030962204621340923 polygonMaxY=-0.029061490021607895 entirelyBelowGround=true
+hz=120 mode=ALL step=1 centre=(-3.903072868202838E-13, 0.0010952796097571883) velocity=(0.0, -1.2) omega=20.0 polygonMinY=2.0000000000000042E-4 polygonMaxY=0.0020814371097969955 entirelyBelowGround=false
+hz=120 mode=ALL step=2 centre=(-7.904755027940118E-5, -0.002090234614765704) velocity=(0.0, -0.41418454670526705) omega=188.49555921538757 polygonMinY=-0.003085385469424766 polygonMaxY=-0.001227325844399534 entirelyBelowGround=true
+hz=120 mode=NONE step=1 centre=(-4.339792975858737E-20, 4.342777261775456E-20) velocity=(0.0, -1.2) omega=20.0 polygonMinY=-8.866132220749339E-4 polygonMaxY=9.891426706816271E-4 entirelyBelowGround=false
+hz=120 mode=NONE step=2 centre=(-2.0021726992049792E-5, 4.253115734170712E-4) velocity=(0.0, -8.906231467231015E-17) omega=-1.4611853005211242E-13 polygonMinY=-4.587203286836067E-4 polygonMaxY=0.0014152548487322003 entirelyBelowGround=false

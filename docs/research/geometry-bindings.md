@@ -1,0 +1,23 @@
+# Geometry calibration bindings
+
+`calibration/src/GeometryCases.java` expands the approved geometry inputs into 15 scale/origin combinations. Each combination captures 20 boundary-circle queries (five deltas, two algorithms, two orders), three independent triangle construction attempts, and 16 circle detection queries following the four upstream stages. Total: 585 query records, plus explicit rejection records for rejected triangles.
+
+The detection stage schedule follows pinned [CircleCircleTest.detectSat/detectGjk](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/test/java/org/dyn4j/collision/shapes/CircleCircleTest.java): coincident transforms, translate first circle by −s on x, translate second by 1.5s on y, translate first again by −s on x. Both overloads and argument orders run. GJK distance is an additional observation at each stage; the exact unmodified upstream tests remain the separate U reference, because this instrumented expansion adds queries and scales/translates the inputs.
+
+Every circle query records actual radii and transforms, origin/scale, booleans, penetration normal/depth, and for GJK the distance boolean, distance, separation normal and both witnesses. Frame-local witnesses are supplemental diagnostics and are meaningful only when `distanceAvailable` is true; cleared output objects from unsuccessful queries are recorded, not treated as valid geometric answers. Exposed GJK distance/raycast epsilons scale by s² and EPA distance epsilon by s, with both GJK and nested EPA settings captured explicitly. The default zero GJK detection epsilon and iteration counts remain unchanged. Circle-circle detection and distance dispatch directly to CircleDetector before GJK convergence logic, so these settings do not affect this particular shape pair. No internal epsilon is patched.
+
+## Supplemental settings correction
+
+The original `final-a/G-/queries.jsonl` retained default GJK settings at every scale and omitted nested EPA settings. The supplemental `corrected-geometry-a` and `corrected-geometry-b` captures correct that metadata/configuration without overwriting the original evidence. They are exploratory corrections, not approved references. Both contain 591 records (585 queries and six construction rejections), and their query files are byte-identical with SHA-256 `aee06be935ea384ad176ba0c5dde0e87b8d1586347b98541c212ac3509dc29e7`. After removing only `detectorSettings` and `penetrationSolverSettings` from query payloads and canonicalizing JSON keys, the complete ordered output is identical to original `final-a/G-`.
+
+| Scale | Corrected GJK distance/raycast epsilon | Corrected EPA distance epsilon |
+| --- | --- | --- |
+| 0.01 | 1.053671212772351E-12 | 1.053671212772351E-10 |
+| 1 | 1.0536712127723509E-8 | 1.0536712127723509E-8 |
+| 100 | 0.00010536712127723509 | 0.0000010536712127723508 |
+
+Previously GJK distance/raycast epsilons were `1.0536712127723509E-8` at all scales. EPA had that same default but was not serialized. The correction was compiled into `/tmp/dyn4k-geometry-corrected-classes` against existing `calibration/classes` and pinned cached dependencies; `Main` ran twice with that temporary directory first on the classpath and filter `G-`. Shared compiled classes were not replaced.
+
+Triangle construction receives already scaled and translated vertices; actual rounded vertices are recorded before construction. This intentionally exposes representability loss at large offsets. Accepted triangles record `getArea()` and `getCenter()` plus the centroid minus the fixed manifest origin. Rejection records include the exception class and message and do not count as supported geometry.
+
+Predicate bindings use [Geometry.getWinding](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Geometry.java#L114), [Segment.getLocation](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Segment.java), and [RobustGeometry.getLocation](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/RobustGeometry.java#L113-L126), with the third vertex as query point and the first two as the oriented line. Predicates run on raw vertices even when construction is rejected. The robust predicate protects arithmetic sign for the supplied rounded inputs; it cannot recover height already lost when forming those inputs. Triangle delegates validation to [Polygon](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Polygon.java#L106-L155), including its near-zero-area rejection. No zero-height or degenerate domain has been invented.

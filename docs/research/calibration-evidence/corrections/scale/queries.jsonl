@@ -1,0 +1,15 @@
+{"id":"U-scale-fixedDistance-0.01-0.0-0.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-0.01-1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,1.999999999998181,"FAIL"]}}
+{"id":"U-scale-fixedDistance-0.01--1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,1.999999999998181,"FAIL"]}}
+{"id":"U-scale-fixedDistance-0.01-1000000.0--1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.000000001862645,"FAIL"]}}
+{"id":"U-scale-fixedDistance-0.01--1000000.0-1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.000000001862645,"FAIL"]}}
+{"id":"U-scale-fixedDistance-1.0-0.0-0.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-1.0-1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-1.0--1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-1.0-1000000.0--1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-1.0--1000000.0-1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-100.0-0.0-0.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-100.0-1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-100.0--1000.0-1000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-100.0-1000000.0--1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}
+{"id":"U-scale-fixedDistance-100.0--1000000.0-1000000.0","payload":{"event":"original-exact-initial-assertion","values":[2.0,2.0,"PASS"]}}

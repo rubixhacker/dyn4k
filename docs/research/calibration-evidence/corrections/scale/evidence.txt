@@ -1,0 +1,10 @@
+Two fresh corrected runs: corrected-scale-a and corrected-scale-b.
+Each: 30 scaled instances, 75 segments, 1440 physics steps.
+Both fixture restitutionVelocity thresholds now equal original threshold * scale.
+All 75 gzip files byte-identical between corrected runs; query and summary files also byte-identical.
+Every corrected input header equals the retained final-a header after replacing only fixture getRestitutionVelocity 1.0 with its dimensional scale.
+Every raw line AFTER the input header is byte-identical to the corresponding retained final-a/U- trace (events and states unchanged).
+Summary byte-identical to prior exact-observation-only corrected run.
+Exact initial fixed-distance checks: 11 PASS,4 FAIL per run, all four failures at s=0.01 and nonzero offsets. See queries.jsonl for exact values.
+No original capture replaced or active calibration/classes compilation performed.
+No reference freeze or approved numerical threshold established.

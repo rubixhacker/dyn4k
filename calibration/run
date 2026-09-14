@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "$0")" && pwd)
+if [[ ${1:-} == --help ]]; then
+  echo 'Usage: calibration/run OUTPUT_DIRECTORY [case substring]'
+  echo 'Downloads hash-checked baseline and test dependencies, compiles isolated harness and executes exploratory captures.'
+  exit 0
+fi
+if [[ $# -lt 1 || $# -gt 2 ]]; then echo 'Use --help' >&2; exit 2; fi
+mkdir -p "$root/cache" "$root/classes"
+fetch() { if [[ ! -f "$root/cache/$1" ]]; then curl --fail --location --silent --show-error "$2" -o "$root/cache/$1"; fi; }
+fetch dyn4j-6.0.0.jar https://repo.maven.apache.org/maven2/org/dyn4j/dyn4j/6.0.0/dyn4j-6.0.0.jar
+fetch junit-4.13.2.jar https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar
+fetch hamcrest-core-1.3.jar https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar
+printf '%s  %s\n' 204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e "$root/cache/dyn4j-6.0.0.jar" | sha256sum -c -
+printf '%s  %s\n' 8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3 "$root/cache/junit-4.13.2.jar" | sha256sum -c -
+printf '%s  %s\n' 66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9 "$root/cache/hamcrest-core-1.3.jar" | sha256sum -c -
+if [[ ! -d "$root/cache/upstream/.git" ]]; then git clone --quiet https://github.com/dyn4j/dyn4j.git "$root/cache/upstream"; fi
+git -C "$root/cache/upstream" checkout --quiet 058bf6d982a0fb89b54050f929f6ea9dae53b714
+if [[ -n $(git -C "$root/cache/upstream" status --porcelain) ]]; then echo 'Dirty upstream source refused' >&2; exit 1; fi
+"$root/scripts/prepare-upstream.sh" "$root/cache/upstream"
+find "$root/src" -name '*.java' > "$root/cache/sources.txt"
+find "$root/generated/org/dyn4j/simulation" -name '*.java' >> "$root/cache/sources.txt"
+printf '%s\n' "$root/generated/org/dyn4j/collision/shapes/CircleCircleTest.java" "$root/generated/org/dyn4j/collision/continuous/ConservativeAdvancementTest.java" "$root/generated/org/dyn4j/dynamics/AbstractPhysicsBodyTest.java" >> "$root/cache/sources.txt"
+javac -sourcepath "$root/src:$root/generated" -encoding UTF-8 -cp "$root/cache/*" -d "$root/classes" @"$root/cache/sources.txt"
+mkdir -p "$1"
+java -version 2> "$1/environment.txt"
+uname -a >> "$1/environment.txt"
+sha256sum "$root"/cache/*.jar >> "$1/environment.txt"
+find "$root/src" "$root/scripts" -type f -print0 | sort -z | xargs -0 sha256sum > "$1/harness.sha256"
+printf '%q ' "$0" "$@" > "$1/command.txt"
+printf '\n' >> "$1/command.txt"
+java -Xmx2g -cp "$root/classes:$root/cache/*:$root/cache/upstream/src/test/resources" Main "$@"
