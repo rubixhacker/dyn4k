@@ -1,0 +1,14 @@
+dyn4j-baseline-raw.tar.part-000 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-001 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-002 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-003 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-004 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-005 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-006 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-007 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-008 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-009 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-010 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-011 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-012 SHA256_MATCH
+dyn4j-baseline-raw.tar.part-013 SHA256_MATCH

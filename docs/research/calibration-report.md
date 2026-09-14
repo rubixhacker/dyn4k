@@ -3,9 +3,11 @@
 Task: [Execute the approved baseline calibration experiment](https://github.com/rubixhacker/dyn4k/issues/15).
 Baseline: dyn4j 6.0.0 source `058bf6d982a0fb89b54050f929f6ea9dae53b714`, binary SHA-256 `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`.
 
-**Status: two repetitions executed and audited; task remains open for activation bindings and full raw-data publication.** These are unreviewed experimental captures. No numerical limit, baseline exception, supported operating range or frozen reference is approved.
+**Status: experiment execution and evidence publication complete; numerical acceptance remains for human review.** These are unreviewed experimental captures. No numerical limit, baseline exception, supported operating range or frozen reference is approved.
 
 **Approved follow-up:** [Exact upstream checkpoint supplement](checkpoint-followup.md) adds 92 continuation probes, with 56,224 steps per repeat including recorded preparation. Both repeats match byte-for-byte; all 14 source controls match original upstream input snapshots and trajectory prefixes. Supplemental raw traces are published. Original corpus totals below remain unchanged.
+
+**Final execution supplement:** [Remaining joint experiments](interaction-results.md) add25 driven combined/control/equal-limit/transition probes and15,003 states per repeat, with identical full-precision outputs and a completed bounded mode inventory. The [full original raw archive](raw-archive-publication.md) reconstructs both repetitions losslessly from shared identical trace bytes. Findings and candidate checks are consolidated in the [acceptance review packet](calibration-acceptance-review.md).
 
 ## Executed evidence
 
@@ -64,12 +66,12 @@ The 600-second nominal free-motion fixture has maximum analytic x/y residuals of
 
 Concrete absolute/relative port-parity limits remain unset. Repeated JVM equality supplies reproducibility evidence, not evidence that every Kotlin target will be bit-identical. The large exploratory sensitivities, inactive modes and baseline failures must be reconciled before broader bounds or operating-domain promises are approved in [Define numerical and migration acceptance](https://github.com/rubixhacker/dyn4k/issues/7).
 
-## Remaining gates
+## Remaining acceptance gates
 
-- Several original isolated P mode rows start before an upstream stimulus or with zero caps/speed/error. The user approved exact later U checkpoints; the [executed supplement](checkpoint-followup.md) supplies Motor target/correction, spring-cap, pulley and limit probes without replacing the original rows. Combined Prismatic/Wheel spring+motor+limits, dormant toggles, nonsaturating high caps and a valid additional Distance range remain explicit gaps. The original [activation audit](negative-ratio-findings.md#activation-audit-distinguish-existing-u-evidence-from-new-p-decision) is historical; the supplement records the approval and its verified scope.
+- Original isolated P rows that lacked drive remain preserved. The checkpoint and final interaction supplements provide active evidence for the identified combined, valid-range, equal-limit and transition gaps. The bounded audit found no further unexecuted joint-mode family; it does not establish exhaustive Cartesian or all-target coverage. Nonsaturating high caps remain nonbinding controls. The original [activation audit](negative-ratio-findings.md#activation-audit-distinguish-existing-u-evidence-from-new-p-decision) is historical; later supplements record the explicit new inputs and verified scope.
 - The failed stack wake paths and CCD outcomes need review; they cannot be waived by widening numerical limits or counting callbacks.
 - Initial reference review and acceptance-limit decisions remain human gates. No baseline-bug exception was approved. The selected unchanged Java application's headful execution and future shim replay remain separate obligations.
-- **Full raw trace publication is unfinished.** The complete raw data is retained on this host, but is not contained in the GitHub branch. Its hashes and exact local locations are published; a compact report is not represented as a remote copy of the full traces.
+- Full raw trace publication is documented in the [archive report](raw-archive-publication.md). The original large corpus is distributed as experimental data assets, while supplemental complete raw repeats are in this branch. Archive integrity does not approve reference eligibility.
 
 ## Artifact locations and reproducibility
 

@@ -1,0 +1,1877 @@
+[
+  {
+    "id": "P-JINT-Distance-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Distance-enabled-equal",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0.0,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0.0,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-combined",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": {
+      "step": 2,
+      "coordinate": 5.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": 8818.73949378309,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 22,
+        "nearLower": 0,
+        "nearUpper": 195,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-lower-combined",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 3,
+      "coordinate": 1.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": 195.40773127479784,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 163,
+        "exactUpper": 0,
+        "nearLower": 194,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 0,
+        "nearLower": 200,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 0,
+        "nearLower": 200,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-lower-spring-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-spring-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-combined",
+    "states": 600,
+    "firstSimultaneousLower": {
+      "step": 323,
+      "coordinate": -1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": -10.000000000040078,
+      "axialLimitForce": 4.809130871308298E-11,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstSimultaneousUpper": {
+      "step": 60,
+      "coordinate": 1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": -9.99999999998033,
+      "axialLimitForce": -2.360600603878993E-11,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "strongestSimultaneousLower": {
+      "step": 400,
+      "coordinate": -1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": -1000.0000000000001,
+      "axialLimitForce": 990.0000000000001,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "strongestSimultaneousUpper": {
+      "step": 600,
+      "coordinate": 1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": 1000.0000000000001,
+      "axialLimitForce": -1010.0000000000001,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactLower": {
+      "step": 323,
+      "coordinate": -1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": -10.000000000040078,
+      "axialLimitForce": 4.809130871308298E-11,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 60,
+      "coordinate": 1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": -9.99999999998033,
+      "axialLimitForce": -2.360600603878993E-11,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 141,
+        "nearLower": 0,
+        "nearUpper": 141,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 78,
+        "exactUpper": 3,
+        "nearLower": 78,
+        "nearUpper": 3,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 3,
+        "exactUpper": 78,
+        "nearLower": 3,
+        "nearUpper": 78,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-enabled-equal",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0.0,
+      "motor": 10.0,
+      "axialLimitForce": -10,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0.0,
+      "motor": 10.0,
+      "axialLimitForce": -10,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-limits-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-motor-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-motor-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": {
+      "step": 24,
+      "coordinate": 1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 10.0,
+      "motor": 0.0,
+      "axialLimitForce": -172.566611769185,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 177,
+        "nearLower": 0,
+        "nearUpper": 177,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 200,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 200,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-spring-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Prismatic-spring-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 323,
+      "coordinate": -1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 0.0,
+      "motor": -4.0075609042119175E-11,
+      "axialLimitForce": 4.809073085054301E-11,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 60,
+      "coordinate": 1.0,
+      "lower": -1.0,
+      "upper": 1.0,
+      "spring": 0.0,
+      "motor": 1.9671578328768687E-11,
+      "axialLimitForce": -2.3605893994522427E-11,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 142,
+        "exactLower": 0,
+        "exactUpper": 141,
+        "nearLower": 0,
+        "nearUpper": 141,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 82,
+        "exactLower": 78,
+        "exactUpper": 3,
+        "nearLower": 78,
+        "nearUpper": 3,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 82,
+        "exactLower": 3,
+        "exactUpper": 78,
+        "nearLower": 3,
+        "nearUpper": 78,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Pulley-slack-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": -4.440892098500626E-16,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": -0.7061984767002047,
+        "enabledSlackBeyondSolverTolerance": 74
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": -0.00033225614181509044,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Revolute-enabled-equal",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0,
+      "motor": 0.25,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 0,
+      "motor": 0.25,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Revolute-motor-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Weld-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Weld-enabled-equal",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 1.0829665001693862,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 1,
+      "coordinate": 0.0,
+      "lower": 0.0,
+      "upper": 0.0,
+      "spring": 1.0829665001693862,
+      "motor": 0,
+      "axialLimitForce": null,
+      "exactLower": true,
+      "exactUpper": true,
+      "nearLower": true,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 168,
+        "exactUpper": 168,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 200,
+        "nearLower": 200,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Weld-spring-enable-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": {
+      "step": 201,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": 7.696899343266878,
+      "motor": 0.0,
+      "axialLimitForce": 0,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 200,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 200,
+        "nearLower": 0,
+        "nearUpper": 200,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-combined",
+    "states": 600,
+    "firstSimultaneousLower": {
+      "step": 201,
+      "coordinate": 1.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": 7.696902001294924,
+      "motor": -0.25,
+      "axialLimitForce": 1.3145040611561853E-13,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstSimultaneousUpper": {
+      "step": 401,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": -10.0,
+      "motor": 0.25,
+      "axialLimitForce": 0,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "strongestSimultaneousLower": {
+      "step": 400,
+      "coordinate": 1.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": -10.0,
+      "motor": -4.049495114233359E-16,
+      "axialLimitForce": 17.696902001294994,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "strongestSimultaneousUpper": {
+      "step": 416,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": 10.0,
+      "motor": 0.25,
+      "axialLimitForce": -10.918229825175933,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactLower": {
+      "step": 201,
+      "coordinate": 1.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": 7.696902001294924,
+      "motor": -0.25,
+      "axialLimitForce": 1.3145040611561853E-13,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 401,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": -10.0,
+      "motor": 0.25,
+      "axialLimitForce": 0,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": true,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 0,
+        "nearLower": 200,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 186,
+        "nearLower": 0,
+        "nearUpper": 187,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-limits-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-motor-cap-transition",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": null,
+    "firstExactUpper": null,
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 1,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-motor-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 201,
+      "coordinate": 1.0,
+      "lower": 1.0,
+      "upper": 5.0,
+      "spring": 7.696896297588204,
+      "motor": 0.0,
+      "axialLimitForce": 0.000005703706790427532,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 401,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": -10.0,
+      "motor": 0.0,
+      "axialLimitForce": 0,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 0,
+        "nearLower": 0,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 200,
+        "exactUpper": 0,
+        "nearLower": 200,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 200,
+        "nonzeroMotor": 0,
+        "exactLower": 0,
+        "exactUpper": 186,
+        "nearLower": 0,
+        "nearUpper": 187,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  },
+  {
+    "id": "P-JINT-Wheel-spring-off",
+    "states": 600,
+    "firstSimultaneousLower": null,
+    "firstSimultaneousUpper": null,
+    "strongestSimultaneousLower": null,
+    "strongestSimultaneousUpper": null,
+    "firstExactLower": {
+      "step": 27,
+      "coordinate": -1.0,
+      "lower": -1.0,
+      "upper": 5.0,
+      "spring": 0.0,
+      "motor": 0.25,
+      "axialLimitForce": 81.99556825869499,
+      "exactLower": true,
+      "exactUpper": false,
+      "nearLower": true,
+      "nearUpper": false,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "firstExactUpper": {
+      "step": 401,
+      "coordinate": -0.5,
+      "lower": -1.0,
+      "upper": -0.5,
+      "spring": 0.0,
+      "motor": 0.25,
+      "axialLimitForce": 0,
+      "exactLower": false,
+      "exactUpper": true,
+      "nearLower": false,
+      "nearUpper": true,
+      "bothForces": false,
+      "slack": null,
+      "slackEnabled": null
+    },
+    "phases": [
+      {
+        "steps": [
+          1,
+          200
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 174,
+        "exactUpper": 0,
+        "nearLower": 174,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          201,
+          400
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 200,
+        "exactUpper": 0,
+        "nearLower": 200,
+        "nearUpper": 0,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      },
+      {
+        "steps": [
+          401,
+          600
+        ],
+        "samples": 200,
+        "nonzeroSpring": 0,
+        "nonzeroMotor": 200,
+        "exactLower": 182,
+        "exactUpper": 1,
+        "nearLower": 182,
+        "nearUpper": 1,
+        "minimumSlack": null,
+        "enabledSlackBeyondSolverTolerance": 0
+      }
+    ]
+  }
+]

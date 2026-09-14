@@ -1,0 +1,11 @@
+Full original raw-data publication verification:
+- Fresh SHA256 of every canonical trace in original final-a and final-b:909 each, identical manifests.
+- Fresh original hashes match previously published structural-audit rawSha256 values exactly.
+- Lossless tar archive14 chunks, total19968512000 bytes; separate original A/B metadata, shared identical canonical gzip bytes.
+- All14 GitHub stored asset SHA256 digests match local chunk checksums.
+- Downloaded all14 complete remote chunks; sha256sum -c reports14 OK.
+- Extracted downloaded tar, ran included restore-repeats.sh;3636 OK lines =2canonical-manifest checks +2restored-manifest checks,909 each.
+- Both reconstructed repetition directories contain909 complete gzip traces, with separate original metadata.
+- Published experimental prerelease calibration-raw-20260914, not Latest, includes upstream license.
+- Anonymous public asset HEAD follows redirect to HTTP200.
+Original local data retained. Byte integrity is not numerical/reference approval.

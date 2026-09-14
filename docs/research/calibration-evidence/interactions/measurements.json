@@ -1,0 +1,4280 @@
+[
+  {
+    "id": "P-JINT-Distance-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 2.0,
+      "getMaximumSpringForce": 200.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 3.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 2.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 9.999999999999911,
+        "getLowerLimit": 2.0,
+        "getMaximumSpringForce": 200.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 10.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 1.6558134500098202E-10,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 2.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 1.6558134500098202E-10
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 2.344555034353394,
+        "maximum": 14.954304613999508,
+        "minimumStep": 1,
+        "maximumStep": 225,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 200.0,
+        "maximum": 200.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 3.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -430.8803933436834,
+        "maximum": 974.2064082138014,
+        "minimumStep": 4,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 3.948006840214992E-11,
+        "maximum": 974.2064082138014,
+        "minimumStep": 428,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 9.438505402369226E-9,
+        "maximum": 1,
+        "minimumStep": 323,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Distance-enabled-equal",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 0.0,
+      "getMaximumSpringForce": 1000.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 10.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumSpringForce": 1000.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 10.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-combined",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 1.0,
+      "getMaximumSpringForce": 1000.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 10.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 4.9999999999998845,
+        "getLowerLimit": 1.0,
+        "getMaximumSpringForce": 1000.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 10.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 9922.00853769583,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 5.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 4.1097791836364195E-10
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 4.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 2,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 7793.651265710411,
+        "maximum": 9922.00853769591,
+        "minimumStep": 1,
+        "maximumStep": 44,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 5.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 4.1097791836364195E-10,
+        "maximum": 7793.651265710411,
+        "minimumStep": 45,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-lower-combined",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 1.0,
+      "getMaximumSpringForce": 1000.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 1.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 1.0,
+        "getLowerLimit": 1.0,
+        "getMaximumSpringForce": 1000.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 1.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 1.3212578390397748E-9,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 5.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 1.7320288185390764E-8
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 1.0,
+        "maximum": 1.655444965646606,
+        "minimumStep": 3,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -974.2064082138014,
+        "maximum": 195.40773127479784,
+        "minimumStep": 1,
+        "maximumStep": 3,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 5.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 5.675326074928454E-9,
+        "maximum": 974.2064082138014,
+        "minimumStep": 45,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-lower-spring-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 1.0,
+      "getMaximumSpringForce": 1000.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 1.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 2.0,
+        "getLowerLimit": 1.0,
+        "getMaximumSpringForce": 1000.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 1.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 5.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 5.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Distance-valid-1-to-5-spring-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentDistance": 2.0,
+      "getLowerLimit": 1.0,
+      "getMaximumSpringForce": 1000.0,
+      "getReactionTorque": 0.0,
+      "getRestDistance": 10.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentDistance": 2.0,
+        "getLowerLimit": 1.0,
+        "getMaximumSpringForce": 1000.0,
+        "getReactionTorque": 0.0,
+        "getRestDistance": 10.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 5.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentDistance": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getRestDistance": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 5.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-combined",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorForce": 1000.0,
+      "getMaximumSpringForce": 10.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 2.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 1.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorForceAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": 1.0,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorForce": 1000.0,
+        "getMaximumSpringForce": 10.0,
+        "getMotorForce": 1000.0000000000001,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 10.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 2.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 1.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getSpringForceAbsoluteCapRatio": 1,
+        "getMotorForceAbsoluteCapRatio": 1.0000000000000002
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 204,
+        "maximumStep": 1,
+        "nonzeroSamples": 394
+      },
+      "getLinearTranslation": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 323,
+        "maximumStep": 60,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": -1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": -1000.0000000000001,
+        "maximum": 1000.0000000000001,
+        "minimumStep": 327,
+        "maximumStep": 64,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 47.12388980384689,
+        "minimumStep": 62,
+        "maximumStep": 1,
+        "nonzeroSamples": 192
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 0.009999999999959923,
+        "maximum": 1.0000000000000002,
+        "minimumStep": 523,
+        "maximumStep": 64,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-enabled-equal",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorForce": 10.0,
+      "getMaximumSpringForce": 1000.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getMotorForceAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorForce": 10.0,
+        "getMaximumSpringForce": 1000.0,
+        "getMotorForce": 10.0,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getMotorForceAbsoluteCapRatio": 1
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLinearTranslation": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-limits-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorForce": 1000.0,
+      "getMaximumSpringForce": 10.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 2.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 1.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorForceAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 1.0,
+        "getLinearTranslation": 3.3333333333333264,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorForce": 1000.0,
+        "getMaximumSpringForce": 10.0,
+        "getMotorForce": 10.0,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": -10.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 2.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 1.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getSpringForceAbsoluteCapRatio": 1,
+        "getMotorForceAbsoluteCapRatio": 0.01
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 202,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearTranslation": {
+        "minimum": -6.245004513516506E-17,
+        "maximum": 3.3333333333333264,
+        "minimumStep": 400,
+        "maximumStep": 200,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": -1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": -84.24777960769377,
+        "maximum": 84.24777960769377,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -10.0,
+        "maximum": 10.0,
+        "minimumStep": 120,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 94.24777960769379,
+        "minimumStep": 521,
+        "maximumStep": 201,
+        "nonzeroSamples": 520
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 0.009999999999999992,
+        "maximum": 0.08424777960769378,
+        "minimumStep": 202,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-motor-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorForce": 10.0,
+      "getMaximumSpringForce": 1000.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 1.0,
+        "getLinearTranslation": 3.474178390241431,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorForce": 10.0,
+        "getMaximumSpringForce": 1000.0,
+        "getMotorForce": 0.0,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 210,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearTranslation": {
+        "minimum": 0.016666666666666666,
+        "maximum": 3.474178390241431,
+        "minimumStep": 1,
+        "maximumStep": 600,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": -10.0,
+        "maximum": 94.24777960769379,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getMotorSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 94.24777960769379,
+        "minimumStep": 2,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 4.996003610813204E-16,
+        "maximum": 1,
+        "minimumStep": 211,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-motor-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorForce": 1000.0,
+      "getMaximumSpringForce": 10.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 2.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 1.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorForceAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": 1.0,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorForce": 1000.0,
+        "getMaximumSpringForce": 10.0,
+        "getMotorForce": 0.0,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 10.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 2.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 1.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getSpringForceAbsoluteCapRatio": 1,
+        "getMotorForceAbsoluteCapRatio": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": 0.0,
+        "maximum": 4.880751588151456,
+        "minimumStep": 25,
+        "maximumStep": 23,
+        "nonzeroSamples": 24
+      },
+      "getLinearTranslation": {
+        "minimum": 0.0035367765131532297,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 24,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": -1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 162.566611769185,
+        "minimumStep": 27,
+        "maximumStep": 24,
+        "nonzeroSamples": 26
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-spring-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorForce": 1000.0,
+      "getMaximumSpringForce": 10.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 0.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 2.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": -2.0000000036800754,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorForce": 1000.0,
+        "getMaximumSpringForce": 10.0,
+        "getMotorForce": 0.0,
+        "getMotorSpeed": 0.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 0.000011321973951424478,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": -2.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0.000011321973951424478
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -51.54695350864315,
+        "maximum": 47.398796847409876,
+        "minimumStep": 402,
+        "maximumStep": 2,
+        "nonzeroSamples": 308
+      },
+      "getLinearTranslation": {
+        "minimum": -5.4838190986371,
+        "maximum": 2.3313622185884855,
+        "minimumStep": 291,
+        "maximumStep": 5,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -1993.1445094287299,
+        "maximum": 1948.4128164276028,
+        "minimumStep": 401,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": -2.0,
+        "maximum": 2.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0.000005506927971224676,
+        "maximum": 1993.1445094287299,
+        "minimumStep": 54,
+        "maximumStep": 401,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 201,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Prismatic-spring-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorForce": 1000.0,
+      "getMaximumSpringForce": 10.0,
+      "getMotorForce": 0.0,
+      "getMotorSpeed": 1.0,
+      "getReactionTorque": 0.0,
+      "getReferenceAngle": 0.0,
+      "getSpringDampingRatio": 0.2,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 2.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 1.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorForceAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": 1.0,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorForce": 1000.0,
+        "getMaximumSpringForce": 10.0,
+        "getMotorForce": 1000.0000000000001,
+        "getMotorSpeed": 1.0,
+        "getReactionTorque": 0.0,
+        "getReferenceAngle": 0.0,
+        "getSpringDampingRatio": 0.2,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 2.0,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": 1.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getSpringForceAbsoluteCapRatio": 0,
+        "getMotorForceAbsoluteCapRatio": 1.0000000000000002
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 204,
+        "maximumStep": 1,
+        "nonzeroSamples": 392
+      },
+      "getLinearTranslation": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 323,
+        "maximumStep": 60,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": -1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorForce": {
+        "minimum": -1000.0000000000001,
+        "maximum": 1000.0000000000001,
+        "minimumStep": 327,
+        "maximumStep": 64,
+        "nonzeroSamples": 306
+      },
+      "getMotorSpeed": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.2,
+        "maximum": 0.2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 2.0,
+        "maximum": 2.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 47.12388980384689,
+        "minimumStep": 2,
+        "maximumStep": 1,
+        "nonzeroSamples": 13
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorForceAbsoluteCapRatio": {
+        "minimum": 0,
+        "maximum": 1.0000000000000002,
+        "minimumStep": 2,
+        "maximumStep": 64,
+        "nonzeroSamples": 306
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Pulley-slack-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getBodyCount": 2,
+      "getCurrentLength": 1.5000000000000002,
+      "getCurrentLength1": 1.041431635850918,
+      "getCurrentLength2": 0.4585683641490823,
+      "getLength": 1.5,
+      "getRatio": 1.0,
+      "getReactionTorque": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 220.55943923608834,
+      "pulleyWeightedLengthError": 2.220446049250313E-16
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getBodyCount": 2,
+        "getCurrentLength": 1.5,
+        "getCurrentLength1": 0.997939751646612,
+        "getCurrentLength2": 0.502060248353388,
+        "getLength": 1.5,
+        "getRatio": 1.0,
+        "getReactionTorque": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 7.696902001294882,
+        "pulleyWeightedLengthError": 0
+      }
+    },
+    "channels": {
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentLength": {
+        "minimum": 0.7938015232997953,
+        "maximum": 1.6208278904872957,
+        "minimumStep": 204,
+        "maximumStep": 209,
+        "nonzeroSamples": 600
+      },
+      "getCurrentLength1": {
+        "minimum": 0.12394831604424915,
+        "maximum": 1.0333743711325176,
+        "minimumStep": 294,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getCurrentLength2": {
+        "minimum": 0.005534659219341709,
+        "maximum": 1.3030875651041591,
+        "minimumStep": 204,
+        "maximumStep": 230,
+        "nonzeroSamples": 600
+      },
+      "getLength": {
+        "minimum": 1.5,
+        "maximum": 1.5,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getRatio": {
+        "minimum": 1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 233.8361963533175,
+        "minimumStep": 201,
+        "maximumStep": 210,
+        "nonzeroSamples": 448
+      },
+      "pulleyWeightedLengthError": {
+        "minimum": -0.7061984767002047,
+        "maximum": 0.1208278904872957,
+        "minimumStep": 204,
+        "maximumStep": 209,
+        "nonzeroSamples": 165
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Revolute-enabled-equal",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLimitsReferenceAngle": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getMotorTorqueAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 0.0,
+        "getAngularTranslation": 0.0,
+        "getBodyCount": 2,
+        "getLimitsReferenceAngle": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 0.25,
+        "getReactionTorque": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0,
+        "getMotorTorqueAbsoluteCapRatio": 1
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getAngularTranslation": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLimitsReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": 1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Revolute-motor-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLimitsReferenceAngle": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 1.5707963267948966,
+        "getAngularTranslation": 0.8645224234307808,
+        "getBodyCount": 2,
+        "getLimitsReferenceAngle": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 0.0,
+        "getReactionTorque": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 275,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getAngularTranslation": {
+        "minimum": -3.141008209887898,
+        "maximum": 3.1415925903695205,
+        "minimumStep": 353,
+        "maximumStep": 120,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLimitsReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getReactionTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1.590524587036235E-15,
+        "maximum": 1,
+        "minimumStep": 276,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Weld-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLimitsReferenceAngle": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumSpringTorque": 5.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getSpringTorque": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularTranslation": -0.018614539750551405,
+        "getBodyCount": 2,
+        "getLimitsReferenceAngle": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumSpringTorque": 5.0,
+        "getReactionTorque": 2.4495752163826627,
+        "getSpringDampingRatio": 0.3,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 131.59472534785812,
+        "getSpringTorque": 2.4495752163826627,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 2.4495752163826627,
+        "reactionForceMagnitude": 4.899999531341536
+      }
+    },
+    "channels": {
+      "getAngularTranslation": {
+        "minimum": -0.04166007169242927,
+        "maximum": -0.0028463814910853723,
+        "minimumStep": 203,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLimitsReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumSpringTorque": {
+        "minimum": 5.0,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 0.6354283402393042,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 131.59472534785812,
+        "maximum": 131.59472534785812,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringTorque": {
+        "minimum": 0.6354283402393042,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 0.6354283402393042,
+        "maximum": 5.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 2.3382517744554883,
+        "maximum": 8.503457121066477,
+        "minimumStep": 1,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      },
+      "getSpringTorqueAbsoluteCapRatio": {
+        "minimum": 0.28396009205487355,
+        "maximum": 1,
+        "minimumStep": 211,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Weld-enabled-equal",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLimitsReferenceAngle": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumSpringTorque": 1000.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getSpringTorque": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularTranslation": -0.0,
+        "getBodyCount": 2,
+        "getLimitsReferenceAngle": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumSpringTorque": 1000.0,
+        "getReactionTorque": 2.4499999999705153,
+        "getSpringDampingRatio": 0.3,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 131.59472534785812,
+        "getSpringTorque": 0.0005993672190085859,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 2.4499999999705153,
+        "reactionForceMagnitude": 4.899999999996163
+      }
+    },
+    "channels": {
+      "getAngularTranslation": {
+        "minimum": -0.0014456701862869353,
+        "maximum": 0.0006125732000417096,
+        "minimumStep": 2,
+        "maximumStep": 3,
+        "nonzeroSamples": 32
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLimitsReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumSpringTorque": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 1.8147911401698198,
+        "maximum": 11.14437668722977,
+        "minimumStep": 4,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 131.59472534785812,
+        "maximum": 131.59472534785812,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringTorque": {
+        "minimum": -0.48629631124905337,
+        "maximum": 1.0829665001693862,
+        "minimumStep": 2,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 1.8147911401698198,
+        "maximum": 11.14437668722977,
+        "minimumStep": 4,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 4.0032351119538685,
+        "maximum": 13.056767087853792,
+        "minimumStep": 4,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Weld-spring-enable-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLimitsReferenceAngle": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumSpringTorque": 1000.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringStiffness": 0.0,
+      "getSpringTorque": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularTranslation": 3.332000937312528E-8,
+        "getBodyCount": 2,
+        "getLimitsReferenceAngle": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumSpringTorque": 1000.0,
+        "getReactionTorque": 2.449999999999999,
+        "getSpringDampingRatio": 0.3,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringStiffness": 131.59472534785812,
+        "getSpringTorque": 0.0,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 2.449999999999999,
+        "reactionForceMagnitude": 4.9
+      }
+    },
+    "channels": {
+      "getAngularTranslation": {
+        "minimum": -0.020604361204350916,
+        "maximum": 0.006197385253362983,
+        "minimumStep": 203,
+        "maximumStep": 211,
+        "nonzeroSamples": 400
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLimitsReferenceAngle": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumSpringTorque": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": 1.528194423630826,
+        "maximum": 5.495502360011096,
+        "minimumStep": 210,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 131.59472534785812,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 400
+      },
+      "getSpringTorque": {
+        "minimum": -0.9218055763691739,
+        "maximum": 3.045502360011096,
+        "minimumStep": 210,
+        "maximumStep": 202,
+        "nonzeroSamples": 200
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": 1.528194423630826,
+        "maximum": 5.495502360011096,
+        "minimumStep": 210,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 3.5986308004714864,
+        "maximum": 9.200941906553112,
+        "minimumStep": 210,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorTorque": 1000.0,
+      "getMaximumSpringForce": 200.0,
+      "getMotorSpeed": 0.0,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 0.0,
+        "getAngularTranslation": 0.0,
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": -0.5,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorTorque": 1000.0,
+        "getMaximumSpringForce": 200.0,
+        "getMotorSpeed": 0.0,
+        "getMotorTorque": 0.0,
+        "getReactionTorque": 0.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 992.2008537695942,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": -0.5,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 7.696902001295101
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getAngularTranslation": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -0.0841120445161949,
+        "maximum": 0.009541235374233617,
+        "minimumStep": 2,
+        "maximumStep": 7,
+        "nonzeroSamples": 66
+      },
+      "getLinearTranslation": {
+        "minimum": -0.5,
+        "maximum": -0.001234851631630729,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": -1.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 200.0,
+        "maximum": 200.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 4.205441268511174,
+        "maximum": 992.2008537695942,
+        "minimumStep": 1,
+        "maximumStep": 411,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": -0.5,
+        "maximum": 5.0,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 4.205441268511174,
+        "maximum": 9.100512983038472,
+        "minimumStep": 1,
+        "maximumStep": 4,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0.03848449671633439,
+        "maximum": 1,
+        "minimumStep": 201,
+        "maximumStep": 202,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-combined",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMaximumSpringForce": 10.0,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorTorqueAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 1.5707963267948966,
+        "getAngularTranslation": -1.518584508304106,
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": -0.5,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMaximumSpringForce": 10.0,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 4.049495114233359E-16,
+        "getReactionTorque": 4.049495114233359E-16,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 10.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": -0.5,
+        "reactionTorque": 4.049495114233359E-16,
+        "reactionForceMagnitude": 7.696902001294994,
+        "getSpringForceAbsoluteCapRatio": 1,
+        "getMotorTorqueAbsoluteCapRatio": 1.6197980456933436E-15
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 275,
+        "maximumStep": 38,
+        "nonzeroSamples": 600
+      },
+      "getAngularTranslation": {
+        "minimum": -3.1411562689549197,
+        "maximum": 3.1414445945010097,
+        "minimumStep": 335,
+        "maximumStep": 138,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -0.3755399241225271,
+        "maximum": 0.30868568025951915,
+        "minimumStep": 401,
+        "maximumStep": 415,
+        "nonzeroSamples": 416
+      },
+      "getLinearTranslation": {
+        "minimum": -0.5210054710015601,
+        "maximum": 1.0,
+        "minimumStep": 408,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -10.0,
+        "maximum": 10.0,
+        "minimumStep": 202,
+        "maximumStep": 402,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": -0.5,
+        "maximum": 5.0,
+        "minimumStep": 401,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0.9182298251759324,
+        "maximum": 10,
+        "minimumStep": 416,
+        "maximumStep": 401,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0.42054412685111736,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1.5238461534283765E-15,
+        "maximum": 1,
+        "minimumStep": 39,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-limits-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMaximumSpringForce": 10.0,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorTorqueAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 1.5707963267948966,
+        "getAngularTranslation": -1.518584508304106,
+        "getBodyCount": 2,
+        "getLinearSpeed": -1.304512053934559E-15,
+        "getLinearTranslation": -0.0038787015613082065,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMaximumSpringForce": 10.0,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 4.049495114233359E-16,
+        "getReactionTorque": 4.049495114233359E-16,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 7.696902001294994,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": -0.5,
+        "reactionTorque": 4.049495114233359E-16,
+        "reactionForceMagnitude": 7.696902001294994,
+        "getSpringForceAbsoluteCapRatio": 0.7696902001294994,
+        "getMotorTorqueAbsoluteCapRatio": 1.6197980456933436E-15
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 275,
+        "maximumStep": 38,
+        "nonzeroSamples": 600
+      },
+      "getAngularTranslation": {
+        "minimum": -3.1411562689549197,
+        "maximum": 3.1414445945010097,
+        "minimumStep": 335,
+        "maximumStep": 138,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -0.0841120445161949,
+        "maximum": 0.009541235374233611,
+        "minimumStep": 2,
+        "maximumStep": 7,
+        "nonzeroSamples": 600
+      },
+      "getLinearTranslation": {
+        "minimum": -0.004342347019976156,
+        "maximum": -0.001234851631630729,
+        "minimumStep": 5,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 4.205441268511174,
+        "maximum": 9.100512983038472,
+        "minimumStep": 1,
+        "maximumStep": 4,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": -0.5,
+        "maximum": 5.0,
+        "minimumStep": 401,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 4.205441268511174,
+        "maximum": 9.100512983038472,
+        "minimumStep": 1,
+        "maximumStep": 4,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0.42054412685111736,
+        "maximum": 0.9100512983038472,
+        "minimumStep": 1,
+        "maximumStep": 4,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1.5238461534283765E-15,
+        "maximum": 1,
+        "minimumStep": 39,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-motor-cap-transition",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": 0.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMaximumSpringForce": 1000.0,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 0.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 1.5707963267948966,
+        "getAngularTranslation": 0.8645224234307808,
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": 0.0,
+        "getLowerLimit": 0.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMaximumSpringForce": 1000.0,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 0.0,
+        "getReactionTorque": 0.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": 0.0,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 0
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 275,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getAngularTranslation": {
+        "minimum": -3.141008209887898,
+        "maximum": 3.1415925903695205,
+        "minimumStep": 353,
+        "maximumStep": 120,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLinearTranslation": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getLowerLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 1000.0,
+        "maximum": 1000.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getReactionTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionTorque": {
+        "minimum": -0.25,
+        "maximum": 18.505508252042546,
+        "minimumStep": 201,
+        "maximumStep": 401,
+        "nonzeroSamples": 202
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1.590524587036235E-15,
+        "maximum": 1,
+        "minimumStep": 276,
+        "maximumStep": 201,
+        "nonzeroSamples": 200
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-motor-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMaximumSpringForce": 10.0,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorTorqueAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 0.0,
+        "getAngularTranslation": 0.0,
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": -0.5,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMaximumSpringForce": 10.0,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 0.0,
+        "getReactionTorque": 0.0,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 10.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 1984.4017075391882,
+        "getUpperLimit": -0.5,
+        "reactionTorque": 0.0,
+        "reactionForceMagnitude": 7.696902001294994,
+        "getSpringForceAbsoluteCapRatio": 1,
+        "getMotorTorqueAbsoluteCapRatio": 0
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getAngularTranslation": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -0.3755399241225271,
+        "maximum": 0.30868568025951915,
+        "minimumStep": 401,
+        "maximumStep": 415,
+        "nonzeroSamples": 79
+      },
+      "getLinearTranslation": {
+        "minimum": -0.5210054710015601,
+        "maximum": 1.0,
+        "minimumStep": 408,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getReactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": -10.0,
+        "maximum": 10.0,
+        "minimumStep": 202,
+        "maximumStep": 402,
+        "nonzeroSamples": 600
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 1984.4017075391882,
+        "maximum": 1984.4017075391882,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getUpperLimit": {
+        "minimum": -0.5,
+        "maximum": 5.0,
+        "minimumStep": 401,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0.9182298251759324,
+        "maximum": 10,
+        "minimumStep": 416,
+        "maximumStep": 401,
+        "nonzeroSamples": 600
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0.42054412685111736,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 202,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      }
+    }
+  },
+  {
+    "id": "P-JINT-Wheel-spring-off",
+    "states": 600,
+    "scope": "Completed-state extrema and exact nonzero counts. No thresholds, cap activation verdict, or reference approval. Motor angular residual is unwrapped only within this small-angle fixture.",
+    "initial": {
+      "getAngularSpeed": 0.0,
+      "getAngularTranslation": 0.0,
+      "getBodyCount": 2,
+      "getLinearSpeed": 0.0,
+      "getLinearTranslation": 0.0,
+      "getLowerLimit": -1.0,
+      "getMaximumMotorTorque": 0.25,
+      "getMaximumSpringForce": 10.0,
+      "getMotorSpeed": 1.5707963267948966,
+      "getMotorTorque": 0.0,
+      "getReactionTorque": 0.0,
+      "getSpringDampingRatio": 0.3,
+      "getSpringForce": 0.0,
+      "getSpringFrequency": 8.0,
+      "getSpringMode": 1,
+      "getSpringRestOffset": 0.0,
+      "getSpringStiffness": 0.0,
+      "getUpperLimit": 5.0,
+      "reactionTorque": 0.0,
+      "reactionForceMagnitude": 0,
+      "getSpringForceAbsoluteCapRatio": 0,
+      "getMotorTorqueAbsoluteCapRatio": 0
+    },
+    "final": {
+      "step": 600,
+      "values": {
+        "getAngularSpeed": 1.5707963267948966,
+        "getAngularTranslation": -1.518584508304106,
+        "getBodyCount": 2,
+        "getLinearSpeed": 0.0,
+        "getLinearTranslation": -1.0,
+        "getLowerLimit": -1.0,
+        "getMaximumMotorTorque": 0.25,
+        "getMaximumSpringForce": 10.0,
+        "getMotorSpeed": 1.5707963267948966,
+        "getMotorTorque": 4.049495114233359E-16,
+        "getReactionTorque": 4.049495114233359E-16,
+        "getSpringDampingRatio": 0.3,
+        "getSpringForce": 0.0,
+        "getSpringFrequency": 8.0,
+        "getSpringMode": 1,
+        "getSpringRestOffset": 0.0,
+        "getSpringStiffness": 0.0,
+        "getUpperLimit": -0.5,
+        "reactionTorque": 4.049495114233359E-16,
+        "reactionForceMagnitude": 7.696902001294994,
+        "getSpringForceAbsoluteCapRatio": 0,
+        "getMotorTorqueAbsoluteCapRatio": 1.6197980456933436E-15
+      }
+    },
+    "channels": {
+      "getAngularSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 275,
+        "maximumStep": 38,
+        "nonzeroSamples": 600
+      },
+      "getAngularTranslation": {
+        "minimum": -3.1411562689549197,
+        "maximum": 3.1414445945010097,
+        "minimumStep": 335,
+        "maximumStep": 138,
+        "nonzeroSamples": 600
+      },
+      "getBodyCount": {
+        "minimum": 2,
+        "maximum": 2,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getLinearSpeed": {
+        "minimum": -4.246666666666669,
+        "maximum": 0.0,
+        "minimumStep": 26,
+        "maximumStep": 28,
+        "nonzeroSamples": 47
+      },
+      "getLinearTranslation": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 27,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getLowerLimit": {
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "minimumStep": 1,
+        "maximumStep": 201,
+        "nonzeroSamples": 600
+      },
+      "getMaximumMotorTorque": {
+        "minimum": 0.25,
+        "maximum": 0.25,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMaximumSpringForce": {
+        "minimum": 10.0,
+        "maximum": 10.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorSpeed": {
+        "minimum": -1.5707963267948966,
+        "maximum": 1.5707963267948966,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getMotorTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getReactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringDampingRatio": {
+        "minimum": 0.3,
+        "maximum": 0.3,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringForce": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringFrequency": {
+        "minimum": 8.0,
+        "maximum": 8.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringMode": {
+        "minimum": 1,
+        "maximum": 1,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "getSpringRestOffset": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getSpringStiffness": {
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getUpperLimit": {
+        "minimum": -0.5,
+        "maximum": 5.0,
+        "minimumStep": 401,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionTorque": {
+        "minimum": -0.25,
+        "maximum": 0.25,
+        "minimumStep": 201,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      },
+      "reactionForceMagnitude": {
+        "minimum": 0,
+        "maximum": 133.5176877775649,
+        "minimumStep": 1,
+        "maximumStep": 28,
+        "nonzeroSamples": 556
+      },
+      "getSpringForceAbsoluteCapRatio": {
+        "minimum": 0,
+        "maximum": 0,
+        "minimumStep": 1,
+        "maximumStep": 1,
+        "nonzeroSamples": 0
+      },
+      "getMotorTorqueAbsoluteCapRatio": {
+        "minimum": 1.5238461534283765E-15,
+        "maximum": 1,
+        "minimumStep": 39,
+        "maximumStep": 1,
+        "nonzeroSamples": 600
+      }
+    }
+  }
+]

@@ -40,6 +40,8 @@ The control comparison uses the original U traces; those remain in the original 
 
 ## Remaining decisions and work
 
+Historical checkpoint frontier below is superseded for joint-fixture execution by the [remaining joint experiment](interaction-results.md). Its combined, valid-range, equal-limit and driven-transition additions retain all original observations. Current acceptance questions are consolidated in the [review packet](calibration-acceptance-review.md).
+
 The approved checkpoint follow-up is executed and published, but the overall calibration task remains open:
 
 - Combined Prismatic/Wheel spring+motor+limits stimuli still need an explicit combined binding; no complete upstream checkpoint supplies all three.

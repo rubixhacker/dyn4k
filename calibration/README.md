@@ -38,6 +38,8 @@ Expected simulation steps before rejection: 5,980,956. The negative Angle ratio 
 
 The subsequently approved `P-JCP-` checkpoint supplement adds 92 continuations and 121 recorded preparation segments, totaling 56,224 additional steps. Run it alone with `./calibration/run NEW_OUTPUT P-JCP-`; the parallel runner includes its own partition. Original corpus counts above remain historical. See [checkpoint results and remaining coverage gaps](../docs/research/checkpoint-followup.md).
 
+The final `P-JINT-` supplement adds25 explicit combined/control/transition/equal-limit continuations and3 recorded preparation steps, totaling15,003 steps. Run it alone with `./calibration/run NEW_OUTPUT P-JINT-`; its parallel partition is separate. See [definitions](../docs/research/interaction-bindings.md) and [verified results](../docs/research/interaction-results.md). Inputs are new experimental choices, not replacements for original rejected or inactive observations.
+
 ## Interpretation
 
 `Analyze` reports exact repeat-independent scale/origin and timestep differences at matching physical times, contact/CCD/sleep observations and spring mechanical-energy drift. It does not assign numerical pass thresholds. Different timesteps have distinct reference candidates. Geometry rejection is not supported-domain evidence; no-contact NONE CCD diagnostics are expected controls, not successful CCD cases. Complete activation of every limit/cap/interaction is not inferred from a nonzero aggregate joint reaction.

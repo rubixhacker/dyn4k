@@ -1,0 +1,11 @@
+Two integrated captures: interactions-final-a and interactions-final-b, exit0.
+All27 gzip traces, queries and summaries byte-identical via cmp.
+25*600+3preparation=15003 states per repeat; no nonfinite or rejected cases.
+Audit --complete expected15003:27segments,46984listenerEvents,62094rawRecords,zero missing states.
+Captured Java source hashes rechecked against final-a/harness.sha256; analysis-only script additions are separately published.
+Independent source/mode review PASS: InteractionCases.java SHA25668dab71cdc51742c6b6e35048bb3fb5787be31837555f0b57a4f3fab53058403.
+Bounded mode frontier: combined both-bound interactions; valid Distance both sides; enabled equal modes; seven fresh cap transitions; Weld spring-enable; Pulley actual slack transition.
+All seven cap transitions have enabled-phase201..400 maximum absolute cap ratio1.
+Original Distance/Pin cap transitions already had saturation evidence; original nonbinding/dormant observations remain preserved, not overwritten.
+Retain Weld equal angular residual and Pulley stretch as baseline findings. No reference or tolerance approval.
+Final integrated nominal/corrected U regression byte-identical to previous published-harness rerun; all40 nominal assertions PASS.
