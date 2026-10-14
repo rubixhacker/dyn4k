@@ -1,0 +1,1472 @@
+{
+  "status": "VERIFIED_FROZEN_EVENTS_PROPOSED_PHASES_REQUIRE_LIVE_REVIEW",
+  "manifestHash": "b42174c7523bea9687e4ab015a215b4e652c2446df73d2f41e836e8a165c1208",
+  "sources": {
+    "source/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "source/SleepWakeCases.java": "c808ba452418f6bb88b0eeaf67955ad6691c7e6cdcd1487819d2397640bc00b7",
+    "source/audit.jq": "6964af254b100d626fbb61b86222053da651944cace98d1dd7bda01a3f0d4563"
+  },
+  "results": [
+    {
+      "hz": 30,
+      "gzipHash": "86cfa767974174a2b35fea477ab02451aae21ac5a779ba6e40d12e4874112ebe",
+      "decompressedHash": "9851e31853012a0d1fde661e9e7c913643e5ab278e06bbf7fcc0f914a7ea8bda",
+      "inputHash": "97f60b69e9aa776a2864347e22328c5735d35830c52fa6c46678bb293d97174a",
+      "states": 18000,
+      "counts": {
+        "inputs": 1,
+        "event": 233995,
+        "state": 18000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 54001,
+        "CollisionListener": 53999,
+        "TimeOfImpactListener": 6,
+        "ContactListener": 125989
+      },
+      "methods": {
+        "StepListener.begin": 18000,
+        "CollisionListener.collision": 53999,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 18000,
+        "TimeOfImpactListener.collision": 6,
+        "StepListener.end": 18000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 17999,
+        "ContactListener.preSolve": 35996,
+        "ContactListener.postSolve": 35996,
+        "ContactListener.persist": 35996
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.begin(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1,
+          "signature": "public abstract boolean org.dyn4j.world.listener.CollisionListener.collision(org.dyn4j.world.BroadphaseCollisionData<T, E>)"
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.updatePerformed(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.postSolve(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T)"
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.end(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "ContactListener.begin": {
+          "step": 2,
+          "order": 7,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.begin(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.collision": {
+          "step": 2,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.collision(org.dyn4j.world.ContactCollisionData<T>)"
+        },
+        "ContactListener.preSolve": {
+          "step": 3,
+          "order": 1,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.preSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.postSolve": {
+          "step": 3,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.postSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.SolvedContact)"
+        },
+        "ContactListener.persist": {
+          "step": 3,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.persist(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact,org.dyn4j.dynamics.contact.Contact)"
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 1,
+          "order": 6,
+          "time": 0.9183673469387763,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,org.dyn4j.dynamics.BodyFixture,T,org.dyn4j.dynamics.BodyFixture,org.dyn4j.collision.continuous.TimeOfImpact)"
+        },
+        {
+          "step": 1,
+          "order": 7,
+          "time": 0.9183673469387763,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T,org.dyn4j.collision.continuous.TimeOfImpact)"
+        }
+      ],
+      "initialStates": [
+        {
+          "step": 1,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.32666666666666666
+          ]
+        },
+        {
+          "step": 2,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4782222222222222
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4782222222222222,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4782222222222222
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.6533333333333333
+          ]
+        },
+        {
+          "step": 3,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999658900678,
+            "getRotationAngle": 0.0002611893275231753,
+            "getSint": 0.0002611893244899772,
+            "getTranslation": [
+              -7.078015708601042e-7,
+              0.483261763110934
+            ],
+            "getTranslationX": -7.078015708601042e-7,
+            "getTranslationY": 0.483261763110934,
+            "getValues": [
+              0.9999999658900678,
+              -0.0002611893244899772,
+              -7.078015708601042e-7,
+              0.0002611893244899772,
+              0.9999999658900678,
+              0.483261763110934
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -1.1102230246251565e-16
+          ]
+        },
+        {
+          "step": 4,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999440718087,
+            "getRotationAngle": 0.00033444937381233033,
+            "getSint": 0.0003344493671954508,
+            "getTranslation": [
+              -0.0000012496041562412571,
+              0.4867861727043509
+            ],
+            "getTranslationX": -0.0000012496041562412571,
+            "getTranslationY": 0.4867861727043509,
+            "getValues": [
+              0.9999999440718087,
+              -0.0003344493671954508,
+              -0.0000012496041562412571,
+              0.0003344493671954508,
+              0.9999999440718087,
+              0.4867861727043509
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            -0.00001193920155290991,
+            -5.551115123125783e-17
+          ]
+        },
+        {
+          "step": 5,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999438982935,
+            "getRotationAngle": 0.00033496778062128954,
+            "getSint": 0.0003349677742277156,
+            "getTranslation": [
+              -0.0000013264573688624139,
+              0.4881287483462714
+            ],
+            "getTranslationX": -0.0000013264573688624139,
+            "getTranslationY": 0.4881287483462714,
+            "getValues": [
+              0.9999999438982935,
+              -0.0003349677742277156,
+              -0.0000013264573688624139,
+              0.0003349677742277156,
+              0.9999999438982935,
+              0.4881287483462714
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            -0.000002230207047533039,
+            -2.7755575615628914e-17
+          ]
+        },
+        {
+          "step": 6,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999480473951,
+            "getRotationAngle": 0.00032234331181093455,
+            "getSint": 0.00032234330557379945,
+            "getTranslation": [
+              -0.0000013018773721618558,
+              0.48925175450878666
+            ],
+            "getTranslationX": -0.0000013018773721618558,
+            "getTranslationY": 0.48925175450878666,
+            "getValues": [
+              0.9999999480473951,
+              -0.00032234330557379945,
+              -0.0000013018773721618558,
+              0.00032234330557379945,
+              0.9999999480473951,
+              0.48925175450878666
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            3.410312969401384e-7,
+            1.1102230246251565e-16
+          ]
+        },
+        {
+          "step": 7,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999544502648,
+            "getRotationAngle": 0.0003018268892980566,
+            "getSint": 0.0003018268840736761,
+            "getTranslation": [
+              -0.000001272176099945401,
+              0.49019114227324073
+            ],
+            "getTranslationX": -0.000001272176099945401,
+            "getTranslationY": 0.49019114227324073,
+            "getValues": [
+              0.9999999544502648,
+              -0.0003018268840736761,
+              -0.000001272176099945401,
+              0.0003018268840736761,
+              0.9999999544502648,
+              0.49019114227324073
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            3.2822294909727635e-7,
+            -8.326672684688674e-17
+          ]
+        },
+        {
+          "step": 8,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999616162922,
+            "getRotationAngle": 0.0002770693343310137,
+            "getSint": 0.00027706933019703737,
+            "getTranslation": [
+              -0.0000012420826212724046,
+              0.49097696237891164
+            ],
+            "getTranslationX": -0.0000012420826212724046,
+            "getTranslationY": 0.49097696237891164,
+            "getValues": [
+              0.9999999616162922,
+              -0.00027706933019703737,
+              -0.0000012420826212724046,
+              0.00027706933019703737,
+              0.9999999616162922,
+              0.49097696237891164
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            3.27311140782377e-7,
+            5.551115123125783e-17
+          ]
+        }
+      ],
+      "firstContact": 2,
+      "firstSolve": 3,
+      "firstPostSolve": {
+        "step": 3,
+        "order": 3,
+        "solved": true,
+        "ignored": false
+      },
+      "contactChanges": [
+        {
+          "step": 2,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "contactBearingSamples": 17999,
+      "contactGaps": 0,
+      "sleepChanges": [
+        {
+          "step": 18,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 9001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 9022,
+          "from": false,
+          "to": true
+        }
+      ],
+      "action": {
+        "step": 9001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "snapshots": [
+        {
+          "event": "before-wake",
+          "step": 9001,
+          "order": 0,
+          "atRest": true,
+          "velocity": [
+            0,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 0.9999999973724141,
+            "getRotationAngle": 0.00007249256413962093,
+            "getSint": 0.00007249255843516513,
+            "getTranslation": [
+              -0.000001050235142445266,
+              0.49432425025727217
+            ],
+            "getTranslationX": -0.000001050235142445266,
+            "getTranslationY": 0.49432425025727217,
+            "getValues": [
+              0.9999999973724141,
+              -0.00007249255843516513,
+              -0.000001050235142445266,
+              0.00007249255843516513,
+              0.9999999973724141,
+              0.49432425025727217
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        },
+        {
+          "event": "after-wake",
+          "step": 9001,
+          "order": 2,
+          "atRest": false,
+          "velocity": [
+            1,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 0.9999999973724141,
+            "getRotationAngle": 0.00007249256413962093,
+            "getSint": 0.00007249255843516513,
+            "getTranslation": [
+              -0.000001050235142445266,
+              0.49432425025727217
+            ],
+            "getTranslationX": -0.000001050235142445266,
+            "getTranslationY": 0.49432425025727217,
+            "getValues": [
+              0.9999999973724141,
+              -0.00007249255843516513,
+              -0.000001050235142445266,
+              0.00007249255843516513,
+              0.9999999973724141,
+              0.49432425025727217
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        }
+      ],
+      "proposedSchedule": [
+        {
+          "phase": "impact",
+          "first": 1,
+          "last": 3,
+          "count": 3
+        },
+        {
+          "phase": "settling",
+          "first": 4,
+          "last": 17,
+          "count": 14
+        },
+        {
+          "phase": "rest",
+          "first": 18,
+          "last": 9000,
+          "count": 8983
+        },
+        {
+          "phase": "settling",
+          "first": 9001,
+          "last": 9021,
+          "count": 21
+        },
+        {
+          "phase": "rest",
+          "first": 9022,
+          "last": 18000,
+          "count": 8979
+        }
+      ]
+    },
+    {
+      "hz": 60,
+      "gzipHash": "ae6fb99402d239569fab8bba950429318879cdb13fb7609833e5f3c7cda68b28",
+      "decompressedHash": "ba4c9c73d73ef0304a9b6308d370aaa7a23d699cb841ca61dbcc5a135db61cf5",
+      "inputHash": "cda35b6908693308cee60c9dbf4884a2312f2dac93743747cc32fbf1214a8a35",
+      "states": 36000,
+      "counts": {
+        "inputs": 1,
+        "event": 467981,
+        "state": 36000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 108001,
+        "CollisionListener": 107995,
+        "TimeOfImpactListener": 10,
+        "ContactListener": 251975
+      },
+      "methods": {
+        "StepListener.begin": 36000,
+        "CollisionListener.collision": 107995,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 36000,
+        "TimeOfImpactListener.collision": 10,
+        "StepListener.end": 36000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 35997,
+        "ContactListener.preSolve": 71992,
+        "ContactListener.postSolve": 71992,
+        "ContactListener.persist": 71992
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.begin(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1,
+          "signature": "public abstract boolean org.dyn4j.world.listener.CollisionListener.collision(org.dyn4j.world.BroadphaseCollisionData<T, E>)"
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.updatePerformed(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.postSolve(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T)"
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.end(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "ContactListener.begin": {
+          "step": 4,
+          "order": 7,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.begin(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.collision": {
+          "step": 4,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.collision(org.dyn4j.world.ContactCollisionData<T>)"
+        },
+        "ContactListener.preSolve": {
+          "step": 5,
+          "order": 1,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.preSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.postSolve": {
+          "step": 5,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.postSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.SolvedContact)"
+        },
+        "ContactListener.persist": {
+          "step": 5,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.persist(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact,org.dyn4j.dynamics.contact.Contact)"
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 3,
+          "order": 4,
+          "time": 0.22448979591836984,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,org.dyn4j.dynamics.BodyFixture,T,org.dyn4j.dynamics.BodyFixture,org.dyn4j.collision.continuous.TimeOfImpact)"
+        },
+        {
+          "step": 3,
+          "order": 5,
+          "time": 0.22448979591836984,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T,org.dyn4j.collision.continuous.TimeOfImpact)"
+        }
+      ],
+      "initialStates": [
+        {
+          "step": 1,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5072777777777778
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5072777777777778,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5072777777777778
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.16333333333333333
+          ]
+        },
+        {
+          "step": 2,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5018333333333334
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5018333333333334,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5018333333333334
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.32666666666666666
+          ]
+        },
+        {
+          "step": 3,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.49
+          ]
+        },
+        {
+          "step": 4,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4891111111111111
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4891111111111111,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4891111111111111
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.6533333333333333
+          ]
+        },
+        {
+          "step": 5,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999983852768,
+            "getRotationAngle": 0.00005682821912461999,
+            "getSint": 0.00005682822032117437,
+            "getTranslation": [
+              -5.5641666242035955e-8,
+              0.4900729691528969
+            ],
+            "getTranslationX": -5.5641666242035955e-8,
+            "getTranslationY": 0.4900729691528969,
+            "getValues": [
+              0.9999999983852768,
+              -0.00005682822032117437,
+              -5.5641666242035955e-8,
+              0.00005682822032117437,
+              0.9999999983852768,
+              0.4900729691528969
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            0
+          ]
+        },
+        {
+          "step": 6,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999958646634,
+            "getRotationAngle": 0.00009094324198681023,
+            "getSint": 0.0000909432417887622,
+            "getTranslation": [
+              -1.1970405992393967e-7,
+              0.4908777054756113
+            ],
+            "getTranslationX": -1.1970405992393967e-7,
+            "getTranslationY": 0.4908777054756113,
+            "getValues": [
+              0.9999999958646634,
+              -0.0000909432417887622,
+              -1.1970405992393967e-7,
+              0.0000909432417887622,
+              0.9999999958646634,
+              0.4908777054756113
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            -0.0000021651684689492224,
+            2.7755575615628914e-17
+          ]
+        },
+        {
+          "step": 7,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999940334688,
+            "getRotationAngle": 0.0001092385569656027,
+            "getSint": 0.00010923855701632727,
+            "getTranslation": [
+              -1.4000021107687637e-7,
+              0.49155099744323366
+            ],
+            "getTranslationX": -1.4000021107687637e-7,
+            "getTranslationY": 0.49155099744323366,
+            "getValues": [
+              0.9999999940334688,
+              -0.00010923855701632727,
+              -1.4000021107687637e-7,
+              0.00010923855701632727,
+              0.9999999940334688,
+              0.49155099744323366
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            -4.619819046329192e-7,
+            1.3877787807814457e-17
+          ]
+        },
+        {
+          "step": 8,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 0.9999999931877914,
+            "getRotationAngle": 0.00011672367868387001,
+            "getSint": 0.0001167236796024146,
+            "getTranslation": [
+              -1.4572321330374376e-7,
+              0.4921143212998185
+            ],
+            "getTranslationX": -1.4572321330374376e-7,
+            "getTranslationY": 0.4921143212998185,
+            "getValues": [
+              0.9999999931877914,
+              -0.0001167236796024146,
+              -1.4572321330374376e-7,
+              0.0001167236796024146,
+              0.9999999931877914,
+              0.4921143212998185
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            -8.149564950127398e-8,
+            -2.7755575615628914e-17
+          ]
+        }
+      ],
+      "firstContact": 4,
+      "firstSolve": 5,
+      "firstPostSolve": {
+        "step": 5,
+        "order": 3,
+        "solved": true,
+        "ignored": false
+      },
+      "contactChanges": [
+        {
+          "step": 4,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "contactBearingSamples": 35997,
+      "contactGaps": 0,
+      "sleepChanges": [
+        {
+          "step": 35,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 18001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 18043,
+          "from": false,
+          "to": true
+        }
+      ],
+      "action": {
+        "step": 18001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "snapshots": [
+        {
+          "event": "before-wake",
+          "step": 18001,
+          "order": 0,
+          "atRest": true,
+          "velocity": [
+            0,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 0.9999999999957045,
+            "getRotationAngle": 0.0000029310246953165734,
+            "getSint": 0.0000029309911208501152,
+            "getTranslation": [
+              -1.153236239266137e-7,
+              0.4949766305799955
+            ],
+            "getTranslationX": -1.153236239266137e-7,
+            "getTranslationY": 0.4949766305799955,
+            "getValues": [
+              0.9999999999957045,
+              -0.0000029309911208501152,
+              -1.153236239266137e-7,
+              0.0000029309911208501152,
+              0.9999999999957045,
+              0.4949766305799955
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        },
+        {
+          "event": "after-wake",
+          "step": 18001,
+          "order": 2,
+          "atRest": false,
+          "velocity": [
+            1,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 0.9999999999957045,
+            "getRotationAngle": 0.0000029310246953165734,
+            "getSint": 0.0000029309911208501152,
+            "getTranslation": [
+              -1.153236239266137e-7,
+              0.4949766305799955
+            ],
+            "getTranslationX": -1.153236239266137e-7,
+            "getTranslationY": 0.4949766305799955,
+            "getValues": [
+              0.9999999999957045,
+              -0.0000029309911208501152,
+              -1.153236239266137e-7,
+              0.0000029309911208501152,
+              0.9999999999957045,
+              0.4949766305799955
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        }
+      ],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 2,
+          "count": 2
+        },
+        {
+          "phase": "impact",
+          "first": 3,
+          "last": 5,
+          "count": 3
+        },
+        {
+          "phase": "settling",
+          "first": 6,
+          "last": 34,
+          "count": 29
+        },
+        {
+          "phase": "rest",
+          "first": 35,
+          "last": 18000,
+          "count": 17966
+        },
+        {
+          "phase": "settling",
+          "first": 18001,
+          "last": 18042,
+          "count": 42
+        },
+        {
+          "phase": "rest",
+          "first": 18043,
+          "last": 36000,
+          "count": 17958
+        }
+      ]
+    },
+    {
+      "hz": 120,
+      "gzipHash": "5bad36d62dcb0f3b1e2d526d2f1f97e0e62ede99ed9d3da0bef330ba0f510c75",
+      "decompressedHash": "19bc07fc64ff1ec3535fbf7bdd8e02fd8acc80917069ad23782941dc34c98db1",
+      "inputHash": "e44f7662025777f981e166bc84efb111b527984fe73d36343ca673f540778df5",
+      "states": 72000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.begin(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1,
+          "signature": "public abstract boolean org.dyn4j.world.listener.CollisionListener.collision(org.dyn4j.world.BroadphaseCollisionData<T, E>)"
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.updatePerformed(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.postSolve(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T)"
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7,
+          "signature": "public abstract void org.dyn4j.world.listener.StepListener.end(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)"
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.begin(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.collision(org.dyn4j.world.ContactCollisionData<T>)"
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.preSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact)"
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.postSolve(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.SolvedContact)"
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9,
+          "signature": "public abstract void org.dyn4j.world.listener.ContactListener.persist(org.dyn4j.world.ContactCollisionData<T>,org.dyn4j.dynamics.contact.Contact,org.dyn4j.dynamics.contact.Contact)"
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,org.dyn4j.dynamics.BodyFixture,T,org.dyn4j.dynamics.BodyFixture,org.dyn4j.collision.continuous.TimeOfImpact)"
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654,
+          "signature": "public abstract boolean org.dyn4j.world.listener.TimeOfImpactListener.collision(T,T,org.dyn4j.collision.continuous.TimeOfImpact)"
+        }
+      ],
+      "initialStates": [
+        {
+          "step": 1,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5093194444444444
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5093194444444444,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5093194444444444
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.08166666666666667
+          ]
+        },
+        {
+          "step": 2,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5079583333333333
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5079583333333333,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5079583333333333
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.16333333333333333
+          ]
+        },
+        {
+          "step": 3,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5059166666666666
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5059166666666666,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5059166666666666
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.245
+          ]
+        },
+        {
+          "step": 4,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5031944444444444
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5031944444444444,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5031944444444444
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.32666666666666666
+          ]
+        },
+        {
+          "step": 5,
+          "contactCount": 0,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.5
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.5,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.5
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.4083333333333333
+          ]
+        },
+        {
+          "step": 6,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4959166666666667
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4959166666666667,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4959166666666667
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            -0.49
+          ]
+        },
+        {
+          "step": 7,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4959166666666667
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4959166666666667,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4959166666666667
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            0
+          ]
+        },
+        {
+          "step": 8,
+          "contactCount": 2,
+          "atRest": false,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4959166666666667
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4959166666666667,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4959166666666667
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          },
+          "velocity": [
+            0,
+            0
+          ]
+        }
+      ],
+      "firstContact": 6,
+      "firstSolve": 7,
+      "firstPostSolve": {
+        "step": 7,
+        "order": 3,
+        "solved": true,
+        "ignored": false
+      },
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "contactBearingSamples": 71995,
+      "contactGaps": 0,
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "snapshots": [
+        {
+          "event": "before-wake",
+          "step": 36001,
+          "order": 0,
+          "atRest": true,
+          "velocity": [
+            0,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4959166666666667
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4959166666666667,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4959166666666667
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        },
+        {
+          "event": "after-wake",
+          "step": 36001,
+          "order": 2,
+          "atRest": false,
+          "velocity": [
+            1,
+            0
+          ],
+          "angularVelocity": 0,
+          "transform": {
+            "getCost": 1,
+            "getRotationAngle": 0,
+            "getSint": 0,
+            "getTranslation": [
+              0,
+              0.4959166666666667
+            ],
+            "getTranslationX": 0,
+            "getTranslationY": 0.4959166666666667,
+            "getValues": [
+              1,
+              0,
+              0,
+              0,
+              1,
+              0.4959166666666667
+            ],
+            "isIdentity": false,
+            "type": "org.dyn4j.geometry.Transform"
+          }
+        }
+      ],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ]
+    }
+  ]
+}
