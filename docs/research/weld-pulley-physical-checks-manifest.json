@@ -1,0 +1,1070 @@
+{
+  "approval": "PENDING_HUMAN_DECISION",
+  "experiment_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "archive_sha256": {
+    "a": "422a749d36060c95cb978c3e9f5fed0f9810494243dac8452ad9cfecb17fe348",
+    "b": "c9dead5c0e7b96b103ba8f71d67a23923e0efb9bbc9df77e49ad21de2633cb4c"
+  },
+  "source_sha256": {
+    "calibration/src/InteractionCases.java": "68dab71cdc51742c6b6e35048bb3fb5787be31837555f0b57a4f3fab53058403",
+    "calibration/src/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "docs/research/calibration-evidence/interactions/audit-manifest.jsonl": "be5cdf822fcaec937873883a42fb65ed699a0a6fd2e6f1e90e219b1a00c18b82",
+    "docs/research/calibration-evidence/interactions/input-manifest.jsonl": "ed27fc959fb2265da78983e29426905071d32f8fbe08f75642c1b5b01a7b865b",
+    "docs/research/calibration-evidence/interactions/queries.jsonl": "0cbbb7fa9f5a3a0e57648c1ddfdf7763b8f414521d3ae2b7caf0f085ad73a023"
+  },
+  "traces": [
+    {
+      "file": "P-JINT-Weld-enabled-equal-0.jsonl.gz",
+      "gzip_sha256": "dd0cde1034e4ea4a3d7348b555a4b6a53f62bddd7f7ec30659a3db40ae1df926",
+      "gzip_bytes": 33933,
+      "input_sha256": "4a3abc8dc76955d0fbe434a31db52f4a060c053f64aa4687feb59c898ff2410f",
+      "decompressed_sha256": "0f72856f1680fcde71e526e905dbbbefb57498ba08a3da3aaa74bda2c61b8abc",
+      "counts": {
+        "inputs": 1,
+        "instrumented-callback": 1,
+        "event": 1801,
+        "state": 600
+      },
+      "repeat_bytes_equal": true,
+      "audit": "PASS",
+      "actions": [],
+      "bindings": [
+        {
+          "event": "experimental-input-binding",
+          "id": "P-JINT-Weld-enabled-equal",
+          "kind": "instrumented-callback",
+          "order": 0,
+          "step": 1,
+          "values": [
+            "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+            "Weld enabled-equal experiment",
+            "enabled equal limits[0,0]; source-compatible drive; Distance initialseparation2/rest10, Prism motor1/cap10, Revolute motorpi/2/cap.25, Weld source offcentre force; active type=Weld",
+            "new experimental input; not U or acceptance approval"
+          ]
+        }
+      ],
+      "phase_measurements": {
+        "equal_limits_enabled": {
+          "steps": [
+            1,
+            600
+          ],
+          "samples": 600,
+          "angle_rad": {
+            "minimum": -0.0014456701862869353,
+            "minimum_step": 2,
+            "maximum": 0.0006125732000417096,
+            "maximum_step": 3
+          },
+          "anchor_gap_m": {
+            "minimum": 5.438094419218942e-12,
+            "minimum_step": 34,
+            "maximum": 0.0010240181055693979,
+            "maximum_step": 1
+          }
+        }
+      },
+      "input_summary": {
+        "id": "P-JINT-Weld-enabled-equal",
+        "steps": 600,
+        "dt": 0.016666666666666666,
+        "origin": [
+          0.0,
+          0.0
+        ],
+        "scale": 1.0,
+        "initial_joint": {
+          "bodies": [
+            "b0",
+            "b1"
+          ],
+          "getAnchor1": [
+            -0.5,
+            2.0
+          ],
+          "getAnchor2": [
+            -0.5,
+            2.0
+          ],
+          "getAngularTranslation": 0.0,
+          "getBodyCount": 2,
+          "getLimitsReferenceAngle": 0.0,
+          "getLowerLimit": 0.0,
+          "getMaximumSpringTorque": 1000.0,
+          "getReactionTorque": 0.0,
+          "getSpringDampingRatio": 0.3,
+          "getSpringFrequency": 8.0,
+          "getSpringMode": 1,
+          "getSpringStiffness": 0.0,
+          "getSpringTorque": 0.0,
+          "getUpperLimit": 0.0,
+          "id": "j0",
+          "isCollisionAllowed": false,
+          "isEnabled": true,
+          "isLimitsEnabled": true,
+          "isMaximumSpringTorqueEnabled": false,
+          "isSpringDamperEnabled": true,
+          "isSpringEnabled": true,
+          "reactionForce": [
+            0.0,
+            0.0
+          ],
+          "reactionTorque": 0.0,
+          "type": "org.dyn4j.dynamics.joint.WeldJoint"
+        },
+        "bodies": [
+          {
+            "id": "b0",
+            "worldCenter": [
+              0.0,
+              0.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b1",
+            "worldCenter": [
+              0.0,
+              2.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              -10.0
+            ],
+            "accumulatedTorque": -5.0
+          }
+        ]
+      }
+    },
+    {
+      "file": "P-JINT-Pulley-slack-transition-preparation-0.jsonl.gz",
+      "gzip_sha256": "b8d5571fcc738e6a28fbb1ce5007d504a057d51724af65e196fec69a7139e2ff",
+      "gzip_bytes": 2510,
+      "input_sha256": "2932a393f0e2a43eb0276ec892f95168907c79fc2704332a389cc8e921e34649",
+      "decompressed_sha256": "af4a8b8ea0f91ec92aefcddcd296d3d22d1653bdbdae2a6c4325a869df782a88",
+      "counts": {
+        "inputs": 1,
+        "event": 8,
+        "state": 1
+      },
+      "repeat_bytes_equal": true,
+      "audit": "PASS",
+      "actions": [],
+      "bindings": [],
+      "phase_measurements": {
+        "preparation": {
+          "steps": [
+            1,
+            1
+          ],
+          "samples": 1,
+          "length_error_m": {
+            "minimum": 0.0,
+            "minimum_step": 1,
+            "maximum": 0.0,
+            "maximum_step": 1
+          },
+          "positive_error_steps": [],
+          "above_configured_linear_tolerance_steps_diagnostic_only": []
+        }
+      },
+      "input_summary": {
+        "id": "P-JINT-Pulley-slack-transition-preparation",
+        "steps": 1,
+        "dt": 0.016666666666666666,
+        "origin": [
+          0.0,
+          0.0
+        ],
+        "scale": 1.0,
+        "initial_joint": {
+          "bodies": [
+            "b1",
+            "b2"
+          ],
+          "getAnchor1": [
+            -1.0,
+            0.0
+          ],
+          "getAnchor2": [
+            1.0,
+            0.5
+          ],
+          "getBodyCount": 2,
+          "getCurrentLength": 1.5,
+          "getCurrentLength1": 1.0,
+          "getCurrentLength2": 0.5,
+          "getLength": 1.5,
+          "getPulleyAnchor1": [
+            -1.0,
+            1.0
+          ],
+          "getPulleyAnchor2": [
+            1.0,
+            1.0
+          ],
+          "getRatio": 1.0,
+          "getReactionTorque": 0.0,
+          "id": "j0",
+          "isCollisionAllowed": false,
+          "isEnabled": true,
+          "isSlackEnabled": false,
+          "reactionForce": [
+            0.0,
+            0.0
+          ],
+          "reactionTorque": 0.0,
+          "type": "org.dyn4j.dynamics.joint.PulleyJoint"
+        },
+        "bodies": [
+          {
+            "id": "b0",
+            "worldCenter": [
+              0.0,
+              -1.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b1",
+            "worldCenter": [
+              -1.0,
+              0.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b2",
+            "worldCenter": [
+              1.0,
+              0.5
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "file": "P-JINT-Pulley-slack-transition-preparation-1.jsonl.gz",
+      "gzip_sha256": "58af70a09822c39653f8959c7fab63cb22aa7f2347c4e43a44cfb68039a784f6",
+      "gzip_bytes": 3661,
+      "input_sha256": "27abd124fffd78b64c563ad94cf7ce524682c566088b0da666320ae6a2dae895",
+      "decompressed_sha256": "9ad819a5171246de54e4ada43a6a9d3fd75d727b8a2c275e864790c0243cfa81",
+      "counts": {
+        "inputs": 1,
+        "event": 22,
+        "state": 2
+      },
+      "repeat_bytes_equal": true,
+      "audit": "PASS",
+      "actions": [],
+      "bindings": [],
+      "phase_measurements": {
+        "preparation": {
+          "steps": [
+            2,
+            3
+          ],
+          "samples": 2,
+          "length_error_m": {
+            "minimum": -0.07830621985746422,
+            "minimum_step": 2,
+            "maximum": 2.220446049250313e-16,
+            "maximum_step": 3
+          },
+          "positive_error_steps": [
+            3
+          ],
+          "above_configured_linear_tolerance_steps_diagnostic_only": []
+        }
+      },
+      "input_summary": {
+        "id": "P-JINT-Pulley-slack-transition-preparation",
+        "steps": 2,
+        "dt": 0.016666666666666666,
+        "origin": [
+          0.0,
+          0.0
+        ],
+        "scale": 1.0,
+        "initial_joint": {
+          "bodies": [
+            "b1",
+            "b2"
+          ],
+          "getAnchor1": [
+            -1.0,
+            0.0
+          ],
+          "getAnchor2": [
+            1.0,
+            0.5
+          ],
+          "getBodyCount": 2,
+          "getCurrentLength": 1.5,
+          "getCurrentLength1": 1.0,
+          "getCurrentLength2": 0.5,
+          "getLength": 1.5,
+          "getPulleyAnchor1": [
+            -1.0,
+            1.0
+          ],
+          "getPulleyAnchor2": [
+            1.0,
+            1.0
+          ],
+          "getRatio": 1.0,
+          "getReactionTorque": 0.0,
+          "id": "j0",
+          "isCollisionAllowed": false,
+          "isEnabled": true,
+          "isSlackEnabled": false,
+          "reactionForce": [
+            0.0,
+            -7.696902001294994
+          ],
+          "reactionTorque": 0.0,
+          "type": "org.dyn4j.dynamics.joint.PulleyJoint"
+        },
+        "bodies": [
+          {
+            "id": "b0",
+            "worldCenter": [
+              0.0,
+              -1.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b1",
+            "worldCenter": [
+              -1.0,
+              0.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b2",
+            "worldCenter": [
+              1.0,
+              0.5
+            ],
+            "velocity": [
+              0.0,
+              10.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "file": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "gzip_sha256": "f4701ce1b6bd1fee14197111c832a7ca491939e32858296f814d9d3ea6fa4134",
+      "gzip_bytes": 161930,
+      "input_sha256": "7631629c04088dd1de47d0b14ea52706033ee2b25285116450ef661a96011d8c",
+      "decompressed_sha256": "a39ce6d63aab5e4b76722df55389552bdcab4ee8904645b8c9b69f42bee1acf3",
+      "counts": {
+        "inputs": 1,
+        "instrumented-callback": 1,
+        "event": 3730,
+        "state": 600,
+        "action": 4
+      },
+      "repeat_bytes_equal": true,
+      "audit": "PASS",
+      "actions": [
+        {
+          "description": "body2.setLinearVelocity(0,10)",
+          "id": "P-JINT-Pulley-slack-transition",
+          "kind": "action",
+          "order": 0,
+          "step": 201
+        },
+        {
+          "description": "body2.translate(0,.1)",
+          "id": "P-JINT-Pulley-slack-transition",
+          "kind": "action",
+          "order": 1,
+          "step": 201
+        },
+        {
+          "description": "setSlackEnabled(true)",
+          "id": "P-JINT-Pulley-slack-transition",
+          "kind": "action",
+          "order": 2,
+          "step": 201
+        },
+        {
+          "description": "setSlackEnabled(false)",
+          "id": "P-JINT-Pulley-slack-transition",
+          "kind": "action",
+          "order": 0,
+          "step": 401
+        }
+      ],
+      "bindings": [
+        {
+          "event": "experimental-input-binding",
+          "id": "P-JINT-Pulley-slack-transition",
+          "kind": "instrumented-callback",
+          "order": 0,
+          "step": 1,
+          "values": [
+            "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+            "Pulley fresh slack-transition experiment",
+            "withAndWithoutSlack exact3body preparation: step1,velocity(0,10),step2; slackfalse; before201 velocity(0,10),translate(0,.1),slacktrue; before401 slackfalse; same world retained",
+            "new experimental input; not U or acceptance approval"
+          ]
+        }
+      ],
+      "phase_measurements": {
+        "disabled_before": {
+          "steps": [
+            1,
+            200
+          ],
+          "samples": 200,
+          "length_error_m": {
+            "minimum": -4.440892098500626e-16,
+            "minimum_step": 155,
+            "maximum": 2.220446049250313e-16,
+            "maximum_step": 9
+          },
+          "positive_error_steps": [
+            9,
+            127,
+            192
+          ],
+          "above_configured_linear_tolerance_steps_diagnostic_only": []
+        },
+        "enabled": {
+          "steps": [
+            201,
+            400
+          ],
+          "samples": 200,
+          "length_error_m": {
+            "minimum": -0.7061984767002047,
+            "minimum_step": 204,
+            "maximum": 0.1208278904872957,
+            "maximum_step": 209
+          },
+          "positive_error_steps": [
+            209,
+            210,
+            217,
+            218,
+            219,
+            220,
+            223,
+            226,
+            228,
+            267,
+            269,
+            271,
+            273,
+            275,
+            311,
+            313,
+            315,
+            317,
+            319,
+            321,
+            323,
+            325,
+            327,
+            329,
+            331,
+            349,
+            351,
+            353,
+            355,
+            357,
+            359,
+            361,
+            363,
+            365,
+            367,
+            369,
+            371,
+            373,
+            374,
+            376,
+            378,
+            380,
+            382,
+            384,
+            386,
+            388,
+            390,
+            399
+          ],
+          "above_configured_linear_tolerance_steps_diagnostic_only": [
+            209,
+            267,
+            269,
+            271,
+            273,
+            275,
+            311,
+            313,
+            315,
+            317,
+            319,
+            321,
+            323,
+            325,
+            327,
+            329,
+            331,
+            349,
+            351,
+            353,
+            355,
+            357,
+            359,
+            361,
+            363,
+            365,
+            367,
+            369,
+            371,
+            373,
+            376,
+            378,
+            380,
+            382,
+            384,
+            386,
+            388,
+            390,
+            399
+          ]
+        },
+        "disabled_after": {
+          "steps": [
+            401,
+            600
+          ],
+          "samples": 200,
+          "length_error_m": {
+            "minimum": -0.00033225614181509044,
+            "minimum_step": 497,
+            "maximum": 0.0,
+            "maximum_step": 401
+          },
+          "positive_error_steps": [],
+          "above_configured_linear_tolerance_steps_diagnostic_only": []
+        }
+      },
+      "input_summary": {
+        "id": "P-JINT-Pulley-slack-transition",
+        "steps": 600,
+        "dt": 0.016666666666666666,
+        "origin": [
+          0.0,
+          0.0
+        ],
+        "scale": 1.0,
+        "initial_joint": {
+          "bodies": [
+            "b1",
+            "b2"
+          ],
+          "getAnchor1": [
+            -0.999999975449914,
+            -0.04143163585091752
+          ],
+          "getAnchor2": [
+            1.0,
+            0.5414316358509177
+          ],
+          "getBodyCount": 2,
+          "getCurrentLength": 1.5000000000000002,
+          "getCurrentLength1": 1.041431635850918,
+          "getCurrentLength2": 0.4585683641490823,
+          "getLength": 1.5,
+          "getPulleyAnchor1": [
+            -1.0,
+            1.0
+          ],
+          "getPulleyAnchor2": [
+            1.0,
+            1.0
+          ],
+          "getRatio": 1.0,
+          "getReactionTorque": 0.0,
+          "id": "j0",
+          "isCollisionAllowed": false,
+          "isEnabled": true,
+          "isSlackEnabled": false,
+          "reactionForce": [
+            -0.0,
+            220.55943923608834
+          ],
+          "reactionTorque": 0.0,
+          "type": "org.dyn4j.dynamics.joint.PulleyJoint"
+        },
+        "bodies": [
+          {
+            "id": "b0",
+            "worldCenter": [
+              0.0,
+              -1.0
+            ],
+            "velocity": [
+              0.0,
+              0.0
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b1",
+            "worldCenter": [
+              -0.999999975449914,
+              -0.04143163585091752
+            ],
+            "velocity": [
+              1.015883034372918e-07,
+              -1.6653345369377348e-16
+            ],
+            "angularVelocity": 2.627580007858077e-15,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          },
+          {
+            "id": "b2",
+            "worldCenter": [
+              1.0,
+              0.5414316358509177
+            ],
+            "velocity": [
+              0.0,
+              0.15625000000000178
+            ],
+            "angularVelocity": 0.0,
+            "accumulatedForce": [
+              0.0,
+              0.0
+            ],
+            "accumulatedTorque": 0.0
+          }
+        ]
+      }
+    }
+  ],
+  "preparation_query_records": [
+    {
+      "id": "P-JINT-Pulley-slack-transition-preparation",
+      "payload": {
+        "event": "source-action",
+        "values": [
+          "body2.setLinearVelocity(0,10) before source step2"
+        ]
+      }
+    }
+  ],
+  "pulley_transition_samples": [
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 200,
+      "phase": "disabled_before",
+      "length_error_m": 0.0,
+      "slack_enabled": false,
+      "reaction_force": [
+        0.0,
+        -7.696902001294994
+      ],
+      "anchor1": [
+        -1.0000000298406646,
+        0.23390978522510322
+      ],
+      "anchor2": [
+        1.0,
+        0.2660902147748973
+      ],
+      "body2_velocity": [
+        0.0,
+        -0.07568359374999091
+      ],
+      "public_current_length_error_m": 0.0
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 201,
+      "phase": "enabled",
+      "length_error_m": -0.26248361545138854,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -0.0
+      ],
+      "anchor1": [
+        -1.0000000283357158,
+        0.23244895623204745
+      ],
+      "anchor2": [
+        1.0,
+        0.5300346592193418
+      ],
+      "body2_velocity": [
+        0.0,
+        9.836666666666666
+      ],
+      "public_current_length_error_m": -0.26248361545138854
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 204,
+      "phase": "enabled",
+      "length_error_m": -0.7061984767002047,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -0.0
+      ],
+      "anchor1": [
+        -1.0000000238208693,
+        0.21173313591954682
+      ],
+      "anchor2": [
+        1.0,
+        1.0055346592193417
+      ],
+      "body2_velocity": [
+        0.0,
+        9.346666666666664
+      ],
+      "public_current_length_error_m": -0.7061984767002047
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 208,
+      "phase": "enabled",
+      "length_error_m": -0.0445773829502043,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        0.0
+      ],
+      "anchor1": [
+        -1.000000017801074,
+        0.14600093105843484
+      ],
+      "anchor2": [
+        1.0,
+        1.6014235481082302
+      ],
+      "body2_velocity": [
+        0.0,
+        8.693333333333328
+      ],
+      "public_current_length_error_m": -0.0445773829502043
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 209,
+      "phase": "enabled",
+      "length_error_m": 0.1208278904872957,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        0.0
+      ],
+      "anchor1": [
+        -1.0000000162961251,
+        0.1227623242876013
+      ],
+      "anchor2": [
+        1.0,
+        1.7435902147748967
+      ],
+      "body2_velocity": [
+        0.0,
+        8.529999999999994
+      ],
+      "public_current_length_error_m": 0.1208278904872957
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 210,
+      "phase": "enabled",
+      "length_error_m": 2.220446049250313e-16,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        233.8361963533175
+      ],
+      "anchor1": [
+        -1.0000000122788721,
+        0.2399180772569432
+      ],
+      "anchor2": [
+        1.0,
+        1.7399180772569434
+      ],
+      "body2_velocity": [
+        0.0,
+        3.4045084635416587
+      ],
+      "public_current_length_error_m": 2.220446049250313e-16
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 266,
+      "phase": "enabled",
+      "length_error_m": -0.07279260402259613,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -0.0
+      ],
+      "anchor1": [
+        -0.9999998430865961,
+        -3.920652928469324e-08
+      ],
+      "anchor2": [
+        1.0,
+        0.572792643229138
+      ],
+      "body2_velocity": [
+        0.0,
+        -5.742158203125035
+      ],
+      "public_current_length_error_m": -0.07279260402259613
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 267,
+      "phase": "enabled",
+      "length_error_m": 0.02563225491837695,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -0.0
+      ],
+      "anchor1": [
+        -0.9999998400453602,
+        -3.920652928481964e-08
+      ],
+      "anchor2": [
+        1.0,
+        0.47436778428816523
+      ],
+      "body2_velocity": [
+        0.0,
+        -5.905491536458368
+      ],
+      "public_current_length_error_m": 0.02563225491837695
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 268,
+      "phase": "enabled",
+      "length_error_m": 0.0,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -146.84176820210294
+      ],
+      "anchor1": [
+        -0.9999998473964365,
+        0.06202851772314492
+      ],
+      "anchor2": [
+        1.0,
+        0.4379714822768675
+      ],
+      "body2_velocity": [
+        0.0,
+        -2.9527457682291702
+      ],
+      "public_current_length_error_m": 0.0
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 399,
+      "phase": "enabled",
+      "length_error_m": 0.005452518901989167,
+      "slack_enabled": true,
+      "reaction_force": [
+        0.0,
+        -0.0
+      ],
+      "anchor1": [
+        -1.0000001411187847,
+        0.4945475188654211
+      ],
+      "anchor2": [
+        1.000000000000305,
+        -3.77673904760744e-08
+      ],
+      "body2_velocity": [
+        5.049924442924905e-12,
+        0.0
+      ],
+      "public_current_length_error_m": 0.005452518901989167
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 400,
+      "phase": "enabled",
+      "length_error_m": 0.0,
+      "slack_enabled": true,
+      "reaction_force": [
+        6.728290758591598e-12,
+        -22.0535144815452
+      ],
+      "anchor1": [
+        -1.0000001536726095,
+        0.4921961653335599
+      ],
+      "anchor2": [
+        1.0000000000003857,
+        0.0078038346664632
+      ],
+      "body2_velocity": [
+        4.907145678552989e-12,
+        0.30465677897154886
+      ],
+      "public_current_length_error_m": 0.0
+    },
+    {
+      "trace": "P-JINT-Pulley-slack-transition-0.jsonl.gz",
+      "step": 401,
+      "phase": "disabled_after",
+      "length_error_m": 0.0,
+      "slack_enabled": false,
+      "reaction_force": [
+        2.9919784196225326e-12,
+        -7.696902001295215
+      ],
+      "anchor1": [
+        -1.000000166227656,
+        0.48711855235070445
+      ],
+      "anchor2": [
+        1.0000000000004665,
+        0.012881447649322591
+      ],
+      "body2_velocity": [
+        4.843653924538695e-12,
+        0.3046567789715535
+      ],
+      "public_current_length_error_m": 0.0
+    }
+  ],
+  "reconstructed_pre_step201_after_actions_length_error_m": -0.10000000000000009,
+  "pre_step201_measurement_status": "Reconstructed from step200 geometry and exact translation action; no immediate pre-solve state or private solver flag was recorded",
+  "settings": {
+    "getAngularTolerance": 0.03490658503988659,
+    "getAngularToleranceSquared": 0.0012184696791468343,
+    "getBaumgarte": 0.2,
+    "getContinuousDetectionMode": "ALL",
+    "getLinearTolerance": 0.005,
+    "getLinearToleranceSquared": 2.5e-05,
+    "getMaximumAngularCorrection": 0.13962634015954636,
+    "getMaximumAngularCorrectionSquared": 0.01949551486634935,
+    "getMaximumAtRestAngularVelocity": 0.03490658503988659,
+    "getMaximumAtRestAngularVelocitySquared": 0.0012184696791468343,
+    "getMaximumAtRestLinearVelocity": 0.01,
+    "getMaximumAtRestLinearVelocitySquared": 0.0001,
+    "getMaximumLinearCorrection": 0.2,
+    "getMaximumLinearCorrectionSquared": 0.04000000000000001,
+    "getMaximumRotation": 1.5707963267948966,
+    "getMaximumRotationSquared": 2.4674011002723395,
+    "getMaximumTranslation": 2.0,
+    "getMaximumTranslationSquared": 4.0,
+    "getMaximumWarmStartDistance": 0.01,
+    "getMaximumWarmStartDistanceSquared": 0.0001,
+    "getMinimumAtRestTime": 0.5,
+    "getPositionConstraintSolverIterations": 2,
+    "getStepFrequency": 0.016666666666666666,
+    "getVelocityConstraintSolverIterations": 6,
+    "isAtRestDetectionEnabled": true,
+    "isWarmStartingEnabled": true,
+    "type": "org.dyn4j.dynamics.Settings"
+  },
+  "upstream_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "upstream_source_sha256": {
+    "Island.java": "a653a8ef8099aee6626a6c63c8c9a0cce082955a03b1ff1b731baa63bc63011d",
+    "PulleyJoint.java": "316732db8f88e38c964b99c08a07a26cf1587f112f8482e9f8dc6c53c26b7e00",
+    "PulleyJointSimulationTest.java": "dbe2845ee94562eca5a401d6df9c261689f6a31647b3b857bbd65caf39a153f2",
+    "Settings.java": "89a064516022a1c1cede359d5f64cc56288c1eb3e8675f0762cd2aca1cce40a6",
+    "WeldJoint.java": "6c562db9bd348bae0e4f52df10a5702b59d5ebca2c831629f0647a9c2d198ab2",
+    "WeldJointSimulationTest.java": "a52805aaea89487267dcf2f7204555fb0d2210625feeb5335a209a8fb786f909"
+  }
+}
