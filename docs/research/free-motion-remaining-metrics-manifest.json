@@ -39,7 +39,7 @@
     "isIdentity",
     "type"
   ],
-  "analytic_model": "exact binary64 input dt times integer step, initial omega=0.5; Decimal precision75 Taylor sin/cos, pi constant80 decimal places",
+  "analytic_model": "exact binary64 input dt times integer step, initial omega=0.5; Decimal precision75 Taylor sin/cos, pi constant84 decimal places",
   "initial_mass_inertia_header_only": [
     0.7853981633974483,
     0.09817477042468103
@@ -369,7 +369,7 @@
   },
   "sample_file_sha256": "ae0930ea9d209e68deb91304aadba40bccb82c717c512487832b5c50cea6e25d",
   "capture_source_sha256": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
-  "auditor_sha256": "084364b023f4defa13036f0e3bdbc08879daee03b99c630e192fb4ba6617d9a3",
+  "auditor_sha256": "e7bbd4273505a6491b63ac6fd02a6de3eaa5bd10300f0f901889cbed81dfd4c6",
   "upstream_source_sha256": {
     "AbstractCollisionBody.java": "737cd8008a01a85435eabf24efc4d17d27b51337d4855e2a50d09ee1e4964fcf",
     "AbstractPhysicsBody.java": "b7b5c417d5abb19212c61e3df4994d5bbde593d1b9aa93898bef9afd7ad4573b",

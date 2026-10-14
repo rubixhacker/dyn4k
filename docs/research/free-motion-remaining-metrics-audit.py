@@ -176,7 +176,7 @@ assert all(m['status'] != 'FAIL' for m in metrics.values())
 result = {'approval':'PENDING_HUMAN_DECISION','fixture':inputs['id'],'experiment_revision':REV,
     'source_revision':'058bf6d982a0fb89b54050f929f6ea9dae53b714','raw_sha256':RAW_SHA,'input_sha256':INPUT_SHA,
     'stream_sha256':stream_sha.hexdigest(),'counts':dict(counts),'body_keys':sorted(body_keys),'transform_keys':sorted(transform_keys),
-    'analytic_model':'exact binary64 input dt times integer step, initial omega=0.5; Decimal precision75 Taylor sin/cos, pi constant80 decimal places',
+    'analytic_model':'exact binary64 input dt times integer step, initial omega=0.5; Decimal precision75 Taylor sin/cos, pi constant84 decimal places',
     'initial_mass_inertia_header_only':[mass,inertia],'initial_momentum_xy':initial_momentum,'initial_spin_angular_momentum':initial_spin,'initial_kinetic_energy':initial_energy,
     'metrics':metrics,'sample_file_sha256':sha((out/'samples.jsonl').read_bytes()),
     'capture_source_sha256':sha(source('calibration/src/Capture.java')),
