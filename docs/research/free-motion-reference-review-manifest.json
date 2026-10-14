@@ -1,0 +1,192 @@
+{
+  "approval": "PENDING_HUMAN_APPROVAL",
+  "fixture": "L-free-s1.0-o0.0,0.0-hz60",
+  "original_experiment_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "baseline_jar_sha256_provenance_only": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "retrieval": {
+    "target": {
+      "header_offset": 19804447744,
+      "data_offset": 19804448256,
+      "member": "package/canonical/L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz",
+      "size": 3945330,
+      "type": "0",
+      "stored_checksum": 9111,
+      "checksum_validated": true,
+      "header_sha256": "2fd56e4e6c63fc6887f7910fd1b8370633e88b42a687135eb9b122be79866425"
+    },
+    "gzip_sha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743",
+    "downloaded_bytes": 4154226,
+    "requests": 409,
+    "headers_visited": 408,
+    "complete_archive_hash_verified": false
+  },
+  "raw_file": "L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz",
+  "input_sha256_utf8_excluding_newline": "91f914d3c9993ac238c66e88015861ece560e20333f9e831f3ff4758980b3dd9",
+  "decompressed_stream_sha256_including_newlines": "4a2919c350f61974b8046dd5fe11e0710db37abde26b5db0af909ab4b8d83f78",
+  "record_counts": {
+    "inputs": 1,
+    "event": 108001,
+    "state": 36000
+  },
+  "callback_method_counts": {
+    "public abstract void org.dyn4j.world.listener.StepListener.begin(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)": 36000,
+    "public abstract void org.dyn4j.world.listener.StepListener.updatePerformed(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)": 1,
+    "public abstract void org.dyn4j.world.listener.StepListener.postSolve(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)": 36000,
+    "public abstract void org.dyn4j.world.listener.StepListener.end(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)": 36000
+  },
+  "state_event_audit": "PASS",
+  "analytical_position": {
+    "formula": "initial_position[axis] + initial_velocity[axis] * (step * fixed_dt)",
+    "units": "metres",
+    "samples_per_axis": 36000,
+    "absolute_limit_per_axis": 1e-10,
+    "relative_limit": 0,
+    "maximum_absolute_errors_xy": [
+      5.425704330264125e-11,
+      2.7128521651320625e-11
+    ],
+    "maximum_error_steps_xy": [
+      35997,
+      35997
+    ],
+    "first_violating_steps_xy": [
+      null,
+      null
+    ],
+    "result": "PASS"
+  },
+  "proposed_roles": [
+    "numerical_trajectory_reference_pending_other_limits",
+    "exact_discrete_and_callback_behavior",
+    "fixture_specific_approved_analytical_position_check",
+    "physical_diagnostics_without_new_limits"
+  ],
+  "source_sha256": {
+    "calibration/src/SceneCases.java": "ec2a4eabcd5ac278e819ab06c4a22025674bfbec8b6e10773d0b8d9f0c9fd956",
+    "calibration/src/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "calibration/src/Audit.java": "87455eeba05ea6b976decd5df9286e8166c16066c4cec441aff39f9eb5eb87f0",
+    "docs/research/calibration-evidence/input-manifest.jsonl": "e16a9a566b448838b9a7ed75960bd098ffb160895ec6c237ca0149915254e10e",
+    "docs/research/calibration-evidence/audit-manifest.jsonl": "b756ae3bb1153798a1a11158d9820b703f850ff194c903c0247c5a21b8515481"
+  },
+  "selected_asset_ranges": [
+    {
+      "asset": "dyn4j-baseline-raw.tar.part-013",
+      "logical_offset": 19804447744,
+      "range_start": 304447744,
+      "range_end": 304448255,
+      "status": 206,
+      "bytes": 512,
+      "sha256": "2fd56e4e6c63fc6887f7910fd1b8370633e88b42a687135eb9b122be79866425"
+    },
+    {
+      "asset": "dyn4j-baseline-raw.tar.part-013",
+      "logical_offset": 19804448256,
+      "range_start": 304448256,
+      "range_end": 308393585,
+      "status": 206,
+      "bytes": 3945330,
+      "sha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743"
+    }
+  ],
+  "part_assets_provenance": [
+    {
+      "name": "dyn4j-baseline-raw.tar.part-000",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563017593",
+      "size": 1500000000,
+      "digest": "sha256:490c39b39d5281f49253232828ac416cd96979806fd422efb41427b91127dfd9",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-000"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-001",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563017591",
+      "size": 1500000000,
+      "digest": "sha256:6e5d8c64eed84221f709bb451f459d00c55b73171eebb6bd535b7de1095f395d",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-001"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-002",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563017592",
+      "size": 1500000000,
+      "digest": "sha256:75a6b7be8a6ecc99c2ad141a220b16b77f36c6732d147f086d9b2e5ec26dfde8",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-002"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-003",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563017590",
+      "size": 1500000000,
+      "digest": "sha256:e8b047059d19d18889e09c1afb50dff25b5be0dee48040ec65945e9fc55c9f3b",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-003"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-004",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563017609",
+      "size": 1500000000,
+      "digest": "sha256:e693c5849ffc49c10e4881238c5c04c6c2d8f08ba19facd65ce313c81a771bed",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-004"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-005",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563020063",
+      "size": 1500000000,
+      "digest": "sha256:f1cc5fc1d493c2dd2db003d5142233e990cc5bedbc79b5de0acfaea51ca5628c",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-005"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-006",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563020899",
+      "size": 1500000000,
+      "digest": "sha256:ee1882f9451f41627a49cc89de88374243ea96176b80314261589873108df3c6",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-006"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-007",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563020927",
+      "size": 1500000000,
+      "digest": "sha256:b1ee7bb42ad22bde8d464d82eefc974da9ce66809558718e86d7aa619d9cc557",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-007"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-008",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563020983",
+      "size": 1500000000,
+      "digest": "sha256:0835730de52d562c84bac48814e5733bb10cb58beb7f97dc3c29015ffdb392ee",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-008"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-009",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563020993",
+      "size": 1500000000,
+      "digest": "sha256:2c78607121f41379f038cb2526897bff6079c261caf3b55b48b458dfacfd0678",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-009"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-010",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563021663",
+      "size": 1500000000,
+      "digest": "sha256:fd813cf006cf01d8a7a9c4d75ca6ef159efa198baaababef6c9c38f45ac8ebe1",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-010"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-011",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563023969",
+      "size": 1500000000,
+      "digest": "sha256:15f542478865c5df9e03526d4338f8e442fb962ddfd1b0864c34e5eada9fd339",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-011"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-012",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563024054",
+      "size": 1500000000,
+      "digest": "sha256:8f6fb62efc772fd71a6ef73e01ee7d5fac93e13dd9f281d53e2a6eb3b583b2b2",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-012"
+    },
+    {
+      "name": "dyn4j-baseline-raw.tar.part-013",
+      "apiUrl": "https://api.github.com/repos/rubixhacker/dyn4k/releases/assets/563024290",
+      "size": 468512000,
+      "digest": "sha256:a032122d587b3d1919706c4cfbd7205c63f1b88ee646190f0a06ee70b5ac7a26",
+      "url": "https://github.com/rubixhacker/dyn4k/releases/download/calibration-raw-20260914/dyn4j-baseline-raw.tar.part-013"
+    }
+  ]
+}
