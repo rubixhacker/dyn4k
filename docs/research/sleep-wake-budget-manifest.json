@@ -1,0 +1,36 @@
+{
+  "status": "RESEARCH_EVIDENCE_ONLY_EXACT_CHECK_PROPOSALS_PENDING_LIVE_APPROVAL",
+  "ticket": "https://github.com/rubixhacker/dyn4k/issues/24",
+  "approved_reference_checkpoint": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6160940265",
+  "approved_reference_manifest_revision": "4674e089d6f968bf752741f2be85cf2048962552",
+  "approved_reference_manifest_sha256": "b42174c7523bea9687e4ab015a215b4e652c2446df73d2f41e836e8a165c1208",
+  "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "archive_sha256": "89d88301ad5ea14a621d8a6e86bfc3dfc90f84a0d7e8abda65f2f526de1b5bee",
+  "new_audit_script": "docs/research/sleep-wake-budget-audit.mjs",
+  "new_audit_script_sha256": "c5f6affc6051d2bfda8cacb700ed8b496fe8b36b6a1d47cd34407fcbe6b4cba4",
+  "observations": "docs/research/sleep-wake-budget-observations.json",
+  "observations_sha256": "bd34030d4fcb05853e172a94512e932ac2f5c6672a9b39a059d39d161d7f35a6",
+  "original_auditor_sha256": "6fd5a7da3f39bc27fc374119808c3a5ed331b955dfe5c7a72d1f81ff57690f46",
+  "audit_environment": {"node": "v26.10.0", "python": "3.14.7", "new_physics_runs": 0},
+  "fresh_original_audit": {"internal_checksums_passed": 31, "states": 126000, "listener_events": 1637943},
+  "new_audit": {
+    "exit_code": 0,
+    "check_group_failures": 0,
+    "previous_transform_diagnostic_mismatches": 0,
+    "consecutive_sleep_transform_diagnostic_mismatches": 0,
+    "numeric_path_templates_per_hz": 477,
+    "numeric_path_template_groups": {"initial_body_state": 69, "per_step_state": 23, "action_snapshots": 138, "callback_payloads": 247},
+    "array_path_policy": "Array indices collapse to []; ranges combine array elements and bodies. These ranges are observations, not componentwise acceptance metrics or limits.",
+    "distinct_callback_signatures_per_hz": 16
+  },
+  "qualification": {
+    "scope": "Frozen baseline bytes and bounded source-supported observations only",
+    "helper": "Manually reviewed observation tool; not a certified numerical comparator or a port runner",
+    "dynamic_contact_numerical_limits": "UNJUSTIFIED_NOT_APPROVED",
+    "new_exact_consistency_requirements": "PROPOSED_PENDING_LIVE_APPROVAL",
+    "port_baseline_trajectory_comparison": "UNPASSED_NO_PORT",
+    "all_target_runtime_qualification": "UNPASSED",
+    "new_physical_acceptance_limits": "NONE_PROPOSED"
+  }
+}
