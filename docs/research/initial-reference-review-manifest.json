@@ -1,0 +1,138 @@
+{
+  "status": "PENDING_HUMAN_APPROVAL",
+  "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "sleep_archive_sha256": "89d88301ad5ea14a621d8a6e86bfc3dfc90f84a0d7e8abda65f2f526de1b5bee",
+  "sleep_archive_bytes": 2617525,
+  "sleep_archive_members_verified": 31,
+  "sleep_sources": {
+    "source/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "source/SleepWakeCases.java": "c808ba452418f6bb88b0eeaf67955ad6691c7e6cdcd1487819d2397640bc00b7",
+    "source/audit.jq": "6964af254b100d626fbb61b86222053da651944cace98d1dd7bda01a3f0d4563"
+  },
+  "original_git_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "original_inspected_files": {
+    "calibration/src/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "calibration/src/SceneCases.java": "ec2a4eabcd5ac278e819ab06c4a22025674bfbec8b6e10773d0b8d9f0c9fd956",
+    "calibration/src/Audit.java": "87455eeba05ea6b976decd5df9286e8166c16066c4cec441aff39f9eb5eb87f0",
+    "calibration/src/InputManifest.java": "0c27d7d44e4a19e48a7c2ea46d409a75129d3b8cbf801d22958c40642a5e5cbb",
+    "docs/research/calibration-evidence/input-manifest.jsonl": "e16a9a566b448838b9a7ed75960bd098ffb160895ec6c237ca0149915254e10e",
+    "docs/research/calibration-evidence/audit-manifest.jsonl": "b756ae3bb1153798a1a11158d9820b703f850ff194c903c0247c5a21b8515481",
+    "docs/research/calibration-evidence/sources.sha256": "30a183670be4f2e578967c5b5bd6834f227239b8b23192dd9bd74c84ac2dd204",
+    "docs/research/calibration-evidence/raw-archive/repeat-a-trace-sha256.txt": "0a14a8b40f82c16c4670ea3af4e8156ca3d389645d3c13e2afd6b186543db064",
+    "docs/research/calibration-evidence/raw-archive/repeat-b-trace-sha256.txt": "0a14a8b40f82c16c4670ea3af4e8156ca3d389645d3c13e2afd6b186543db064",
+    "docs/research/calibration-evidence/raw-archive/chunk-sha256.txt": "1d95a09149f49f95bf6035f68fa6d952ad66b78a68f882a564e34e12904200d1"
+  },
+  "sleep_candidates": [
+    {
+      "status": "PENDING_HUMAN_APPROVAL",
+      "hz": 30,
+      "selected_member": "dyn4k-sleep-evidence/run1/S-sleep-wake-hz30-0.jsonl.gz",
+      "corroborating_member": "dyn4k-sleep-evidence/run2/S-sleep-wake-hz30-0.jsonl.gz",
+      "gzip_sha256": "86cfa767974174a2b35fea477ab02451aae21ac5a779ba6e40d12e4874112ebe",
+      "gzip_bytes": 4847331,
+      "input_sha256_utf8_without_newline": "97f60b69e9aa776a2864347e22328c5735d35830c52fa6c46678bb293d97174a",
+      "decompressed_sha256_including_newlines": "9851e31853012a0d1fde661e9e7c913643e5ab278e06bbf7fcc0f914a7ea8bda",
+      "records_by_kind": {
+        "inputs": 1,
+        "event": 233995,
+        "state": 18000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "events_by_listener": {
+        "StepListener": 54001,
+        "CollisionListener": 53999,
+        "TimeOfImpactListener": 6,
+        "ContactListener": 125989
+      },
+      "first_sleep_step": 18,
+      "action_step": 9001,
+      "first_return_to_sleep_step": 9022,
+      "preceding_window_samples": 31,
+      "minimum_dynamic_center_y_diagnostic": 0.4782222222222222,
+      "fresh_stream_audit": "PASS",
+      "repeat_gzip_bytes_equal": true
+    },
+    {
+      "status": "PENDING_HUMAN_APPROVAL",
+      "hz": 60,
+      "selected_member": "dyn4k-sleep-evidence/run1/S-sleep-wake-hz60-0.jsonl.gz",
+      "corroborating_member": "dyn4k-sleep-evidence/run2/S-sleep-wake-hz60-0.jsonl.gz",
+      "gzip_sha256": "ae6fb99402d239569fab8bba950429318879cdb13fb7609833e5f3c7cda68b28",
+      "gzip_bytes": 9675415,
+      "input_sha256_utf8_without_newline": "cda35b6908693308cee60c9dbf4884a2312f2dac93743747cc32fbf1214a8a35",
+      "decompressed_sha256_including_newlines": "ba4c9c73d73ef0304a9b6308d370aaa7a23d699cb841ca61dbcc5a135db61cf5",
+      "records_by_kind": {
+        "inputs": 1,
+        "event": 467981,
+        "state": 36000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "events_by_listener": {
+        "StepListener": 108001,
+        "CollisionListener": 107995,
+        "TimeOfImpactListener": 10,
+        "ContactListener": 251975
+      },
+      "first_sleep_step": 35,
+      "action_step": 18001,
+      "first_return_to_sleep_step": 18043,
+      "preceding_window_samples": 61,
+      "minimum_dynamic_center_y_diagnostic": 0.4891111111111111,
+      "fresh_stream_audit": "PASS",
+      "repeat_gzip_bytes_equal": true
+    },
+    {
+      "status": "PENDING_HUMAN_APPROVAL",
+      "hz": 120,
+      "selected_member": "dyn4k-sleep-evidence/run1/S-sleep-wake-hz120-0.jsonl.gz",
+      "corroborating_member": "dyn4k-sleep-evidence/run2/S-sleep-wake-hz120-0.jsonl.gz",
+      "gzip_sha256": "5bad36d62dcb0f3b1e2d526d2f1f97e0e62ede99ed9d3da0bef330ba0f510c75",
+      "gzip_bytes": 19937189,
+      "input_sha256_utf8_without_newline": "e44f7662025777f981e166bc84efb111b527984fe73d36343ca673f540778df5",
+      "decompressed_sha256_including_newlines": "19bc07fc64ff1ec3535fbf7bdd8e02fd8acc80917069ad23782941dc34c98db1",
+      "records_by_kind": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "events_by_listener": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "first_sleep_step": 66,
+      "action_step": 36001,
+      "first_return_to_sleep_step": 36084,
+      "preceding_window_samples": 121,
+      "minimum_dynamic_center_y_diagnostic": 0.4959166666666667,
+      "fresh_stream_audit": "PASS",
+      "repeat_gzip_bytes_equal": true
+    }
+  ],
+  "nominal_free_motion_candidate": {
+    "status": "RAW_TRACE_NOT_RECHECKED_NOT_READY_TO_FREEZE",
+    "published_audit_entry": {
+      "file": "L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz",
+      "id": "L-free-s1.0-o0.0,0.0-hz60",
+      "rawSha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743",
+      "derivativeSha256": "e504724fe9c19255392eecb013587ce0ff01f0b7d5467dd404db7d6e6c807cef",
+      "rawBytes": 3945330,
+      "derivativeBytes": 3353761,
+      "rawRecords": 144002,
+      "derivativeRecords": 36001,
+      "states": 36000,
+      "listenerEvents": 108001,
+      "plannedSteps": 36000,
+      "startStep": 0,
+      "rejected": false,
+      "firstFailureStep": -1
+    },
+    "published_input_sha256": "91f914d3c9993ac238c66e88015861ece560e20333f9e831f3ff4758980b3dd9"
+  }
+}
