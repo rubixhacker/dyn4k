@@ -1,0 +1,91 @@
+{
+  "baseline": {
+    "status": "PASS",
+    "scope": "DIRECT_FROZEN_BASELINE_OUTPUTS_ONLY",
+    "raw_sha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743",
+    "header_sha256": "91f914d3c9993ac238c66e88015861ece560e20333f9e831f3ff4758980b3dd9",
+    "stream_sha256": "4a2919c350f61974b8046dd5fe11e0710db37abde26b5db0af909ab4b8d83f78",
+    "input_records": 1,
+    "states": 36000,
+    "events": 108001,
+    "current_checks": 144000,
+    "previous_full_transform_checks": 36000,
+    "previous_full_transform_passes": 36000,
+    "first_inheritance_failure": null,
+    "metrics": [
+      {
+        "metric": "cosine",
+        "pass_count": 36000,
+        "fail_count": 0,
+        "inconclusive_count": 0,
+        "maximum_upper": "18114704236748610983569178747123380744798508206289247558077/10000000000000000000000000000000000000000000000000000000000000000000000",
+        "maximum_step": 35814,
+        "first_unpassed_step": null
+      },
+      {
+        "metric": "sine",
+        "pass_count": 36000,
+        "fail_count": 0,
+        "inconclusive_count": 0,
+        "maximum_upper": "728059307004869263383928043270148431889396965590016913891/400000000000000000000000000000000000000000000000000000000000000000000",
+        "maximum_step": 36000,
+        "first_unpassed_step": null
+      },
+      {
+        "metric": "wrapped_public_angle_rad",
+        "pass_count": 36000,
+        "fail_count": 0,
+        "inconclusive_count": 0,
+        "maximum_upper": "1739002635537490466691173507676189733982313114946614596168709/1250000000000000000000000000000000000000000000000000000000000000000000",
+        "maximum_step": 35814,
+        "first_unpassed_step": null
+      },
+      {
+        "metric": "unwrapped_recorder_rad",
+        "pass_count": 36000,
+        "fail_count": 0,
+        "inconclusive_count": 0,
+        "maximum_upper": "410974173/288230376151711744",
+        "maximum_step": 35814,
+        "first_unpassed_step": null
+      }
+    ],
+    "precision": "outward integer lattice 1e-70; exact Fraction metrics/decoding",
+    "python": "3.14.7 (main, Aug 10 2026, 00:00:00) [GCC 16.1.1 20260515 (Red Hat 16.1.1-2)]",
+    "platform": "Linux-7.2.7-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+    "checker_sha256": "181440967b44e3e52427dd905ca9854acb9114c5305719a8fe3a0749f98b29ba",
+    "numeric_helper_sha256": "c7955aeb9a6a0a97decaf015f1382b4ac0be0a187f849fc0ad5fdea15fa96c09",
+    "oracle_sha256": "710b70f0bcc780dd81883ef1d9971b7b6c6b47e78c86a3a5dd07f3d1edb2b97b",
+    "comparison_rows_sha256": "733dc97d76d7ec3a55f71354fbc435df3ce4b00f3d0d914dab3569b4203b8436",
+    "inheritance_rows_sha256": "1e7d05a14cd1c8bf27ff4d847c374e97cc4f65008f27739fe848284a8333e031",
+    "historical_primitive_status": "UNQUALIFIED_HIDDEN_CALLS",
+    "port_runtime_status": "UNPASSED",
+    "actual_differential_status": "NOT_RUN_NO_PORT_TRAJECTORY"
+  },
+  "verification": {
+    "status": "PASS",
+    "checks": [
+      "six exact halfway ties: even lower, even upper, binade carry, both signs",
+      "known 0.1 rational and signed-zero encoding/numerical equality",
+      "90 independently constructed binary64 normal round-trips across exponent ranges",
+      "finite range endpoints; eight malformed/nonfinite/unsupported/overflow numeric rejections",
+      "inclusive cap, strict failure, two straddling cases including lower endpoint exactly cap",
+      "opposite wrap-cut sides; narrow intervals at +/-pi; half-turn rejection",
+      "16 synthetic differential outcomes: identity, inclusive cap, over cap and wrap cut",
+      "full nested numerical inheritance with zero signs and one-ulp changed value",
+      "eight malformed/nonfinite/truncated/duplicate/unsafe-integer/schema JSON rejections",
+      "three full-entry hash mismatch/empty/truncated gzip rejections with no success manifest",
+      "all 251640 distinct archived floating tokens agree with independent CPython decoder bits"
+    ],
+    "distinct_archived_float_tokens": 251640,
+    "verification_script_sha256": "e26e550d2a382e4b3ea54776d3eb9a42fc92f8bb4918edbcf4f6ca7b3f8210c0",
+    "checker_sha256": "181440967b44e3e52427dd905ca9854acb9114c5305719a8fe3a0749f98b29ba",
+    "numeric_helper_sha256": "c7955aeb9a6a0a97decaf015f1382b4ac0be0a187f849fc0ad5fdea15fa96c09",
+    "qualification_scope": "bounded manual-proof and executed checks; no formal machine proof or port run"
+  },
+  "experiment_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "dyn4j_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "model_revision": "9994a0e16470e51df8a1ddfa21227620e9951239",
+  "baseline_manifest_sha256": "f71c0fb9a6d5d7c28a863e8ed84b9be8f4b67234efa750446ee3decec41f916a",
+  "verification_result_sha256": "2c1cc20b1163b24c16f90cafb468f788c7941a6582a0f0608886d1d3e065e9af"
+}
