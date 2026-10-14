@@ -1,0 +1,540 @@
+{
+  "status": "COMPLETE_PHYSICAL_FAIL",
+  "semantics": "Exact mathematical geometry of stored binary64 coefficients; no trig normalization or runtime rounding allowance",
+  "total": 126000,
+  "passed": 153,
+  "failed": 125847,
+  "manifestSha256": "b42174c7523bea9687e4ab015a215b4e652c2446df73d2f41e836e8a165c1208",
+  "sources": {
+    "source/Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "source/SleepWakeCases.java": "c808ba452418f6bb88b0eeaf67955ad6691c7e6cdcd1487819d2397640bc00b7",
+    "source/audit.jq": "6964af254b100d626fbb61b86222053da651944cace98d1dd7bda01a3f0d4563"
+  },
+  "failureDetailsSha256": "68474d839afb2caf39b3e2eca2d7bf389c86d3ca76aa22edf3679e97256a9925",
+  "results": [
+    {
+      "hz": 30,
+      "states": 18000,
+      "gzipSha256": "86cfa767974174a2b35fea477ab02451aae21ac5a779ba6e40d12e4874112ebe",
+      "rawSha256": "9851e31853012a0d1fde661e9e7c913643e5ab278e06bbf7fcc0f914a7ea8bda",
+      "inputSha256": "97f60b69e9aa776a2864347e22328c5735d35830c52fa6c46678bb293d97174a",
+      "phases": [
+        {
+          "name": "initial-approach",
+          "first": 1,
+          "last": 0,
+          "ceiling": "0/1",
+          "count": 0,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": null,
+          "maximum": null,
+          "closestBoundary": null
+        },
+        {
+          "name": "impact",
+          "first": 1,
+          "last": 3,
+          "ceiling": "1/100",
+          "count": 3,
+          "failed": 2,
+          "failureRanges": [
+            [
+              2,
+              3
+            ]
+          ],
+          "minimum": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "maximum": {
+            "step": 2,
+            "exactMetres": "196156783769915/9007199254740992",
+            "approximateMetres": 0.021777777777777785
+          },
+          "closestBoundary": {
+            "step": 3,
+            "exactMetres": "77793675960238957/4611686018427387904",
+            "approximateMetres": 0.016868814496344888,
+            "signedHeadroomMetres": "-791920394399126949/115292150460684697600"
+          }
+        },
+        {
+          "name": "initial-settling",
+          "first": 4,
+          "last": 17,
+          "ceiling": "1/200",
+          "count": 14,
+          "failed": 14,
+          "failureRanges": [
+            [
+              4,
+              17
+            ]
+          ],
+          "minimum": {
+            "step": 17,
+            "exactMetres": "215828481354065205/36893488147419103232",
+            "approximateMetres": 0.005850042709208117
+          },
+          "maximum": {
+            "step": 4,
+            "exactMetres": "30854540681456955/2305843009213693952",
+            "approximateMetres": 0.013381024015151203
+          },
+          "closestBoundary": {
+            "step": 17,
+            "exactMetres": "215828481354065205/36893488147419103232",
+            "approximateMetres": 0.005850042709208117,
+            "signedHeadroomMetres": "-784026015424242221/922337203685477580800"
+          }
+        },
+        {
+          "name": "rest-before",
+          "first": 18,
+          "last": 9000,
+          "ceiling": "1/1000",
+          "count": 8983,
+          "failed": 8983,
+          "failureRanges": [
+            [
+              18,
+              9000
+            ]
+          ],
+          "minimum": {
+            "step": 18,
+            "exactMetres": "842941636253372311/147573952589676412928",
+            "approximateMetres": 0.0057119947081524505
+          },
+          "maximum": {
+            "step": 18,
+            "exactMetres": "842941636253372311/147573952589676412928",
+            "approximateMetres": 0.0057119947081524505
+          },
+          "closestBoundary": {
+            "step": 18,
+            "exactMetres": "842941636253372311/147573952589676412928",
+            "approximateMetres": 0.0057119947081524505,
+            "signedHeadroomMetres": "-86920960457961987259/18446744073709551616000"
+          }
+        },
+        {
+          "name": "wake-settling",
+          "first": 9001,
+          "last": 9021,
+          "ceiling": "1/200",
+          "count": 21,
+          "failed": 21,
+          "failureRanges": [
+            [
+              9001,
+              9021
+            ]
+          ],
+          "minimum": {
+            "step": 9021,
+            "exactMetres": "740375716649204797/147573952589676412928",
+            "approximateMetres": 0.005016981002791125
+          },
+          "maximum": {
+            "step": 9001,
+            "exactMetres": "825868742605498601/147573952589676412928",
+            "approximateMetres": 0.005596304280754709
+          },
+          "closestBoundary": {
+            "step": 9021,
+            "exactMetres": "740375716649204797/147573952589676412928",
+            "approximateMetres": 0.005016981002791125,
+            "signedHeadroomMetres": "-62648842520568309/3689348814741910323200"
+          }
+        },
+        {
+          "name": "rest-after",
+          "first": 9022,
+          "last": 18000,
+          "ceiling": "1/1000",
+          "count": 8979,
+          "failed": 8979,
+          "failureRanges": [
+            [
+              9022,
+              18000
+            ]
+          ],
+          "minimum": {
+            "step": 9022,
+            "exactMetres": "11839465031033927565/2361183241434822606848",
+            "approximateMetres": 0.005014208479575447
+          },
+          "maximum": {
+            "step": 9022,
+            "exactMetres": "11839465031033927565/2361183241434822606848",
+            "approximateMetres": 0.005014208479575447
+          },
+          "closestBoundary": {
+            "step": 9022,
+            "exactMetres": "11839465031033927565/2361183241434822606848",
+            "approximateMetres": 0.005014208479575447,
+            "signedHeadroomMetres": "-1184785223699888119769/295147905179352825856000"
+          }
+        }
+      ]
+    },
+    {
+      "hz": 60,
+      "states": 36000,
+      "gzipSha256": "ae6fb99402d239569fab8bba950429318879cdb13fb7609833e5f3c7cda68b28",
+      "rawSha256": "ba4c9c73d73ef0304a9b6308d370aaa7a23d699cb841ca61dbcc5a135db61cf5",
+      "inputSha256": "cda35b6908693308cee60c9dbf4884a2312f2dac93743747cc32fbf1214a8a35",
+      "phases": [
+        {
+          "name": "initial-approach",
+          "first": 1,
+          "last": 2,
+          "ceiling": "0/1",
+          "count": 2,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "maximum": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "closestBoundary": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0,
+            "signedHeadroomMetres": "0/1"
+          }
+        },
+        {
+          "name": "impact",
+          "first": 3,
+          "last": 5,
+          "ceiling": "1/100",
+          "count": 3,
+          "failed": 1,
+          "failureRanges": [
+            [
+              4,
+              4
+            ]
+          ],
+          "minimum": {
+            "step": 3,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "maximum": {
+            "step": 4,
+            "exactMetres": "196156783769915/18014398509481984",
+            "approximateMetres": 0.010888888888888892
+          },
+          "closestBoundary": {
+            "step": 5,
+            "exactMetres": "91822765186676295/9223372036854775808",
+            "approximateMetres": 0.009955444149902078,
+            "signedHeadroomMetres": "10273879546786577/230584300921369395200"
+          }
+        },
+        {
+          "name": "initial-settling",
+          "first": 6,
+          "last": 34,
+          "ceiling": "1/200",
+          "count": 29,
+          "failed": 29,
+          "failureRanges": [
+            [
+              6,
+              34
+            ]
+          ],
+          "minimum": {
+            "step": 34,
+            "exactMetres": "11875983539061845279/2361183241434822606848",
+            "approximateMetres": 0.005029674669317556
+          },
+          "maximum": {
+            "step": 6,
+            "exactMetres": "5284856177122095/576460752303423488",
+            "approximateMetres": 0.009167764077614741
+          },
+          "closestBoundary": {
+            "step": 34,
+            "exactMetres": "11875983539061845279/2361183241434822606848",
+            "approximateMetres": 0.005029674669317556,
+            "signedHeadroomMetres": "-1751683297193306119/59029581035870565171200"
+          }
+        },
+        {
+          "name": "rest-before",
+          "first": 35,
+          "last": 18000,
+          "ceiling": "1/1000",
+          "count": 17966,
+          "failed": 17966,
+          "failureRanges": [
+            [
+              35,
+              18000
+            ]
+          ],
+          "minimum": {
+            "step": 35,
+            "exactMetres": "23729111977074458263/4722366482869645213696",
+            "approximateMetres": 0.005024834913417174
+          },
+          "maximum": {
+            "step": 35,
+            "exactMetres": "23729111977074458263/4722366482869645213696",
+            "approximateMetres": 0.005024834913417174
+          },
+          "closestBoundary": {
+            "step": 35,
+            "exactMetres": "23729111977074458263/4722366482869645213696",
+            "approximateMetres": 0.005024834913417174,
+            "signedHeadroomMetres": "-2375843186775601631163/590295810358705651712000"
+          }
+        },
+        {
+          "name": "wake-settling",
+          "first": 18001,
+          "last": 18042,
+          "ceiling": "1/200",
+          "count": 42,
+          "failed": 42,
+          "failureRanges": [
+            [
+              18001,
+              18042
+            ]
+          ],
+          "minimum": {
+            "step": 18042,
+            "exactMetres": "6044645872214313847085/1208925819614629174706176",
+            "approximateMetres": 0.005000013875244367
+          },
+          "maximum": {
+            "step": 18001,
+            "exactMetres": "23709981182880356939/4722366482869645213696",
+            "approximateMetres": 0.005020783810169788
+          },
+          "closestBoundary": {
+            "step": 18042,
+            "exactMetres": "6044645872214313847085/1208925819614629174706176",
+            "approximateMetres": 0.005000013875244367,
+            "signedHeadroomMetres": "-419353529199338853/30223145490365729367654400"
+          }
+        },
+        {
+          "name": "rest-after",
+          "first": 18043,
+          "last": 36000,
+          "ceiling": "1/1000",
+          "count": 17958,
+          "failed": 17958,
+          "failureRanges": [
+            [
+              18043,
+              36000
+            ]
+          ],
+          "minimum": {
+            "step": 18043,
+            "exactMetres": "48357145049599121466105/9671406556917033397649408",
+            "approximateMetres": 0.0050000116079303766
+          },
+          "maximum": {
+            "step": 18043,
+            "exactMetres": "48357145049599121466105/9671406556917033397649408",
+            "approximateMetres": 0.0050000116079303766
+          },
+          "closestBoundary": {
+            "step": 18043,
+            "exactMetres": "48357145049599121466105/9671406556917033397649408",
+            "approximateMetres": 0.0050000116079303766,
+            "signedHeadroomMetres": "-4835717311585261008556949/1208925819614629174706176000"
+          }
+        }
+      ]
+    },
+    {
+      "hz": 120,
+      "states": 72000,
+      "gzipSha256": "5bad36d62dcb0f3b1e2d526d2f1f97e0e62ede99ed9d3da0bef330ba0f510c75",
+      "rawSha256": "19bc07fc64ff1ec3535fbf7bdd8e02fd8acc80917069ad23782941dc34c98db1",
+      "inputSha256": "e44f7662025777f981e166bc84efb111b527984fe73d36343ca673f540778df5",
+      "phases": [
+        {
+          "name": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "ceiling": "0/1",
+          "count": 4,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "maximum": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "closestBoundary": {
+            "step": 1,
+            "exactMetres": "0/1",
+            "approximateMetres": 0,
+            "signedHeadroomMetres": "0/1"
+          }
+        },
+        {
+          "name": "impact",
+          "first": 5,
+          "last": 7,
+          "ceiling": "1/100",
+          "count": 3,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": {
+            "step": 5,
+            "exactMetres": "0/1",
+            "approximateMetres": 0
+          },
+          "maximum": {
+            "step": 6,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328
+          },
+          "closestBoundary": {
+            "step": 6,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328,
+            "signedHeadroomMetres": "1332314889763773/225179981368524800"
+          }
+        },
+        {
+          "name": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "ceiling": "1/200",
+          "count": 58,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": {
+            "step": 8,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328
+          },
+          "maximum": {
+            "step": 8,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328
+          },
+          "closestBoundary": {
+            "step": 8,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328,
+            "signedHeadroomMetres": "206414982921149/225179981368524800"
+          }
+        },
+        {
+          "name": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "ceiling": "1/1000",
+          "count": 35935,
+          "failed": 35935,
+          "failureRanges": [
+            [
+              66,
+              36000
+            ]
+          ],
+          "minimum": {
+            "step": 66,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328
+          },
+          "maximum": {
+            "step": 66,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328
+          },
+          "closestBoundary": {
+            "step": 66,
+            "exactMetres": "36779396956859/9007199254740992",
+            "approximateMetres": 0.004083333333333328,
+            "signedHeadroomMetres": "-3471524712764751/1125899906842624000"
+          }
+        },
+        {
+          "name": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "ceiling": "1/200",
+          "count": 83,
+          "failed": 0,
+          "failureRanges": [],
+          "minimum": {
+            "step": 36001,
+            "exactMetres": "339230061424274941349355594763469/83076749736557242056487941267521536",
+            "approximateMetres": 0.004083333333333328
+          },
+          "maximum": {
+            "step": 36083,
+            "exactMetres": "5300469709754299406652145873711/1298074214633706907132624082305024",
+            "approximateMetres": 0.00408333333333333
+          },
+          "closestBoundary": {
+            "step": 36083,
+            "exactMetres": "5300469709754299406652145873711/1298074214633706907132624082305024",
+            "approximateMetres": 0.00408333333333333,
+            "signedHeadroomMetres": "29747534085355878225274363445353/32451855365842672678315602057625600"
+          }
+        },
+        {
+          "name": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "ceiling": "1/1000",
+          "count": 35917,
+          "failed": 35917,
+          "failureRanges": [
+            [
+              36084,
+              72000
+            ]
+          ],
+          "minimum": {
+            "step": 36084,
+            "exactMetres": "5300469709754299444182142768465/1298074214633706907132624082305024",
+            "approximateMetres": 0.00408333333333333
+          },
+          "maximum": {
+            "step": 36084,
+            "exactMetres": "5300469709754299444182142768465/1298074214633706907132624082305024",
+            "approximateMetres": 0.00408333333333333
+          },
+          "closestBoundary": {
+            "step": 36084,
+            "exactMetres": "5300469709754299444182142768465/1298074214633706907132624082305024",
+            "approximateMetres": 0.00408333333333333,
+            "signedHeadroomMetres": "-500299436890074067131189835769997/162259276829213363391578010288128000"
+          }
+        }
+      ]
+    }
+  ]
+}
