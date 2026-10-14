@@ -1,0 +1,56 @@
+{
+  "scope": "APPROVED_EXACT_RELATIONSHIPS_FROZEN_BASELINE_ONLY",
+  "results": [
+    {
+      "hz": 30,
+      "gzipSha256": "86cfa767974174a2b35fea477ab02451aae21ac5a779ba6e40d12e4874112ebe",
+      "decompressedSha256": "9851e31853012a0d1fde661e9e7c913643e5ab278e06bbf7fcc0f914a7ea8bda",
+      "counts": {
+        "initial": 1,
+        "step": 18000,
+        "before": 1,
+        "after": 1,
+        "impulse": 1,
+        "timestep": 54001,
+        "listeners": 233995
+      },
+      "firstSleep": 18,
+      "returnSleep": 9022,
+      "status": "BOUNDED_EXACT_CHECKS_PASS_NOT_PORT_QUALIFICATION"
+    },
+    {
+      "hz": 60,
+      "gzipSha256": "ae6fb99402d239569fab8bba950429318879cdb13fb7609833e5f3c7cda68b28",
+      "decompressedSha256": "ba4c9c73d73ef0304a9b6308d370aaa7a23d699cb841ca61dbcc5a135db61cf5",
+      "counts": {
+        "initial": 1,
+        "step": 36000,
+        "before": 1,
+        "after": 1,
+        "impulse": 1,
+        "timestep": 108001,
+        "listeners": 467981
+      },
+      "firstSleep": 35,
+      "returnSleep": 18043,
+      "status": "BOUNDED_EXACT_CHECKS_PASS_NOT_PORT_QUALIFICATION"
+    },
+    {
+      "hz": 120,
+      "gzipSha256": "5bad36d62dcb0f3b1e2d526d2f1f97e0e62ede99ed9d3da0bef330ba0f510c75",
+      "decompressedSha256": "19bc07fc64ff1ec3535fbf7bdd8e02fd8acc80917069ad23782941dc34c98db1",
+      "counts": {
+        "initial": 1,
+        "step": 72000,
+        "before": 1,
+        "after": 1,
+        "impulse": 1,
+        "timestep": 216001,
+        "listeners": 935967
+      },
+      "firstSleep": 66,
+      "returnSleep": 36084,
+      "status": "BOUNDED_EXACT_CHECKS_PASS_NOT_PORT_QUALIFICATION"
+    }
+  ]
+}
