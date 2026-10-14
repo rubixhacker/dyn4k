@@ -1,0 +1,52 @@
+{
+  "status": "PROPOSED_CONDITIONAL_MODEL_PENDING_HUMAN_APPROVAL",
+  "qualification": "BASELINE_PRIMITIVES_AND_ALL_PORT_RUNTIMES_UNPASSED",
+  "fixture": "L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz",
+  "steps": 36000,
+  "experiment_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "dyn4j_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "jdk25_specification_source_revision": "6c48f4ed707bf0b15f9b6098de30db8aae6fa40f",
+  "raw_sha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743",
+  "input_sha256": "91f914d3c9993ac238c66e88015861ece560e20333f9e831f3ff4758980b3dd9",
+  "stream_sha256": "4a2919c350f61974b8046dd5fe11e0710db37abde26b5db0af909ab4b8d83f78",
+  "source_sha256": {
+    "Transform.java": "70c0c6798bbe23fcfda2381e3f7c364ab3d85f152f2af42243e3ae4eaa1d8ca2",
+    "Capture.java": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+    "OpenJDK25-Math.java": "a7196d1d35ff4b9e08117f39c6ca892e2219f19ca21c49b721a96e5ecbedb928"
+  },
+  "alpha_radians_exact": "4803839602528529/576460752303423488",
+  "unit_roundoff_exact": "1/9007199254740992",
+  "component_bound_exact": "16*36000/9007199254740992",
+  "getter_bound_upward": "4.886052375e-8",
+  "recorder_bound_upward": "5.012352752e-8",
+  "getter_bound_worst_step": 35814,
+  "analytic_absolute_caps": {
+    "each_component": "7e-11",
+    "wrapped_public_angle_rad": "5e-8",
+    "unwrapped_recorder_rad": "6e-8"
+  },
+  "baseline_to_port_absolute_caps": {
+    "each_component": "1.4e-10",
+    "wrapped_public_angle_rad": "1e-7",
+    "unwrapped_recorder_rad": "1.2e-7"
+  },
+  "relative_allowance": "0",
+  "previous_transform": "same checks at n-1 plus approved exact previous/current relationship",
+  "certificate_script_sha256": "710b70f0bcc780dd81883ef1d9971b7b6c6b47e78c86a3a5dd07f3d1edb2b97b",
+  "certificate_steps_sha256": "c90dff0d90ff60c911599c065970c466538132901eb67cdb6b05dcfcb34d7498",
+  "baseline_replay": {
+    "role": "separate plausibility only; not primitive qualification or certified acceptance",
+    "states": 36000,
+    "events": 108001,
+    "manifest_sha256": "085074854226f2b943d04dbe4a08aa474d5b996c255fa319e48a1fed15c1784f",
+    "samples_sha256": "ae0930ea9d209e68deb91304aadba40bccb82c717c512487832b5c50cea6e25d"
+  },
+  "proof_obligations": [
+    "H1 exact fixture, source operation graph, pure deterministic getters, clamping and recorder",
+    "H2 binary64 round-to-nearest ties-to-even, gradual underflow, only proved local FMA form allowed; no unproved reassociation",
+    "H3 actual-path sin/cos absolute error <=2u, acos <=4u, atan2 <=8u, exact initial acos(1)",
+    "every target/runtime/configuration actual candidate operation and primitive qualification",
+    "certified outward comparator with pass/fail/inconclusive boundary treatment; direct baseline check can avoid reconstructing historical primitive calls",
+    "all selected analytic and baseline-to-port trajectory checks executed"
+  ]
+}
