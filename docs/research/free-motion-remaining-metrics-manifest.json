@@ -1,0 +1,383 @@
+{
+  "approval": "PENDING_HUMAN_DECISION",
+  "fixture": "L-free-s1.0-o0.0,0.0-hz60",
+  "experiment_revision": "0995a6bac84de882b0d04b6c3ea18162ca3b4a7c",
+  "source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "raw_sha256": "4981795bffcd2a0262040acb53c60b20607fea14a2a0c7d79e858ba68e7f2743",
+  "input_sha256": "91f914d3c9993ac238c66e88015861ece560e20333f9e831f3ff4758980b3dd9",
+  "stream_sha256": "4a2919c350f61974b8046dd5fe11e0710db37abde26b5db0af909ab4b8d83f78",
+  "counts": {
+    "inputs": 1,
+    "event": 108001,
+    "state": 36000
+  },
+  "body_keys": [
+    "accumulatedForce",
+    "accumulatedTorque",
+    "angularVelocity",
+    "atRest",
+    "fixedOriginPosition",
+    "force",
+    "id",
+    "previousTransform",
+    "rotationIncrementSum",
+    "rotationStepBoundBelowPi",
+    "rotationTrackingScope",
+    "torque",
+    "transform",
+    "velocity",
+    "worldCenter"
+  ],
+  "transform_keys": [
+    "getCost",
+    "getRotationAngle",
+    "getSint",
+    "getTranslation",
+    "getTranslationX",
+    "getTranslationY",
+    "getValues",
+    "isIdentity",
+    "type"
+  ],
+  "analytic_model": "exact binary64 input dt times integer step, initial omega=0.5; Decimal precision75 Taylor sin/cos, pi constant80 decimal places",
+  "initial_mass_inertia_header_only": [
+    0.7853981633974483,
+    0.09817477042468103
+  ],
+  "initial_momentum_xy": [
+    0.19634954084936207,
+    -0.09817477042468103
+  ],
+  "initial_spin_angular_momentum": 0.04908738521234052,
+  "initial_kinetic_energy": 0.04295146206079795,
+  "metrics": {
+    "current_getCost": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.811470423674861e-12,
+      "maximum_step": 35814,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "current_getSint": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.820148267512173e-12,
+      "maximum_step": 36000,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "current_orientation_rad": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.3912021084299924e-09,
+      "maximum_step": 35814,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "current_unit_circle_defect": {
+      "samples": 36000,
+      "maximum_absolute_residual": 3.641247182139074e-12,
+      "maximum_step": 36000,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "current_matrix_getter_consistency": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "current_translation_getter_consistency": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "current_angle_getter_vs_signed_acos": {
+      "samples": 36000,
+      "maximum_absolute_residual": 4.440892098500626e-16,
+      "maximum_step": 254,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_getCost": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.811470423674861e-12,
+      "maximum_step": 35815,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_getSint": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.819644771973072e-12,
+      "maximum_step": 36000,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_orientation_rad": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.3912021084299924e-09,
+      "maximum_step": 35815,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_unit_circle_defect": {
+      "samples": 36000,
+      "maximum_absolute_residual": 3.6410603351481406e-12,
+      "maximum_step": 36000,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_matrix_getter_consistency": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "previous_translation_getter_consistency": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "previous_angle_getter_vs_signed_acos": {
+      "samples": 36000,
+      "maximum_absolute_residual": 4.440892098500626e-16,
+      "maximum_step": 255,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "previous_equals_prior_current": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "world_center_equals_translation": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "fixed_origin_equals_world_center": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "position_0_approved": {
+      "samples": 36000,
+      "maximum_absolute_residual": 5.425704330264125e-11,
+      "maximum_step": 35997,
+      "limit": 1e-10,
+      "first_violation": null,
+      "role": "previously_approved",
+      "status": "PASS"
+    },
+    "previous_position_0_inherited": {
+      "samples": 36000,
+      "maximum_absolute_residual": 5.425704330264125e-11,
+      "maximum_step": 35998,
+      "limit": 1e-10,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "velocity_0_approved": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "previously_approved",
+      "status": "PASS"
+    },
+    "position_1_approved": {
+      "samples": 36000,
+      "maximum_absolute_residual": 2.7128521651320625e-11,
+      "maximum_step": 35997,
+      "limit": 1e-10,
+      "first_violation": null,
+      "role": "previously_approved",
+      "status": "PASS"
+    },
+    "previous_position_1_inherited": {
+      "samples": 36000,
+      "maximum_absolute_residual": 2.7128521651320625e-11,
+      "maximum_step": 35998,
+      "limit": 1e-10,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "velocity_1_approved": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "previously_approved",
+      "status": "PASS"
+    },
+    "angular_velocity_approved": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "previously_approved",
+      "status": "PASS"
+    },
+    "force_zero": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "accumulatedForce_zero": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "torque_zero": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "accumulatedTorque_zero": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "proposed_fixture_specific_check",
+      "status": "PASS"
+    },
+    "unwrapped_rotation_rad": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.4258530918465073e-09,
+      "maximum_step": 35814,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "recorder_sum_recalculation": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.0800249583553523e-12,
+      "maximum_step": 35937,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "step_rotation_vs_omega_dt_rad": {
+      "samples": 36000,
+      "maximum_absolute_residual": 1.6488306327916424e-09,
+      "maximum_step": 35815,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    },
+    "linear_momentum_drift_assumed_mass": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "redundant_diagnostic",
+      "status": "PASS"
+    },
+    "spin_momentum_drift_assumed_inertia": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "redundant_diagnostic",
+      "status": "PASS"
+    },
+    "kinetic_energy_drift_assumed_mass_inertia": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": 0,
+      "first_violation": null,
+      "role": "redundant_diagnostic",
+      "status": "PASS"
+    },
+    "orbital_angular_momentum_about_fixed_origin": {
+      "samples": 36000,
+      "maximum_absolute_residual": 0.0,
+      "maximum_step": 1,
+      "limit": null,
+      "first_violation": null,
+      "role": "diagnostic_limit_missing",
+      "status": "DIAGNOSTIC_NO_APPROVED_LIMIT"
+    }
+  },
+  "sample_file_sha256": "ae0930ea9d209e68deb91304aadba40bccb82c717c512487832b5c50cea6e25d",
+  "capture_source_sha256": "064d701251261b94fd6538ae49a0737aae8e06c673738c36668838676cd31a28",
+  "auditor_sha256": "084364b023f4defa13036f0e3bdbc08879daee03b99c630e192fb4ba6617d9a3",
+  "upstream_source_sha256": {
+    "AbstractCollisionBody.java": "737cd8008a01a85435eabf24efc4d17d27b51337d4855e2a50d09ee1e4964fcf",
+    "AbstractPhysicsBody.java": "b7b5c417d5abb19212c61e3df4994d5bbde593d1b9aa93898bef9afd7ad4573b",
+    "AbstractPhysicsBodyTest.java": "44fe1fc62d3d4b65cc7306f11dff8f0cc3f03b2a7ea13d5ae43e60add6f9f28f",
+    "AbstractPhysicsWorld.java": "6fac64392a8a32cacffd5c6930eb4134cb1c6102f913ef19d59404917b373892",
+    "Circle.java": "b54419384bff145875fae2ad7fa9622efb219dd1fc0cc99f6c0cec0bb3d1441c",
+    "Rotation.java": "f934f995a18f54230050e5296e77065daf49aab0c93cf92c3b00bc94eea146c8",
+    "Transform.java": "70c0c6798bbe23fcfda2381e3f7c364ab3d85f152f2af42243e3ae4eaa1d8ca2",
+    "TransformTest.java": "6b7ecd462c7149f5ec0d1d3d22f28a7867212a02a4c04ec450118a6820f11539"
+  }
+}
