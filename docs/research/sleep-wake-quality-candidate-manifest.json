@@ -1,0 +1,1093 @@
+{
+  "status": "PENDING_HUMAN_REFERENCE_AND_PHASE_APPROVAL",
+  "ticket": "https://github.com/rubixhacker/dyn4k/issues/29",
+  "executionApproval": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6172176446",
+  "protocolRevision": "23e117d39603fd8aca505448f8ac111d662107c4",
+  "driverRevision": "82395ce9c39f7a0973f71ecb025275d8a496683e",
+  "auditorRevision": "d1c5116b6d4dbd4cb9f9faf3f6cfc997fa014fbe",
+  "sourceAndRuntimeSha256": {
+    "source/Capture.java": "fe5e8f0cd78803a53ea941f916b9c540adf017522e2b1da7f63d4091097b71d9",
+    "source/SleepWakeQuality.java": "9e49ea23d8b98c97c057c7ecde797fe304e965c0f153669bf208f6c26407bef7",
+    "source/audit.mjs": "261d7e2c5893e6b8423a7ed073247a4d53c2f1e738e1e3120500eac4f6467ff8",
+    "classes/Capture.class": "43a94e79ccd9af4a4bc3d8bc08cb1d3b5b443081acbbb477b8778f1e0c55a22d",
+    "classes/Capture$NonFinite.class": "c76bf02e3ac412020859f06e6cf24e1321f2b8d24370b22680a9c9b3ca6f7669",
+    "classes/SleepWakeQuality.class": "88d9c7b7ebd194b3c3a37da50a9709cd2c521d1a6224a72abc0f6c9676590ad8",
+    "dyn4j-6.0.0.jar": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+    "initial-reference-review-manifest.json": "b42174c7523bea9687e4ab015a215b4e652c2446df73d2f41e836e8a165c1208",
+    "runtime.txt": "62fa087fae12f54cc746397043429f364171856297eca43bdc8bd243fe98ee6b"
+  },
+  "profile": {
+    "linearTolerance": "1/4096 m",
+    "positionIterations": 8,
+    "innerStep": "binary64(1.0/120.0)",
+    "outerGroups": {
+      "30": 4,
+      "60": 2,
+      "120": 1
+    },
+    "secondsPerJourney": 600,
+    "repetitions": 2,
+    "actionInnerStep": 36001,
+    "settingsOtherwise": "unchanged from hash-guarded original 120Hz input"
+  },
+  "totalStates": 432000,
+  "totalOuterEndpoints": 252000,
+  "totalListenerEvents": 5615802,
+  "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW",
+  "referenceProposal": "repetition 1 per outer cadence; repetition 2 corroborates; all six retained",
+  "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+  "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+  "candidates": [
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer30-repeat1",
+      "hz": 30,
+      "repetition": 1,
+      "file": "Q-sleep-wake-outer30-repeat1-0.jsonl.gz",
+      "gzipSha256": "c2264bc048e7118a4dde0c566768fc0e1f70d02431c2d5a8829de78c6f75f0d9",
+      "decompressedSha256": "693f10f89af4c8f34fcb1ca7a5a18dc3e509217c5413b4c77f9c28b891de5599",
+      "inputSha256": "20ec36acfd33d02ec3364b1461dc0fd39bc491ce1cfcdd3c8e3be6d303718a8f",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 18000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 18000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    },
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer30-repeat2",
+      "hz": 30,
+      "repetition": 2,
+      "file": "Q-sleep-wake-outer30-repeat2-0.jsonl.gz",
+      "gzipSha256": "150bc3c39452acfb031c962441d8cfd02ed9795ae6e662d3ea9936c2376cf7ed",
+      "decompressedSha256": "f2cf30c8e224763d1dffa40d761bd699c69c6c24f99a6a5a573ff1604d5a1719",
+      "inputSha256": "a736ac5ae091807797877ecd1415b2e14285327ffc1a49bf310dd76007e0a338",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 18000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 18000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    },
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer60-repeat1",
+      "hz": 60,
+      "repetition": 1,
+      "file": "Q-sleep-wake-outer60-repeat1-0.jsonl.gz",
+      "gzipSha256": "9c5d165d77a69191fb6be517ad41d7fdb6bcf1f4c89256af2864ba07f024916b",
+      "decompressedSha256": "89186f9a194e651cbf6bf005864df7e7f6e58f6edc35a9b824e232e14ea82106",
+      "inputSha256": "68c23de784b8645c56199f5ee2bf1599e38890498065f858f396f66442808270",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 36000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 36000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    },
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer60-repeat2",
+      "hz": 60,
+      "repetition": 2,
+      "file": "Q-sleep-wake-outer60-repeat2-0.jsonl.gz",
+      "gzipSha256": "c2bf76f7bf5fc427301d31ed305895a2f21c7d9360117db1a9ed506e22028313",
+      "decompressedSha256": "906b5ce3503c1c28dbb0edb998698b3a169b46912b6aef00cc7df708c6c9e4da",
+      "inputSha256": "dd9ef1a00dc3dc33906d7b75db6a3652d31bddf3cc8c639a33d84871cf91a947",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 36000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 36000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    },
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer120-repeat1",
+      "hz": 120,
+      "repetition": 1,
+      "file": "Q-sleep-wake-outer120-repeat1-0.jsonl.gz",
+      "gzipSha256": "267ea651d58b0bb0b0b6d06efce5e2cc30b31a79738c83615bd199340af9f629",
+      "decompressedSha256": "9b1f8c846fa50c9261b8fe8675726d5f91d96794930f014553c2a4dac89a2682",
+      "inputSha256": "83c7074386c7d75b05c312f4ac4ca4a7da7485f7b5b6bef20ef89334cd262b8c",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 72000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 72000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    },
+    {
+      "status": "CAPTURE_AUDITED_CANDIDATE_PENDING_HUMAN_REFERENCE_AND_PHASE_REVIEW",
+      "id": "Q-sleep-wake-outer120-repeat2",
+      "hz": 120,
+      "repetition": 2,
+      "file": "Q-sleep-wake-outer120-repeat2-0.jsonl.gz",
+      "gzipSha256": "682b7c3bdf28ce5c651f2125525d939c3618ad6e3f905e9b28507ae0cbfca618",
+      "decompressedSha256": "50eb4ab5bf3f73b95d6538f3af77b6f8f2a0fde778efe113b265eaf3edb8857d",
+      "inputSha256": "ace670ba6432e2476ea97244011dbb63c253cc9cb74637513e75e7a19bf68483",
+      "stateSequenceSha256": "a67c84d1f4bc7d737ffd310e90203cf9dac959fd7c114adf9b1eda6c8ed7bd21",
+      "normalizedInnerSequenceSha256": "95ac1ebfff997ebabb53c304a189192884d0ea8c55db2053d1701865869d3dbb",
+      "states": 72000,
+      "endpoints": 72000,
+      "counts": {
+        "inputs": 1,
+        "event": 935967,
+        "state": 72000,
+        "outer-endpoint": 72000,
+        "instrumented-callback": 2,
+        "action": 1
+      },
+      "listeners": {
+        "StepListener": 216001,
+        "CollisionListener": 215991,
+        "TimeOfImpactListener": 14,
+        "ContactListener": 503961
+      },
+      "methods": {
+        "StepListener.begin": 72000,
+        "CollisionListener.collision": 215991,
+        "StepListener.updatePerformed": 1,
+        "StepListener.postSolve": 72000,
+        "TimeOfImpactListener.collision": 14,
+        "StepListener.end": 72000,
+        "ContactListener.begin": 2,
+        "ContactListener.collision": 71995,
+        "ContactListener.preSolve": 143988,
+        "ContactListener.postSolve": 143988,
+        "ContactListener.persist": 143988
+      },
+      "firstEvents": {
+        "StepListener.begin": {
+          "step": 1,
+          "order": 0
+        },
+        "CollisionListener.collision": {
+          "step": 1,
+          "order": 1
+        },
+        "StepListener.updatePerformed": {
+          "step": 1,
+          "order": 2
+        },
+        "StepListener.postSolve": {
+          "step": 1,
+          "order": 3
+        },
+        "TimeOfImpactListener.collision": {
+          "step": 1,
+          "order": 4
+        },
+        "StepListener.end": {
+          "step": 1,
+          "order": 7
+        },
+        "ContactListener.begin": {
+          "step": 6,
+          "order": 7
+        },
+        "ContactListener.collision": {
+          "step": 6,
+          "order": 9
+        },
+        "ContactListener.preSolve": {
+          "step": 7,
+          "order": 1
+        },
+        "ContactListener.postSolve": {
+          "step": 7,
+          "order": 3
+        },
+        "ContactListener.persist": {
+          "step": 7,
+          "order": 9
+        }
+      },
+      "toiPayloads": [
+        {
+          "step": 5,
+          "order": 4,
+          "time": 0.9387755102040654
+        },
+        {
+          "step": 5,
+          "order": 5,
+          "time": 0.9387755102040654
+        }
+      ],
+      "sleepChanges": [
+        {
+          "step": 66,
+          "from": false,
+          "to": true
+        },
+        {
+          "step": 36001,
+          "from": true,
+          "to": false
+        },
+        {
+          "step": 36084,
+          "from": false,
+          "to": true
+        }
+      ],
+      "contactChanges": [
+        {
+          "step": 6,
+          "from": 0,
+          "to": 2
+        }
+      ],
+      "action": {
+        "step": 36001,
+        "order": 1,
+        "description": "impulse=(1,0) at center; sleepingBefore=true; precedingSecondAsleep=true"
+      },
+      "window": {
+        "first": 35880,
+        "last": 36000,
+        "count": 121,
+        "allAsleep": true
+      },
+      "phaseGaps": [],
+      "proposedSchedule": [
+        {
+          "phase": "initial-approach",
+          "first": 1,
+          "last": 4,
+          "count": 4
+        },
+        {
+          "phase": "impact",
+          "first": 5,
+          "last": 7,
+          "count": 3
+        },
+        {
+          "phase": "initial-settling",
+          "first": 8,
+          "last": 65,
+          "count": 58
+        },
+        {
+          "phase": "rest-before",
+          "first": 66,
+          "last": 36000,
+          "count": 35935
+        },
+        {
+          "phase": "wake-settling",
+          "first": 36001,
+          "last": 36083,
+          "count": 83
+        },
+        {
+          "phase": "rest-after",
+          "first": 36084,
+          "last": 72000,
+          "count": 35917
+        }
+      ],
+      "physicalAcceptance": "NOT_EVALUATED_PENDING_REVIEW"
+    }
+  ],
+  "archive": {
+    "url": "https://github.com/rubixhacker/dyn4k/releases/download/sleep-wake-quality-candidate-20261014/dyn4j-sleep-wake-quality-20261014.tar.gz",
+    "sha256": "057d96767dcf4ef863afb61417f8ef9cc6b7fc1442e0e39df55bbe006cb1212c",
+    "bytes": 6174766,
+    "package": "dyn4k-quality-candidates",
+    "checksumMembers": 63
+  }
+}
