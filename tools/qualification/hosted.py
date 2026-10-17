@@ -63,10 +63,22 @@ def read_command(command):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def tool_version(command, pattern):
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    if result.returncode:
+        return ""
+    match = re.search(pattern, result.stdout + "\n" + result.stderr)
+    return match.group(1) if match else ""
+
+
 def discover_runtime(target):
-    observed = {"system": platform.system(), "machine": platform.machine(),
-                "os_version": platform.version() if platform.system() == "Windows"
-                else read_command(["sw_vers", "-productVersion"])}
+    system = platform.system()
+    observed = {"system": system, "machine": platform.machine(),
+                "os_version": read_command(["sw_vers", "-productVersion"])
+                if system == "Darwin" else platform.version(),
+                "runner_image_os": os.environ.get("ImageOS", ""),
+                "runner_image_version": os.environ.get("ImageVersion", ""),
+                "java_version": tool_version(["java", "-version"], r'version "([^"]+)"')}
     if observed["system"] == "Darwin":
         xcode = read_command(["xcodebuild", "-version"])
         match = re.search(r"Xcode ([0-9.]+)", xcode)
@@ -156,6 +168,10 @@ def run_hosted(target, candidate_sha, output):
             return result
         artifact_target = "js" if target == "jsSafari" else target
         wrapper = gradle_wrapper(repository)
+        result["runtime"]["gradle_version"] = tool_version([wrapper, "--version"], r"Gradle ([0-9.]+)")
+        build = (repository / "build.gradle.kts").read_text()
+        kgp = re.search(r'kotlin\("multiplatform"\) version "([^"]+)"', build)
+        result["runtime"]["kgp_declared_version"] = kgp.group(1) if kgp else ""
         stage = [wrapper, "--no-daemon", "--console=plain"]
         for module in qualify.MODULES:
             stage.extend((f":{module}:publishKotlinMultiplatformPublicationToStagingRepository",

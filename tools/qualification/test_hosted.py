@@ -1,5 +1,6 @@
 import hashlib
 import os
+import platform
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,15 @@ import qualify
 
 
 class HostedQualificationTests(unittest.TestCase):
+    def test_staged_web_publications_bind_klib_binaries(self):
+        for target in ("js", "wasmJs", "wasmWasi"):
+            for module in qualify.MODULES:
+                self.assertTrue(qualify.target_binary_path(module, target).endswith(".klib"))
+
+    @unittest.skipUnless(platform.system() == "Linux", "Linux host probe")
+    def test_wrong_host_is_reported_without_mac_commands(self):
+        self.assertEqual("Linux", hosted.discover_runtime("macosArm64")["system"])
+
     def test_frozen_native_groups_pin_source_and_staged_consumer_cases(self):
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
         groups = {group["id"]: group for group in manifest["groups"]}

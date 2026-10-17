@@ -83,8 +83,7 @@ def check_providers(graph):
 
 def target_binary_path(module, target):
     publication = target_publication_name(module, target)
-    extension = ".aar" if target == "android" else ".jar" if target in (
-        "jvm", "js", "wasmJs", "wasmWasi") else ".klib"
+    extension = ".aar" if target == "android" else ".jar" if target == "jvm" else ".klib"
     return f'{GROUP.replace(".", "/")}/{publication}/{VERSION}/{publication}-{VERSION}{extension}'
 
 
