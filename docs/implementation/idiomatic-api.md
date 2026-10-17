@@ -25,6 +25,8 @@ simulation.step(1)
 
 `world`, `body`, `fixture`, and `distanceJoint` use the same add methods as the compatibility API. `joint(existingJoint) { ... }` adds any concrete joint type. The package also has aliases for all ten concrete joint classes. The builder block is optional: `val simulation = world()` and `simulation.add(body())` provide the same construction path.
 
+Pass an existing world to `world(instance) { ... }` to configure a subclass or another `PhysicsWorld` implementation. The builder returns that instance. Its overrides still run when the engine steps it. The direct test and staged external consumer both subclass the Kotlin `World` alias, override the protected step hook, and observe the same body through the compatibility API.
+
 Use `shape(existingShape) { ... }` to configure any core shape. It returns the same shape reference. `circle`, `rectangle`, and `polygon` are short constructors for common shapes. All other core shape constructors remain available through their Kotlin aliases.
 
 ## Observe state and query objects
@@ -62,6 +64,8 @@ ball.getLinearVelocity().x = 2.0;
 ```
 
 The Kotlin API can add this same `Body` to `World<Body>`. The Java step listener in the mixed example receives that body through the same world reference. A change through either API is visible through the other. The executable direct, Java, and mixed examples are in `dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt`, `dyn4k/src/jvmTest/java/IdiomaticJavaExample.java`, and `dyn4k/src/jvmTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticMixedExampleTest.kt`.
+
+The independent fixture in `consumers/idiomatic-api` resolves the staged `dyn4k` publication. Its test builds a world with fixtures and a joint, runs a query, observes step and contact callbacks, removes listeners, and checks retained membership views after removal. Pass the fresh local staging path as `-PqualificationRepository=<path>`; the fixture does not use project source dependencies.
 
 ## Choose units consistently
 

@@ -7,6 +7,119 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class IdiomaticApiTest {
+    private class ObservedWorld : World<Body>() {
+        var steps = 0
+        var observedBody: Body? = null
+
+        protected override fun step() {
+            steps++
+            observedBody = getBody(0)
+            super.step()
+        }
+    }
+
+    @Test
+    fun builderKeepsSubclassAndDispatchesItsStepOverride() {
+        val extended = ObservedWorld()
+        val built = world(extended) {
+            gravity = Vector2(0.0, 0.0)
+            body { fixture(circle(0.5)); massType = MassType.NORMAL }
+        }
+        val compatibility: org.dyn4j.world.PhysicsWorld<Body, *> = built
+        assertSame(extended, built)
+        built.step(1)
+        assertEquals(1, extended.steps)
+        assertSame(built.bodies.single(), extended.observedBody)
+        assertSame(compatibility.getBody(0), extended.observedBody)
+    }
+
+    @Test
+    fun retainedMembershipViewsTrackAddsAndRemoves() {
+        val built = world { gravity = Vector2(0.0, 0.0) }
+        val bodyView = built.bodies
+        val jointView = built.joints
+        val first = built.body { massType = MassType.NORMAL }
+        val fixtureView = first.fixtures
+        val fixture = first.fixture(circle(0.5))
+        val second = built.body { fixture(circle(0.5)); massType = MassType.NORMAL }
+        val joint = built.distanceJoint(first, second, Vector2(), Vector2(2.0, 0.0))
+
+        assertSame(bodyView, built.getBodies())
+        assertSame(jointView, built.getJoints())
+        assertSame(fixtureView, first.getFixtures())
+        assertEquals(2, bodyView.size)
+        assertSame(first, bodyView[0])
+        assertEquals(1, fixtureView.size)
+        assertSame(fixture, fixtureView[0])
+        assertSame(joint, jointView.single())
+
+        assertTrue(built.removeJoint(joint))
+        assertTrue(first.removeFixture(fixture))
+        assertTrue(built.removeBody(second))
+        assertEquals(0, jointView.size)
+        assertEquals(0, fixtureView.size)
+        assertEquals(1, bodyView.size)
+        assertSame(first, bodyView.single())
+    }
+
+    @Test
+    fun removedStepCallbacksDoNotRunAgain() {
+        val built = world { gravity = Vector2(0.0, 0.0) }
+        var begins = 0
+        var ends = 0
+        val begin = built.onStepBegin { _, source ->
+            assertSame(built, source)
+            begins++
+        }
+        val end = built.onStepEnd { _, source ->
+            assertSame(built, source)
+            ends++
+        }
+        built.step(1)
+        assertEquals(1, begins)
+        assertEquals(1, ends)
+        assertTrue(built.removeStepListener(begin))
+        assertTrue(built.removeStepListener(end))
+        built.step(1)
+        assertEquals(1, begins)
+        assertEquals(1, ends)
+    }
+
+    @Test
+    fun contactEndRunsOnSeparationAndStopsAfterRemoval() {
+        val built = world {
+            gravity = Vector2(0.0, 0.0)
+            body { fixture(circle(1.0)); massType = MassType.INFINITE }
+            body { fixture(circle(1.0)); massType = MassType.NORMAL; translate(0.5, 0.0) }
+        }
+        val moving = built.bodies[1]
+        var begins = 0
+        var ends = 0
+        val begin = built.onContactBegin { collision, _ ->
+            assertSame(built.bodies[0], collision!!.getBody1())
+            begins++
+        }
+        val end = built.onContactEnd { collision, _ ->
+            assertSame(built.bodies[0], collision!!.getBody1())
+            ends++
+        }
+        built.step(1)
+        assertTrue(begins > 0)
+        moving.translate(10.0, 0.0)
+        built.step(1)
+        assertTrue(ends > 0)
+        val beginCount = begins
+        val endCount = ends
+        assertTrue(built.removeContactListener(begin))
+        assertTrue(built.removeContactListener(end))
+        moving.translate(-10.0, 0.0)
+        built.step(1)
+        moving.translate(10.0, 0.0)
+        built.step(1)
+        assertEquals(beginCount, begins)
+        assertEquals(endCount, ends)
+    }
+
     @Test
     fun vectorOperatorsAndShapePropertiesPreserveMutableCompatibilityObjects() {
         val left: Vector2 = Vector2(2.0, 3.0)

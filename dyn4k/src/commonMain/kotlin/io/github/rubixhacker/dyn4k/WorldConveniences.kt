@@ -7,6 +7,11 @@ import org.dyn4j.world.PhysicsWorld
 
 fun world(block: World<Body>.() -> Unit = {}): World<Body> = World<Body>().apply(block)
 
+fun <T : PhysicsBody, V : ContactCollisionData<T>, W : PhysicsWorld<T, V>> world(
+    instance: W,
+    block: W.() -> Unit = {},
+): W = instance.apply(block)
+
 fun World<Body>.body(block: Body.() -> Unit = {}): Body =
     Body().apply(block).also(::addBody)
 
