@@ -42,8 +42,8 @@ open class Link : Segment {
     }
 
     override fun copy() = Link(this)
-    fun getPoint0() = point0
-    fun getPoint3() = point3
+    open fun getPoint0() = point0
+    open fun getPoint3() = point3
     override fun toString() = "Link[${super.toString()}|Length=$length]"
     override fun rotate(theta: Double): Unit = throw UnsupportedOperationException()
     override fun rotate(rotation: Rotation, x: Double, y: Double): Unit = throw UnsupportedOperationException()
@@ -54,6 +54,6 @@ open class Link : Segment {
     override fun rotateAboutCenter(theta: Double): Unit = throw UnsupportedOperationException()
     override fun translate(vector: Vector2): Unit = throw UnsupportedOperationException()
     final override fun translate(x: Double, y: Double): Unit = throw UnsupportedOperationException()
-    fun getPreviousEdgeVector() = point0!!.to(vertices[0]).also { it.normalize() }
-    fun getNextEdgeVector() = vertices[1].to(point3!!).also { it.normalize() }
+    open fun getPreviousEdgeVector() = point0!!.to(vertices[0]).also { it.normalize() }
+    open fun getNextEdgeVector() = vertices[1].to(point3!!).also { it.normalize() }
 }

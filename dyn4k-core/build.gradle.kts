@@ -27,6 +27,7 @@ data class JvmApiSpec(
     val protectedFields: Set<String> = emptySet(),
     val packageFields: Set<String> = emptySet(),
     val staticMethods: Set<String> = emptySet(),
+    val nonFinalStaticMethods: Set<String> = emptySet(),
     val varargMethods: Set<String> = emptySet(),
     val packageMethods: Set<String> = emptySet(),
     val packageMethodSignatures: Set<String> = emptySet(),
@@ -127,7 +128,7 @@ val jvmApi = mapOf(
         protectedFields = setOf("center", "radius", "userData")
     ),
     "org/dyn4j/geometry/Polygon" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals"),
+        protectedFields = setOf("vertices", "normals"),
         packageMethods = setOf("getFarthestVertexIndex"),
         packageConstructorDescriptors = setOf(
             "(Lorg/dyn4j/geometry/Vector2;D[Lorg/dyn4j/geometry/Vector2;[Lorg/dyn4j/geometry/Vector2;)V"
@@ -178,22 +179,24 @@ val jvmApi = mapOf(
         packageFields = setOf("width", "height")
     ),
     "org/dyn4j/geometry/Capsule" to JvmApiSpec(
-        packageFields = setOf("length", "capRadius", "foci", "localXAxis"),
-        protectedFields = setOf("EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR")
+        protectedFields = setOf(
+            "length", "capRadius", "foci", "localXAxis",
+            "EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR"
+        )
     ),
     "org/dyn4j/geometry/Ellipse" to JvmApiSpec(
-        packageFields = setOf("halfWidth", "halfHeight", "rotation"),
+        protectedFields = setOf("halfWidth", "halfHeight", "rotation"),
         staticMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse"),
         packageMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse")
     ),
     "org/dyn4j/geometry/HalfEllipse" to JvmApiSpec(
-        packageFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
+        protectedFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
     ),
     "org/dyn4j/geometry/Slice" to JvmApiSpec(
-        packageFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
+        protectedFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
     ),
     "org/dyn4j/geometry/Segment" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals", "length"),
+        protectedFields = setOf("vertices", "normals", "length"),
         staticMethods = setOf(
             "getLocation", "getPointOnLineClosestToPoint", "getPointOnSegmentClosestToPoint",
             "getLineIntersection", "getSegmentIntersection", "getFarthestFeature", "getFarthestPoint"
@@ -201,6 +204,22 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Link" to JvmApiSpec(
         packageFields = setOf("point0", "point3")
+    ),
+    "org/dyn4j/collision/AbstractCollisionItem" to JvmApiSpec(
+        nonFinalStaticMethods = setOf("getHashCode", "equals")
+    ),
+    "org/dyn4j/collision/Filter" to JvmApiSpec(publicFields = setOf("DEFAULT_FILTER")),
+    "org/dyn4j/collision/CategoryFilter" to JvmApiSpec(protectedFields = setOf("category", "mask")),
+    "org/dyn4j/collision/Fixture" to JvmApiSpec(
+        protectedFields = setOf("shape", "filter", "sensor", "userData")
+    ),
+    "org/dyn4j/collision/AbstractBounds" to JvmApiSpec(protectedFields = setOf("transform")),
+    "org/dyn4j/collision/AxisAlignedBounds" to JvmApiSpec(protectedFields = setOf("aabb")),
+    "org/dyn4j/collision/AbstractCollisionBody" to JvmApiSpec(
+        protectedFields = setOf(
+            "transform", "transform0", "fixtures", "fixturesUnmodifiable", "radius", "userData",
+            "enabled", "fixtureModificationHandler", "owner"
+        )
     ),
     "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
@@ -390,6 +409,9 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val isVararg = name in spec.varargMethods &&
                                     Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                 var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                if (name in spec.nonFinalStaticMethods && access and Opcodes.ACC_STATIC != 0) {
+                                    revised = revised and Opcodes.ACC_FINAL.inv()
+                                }
                                 if (name in spec.packageMethods || name + descriptor in spec.packageMethodSignatures ||
                                     (spec.packageNodeMethods && descriptor.startsWith("(Lorg/dyn4j/BinarySearchTreeNode;")) ||
                                     (name == "<init>" && descriptor in spec.packageConstructorDescriptors)) {
@@ -401,8 +423,12 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
+                                val baselineFinalLinkMethod = owner == "org/dyn4j/geometry/Link" &&
+                                    ((name == "rotate" && descriptor == "(DDD)V") ||
+                                        (name == "translate" && descriptor == "(DD)V"))
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
-                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
+                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0 &&
+                                    !baselineFinalLinkMethod
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
                                 if (name in baselineFinalPolygonMethods[owner].orEmpty() &&
                                     !(owner == "org/dyn4j/geometry/decompose/DoubleEdgeList" &&
@@ -937,6 +963,86 @@ tasks.register<JavaExec>("runUpstreamTreeTests") {
     args(treeTestNames.map { "org.dyn4j.$it" })
 }
 
+val collisionModelTestNames = listOf(
+    "AbstractBoundsTest", "AbstractCollisionBodyTest", "AbstractCollisionItemTest",
+    "AbstractCollisionPairCollisionBodyTest", "AbstractCollisionPairCollisionItemTest",
+    "AxisAlignedBoundsTest", "BasicCollisionItemTest", "BasicCollisionPairCollisionBodyTest",
+    "BasicCollisionPairCollisionItemTest", "CategoryFilterTest", "CollisionsTest",
+    "DefaultFilterTest", "FixtureTest", "TypeFilterTest"
+)
+val compileUpstreamCollisionModelTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(collisionModelTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/collision/$it.java") }
+    })
+    source(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/collision/TestCollisionBody.java") })
+    source(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/UnitConversionTest.java") })
+    source(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/exception/ExceptionsTest.java") })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-collision-model-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamCollisionModelTests") {
+    dependsOn(compileUpstreamCollisionModelTests)
+    classpath(
+        compileUpstreamCollisionModelTests.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime
+    )
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(collisionModelTestNames.map { "org.dyn4j.collision.$it" } +
+        listOf("org.dyn4j.UnitConversionTest", "org.dyn4j.exception.ExceptionsTest"))
+}
+
+val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
+val collisionModelStaticHideSource = file("src/jvmConsumer/java/Issue35StaticHideConsumer.java")
+val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineCollisionModelConsumer") {
+    dependsOn(baselineCollisionModelConsumer)
+    classpath(baselineCollisionModelConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("CollisionModelConsumer")
+}
+val candidateCollisionModelConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateCollisionModelConsumer") {
+    dependsOn(candidateCollisionModelConsumer)
+    classpath(candidateCollisionModelConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("CollisionModelConsumer")
+}
+val stagedCollisionModelConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedCollisionModelConsumer") {
+    dependsOn(stagedCollisionModelConsumer)
+    classpath(stagedCollisionModelConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("CollisionModelConsumer")
+}
+val androidCollisionModelConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidCollisionModelConsumer") {
+    dependsOn(androidCollisionModelConsumer, androidRuntimeJar)
+    classpath(androidCollisionModelConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("CollisionModelConsumer")
+}
 val polygonTestNames = mapOf(
     "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
     "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),
