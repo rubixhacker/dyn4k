@@ -50,17 +50,19 @@ open class Transform : Transformable, Copyable<Transform> {
     override fun toString() =
         "[" + cost + " " + -sint + " | " + x + "][" + sint + " " + cost + " | " + y + "]"
 
-    internal fun rotateComponents(c: Double, s: Double) {
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(c: Double, s: Double) {
         val nc = clamp(c * cost - s * sint)
         val ns = clamp(s * cost + c * sint)
         val nx = c * x - s * y
         val ny = s * x + c * y
         cost = nc; sint = ns; x = nx; y = ny
     }
-    override fun rotate(theta: Double) = rotateComponents(cos(theta), sin(theta))
+    override fun rotate(theta: Double) = rotate(cos(theta), sin(theta))
     override fun rotate(rotation: Rotation) =
-        rotateComponents(rotation.costValue(), rotation.sintValue())
-    internal fun rotateComponents(c: Double, s: Double, x: Double, y: Double) {
+        rotate(rotation.costValue(), rotation.sintValue())
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(c: Double, s: Double, x: Double, y: Double) {
         val nc = clamp(c * cost - s * sint)
         val ns = clamp(s * cost + c * sint)
         cost = nc; sint = ns
@@ -69,9 +71,9 @@ open class Transform : Transformable, Copyable<Transform> {
         this.y = s * cx + c * cy + y
     }
     override fun rotate(theta: Double, x: Double, y: Double) =
-        rotateComponents(cos(theta), sin(theta), x, y)
+        rotate(cos(theta), sin(theta), x, y)
     override fun rotate(rotation: Rotation, x: Double, y: Double) =
-        rotateComponents(rotation.costValue(), rotation.sintValue(), x, y)
+        rotate(rotation.costValue(), rotation.sintValue(), x, y)
     override fun rotate(theta: Double, point: Vector2) = rotate(theta, point.x, point.y)
     override fun rotate(rotation: Rotation, point: Vector2) =
         rotate(rotation, point.x, point.y)

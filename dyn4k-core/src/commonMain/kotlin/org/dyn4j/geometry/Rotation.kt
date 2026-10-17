@@ -80,11 +80,13 @@ open class Rotation : Copyable<Rotation> {
     open fun toVector() = Vector2(cost, sint)
     open fun toVector(magnitude: Double) = Vector2(cost * magnitude, sint * magnitude)
 
+    @kotlin.jvm.JvmName("rotate45Helper")
     internal fun rotate45Helper(cost: Double, sint: Double): Rotation {
         this.cost = SQRT_2_INV * (cost - sint)
         this.sint = SQRT_2_INV * (cost + sint)
         return this
     }
+    @kotlin.jvm.JvmName("getRotated45Helper")
     internal fun getRotated45Helper(cost: Double, sint: Double) =
         Rotation(SQRT_2_INV * (cost - sint), SQRT_2_INV * (cost + sint))
     open fun rotate45() = rotate45Helper(cost, sint)
@@ -104,7 +106,8 @@ open class Rotation : Copyable<Rotation> {
     open fun inverse(): Rotation { sint = -sint; return this }
     open fun getInversed() = Rotation(cost, -sint)
 
-    internal fun rotateComponents(c: Double, s: Double): Rotation {
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(c: Double, s: Double): Rotation {
         val oc = cost; val os = sint
         cost = clamp(oc * c - os * s)
         sint = clamp(oc * s + os * c)
@@ -112,16 +115,18 @@ open class Rotation : Copyable<Rotation> {
     }
     open fun getRotated(c: Double, s: Double) =
         Rotation(clamp(cost * c - sint * s), clamp(cost * s + sint * c))
-    open fun rotate(rotation: Rotation) = rotateComponents(rotation.cost, rotation.sint)
+    open fun rotate(rotation: Rotation) = rotate(rotation.cost, rotation.sint)
     open fun getRotated(rotation: Rotation) = getRotated(rotation.cost, rotation.sint)
-    open fun rotate(angle: Double) = rotateComponents(cos(angle), sin(angle))
+    open fun rotate(angle: Double) = rotate(cos(angle), sin(angle))
     open fun getRotated(angle: Double) = getRotated(cos(angle), sin(angle))
     open fun isIdentity() = cost == 1.0
     open fun isIdentity(error: Double) = abs(cost - 1.0) < error
     open fun dot(rotation: Rotation) = cost * rotation.cost + sint * rotation.sint
     open fun cross(rotation: Rotation) = cost * rotation.sint - sint * rotation.cost
-    open fun dot(vector: Vector2) = cost * vector.x + sint * vector.y
-    open fun cross(vector: Vector2) = cost * vector.y - sint * vector.x
+    @kotlin.jvm.JvmName("dot")
+    internal fun dot(vector: Vector2) = cost * vector.x + sint * vector.y
+    @kotlin.jvm.JvmName("cross")
+    internal fun cross(vector: Vector2) = cost * vector.y - sint * vector.x
     open fun compare(other: Rotation): Int {
         val difference = cross(other)
         return if (difference > 0.0) 1 else if (difference < 0.0) -1 else 0

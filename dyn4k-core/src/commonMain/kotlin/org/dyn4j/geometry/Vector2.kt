@@ -123,29 +123,31 @@ open class Vector2 : Copyable<Vector2> {
     open fun getNegative() = Vector2(-x, -y)
     open fun zero(): Vector2 { x = 0.0; y = 0.0; return this }
 
-    internal fun rotateComponents(cost: Double, sint: Double): Vector2 {
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(cost: Double, sint: Double): Vector2 {
         val ox = x; val oy = y
         x = ox * cost - oy * sint; y = ox * sint + oy * cost
         return this
     }
-    open fun rotate(theta: Double) = rotateComponents(cos(theta), sin(theta))
-    open fun rotate(rotation: Rotation) = rotateComponents(rotation.costValue(), rotation.sintValue())
-    open fun inverseRotate(theta: Double) = rotateComponents(cos(theta), -sin(theta))
-    open fun inverseRotate(rotation: Rotation) = rotateComponents(rotation.costValue(), -rotation.sintValue())
-    internal fun rotateComponents(cost: Double, sint: Double, x: Double, y: Double): Vector2 {
+    open fun rotate(theta: Double) = rotate(cos(theta), sin(theta))
+    open fun rotate(rotation: Rotation) = rotate(rotation.costValue(), rotation.sintValue())
+    open fun inverseRotate(theta: Double) = rotate(cos(theta), -sin(theta))
+    open fun inverseRotate(rotation: Rotation) = rotate(rotation.costValue(), -rotation.sintValue())
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(cost: Double, sint: Double, x: Double, y: Double): Vector2 {
         val tx = this.x - x; val ty = this.y - y
         this.x = tx * cost - ty * sint + x
         this.y = tx * sint + ty * cost + y
         return this
     }
     open fun rotate(theta: Double, x: Double, y: Double) =
-        rotateComponents(cos(theta), sin(theta), x, y)
+        rotate(cos(theta), sin(theta), x, y)
     open fun rotate(rotation: Rotation, x: Double, y: Double) =
-        rotateComponents(rotation.costValue(), rotation.sintValue(), x, y)
+        rotate(rotation.costValue(), rotation.sintValue(), x, y)
     open fun inverseRotate(theta: Double, x: Double, y: Double) =
-        rotateComponents(cos(theta), -sin(theta), x, y)
+        rotate(cos(theta), -sin(theta), x, y)
     open fun inverseRotate(rotation: Rotation, x: Double, y: Double) =
-        rotateComponents(rotation.costValue(), -rotation.sintValue(), x, y)
+        rotate(rotation.costValue(), -rotation.sintValue(), x, y)
     open fun rotate(theta: Double, point: Vector2) = rotate(theta, point.x, point.y)
     open fun rotate(rotation: Rotation, point: Vector2) = rotate(rotation, point.x, point.y)
     open fun inverseRotate(theta: Double, point: Vector2) = inverseRotate(theta, point.x, point.y)
@@ -191,10 +193,10 @@ open class Vector2 : Copyable<Vector2> {
     }
 
     companion object {
-        @kotlin.jvm.JvmField val X_AXIS = Vector2(1.0, 0.0)
-        @kotlin.jvm.JvmField val Y_AXIS = Vector2(0.0, 1.0)
-        @kotlin.jvm.JvmField val INV_X_AXIS = Vector2(-1.0, 0.0)
-        @kotlin.jvm.JvmField val INV_Y_AXIS = Vector2(0.0, -1.0)
+        @kotlin.jvm.JvmField internal val X_AXIS = Vector2(1.0, 0.0)
+        @kotlin.jvm.JvmField internal val Y_AXIS = Vector2(0.0, 1.0)
+        @kotlin.jvm.JvmField internal val INV_X_AXIS = Vector2(-1.0, 0.0)
+        @kotlin.jvm.JvmField internal val INV_Y_AXIS = Vector2(0.0, -1.0)
 
         @JvmStaticBridge fun create(magnitude: Double, direction: Double) =
             Vector2(magnitude * cos(direction), magnitude * sin(direction))
