@@ -148,6 +148,11 @@ def capture_staging(repository, destination, targets):
             actual = qualify.digest(binary)
             if sidecar.read_text().strip().lower() != actual:
                 raise ValueError(f"staged binary checksum differs: {module} {target}")
+            binary_path = destination / "staged" / binary.relative_to(staging)
+            binary_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(binary, binary_path)
+            files.append({"path": portable_path(binary_path.relative_to(destination).as_posix()),
+                          "sha256": qualify.digest(binary_path)})
             target_path = destination / "staged" / sidecar.relative_to(staging)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(sidecar, target_path)
@@ -299,7 +304,7 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
     return result
 
 
-def verify_bundle(bundle, manifest, candidate_sha):
+def verify_bundle(bundle, manifest, candidate_sha, require_matrix=True):
     summary = qualify.load_json_strict(bundle / "verification.json")
     if not isinstance(summary, dict):
         raise ValueError("bundle verification JSON is not an object")
@@ -318,6 +323,8 @@ def verify_bundle(bundle, manifest, candidate_sha):
         name = f"hosted-{route}"
         top = qualify.load_json_strict(bundle / "json" / f"{name}.json")
         qualify.validate_hosted_probe(top, candidate_sha)
+        if top.get("status") != "PROBE_PASSED":
+            raise ValueError(f"hosted top status is {top.get('status')}, not PROBE_PASSED")
         if summary.get("runtime") != top.get("runtime"):
             raise ValueError("bundle runtime differs from hosted observation")
         selections = {f"{name}-consumer.json": (f"consumer-{route}",)}
@@ -402,6 +409,10 @@ def verify_bundle(bundle, manifest, candidate_sha):
             digest = sidecar.read_text().strip().lower()
             if not qualify.SHA64.fullmatch(digest):
                 raise ValueError("bundled staged binary checksum is invalid")
+            binary = bundle / "staged" / qualify.target_binary_path(module, target)
+            if (not binary.is_file() or binary.is_symlink()
+                    or qualify.digest(binary) != digest):
+                raise ValueError(f"bundled staged binary checksum differs or binary is missing: {module} {target}")
             observed_hashes[target][module] = digest
     expected_hashes = (summary.get("artifact_hashes") if route == "ubuntu-host"
                        else {targets[0]: summary.get("artifact_hashes")})
@@ -415,10 +426,10 @@ def verify_bundle(bundle, manifest, candidate_sha):
             raise ValueError("bundle runtime matrix candidate or size differs")
         if route != "ubuntu-host":
             bounded = matrix.get("bounded_hosted_probes", [])
-            if len(bounded) != 1 or bounded[0].get("target") != route or bounded[0].get("status") != "PROBE_PASSED":
-                raise ValueError("bundle matrix lacks verified bounded pass")
-    elif route == "ubuntu-host":
-        raise ValueError("Ubuntu runtime matrix is missing")
+            if bounded != [top]:
+                raise ValueError("bundle matrix bounded observation differs from hosted probe")
+    elif require_matrix:
+        raise ValueError("bundle runtime matrix is missing")
     return summary
 
 

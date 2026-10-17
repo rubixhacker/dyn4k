@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -104,9 +105,48 @@ class RawArtifactTests(unittest.TestCase):
             workflow_result = artifact.stage_hosted(repository, manifest, sha, target,
                                                     probe_path, None, workflow_bundle)
             self.assertEqual("PROBE_PASSED", workflow_result["status"])
-            artifact.verify_bundle(workflow_bundle, manifest, sha)
+            with self.assertRaisesRegex(ValueError, "matrix.*missing"):
+                artifact.verify_bundle(workflow_bundle, manifest, sha)
+            artifact.verify_bundle(workflow_bundle, manifest, sha, require_matrix=False)
             (workflow_bundle / "json/matrix-macosArm64.json").write_bytes(matrix_path.read_bytes())
             artifact.verify_bundle(workflow_bundle, manifest, sha)
+            failed_top = repository / "bundle-failed-top"
+            shutil.copytree(workflow_bundle, failed_top)
+            top_path = failed_top / "json/hosted-macosArm64.json"
+            top_result = json.loads(top_path.read_text())
+            top_result.update(status="PROBE_FAILED", reason="source probe failed")
+            top_path.write_text(json.dumps(top_result))
+            with self.assertRaisesRegex(ValueError, "top.*PROBE_FAILED|hosted probe did not pass"):
+                artifact.verify_bundle(failed_top, manifest, sha)
+            inconsistent_matrix = repository / "bundle-inconsistent-matrix"
+            shutil.copytree(workflow_bundle, inconsistent_matrix)
+            matrix_result = json.loads((inconsistent_matrix / "json/matrix-macosArm64.json").read_text())
+            matrix_result["bounded_hosted_probes"][0]["reason"] = "other observation"
+            (inconsistent_matrix / "json/matrix-macosArm64.json").write_text(json.dumps(matrix_result))
+            with self.assertRaisesRegex(ValueError, "matrix.*bounded|bounded.*matrix"):
+                artifact.verify_bundle(inconsistent_matrix, manifest, sha)
+            fabricated = repository / "bundle-fabricated-binary"
+            shutil.copytree(workflow_bundle, fabricated)
+            summary_path = fabricated / "verification.json"
+            summary = json.loads(summary_path.read_text())
+            top_path = fabricated / "json/hosted-macosArm64.json"
+            top_result = json.loads(top_path.read_text())
+            binary = fabricated / "staged" / qualify.target_binary_path("dyn4k-core", target)
+            digest = "f" * 64
+            sidecar = binary.with_name(binary.name + ".sha256")
+            sidecar.write_text(digest + "\n")
+            summary["artifact_hashes"]["dyn4k-core"] = digest
+            top_result["artifact_hashes"]["dyn4k-core"] = digest
+            for item in summary["staged_files"]:
+                if item["path"] == sidecar.relative_to(fabricated).as_posix():
+                    item["sha256"] = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+            summary_path.write_text(json.dumps(summary))
+            top_path.write_text(json.dumps(top_result))
+            (fabricated / "json/matrix-macosArm64.json").write_text(json.dumps({
+                "candidate_sha": sha, "total": 112,
+                "bounded_hosted_probes": [top_result]}))
+            with self.assertRaisesRegex(ValueError, "binary.*missing|binary.*checksum"):
+                artifact.verify_bundle(fabricated, manifest, sha)
             inventory_path = workflow_bundle / "verification.json"
             inventory_bytes = inventory_path.read_bytes()
             windows_inventory = json.loads(inventory_bytes)

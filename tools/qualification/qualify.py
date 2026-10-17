@@ -750,7 +750,7 @@ def main():
                 try:
                     verified = artifact.verify_bundle(
                         bundle, load_json_strict(repository / "tools/qualification/foundation-probes.json"),
-                        args.candidate_sha)
+                        args.candidate_sha, require_matrix=False)
                     if verified["route"] != observed["target"]:
                         raise ValueError("raw bundle target differs from hosted probe")
                 except (OSError, TypeError, ValueError, ET.ParseError) as error:
