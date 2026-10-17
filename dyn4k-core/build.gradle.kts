@@ -1273,6 +1273,128 @@ val jointTestNames = listOf(
     "PinJointTest", "PrismaticJointTest", "PulleyJointTest", "RevoluteJointTest",
     "WeldJointTest", "WheelJointTest"
 )
+val worldTestNames = listOf(
+    "AbstractCollisionWorldTest", "AbstractPhysicsWorldTest", "BroadphaseFilterAdapterTest",
+    "CollisionBodyBroadphaseFilterTest", "CollisionItemAdapterTest", "ConstraintGraphTest",
+    "DetectFilterTest", "IslandTest", "PhysicsBodyBroadphaseFilterTest",
+    "PhysicsBodySweptAABBProducerTest", "ValueMixerTest", "WorldTest"
+)
+val worldTestClasses = worldTestNames.map { "org.dyn4j.world.$it" } + listOf(
+    "org.dyn4j.world.listener.ListenerAdaptersTest", "org.dyn4j.world.result.DetectResultTest"
+)
+val worldTestSources = worldTestNames.map { name ->
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/$name.java") }
+} + listOf(
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/listener/ListenerAdaptersTest.java") },
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/result/DetectResultTest.java") }
+)
+val compileBaselineWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(worldTestSources)
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/baseline-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineWorldTests") {
+    dependsOn(compileBaselineWorldTests)
+    classpath(compileBaselineWorldTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val compileUpstreamWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(worldTestSources)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/candidate-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamWorldTests") {
+    dependsOn(compileUpstreamWorldTests)
+    classpath(compileUpstreamWorldTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val compileAndroidWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, androidCompileJar)
+    source(worldTestSources)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/android-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidWorldTests") {
+    dependsOn(compileAndroidWorldTests, androidRuntimeJar)
+    classpath(compileAndroidWorldTests.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val worldConsumerSource = file("src/jvmConsumer/java/WorldConsumer.java")
+val baselineWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(worldConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineWorldConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldConsumer")
+}
+val candidateWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(worldConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateWorldConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldConsumer")
+}
+val stagedWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(worldConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedWorldConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldConsumer")
+}
+val stagedWorldKotlinConsumer = tasks.register<JavaExec>("stagedWorldKotlinConsumer") {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    val output = layout.buildDirectory.dir("consumer/world-staged-kotlin")
+    inputs.file(file("src/jvmConsumer/kotlin/WorldKotlinConsumer.kt"))
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(output)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", output.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/WorldKotlinConsumer.kt").absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedWorldKotlinConsumer") {
+    dependsOn(stagedWorldKotlinConsumer)
+    classpath(layout.buildDirectory.dir("consumer/world-staged-kotlin"), stagedGeometryClasspath)
+    mainClass.set("WorldKotlinConsumer")
+}
+val androidWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(worldConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidWorldConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldConsumer")
+}
 val jointTestSourceNames = jointTestNames + listOf(
     "BaseJointTest", "TestAbstractJoint", "TestAbstractPairedBodyJoint", "TestAbstractSingleBodyJoint"
 )
