@@ -46,37 +46,54 @@ def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str
     return subprocess.run(command, check=True, **kwargs)
 
 
-def jar_types(binary: Path, only: set[str] | None = None) -> tuple[list[str], dict[str, str]]:
+def jar_types(binary: Path, only: set[str] | None = None,
+              visibility: str = "-protected", verbose: bool = False) -> tuple[list[str], dict[str, str]]:
     names = run(["jar", "tf", str(binary)], capture_output=True).stdout.splitlines()
     classes = sorted(n[:-6].replace("/", ".") for n in names
                      if n.endswith(".class") and not n.endswith("module-info.class"))
-    signatures = {name: run(["javap", "-classpath", str(binary), "-protected", "-s", name],
+    signatures = {name: run(["javap", "-classpath", str(binary), visibility, "-s",
+                             *(["-v"] if verbose else []), name],
                             capture_output=True).stdout for name in classes
                   if only is None or name in only}
     return classes, signatures
 
 
-def surface(signature: str) -> tuple[str, dict[tuple[str, str], str]] | None:
-    lines = [line.strip() for line in signature.splitlines()]
-    header = next((line for line in lines if line.endswith("{") and " class " in f" {line} "
-                   or line.endswith("{") and " interface " in f" {line} "), None)
-    if header is None or not header.startswith(("public ", "protected ")):
+def type_header(signature: str) -> str | None:
+    return next((line.strip() for line in signature.splitlines() if re.match(
+        r"^(?:(?:public|protected|private|abstract|final|sealed|strictfp) )*"
+        r"(?:class|interface|enum|@interface) ", line.strip())), None)
+
+
+def surface(signature: str, include_package: bool = False) -> tuple[str, dict[tuple[str, str], list[str]]] | None:
+    raw_lines = signature.splitlines()
+    lines = [line.strip() for line in raw_lines]
+    header = type_header(signature)
+    if (header is None or header.startswith("private ")
+            or (not include_package and not header.startswith(("public ", "protected ")))):
         return None
     header = re.sub(r"\s+", " ", header)
     members = {}
     for index, line in enumerate(lines):
-        if not line.endswith(";") or not line.startswith(("public ", "protected ")):
+        if not re.match(r"^  \S", raw_lines[index]):
+            continue
+        if not line.endswith(";") or (not include_package and
+                                       not line.startswith(("public ", "protected "))):
+            continue
+        if include_package and line.startswith(("private ", "#")):
             continue
         if index + 1 >= len(lines) or not lines[index + 1].startswith("descriptor: "):
             raise ValueError(f"missing descriptor for {line}")
+        if index + 2 >= len(lines) or not lines[index + 2].startswith("flags: "):
+            raise ValueError(f"missing flags for {line}")
+        flags = lines[index + 2]
+        if "ACC_BRIDGE" in flags or "ACC_SYNTHETIC" in flags:
+            continue
         descriptor = lines[index + 1].removeprefix("descriptor: ")
         name = line.split("(", 1)[0].split()[-1] if "(" in line else line[:-1].split()[-1]
         parameter_types = descriptor.split(")", 1)[0] + ")" if "(" in descriptor else ""
         key = (name, parameter_types)
         declaration = re.sub(r"\s+", " ", line) + " descriptor: " + descriptor
-        if descriptor.startswith("("):
-            declaration = declaration.replace(" static final ", " static ", 1)
-        members[key] = declaration
+        members.setdefault(key, []).append(declaration)
     return header, members
 
 
@@ -104,11 +121,11 @@ def type_contract(header: str) -> tuple[str, str | None, set[str]]:
     declaration = header.removesuffix(" {")
     implemented = split_top_level(declaration, " implements ")
     base = implemented[0]
-    interfaces = set(split_top_level(implemented[1], ", ")) if len(implemented) > 1 else set()
+    interfaces = set(split_top_level(implemented[1], ",")) if len(implemented) > 1 else set()
     extended = split_top_level(base, " extends ")
     if len(extended) > 1:
         if " interface " in f" {extended[0]} ":
-            interfaces.update(split_top_level(extended[1], ", "))
+            interfaces.update(split_top_level(extended[1], ","))
             superclass = None
         else:
             superclass = extended[1]
@@ -117,41 +134,104 @@ def type_contract(header: str) -> tuple[str, str | None, set[str]]:
     return extended[0], superclass, interfaces
 
 
-def compare_jars(baseline: Path, candidate: Path, only: set[str] | None = None) -> dict[str, object]:
-    baseline_types, baseline_signatures = jar_types(baseline, only)
-    candidate_types, candidate_signatures = jar_types(candidate, set(baseline_types) if only is None else only)
+def source_compatible_declaration(expected: str, actual: str,
+                                  allow_final_removal: bool = True) -> bool:
+    if expected == actual:
+        return True
+    widened = expected
+    if expected.startswith("protected ") and actual.startswith("public "):
+        widened = "public " + expected.removeprefix("protected ")
+    elif not expected.startswith(("public ", "protected ")) and actual.startswith(
+            ("public ", "protected ")):
+        widened = actual.split(" ", 1)[0] + " " + expected
+    if (allow_final_removal and " final " in f" {widened} "
+            and " final " not in f" {actual} "):
+        widened = re.sub(r"\bfinal ", "", widened, count=1)
+    return widened == actual
+
+
+def compare_jars(baseline: Path, candidate: Path, only: set[str] | None = None,
+                 visibility: str = "-protected") -> dict[str, object]:
+    baseline_types, baseline_signatures = jar_types(baseline, only, visibility, verbose=True)
+    candidate_types, candidate_signatures = jar_types(
+        candidate, set(baseline_types) if only is None else only, visibility, verbose=True)
     selected = set(baseline_types) if only is None else only
     unknown = sorted(selected - set(baseline_types))
     if unknown:
         raise ValueError(f"types absent from baseline: {', '.join(unknown)}")
     missing = []
     mismatches = []
+    compatible = []
     compared = []
+    declarations = 0
+    type_cache = {}
+
+    def candidate_interfaces(type_name: str, seen: set[str]) -> set[str]:
+        raw = type_name.split("<", 1)[0]
+        if raw in seen:
+            return set()
+        seen.add(raw)
+        signature = candidate_signatures.get(raw)
+        if signature is None:
+            try:
+                signature = run(["javap", "-classpath", str(candidate), visibility,
+                                 "-s", "-v", raw], capture_output=True).stdout
+            except subprocess.CalledProcessError:
+                return set()
+        if raw not in type_cache:
+            parsed = surface(signature, visibility == "-package")
+            type_cache[raw] = type_contract(parsed[0]) if parsed else None
+        contract = type_cache[raw]
+        if contract is None:
+            return set()
+        interfaces = set(contract[2])
+        for item in contract[2]:
+            interfaces.update(candidate_interfaces(item, seen))
+        if contract[1]:
+            interfaces.update(candidate_interfaces(contract[1], seen))
+        return interfaces
+
     for name in sorted(selected):
-        expected = surface(baseline_signatures[name])
+        expected = surface(baseline_signatures[name], visibility == "-package")
         if expected is None:
             continue
         compared.append(name)
+        declarations += sum(len(members) for members in expected[1].values())
         if name not in candidate_signatures:
             missing.append(name)
             continue
-        actual = surface(candidate_signatures[name])
+        actual = surface(candidate_signatures[name], visibility == "-package")
         if actual is None:
-            mismatches.append(f"{name}: public/protected type access lost")
+            mismatches.append(f"{name}: type access lost: {expected[0]} -> "
+                              f"{type_header(candidate_signatures[name]) or '<no type declaration>'}")
             continue
         expected_type = type_contract(expected[0])
         actual_type = type_contract(actual[0])
-        if (expected_type[0] != actual_type[0] or expected_type[1] != actual_type[1]
-                or not expected_type[2].issubset(actual_type[2])):
-            mismatches.append(f"{name}: type contract changed: {actual[0]}")
-        for key, member in expected[1].items():
-            if key not in actual[1]:
-                mismatches.append(f"{name}: missing {member}")
-            elif member != actual[1][key]:
-                mismatches.append(f"{name}: changed {member} -> {actual[1][key]}")
+        interfaces = set(actual_type[2])
+        if not expected_type[2].issubset(interfaces):
+            interfaces.update(candidate_interfaces(name, set()))
+        if (not source_compatible_declaration(expected_type[0], actual_type[0])
+                or expected_type[1] != actual_type[1]
+                or not expected_type[2].issubset(interfaces)):
+            mismatches.append(f"{name}: type contract changed: {expected[0]} -> {actual[0]}")
+        elif expected[0] != actual[0]:
+            compatible.append(f"{name}: compatible type difference: {expected[0]} -> {actual[0]}")
+        for key, members in expected[1].items():
+            for member in members:
+                if key not in actual[1]:
+                    mismatches.append(f"{name}: missing {member}")
+                elif member not in actual[1][key]:
+                    equivalent = next((item for item in actual[1][key]
+                                       if source_compatible_declaration(
+                                           member, item, "descriptor: (" in member)), None)
+                    if equivalent is None:
+                        mismatches.append(f"{name}: changed {member} -> {actual[1][key]}")
+                    else:
+                        compatible.append(f"{name}: compatible member difference: {member} -> {equivalent}")
     return {"baseline_types": len(baseline_types), "candidate_types": len(candidate_types),
+            "compared_baseline_declarations": declarations,
             "compared_api_types": compared, "missing_types": missing,
-            "signature_mismatches": mismatches}
+            "signature_mismatches": mismatches, "compatible_differences": compatible}
 
 
 def result_field(output: str, label: str) -> int | None:
