@@ -4,11 +4,14 @@ import java.util.ConcurrentModificationException;
 import org.dyn4j.Unsafe;
 import org.dyn4j.UnitConversion;
 import org.dyn4j.collision.AbstractCollisionBody;
+import org.dyn4j.collision.AbstractCollisionItem;
+import org.dyn4j.collision.AbstractCollisionPair;
 import org.dyn4j.collision.AxisAlignedBounds;
 import org.dyn4j.collision.BasicCollisionItem;
 import org.dyn4j.collision.BasicCollisionPair;
 import org.dyn4j.collision.CategoryFilter;
 import org.dyn4j.collision.CollisionBody;
+import org.dyn4j.collision.CollisionItem;
 import org.dyn4j.collision.Filter;
 import org.dyn4j.collision.Fixture;
 import org.dyn4j.collision.FixtureModificationHandler;
@@ -17,6 +20,7 @@ import org.dyn4j.exception.CopyException;
 import org.dyn4j.geometry.AABB;
 import org.dyn4j.geometry.Circle;
 import org.dyn4j.geometry.Convex;
+import org.dyn4j.geometry.Transform;
 import org.dyn4j.geometry.Vector2;
 
 public final class CollisionModelConsumer {
@@ -55,6 +59,9 @@ public final class CollisionModelConsumer {
         int protectedCount() { return this.fixtures.size(); }
         boolean protectedEnabled() { return this.enabled; }
         void updateRadius() { setRotationDiscRadius(new Vector2()); }
+        double updateRadiusWith(Vector2 center) { setRotationDiscRadius(center); return this.radius; }
+        Iterator<Fixture> protectedIterator() { return this.fixtures.iterator(); }
+        List<Fixture> protectedSubList() { return this.fixtures.subList(0, 1); }
     }
 
     private static class SubstitutingBody extends Body {
@@ -63,6 +70,55 @@ public final class CollisionModelConsumer {
         SubstitutingBody(SubstitutingBody other) { super(other); }
         @Override public Fixture getFixture(int index) { return replacement; }
         @Override public SubstitutingBody copy() { return new SubstitutingBody(this); }
+    }
+
+    private static class ObservedItem implements CollisionItem<Body, Fixture> {
+        private final String tag;
+        private final StringBuilder calls;
+        ObservedItem(String tag, StringBuilder calls) { this.tag = tag; this.calls = calls; }
+        @Override public Body getBody() { calls.append(tag).append("body,"); return null; }
+        @Override public Fixture getFixture() { calls.append(tag).append("fixture,"); return null; }
+        @Override public CollisionItem<Body, Fixture> copy() { return this; }
+    }
+
+    private static class HashToken {
+        private final StringBuilder calls;
+        HashToken(StringBuilder calls) { this.calls = calls; }
+        @Override public int hashCode() { calls.append("first,"); return 7; }
+    }
+
+    private static class MutatingFixture extends Fixture {
+        private final Body body;
+        private boolean added;
+        MutatingFixture(Body body) { super(new Circle(1.0)); this.body = body; }
+        @Override public Convex getShape() {
+            if (!added) { added = true; body.addFixture(new Circle(2.0)); }
+            return super.getShape();
+        }
+    }
+
+    private static Body mutationBody() {
+        Body body = new Body();
+        body.addFixture(new MutatingFixture(body));
+        return body;
+    }
+
+    private static class NullAcceptingCircle extends Circle {
+        NullAcceptingCircle() { super(1.0); }
+        @Override public boolean contains(Vector2 point, Transform transform) { return point == null; }
+        @Override public double getRadius(Vector2 center) {
+            return center == null ? 3.0 : super.getRadius(center);
+        }
+        @Override public void computeAABB(Transform transform, AABB result) {
+            if (transform == null) result.set(new AABB(-3.0, -3.0, 3.0, 3.0));
+            else super.computeAABB(transform, result);
+        }
+    }
+
+    private static Body nullPointBody() {
+        Body body = new Body();
+        body.addFixture(new NullAcceptingCircle());
+        return body;
     }
 
     public static void main(String[] args) {
@@ -136,6 +192,65 @@ public final class CollisionModelConsumer {
         changing.addFixture(new Circle(2.0));
         try { viewIterator.next(); throw new AssertionError("missing ConcurrentModificationException"); }
         catch (ConcurrentModificationException expected) { checks++; }
+        List<Fixture> subList = changing.getFixtures().subList(0, 1);
+        changing.addFixture(new Circle(4.0));
+        try { subList.get(0); throw new AssertionError("missing fixture view sublist CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+        Iterator<Fixture> protectedIterator = changing.protectedIterator();
+        changing.addFixture(new Circle(3.0));
+        try { protectedIterator.next(); throw new AssertionError("missing protected iterator CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+        List<Fixture> protectedSubList = changing.protectedSubList();
+        changing.addFixture(new Circle(5.0));
+        try { protectedSubList.get(0); throw new AssertionError("missing protected sublist CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+        List<Fixture> nestedView = changing.getFixtures().subList(0, 1).subList(0, 1);
+        Iterator<Fixture> protectedSubIterator = changing.protectedSubList().iterator();
+        changing.addFixture(new Circle(6.0));
+        try { nestedView.get(0); throw new AssertionError("missing nested view CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+        try { protectedSubIterator.next(); throw new AssertionError("missing protected sublist iterator CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+        Body editable = new Body();
+        editable.addFixture(new Circle(1.0));
+        List<Fixture> editableSubList = editable.protectedSubList();
+        Fixture inserted = new Fixture(new Circle(2.0));
+        editableSubList.add(inserted);
+        check(editableSubList.size() == 2 && editable.getFixture(1) == inserted);
+        Iterator<Fixture> staleSubIterator = editableSubList.iterator();
+        editableSubList.remove(0);
+        try { staleSubIterator.next(); throw new AssertionError("missing edited sublist iterator CME"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+
+        Body empty = new Body();
+        check(empty.getFixture((Vector2)null) == null);
+        check(empty.getFixtures((Vector2)null).isEmpty());
+        check(empty.removeFixture((Vector2)null) == null);
+        check(empty.removeFixtures((Vector2)null).isEmpty());
+        check(!empty.contains(null));
+        Body nullGet = nullPointBody();
+        check(nullGet.getFixture((Vector2)null) == nullGet.getFixture(0));
+        Body nullGetMany = nullPointBody();
+        check(nullGetMany.getFixtures((Vector2)null).size() == 1);
+        check(nullPointBody().contains(null));
+        Body nullRemove = nullPointBody();
+        check(nullRemove.removeFixture((Vector2)null) != null && nullRemove.getFixtureCount() == 0);
+        Body nullRemoveMany = nullPointBody();
+        check(nullRemoveMany.removeFixtures((Vector2)null).size() == 1 && nullRemoveMany.getFixtureCount() == 0);
+        check(nullPointBody().updateRadiusWith(null) == 3.0);
+        check(nullPointBody().createAABB((Transform)null).equals(new AABB(-3.0, -3.0, 3.0, 3.0)));
+        AABB nullTransformResult = new AABB(0.0, 0.0, 0.0, 0.0);
+        nullPointBody().computeAABB(null, nullTransformResult);
+        check(nullTransformResult.equals(new AABB(-3.0, -3.0, 3.0, 3.0)));
+        check(empty.updateRadiusWith(null) == 0.0);
+        check(empty.createAABB((Transform)null).equals(new AABB(0.0, 0.0, 0.0, 0.0)));
+        AABB emptyResult = new AABB(1.0, 1.0, 2.0, 2.0);
+        empty.computeAABB(null, emptyResult);
+        check(emptyResult.equals(new AABB(0.0, 0.0, 0.0, 0.0)));
+
+        StringBuilder calls = new StringBuilder();
+        check(AbstractCollisionItem.equals(new ObservedItem("A", calls), new ObservedItem("B", calls)));
+        check(calls.toString().equals("Bbody,Abody,Bfixture,Afixture,"));
 
         AxisAlignedBounds bounds = new AxisAlignedBounds(4, 4);
         check(bounds.isOutside(new AABB(3, 3, 4, 4)));
@@ -143,6 +258,42 @@ public final class CollisionModelConsumer {
         check(!bounds.isOutside(new AABB(3, 3, 4, 4)));
         check(bounds.copy().getBounds().equals(bounds.getBounds()));
         check(new BasicCollisionPair<>("a", "b").equals(new BasicCollisionPair<>("b", "a")));
+        StringBuilder hashCalls = new StringBuilder();
+        try {
+            AbstractCollisionPair.getHashCode(new HashToken(hashCalls), null);
+            throw new AssertionError("missing pair hash NPE");
+        } catch (NullPointerException expected) { checks++; }
+        check(hashCalls.toString().equals("first,"));
+        Body queried = mutationBody();
+        check(queried.getFixture(new Vector2(5.0, 5.0)) == null && queried.getFixtureCount() == 2);
+        Body queriedMany = mutationBody();
+        check(queriedMany.getFixtures(new Vector2(5.0, 5.0)).isEmpty() && queriedMany.getFixtureCount() == 2);
+        Body contained = mutationBody();
+        check(!contained.contains(new Vector2(5.0, 5.0)) && contained.getFixtureCount() == 2);
+        Body radiusBody = mutationBody();
+        radiusBody.updateRadius();
+        check(radiusBody.getRotationDiscRadius() == 1.0 && radiusBody.getFixtureCount() == 2);
+        Body aabbBody = mutationBody();
+        check(aabbBody.createAABB().equals(new AABB(-1.0, -1.0, 1.0, 1.0)) && aabbBody.getFixtureCount() == 2);
+        hashCalls.setLength(0);
+        final StringBuilder fixtureHashCalls = hashCalls;
+        Body hashBody = new Body() {
+            @Override public int hashCode() { fixtureHashCalls.append("body,"); return 3; }
+        };
+        Fixture hashFixture = new Fixture(new Circle(1.0)) {
+            @Override public int hashCode() { fixtureHashCalls.append("fixture,"); return 5; }
+        };
+        try {
+            AbstractCollisionPair.getHashCode(hashBody, hashFixture, null, hashFixture);
+            throw new AssertionError("missing body pair hash NPE");
+        } catch (NullPointerException expected) { checks++; }
+        check(hashCalls.toString().equals("body,fixture,"));
+        hashCalls.setLength(0);
+        try {
+            new BasicCollisionPair<Object>(new HashToken(hashCalls), null).hashCode();
+            throw new AssertionError("missing basic pair hash NPE");
+        } catch (NullPointerException expected) { checks++; }
+        check(hashCalls.toString().equals("first,"));
         try {
             new BasicCollisionPair<Object>(null, "x").equals(new BasicCollisionPair<Object>(null, "x"));
             throw new AssertionError("missing NullPointerException");

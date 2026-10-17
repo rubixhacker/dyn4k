@@ -8,6 +8,7 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.UnitConversion
@@ -58,6 +59,9 @@ class CollisionModelTest {
         override fun getLocalCenter() = Vector2()
         override fun copy() = TestBody(this)
         fun addDirectly(fixture: Fixture) { fixtures.add(fixture) }
+        fun protectedIterator(): MutableIterator<Fixture> = fixtures.iterator()
+        fun protectedSubList(): MutableList<Fixture> = fixtures.subList(0, 1)
+        fun updateRadiusWith(center: Vector2?): Double { setRotationDiscRadius(center); return radius }
     }
 
     @Test
@@ -161,5 +165,135 @@ class CollisionModelTest {
         val emptyIterator = empty.getFixtures().iterator()
         empty.removeAllFixtures()
         assertFailsWith<ConcurrentModificationException> { emptyIterator.next() }
+    }
+
+    @Test
+    fun protectedFixtureIteratorFailsAfterBodyMutation() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val iterator = body.protectedIterator()
+        body.addFixture(Circle(2.0))
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+    }
+
+    @Test
+    fun fixtureViewSubListFailsAfterBodyMutation() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val subList = body.getFixtures().subList(0, 1)
+        body.addFixture(Circle(2.0))
+        assertFailsWith<ConcurrentModificationException> { subList[0] }
+    }
+
+    @Test
+    fun protectedFixtureSubListFailsAfterBodyMutation() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val subList = body.protectedSubList()
+        body.addFixture(Circle(2.0))
+        assertFailsWith<ConcurrentModificationException> { subList[0] }
+    }
+
+    @Test
+    fun nestedViewAndProtectedSubListIteratorsFailAfterMutation() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val nested = body.getFixtures().subList(0, 1).subList(0, 1)
+        val protectedIterator = body.protectedSubList().iterator()
+        body.addFixture(Circle(2.0))
+        assertFailsWith<ConcurrentModificationException> { nested[0] }
+        assertFailsWith<ConcurrentModificationException> { protectedIterator.next() }
+    }
+
+    @Test
+    fun protectedSubListMutationsRemainLiveAndInvalidateIterators() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val subList = body.protectedSubList()
+        val added = Fixture(Circle(2.0))
+        subList.add(added)
+        assertSame(added, body.getFixture(1))
+        assertEquals(2, subList.size)
+        val iterator = subList.iterator()
+        subList.removeAt(0)
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertSame(added, body.getFixtures().single())
+    }
+
+    @Test
+    fun nullPointOperationsOnEmptyBodyReturnEmptyResults() {
+        val body = TestBody()
+        assertEquals(null, body.getFixture(null))
+        assertTrue(body.getFixtures(null).isEmpty())
+        assertEquals(null, body.removeFixture(null as Vector2?))
+        assertTrue(body.removeFixtures(null).isEmpty())
+        assertFalse(body.contains(null))
+    }
+
+    @Test
+    fun collisionItemEqualityCallsOtherGettersFirst() {
+        val calls = StringBuilder()
+        class ObservedItem(private val tag: String) : CollisionItem<TestBody, Fixture> {
+            override fun getBody(): TestBody? { calls.append(tag).append("body,"); return null }
+            override fun getFixture(): Fixture? { calls.append(tag).append("fixture,"); return null }
+            override fun copy(): CollisionItem<TestBody, Fixture> = this
+        }
+        assertTrue(AbstractCollisionItem.equals(ObservedItem("A"), ObservedItem("B")))
+        assertEquals("Bbody,Abody,Bfixture,Afixture,", calls.toString())
+    }
+
+    @Test
+    fun emptyBodyDefersNullCenterAndTransformChecks() {
+        val body = TestBody()
+        assertEquals(0.0, body.updateRadiusWith(null))
+        assertEquals(AABB(0.0, 0.0, 0.0, 0.0), body.createAABB(null))
+        val result = AABB(1.0, 1.0, 2.0, 2.0)
+        body.computeAABB(null, result)
+        assertEquals(AABB(0.0, 0.0, 0.0, 0.0), result)
+    }
+
+    @Test
+    fun pairHashCallsEarlierObjectBeforeNullFailure() {
+        class HashToken(private val calls: StringBuilder) {
+            override fun hashCode(): Int { calls.append("first,"); return 7 }
+        }
+        val staticCalls = StringBuilder()
+        assertFailsWith<NullPointerException> {
+            AbstractCollisionPair.getHashCode(HashToken(staticCalls), null)
+        }
+        assertEquals("first,", staticCalls.toString())
+        val pairCalls = StringBuilder()
+        assertFailsWith<NullPointerException> {
+            BasicCollisionPair<Any?>(HashToken(pairCalls), null).hashCode()
+        }
+        assertEquals("first,", pairCalls.toString())
+    }
+
+    @Test
+    fun fixtureCallbacksKeepInitialTraversalExtent() {
+        class MutatingFixture(private val body: TestBody) : Fixture(Circle(1.0)) {
+            private var added = false
+            override fun getShape(): Convex {
+                if (!added) { added = true; body.addFixture(Circle(2.0)) }
+                return super.getShape()
+            }
+        }
+        fun body() = TestBody().also { it.addFixture(MutatingFixture(it)) }
+        val point = Vector2(5.0, 5.0)
+        val queried = body()
+        assertEquals(null, queried.getFixture(point))
+        assertEquals(2, queried.getFixtureCount())
+        val queriedMany = body()
+        assertTrue(queriedMany.getFixtures(point).isEmpty())
+        assertEquals(2, queriedMany.getFixtureCount())
+        val contained = body()
+        assertFalse(contained.contains(point))
+        assertEquals(2, contained.getFixtureCount())
+        val radiusBody = body()
+        assertEquals(1.0, radiusBody.updateRadiusWith(Vector2()))
+        assertEquals(2, radiusBody.getFixtureCount())
+        val aabbBody = body()
+        assertEquals(AABB(-1.0, -1.0, 1.0, 1.0), aabbBody.createAABB())
+        assertEquals(2, aabbBody.getFixtureCount())
     }
 }

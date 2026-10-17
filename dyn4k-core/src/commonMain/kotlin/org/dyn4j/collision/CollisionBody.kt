@@ -38,6 +38,9 @@ import org.dyn4j.geometry.Transformable
 import org.dyn4j.geometry.Vector2
 import kotlin.math.max
 
+@Suppress("UNCHECKED_CAST")
+private fun <T> passNullable(value: T?): T = value as T
+
 interface FixtureModificationHandler<T : Fixture> {
     fun onFixtureAdded(fixture: T)
     fun onFixtureRemoved(fixture: T)
@@ -51,17 +54,17 @@ interface CollisionBody<T : Fixture> : Transformable, Shiftable, DataContainer, 
     fun addFixture(convex: Convex): T
     fun getFixture(index: Int): T
     fun containsFixture(fixture: T?): Boolean
-    fun getFixture(point: Vector2): T?
-    fun getFixtures(point: Vector2): List<T>
+    fun getFixture(point: Vector2?): T?
+    fun getFixtures(point: Vector2?): List<T>
     fun removeFixture(fixture: T?): Boolean
     fun removeFixture(index: Int): T
     fun removeAllFixtures(): List<T>
-    fun removeFixture(point: Vector2): T?
-    fun removeFixtures(point: Vector2): List<T>
+    fun removeFixture(point: Vector2?): T?
+    fun removeFixtures(point: Vector2?): List<T>
     fun getFixtureCount(): Int
     fun getFixtures(): List<T>
     fun getFixtureIterator(): MutableIterator<T>
-    fun contains(point: Vector2): Boolean
+    fun contains(point: Vector2?): Boolean
     fun getLocalCenter(): Vector2
     fun getWorldCenter(): Vector2
     fun getLocalPoint(worldPoint: Vector2): Vector2
@@ -79,9 +82,9 @@ interface CollisionBody<T : Fixture> : Transformable, Shiftable, DataContainer, 
     fun rotateAboutCenter(theta: Double)
     fun translateToOrigin()
     fun createAABB(): AABB
-    fun createAABB(transform: Transform): AABB
+    fun createAABB(transform: Transform?): AABB
     fun computeAABB(result: AABB)
-    fun computeAABB(transform: Transform, result: AABB)
+    fun computeAABB(transform: Transform?, result: AABB)
     fun setEnabled(enabled: Boolean)
     fun isEnabled(): Boolean
     fun getFixtureModificationHandler(): FixtureModificationHandler<T>?
@@ -102,34 +105,7 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
     constructor() : this(CollisionBody.TYPICAL_FIXTURE_COUNT)
     constructor(fixtureCount: Int) {
         fixtures = TrackedFixtureList(if (fixtureCount <= 0) CollisionBody.TYPICAL_FIXTURE_COUNT else fixtureCount)
-        fixturesUnmodifiable = object : AbstractList<T>() {
-            override val size: Int get() = fixtures.size
-            override fun get(index: Int): T = fixtures[index]
-            override fun iterator(): Iterator<T> = listIterator()
-            override fun listIterator(): ListIterator<T> = listIterator(0)
-            override fun listIterator(index: Int): ListIterator<T> {
-                if (index < 0 || index > size) throw IndexOutOfBoundsException()
-                val tracked = fixtures
-                val expected = (tracked as TrackedFixtureList<T>).version
-                return object : ListIterator<T> {
-                    private var cursor = index
-                    override fun hasNext() = cursor < fixtures.size
-                    override fun next(): T {
-                        if (expected != tracked.version) throw ConcurrentModificationException()
-                        if (!hasNext()) throw NoSuchElementException()
-                        return fixtures[cursor++]
-                    }
-                    override fun hasPrevious() = cursor > 0
-                    override fun previous(): T {
-                        if (expected != tracked.version) throw ConcurrentModificationException()
-                        if (!hasPrevious()) throw NoSuchElementException()
-                        return fixtures[--cursor]
-                    }
-                    override fun nextIndex() = cursor
-                    override fun previousIndex() = cursor - 1
-                }
-            }
-        }
+        fixturesUnmodifiable = FixtureView(0, null, null)
         transform = Transform()
         transform0 = Transform()
     }
@@ -168,10 +144,10 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
         return removed
     }
 
-    override fun removeFixture(point: Vector2): T? {
+    override fun removeFixture(point: Vector2?): T? {
         for (index in fixtures.indices) {
             val fixture = fixtures[index]
-            if (fixture.getShape().contains(point, transform)) {
+            if (fixture.getShape().contains(passNullable(point), transform)) {
                 fixtures.removeAt(index)
                 fixtureModificationHandler?.onFixtureRemoved(fixture)
                 return fixture
@@ -180,12 +156,12 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
         return null
     }
 
-    override fun removeFixtures(point: Vector2): List<T> {
+    override fun removeFixtures(point: Vector2?): List<T> {
         val removed = ArrayList<T>()
         val iterator = fixtures.iterator()
         while (iterator.hasNext()) {
             val fixture = iterator.next()
-            if (fixture.getShape().contains(point, transform)) {
+            if (fixture.getShape().contains(passNullable(point), transform)) {
                 iterator.remove()
                 fixtureModificationHandler?.onFixtureRemoved(fixture)
                 removed.add(fixture)
@@ -196,15 +172,34 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
 
     override fun containsFixture(fixture: T?) = fixtures.contains(fixture)
     override fun getFixture(index: Int) = fixtures[index]
-    override fun getFixture(point: Vector2): T? = fixtures.firstOrNull { it.getShape().contains(point, transform) }
-    override fun getFixtures(point: Vector2): List<T> = fixtures.filter { it.getShape().contains(point, transform) }
+    override fun getFixture(point: Vector2?): T? {
+        val count = fixtures.size
+        for (index in 0 until count) {
+            val fixture = fixtures[index]
+            if (fixture.getShape().contains(passNullable(point), transform)) return fixture
+        }
+        return null
+    }
+    override fun getFixtures(point: Vector2?): List<T> {
+        val selected = ArrayList<T>()
+        val count = fixtures.size
+        for (index in 0 until count) {
+            val fixture = fixtures[index]
+            if (fixture.getShape().contains(passNullable(point), transform)) selected.add(fixture)
+        }
+        return selected
+    }
     override fun getFixtureCount() = fixtures.size
     override fun getFixtures(): List<T> = fixturesUnmodifiable
     override fun getFixtureIterator(): MutableIterator<T> = FixtureIterator()
 
-    protected open fun setRotationDiscRadius(center: Vector2) {
-        radius = 0.0
-        for (fixture in fixtures) radius = max(radius, fixture.getShape().getRadius(center))
+    protected open fun setRotationDiscRadius(center: Vector2?) {
+        var nextRadius = 0.0
+        val count = fixtures.size
+        for (index in 0 until count) {
+            nextRadius = max(nextRadius, fixtures[index].getShape().getRadius(passNullable(center)))
+        }
+        radius = nextRadius
     }
 
     override fun rotate(theta: Double, x: Double, y: Double) = transform.rotate(theta, x, y)
@@ -226,14 +221,15 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
     override fun setUserData(data: Any?) { userData = data }
 
     override fun createAABB() = AABB(0.0, 0.0, 0.0, 0.0).also { computeAABB(transform, it) }
-    override fun createAABB(transform: Transform) = AABB(0.0, 0.0, 0.0, 0.0).also { computeAABB(transform, it) }
+    override fun createAABB(transform: Transform?) = AABB(0.0, 0.0, 0.0, 0.0).also { computeAABB(transform, it) }
     override fun computeAABB(result: AABB) = computeAABB(transform, result)
-    override fun computeAABB(transform: Transform, result: AABB) {
-        if (fixtures.isEmpty()) { result.zero(); return }
-        fixtures[0].getShape().computeAABB(transform, result)
+    override fun computeAABB(transform: Transform?, result: AABB) {
+        val count = fixtures.size
+        if (count == 0) { result.zero(); return }
+        fixtures[0].getShape().computeAABB(passNullable(transform), result)
         val next = AABB(0.0, 0.0, 0.0, 0.0)
-        for (index in 1 until fixtures.size) {
-            fixtures[index].getShape().computeAABB(transform, next)
+        for (index in 1 until count) {
+            fixtures[index].getShape().computeAABB(passNullable(transform), next)
             result.union(next)
         }
     }
@@ -247,7 +243,13 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
     override fun getWorldVector(localVector: Vector2) = transform.getTransformedR(localVector)
     override fun getWorldVector(localVector: Vector2, destination: Vector2) = transform.getTransformedR(localVector, destination)
     override fun getWorldCenter() = transform.getTransformed(getLocalCenter())
-    override fun contains(point: Vector2) = fixtures.any { it.getShape().contains(point, transform) }
+    override fun contains(point: Vector2?): Boolean {
+        val count = fixtures.size
+        for (index in 0 until count) {
+            if (fixtures[index].getShape().contains(passNullable(point), transform)) return true
+        }
+        return false
+    }
     override fun isEnabled() = enabled
     override fun setEnabled(enabled: Boolean) { this.enabled = enabled }
     override fun getOwner() = owner
@@ -278,6 +280,56 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
         }
     }
 
+    private inner class FixtureView(
+        private val start: Int,
+        private val end: Int?,
+        private val expectedVersion: Int?
+    ) : AbstractList<T>() {
+        private val tracked get() = fixtures as TrackedFixtureList<T>
+        private fun checkVersion() {
+            if (expectedVersion != null && expectedVersion != tracked.version) throw ConcurrentModificationException()
+        }
+        override val size: Int get() {
+            checkVersion()
+            return (end ?: fixtures.size) - start
+        }
+        override fun get(index: Int): T {
+            if (index < 0 || index >= size) throw IndexOutOfBoundsException()
+            return fixtures[start + index]
+        }
+        override fun subList(fromIndex: Int, toIndex: Int): List<T> {
+            val count = size
+            if (fromIndex < 0 || toIndex > count || fromIndex > toIndex) throw IndexOutOfBoundsException()
+            return FixtureView(start + fromIndex, start + toIndex, tracked.version)
+        }
+        override fun iterator(): Iterator<T> = listIterator()
+        override fun listIterator(): ListIterator<T> = listIterator(0)
+        override fun listIterator(index: Int): ListIterator<T> {
+            if (index < 0 || index > size) throw IndexOutOfBoundsException()
+            val expected = tracked.version
+            return object : ListIterator<T> {
+                private var cursor = index
+                private fun check() {
+                    if (expected != tracked.version) throw ConcurrentModificationException()
+                }
+                override fun hasNext() = cursor < size
+                override fun next(): T {
+                    check()
+                    if (!hasNext()) throw NoSuchElementException()
+                    return get(cursor++)
+                }
+                override fun hasPrevious() = cursor > 0
+                override fun previous(): T {
+                    check()
+                    if (!hasPrevious()) throw NoSuchElementException()
+                    return get(--cursor)
+                }
+                override fun nextIndex() = cursor
+                override fun previousIndex() = cursor - 1
+            }
+        }
+    }
+
     private class TrackedFixtureList<E>(capacity: Int) : AbstractMutableList<E>() {
         private val backing = ArrayList<E>(capacity)
         var version: Int = 0
@@ -288,5 +340,160 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
         override fun add(index: Int, element: E) { backing.add(index, element); version++ }
         override fun removeAt(index: Int): E = backing.removeAt(index).also { version++ }
         override fun clear() { backing.clear(); version++ }
+        override fun subList(fromIndex: Int, toIndex: Int): MutableList<E> {
+            if (fromIndex < 0 || toIndex > size || fromIndex > toIndex) throw IndexOutOfBoundsException()
+            return TrackedSubList(fromIndex, toIndex, null)
+        }
+        override fun iterator(): MutableIterator<E> = listIterator()
+        override fun listIterator(): MutableListIterator<E> = listIterator(0)
+        override fun listIterator(index: Int): MutableListIterator<E> {
+            if (index < 0 || index > size) throw IndexOutOfBoundsException()
+            return object : MutableListIterator<E> {
+                private var cursor = index
+                private var lastReturned = -1
+                private var expected = version
+                private fun checkVersion() {
+                    if (expected != version) throw ConcurrentModificationException()
+                }
+                override fun hasNext() = cursor < size
+                override fun next(): E {
+                    checkVersion()
+                    if (!hasNext()) throw NoSuchElementException()
+                    lastReturned = cursor
+                    return backing[cursor++]
+                }
+                override fun hasPrevious() = cursor > 0
+                override fun previous(): E {
+                    checkVersion()
+                    if (!hasPrevious()) throw NoSuchElementException()
+                    lastReturned = --cursor
+                    return backing[cursor]
+                }
+                override fun nextIndex() = cursor
+                override fun previousIndex() = cursor - 1
+                override fun remove() {
+                    if (lastReturned < 0) throw IllegalStateException()
+                    checkVersion()
+                    removeAt(lastReturned)
+                    if (lastReturned < cursor) cursor--
+                    lastReturned = -1
+                    expected = version
+                }
+                override fun set(element: E) {
+                    if (lastReturned < 0) throw IllegalStateException()
+                    checkVersion()
+                    backing[lastReturned] = element
+                }
+                override fun add(element: E) {
+                    checkVersion()
+                    this@TrackedFixtureList.add(cursor++, element)
+                    lastReturned = -1
+                    expected = version
+                }
+            }
+        }
+
+        private inner class TrackedSubList(
+            private val start: Int,
+            private var end: Int,
+            private val parent: TrackedSubList?
+        ) : AbstractMutableList<E>() {
+            private var expected = version
+            private fun checkVersion() {
+                if (expected != version) throw ConcurrentModificationException()
+            }
+            private fun changed(delta: Int) {
+                var current: TrackedSubList? = this
+                while (current != null) {
+                    current.end += delta
+                    current.expected = version
+                    current = current.parent
+                }
+            }
+            override val size: Int get() { checkVersion(); return end - start }
+            override fun get(index: Int): E {
+                val count = size
+                if (index < 0 || index >= count) throw IndexOutOfBoundsException()
+                return backing[start + index]
+            }
+            override fun set(index: Int, element: E): E {
+                val count = size
+                if (index < 0 || index >= count) throw IndexOutOfBoundsException()
+                return backing.set(start + index, element)
+            }
+            override fun add(index: Int, element: E) {
+                val count = size
+                if (index < 0 || index > count) throw IndexOutOfBoundsException()
+                this@TrackedFixtureList.add(start + index, element)
+                changed(1)
+            }
+            override fun removeAt(index: Int): E {
+                val count = size
+                if (index < 0 || index >= count) throw IndexOutOfBoundsException()
+                val removed = this@TrackedFixtureList.removeAt(start + index)
+                changed(-1)
+                return removed
+            }
+            override fun clear() {
+                val count = size
+                if (count == 0) { version++; changed(0); return }
+                for (index in count - 1 downTo 0) this@TrackedFixtureList.removeAt(start + index)
+                changed(-count)
+            }
+            override fun subList(fromIndex: Int, toIndex: Int): MutableList<E> {
+                val count = size
+                if (fromIndex < 0 || toIndex > count || fromIndex > toIndex) throw IndexOutOfBoundsException()
+                return TrackedSubList(start + fromIndex, start + toIndex, this)
+            }
+            override fun iterator(): MutableIterator<E> = listIterator()
+            override fun listIterator(): MutableListIterator<E> = listIterator(0)
+            override fun listIterator(index: Int): MutableListIterator<E> {
+                val count = size
+                if (index < 0 || index > count) throw IndexOutOfBoundsException()
+                return object : MutableListIterator<E> {
+                    private var cursor = index
+                    private var lastReturned = -1
+                    private var iteratorVersion = version
+                    private fun check() {
+                        if (iteratorVersion != version) throw ConcurrentModificationException()
+                    }
+                    override fun hasNext() = cursor < end - start
+                    override fun next(): E {
+                        check()
+                        if (!hasNext()) throw NoSuchElementException()
+                        lastReturned = cursor
+                        return get(cursor++)
+                    }
+                    override fun hasPrevious() = cursor > 0
+                    override fun previous(): E {
+                        check()
+                        if (!hasPrevious()) throw NoSuchElementException()
+                        lastReturned = --cursor
+                        return get(cursor)
+                    }
+                    override fun nextIndex() = cursor
+                    override fun previousIndex() = cursor - 1
+                    override fun remove() {
+                        if (lastReturned < 0) throw IllegalStateException()
+                        check()
+                        this@TrackedSubList.removeAt(lastReturned)
+                        if (lastReturned < cursor) cursor--
+                        lastReturned = -1
+                        iteratorVersion = version
+                    }
+                    override fun set(element: E) {
+                        if (lastReturned < 0) throw IllegalStateException()
+                        check()
+                        this@TrackedSubList[lastReturned] = element
+                    }
+                    override fun add(element: E) {
+                        check()
+                        this@TrackedSubList.add(cursor++, element)
+                        lastReturned = -1
+                        iteratorVersion = version
+                    }
+                }
+            }
+        }
     }
 }

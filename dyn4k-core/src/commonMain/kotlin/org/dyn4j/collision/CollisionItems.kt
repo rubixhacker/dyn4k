@@ -39,7 +39,7 @@ abstract class AbstractCollisionItem<T : CollisionBody<E>, E : Fixture> : Collis
 
         @kotlin.jvm.JvmStatic fun equals(item: CollisionItem<*, *>?, obj: Any?): Boolean =
             item === obj || item != null && obj is CollisionItem<*, *> &&
-                item.getBody() === obj.getBody() && item.getFixture() === obj.getFixture()
+                obj.getBody() === item.getBody() && obj.getFixture() === item.getFixture()
     }
 }
 
@@ -63,12 +63,14 @@ interface CollisionPair<T> : Copyable<CollisionPair<T>> {
 
 abstract class AbstractCollisionPair<T> : CollisionPair<T>, Copyable<CollisionPair<T>> {
     companion object {
-        @kotlin.jvm.JvmStatic fun getHashCode(body1: CollisionBody<*>, fixture1: Fixture,
-                                   body2: CollisionBody<*>, fixture2: Fixture): Int =
+        @kotlin.jvm.JvmStatic fun getHashCode(body1: CollisionBody<*>?, fixture1: Fixture?,
+                                   body2: CollisionBody<*>?, fixture2: Fixture?): Int =
             AbstractCollisionItem.getHashCode(body1, fixture1) +
                 AbstractCollisionItem.getHashCode(body2, fixture2)
 
-        @kotlin.jvm.JvmStatic fun getHashCode(item1: Any, item2: Any): Int = item1.hashCode() + item2.hashCode()
+        @kotlin.jvm.JvmStatic fun getHashCode(item1: Any?, item2: Any?): Int {
+            return item1!!.hashCode() + item2!!.hashCode()
+        }
 
         @kotlin.jvm.JvmStatic fun equals(pair: CollisionPair<*>?, obj: Any?): Boolean {
             if (pair === obj) return true
@@ -93,7 +95,7 @@ class BasicCollisionPair<T> : AbstractCollisionPair<T>, CollisionPair<T> {
     override fun getSecond() = second
     override fun copy() = BasicCollisionPair(this)
     override fun equals(other: Any?) = AbstractCollisionPair.equals(this, other)
-    override fun hashCode() = AbstractCollisionPair.getHashCode(first as Any, second as Any)
+    override fun hashCode() = AbstractCollisionPair.getHashCode(first, second)
 }
 
 class Collisions private constructor() {
