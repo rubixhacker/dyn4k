@@ -44,6 +44,9 @@ class PhysicsWorldJourneyTest {
             joints[index] = joint
         }
 
+        fun stepBackingIterator(): MutableIterator<StepListener<Body>?> = stepListeners.iterator()
+        fun jointBackingIterator(): MutableIterator<Joint<Body>> = joints.iterator()
+
         fun protectedStateMatchesPublic(): Boolean =
             settings === getSettings() && gravity === getGravity() &&
                 contactConstraintSolver === getContactConstraintSolver()
@@ -150,6 +153,75 @@ class PhysicsWorldJourneyTest {
         world.addJoint(PinJoint(body, Vector2()))
         assertEquals(2, view.size)
         assertFailsWith<ConcurrentModificationException> { beforeAdd.next() }
+    }
+
+    @Test
+    fun protectedBackingIteratorsRejectStructuralChangeOnly() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val replacement = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        val afterStepSet = world.stepBackingIterator()
+        world.replaceStepListener(0, replacement)
+        assertSame(replacement, afterStepSet.next())
+        val beforeStepAdd = world.stepBackingIterator()
+        world.addStepListener(StepListenerAdapter())
+        assertFailsWith<ConcurrentModificationException> { beforeStepAdd.next() }
+
+        val body = Body()
+        world.addBody(body)
+        val joint = PinJoint(body, Vector2())
+        world.addJoint(joint)
+        val afterJointSet = world.jointBackingIterator()
+        world.replaceJoint(0, joint)
+        assertSame(joint, afterJointSet.next())
+        val beforeJointAdd = world.jointBackingIterator()
+        world.addJoint(PinJoint(body, Vector2()))
+        assertFailsWith<ConcurrentModificationException> { beforeJointAdd.next() }
+    }
+
+    @Test
+    fun publicSubListsRejectStructuralChangeOnly() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val replacement = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        val listeners = world.getStepListeners()
+        val stepSubList = listeners.subList(0, 1)
+        world.replaceStepListener(0, replacement)
+        assertSame(replacement, stepSubList[0])
+        world.addStepListener(StepListenerAdapter())
+        assertEquals(2, listeners.size)
+        assertFailsWith<ConcurrentModificationException> { stepSubList[0] }
+
+        val body = Body()
+        world.addBody(body)
+        val joint = PinJoint(body, Vector2())
+        world.addJoint(joint)
+        val joints = world.getJoints()
+        val jointSubList = joints.subList(0, 1)
+        world.replaceJoint(0, joint)
+        assertSame(joint, jointSubList[0])
+        world.addJoint(PinJoint(body, Vector2()))
+        assertEquals(2, joints.size)
+        assertFailsWith<ConcurrentModificationException> { jointSubList[0] }
+    }
+
+    @Test
+    fun emptyPublicViewRejectsDefaultMutations() {
+        val world = World<Body>()
+        val graph = ConstraintGraph<Body>()
+        val body = Body()
+        graph.addBody(body)
+        val node = graph.getNode(body)!!
+        val views: List<List<*>> = listOf(
+            world.getStepListeners(), world.getJoints(), node.getContactConstraints(), node.getJoints()
+        )
+        for (view in views) {
+            val mutableView = view as MutableList<*>
+            assertFailsWith<UnsupportedOperationException> { mutableView.removeAll(emptyList()) }
+            assertFailsWith<UnsupportedOperationException> { mutableView.clear() }
+        }
     }
 
     @Test

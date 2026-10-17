@@ -59,6 +59,47 @@ class GraphContactJourneyTest {
     }
 
     @Test
+    fun graphProtectedIteratorsAndPublicSubListsRejectStructuralChangeOnly() {
+        val a = Body()
+        val af = a.addFixture(Circle(0.5))
+        val b = Body()
+        val bf = b.addFixture(Circle(0.5))
+        val contact = ContactConstraint(
+            BasicCollisionPair(BasicCollisionItem(a, af), BasicCollisionItem(b, bf))
+        )
+        val joint = PinJoint(a, Vector2())
+        val graph = ConstraintGraph<Body>()
+        graph.addBody(a)
+        graph.addBody(b)
+        graph.addContactConstraint(contact)
+        graph.addJoint(joint)
+        val node = graph.getNode(a)!!
+        val contacts = node.getContactConstraints()
+        val joints = node.getJoints()
+        val contactSubList = contacts.subList(0, 1)
+        val jointSubList = joints.subList(0, 1)
+        val contactBeforeSet = node.mutableContacts().iterator()
+        val jointBeforeSet = node.mutableJoints().iterator()
+        node.mutableContacts()[0] = contact
+        node.mutableJoints()[0] = joint
+        assertSame(contact, contactBeforeSet.next())
+        assertSame(joint, jointBeforeSet.next())
+        assertSame(contact, contactSubList[0])
+        assertSame(joint, jointSubList[0])
+
+        val contactBeforeAdd = node.mutableContacts().iterator()
+        val jointBeforeAdd = node.mutableJoints().iterator()
+        graph.addContactConstraint(contact)
+        graph.addJoint(PinJoint(a, Vector2()))
+        assertEquals(2, contacts.size)
+        assertEquals(2, joints.size)
+        assertFailsWith<ConcurrentModificationException> { contactBeforeAdd.next() }
+        assertFailsWith<ConcurrentModificationException> { jointBeforeAdd.next() }
+        assertFailsWith<ConcurrentModificationException> { contactSubList[0] }
+        assertFailsWith<ConcurrentModificationException> { jointSubList[0] }
+    }
+
+    @Test
     fun contactViewsTrackEdgesAndBodyRemoval() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
