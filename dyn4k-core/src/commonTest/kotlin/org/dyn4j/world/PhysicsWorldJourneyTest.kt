@@ -27,6 +27,7 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.listener.StepListenerAdapter
+import org.dyn4j.world.listener.StepListener
 import org.dyn4j.world.listener.ContactListenerAdapter
 import org.dyn4j.world.listener.DestructionListenerAdapter
 import org.dyn4j.dynamics.joint.Joint
@@ -34,6 +35,14 @@ import org.dyn4j.dynamics.joint.Joint
 class PhysicsWorldJourneyTest {
     private class ExtendedWorld : World<Body>() {
         var created = 0
+
+        fun replaceStepListener(index: Int, listener: StepListener<Body>) {
+            stepListeners[index] = listener
+        }
+
+        fun replaceJoint(index: Int, joint: Joint<Body>) {
+            joints[index] = joint
+        }
 
         fun protectedStateMatchesPublic(): Boolean =
             settings === getSettings() && gravity === getGravity() &&
@@ -104,6 +113,43 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<IllegalStateException> { iterator.remove() }
         assertTrue(view.isEmpty())
         assertEquals(null, joint.getOwner())
+    }
+
+    @Test
+    fun savedStepListenerViewIteratorRejectsStructuralChangeOnly() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val replacement = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        val view = world.getStepListeners()
+        assertSame(view, world.getStepListeners())
+        val afterSet = view.iterator()
+        world.replaceStepListener(0, replacement)
+        assertSame(replacement, afterSet.next())
+
+        val beforeAdd = view.iterator()
+        world.addStepListener(StepListenerAdapter())
+        assertEquals(2, view.size)
+        assertFailsWith<ConcurrentModificationException> { beforeAdd.next() }
+    }
+
+    @Test
+    fun savedJointViewIteratorRejectsStructuralChangeOnly() {
+        val world = ExtendedWorld()
+        val body = Body()
+        world.addBody(body)
+        val first = PinJoint(body, Vector2())
+        world.addJoint(first)
+        val view = world.getJoints()
+        assertSame(view, world.getJoints())
+        val afterSet = view.iterator()
+        world.replaceJoint(0, first)
+        assertSame(first, afterSet.next())
+
+        val beforeAdd = view.iterator()
+        world.addJoint(PinJoint(body, Vector2()))
+        assertEquals(2, view.size)
+        assertFailsWith<ConcurrentModificationException> { beforeAdd.next() }
     }
 
     @Test

@@ -155,16 +155,21 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
             StaticValueAABBExpansionMethod(0.2), bodyCapacity
         )
         ccdBroadphase.setUpdateTrackingEnabled(true)
-        joints = ArrayList(jointCapacity)
-        jointsUnmodifiable = LiveView(joints)
-        contactListeners = ArrayList()
-        destructionListeners = ArrayList()
-        timeOfImpactListeners = ArrayList()
-        stepListeners = ArrayList()
-        contactListenersUnmodifiable = LiveView(contactListeners)
-        destructionListenersUnmodifiable = LiveView(destructionListeners)
-        timeOfImpactListenersUnmodifiable = LiveView(timeOfImpactListeners)
-        stepListenersUnmodifiable = LiveView(stepListeners)
+        val jointList = WorldTrackedArrayList<Joint<T>>(jointCapacity)
+        joints = jointList
+        jointsUnmodifiable = jointList.liveView()
+        val contactListenerList = WorldTrackedArrayList<ContactListener<T>?>()
+        val destructionListenerList = WorldTrackedArrayList<DestructionListener<T>?>()
+        val timeOfImpactListenerList = WorldTrackedArrayList<TimeOfImpactListener<T>?>()
+        val stepListenerList = WorldTrackedArrayList<StepListener<T>?>()
+        contactListeners = contactListenerList
+        destructionListeners = destructionListenerList
+        timeOfImpactListeners = timeOfImpactListenerList
+        stepListeners = stepListenerList
+        contactListenersUnmodifiable = contactListenerList.liveView()
+        destructionListenersUnmodifiable = destructionListenerList.liveView()
+        timeOfImpactListenersUnmodifiable = timeOfImpactListenerList.liveView()
+        stepListenersUnmodifiable = stepListenerList.liveView()
         constraintGraph = ConstraintGraph(bodyCapacity, jointCapacity)
         contactCollisions = ArrayList(Collisions.getEstimatedCollisionPairs(bodyCapacity))
         ccdCollisionData = LinkedHashSet()
@@ -685,8 +690,4 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         }
     }
 
-    private class LiveView<E>(private val source: MutableList<E>) : AbstractList<E>() {
-        override val size: Int get() = source.size
-        override fun get(index: Int): E = source[index]
-    }
 }

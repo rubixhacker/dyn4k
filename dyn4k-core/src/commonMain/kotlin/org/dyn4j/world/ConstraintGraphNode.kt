@@ -29,11 +29,13 @@ import org.dyn4j.dynamics.contact.ContactConstraint
 import org.dyn4j.dynamics.joint.Joint
 
 class ConstraintGraphNode<T : PhysicsBody>(@kotlin.jvm.JvmField protected val body: T) {
-    @kotlin.jvm.JvmField protected val contactConstraints: MutableList<ContactConstraint<T>> = ArrayList()
-    @kotlin.jvm.JvmField protected val joints: MutableList<Joint<T>> = ArrayList()
+    @kotlin.jvm.JvmField protected val contactConstraints: MutableList<ContactConstraint<T>> =
+        WorldTrackedArrayList<ContactConstraint<T>>()
+    @kotlin.jvm.JvmField protected val joints: MutableList<Joint<T>> = WorldTrackedArrayList<Joint<T>>()
     @kotlin.jvm.JvmField protected val contactConstraintsUnmodifiable: List<ContactConstraint<T>> =
-        LiveReadOnlyList(contactConstraints)
-    @kotlin.jvm.JvmField protected val jointsUnmodifiable: List<Joint<T>> = LiveReadOnlyList(joints)
+        (contactConstraints as WorldTrackedArrayList<ContactConstraint<T>>).liveView()
+    @kotlin.jvm.JvmField protected val jointsUnmodifiable: List<Joint<T>> =
+        (joints as WorldTrackedArrayList<Joint<T>>).liveView()
 
     fun getBody(): T = body
     fun getJoints(): List<Joint<T>> = jointsUnmodifiable
@@ -41,9 +43,4 @@ class ConstraintGraphNode<T : PhysicsBody>(@kotlin.jvm.JvmField protected val bo
 
     internal fun mutableContacts(): MutableList<ContactConstraint<T>> = contactConstraints
     internal fun mutableJoints(): MutableList<Joint<T>> = joints
-}
-
-private class LiveReadOnlyList<T>(private val source: List<T>) : AbstractList<T>() {
-    override val size: Int get() = source.size
-    override fun get(index: Int): T = source[index]
 }
