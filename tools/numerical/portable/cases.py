@@ -141,6 +141,11 @@ def declared_cases():
             case["profile"] == "frozen-weld-pulley")
         case["min_step_events"] = 1
         case["expected_actions"] = []
+        case["expected_instrumented_callbacks"] = (
+            [1] if case["id"] in ("P-JINT-Weld-enabled-equal",
+                               "P-JINT-Pulley-slack-transition-main") else [])
+        if case["id"].startswith(("contacts-default-", "contacts-configured-")):
+            case["expected_instrumented_callbacks"] = [case["input"]["actionStep"]] * 2
         if case["id"] == "motion-forces-60":
             case["expected_actions"] = list(range(1, 61))
         elif case["id"].startswith("contacts-default-"):

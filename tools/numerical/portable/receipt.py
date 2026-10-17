@@ -309,6 +309,8 @@ def inspect(path, cases):
     last_frozen_state = None
     step_callback_count = 0
     action_steps = []
+    instrumented_steps = []
+    frozen_id = None
     body_ids = []
     joint_ids = []
     for row in records(path):
@@ -345,6 +347,7 @@ def inspect(path, cases):
                         all(exact(frozen_input.get(key), frozen[key])
                             for key in ("settings", "world", "state")),
                         f"{case_id}: frozen input envelope is absent or inconsistent")
+                frozen_id = frozen_input.get("id")
             current = case_id
             next_step = case.get("start_step", 0) + 1
             last_order = -1
@@ -357,7 +360,8 @@ def inspect(path, cases):
             last_frozen_state = None
             step_callback_count = 0
             action_steps = []
-        elif kind in ("event", "action", "state"):
+            instrumented_steps = []
+        elif kind in ("event", "action", "instrumented-callback", "state"):
             if current != case_id:
                 raise Rejected("record is outside its case")
             step = row.get("step")
@@ -398,7 +402,30 @@ def inspect(path, cases):
                 if kind == "event":
                     step_callback_count += 1
                 if kind == "action":
+                    if expected[case_id].get("require_frozen_projection"):
+                        frozen_actions = row.get("frozenRecords")
+                        require(isinstance(frozen_actions, list) and frozen_actions and
+                                all(isinstance(action, dict) and action.get("kind") == "action" and
+                                    action.get("id") == frozen_id and
+                                    exact(action.get("step"), step) and
+                                    type(action.get("order")) is int
+                                    for action in frozen_actions) and
+                                [action["order"] for action in frozen_actions] == list(range(
+                                    frozen_actions[0]["order"],
+                                    frozen_actions[0]["order"] + len(frozen_actions))),
+                                f"{case_id}: frozen action projection is absent or unordered")
                     action_steps.append(step)
+                if kind == "instrumented-callback":
+                    frozen_record = row.get("frozenRecord")
+                    require(isinstance(frozen_record, dict) and
+                            frozen_record.get("kind") == kind and
+                            frozen_record.get("id") == frozen_id and
+                            frozen_record.get("event") == row.get("event") and
+                            exact(frozen_record.get("step"), step) and
+                            exact(frozen_record.get("order"), order) and
+                            exact(frozen_record.get("values"), row.get("values")),
+                            f"{case_id}: instrumented callback projection differs")
+                    instrumented_steps.append(step)
         elif kind == "endpoint":
             group = expected[current].get("outer_group") if current else None
             if (current != case_id or not group or row.get("step") != next_step - 1 or
@@ -428,6 +455,8 @@ def inspect(path, cases):
                 raise Rejected(f"{case_id}: case-end endpoint count differs")
             if action_steps != expected[case_id].get("expected_actions", []):
                 raise Rejected(f"{case_id}: action steps differ")
+            if instrumented_steps != expected[case_id].get("expected_instrumented_callbacks", []):
+                raise Rejected(f"{case_id}: instrumented callback steps differ")
             seen.add(case_id)
             current = None
         else:

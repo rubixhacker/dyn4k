@@ -18,6 +18,7 @@ CATALOG = Path(__file__).resolve().parents[1] / "fixtures.json"
 CHANNELS = ("transform.getTranslation.0", "transform.getTranslation.1",
             "previousTransform.getTranslation.0", "previousTransform.getTranslation.1",
             "velocity.0", "velocity.1", "angularVelocity", "rotationIncrementSum", "atRest")
+NOMINAL_ZERO_FIELDS = ("force", "torque", "accumulatedForce", "accumulatedTorque")
 RULE_PATHS = {
     "transform.getTranslation.0": "state.state.bodies[].transform.getTranslation[]",
     "transform.getTranslation.1": "state.state.bodies[].transform.getTranslation[]",
@@ -127,6 +128,105 @@ def step_event_diagnostic(reference, portable):
     return result
 
 
+def frozen_event_diagnostic(reference, portable):
+    baseline = (row for row in reference_records(reference) if row.get("kind") == "event")
+    candidate = (row.get("frozenEvent") for row in
+                 records(portable, allow_tagged_nonfinite=True) if row.get("kind") == "event")
+    sentinel = object()
+    result = {"reference_events": 0, "portable_events": 0, "exact_events": 0,
+              "differing_events": 0, "first_differences": []}
+    for left, right in zip_longest(baseline, candidate, fillvalue=sentinel):
+        if left is not sentinel:
+            result["reference_events"] += 1
+        if right is not sentinel:
+            result["portable_events"] += 1
+        if left is sentinel or right is sentinel or not exact(left, right):
+            result["differing_events"] += 1
+            if len(result["first_differences"]) < 20:
+                result["first_differences"].append({
+                    "reference_step": left.get("step") if isinstance(left, dict) else None,
+                    "portable_step": right.get("step") if isinstance(right, dict) else None,
+                    "reference_order": left.get("order") if isinstance(left, dict) else None,
+                    "portable_order": right.get("order") if isinstance(right, dict) else None,
+                    "reference_method": left.get("method") if isinstance(left, dict) else None,
+                    "portable_method": right.get("method") if isinstance(right, dict) else None,
+                    "structural_differences": structural_differences(left, right, "event", 5)
+                        if isinstance(left, dict) and isinstance(right, dict) else [],
+                    "value_differences": value_differences(left, right, "event", 5)
+                        if isinstance(left, dict) and isinstance(right, dict) else []})
+        else:
+            result["exact_events"] += 1
+    result["status"] = "PASSED" if result["differing_events"] == 0 and result["reference_events"] else "FAILED"
+    return result
+
+
+def auxiliary_record_diagnostic(reference, portable):
+    kinds = {"action", "instrumented-callback"}
+    baseline = (row for row in reference_records(reference) if row.get("kind") in kinds)
+    def candidate_records():
+        for row in records(portable, allow_tagged_nonfinite=True):
+            if row.get("kind") == "action":
+                yield from row.get("frozenRecords", [])
+            elif row.get("kind") == "instrumented-callback":
+                yield row.get("frozenRecord")
+    sentinel = object()
+    result = {"reference_records": 0, "portable_records": 0, "exact_records": 0,
+              "differing_records": 0, "first_differences": []}
+    for left, right in zip_longest(baseline, candidate_records(), fillvalue=sentinel):
+        if left is not sentinel:
+            result["reference_records"] += 1
+        if right is not sentinel:
+            result["portable_records"] += 1
+        if left is sentinel or right is sentinel or not exact(left, right):
+            result["differing_records"] += 1
+            if len(result["first_differences"]) < 20:
+                result["first_differences"].append({
+                    "reference_kind": left.get("kind") if isinstance(left, dict) else None,
+                    "portable_kind": right.get("kind") if isinstance(right, dict) else None,
+                    "reference_step": left.get("step") if isinstance(left, dict) else None,
+                    "portable_step": right.get("step") if isinstance(right, dict) else None,
+                    "structural_differences": structural_differences(left, right, "record", 5)
+                        if isinstance(left, dict) and isinstance(right, dict) else [],
+                    "value_differences": value_differences(left, right, "record", 5)
+                        if isinstance(left, dict) and isinstance(right, dict) else []})
+        else:
+            result["exact_records"] += 1
+    result["status"] = "PASSED" if result["differing_records"] == 0 and result["reference_records"] == result["portable_records"] else "FAILED"
+    return result
+
+
+def nominal_zero_diagnostic(reference, portable):
+    baseline = (row for row in reference_records(reference) if row.get("kind") == "state")
+    candidate = (row for row in records(portable, allow_tagged_nonfinite=True)
+                 if row.get("kind") == "state")
+    result = {"status": "PROSPECTIVE_EXACT_ZERO", "steps": 0,
+              "checked_values": 0, "failed_values": 0, "first_failures": []}
+    def values(value):
+        return value if isinstance(value, list) else [value]
+    for left, right in zip_longest(baseline, candidate):
+        if left is None or right is None or left.get("step") != right.get("step"):
+            raise Rejected("nominal zero diagnostic has missing or reordered states")
+        result["steps"] += 1
+        left_bodies = left["state"]["bodies"]
+        right_bodies = right["frozenState"]["bodies"]
+        if len(left_bodies) != len(right_bodies):
+            raise Rejected("nominal zero diagnostic body count differs")
+        for index, (a, b) in enumerate(zip(left_bodies, right_bodies)):
+            for field in NOMINAL_ZERO_FIELDS:
+                for side, body in (("baseline", a), ("portable", b)):
+                    for value in values(body[field]):
+                        result["checked_values"] += 1
+                        if not exact(value, 0.0):
+                            result["failed_values"] += 1
+                            if len(result["first_failures"]) < 20:
+                                result["first_failures"].append({"step": left["step"],
+                                    "body": index, "field": field, "side": side,
+                                    "value": value})
+    if not result["steps"] or result["failed_values"]:
+        result["status"] = "FAILED"
+    return result
+
+
 def reference_records(path):
     for _, value in approved.records(path):
         yield value
@@ -149,13 +249,66 @@ def portable_case_id(fixture_key):
 
 
 def strict_comparison(fixture, reference, portable):
+    return compare_stream(fixture, reference_records(reference),
+                          records(portable, allow_tagged_nonfinite=True))
+
+
+def projected_records(portable):
+    grouping = None
+    for row in records(portable, allow_tagged_nonfinite=True):
+        kind = row.get("kind")
+        if kind == "inputs":
+            frozen = row.get("frozenInput")
+            if not isinstance(frozen, dict):
+                raise Rejected("frozen input projection is absent")
+            grouping = frozen.get("grouping")
+            yield frozen
+        elif kind == "event":
+            frozen = row.get("frozenEvent")
+            if not isinstance(frozen, dict):
+                raise Rejected("frozen event projection is absent")
+            yield frozen
+        elif kind == "action":
+            frozen = row.get("frozenRecords")
+            if not isinstance(frozen, list) or not frozen:
+                raise Rejected("frozen action projection is absent")
+            yield from frozen
+        elif kind == "instrumented-callback":
+            frozen = row.get("frozenRecord")
+            if not isinstance(frozen, dict):
+                raise Rejected("frozen instrumented callback projection is absent")
+            yield frozen
+        elif kind == "state":
+            frozen = row.get("frozenState")
+            if not isinstance(frozen, dict):
+                raise Rejected("frozen state projection is absent")
+            result = {"kind": "state", "step": row["step"], "state": frozen}
+            if grouping:
+                group = grouping["innerPerOuter"]
+                result["outerStep"] = (row["step"] - 1) // group + 1
+                result["innerWithinOuter"] = (row["step"] - 1) % group + 1
+            yield result
+        elif kind == "endpoint":
+            if not grouping:
+                raise Rejected("unexpected frozen outer endpoint")
+            yield {"kind": "outer-endpoint", "step": row["step"],
+                   "outerStep": row["step"] // grouping["innerPerOuter"],
+                   "state": row["frozenState"]}
+        elif kind != "case-end":
+            raise Rejected(f"unknown portable record kind: {kind}")
+
+
+def projected_comparison(fixture, reference, portable):
+    return compare_stream(fixture, reference_records(reference), projected_records(portable))
+
+
+def compare_stream(fixture, reference, candidate):
     result = {"status": "PASSED", "records": 0, "numeric_checks": 0,
               "exact_numeric_checks": 0, "derived_checks": 0,
               "unpassed_channels": set()}
     sentinel = object()
     try:
-        for left, right in zip_longest(reference_records(reference),
-                                       records(portable, allow_tagged_nonfinite=True),
+        for left, right in zip_longest(reference, candidate,
                                        fillvalue=sentinel):
             if left is sentinel or right is sentinel:
                 raise Rejected("frozen record count differs")
@@ -199,7 +352,12 @@ def diagnostic(fixture_key, reference, portable):
     if hashlib.sha256(first.rstrip(b"\n")).hexdigest() != fixture["reference"]["input_sha256"]:
         raise Rejected("frozen input line SHA-256 differs")
     strict = strict_comparison(approved_fixture, reference, portable)
+    projected = projected_comparison(approved_fixture, reference, portable)
     step_events = step_event_diagnostic(reference, portable)
+    frozen_events = frozen_event_diagnostic(reference, portable)
+    auxiliary = auxiliary_record_diagnostic(reference, portable)
+    nominal_zero = (nominal_zero_diagnostic(reference, portable)
+                    if fixture_key == "nominal-free-motion" else None)
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
     port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
@@ -307,7 +465,11 @@ def diagnostic(fixture_key, reference, portable):
             "frozen_input_projection": frozen_input_projection,
             "frozen_configuration_projection": configuration,
             "strict_approved_comparison": strict,
+            "projected_approved_comparison": projected,
             "step_event_projection": step_events,
+            "frozen_event_projection": frozen_events,
+            "auxiliary_record_projection": auxiliary,
+            "nominal_zero_invariant": nominal_zero,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,
             "event_records": events, "first_differences": first_differences,

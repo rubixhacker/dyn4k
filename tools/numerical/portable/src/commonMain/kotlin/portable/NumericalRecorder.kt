@@ -27,8 +27,12 @@ import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Rectangle
 import org.dyn4j.world.ContactCollisionData
+import org.dyn4j.world.BroadphaseCollisionData
+import org.dyn4j.world.NarrowphaseCollisionData
+import org.dyn4j.world.ManifoldCollisionData
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
+import org.dyn4j.world.listener.CollisionListener
 import org.dyn4j.world.listener.ContactListener
 import org.dyn4j.world.listener.StepListener
 import org.dyn4j.world.listener.TimeOfImpactListener
@@ -66,12 +70,20 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         val sums = MutableList(bodies.size) { 0.0 }
         var step = spec.startStep
         var order = 0
+        var frozenOrder = 0
+        var precedingSecondAsleep = true
         var events = 0
         var endpoints = 0
-        fun event(name: String, payload: Any?, time: TimeStep? = null) {
-            val frozenEvent = if (frozen && name.startsWith("step."))
-                mapOf("frozenEvent" to FrozenEvent.step(spec, name, step, order, time))
-                else emptyMap()
+        fun event(name: String, payload: Any?, time: TimeStep? = null,
+                  projection: ((Int) -> Map<String, Any?>)? = null) {
+            val frozenEvent = if (frozen) {
+                val value = if (name.startsWith("step."))
+                    FrozenEvent.step(spec, name, step, frozenOrder, time)
+                    else projection?.invoke(frozenOrder)
+                        ?: error("frozen callback has no projection: $name")
+                frozenOrder++
+                mapOf("frozenEvent" to value)
+            } else emptyMap()
             line(mapOf("kind" to "event", "id" to spec.id, "step" to step,
                 "order" to order++, "name" to name, "payload" to payload) + frozenEvent)
             events++
@@ -86,30 +98,72 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     "normalImpulse" to (contact as? SolvedContact)?.getNormalImpulse(),
                     "tangentialImpulse" to (contact as? SolvedContact)?.getTangentialImpulse(),
                     "solved" to (contact as? SolvedContact)?.isSolved())
-            override fun begin(collision: ContactCollisionData<Body>?, contact: Contact?) = event("contact.begin", detail(collision, contact))
+            override fun begin(collision: ContactCollisionData<Body>?, contact: Contact?) =
+                event("contact.begin", detail(collision, contact), projection = { position ->
+                    FrozenEvent.contactEvent("begin", step, position, collision, listOf(contact), bodies) })
             override fun persist(collision: ContactCollisionData<Body>?, oldContact: Contact?, newContact: Contact?) =
-                event("contact.persist", mapOf("old" to detail(collision, oldContact), "new" to detail(collision, newContact)))
-            override fun end(collision: ContactCollisionData<Body>?, contact: Contact?) = event("contact.end", detail(collision, contact))
-            override fun destroyed(collision: ContactCollisionData<Body>?, contact: Contact?) = event("contact.destroyed", detail(collision, contact))
-            override fun collision(collision: ContactCollisionData<Body>?) = event("contact.collision", collision?.getPenetration()?.getDepth())
-            override fun preSolve(collision: ContactCollisionData<Body>?, contact: Contact?) = event("contact.preSolve", detail(collision, contact))
-            override fun postSolve(collision: ContactCollisionData<Body>?, contact: SolvedContact?) = event("contact.postSolve", detail(collision, contact))
+                event("contact.persist", mapOf("old" to detail(collision, oldContact), "new" to detail(collision, newContact)),
+                    projection = { position -> FrozenEvent.contactEvent("persist", step, position,
+                        collision, listOf(oldContact, newContact), bodies) })
+            override fun end(collision: ContactCollisionData<Body>?, contact: Contact?) =
+                event("contact.end", detail(collision, contact), projection = { position ->
+                    FrozenEvent.contactEvent("end", step, position, collision, listOf(contact), bodies) })
+            override fun destroyed(collision: ContactCollisionData<Body>?, contact: Contact?) =
+                event("contact.destroyed", detail(collision, contact), projection = { position ->
+                    FrozenEvent.contactEvent("destroyed", step, position, collision, listOf(contact), bodies) })
+            override fun collision(collision: ContactCollisionData<Body>?) =
+                event("contact.collision", collision?.getPenetration()?.getDepth(), projection = { position ->
+                    FrozenEvent.contactEvent("collision", step, position, collision, emptyList(), bodies) })
+            override fun preSolve(collision: ContactCollisionData<Body>?, contact: Contact?) =
+                event("contact.preSolve", detail(collision, contact), projection = { position ->
+                    FrozenEvent.contactEvent("preSolve", step, position, collision, listOf(contact), bodies) })
+            override fun postSolve(collision: ContactCollisionData<Body>?, contact: SolvedContact?) =
+                event("contact.postSolve", detail(collision, contact), projection = { position ->
+                    FrozenEvent.contactEvent("postSolve", step, position, collision, listOf(contact), bodies) })
+        }
+        val collisions = object : CollisionListener<Body, BodyFixture> {
+            override fun collision(collision: BroadphaseCollisionData<Body, BodyFixture>?): Boolean {
+                event("collision.broadphase", collision?.getBody1()?.let(bodies::indexOf),
+                    projection = { position -> FrozenEvent.collisionEvent("Broadphase", step,
+                        position, collision, bodies) })
+                return true
+            }
+            override fun collision(collision: NarrowphaseCollisionData<Body, BodyFixture>?): Boolean {
+                event("collision.narrowphase", collision?.getPenetration()?.getDepth(),
+                    projection = { position -> FrozenEvent.collisionEvent("Narrowphase", step,
+                        position, collision, bodies) })
+                return true
+            }
+            override fun collision(collision: ManifoldCollisionData<Body, BodyFixture>?): Boolean {
+                event("collision.manifold", collision?.getManifold()?.getPoints()?.size,
+                    projection = { position -> FrozenEvent.collisionEvent("Manifold", step,
+                        position, collision, bodies) })
+                return true
+            }
         }
         val timeOfImpact = object : TimeOfImpactListener<Body> {
             override fun collision(body1: Body?, body2: Body?): Boolean {
-                event("toi.bodies", listOf(bodies.indexOf(body1), bodies.indexOf(body2)))
+                event("toi.bodies", listOf(bodies.indexOf(body1), bodies.indexOf(body2)),
+                    projection = { position -> FrozenEvent.toiEvent(step, position,
+                        body1, null, body2, null, null, bodies) })
                 return true
             }
             override fun collision(body1: Body?, fixture1: BodyFixture?, body2: Body?, fixture2: BodyFixture?): Boolean {
-                event("toi.fixtures", listOf(bodies.indexOf(body1), body1?.getFixtures()?.indexOf(fixture1), bodies.indexOf(body2), body2?.getFixtures()?.indexOf(fixture2)))
+                event("toi.fixtures", listOf(bodies.indexOf(body1), body1?.getFixtures()?.indexOf(fixture1), bodies.indexOf(body2), body2?.getFixtures()?.indexOf(fixture2)),
+                    projection = { position -> FrozenEvent.toiEvent(step, position,
+                        body1, fixture1, body2, fixture2, null, bodies) })
                 return true
             }
             override fun collision(body1: Body?, fixture1: BodyFixture?, body2: Body?, fixture2: BodyFixture?, toi: TimeOfImpact?): Boolean {
-                event("toi.payload.fixtures", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()))
+                event("toi.payload.fixtures", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()),
+                    projection = { position -> FrozenEvent.toiEvent(step, position,
+                        body1, fixture1, body2, fixture2, toi, bodies) })
                 return true
             }
             override fun collision(body1: Body?, body2: Body?, toi: TimeOfImpact?): Boolean {
-                event("toi.payload.bodies", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()))
+                event("toi.payload.bodies", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()),
+                    projection = { position -> FrozenEvent.toiEvent(step, position,
+                        body1, null, body2, null, toi, bodies) })
                 return true
             }
         }
@@ -154,17 +208,49 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 mapOf("observations" to observe(world)))) + frozenConfiguration)
         world.addContactListener(contacts)
         world.addTimeOfImpactListener(timeOfImpact)
+        if (frozen) world.addCollisionListener(collisions)
         world.addStepListener(steps)
         try {
             for (number in 1..spec.steps) {
                 step = spec.startStep + number
                 order = 0
-                val action = before(number, world)
-                if (action != null) {
-                    line(mapOf("kind" to "action", "id" to spec.id, "step" to step,
-                        "order" to order++, "name" to action))
+                frozenOrder = 0
+                val wakeCase = frozen && (spec.id.startsWith("contacts-default-") ||
+                    spec.id.startsWith("contacts-configured-"))
+                if (wakeCase && number - 1 in 299 * spec.hz..300 * spec.hz)
+                    precedingSecondAsleep = precedingSecondAsleep && bodies.last().isAtRest()
+                val wakeStep = wakeCase && step == spec.input["actionStep"]
+                fun wakeRecord(name: String) {
+                    val state = FrozenState.capture(world, bodies, joints, sums, dt, origin,
+                        initial = true)
+                    val projection = FrozenEvent.wakeState(spec, name, step, frozenOrder++, state)
+                    line(mapOf("kind" to "instrumented-callback", "id" to spec.id,
+                        "step" to step, "order" to order++, "event" to name,
+                        "values" to listOf(state), "frozenRecord" to projection))
                     events++
                 }
+                if (number == 1 && spec.id in setOf("P-JINT-Weld-enabled-equal",
+                        "P-JINT-Pulley-slack-transition-main")) {
+                    val binding = FrozenEvent.experimentalBinding(spec, step, frozenOrder++)
+                    line(mapOf("kind" to "instrumented-callback", "id" to spec.id,
+                        "step" to step, "order" to order++,
+                        "event" to "experimental-input-binding",
+                        "values" to binding["values"], "frozenRecord" to binding))
+                    events++
+                }
+                if (wakeStep) wakeRecord("before-wake")
+                val sleepingBefore = bodies.last().isAtRest()
+                val action = before(number, world)
+                if (action != null) {
+                    val frozenActions = if (frozen) FrozenEvent.actions(spec, step,
+                        frozenOrder, sleepingBefore, precedingSecondAsleep) else emptyList()
+                    frozenOrder += frozenActions.size
+                    line(mapOf("kind" to "action", "id" to spec.id, "step" to step,
+                        "order" to order++, "name" to action) +
+                        if (frozen) mapOf("frozenRecords" to frozenActions) else emptyMap())
+                    events++
+                }
+                if (wakeStep) wakeRecord("after-wake")
                 world.step(1, dt)
                 for (index in bodies.indices) {
                     val angle = bodies[index].getTransform().getRotationAngle()
@@ -191,6 +277,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         } finally {
             world.removeContactListener(contacts)
             world.removeTimeOfImpactListener(timeOfImpact)
+            if (frozen) world.removeCollisionListener(collisions)
             world.removeStepListener(steps)
         }
     }

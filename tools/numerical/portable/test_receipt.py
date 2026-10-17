@@ -77,6 +77,12 @@ class ReceiptContractTest(unittest.TestCase):
             self.assertRaises(receipt.Rejected, receipt.inspect,
                               self.write(folder, "altered-envelope.jsonl", rows), case)
 
+    def test_required_instrumented_callback_cannot_be_omitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write(Path(directory), "missing-binding.jsonl", sample())
+            cases = [{**CASES[0], "expected_instrumented_callbacks": [1]}]
+            self.assertRaises(receipt.Rejected, receipt.inspect, path, cases)
+
     def test_required_input_setup_cannot_be_omitted_or_relabelled(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self.write(Path(tmp), "trace.jsonl", sample())

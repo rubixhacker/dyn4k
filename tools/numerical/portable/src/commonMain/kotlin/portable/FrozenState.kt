@@ -54,7 +54,7 @@ internal object FrozenState {
         else -> error("unsupported frozen fixture shape: ${value::class}")
     }
 
-    private fun fixture(value: BodyFixture, id: String): Map<String, Any?> {
+    fun fixture(value: BodyFixture, id: String): Map<String, Any?> {
         require(value.getFilter() === Filter.DEFAULT_FILTER)
         return mapOf("type" to "org.dyn4j.dynamics.BodyFixture", "id" to id,
             "getDensity" to value.getDensity(), "getFriction" to value.getFriction(),
