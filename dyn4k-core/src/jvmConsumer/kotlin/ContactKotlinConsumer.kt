@@ -39,6 +39,6 @@ object ContactKotlinConsumer {
             override fun end(contact: Contact) {}
         })
         check(began == 1 && contacts.size == 1 && contacts[0].getDepth() == 0.1)
-        println("contact-kotlin-consumer: 3 checks passed")
+        println("contact-kotlin-consumer: passed")
     }
 }

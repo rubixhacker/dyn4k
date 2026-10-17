@@ -79,6 +79,20 @@ public final class ContactConsumer {
         constraint.update(manifold, settings, handler);
         require(callbacks[0] == 1 && liveContacts.size() == 1);
         require(constraint.getTangentSpeed() == 0.25);
+        boolean rejectedMutation = false;
+        try {
+            liveContacts.clear();
+        } catch (UnsupportedOperationException expected) {
+            rejectedMutation = true;
+        }
+        require(rejectedMutation && liveContacts.size() == 1);
+        boolean rejectedFriction = false;
+        try {
+            constraint.setFriction(-1.0);
+        } catch (org.dyn4j.exception.ValueOutOfRangeException expected) {
+            rejectedFriction = true;
+        }
+        require(rejectedFriction);
         CountingSolver solver = new CountingSolver();
         List<ContactConstraint<Body>> constraints = Collections.singletonList(constraint);
         TimeStep step = new TimeStep(settings.getStepFrequency());
@@ -111,6 +125,43 @@ public final class ContactConsumer {
         new ForceCollisionTimeOfImpactSolver<Body>().solve(moving, fixed, toi, settings);
         require(moving.getTransform().getTranslationX() == 0.2);
         require(fixed.getTransform().getTranslationX() == 2.5);
-        System.out.println("contact-consumer: 13 checks passed");
+
+        Body block1 = new Body();
+        Body block2 = new Body();
+        BodyFixture blockFixture1 = block1.addFixture(new Circle(0.5));
+        BodyFixture blockFixture2 = block2.addFixture(new Circle(0.5));
+        block1.setMass(MassType.NORMAL);
+        block2.setMass(MassType.NORMAL);
+        block1.setLinearVelocity(1.0, 0.0);
+        block2.translate(0.9, 0.0);
+        CollisionPair<CollisionItem<Body, BodyFixture>> blockPair =
+            new BasicCollisionPair<CollisionItem<Body, BodyFixture>>(
+                new BasicCollisionItem<Body, BodyFixture>(block1, blockFixture1),
+                new BasicCollisionItem<Body, BodyFixture>(block2, blockFixture2));
+        ContactConstraint<Body> blockConstraint = new ContactConstraint<Body>(blockPair);
+        Manifold blockManifold = new Manifold();
+        blockManifold.setNormal(new Vector2(-1.0, 0.0));
+        for (double y : new double[] {-0.25, 0.25}) {
+            ManifoldPoint blockPoint = new ManifoldPoint(ManifoldPointId.DISTANCE);
+            blockPoint.setPoint(new Vector2(0.45, y));
+            blockPoint.setDepth(0.1);
+            blockManifold.getPoints().add(blockPoint);
+        }
+        blockConstraint.update(blockManifold, settings, handler);
+        List<ContactConstraint<Body>> blockConstraints = Collections.singletonList(blockConstraint);
+        SequentialImpulses<Body> blockSolver = new SequentialImpulses<Body>();
+        blockSolver.initialize(blockConstraints, step, settings);
+        blockSolver.solveVelocityContraints(blockConstraints, step, settings);
+        blockSolver.solvePositionContraints(blockConstraints, step, settings);
+        require(blockConstraint.getContacts().size() == 2);
+        require(blockConstraint.getContacts().get(0).isSolved());
+        require(blockConstraint.getContacts().get(1).isSolved());
+        System.out.println("contact-block: " + Double.toHexString(block1.getLinearVelocity().x) + " " +
+            Double.toHexString(block2.getLinearVelocity().x) + " " +
+            Double.toHexString(blockConstraint.getContacts().get(0).getNormalImpulse()) + " " +
+            Double.toHexString(blockConstraint.getContacts().get(1).getNormalImpulse()) + " " +
+            Double.toHexString(block1.getTransform().getTranslationX()) + " " +
+            Double.toHexString(block2.getTransform().getTranslationX()));
+        System.out.println("contact-consumer: passed");
     }
 }
