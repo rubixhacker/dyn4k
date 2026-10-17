@@ -200,6 +200,33 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "dirty"):
                 qualify.require_clean_checkout(repository, sha)
 
+    def test_untracked_inputs_reject_matching_head_but_generated_outputs_do_not(self):
+        with tempfile.TemporaryDirectory() as root:
+            repository = Path(root)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            (repository / ".gitignore").write_text("build/\nlocal.properties\n")
+            subprocess.run(["git", "-C", str(repository), "add", ".gitignore"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm", "base"], check=True)
+            sha = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            for generated in ("build/generated/Unexpected.kt",
+                              "tools/qualification/__pycache__/qualify.pyc",
+                              "kotlin-js-store/yarn.lock"):
+                path = repository / generated
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("generated\n")
+            qualify.require_clean_checkout(repository, sha)
+            for relevant in ("src/commonMain/kotlin/Unexpected.kt",
+                             "extra.gradle.kts", "local.properties"):
+                path = repository / relevant
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("input\n")
+                with self.assertRaisesRegex(ValueError, "dirty|untracked"):
+                    qualify.require_clean_checkout(repository, sha)
+                path.unlink()
+            qualify.require_clean_checkout(repository, sha)
+
     def test_forged_audit_cannot_replace_staged_files(self):
         with tempfile.TemporaryDirectory() as root:
             fake = {"candidate_sha": "a" * 40, "status": "PASSED", "artifacts": []}

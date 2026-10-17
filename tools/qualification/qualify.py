@@ -257,6 +257,15 @@ def require_clean_checkout(repository, candidate_sha):
         text=True)
     if tracked.strip():
         raise ValueError("dirty tracked checkout invalidates candidate evidence: " + tracked.strip())
+    untracked = subprocess.check_output(
+        ["git", "-C", str(repository), "ls-files", "--others", "-z"])
+    generated_directories = {b"build", b".gradle", b".kotlin", b"__pycache__"}
+    relevant = [path for path in untracked.split(b"\0") if path
+                and path != b"kotlin-js-store/yarn.lock"
+                and not generated_directories.intersection(path.split(b"/"))]
+    if relevant:
+        names = ", ".join(os.fsdecode(path) for path in relevant[:5])
+        raise ValueError(f"untracked checkout inputs invalidate candidate evidence: {names}")
 
 
 def audit_staging(root, candidate_sha):
