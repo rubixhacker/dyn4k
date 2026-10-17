@@ -67,8 +67,8 @@ def provider_check(jar: Path, dependencies: list[Path], expected_sha256: str | N
     reason = ("duplicate org.dyn4j providers" if len(providers) > 1 else
               "expected org.dyn4j provider missing" if len(providers) == 0 else
               "wrong org.dyn4j provider path" if providers[0]["path"] != expected_path else
-              "expected provider SHA-256 mismatch" if expected_sha256 is not None
-              and providers[0]["sha256"] != expected_sha256 else
+              "expected provider SHA-256 required" if expected_sha256 is None else
+              "expected provider SHA-256 mismatch" if providers[0]["sha256"] != expected_sha256 else
               "single org.dyn4j provider")
     return {"passed": reason == "single org.dyn4j provider", "reason": reason,
             "expected_path": expected_path, "expected_sha256": expected_sha256,
@@ -129,7 +129,7 @@ def main() -> None:
                         required=True)
     parser.add_argument("--dependency", type=Path, action="append", default=[])
     parser.add_argument("--java8-java", type=Path)
-    parser.add_argument("--expected-provider-sha256", help="SHA-256 of the staged org.dyn4j provider")
+    parser.add_argument("--expected-provider-sha256", help="required independent SHA-256 for a named-module consumer pass")
     parser.add_argument("--ledger", type=Path, default=Path("tools/compatibility/declaration-ledger.json"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()

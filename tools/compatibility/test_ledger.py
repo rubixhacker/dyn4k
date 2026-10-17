@@ -115,7 +115,8 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(observed["name"], "org.dyn4j")
         self.assertEqual(set(observed["exports"]), EXPORTS)
         self.assertTrue(observed["passed"])
-        self.assertTrue(probe(jar, "named-module-consumer")["passed"])
+        self.assertTrue(probe(jar, "named-module-consumer",
+                              expected_provider_sha256="204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e")["passed"])
 
     def test_omitted_file_declaration_and_test_fail(self):
         for section in ("production", "declarations", "tests"):

@@ -107,15 +107,30 @@ def main() -> None:
         assert_pass(args.candidate, [args.stdlib], root / "candidate", "candidate")
 
         candidate_sha256 = hashlib.sha256(args.candidate.read_bytes()).hexdigest()
-        assert_probe_rejected(args.baseline, [args.candidate, args.stdlib], None,
+        old_artifact = root / "old-artifact.jar"
+        with zipfile.ZipFile(args.candidate) as archive:
+            descriptor_bytes = archive.read("module-info.class")
+        repack(args.candidate, old_artifact, descriptor_bytes)
+        with zipfile.ZipFile(old_artifact, "a") as archive:
+            archive.writestr("META-INF/prior-artifact-fixture.txt", "older artifact fixture\n")
+        require(hashlib.sha256(old_artifact.read_bytes()).hexdigest() != candidate_sha256,
+                "old artifact fixture must differ from the staged candidate")
+        assert_probe_rejected(old_artifact, [args.stdlib], None,
+                              "expected provider SHA-256 required", "old artifact without expected SHA",
+                              [old_artifact])
+
+        assert_probe_rejected(args.baseline, [args.candidate, args.stdlib], BASELINE_SHA256,
                               "duplicate org.dyn4j providers", "baseline first dual module path",
                               [args.baseline, args.candidate])
-        assert_probe_rejected(args.candidate, [args.baseline, args.stdlib], None,
+        assert_probe_rejected(args.candidate, [args.baseline, args.stdlib], candidate_sha256,
                               "duplicate org.dyn4j providers", "candidate first dual module path",
                               [args.candidate, args.baseline])
         assert_probe_rejected(args.baseline, [], candidate_sha256,
                               "expected provider SHA-256 mismatch", "wrong staged candidate",
                               [args.baseline])
+        assert_probe_rejected(args.stdlib, [args.candidate], candidate_sha256,
+                              "wrong org.dyn4j provider path", "wrong provider path",
+                              [args.candidate])
 
         wrong_name = root / "wrong-name.jar"
         repack(args.candidate, wrong_name, None)

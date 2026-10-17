@@ -40,12 +40,15 @@ pass with either order. Run `module_probe.py` with every intended module-path
 JAR before claiming the staged provider ran. Its named-module mode rejects
 duplicate `org.dyn4j` providers before compilation and reports both resolved
 paths and SHA-256 hashes. It also checks that the sole provider is the `--jar`
-argument. Supply `--expected-provider-sha256` from the staged artifact record
-to reject a substituted JAR. An ordinary Java build does not invoke this
-check automatically. The Gradle qualification consumer has a separate
-resolved dependency-graph guard and an adverse duplicate-dependency test.
-The negative runner checks both provider orders and a baseline JAR supplied
-as the wrong staged candidate.
+argument. A named-module pass requires `--expected-provider-sha256` from an
+independent staged artifact record. Omitting it returns a nonpass result before
+compilation. Use the pinned baseline SHA for a baseline-only check. An ordinary
+Java build does not invoke this check automatically. The Gradle qualification
+consumer has a separate resolved dependency-graph guard and an adverse
+duplicate-dependency test.
+The negative runner checks both provider orders, an older JAR without an
+expected SHA, a wrong provider path, and a baseline JAR supplied as the wrong
+staged candidate.
 
 ## Reproduce
 
@@ -58,13 +61,15 @@ the JAR supplied to the probe.
 ```sh
 ./gradlew :dyn4k-core:publishJvmPublicationToStagingRepository :dyn4k:publishJvmPublicationToStagingRepository
 python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode module-descriptor
+python3 tools/compatibility/module_probe.py --jar "$BASELINE_JAR" --mode named-module-consumer --expected-provider-sha256 204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e
 python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode named-module-consumer --dependency "$KOTLIN_STDLIB_JAR" --expected-provider-sha256 "$EXPECTED_CORE_SHA256"
 python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode java8-classpath --dependency "$KOTLIN_STDLIB_JAR" --java8-java "$JAVA8_HOME/bin/java"
 python3 tools/qualification/module/negative_tests.py --candidate build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --baseline "$BASELINE_JAR" --stdlib "$KOTLIN_STDLIB_JAR" --java8 "$JAVA8_HOME/bin/java"
 ```
 
-The bounded unchanged upstream foundation suite passed 133/133 cases. The
-common suite passed 386 cases on each of six available host configurations:
+The bounded unchanged upstream foundation and geometry suites passed 133/133
+and 446/446 cases. The common suite passed 510 cases on each of six available
+host configurations:
 JVM, Linux x64, JS Node, Wasm JS Node, Wasm WASI Node, and Android host.
 Each host reported zero failures, errors, and skips. This verifies the
 publication change on those hosts. It does not execute the full 2,385-case

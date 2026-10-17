@@ -320,7 +320,8 @@ def validate_module(item: object, expected: dict, baseline: dict, root: Path,
                     invalid.append("module: Java 8 executable missing or changed")
                     continue
             try:
-                observed = module_probe.probe(jar, kind, paths, java8)
+                expected_provider_sha256 = candidate["artifact_sha256"] if kind == "named-module-consumer" else None
+                observed = module_probe.probe(jar, kind, paths, java8, expected_provider_sha256)
             except (OSError, ValueError) as error:
                 invalid.append(f"module: {kind}: probe failed: {error}")
                 continue
