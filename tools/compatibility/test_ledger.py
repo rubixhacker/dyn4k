@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -178,9 +179,9 @@ class LedgerTests(unittest.TestCase):
             report["target"] = "linuxX64"
             path.write_text(json.dumps(report))
             record["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-            valid = validate(value, self.reference, root, "a" * 40)
-            self.assertEqual(valid["invalid"], [])
-            self.assertFalse(any(item["id"] in gap and "unrun common-portable" in gap for gap in valid["gaps"]))
+            forged = validate(value, self.reference, root, "a" * 40)
+            self.assertTrue(forged["invalid"], forged)
+            self.assertTrue(any(item["id"] in gap and "unrun common-portable" in gap for gap in forged["gaps"]))
 
     def test_fabricated_passed_evidence_fails(self):
         self.check_invalid(lambda value: value["tests"][0]["evidence"].append(
@@ -196,8 +197,101 @@ class LedgerTests(unittest.TestCase):
             result = validate(broken, self.reference, root)
             self.assertTrue(result["invalid"])
 
+    def test_executed_jvm_declaration_report_passes_and_stale_report_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "p" / "A.java"
+            source.parent.mkdir()
+            source.write_text("package p; public class A { public void run() {} }\n")
+            classes = root / "classes"
+            classes.mkdir()
+            subprocess.run(["javac", "-d", str(classes), str(source)], check=True, capture_output=True)
+            artifact = root / "candidate.jar"
+            subprocess.run(["jar", "cf", str(artifact), "-C", str(classes), "."], check=True, capture_output=True)
+            expected = copy.deepcopy(self.reference)
+            expected["declarations"]["p.A|type"] = ("src/main/java/p/A.java", "public class p.A {")
+            value = copy.deepcopy(self.ledger)
+            item = value["declarations"][0]
+            item["signature"] = "public class p.A {"
+            candidate = {"identity": item["id"], "commit": "a" * 40,
+                         "artifact": "candidate.jar", "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}
+            item["candidate"] = candidate
+            observed = ledger.execution_probe.signature(item, artifact, ledger.oracle)
+            self.assertEqual(observed["actual_executed_cases"], 1)
+            self.assertIn("public class p.A", observed["raw_stdout"])
+            report = {"schema_version": 2, "probe": "javap-signature-v1", "kind": "java-signature",
+                      "target": "jvm", "baseline": expected["baseline"],
+                      "candidate_identity": candidate["identity"], "candidate_commit": candidate["commit"],
+                      "artifact_sha256": candidate["artifact_sha256"],
+                      "source_sha256": expected["production"][item["source_file"]],
+                      "passed_identities": [item["id"]], "execution": observed, **observed}
+            path = root / "report.json"
+            path.write_text(json.dumps(report))
+            item["evidence"] = [{"kind": "java-signature", "target": "jvm", "status": "passed",
+                                 "report": "report.json", "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}]
+            valid = validate(value, expected, root, "a" * 40)
+            self.assertEqual(valid["invalid"], [], valid)
+            self.assertFalse(any(item["id"] in gap and "unrun java-signature" in gap for gap in valid["gaps"]))
+            for field, changed in (("output", observed["output"] + "FORGED GREEN\n"),
+                                   ("command", ["java", "Runner"]),
+                                   ("actual_executed_cases", 2), ("expected_cases", 2),
+                                   ("expected_cases", True),
+                                   ("execution", {**observed, "expected_cases": True}),
+                                   ("failures", 1), ("ignored", 1),
+                                   ("raw_stdout", "fabricated output")):
+                with self.subTest(field=field):
+                    stale_report = {**report, field: changed}
+                    path.write_text(json.dumps(stale_report))
+                    item["evidence"][0]["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    stale = validate(value, expected, root, "a" * 40)
+                    self.assertTrue(any("differs from executed probe" in error for error in stale["invalid"]), stale)
+            report["source_sha256"] = sha("stale source")
+            path.write_text(json.dumps(report))
+            item["evidence"][0]["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            stale_source = validate(value, expected, root, "a" * 40)
+            self.assertTrue(any("execution identity" in error for error in stale_source["invalid"]), stale_source)
+
+    def test_fabricated_generic_green_reports_have_no_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "candidate.jar"
+            artifact.write_bytes(b"candidate")
+            for section, kind, target in (("declarations", "java-signature", "jvm"),
+                                          ("declarations", "common-portable", "linuxX64"),
+                                          ("tests", "java-test", "jvm")):
+                with self.subTest(kind=kind):
+                    value = copy.deepcopy(self.ledger)
+                    item = value[section][0]
+                    item["candidate"] = {"identity": item["id"], "commit": "a" * 40,
+                                         "artifact": "candidate.jar",
+                                         "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}
+                    source = item["source_file"] if section == "declarations" else item["id"]
+                    source_hash = self.reference["production" if section == "declarations" else "tests"][source]
+                    report = {"kind": kind, "target": target, "baseline": self.reference["baseline"],
+                              "candidate_identity": item["id"], "candidate_commit": "a" * 40,
+                              "artifact_sha256": item["candidate"]["artifact_sha256"],
+                              "source_sha256": source_hash, "passed_identities": [item["id"]],
+                              "command": ["java", "Runner"], "expected_cases": 1,
+                              "actual_executed_cases": 1, "failures": 0, "ignored": 0,
+                              "process_exit_code": 0,
+                              "output": "ACTUAL_TESTS=1\nFAILURES=0\nIGNORED=0\n"}
+                    path = root / "report.json"
+                    path.write_text(json.dumps(report))
+                    item["evidence"] = [{"kind": kind, "target": target, "status": "passed",
+                                         "report": "report.json", "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}]
+                    result = validate(value, self.reference, root, "a" * 40)
+                    self.assertTrue(result["invalid"], result)
+                    self.assertTrue(any(item["id"] in gap and f"unrun {kind}" in gap for gap in result["gaps"]))
+                    if kind != "java-signature":
+                        report.update(schema_version=2, probe="javap-signature-v1", execution={})
+                        path.write_text(json.dumps(report))
+                        item["evidence"][0]["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                        unsupported = validate(value, self.reference, root, "a" * 40)
+                        self.assertTrue(any("no allowlisted executable probe" in error
+                                            for error in unsupported["invalid"]), unsupported)
+
     def test_ignored_and_unapproved_exception_remain_unpassed(self):
-        for status in ("ignored", "unapproved_exception", "unrun"):
+        for status in ("missing", "ignored", "unapproved_exception", "unrun"):
             with self.subTest(status=status):
                 value = copy.deepcopy(self.ledger)
                 value["tests"][0]["evidence"] = [{"kind": "java-test", "status": status}]
@@ -233,8 +327,8 @@ class LedgerTests(unittest.TestCase):
             item["evidence"] = [{"kind": "java-test", "target": "jvm", "status": "passed", "report": "report.json",
                                  "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}]
             valid = validate(value, self.reference, root, "a" * 40)
-            self.assertEqual(valid["invalid"], [])
-            self.assertFalse(any(item["id"] in gap and "unrun java-test" in gap for gap in valid["gaps"]))
+            self.assertTrue(valid["invalid"], valid)
+            self.assertTrue(any(item["id"] in gap and "unrun java-test" in gap for gap in valid["gaps"]))
             report["output"] = "ACTUAL_TESTS=1\nFAILURES=0\nIGNORED=1\n"
             path.write_text(json.dumps(report))
             item["evidence"][0]["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()

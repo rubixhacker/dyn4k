@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baseline"))
 import verify as oracle
 import module_probe
+import execution_probe
 
 
 MODULE_SOURCE = "src/main/java/module-info.java"
@@ -176,27 +177,32 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
     target = evidence.get("target")
     if not isinstance(kind, str) or not isinstance(target, str) or not target:
         return "passed evidence kind or target is missing"
-    required = (report.get("baseline") == baseline and report.get("candidate_identity") == candidate.get("identity")
+    required = (report.get("schema_version") == 2
+                and report.get("baseline") == baseline and report.get("candidate_identity") == candidate.get("identity")
                 and report.get("kind") == kind and report.get("target") == target
                 and report.get("candidate_commit") == candidate.get("commit")
                 and report.get("artifact_sha256") == candidate.get("artifact_sha256")
                 and report.get("source_sha256") == source_sha256
-                and isinstance(report.get("passed_identities"), list)
-                and item["id"] in report["passed_identities"]
-                and isinstance(report.get("command"), list) and bool(report["command"])
-                and all(isinstance(part, str) and part for part in report["command"])
-                and type(report.get("expected_cases")) is int and report["expected_cases"] > 0
-                and type(report.get("actual_executed_cases")) is int
-                and report["actual_executed_cases"] == report["expected_cases"]
-                and type(report.get("failures")) is int and report["failures"] == 0
-                and type(report.get("ignored")) is int and report["ignored"] == 0
-                and type(report.get("process_exit_code")) is int and report["process_exit_code"] == 0
-                and isinstance(report.get("output"), str)
-                and oracle.result_field(report["output"], "ACTUAL_TESTS") == report["actual_executed_cases"]
-                and oracle.result_field(report["output"], "FAILURES") == 0
-                and oracle.result_field(report["output"], "IGNORED") == 0)
+                and report.get("passed_identities") == [item["id"]])
     if not required:
         return "passed evidence report lacks matching execution identity or complete results"
+    if (kind, target, report.get("probe")) != ("java-signature", "jvm", "javap-signature-v1"):
+        return "passed evidence has no allowlisted executable probe for kind and target"
+    if candidate.get("identity") != item["id"]:
+        return "passed evidence candidate declaration identity differs"
+    try:
+        observed = execution_probe.signature(item, root / candidate["artifact"], oracle)
+    except (OSError, ValueError, subprocess.TimeoutExpired, KeyError, TypeError) as error:
+        return f"passed evidence probe failed: {error}"
+    fields = ("command", "expected_cases", "actual_executed_cases", "failures", "ignored",
+              "process_exit_code", "raw_stdout", "raw_stderr", "output")
+    if (json.dumps(report.get("execution"), sort_keys=True) != json.dumps(observed, sort_keys=True)
+            or any(type(report.get(field)) is not type(observed[field])
+                   or report.get(field) != observed[field] for field in fields)
+            or observed["actual_executed_cases"] != observed["expected_cases"]
+            or observed["failures"] != 0 or observed["ignored"] != 0
+            or observed["process_exit_code"] != 0):
+        return "passed evidence differs from executed probe"
     return None
 
 
