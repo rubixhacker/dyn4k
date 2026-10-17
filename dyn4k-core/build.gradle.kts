@@ -64,7 +64,12 @@ val jvmApi = mapOf(
         publicFields = setOf("E"), staticMethods = setOf("compute")
     ),
     "org/dyn4j/geometry/Vector2" to JvmApiSpec(
-        publicFields = setOf("x", "y", "X_AXIS", "Y_AXIS", "INV_X_AXIS", "INV_Y_AXIS"),
+        publicFields = setOf("x", "y"),
+        packageFields = setOf("X_AXIS", "Y_AXIS", "INV_X_AXIS", "INV_Y_AXIS"),
+        packageMethodSignatures = setOf(
+            "rotate(DD)Lorg/dyn4j/geometry/Vector2;",
+            "rotate(DDDD)Lorg/dyn4j/geometry/Vector2;"
+        ),
         staticMethods = setOf("create", "tripleProduct")
     ),
     "org/dyn4j/geometry/Vector3" to JvmApiSpec(
@@ -72,6 +77,13 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Rotation" to JvmApiSpec(
         protectedFields = setOf("cost", "sint"),
+        packageMethodSignatures = setOf(
+            "rotate45Helper(DD)Lorg/dyn4j/geometry/Rotation;",
+            "getRotated45Helper(DD)Lorg/dyn4j/geometry/Rotation;",
+            "rotate(DD)Lorg/dyn4j/geometry/Rotation;",
+            "dot(Lorg/dyn4j/geometry/Vector2;)D",
+            "cross(Lorg/dyn4j/geometry/Vector2;)D"
+        ),
         staticMethods = setOf(
             "of", "ofDegrees", "rotation0", "rotation45", "rotation90", "rotation135",
             "rotation180", "rotation225", "rotation270", "rotation315",
@@ -85,7 +97,8 @@ val jvmApi = mapOf(
         publicFields = setOf("m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22")
     ),
     "org/dyn4j/geometry/Transform" to JvmApiSpec(
-        protectedFields = setOf("cost", "sint", "x", "y")
+        protectedFields = setOf("cost", "sint", "x", "y"),
+        packageMethodSignatures = setOf("rotate(DD)V", "rotate(DDDD)V")
     ),
     "org/dyn4j/geometry/AABB" to JvmApiSpec(
         protectedFields = setOf("minX", "minY", "maxX", "maxY"),
