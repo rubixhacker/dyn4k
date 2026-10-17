@@ -1,0 +1,61 @@
+{
+  "absent_classpath_paths": [
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/compatibility",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/compatibility",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/main"
+  ],
+  "entrypoints": {
+    "compatibility": "BaselinePilot",
+    "direct_kotlin": "performance.DirectPilotKt"
+  },
+  "java": "/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2/bin/java",
+  "java_flags": [
+    "-Xms256m",
+    "-Xmx2g",
+    "-XX:+UseG1GC"
+  ],
+  "java_version": "openjdk version \"21.0.9\" 2025-10-21\nOpenJDK Runtime Environment JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147)\nOpenJDK 64-Bit Server VM JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147, mixed mode, sharing)",
+  "paths": {
+    "compatibility": [
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+    ],
+    "direct_kotlin": [
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/main",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/main",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/main",
+      "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar",
+      "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+    ]
+  },
+  "qualification": "unpassed",
+  "schema": 1,
+  "sha256": {
+    "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar": "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f",
+    "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+    "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+    "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar": "7e32875e21cac6bf1dfdc09627f0db2b31211c706054865db6d24dc5ef638647",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build.gradle.kts": "bde3f84944a15518e047b4d558ddc6ee8ac9c147d4ef2084b6b2090775426e35",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/compatibility": "f1d36679cd5701d56431782d737ecf8b477590d1e43b49b70300d451e0897909",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/main": "0986ebfe5dd3a389132c5d224b86f311354c09b2a057c1db7596cbbc0ce099d0",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/main": "27931623c0f33d5c968a7f6434573c38434cc61e3f86dd51f2948ac88ce56556",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/java/performance/ProviderIdentity.java": "93e6721d07d1bad849aaf667b4a415c7fef55fc199578989728c1039f0360ab4",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/kotlin/performance/DirectFixture.kt": "599874460f38103e32bcd94d1e4f96fb5bd576cc345ca176e768ab55f6d755ad",
+    "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/kotlin/performance/DirectPilot.kt": "40d49b42558b2249e8d30dd153ecf982f2f34b705a5864fcfbf608cf411b568f",
+    "/var/home/stewart/Workspace/dyn4k-performance/docs/research/performance-manifest-v1.json": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+    "/var/home/stewart/Workspace/dyn4k-performance/tools/performance/BaselinePilot.java": "59acd426bf0738ac12aed4ccc4a8e568cbd5eea29389d8274998b8ddb7b07a3a",
+    "/var/home/stewart/Workspace/dyn4k-performance/tools/performance/candidate_runner.py": "648468c60b644fe8c1640672193d2fb26a6f9c9fcc00b0b5c7fb5cb25acecce5"
+  },
+  "source_commit": "c2b4372c754c9b1d9aeec5c409443134c9169aa3",
+  "source_trees": {
+    "dyn4k": "4dd17dd420b976fe3263c9f3aa728107ab0965fd",
+    "dyn4k-core": "ae3bd7d8d720220f94a47c4cc412ef5b672dd774"
+  },
+  "staging_repository": "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository"
+}

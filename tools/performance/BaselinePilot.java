@@ -30,6 +30,7 @@ public final class BaselinePilot {
     private final String variant;
     private final int count;
     private final int hz;
+    private int nextCcdBodyIndex;
     private long contactBegins;
     private long contactEnds;
     private long toiEvents;
@@ -61,8 +62,24 @@ public final class BaselinePilot {
         if (world.getBodyCount() < count) throw new IllegalStateException("incomplete fixture");
     }
 
-    private static Body circle(double x, double y) {
-        Body body = new Body();
+    private static final class CcdBody extends Body {
+        private final int creationIndex;
+
+        private CcdBody(int creationIndex) {
+            this.creationIndex = creationIndex;
+        }
+
+        @Override public int hashCode() {
+            return creationIndex;
+        }
+    }
+
+    private Body newBody() {
+        return family.equals("ccd") ? new CcdBody(nextCcdBodyIndex++) : new Body();
+    }
+
+    private Body circle(double x, double y) {
+        Body body = newBody();
         BodyFixture fixture = body.addFixture(Geometry.createCircle(0.25));
         fixture.setDensity(1.0);
         fixture.setFriction(0.5);
@@ -73,7 +90,7 @@ public final class BaselinePilot {
     }
 
     private Body staticRectangle(double x, double y, double width, double height) {
-        Body body = new Body();
+        Body body = newBody();
         BodyFixture fixture = body.addFixture(Geometry.createRectangle(width, height));
         fixture.setDensity(1.0);
         fixture.setFriction(0.5);
@@ -122,6 +139,16 @@ public final class BaselinePilot {
             body.setBullet(true);
             body.setLinearVelocity(i % 2 == 0 ? 18.0 : -18.0, 0.0);
             addDynamic(body);
+        }
+    }
+
+    private void printCcdIdentity() {
+        if (!family.equals("ccd")) throw new IllegalArgumentException("CCD identity requires CCD fixture");
+        System.out.println("creation_index,hash_code,world_center_x,world_center_y,bullet");
+        for (int index = 0; index < world.getBodyCount(); index++) {
+            Body body = world.getBody(index);
+            Vector2 center = body.getWorldCenter();
+            System.out.println(index + "," + body.hashCode() + "," + center.x + "," + center.y + "," + body.isBullet());
         }
     }
 
@@ -327,13 +354,7 @@ public final class BaselinePilot {
         }
     }
 
-    private void run(int steps, String mode, int warmup, long rssBase) {
-        if (!mode.equals("timing") && !mode.equals("allocation") && !mode.equals("memory"))
-            throw new IllegalArgumentException("unknown mode: " + mode);
-        ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        boolean allocation = !mode.equals("timing") && bean.isThreadAllocatedMemorySupported();
-        if (allocation) bean.setThreadAllocatedMemoryEnabled(true);
-        long thread = Thread.currentThread().getId();
+    private void warm(int warmup, String mode) {
         System.err.println("warmup_step,elapsed_ns,rss_bytes");
         long warmStart = System.nanoTime();
         for (int i = 0; i < warmup; i++) {
@@ -346,6 +367,15 @@ public final class BaselinePilot {
             long warmElapsed = System.nanoTime() - begin;
             System.err.println(i + "," + warmElapsed + "," + (mode.equals("memory") ? rssBytes() : -1));
         }
+    }
+
+    private static void run(String family, String variant, int count, int hz, int steps, String mode, long rssBase) {
+        if (!mode.equals("timing") && !mode.equals("allocation") && !mode.equals("memory"))
+            throw new IllegalArgumentException("unknown mode: " + mode);
+        ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        boolean allocation = !mode.equals("timing") && bean.isThreadAllocatedMemorySupported();
+        if (allocation) bean.setThreadAllocatedMemoryEnabled(true);
+        long thread = Thread.currentThread().getId();
         BaselinePilot measured = new BaselinePilot(family, variant, count, hz);
         if (mode.equals("memory")) {
             long beforeCollections = collections();
@@ -403,6 +433,7 @@ public final class BaselinePilot {
             }
             System.out.println(i + "," + elapsed + "," + mutation + "," + lateness + "," + allocated + "," + heap + "," + rss + "," + delta + "," + measured.world.getBodyCount() + "," + measured.world.getJointCount() + "," + awake + "," + linearSpeed + "," + angularSpeed + "," + measured.contactBegins + "," + measured.contactEnds + "," + measured.toiEvents + "," + candidates + "," + activePairs + "," + activePoints);
         }
+        java.lang.ref.Reference.reachabilityFence(measured);
     }
 
     public static void main(String[] args) {
@@ -428,7 +459,10 @@ public final class BaselinePilot {
         if (!size.equals("small") && !size.equals("medium") && !size.equals("stress")) throw new IllegalArgumentException("unknown size");
         if (family.equals("lifecycle") && !List.of("settle", "wake", "replace").contains(variant)) throw new IllegalArgumentException("unknown lifecycle variant");
         if (!family.equals("joint") && !family.equals("lifecycle") && !variant.equals("default")) throw new IllegalArgumentException("unknown variant");
-        if (mode.equals("plateau")) {
+        if (mode.equals("fixture_identity")) {
+            if (steps != 1 || warmup != 0) throw new IllegalArgumentException("identity requires one step and no warm-up");
+            new BaselinePilot(family, variant, count, hz).printCcdIdentity();
+        } else if (mode.equals("plateau")) {
             try {
                 plateau(family, variant, count, hz, warmup);
             } catch (InterruptedException exc) {
@@ -447,7 +481,9 @@ public final class BaselinePilot {
             System.err.println("#construction_allocated_bytes=" + (allocation ? bean.getThreadAllocatedBytes(Thread.currentThread().getId()) - beforeAllocation : -1));
             System.err.println("#rss_empty_harness_bytes=" + rssBase);
             System.err.println("#rss_after_construction_bytes=" + rssBytes());
-            fixture.run(steps, mode, warmup, rssBase);
+            fixture.warm(warmup, mode);
+            fixture = null;
+            run(family, variant, count, hz, steps, mode, rssBase);
         }
     }
 }

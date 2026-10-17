@@ -1,0 +1,159 @@
+{
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "candidate_identity": {
+    "absent_classpath_paths": [
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/main"
+    ],
+    "entrypoints": {
+      "compatibility": "BaselinePilot",
+      "direct_kotlin": "performance.DirectPilotKt"
+    },
+    "java": "/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2/bin/java",
+    "java_flags": [
+      "-Xms256m",
+      "-Xmx2g",
+      "-XX:+UseG1GC"
+    ],
+    "java_version": "openjdk version \"21.0.9\" 2025-10-21\nOpenJDK Runtime Environment JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147)\nOpenJDK 64-Bit Server VM JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147, mixed mode, sharing)",
+    "paths": {
+      "compatibility": [
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+      ],
+      "direct_kotlin": [
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/main",
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/main",
+        "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/resources/main",
+        "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+      ]
+    },
+    "qualification": "unpassed",
+    "schema": 1,
+    "sha256": {
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar": "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+      "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+      "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar": "7e32875e21cac6bf1dfdc09627f0db2b31211c706054865db6d24dc5ef638647",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build.gradle.kts": "bde3f84944a15518e047b4d558ddc6ee8ac9c147d4ef2084b6b2090775426e35",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/compatibility": "6af7ebc67b241d92686c3918e42d8d6379b4a6a8e4a7b33acc106197aa8d83c7",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/java/main": "0986ebfe5dd3a389132c5d224b86f311354c09b2a057c1db7596cbbc0ce099d0",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/build/classes/kotlin/main": "836c3df78ad127b7b731eb598d379d82172c56add009bf2b9a497db94bf95c70",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/java/performance/ProviderIdentity.java": "93e6721d07d1bad849aaf667b4a415c7fef55fc199578989728c1039f0360ab4",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/kotlin/performance/DirectFixture.kt": "6bcf520ebf6da871e9e24f094f33129898265d184c5c1c4f7be3ed76425147f5",
+      "/var/home/stewart/Workspace/dyn4k-performance/consumers/performance/src/main/kotlin/performance/DirectPilot.kt": "329e6329f51baf8cd2f6e4a8dee7874ab2e368ba677a18508d6192aa14800429",
+      "/var/home/stewart/Workspace/dyn4k-performance/docs/research/performance-manifest-v1.json": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+      "/var/home/stewart/Workspace/dyn4k-performance/tools/performance/BaselinePilot.java": "fb7e40062e06c4169c23e72ae3259e360cd9459dc79f1c31297e2da46a169ba9",
+      "/var/home/stewart/Workspace/dyn4k-performance/tools/performance/candidate_runner.py": "a015b8c4dd75539c370b5f634615d8fe953d3b4865f0ab51a74fe7c0829445f3"
+    },
+    "source_commit": "9ce41f7cc7cfc0a7c7991b02335c5e285159f58d",
+    "source_trees": {
+      "dyn4k": "4dd17dd420b976fe3263c9f3aa728107ab0965fd",
+      "dyn4k-core": "ae3bd7d8d720220f94a47c4cc412ef5b672dd774"
+    },
+    "staging_repository": "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository"
+  },
+  "candidate_identity_sha256": "2268581c6ce00d8c7354034f305e8cac61d29f1bbd88d7ad2538fbe710025a23",
+  "candidate_runner_sha256": "a015b8c4dd75539c370b5f634615d8fe953d3b4865f0ab51a74fe7c0829445f3",
+  "capture_tool_sha256": {
+    "tools/performance/candidate_pilot.py": "74caf034af9dbb6b52d2b37aa6fe3e837572949431bf3fd29ffd23ddd78bfba7",
+    "tools/performance/measure.py": "f0e61107f39db2c6ab49146aef913418d2c4dc46b02d4e236bc63d3f296dc782"
+  },
+  "capture_tool_source_commit": "9ce41f7cc7cfc0a7c7991b02335c5e285159f58d",
+  "direct_fixture_sha256": "6bcf520ebf6da871e9e24f094f33129898265d184c5c1c4f7be3ed76425147f5",
+  "direct_pilot_sha256": "329e6329f51baf8cd2f6e4a8dee7874ab2e368ba677a18508d6192aa14800429",
+  "expected_runs": 3,
+  "failures": [],
+  "harness_sha256": "fb7e40062e06c4169c23e72ae3259e360cd9459dc79f1c31297e2da46a169ba9",
+  "host": {
+    "charging_state": null,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "hostname": "bazzite",
+    "java_version": "openjdk version \"21.0.9\" 2025-10-21\nOpenJDK Runtime Environment JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147)\nOpenJDK 64-Bit Server VM JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147, mixed mode, sharing)",
+    "machine": "x86_64",
+    "os_version": "NAME=\"Bazzite\"\nVERSION=\"44.20261012.0 (Silverblue)\"\nRELEASE_TYPE=stable\nID=bazzite\nID_LIKE=\"fedora\"\nVERSION_ID=44\nVERSION_CODENAME=\"Silverblue\"\nPRETTY_NAME=\"Bazzite\"\nANSI_COLOR=\"0;38;2;138;43;226\"\nLOGO=bazzite-logo\nCPE_NAME=\"cpe:/o:universal-blue:bazzite:44\"\nDEFAULT_HOSTNAME=\"bazzite\"\nHOME_URL=\"https://bazzite.gg\"\nDOCUMENTATION_URL=\"https://docs.bazzite.gg\"\nSUPPORT_URL=\"https://discord.bazzite.gg\"\nBUG_REPORT_URL=\"https://github.com/ublue-os/bazzite/issues/\"\nSUPPORT_END=2027-05-19\nVARIANT=\"Silverblue\"\nVARIANT_ID=bazzite-gnome\nOSTREE_VERSION='44.20261012.0'\nBUILD_ID=\"Stable (F44.20261012)\"\nBOOTLOADER_NAME=\"Bazzite Stable (F44.20261012)\"\nIMAGE_ID=\"bazzite-gnome-44.20261012\"",
+    "power_mode": null,
+    "product_name": "Desktop (AMD Ryzen AI Max 300 Series)",
+    "product_version": "A6",
+    "ram_kib": 131147088,
+    "release": "7.2.9-ogc3.1.fc44.x86_64",
+    "system": "Linux",
+    "temperature_c": null,
+    "throttling": null
+  },
+  "manifest_sha256": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+  "probe": {
+    "allocation_supported": true,
+    "collection_count_delta": 1,
+    "controlled_allocated_bytes": 1164520,
+    "controlled_payload_bytes": 1048576,
+    "heap_after_collection_bytes": 1475816,
+    "heap_live_bytes": 4278632,
+    "rss_after_collection_bytes": 56741888,
+    "rss_live_bytes": 49905664,
+    "timer_median_pair_ns": 30,
+    "timer_min_positive_ns": 20,
+    "timer_p99_pair_ns": 31
+  },
+  "qualification": "unpassed",
+  "results": [
+    {
+      "api": "baseline",
+      "cycles": 100,
+      "heap_drift_fraction": 0.0030596946424745752,
+      "plateau_status": "stable",
+      "process_pid": 3502284,
+      "raw": "lifecycle.replace.small.60hz.baseline.plateau.csv",
+      "raw_sha256": "245b5cc5d39bc0ebdf86f8e7b7a734f3faddbb8037b2d56da1a8a7ea9cb1659a",
+      "stderr_raw": "lifecycle.replace.small.60hz.baseline.plateau.stderr.raw",
+      "stderr_sha256": "375f3cbff016732c833bd2330889bf8c62557bb75892a730d202b67a492c41f6",
+      "warmup_raw": "lifecycle.replace.small.60hz.baseline.plateau.warmup.csv",
+      "warmup_sha256": "375f3cbff016732c833bd2330889bf8c62557bb75892a730d202b67a492c41f6",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.baseline"
+    },
+    {
+      "api": "direct_kotlin",
+      "cycles": 100,
+      "heap_drift_fraction": 0.0009403127444020942,
+      "plateau_status": "stable",
+      "process_pid": 3503256,
+      "raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.csv",
+      "raw_sha256": "8b2396921fe173ae63f85deea31f61cbd362ad3ae5a81d3618d7bb3c5068fd94",
+      "stderr_raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.stderr.raw",
+      "stderr_sha256": "be05d0d3989c985b94e32c5a4d54706997d11249364dbad7f0b86a805eb609af",
+      "warmup_raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.warmup.csv",
+      "warmup_sha256": "56edbe27caec6c9f647d33c94f10f2364dba573b52d0a6203e67fa82453459cc",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.direct_kotlin"
+    },
+    {
+      "api": "compatibility",
+      "cycles": 100,
+      "heap_drift_fraction": 0.0036168243497447516,
+      "plateau_status": "stable",
+      "process_pid": 3504154,
+      "raw": "lifecycle.replace.small.60hz.compatibility.plateau.csv",
+      "raw_sha256": "c885b17a24f65d01a96281503c30cf2ce8e36c4e78c7863dc2273059e8b04331",
+      "stderr_raw": "lifecycle.replace.small.60hz.compatibility.plateau.stderr.raw",
+      "stderr_sha256": "e23d12859dcc47b61d1630e4f3a4253dd9e1929f0070adc99db45bb9e5b3217b",
+      "warmup_raw": "lifecycle.replace.small.60hz.compatibility.plateau.warmup.csv",
+      "warmup_sha256": "f6d5431e30564ba970fb99e7c489c01f33713949313758b9d75083bfb85dee41",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.compatibility"
+    }
+  ],
+  "schema": 1,
+  "status": "bounded_pilot_only"
+}

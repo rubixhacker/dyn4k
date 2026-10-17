@@ -6,9 +6,35 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("manifest.py")
+CCD_FIXTURE = SCRIPT.parents[2] / "docs/research/performance-ccd-fixture-v2.json"
 
 
 class ManifestContractTest(unittest.TestCase):
+    def test_ccd_fixture_revision_links_to_unchanged_manifest(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "validate-ccd-fixture", str(CCD_FIXTURE)],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        fixture = json.loads(CCD_FIXTURE.read_text())
+        self.assertEqual("performance-ccd-v2", fixture["version"])
+        self.assertEqual(27, len(fixture["workload_ids"]))
+        self.assertEqual("zero_based_creation_index", fixture["body_hash"]["algorithm"])
+
+    def test_ccd_fixture_revision_rejects_changed_rule_or_base_hash(self):
+        for change in ("body_hash", "base_manifest_sha256"):
+            with self.subTest(change=change):
+                fixture = json.loads(CCD_FIXTURE.read_text())
+                if change == "body_hash":
+                    fixture["body_hash"]["algorithm"] = "object_identity"
+                else:
+                    fixture[change] = "0" * 64
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), "validate-ccd-fixture", "-"],
+                    input=json.dumps(fixture), capture_output=True, text=True,
+                )
+                self.assertNotEqual(0, result.returncode)
+
     def test_public_manifest_command_covers_approved_matrix(self):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "emit"],
