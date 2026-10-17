@@ -11,6 +11,7 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.FieldVisitor
+import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -187,6 +188,90 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Link" to JvmApiSpec(
         packageFields = setOf("point0", "point3")
+    ),
+    "org/dyn4j/geometry/hull/DivideAndConquer" to JvmApiSpec(packageMethods = setOf("divide")),
+    "org/dyn4j/geometry/hull/LinkedVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "next", "prev")
+    ),
+    "org/dyn4j/geometry/hull/LinkedVertexHull" to JvmApiSpec(
+        packageType = true, packageFields = setOf("leftMost", "rightMost", "size"), staticMethods = setOf("merge")
+    ),
+    "org/dyn4j/geometry/hull/MinXYPointComparator" to JvmApiSpec(
+        packageType = true, packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/hull/ReferencePointComparator" to JvmApiSpec(
+        packageType = true, packageFields = setOf("reference")
+    ),
+    "org/dyn4j/geometry/decompose/ClosestEdgeToVertexSearchCriteria" to JvmApiSpec(
+        packageType = true, packageFields = setOf("vertex", "closest")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeList" to JvmApiSpec(
+        packageType = true, packageFields = setOf("vertices", "edges", "faces"),
+        packageMethods = setOf("getReferenceFace", "getPreviousEdge", "getYMonotonePolygons", "triangulateYMonotonePolygon", "isReflex"),
+        packageMethodSignatures = setOf(
+            "addHalfEdges(Lorg/dyn4j/geometry/decompose/DoubleEdgeListVertex;Lorg/dyn4j/geometry/decompose/DoubleEdgeListVertex;)V",
+            "removeHalfEdges(Lorg/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge;)V",
+            "removeHalfEdges(ILorg/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge;)V"
+        )
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListFace" to JvmApiSpec(
+        packageType = true, packageFields = setOf("edge"), packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("origin", "twin", "next", "face"),
+        packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "leaving")
+    ),
+    "org/dyn4j/geometry/decompose/EarClipping" to JvmApiSpec(
+        packageMethods = setOf("createTriangulation", "isReflex", "isEar"), varargMethods = setOf("createTriangulation")
+    ),
+    "org/dyn4j/geometry/decompose/EarClippingVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "prev", "next", "ear", "reflex", "index")
+    ),
+    "org/dyn4j/geometry/decompose/MonotoneChainType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/decompose/MonotonePolygonType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/decompose/MonotonePolygon" to JvmApiSpec(
+        packageType = true, packageFields = setOf("type", "vertices")
+    ),
+    "org/dyn4j/geometry/decompose/MonotoneVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("data", "next", "previous", "chainType")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLine" to JvmApiSpec(
+        packageMethods = setOf("createTriangulation", "start", "end", "split", "merge", "regular"),
+        varargMethods = setOf("createTriangulation")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("referenceY", "v0", "v1", "helper", "slope")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineState" to JvmApiSpec(
+        packageType = true, packageFields = setOf("referenceY", "tree", "dcel"),
+        packageMethods = setOf("getType")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "index", "type", "next", "prev", "left", "right"),
+        packageMethods = setOf("isLeft")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineVertexType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/simplify/SegmentTree" to JvmApiSpec(
+        packageType = true, packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/simplify/AbstractSimplifier" to JvmApiSpec(varargMethods = setOf("simplify")),
+    "org/dyn4j/geometry/simplify/SegmentTreeNode" to JvmApiSpec(
+        packageType = true, packageFields = setOf("left", "right", "parent", "height", "aabb")
+    ),
+    "org/dyn4j/geometry/simplify/SegmentTreeLeaf" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point1", "point2", "index1", "index2")
+    ),
+    "org/dyn4j/geometry/simplify/SimplePolygonVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("index", "point", "prev", "next", "prevSegment", "nextSegment")
+    ),
+    "org/dyn4j/geometry/simplify/DouglasPeucker\$FarthestVertex" to JvmApiSpec(
+        packageFields = setOf("index", "distance")
+    ),
+    "org/dyn4j/geometry/simplify/Visvalingam\$AreaTrackedVertex" to JvmApiSpec(
+        packageFields = setOf("area")
     )
 )
 
@@ -299,9 +384,48 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                         }
                                     }
                                 }
+                                if (owner == "org/dyn4j/geometry/simplify/AbstractSimplifier" &&
+                                    name == "simplify" && descriptor == "([Lorg/dyn4j/geometry/Vector2;)[Lorg/dyn4j/geometry/Vector2;") {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitCode() {
+                                            super.visitCode()
+                                            val nonNull = Label()
+                                            super.visitVarInsn(Opcodes.ALOAD, 1)
+                                            super.visitJumpInsn(Opcodes.IFNONNULL, nonNull)
+                                            super.visitInsn(Opcodes.ACONST_NULL)
+                                            super.visitInsn(Opcodes.ARETURN)
+                                            super.visitLabel(nonNull)
+                                            super.visitFrame(Opcodes.F_SAME, 0, null, 0, null)
+                                        }
+                                    }
+                                }
                                 return method
                             }
                             override fun visitEnd() {
+                                if (owner == "org/dyn4j/geometry/decompose/SweepLineState") {
+                                    val method = super.visitMethod(
+                                        Opcodes.ACC_FINAL, "initialize",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/PriorityQueue;",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/PriorityQueue<Lorg/dyn4j/geometry/decompose/SweepLineVertex;>;",
+                                        null
+                                    )
+                                    method.visitCode()
+                                    method.visitTypeInsn(Opcodes.NEW, "java/util/PriorityQueue")
+                                    method.visitInsn(Opcodes.DUP)
+                                    method.visitVarInsn(Opcodes.ALOAD, 0)
+                                    method.visitVarInsn(Opcodes.ALOAD, 1)
+                                    method.visitMethodInsn(
+                                        Opcodes.INVOKEVIRTUAL, owner, "initializeSorted",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/List;", false
+                                    )
+                                    method.visitMethodInsn(
+                                        Opcodes.INVOKESPECIAL, "java/util/PriorityQueue", "<init>",
+                                        "(Ljava/util/Collection;)V", false
+                                    )
+                                    method.visitInsn(Opcodes.ARETURN)
+                                    method.visitMaxs(0, 0)
+                                    method.visitEnd()
+                                }
                                 for ((name, descriptor, signature) in companionMethods[owner].orEmpty()) {
                                     if ((name to descriptor) in present) continue
                                     val visibility = if (name in spec.packageMethods ||
@@ -723,4 +847,85 @@ tasks.register<JavaExec>("runUpstreamTreeTests") {
     classpath(compileUpstreamTreeTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
     mainClass.set("org.junit.runner.JUnitCore")
     args(treeTestNames.map { "org.dyn4j.$it" })
+}
+
+val polygonTestNames = mapOf(
+    "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
+    "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),
+    "simplify" to listOf(
+        "DouglasPeuckerTest", "SegmentTreeTest", "SimplePolygonVertexTest",
+        "VertexClusterReductionTest", "VisvalingamTest"
+    )
+)
+val polygonTestSources = polygonTestNames.flatMap { (packageName, names) ->
+    (names + when (packageName) {
+        "decompose" -> listOf("AbstractDecomposeTest")
+        "simplify" -> listOf("AbstractSimplifyTest")
+        else -> emptyList()
+    }).map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/geometry/$packageName/$it.java")
+    } }
+} + listOf(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/geometry/RobustGeometryTest.java") })
+val compileUpstreamPolygonTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(polygonTestSources)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-polygon-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamPolygonTests") {
+    dependsOn(compileUpstreamPolygonTests)
+    classpath(
+        compileUpstreamPolygonTests.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(polygonTestNames.flatMap { (packageName, names) ->
+        names.map { "org.dyn4j.geometry.$packageName.$it" }
+    })
+}
+tasks.register<Exec>("verifyPolygonJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        environment("JAVA_HOME", System.getenv("JAVA_HOME"))
+        commandLine(
+            "python3", rootProject.file("scripts/verify-polygon-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
+        )
+    }
+}
+
+val polygonConsumerSource = file("src/jvmConsumer/java/PolygonAlgorithmConsumer.java")
+val baselinePolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(polygonConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/baseline"))
+    options.release.set(8)
+}
+val candidatePolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(polygonConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselinePolygonConsumer") {
+    dependsOn(baselinePolygonConsumer)
+    classpath(
+        baselinePolygonConsumer.flatMap { it.destinationDirectory }, baseline,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
+}
+tasks.register<JavaExec>("runCandidatePolygonConsumer") {
+    dependsOn(candidatePolygonConsumer)
+    classpath(
+        candidatePolygonConsumer.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
 }
