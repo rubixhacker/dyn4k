@@ -45,7 +45,7 @@ class QualificationTests(unittest.TestCase):
             ("androidHost", "", ""),
         ):
             cases = qualify.expected_probe_cases(manifest, groups[group_id])
-            self.assertEqual(45 if group_id == "jvm" else 43, len(cases), group_id)
+            self.assertEqual(47 if group_id == "jvm" else 45, len(cases), group_id)
             self.assertEqual(
                 [(f"{prefix}io.github.rubixhacker.dyn4k.GeometryShapeTest", name + suffix)
                  for name in self.GEOMETRY_CASES],
@@ -53,7 +53,7 @@ class QualificationTests(unittest.TestCase):
             self.assertIn((f"{prefix}org.dyn4j.geometry.GeometryCopyExtensionTest",
                            "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState" + suffix),
                           cases)
-            self.assertEqual(432, len(qualify.expected_probe_cases(
+            self.assertEqual(433, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
             self.assertEqual(2, len(qualify.expected_probe_cases(
                 manifest, groups["consumer-" + group_id])))
@@ -69,15 +69,38 @@ class QualificationTests(unittest.TestCase):
             epsilon = (prefix + "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
                        "compute" + group["name_suffix"])
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(432, len(cases), group["id"])
+            self.assertEqual(433, len(cases), group["id"])
             self.assertEqual(1, cases.count(epsilon), group["id"])
+            collision = (prefix + "org.dyn4j.collision.CollisionModelTest",
+                         "copyExceptionFromNamesPreservesMessage" + group["name_suffix"])
+            self.assertEqual(1, cases.count(collision), group["id"])
+
+    def test_frozen_dyn_manifest_names_integrated_polygon_extension(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        groups = [group for group in manifest["groups"]
+                  if group["id"] in ("jvm", "linuxX64", "jsNode", "wasmJsNode",
+                                     "wasmWasiNode", "androidHost", "macosArm64",
+                                     "iosSimulatorArm64", "tvosSimulatorArm64",
+                                     "watchosSimulatorArm64", "iosX64", "mingwX64")]
+        self.assertEqual(12, len(groups))
+        for group in groups:
+            prefix = group["classname"].removesuffix(
+                "io.github.rubixhacker.dyn4k.FoundationTest")
+            cases = qualify.expected_probe_cases(manifest, group)
+            self.assertEqual(47 if group["id"] == "jvm" else 45,
+                             len(cases), group["id"])
+            for name in ("subclassCanUseItsOwnHelperAndInheritedAlgorithm",
+                         "sameSignatureHelperCannotChangePropertyOrSimplification"):
+                expected = (prefix + "io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+                            name + group["name_suffix"])
+                self.assertEqual(1, cases.count(expected), group["id"])
 
     def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         group = next(group for group in manifest["groups"] if group["id"] == "jvm")
         cases = qualify.expected_probe_cases(manifest, group)
-        self.assertEqual(45, len(cases))
-        suite = ET.Element("testsuite", tests="46", failures="0", errors="0", skipped="0")
+        self.assertEqual(47, len(cases))
+        suite = ET.Element("testsuite", tests="48", failures="0", errors="0", skipped="0")
         for classname, name in cases + [("io.github.rubixhacker.dyn4k.GeometryShapeTest", "unexpected[jvm]")]:
             ET.SubElement(suite, "testcase", classname=classname, name=name, time="0")
         xml = ET.tostring(suite, encoding="unicode")
@@ -92,8 +115,8 @@ class QualificationTests(unittest.TestCase):
                                            Path(root) / "result.json",
                                            manifest={**manifest, "groups": [report_group]})
                 self.assertEqual("PROBE_FAILED", result["status"])
-                self.assertEqual(45, result["expected"])
-                self.assertEqual(46, result["executed"])
+                self.assertEqual(47, result["expected"])
+                self.assertEqual(48, result["executed"])
                 self.assertIn("unexpected cases", result["reason"])
             finally:
                 os.chdir(previous)
