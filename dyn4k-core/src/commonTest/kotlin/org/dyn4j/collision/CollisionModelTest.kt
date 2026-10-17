@@ -176,6 +176,16 @@ class CollisionModelTest {
     }
 
     @Test
+    fun copyExceptionFromNamesPreservesMessage() {
+        val exception = CopyException("Source", "Copy")
+        assertEquals(
+            "The copy method on class 'Source' returns an object of class 'Copy'. " +
+                "You must override the copy method to return type 'Source'.",
+            exception.message
+        )
+    }
+
+    @Test
     fun nullFirstPairThrowsDuringEquality() {
         val first = BasicCollisionPair<Any?>(null, "x")
         val second = BasicCollisionPair<Any?>(null, "x")

@@ -167,12 +167,14 @@ open class Vector2 : Copyable<Vector2> {
     open fun getNormalized(): Vector2 {
         val magnitude = getMagnitude()
         if (magnitude <= Epsilon.E) return Vector2()
-        return Vector2(x / magnitude, y / magnitude)
+        val reciprocal = 1.0 / magnitude
+        return Vector2(x * reciprocal, y * reciprocal)
     }
     open fun normalize(): Double {
-        val magnitude = getMagnitude()
+        val magnitude = sqrt(x * x + y * y)
         if (magnitude <= Epsilon.E) return 0.0
-        x /= magnitude; y /= magnitude
+        val reciprocal = 1.0 / magnitude
+        x *= reciprocal; y *= reciprocal
         return magnitude
     }
     open fun getAngleBetween(vector: Vector2) =
