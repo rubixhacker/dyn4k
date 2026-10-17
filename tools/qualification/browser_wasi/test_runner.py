@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -103,6 +104,32 @@ class SourceCasesTest(unittest.TestCase):
             attestation.write_text(json.dumps(forged) + "\n")
             with self.assertRaisesRegex(ValueError, "process image"):
                 verify_browser_launches(attestation, selected, token, "chromium")
+
+    def test_browser_process_keeps_karmas_launcher_pid(self):
+        selected = Path(shutil.which("sleep"))
+        launcher = Path(__file__).with_name("browser_launcher.py")
+        with tempfile.TemporaryDirectory() as directory:
+            attestation = Path(directory) / "launch.jsonl"
+            env = dict(os.environ, DYN4K_BROWSER_SELECTED_BINARY=str(selected),
+                       DYN4K_BROWSER_ATTESTATION=str(attestation),
+                       DYN4K_BROWSER_TOKEN="test-process-lifecycle",
+                       DYN4K_BROWSER_RUNTIME="chromium")
+            launched = subprocess.Popen([sys.executable, str(launcher), "10"], env=env,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            recorded_pid = None
+            try:
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and not attestation.is_file():
+                    time.sleep(0.01)
+                self.assertTrue(attestation.is_file(), "browser launch was not attested")
+                recorded_pid = json.loads(attestation.read_text())["pid"]
+                self.assertEqual(launched.pid, recorded_pid)
+            finally:
+                launched.terminate()
+                launched.wait(timeout=3)
+                launched.stderr.close()
+                if recorded_pid is not None and recorded_pid != launched.pid:
+                    os.kill(recorded_pid, 15)
 
     def test_staged_physics_contract_rejects_noop_and_missing_assertions(self):
         from runner import verify_consumer_physics_contract
