@@ -373,5 +373,31 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
     }
     override fun getGravityScale() = gravityScale
     override fun setGravityScale(scale: Double) { if (scale != gravityScale) setAtRest(false); gravityScale = scale }
-    override fun toString() = "Body[HashCode=${hashCode()}|Fixtures={${fixtures.joinToString(",")}}|InitialTransform=$transform0|Transform=$transform|RotationDiscRadius=$radius|Mass=$mass|LinearVelocity=$linearVelocity|AngularVelocity=$angularVelocity|Force=$force|Torque=$torque|AccumulatedForce=${getAccumulatedForce()}|AccumulatedTorque=${getAccumulatedTorque()}|IsAtRestDetectionEnabled=$atRestDetectionEnabled|IsAtRest=$atRest|IsActive=$enabled|IsBullet=$bullet|LinearDamping=$linearDamping|AngularDamping$angularDamping|GravityScale=$gravityScale]"
+    override fun toString(): String {
+        val result = StringBuilder().append("Body[HashCode=").append(hashCode()).append("|Fixtures={")
+        val count = fixtures.size
+        for (index in 0 until count) {
+            if (index != 0) result.append(",")
+            result.append(fixtures[index])
+        }
+        result.append("}|InitialTransform=").append(transform0)
+            .append("|Transform=").append(transform)
+            .append("|RotationDiscRadius=").append(radius)
+            .append("|Mass=").append(mass)
+            .append("|LinearVelocity=").append(linearVelocity)
+            .append("|AngularVelocity=").append(angularVelocity)
+            .append("|Force=").append(force)
+            .append("|Torque=").append(torque)
+            .append("|AccumulatedForce=").append(getAccumulatedForce())
+            .append("|AccumulatedTorque=").append(getAccumulatedTorque())
+            .append("|IsAtRestDetectionEnabled=").append(atRestDetectionEnabled)
+            .append("|IsAtRest=").append(atRest)
+            .append("|IsActive=").append(enabled)
+            .append("|IsBullet=").append(bullet)
+            .append("|LinearDamping=").append(linearDamping)
+            .append("|AngularDamping").append(angularDamping)
+            .append("|GravityScale=").append(gravityScale)
+            .append("]")
+        return result.toString()
+    }
 }
