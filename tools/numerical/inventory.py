@@ -35,10 +35,13 @@ def unit_for_path(path):
 
 def classify_path(fixture, path, cache):
     canonical = canonical_path(path)
-    if canonical.endswith(".getValues[]") and not canonical.startswith("inputs."):
-        return {"status": "UNPASSED_DEPENDENCY", "unit": "mixed",
-                "reason": "Matrix entries alias stored cosine, sine, and translation. Cosine and translation have formula or selected limits; sine magnitude has no bound."}
     derived = fixture.get("derived_rules", {})
+    if canonical.endswith(".getValues[]") and not canonical.startswith("inputs."):
+        if "stored_sine" in derived and "stored_cosine" in derived:
+            return {"status": "EXACT_ALIAS", "unit": "mixed",
+                    "reason": "Same-run matrix entries exactly alias bounded cosine and sine coefficients and selected translation components."}
+        return {"status": "UNPASSED_DEPENDENCY", "unit": "mixed",
+                "reason": "Matrix sine entries have no qualified component rule."}
     if canonical.endswith(".properties.getChangeInPosition[]") and "change_in_position" in derived:
         return {"status": "DERIVED_FORMULA", "unit": "m",
                 "reason": "Current minus previous translation; each source has a 1e-4 m component limit. Same-run binary64 subtraction and a 2e-4 m plus actual rounding-residual enclosure are required."}
@@ -66,8 +69,11 @@ def classify_path(fixture, path, cache):
             reason = "The field is a frozen input, configuration, counter, or same-run exact identity."
         return {"status": "EXACT_IDENTITY", "unit": unit_for_path(path), "reason": reason}
     if canonical.endswith(".getSint"):
+        if "stored_sine" in derived and "stored_cosine" in derived:
+            return {"status": "DERIVED_FORMULA", "unit": "dimensionless",
+                    "reason": "Independent rotation norm quality and the acos cosine enclosure imply a candidate-independent sine component limit."}
         return {"status": "UNPASSED_NO_BOUND", "unit": "dimensionless",
-                "reason": "Transform.getRotationAngle uses only the sign of stored sine. The angle and cosine checks do not constrain sine magnitude; no norm/drift bound exists."}
+                "reason": "Transform.getRotationAngle uses only the sign of stored sine; no norm rule is selected."}
     return {"status": "UNPASSED_UNCLASSIFIED", "unit": "unknown",
             "reason": "No matching selected limit, source identity, or proved formula enclosure."}
 

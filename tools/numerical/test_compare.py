@@ -382,6 +382,23 @@ class ComparatorSeamTest(unittest.TestCase):
             classify_reference(self.fixture, self.root / "reference.jsonl.gz",
                                ["state.state.sum", "state.state.sum"])
 
+    def test_inventory_classifies_sine_and_matrix_aliases(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0,
+            "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+            "getTranslationY": 0.0, "getValues": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]}}]}
+        self.write_reference(rows)
+        paths = ["state.state.bodies[].transform.getSint",
+                 "state.state.bodies[].transform.getValues[]"]
+        classified = classify_reference(self.fixture, self.root / "reference.jsonl.gz", paths)
+        self.assertEqual("DERIVED_FORMULA", classified["legacy_paths"][paths[0]]["status"])
+        self.assertEqual("EXACT_ALIAS", classified["legacy_paths"][paths[1]]["status"])
+
     def test_wake_snapshot_static_fields_keep_exact_identity(self):
         selected = load_fixture("configured-30-r1")
         self.fixture["exact_numeric"] = selected["exact_numeric"]
@@ -428,7 +445,7 @@ class ComparatorSeamTest(unittest.TestCase):
         self.write_candidate(altered)
         self.assertIn("branch differs", self.result()["reason"])
 
-    def test_acos_getter_bounds_stored_cosine_but_not_sine_length(self):
+    def test_stored_sine_requires_norm_and_component_enclosures(self):
         selected = load_fixture("configured-30-r1")
         self.fixture["rules"] = selected["rules"]
         self.fixture["derived_rules"] = selected["derived_rules"]
@@ -439,9 +456,13 @@ class ComparatorSeamTest(unittest.TestCase):
         self.write_reference(rows)
         self.write_candidate(rows)
         result = self.result()
-        self.assertEqual("UNPASSED", result["status"])
-        self.assertIn("state.state.bodies[].transform.getSint", result["unpassed_channels"])
+        self.assertEqual("PASSED", result["status"])
+        self.assertEqual([], result["unpassed_channels"])
         self.assertNotIn("state.state.bodies[].transform.getCost", result["unpassed_channels"])
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"]["getSint"] = 0.00005
+        self.write_candidate(altered)
+        self.assertEqual("PASSED", self.result()["status"])
         altered = json.loads(json.dumps(rows))
         altered[2]["state"]["bodies"][0]["transform"]["getCost"] = 0.999
         self.write_candidate(altered)
@@ -449,7 +470,37 @@ class ComparatorSeamTest(unittest.TestCase):
         altered = json.loads(json.dumps(rows))
         altered[2]["state"]["bodies"][0]["transform"]["getSint"] = 0.9
         self.write_candidate(altered)
-        self.assertEqual("UNPASSED", self.result()["status"])
+        self.assertEqual("FAILED", self.result()["status"])
+        self.assertIn("norm", self.result()["reason"])
+
+    def test_sine_and_matrix_reject_out_of_bound_or_invalid_values(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        self.fixture["check_translation_aliases"] = True
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0,
+            "getTranslation": [1.0, 2.0], "getTranslationX": 1.0,
+            "getTranslationY": 2.0, "getValues": [1.0, 0.0, 1.0, 0.0, 1.0, 2.0]}}]}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        for value in (0.001, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                altered = json.loads(json.dumps(rows))
+                transform = altered[2]["state"]["bodies"][0]["transform"]
+                transform["getSint"] = value
+                transform["getValues"][1] = -value
+                transform["getValues"][3] = value
+                self.write_candidate(altered)
+                self.assertEqual("FAILED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"]["getValues"][3] = 0.00005
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+        self.assertIn("matrix getter alias", self.result()["reason"])
 
     def test_explicit_nominal_cosine_cap_keeps_precedence(self):
         self.fixture["rules"] = [

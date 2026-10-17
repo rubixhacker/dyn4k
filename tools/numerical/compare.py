@@ -316,6 +316,7 @@ def orientation_error_bounds(reference, candidate):
     return min(pair[0] for pair in bounds), min(pair[1] for pair in bounds)
 
 
+@lru_cache(maxsize=4096)
 def sqrt_bounds(value):
     scale = 10**70
     scaled = value * scale * scale
@@ -497,6 +498,62 @@ def check_cost_pair(fixture, reference, candidate, path, result):
     result.setdefault("_derived_paths", set()).add(path + ".getCost")
 
 
+@lru_cache(maxsize=16)
+def sine_component_cap(eta, terms, acos_ulp_multiplier, angle_cap):
+    cosine_error = (Fraction.from_float(acos_ulp_multiplier * math.ulp(4.0)) +
+                    2 * Fraction(4**(2 * terms), factorial(2 * terms)))
+    _, sine_error = sqrt_bounds(2 * eta + eta * eta + 2 * cosine_error)
+    return angle_cap + 2 * sine_error
+
+
+def check_sine_pair(fixture, reference, candidate, path, result):
+    formula = fixture.get("derived_rules", {}).get("stored_sine")
+    if not formula or not path.startswith(("state.state.bodies[].",
+                                          "outer-endpoint.state.bodies[].",
+                                          "instrumented-callback.values[].bodies[].")):
+        return
+    if not all(key in reference for key in ("getCost", "getSint", "getRotationAngle")):
+        return
+    if rule_for(fixture, path + ".getSint", result):
+        return
+    angle_rule = rule_for(fixture, path + ".getRotationAngle", result)
+    cosine = fixture.get("derived_rules", {}).get("stored_cosine")
+    if (formula.get("metric") != "rotation_norm_and_component" or formula.get("relative") != 0 or
+        not angle_rule or angle_rule["metric"] != "orientation" or angle_rule["relative"] != 0 or
+        not cosine or cosine["relative"] != 0):
+        raise Rejected("stored sine lacks its selected formula premises")
+    eta = Fraction(str(formula["norm_absolute"]))
+    steps = formula["max_inner_steps"]
+    rotations = formula["max_rotations_per_step"]
+    multiplier = formula["unit_roundoff_multiplier"]
+    if (eta <= 0 or eta >= 1 or type(steps) is not int or steps <= 0 or
+        type(rotations) is not int or rotations <= 0 or
+        type(multiplier) is not int or multiplier <= 0 or
+        fixture["counts"]["state"] > steps):
+        raise Rejected("stored sine norm premise is invalid")
+    growth = steps * rotations * multiplier * Fraction(1, 2**53)
+    if growth >= 1 or growth / (1 - growth) >= eta:
+        raise Rejected("stored sine operation enclosure exceeds norm limit")
+    for transform in (reference,) if reference == candidate else (reference, candidate):
+        cost = Fraction.from_float(float(transform["getCost"]))
+        sine = Fraction.from_float(float(transform["getSint"]))
+        if abs(cost) > 1 or abs(sine) > 1:
+            raise Rejected("stored rotation coefficient outside source clamp")
+        squared = cost * cost + sine * sine
+        if squared < (1 - eta)**2 or squared > (1 + eta)**2:
+            raise Rejected("stored rotation norm limit exceeded")
+    terms = cosine["taylor_terms"]
+    if type(terms) is not int or terms < 10 or cosine["acos_ulp_multiplier"] < 1:
+        raise Rejected("stored sine cosine enclosure is invalid")
+    angle_cap = Fraction(str(angle_rule["absolute"]))
+    component_cap = sine_component_cap(eta, terms, cosine["acos_ulp_multiplier"], angle_cap)
+    difference = abs(Fraction.from_float(float(reference["getSint"])) -
+                     Fraction.from_float(float(candidate["getSint"])))
+    if difference > component_cap:
+        raise Rejected("stored sine component limit exceeded")
+    result.setdefault("_derived_paths", set()).add(path + ".getSint")
+
+
 def compare_value(fixture, reference, candidate, path, result):
     if type(reference) is not type(candidate) and not (
         type(reference) in (int, float) and type(candidate) in (int, float)
@@ -506,6 +563,7 @@ def compare_value(fixture, reference, candidate, path, result):
         if set(reference) != set(candidate):
             raise Rejected(f"fields differ: {path}")
         check_cost_pair(fixture, reference, candidate, path, result)
+        check_sine_pair(fixture, reference, candidate, path, result)
         if path == "instrumented-callback.values[].bodies[]":
             check_derived_pair(fixture, reference, candidate, path, result)
         for key in reference:
@@ -532,7 +590,7 @@ def compare_value(fixture, reference, candidate, path, result):
         for left, right in zip(reference, candidate):
             compare_value(fixture, left, right, path + "[]", result)
     elif type(reference) in (int, float):
-        if path.endswith(".getCost") and path in result.get("_derived_paths", set()):
+        if path.endswith((".getCost", ".getSint")) and path in result.get("_derived_paths", set()):
             result["derived_checks"] += 1
             return
         if path.startswith("instrumented-callback.") and (
