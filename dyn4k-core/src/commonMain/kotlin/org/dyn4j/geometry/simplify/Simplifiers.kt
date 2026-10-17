@@ -120,7 +120,7 @@ abstract class AbstractSimplifier : Simplifier {
     }
 }
 
-open class VertexClusterReduction(val clusterTolerance: Double) : AbstractSimplifier() {
+open class VertexClusterReduction(@get:kotlin.jvm.JvmSynthetic val clusterTolerance: Double) : AbstractSimplifier() {
     init {
         if (clusterTolerance < 0.0) throw ValueOutOfRangeException(
             "clusterTolerance", clusterTolerance, ValueOutOfRangeException.MUST_BE_GREATER_THAN_OR_EQUAL_TO, 0.0

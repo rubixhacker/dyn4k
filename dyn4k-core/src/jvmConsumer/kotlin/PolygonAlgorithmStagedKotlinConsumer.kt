@@ -5,6 +5,10 @@ import org.dyn4j.geometry.decompose.EarClipping
 import org.dyn4j.geometry.hull.MonotoneChain
 import org.dyn4j.geometry.simplify.VertexClusterReduction
 
+private class StagedPolygonExtension : VertexClusterReduction(0.1) {
+    fun getClusterTolerance(): String = "extension"
+}
+
 fun main() {
     var checks = 0
     fun checkResult(condition: Boolean) {
@@ -31,5 +35,8 @@ fun main() {
     val mutable = result as MutableList<Vector2>
     mutable.add(Vector2(3.0, 4.0))
     checkResult(mutable.size == 2)
+    val extension = StagedPolygonExtension()
+    checkResult(extension.clusterTolerance == 0.1)
+    checkResult(extension.getClusterTolerance() == "extension")
     println("PolygonAlgorithmStagedKotlinConsumer: $checks checks passed")
 }
