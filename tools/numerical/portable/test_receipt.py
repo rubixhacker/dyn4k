@@ -54,13 +54,16 @@ class ReceiptContractTest(unittest.TestCase):
     def test_frozen_projection_cannot_disappear_from_a_case(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
-            case = [{**CASES[0], "require_frozen_projection": True}]
+            case = [{**CASES[0], "require_frozen_projection": True,
+                     "frozen_id": "baseline", "frozen_origin": [0.0, 0.0],
+                     "frozen_scale": 1.0}]
             rows = copy.deepcopy(sample())
             self.assertRaises(receipt.Rejected, receipt.inspect,
                               self.write(folder, "missing.jsonl", rows), case)
             rows[0]["frozenConfiguration"] = {key: {} for key in ("settings", "world", "state")}
             rows[0]["frozenInput"] = {"kind": "inputs", "dt": rows[0]["dt"],
-                "steps": rows[0]["steps"], "settings": {}, "world": {}, "state": {}}
+                "steps": rows[0]["steps"], "id": "baseline", "origin": [0.0, 0.0],
+                "scale": 1.0, "settings": {}, "world": {}, "state": {}}
             for row in rows:
                 if row["kind"] == "state":
                     row["frozenState"] = {"bodies": [], "joints": []}
@@ -72,10 +75,15 @@ class ReceiptContractTest(unittest.TestCase):
             rows = copy.deepcopy(sample())
             rows[0]["frozenConfiguration"] = {key: {} for key in ("settings", "world", "state")}
             rows[0]["frozenInput"] = {"kind": "inputs", "dt": rows[0]["dt"],
-                "steps": rows[0]["steps"], "settings": {}, "world": {}, "state": {}}
+                "steps": rows[0]["steps"], "id": "baseline", "origin": [0.0, 0.0],
+                "scale": 1.0, "settings": {}, "world": {}, "state": {}}
             rows[0]["frozenInput"]["dt"] *= 2
             self.assertRaises(receipt.Rejected, receipt.inspect,
                               self.write(folder, "altered-envelope.jsonl", rows), case)
+            rows[0]["frozenInput"]["dt"] = rows[0]["dt"]
+            rows[0]["frozenInput"]["id"] = "other"
+            self.assertRaises(receipt.Rejected, receipt.inspect,
+                              self.write(folder, "altered-frozen-id.jsonl", rows), case)
 
     def test_required_instrumented_callback_cannot_be_omitted(self):
         with tempfile.TemporaryDirectory() as directory:

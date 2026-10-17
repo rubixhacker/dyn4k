@@ -139,6 +139,30 @@ def declared_cases():
             case["id"].startswith("contacts-default-") or
             case["id"].startswith("contacts-configured-") or
             case["profile"] == "frozen-weld-pulley")
+        if case["require_frozen_projection"]:
+            case["frozen_origin"] = [0.0, 0.0]
+            case["frozen_scale"] = 1.0
+            if case["id"] == "long-free-60":
+                case["frozen_id"] = "L-free-s1.0-o0.0,0.0-hz60"
+            elif case["id"].startswith("contacts-default-"):
+                case["frozen_id"] = "S-sleep-wake-hz" + case["id"].rsplit("-", 1)[1]
+            elif case["id"].startswith("contacts-configured-"):
+                outer_hz = case["input"]["outerHz"]
+                repetition = case["input"]["repetition"]
+                case["frozen_id"] = f"Q-sleep-wake-outer{outer_hz}-repeat{repetition}"
+                case["frozen_grouping"] = {
+                    "outerHz": outer_hz, "repetition": repetition,
+                    "innerPerOuter": case["outer_group"],
+                    "outerDt": 1.0 / outer_hz,
+                    "outerSteps": case["steps"] // case["outer_group"],
+                    "actionInnerStep": case["input"]["actionStep"],
+                }
+            elif case["id"].startswith("P-JINT-Pulley-slack-transition-preparation-"):
+                case["frozen_id"] = "P-JINT-Pulley-slack-transition-preparation"
+            elif case["id"] == "P-JINT-Pulley-slack-transition-main":
+                case["frozen_id"] = "P-JINT-Pulley-slack-transition"
+            else:
+                case["frozen_id"] = case["id"]
         case["min_step_events"] = 1
         case["expected_actions"] = []
         case["expected_instrumented_callbacks"] = (

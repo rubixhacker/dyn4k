@@ -347,6 +347,14 @@ def inspect(path, cases):
                         all(exact(frozen_input.get(key), frozen[key])
                             for key in ("settings", "world", "state")),
                         f"{case_id}: frozen input envelope is absent or inconsistent")
+                for field, expected_value in (("id", case.get("frozen_id")),
+                                              ("origin", case.get("frozen_origin")),
+                                              ("scale", case.get("frozen_scale"))):
+                    if expected_value is not None:
+                        require(exact(frozen_input.get(field), expected_value),
+                                f"{case_id}: frozen input {field} differs")
+                require(exact(frozen_input.get("grouping"), case.get("frozen_grouping")),
+                        f"{case_id}: frozen input grouping differs")
                 frozen_id = frozen_input.get("id")
             current = case_id
             next_step = case.get("start_step", 0) + 1
