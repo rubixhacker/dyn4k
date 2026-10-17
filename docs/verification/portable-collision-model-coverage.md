@@ -146,111 +146,113 @@ The pinned source is dyn4j 6.0.0 at `058bf6d982a0fb89b54050f929f6ea9dae53b714`. 
 
 ## Behavior and dispositions
 
-The portable cases exercise public fixture, filter, bounds, item, pair, body, unit conversion, and exception APIs. Nine additional common cases exercise live views, fail-fast iterators and nested sublists, null at point of use, callback re-entry, virtual copy, and getter evaluation order. `getFixturesAndAdd` and `getFixturesAndRemove` use a Kotlin read-only `List` counterpart. The original Java `List.add/remove` exception behavior remains in the unchanged Java suites because that mutator interface is Java/JVM-specific. The unchanged `Issue35StaticHideConsumer.java` separately proves Java static helper hiding; there is no corresponding portable Kotlin static hiding operation. No original helper is waived merely because it uses Java collections.
+The identity table above is complete: 114 distinct pinned Java methods, 114 distinct mapped portable methods, and nine supplemental portable methods. A set comparison against the baseline JUnit XML found zero missing or extra original identities; each final host XML contains all 114 mapped methods and nine supplemental methods. No original test identity is waived. The pinned TestCollisionBody.java helper contributes zero JUnit methods.
 
-`AbstractCollisionBodyTest.addNullConvex` remains an exact JVM source case. Its public common signature takes non-null `Convex`, so common Kotlin cannot pass a null reference into the method. The mapped common test checks the nullable `Fixture` constructor reached by the normal body implementation. This is partial portable evidence for that one identity, not proof of the Java call path. The unchanged Java suite covers the actual call. The integration owner must decide whether a nullable common signature is required to make this case portable.
+The portable cases exercise fixture/filter/bounds ownership, independent copies, object identity, public body operations, live fixture views, fail-fast iterators and nested sublists, callback re-entry, getter evaluation order, virtual copy, and null at the point of use. The root collision AbstractCollisionBodyTest.addNullConvex calls CoverageBody.addFixture(null as Convex?) exactly as the pinned Java TestBody calls addFixture((Convex) null). Both reach Fixture(null) and throw ArgumentNullException with message "shape cannot be null" before insertion; the portable case also checks fixture count zero. The dynamics body probe in the source owner's separate report produces "convex cannot be null" for a different body implementation; that is not this root collision identity.
 
-## Verification
+The nine pinned FixtureTest methods run independently on baseline and candidate JVM, and their nine mapped common counterparts run on every host. The outcomes cover successful construction, null shape error, shape identity, string representation, filter identity, null filter error, sensor mutation, user-data identity/reset, and deep shape/filter copy with cleared user data. All nine passed in each lane. The separate body addNullConvex identity passed on both Java JVM lanes and every portable host. The 19 portable FilterFixtureCoverageTest methods include these nine fixture cases; their XML is listed below.
 
-### Exact tree and environment
+Two Java-specific behavior fragments remain executed by unchanged JVM tests: Java List.add/remove on the body fixture view in AbstractCollisionBodyTest.getFixturesAndAdd/getFixturesAndRemove, and Java static helper hiding in Issue35StaticHideConsumer. The two original view identities are still mapped to common tests of the read-only Kotlin List contract; live view and mutation/fail-fast behavior are exercised by supplemental common tests. These are fragment dispositions, not omitted Java identities or skipped tests.
 
-- Author model verified from this session's active `turn_context`: `gpt-6-sol`, turn `01a14b38-bd61-75d1-a18f-06c6bda44d0e`.
-- Verified tree commit: `1838472ca42ccba17fe8f13396b43484890c8542`. Test source commit: `8a0a526eacf43f5caf5c1a50310b939c20ae7b6b`; pinned collision dependency: `134b8dc691849fcc51e45229a3d950bff895412a`; merged integration: `ec2b14baafbe4672b7c9799144354a1a943e7744`.
-- Common test source SHA-256: `0e4bf6c652d64c898b25650db994027e1ced5a3154874d559db97328aea46bab`.
-- Candidate JVM JAR SHA-256: `223eaa1fd59234712e90804b4485864974fc5b0986d4c3a12e8cec3b1986c0d3`.
-- Pinned baseline binary SHA-256: `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`.
-- Bazzite 44.20261012.0, Linux 7.2.9-ogc3.1.fc44.x86_64, x86_64; Gradle 9.5.0; Kotlin/KGP 2.4.20; OpenJDK JBR 21.0.9+10-b895.147. JS uses KGP Node 24.16.0; Wasm JS and Wasm WASI use KGP Node 26.2.0. Android host uses the local JDK host task, not an Android device.
-- Raw Gradle log: `/tmp/dyn4k-portable-collision-model-evidence/gradle-final.log`, SHA-256 `0b8c6b6739948cc087dccfde15b1ebf71ba3be5aa8c9e401c5cc0f972f6d0571`.
+## Verification identity and environment
 
-### Original Java suites
+- Active model: gpt-6-sol, raw session 01a14b38-bc97-7680-8f59-af16a284b75a, turn 01a14b5e-881b-7661-979a-ac83c617a960.
+- Verified build/source tree before this documentation update: 4cdd9c1d8082f57ac37ba87d1ebf1d1f4463c8d0. It contains reviewed collision source abef13d59ed31214019b09c8fc08ea047d50daa6 and the then-current integration 5457e52. The final documentation commit changes no source or build input.
+- Pinned upstream source SHA: 058bf6d982a0fb89b54050f929f6ea9dae53b714. Common test source SHA-256: 742787ad7e6adc71bec7b76d05dfba8916cf8758dae070a622e5cd229507f4c1. The pinned original source file hashes remain in the table above.
+- Baseline dyn4j 6.0.0 binary SHA-256: 204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e. Built and staged JVM JAR SHA-256: 8d295feb72e218a61985532e4333fd4ff3975cc176a5472770976825348d451b. Staged Android AAR: 7245eae1f4bc1c3a9a9c056ce5445da5443f62e858d1f812076697ee0c13217f. Extracted staged Android classes JAR: b186e4309a7400b9646076110856b50515dd0b0ea1e14c00922a749568cb1591.
+- Host: Bazzite 44, Linux 7.2.9-ogc3.1.fc44.x86_64, x86_64; Gradle 9.5.0, Kotlin/KGP 2.4.20, JBR OpenJDK 21.0.9+10-b895.147. KGP Node 24.16.0 ran JS Node; Node 26.2.0 ran Wasm JS and Wasm WASI. Android host is a JDK classpath test, not device execution.
+- The final combined Gradle log is /tmp/dyn4k-collision-corpus-evidence/gradle-final-after-integration.log, SHA-256 ec99a3694662852b1f3545a4cdcb7552e546f3e58a8b2dda1eb8e56fda372abc.
 
-The pinned original Java sources compiled with `javac --release 8` against the baseline binary and executed in a separate JVM. The unchanged sources also compiled through `:dyn4k-core:compileUpstreamCollisionModelTests` against the candidate and executed through `:dyn4k-core:runUpstreamCollisionModelTests`. A separate JUnit XML runner used JUnit 4.13.2 and Hamcrest 1.3 for both sides. Both executed **114/114** with zero failures and zero ignored tests. The raw baseline and candidate XML each have SHA-256 `54734dda1f47158de307210bc76f6474c15274859885e61ca9ba4e082fd72d65` and are saved in `/tmp/dyn4k-portable-collision-model-evidence/`. The Gradle candidate task used JUnit 4.13.1 and independently printed `OK (114 tests)`.
+## Red/green sensitivity
 
-A same-source Java null probe compiled with `javac --release 8` returned `null` for an empty body and threw `java.lang.NullPointerException` after adding a fixture on both baseline and candidate JVM runs. This observation is separate from the original 114-case suite.
+A temporary wrong message expectation, "convex cannot be null", on the actual CoverageBody.addFixture(null as Convex?) call caused the targeted JVM case to fail with a JUnit ComparisonFailure: actual "shape cannot be null". The red raw XML is /tmp/dyn4k-collision-corpus-evidence/red/TEST-org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml, SHA-256 8d9b4e57dbca22f94f26e14a74d7664a2d16eaea433b609b2420db45d5c0d406. The expected message was restored to the pinned Fixture constructor result. All final host XMLs below are green.
 
-The unchanged collision consumer, including Java static helper hiding, printed `collision consumer checks=71` in each of four independent Gradle tasks: `runBaselineCollisionModelConsumer`, `runCandidateCollisionModelConsumer`, `runStagedCollisionModelConsumer`, and `runAndroidCollisionModelConsumer`. All four tasks exited successfully. The Android consumer is an Android class/JVM-host check; it does not establish device runtime behavior.
+The targeted red command used the three environment variables below and:
 
-### Common runtime lanes
+    ./gradlew :dyn4k-core:jvmTest --tests 'org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.addNullConvex' --offline --rerun-tasks --console=plain
 
-The expected new common count is 123: 114 mapped counterparts and nine supplemental cases. The full local suite also includes 20 pre-existing common tests. No XML reports a skipped case. Linux x64 stopped during the null probe, so two expected common cases were not executed; a zero skip counter does not make that lane complete.
+## Original Java and consumers
 
-| Runtime task | New cases executed | Full cases executed | Failures | Skips | Result |
+The unchanged 16 original Java test classes compiled with javac --release 8 and ran separately against the baseline and candidate JARs through the JUnit 4.13.2 XML runner. Each raw XML has 114 cases, zero failures and zero skipped tests. Both XMLs have SHA-256 54734dda1f47158de307210bc76f6474c15274859885e61ca9ba4e082fd72d65 and are at /tmp/dyn4k-collision-corpus-evidence/baseline-original.xml and candidate-original.xml. The independent Gradle task runUpstreamCollisionModelTests also printed OK (114 tests) using JUnit 4.13.1.
+
+The unchanged CollisionModelConsumer.java compiled with javac --release 8 and ran four times against baseline, candidate, staged JVM, and staged Android classes on the JDK host. Each printed collision consumer checks=75. The identical Kotlin consumer source (SHA-256 c9a940bb25b28dbe4fcba944d5b49e9e03c74b283c393444d5892a28b4e1541b) compiled and ran against baseline, direct candidate JAR, and staged JVM JAR in three isolated temporary Gradle projects. Each printed staged Kotlin checks=7. Its source was unchanged; only dependency coordinates/path were selected per lane. Logs are retained in /tmp/dyn4k-collision-corpus-evidence/.
+
+The strict tools/baseline/verify.py comparison selected all 17 root collision top-level types and seven owned support/exception types. It compared 24 types and 221 pinned public/protected declarations on each of the staged JVM and extracted staged Android class JARs. Both returned zero missing types, signature mismatches, and compatible differences. The executable command and result are retained at /tmp/dyn4k-collision-corpus-evidence/verify-signatures.py (SHA-256 8d57e0e23803a2a8881b9a38584e9e8a5c784f5eab756ee94ec19c86832d6a8a) and signatures-final.log (SHA-256 df193671307b8d0661411163de82dc000591e6ce6ae7eb0ef45a08472cf53bf4).
+
+## Common runtime lanes
+
+The six requested host tasks each executed 123 portable collision corpus cases: bounds 18, body 45, item/pair 20, support 21, filter/fixture 19. Each also executed 22 existing CollisionModelTest cases, for 145 collision-slice cases. Every lane had zero failures, errors, and skips. The earlier Linux x64 SIGSEGV and JS/Wasm null-point failures were absent after the reviewed source repair. Other geometry tests also ran in these Gradle tasks; their counts are outside this collision-slice ledger.
+
+| Host task | Portable corpus | Existing collision | Total collision slice | Failures | Errors | Skips | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| jvmTest | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+| linuxX64Test | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+| jsNodeTest | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+| wasmJsNodeTest | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+| wasmWasiNodeTest | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+| testAndroidHostTest | 123 | 22 | 145 | 0 | 0 | 0 | PASS |
+
+### Exact commands
+
+All repository Gradle runs used JAVA_HOME=/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2, ANDROID_HOME=/var/home/stewart/Android/Sdk, and ANDROID_SDK_ROOT=/var/home/stewart/Android/Sdk. The final combined command was:
+
+    ./gradlew :dyn4k-core:jvmTest :dyn4k-core:linuxX64Test :dyn4k-core:jsNodeTest :dyn4k-core:wasmJsNodeTest :dyn4k-core:wasmWasiNodeTest :dyn4k-core:testAndroidHostTest :dyn4k-core:runUpstreamCollisionModelTests :dyn4k-core:runBaselineCollisionModelConsumer :dyn4k-core:runCandidateCollisionModelConsumer :dyn4k-core:runStagedCollisionModelConsumer :dyn4k-core:runAndroidCollisionModelConsumer :dyn4k-core:publishAndroidPublicationToStagingRepository --offline --rerun-tasks --continue --console=plain
+
+The independent original Java command was:
+
+    bash /tmp/dyn4k-portable-collision-model-evidence/run-original.sh
+
+The strict staged signature command, after extracting classes.jar from the staged Android AAR, was:
+
+    PATH=/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2/bin:$PATH PYTHONDONTWRITEBYTECODE=1 python3 /tmp/dyn4k-collision-corpus-evidence/verify-signatures.py
+
+Each Kotlin consumer lane used the same command shape with baseline-kotlin, candidate-kotlin, or staged-kotlin as project directory:
+
+    JAVA_HOME=/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2 ./gradlew -p /tmp/dyn4k-collision-corpus-evidence/staged-kotlin run --offline --rerun-tasks --console=plain
+
+## Raw collision XML
+
+Each file below is an unmodified copy from dyn4k-core/build/test-results/<task>/ immediately after the final run. The base directory is /tmp/dyn4k-collision-corpus-evidence/final-xml/. All 36 files were counted directly from XML.
+
+| Relative XML path | Cases | Failures | Errors | Skips | SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `jvmTest` | 123/123 | 143 | 0 | 0 | PASS |
-| `linuxX64Test` | 121/123 | 141 | 1 | 0 | FAIL |
-| `jsNodeTest` | 123/123 | 143 | 1 | 0 | FAIL |
-| `wasmJsNodeTest` | 123/123 | 143 | 1 | 0 | FAIL |
-| `wasmWasiNodeTest` | 123/123 | 143 | 1 | 0 | FAIL |
-| `testAndroidHostTest` | 123/123 | 143 | 0 | 0 | PASS |
+| jvmTest/TEST-org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | 76e385d5e1902a6a2162e341e32b002fc8b82f0532f09e544367ea8f0aae5a9b |
+| jvmTest/TEST-org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | 32be7398eaeab85d7185832b3b94696c59e1a352af1f5687c8412ead7e7f32dd |
+| jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | 53a8d72aa026eb1a2d7fda2524cb0ca6b2cf8dc2c05cd90a7f350bd563a27fea |
+| jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | c3aaa01bf74c7c0c656fc78486980c40ec481590130162c1dc98b1690fdd92bb |
+| jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | 4e5078aab1ee568db931d708042a9f92a0b8be46bb58cb1cad26561eb2e89266 |
+| jvmTest/TEST-org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | 4c4f61425ddb39ad07b6ffc3eeb9b6e9ec05f9e406ef7a7eb9fdaba76b409355 |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | e5619e2334ba5c361c879e1839517bbfec7179a7064b525d58304d6fa03498bd |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | a01956700026c120519efeecaa1385beb45e3b091e2155c4f30bcd0de762558d |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | f6350101077c403599e57fbc7ba12f9eb48fdb9c9a0e7dd88977f7ba4025978e |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | 5ce08b7daf22358b10d6965fcf8550434a5c2f2c4c4d3a8a29dfd136012c900d |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | c1e4284022257d67e9aea8bdde533f31f915a472f31c2db6b4d30bb72caebb6b |
+| linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | f7dd091b09e8763bb1db23d02496a446595be4daabe7ebe9b30f6e864e9108fa |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | 0d2501a1c72ffa1c8ee0ae5fe6e543eb48e03927e339c6cd45dc2b08cf4cc3ab |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | dd8bf2c900ef25348adfd737b66976e06213319983783b8d53099087755cec0e |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | 2bd4f247f001186193be7580f6d5cc3fef1c54cbcc66799bc77621b319f20c94 |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | 18f2d8c3d7cb72a800faf0c4bbbefca1d2aebfcbea9d0cae7e317fc91f398fc7 |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | 27ec72ccd01849e6703b5505a67b3d6b749b9a0c3b392e5c15c0650320705225 |
+| jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | 87b762939156dd02f4c75ffe3a675dfc1c0a5d76ca751efb36bb8c202768a689 |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | 93d0a0b67a2b554e33ebebbfa275c1cd486c90be46bc25ddd67dbf893b4737e8 |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | 084b3c40ec4afc29a83edc7a434c291329a154cdc6947731066e924506b9c4bb |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | 6ed35cab7201601bab3d6e1a340c06a112576b8854e45b08a8061146739f1d38 |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | afb8b2c5cf1eaca52c479b3e614af46f90aa3937bb4608a21e5de1deb4c98af2 |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | 328d2a54f0c168586ada0430b3dac7f46bf7c729389d5d67c2de481595a44415 |
+| wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | de7e9a0f1de3833c3fc1f80882759d7e3e513d79399afa78711ee729383cde0e |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | ae7f4d26875d6fe10bcabe0493d032da0a3af555eed4fb5920e737ce8756ccf6 |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | 755f0de5f26f1e6cacf88506824fb46899a11fc29e7bcd123eea6abc26403108 |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | 58ff6f0b964166cb94d630469e701701fc95739dd66e678b42d5c6f659e7f48b |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | e9d12079b4ca2997eac6d9e81cd98b13624b948d3edaa199080c82cea6b73147 |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | a76db2d8123d63ffed43315e1485b6848960d36632cfa9032461365bb80fd79c |
+| wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | 7565eaad3de7e537a81c8729bca89799d81b1b08cca783182ac1ef8e85ef4392 |
+| testAndroidHostTest/TEST-org.dyn4j.collision.CollisionModelTest.xml | 22 | 0 | 0 | 0 | 5ab249503815261b4505695074f01862dbb14d32014f090f730215e8c0b1b6f5 |
+| testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml | 18 | 0 | 0 | 0 | 2bd0ddb783013280195dd8f93b6a235f1c868a3f10e80b4f006f051fcb81e37d |
+| testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml | 45 | 0 | 0 | 0 | 273b15d91d5d2cec18640725e2ba5ff702c59f1458f9afeed0ae0f49bc91ca6f |
+| testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml | 20 | 0 | 0 | 0 | 8ffe18ac88178b1efdec541af31f0b53127d2f16cd74a2b05dddb4a1da316a6a |
+| testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml | 21 | 0 | 0 | 0 | c12efc9b6eb64c9ac6350ee8eb9be48b1ee600064acbbc6e6641dcbfe921a475 |
+| testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml | 19 | 0 | 0 | 0 | e6f5234ad23c1256c81ce14f32707b1f5cc8784a4e24383c4e9d202683a1782d |
 
-The sole remaining failure on each non-JVM lane is `CollisionBodyCoverageTest.supplementalNullPointIsDeferredUntilShapeUse`. Linux x64 exits with code 139 (`SIGSEGV`) and an `Unknown` XML failure. An isolated native run under GDB traces the null point from `AbstractCollisionBody.getFixture` at `CollisionBody.kt:179` through `Circle.contains` to a null `Vector2.x` dereference at `Vector2.kt:40`. The raw backtrace is `/tmp/dyn4k-portable-collision-model-evidence/native-null-gdb.log`, SHA-256 `084242f2bcc51cd177c8a3a5007781e0f36e39eb3d80459ae0df027ca525fc5a`. JS Node throws a JavaScript `TypeError`. Wasm JS and Wasm WASI throw `ClassCastException` for a null-to-`Vector2` cast. JVM and Android host throw the expected `NullPointerException`. The engine owner must repair and rerun this behavior; production code is outside this coverage branch.
+## Qualification boundary
 
-All six requested local tasks were available. Android device, Apple, Windows, Linux ARM64, browser, and other qualification runtimes were not run for this slice. Their status is `NOT_RUN`, not pass or zero cases. The full support matrix remains open under the integration qualification work.
-
-### Reproduction commands
-
-The common and candidate Java run used this exact Gradle invocation, with `JAVA_HOME=/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2`, `ANDROID_HOME=/var/home/stewart/Android/Sdk`, and `ANDROID_SDK_ROOT=/var/home/stewart/Android/Sdk`:
-
-```bash
-./gradlew :dyn4k-core:jvmTest :dyn4k-core:linuxX64Test :dyn4k-core:jsNodeTest :dyn4k-core:wasmJsNodeTest :dyn4k-core:wasmWasiNodeTest :dyn4k-core:testAndroidHostTest :dyn4k-core:runUpstreamCollisionModelTests --offline --rerun-tasks --continue --info
-```
-
-The unchanged Java consumer tasks used the same three environment variables:
-
-```bash
-./gradlew :dyn4k-core:runBaselineCollisionModelConsumer :dyn4k-core:runCandidateCollisionModelConsumer :dyn4k-core:runStagedCollisionModelConsumer :dyn4k-core:runAndroidCollisionModelConsumer --offline --rerun-tasks --continue --quiet
-```
-
-The isolated native failure used the compiled test executable from the same Gradle run:
-
-```bash
-dyn4k-core/build/bin/linuxX64/debugTest/test.kexe '--ktest_filter=*supplementalNullPointIsDeferredUntilShapeUse*' --ktest_logger=SIMPLE
-gdb --batch -ex run -ex 'bt 15' --args dyn4k-core/build/bin/linuxX64/debugTest/test.kexe '--ktest_filter=*supplementalNullPointIsDeferredUntilShapeUse*' --ktest_logger=SIMPLE
-```
-
-For the baseline, `javac --release 8` compiled `src/test/java/org/dyn4j/collision/*.java`, `UnitConversionTest.java`, and `exception/ExceptionsTest.java` from the pinned checkout against `dyn4j-6.0.0.jar`, JUnit 4.13.2, and Hamcrest 1.3. The separate `CollisionJUnitXml` runner invoked these 16 test classes in the order used by `runUpstreamCollisionModelTests`. The candidate runner used the same 16 names with the Gradle-compiled original class files, candidate JVM JAR, Kotlin stdlib 2.4.20, JUnit 4.13.2, and Hamcrest 1.3. The exact baseline/candidate compilation and execution command is `bash /tmp/dyn4k-portable-collision-model-evidence/run-original.sh`. The runner source, same-source null probe, XML, and Gradle log are retained in that directory.
-
-### Raw XML hashes
-
-Each row hashes the unmodified XML copied from `dyn4k-core/build/test-results/<task>/` to the evidence directory immediately after the exact-tree run. The first XML in each lane is the pre-existing common suite; the other five are the new corpus.
-
-| Raw XML under evidence directory | Cases | Failures | SHA-256 |
-| --- | ---: | ---: | --- |
-| `jvmTest/TEST-org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `de1f1801162d68576b3bd544704b18a2fc56115665c651ebaa391aca0851b0b1` |
-| `jvmTest/TEST-org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `656ccd554d0dd7452f30340397ec74d0b21d57a63f3b22c77b1ae6a3919ea027` |
-| `jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 45 | 0 | `36ac82d88da9734b5db5c975a91d37053af33eba1e5c211a06eab1d7a1730f81` |
-| `jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `efb60cfaca8010076c3c358b66b84a7856b3a4255cd228918b462b1a6dcd1608` |
-| `jvmTest/TEST-org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `6da33147dfd76696d3471d03122b72db95863e08e507205e37c2cec74c1a1ad0` |
-| `jvmTest/TEST-org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `c53464a5d40ff60f40b143e7c8efc90034f618186da98f04bbdc93262ae15ef8` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `94c0429c670cd05031107bcd81776984d0b07b9192c0629f5299fef4d51c7538` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `d1e6669b521376d31d85db091bda0178f728764b056163b1295d0c92923f6667` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 43 | 1 | `a007d43c9e5702b6fd5ba37b3ccf73165b6ce8e535eadee56bd7536e2a6c950c` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `9895785066d05f60b3442f71697ed31c2eacabe7ff212278edb703c048bf3af0` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `5d37fae99f6bf2e3ef55567cd1ee53f70370c748e7021f765300696b7343c83a` |
-| `linuxX64Test/TEST-linuxX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `ab757ecabe235682f53838ac676dc1bf6198ecb86c375a02d182752999175528` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `49c643eac44d99e1913628273cdfdaeec7981e1842ec03ef19ee790ed62a8424` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `163cad9a6c2244599603a0049956274a032835afa37ebfe07c4d1b2109e91a20` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 45 | 1 | `2748adc9c535d87a64fc0965b47fec8915757096aa8c187eff9d765ed060727f` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `9d68e9692a7ccc4a874fb9017d70551115739f0f96226ea0b54b9bc98bb221ef` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `007523f0b6f6a54ac533fe3e78175aea7c5af9401e7d7b7a5f247a1cd5fde67a` |
-| `jsNodeTest/TEST-jsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `ad835b2af212e5e8a354d5254bdda1c656d86ea2fece856bc1c9c5368f99bc9e` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `2c5253edb51d69458859eb6f416c4f733d9da1c5f2addae5a65ab9d5e4ca2060` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `6582a8d1ee513871fd63901498586ff8d2484f991bdfc94b075af2f577984c5f` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 45 | 1 | `5d3e78c5575d6ec662925f8f6ff65ad56338b6b51c7ea3bbc6858ddbe3bc048b` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `72f238b38324c27e1ee26b79a70bceac39ed55018a722bcd8936dae90a3d0f4b` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `979ce2bb9d14ae7182d2a6be4c27444cbdd78c232da9ddd36f1ca28d1015fd0b` |
-| `wasmJsNodeTest/TEST-wasmJsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `134a0dd2020db177fd92a56220e8d8b9a5534243662418dfb801682725b6f9e7` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `2cef65584ea194668b1e997642ac751a22e9a57f267d8324bbd294014b96aefb` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `048a884c58307b90b7cc29800cab33abce0a607b8e91f3e1d6853e9618736a09` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 45 | 1 | `eb0ea70dbe30e4d444d68b7980191f3fade8fe46f0a4ee01ce6b7edd11e73a13` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `e1e59139ece7b3f672b944c79e680ccf22127c10d94ec473656bd8042e007ac2` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `41250a8b5006e6c33e90c263c3f743d6fd0645c2e4df2b6c025efb38496edaa5` |
-| `wasmWasiNodeTest/TEST-wasmWasiNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `f9851c1ae8c138f04f321024d1e139162097d3d39d70abc34c8ba8d6b4504f99` |
-| `testAndroidHostTest/TEST-org.dyn4j.collision.CollisionModelTest.xml` | 20 | 0 | `b891a95604c161c452c7b8ff3edd6150a8f56d193924dfdc20a25b2d1637e8fe` |
-| `testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.BoundsCoverageTest.xml` | 18 | 0 | `faa88656fac14dfecaafb800169116120de8c2668ae26be7d3c71972e46f274d` |
-| `testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest.xml` | 45 | 0 | `a971f11ce1d65e2d558c8205cffb010a9e4697da6919f426e360915c4f31ac8b` |
-| `testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest.xml` | 20 | 0 | `4f959eba915dc85f6699f000f4c9f80439d79438de1fea15974407b12a4b02cd` |
-| `testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest.xml` | 21 | 0 | `c6c57d2dc8277cfce053852f2474b682e5d75229fe6f63ba59ea4a8c12f36bb7` |
-| `testAndroidHostTest/TEST-org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest.xml` | 19 | 0 | `3964ad7ab9ca623f93f5275c2e255d32e03c986781826a8bb2c5a35876f356b9` |
-
-The frozen `core-*` qualification manifest does not include this new common-test subtree. Updating it and rerunning all qualification lanes are integration dependencies. This report is bounded local corpus evidence, not full target qualification.
+These are six host runtime results plus unchanged JVM source consumers, not full 21-target qualification. Android device, browser, Apple, Windows, Linux ARM64, other native targets, and remaining runtime combinations are NOT_RUN for this slice. The frozen core-* qualification manifest does not yet include these new common tests; integration must update it and execute its gates before making a full qualification claim. The pinned source, fixtures, and BSD legal notices remain intact. [Use baseline filters, bounds, and collision objects from consumers](https://github.com/rubixhacker/dyn4k/issues/35) and [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42) remain open.
