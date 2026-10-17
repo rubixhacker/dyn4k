@@ -8,7 +8,7 @@
   "phases": [["excitation", 1, 60], ["long-run", 61, 36000]],
   "cases": {
     "weld-rigid": {
-      "geometry": "A fixed 10 m by 0.5 m rectangle at the origin and a dynamic 1 m by 0.5 m rectangle centered at (0,2) m. The joint world anchor is (-0.5,2) m. Spring and limits are disabled. Gravity is (0,-9.8) m/s^2. The dynamic body starts with velocity (2,0) m/s. No later body or joint mutation.",
+      "geometry": "A fixed 10 m by 0.5 m rectangle at the origin and a dynamic 1 m by 0.5 m rectangle centered at (0,2) m. The joint world anchor is (-0.5,2) m. Spring and limits are disabled. Gravity is (0,-9.8) m/s^2. The dynamic body starts with velocity (2,0) m/s and a queued force (0,-10) N applied at world point (0.5,2) m before step 1. No later body or joint mutation.",
       "metrics": {
         "anchor_gap_m": {"absolute_limit": "0.01", "relative_limit": "0"},
         "angular_error_rad": {"absolute_limit": "0.017453292519943295", "relative_limit": "0"}
