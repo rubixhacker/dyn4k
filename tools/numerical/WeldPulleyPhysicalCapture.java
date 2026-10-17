@@ -59,6 +59,10 @@ public final class WeldPulleyPhysicalCapture {
                 event(0, "begin");
             }
 
+            @Override public void updatePerformed(TimeStep step, PhysicsWorld<Body, ?> source) {
+                event(99, "updatePerformed");
+            }
+
             @Override public void postSolve(TimeStep step, PhysicsWorld<Body, ?> source) {
                 event(1, "postSolve");
             }
@@ -104,7 +108,7 @@ public final class WeldPulleyPhysicalCapture {
         String name = args[0];
         World<Body> world = new World<>();
         world.setGravity(new Vector2(0, -9.8));
-        if (name.equals("weld-rigid")) {
+        if (name.equals("weld-spring-equal")) {
             Body fixed = new Body();
             fixed.addFixture(Geometry.createRectangle(10, 0.5)).setFriction(0);
             fixed.setMass(MassType.INFINITE);

@@ -147,7 +147,7 @@ def audit_quality(declaration, manifest, case, path):
             row = rows[base + 3]
             if row.keys() != {"kind", "step", "state"} or row["kind"] != "state" or row["step"] != step:
                 raise Rejected("state identity or order differs")
-            values = weld(row["state"]) if case == "weld-rigid" else pulley(row["state"])
+            values = weld(row["state"]) if case == "weld-spring-equal" else pulley(row["state"])
             phase = "excitation" if step <= declaration["phases"][0][2] else "long-run"
             for name, value in values.items():
                 item = metrics[name]
@@ -172,16 +172,22 @@ def main():
     parser = argparse.ArgumentParser(description="Audit frozen Weld/Pulley physical quality")
     parser.add_argument("--declaration", default="tools/numerical/weld-pulley-physical-declaration.json")
     parser.add_argument("--manifest", default="tools/numerical/weld-pulley-physical-manifest.json")
-    parser.add_argument("--case", choices=("weld-rigid", "pulley-taut"), required=True)
+    parser.add_argument("--case", choices=("weld-spring-equal", "pulley-taut"), required=True)
     parser.add_argument("--reference", required=True)
+    parser.add_argument("--capture-source", default="tools/numerical/WeldPulleyPhysicalCapture.java")
+    parser.add_argument("--baseline-jar", required=True)
     args = parser.parse_args()
     declaration_bytes = Path(args.declaration).read_bytes()
     declaration = json.loads(declaration_bytes)
     manifest = json.loads(Path(args.manifest).read_bytes())
-    if sha(declaration_bytes) != manifest["declaration_sha256"]:
-        result = {"status": "INVALID", "reason": "declaration hash differs"}
-    else:
+    try:
+        if (sha(declaration_bytes) != manifest["declaration_sha256"] or
+            sha(Path(args.capture_source).read_bytes()) != manifest["capture_sha256"] or
+            sha(Path(args.baseline_jar).read_bytes()) != manifest["baseline_jar_sha256"]):
+            raise Rejected("declaration, capture source, or baseline JAR hash differs")
         result = audit_quality(declaration, manifest, args.case, args.reference)
+    except (Rejected, OSError, KeyError) as error:
+        result = {"status": "INVALID", "reason": str(error)}
     print(json.dumps(result, sort_keys=True))
     raise SystemExit(0 if result["status"] == "PHYSICAL_PASSED" else
                      2 if result["status"] == "PHYSICAL_FAILED" else 1)

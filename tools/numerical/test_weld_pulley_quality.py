@@ -25,7 +25,7 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
             "steps_per_case": 2,
             "phases": [["excitation", 1, 1], ["long-run", 2, 2]],
             "cases": {
-                "weld-rigid": {"metrics": {"anchor_gap_m": {"absolute_limit": "0.01", "relative_limit": "0"}, "angular_error_rad": {"absolute_limit": "0.017453292519943295", "relative_limit": "0"}}},
+                "weld-spring-equal": {"metrics": {"anchor_gap_m": {"absolute_limit": "0.01", "relative_limit": "0"}, "angular_error_rad": {"absolute_limit": "0.017453292519943295", "relative_limit": "0"}}},
                 "pulley-taut": {"metrics": {"absolute_rope_error_m": {"absolute_limit": "0.01", "relative_limit": "0"}}},
             },
         }
@@ -35,7 +35,7 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
         header = {"kind": "inputs", "case": case, "declaration_sha256": "d" * 64,
                   "capture_sha256": "c" * 64, "source_revision": "f" * 40,
                   "jar_sha256": "a" * 64, "step_seconds": "1/60", "steps": 2}
-        if case == "weld-rigid":
+        if case == "weld-spring-equal":
             state = {"bodies": [{"id": "ground", "center": [0, 0], "angle": 0, "cost": 1, "sint": 0},
                                 {"id": "member", "center": [0, 2], "angle": 0, "cost": 1, "sint": 0}],
                      "joint": {"type": "WeldJoint", "spring": True, "limits": True,
@@ -74,13 +74,13 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
                 self.assertEqual("PHYSICAL_PASSED", self.audit(case, self.rows(case))["status"])
 
     def test_out_of_bound_weld_anchor_and_angle_fail(self):
-        rows = self.rows("weld-rigid")
+        rows = self.rows("weld-spring-equal")
         rows[-1]["state"]["joint"]["anchor2"][1] = 2.011
         rows[-1]["state"]["bodies"][1]["center"][1] = 2.011
-        self.assertEqual("PHYSICAL_FAILED", self.audit("weld-rigid", rows)["status"])
-        rows = self.rows("weld-rigid")
+        self.assertEqual("PHYSICAL_FAILED", self.audit("weld-spring-equal", rows)["status"])
+        rows = self.rows("weld-spring-equal")
         rows[-1]["state"]["bodies"][1]["angle"] = 0.02
-        self.assertEqual("PHYSICAL_FAILED", self.audit("weld-rigid", rows)["status"])
+        self.assertEqual("PHYSICAL_FAILED", self.audit("weld-spring-equal", rows)["status"])
 
     def test_out_of_bound_pulley_extension_and_compression_fail(self):
         for offset in (-0.02, 0.02):
@@ -102,10 +102,10 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
             lambda r: r[0].update(jar_sha256="0" * 64),
         ]
         for mutate in mutations:
-            rows = self.rows("weld-rigid")
+            rows = self.rows("weld-spring-equal")
             mutate(rows)
             with self.subTest(mutation=mutate):
-                self.assertEqual("INVALID", self.audit("weld-rigid", rows)["status"])
+                self.assertEqual("INVALID", self.audit("weld-spring-equal", rows)["status"])
 
     def test_wrong_frozen_hash_or_empty_suite_fails_closed(self):
         case = "pulley-taut"
