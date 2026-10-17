@@ -17,7 +17,10 @@ class IdiomaticMixedExampleTest {
         val live = world.bodies.single().linearVelocity
         assertSame(javaBody.getLinearVelocity(), live)
         live.x = 3.0
+        val calls = intArrayOf(0)
+        world.addStepListener(IdiomaticJavaExample.observeBody(javaBody, calls))
         world.step(1)
+        assertEquals(1, calls[0])
         assertEquals(3.0, javaBody.getLinearVelocity().x, 1e-12)
     }
 }
