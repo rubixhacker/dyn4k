@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import math
+import os
+import platform
 import shutil
 import argparse
 import xml.etree.ElementTree as ET
@@ -219,6 +221,32 @@ UBUNTU_PROBES = {
 }
 
 
+def ubuntu_runtime():
+    import hosted
+
+    release = platform.freedesktop_os_release()
+    return {"system": platform.system(), "machine": platform.machine(),
+            "kernel_release": platform.release(),
+            "distribution": release.get("ID", ""),
+            "os_version": release.get("VERSION_ID", ""),
+            "runner_image_os": os.environ.get("ImageOS", ""),
+            "runner_image_version": os.environ.get("ImageVersion", ""),
+            "github_actions": os.environ.get("GITHUB_ACTIONS") == "true",
+            "java_version": hosted.tool_version(["java", "-version"], r'version "([^"]+)"')}
+
+
+def check_ubuntu_runtime(runtime):
+    if (not isinstance(runtime, dict) or runtime.get("system") != "Linux"
+            or str(runtime.get("machine", "")).lower() not in ("x86_64", "amd64")
+            or not runtime.get("distribution") or not runtime.get("os_version")
+            or not runtime.get("kernel_release") or not runtime.get("java_version")):
+        raise ValueError("Ubuntu bundle runtime identity is incomplete or wrong")
+    if runtime.get("github_actions") and (runtime.get("distribution") != "ubuntu"
+                                          or not runtime.get("runner_image_os")
+                                          or not runtime.get("runner_image_version")):
+        raise ValueError("Ubuntu bundle runtime runner image is missing or wrong")
+
+
 def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination):
     destination.mkdir(parents=True, exist_ok=False)
     (destination / "json").mkdir()
@@ -227,6 +255,8 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
               "groups": {}, "files": []}
     problems = []
     try:
+        result["runtime"] = ubuntu_runtime()
+        check_ubuntu_runtime(result["runtime"])
         groups = {group["id"]: group for group in manifest["groups"]}
         for name, ids in UBUNTU_PROBES.items():
             probe = copy_json(evidence_dir / name, destination)
@@ -268,6 +298,7 @@ def verify_bundle(bundle, manifest, candidate_sha):
         raise ValueError(summary.get("reason", "bundle did not pass"))
     route = summary.get("route")
     if route == "ubuntu-host":
+        check_ubuntu_runtime(summary.get("runtime"))
         selections = UBUNTU_PROBES
     else:
         import hosted

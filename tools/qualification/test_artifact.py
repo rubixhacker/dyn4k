@@ -211,9 +211,16 @@ class RawArtifactTests(unittest.TestCase):
             complete_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
                                                      repository / "ubuntu-complete")
             self.assertEqual("PROBE_PASSED", complete_ubuntu["status"])
+            self.assertEqual("Linux", complete_ubuntu["runtime"]["system"])
             self.assertEqual(2858, complete_ubuntu["executed"])
             self.assertEqual(2858, artifact.verify_bundle(repository / "ubuntu-complete",
                                                            manifest, sha)["executed"])
+            summary_path = repository / "ubuntu-complete/verification.json"
+            summary = json.loads(summary_path.read_text())
+            summary["runtime"]["system"] = "Windows"
+            summary_path.write_text(json.dumps(summary))
+            with self.assertRaisesRegex(ValueError, "Ubuntu bundle runtime"):
+                artifact.verify_bundle(repository / "ubuntu-complete", manifest, sha)
 
 
 if __name__ == "__main__":
