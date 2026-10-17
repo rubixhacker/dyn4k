@@ -99,6 +99,7 @@ def validate_setup(header, case):
                          "maximumAngularCorrection", "baumgarte", "continuousDetectionMode",
                          "narrowphase", "timeOfImpact"}
     require(required_settings <= settings.keys(), "input settings omit a required field")
+    require(isinstance(settings["timeOfImpact"], dict), "input TOI settings are malformed")
     require(exact(settings["timeOfImpact"].get("distanceEpsilon"), 4.806217383937352e-6),
             "default TOI distance epsilon differs from pinned cbrt value")
     bodies = setup.get("bodies")
@@ -106,6 +107,7 @@ def validate_setup(header, case):
     require(isinstance(bodies, list) and bodies and isinstance(joints, list),
             "input body or joint setup is absent")
     for index, body in enumerate(bodies):
+        require(isinstance(body, dict), "input body setup is malformed")
         require(body.get("id") == f"b{index}", "input body identity differs")
         require({"transform", "massType", "mass", "inertia", "massCenter", "linearDamping",
                  "angularDamping", "initialVelocity", "initialAngularVelocity",
@@ -115,6 +117,7 @@ def validate_setup(header, case):
                 "input fixture setup is empty")
         require(len(body["fixtures"]) == 1, "input fixture count differs")
         for fixture_index, fixture in enumerate(body["fixtures"]):
+            require(isinstance(fixture, dict), "input fixture setup is malformed")
             require(fixture.get("id") == f"b{index}f{fixture_index}", "input fixture identity differs")
             require({"density", "friction", "restitution", "restitutionVelocity", "sensor",
                      "filter", "shape"} <= fixture.keys(), "input fixture setup omits a required field")
@@ -124,6 +127,7 @@ def validate_setup(header, case):
             require(exact(fixture["density"], 1.0) and fixture["sensor"] is False,
                     "input fixture density or sensor differs")
     for index, joint in enumerate(joints):
+        require(isinstance(joint, dict), "input joint setup is malformed")
         require(joint.get("id") == f"j{index}" and isinstance(joint.get("mode"), dict) and
                 isinstance(joint.get("bodies"), list), "input joint identity or mode is absent")
     family = case["family"]
@@ -219,6 +223,9 @@ def validate_setup(header, case):
 def validate_state(state, body_ids, joint_ids):
     require(isinstance(state, dict) and isinstance(state.get("bodies"), list) and
             isinstance(state.get("joints"), list), "state body or joint channel is absent")
+    require(all(isinstance(body, dict) for body in state["bodies"]) and
+            all(isinstance(joint, dict) for joint in state["joints"]),
+            "state body or joint channel is malformed")
     require([body.get("id") for body in state["bodies"]] == body_ids and
             [joint.get("id") for joint in state["joints"]] == joint_ids,
             "state body or joint identity differs")
@@ -230,7 +237,8 @@ def validate_state(state, body_ids, joint_ids):
         require(required_body <= body.keys(), "state body channel is absent")
         for transform_name in ("transform", "previousTransform"):
             transform = body[transform_name]
-            require({"getTranslation", "getTranslationX", "getTranslationY", "getCost",
+            require(isinstance(transform, dict) and
+                    {"getTranslation", "getTranslationX", "getTranslationY", "getCost",
                      "getSint", "getRotationAngle", "getValues"} <= transform.keys(),
                     "state transform channel is absent")
             require(exact(transform["getTranslation"],

@@ -12,7 +12,7 @@ from pathlib import Path
 from cases import declared_cases
 from physical import nominal_free
 from reference_diagnostic import diagnostic, portable_case_id
-from receipt import Identity, Rejected, digest, inspect, seal, verify
+from receipt import Identity, Rejected, digest, seal
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -206,28 +206,26 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                "qualification": "UNPASSED", "frozen_comparison": "NOT_COMPARABLE_PORTABLE_SCHEMA",
                "candidate_commit": commit, "source_sha256": source_sha256,
                "artifact_sha256": artifact_sha256}
+    trace = None
     try:
         xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob("TEST-*PortableMatrixTest*.xml"))
         if len(xml) != 1 or xml[0].stat().st_mtime < started:
             raise Rejected("matrix XML is missing or stale")
         trace, attributes = extract_xml(host, lane)
         outcome["xml"] = attributes
-        outcome["trace_sha256"] = digest(trace)
         if completed.returncode:
             raise Rejected("Gradle task failed")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
                (("tests", 7), ("skipped", 0), ("failures", 0), ("errors", 0))):
             raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
-        counts = inspect(trace, declared_cases())
         if clean_identity() != (commit, source_sha256):
             raise Rejected("source changed during host execution")
         identity = Identity(commit, source_sha256, artifact_sha256, runtime(host, lane / "gradle.log"))
         sealed = seal(trace, declared_cases(), identity, target_artifacts)
-        verify(sealed, trace, declared_cases(), identity, target_artifacts)
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
         physical = nominal_free(trace)
         comparisons = compare_frozen(trace, lane, reference_dirs)
-        outcome.update({"xml": attributes, "counts": counts, "trace_sha256": digest(trace),
+        outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
                         "artifact_sha256": identity.artifact_sha256, "physical": physical,
                         "frozen_comparison": "UNPASSED", "frozen_comparison_results":
                             {"available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
@@ -239,6 +237,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
     except (Rejected, OSError, ValueError, KeyError) as error:
         outcome["status"] = "FAILED"
         outcome["reason"] = str(error)
+    if trace is not None and "trace_sha256" not in outcome:
+        outcome["trace_sha256"] = digest(trace)
     if not (lane / "receipt.json").exists():
         (lane / "receipt.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     (lane / "result.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
