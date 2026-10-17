@@ -9,11 +9,12 @@ object DynamicsKotlinConsumer {
     @JvmStatic
     fun main(args: Array<String>) {
         val body: Body = Body()
+        check(Body(fixtureCount = 2).getFixtureCount() == 0)
         val shared: PhysicsBody = body
         val fixture = body.addFixture(Circle(1.0))
         check(shared.getFixture(0) === fixture)
         shared.setMass(MassType.NORMAL)
-        val force = Force(2.0, 0.0)
+        val force = Force(x = 2.0, y = 0.0)
         body.applyForce(force)
         force.getForce().x = 3.0
         check(shared.getAccumulatedForce().x == 3.0)
