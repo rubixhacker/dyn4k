@@ -207,6 +207,8 @@ jobs:
             build-tools;36.0.0
       - name: Select pinned Xcode
         run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Enable Safari WebDriver
+        run: sudo safaridriver --enable
       - uses: gradle/actions/setup-gradle@v4
       - name: Execute staged Safari browser probe
         run: >-
