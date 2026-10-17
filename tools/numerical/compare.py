@@ -110,6 +110,70 @@ def check_translation_aliases(state):
             raise Rejected("world center alias differs")
 
 
+def orientation_change(previous, current, angular_velocity):
+    if previous == current:
+        return 0.0, "same-angle"
+    previous_negative = previous < 0
+    current_negative = current < 0
+    if previous_negative:
+        previous += 2 * math.pi
+    if current_negative:
+        current += 2 * math.pi
+    change = current - previous
+    if angular_velocity == 0:
+        branch = "zero-velocity"
+        if change > math.pi:
+            change -= 2 * math.pi
+            branch += ":subtract-turn"
+        elif change < -math.pi:
+            change += 2 * math.pi
+            branch += ":add-turn"
+    elif current < previous and angular_velocity > 0:
+        change += 2 * math.pi
+        branch = "positive-wrap"
+    elif current > previous and angular_velocity < 0:
+        change -= 2 * math.pi
+        branch = "negative-wrap"
+    else:
+        branch = "direct"
+    return change, (previous_negative, current_negative, branch)
+
+
+def check_body_getters(body):
+    properties = body.get("properties")
+    if not properties:
+        return
+    for getter, field in (("getTransform", "transform"),
+                          ("getPreviousTransform", "previousTransform"),
+                          ("getWorldCenter", "worldCenter"),
+                          ("getLinearVelocity", "velocity"),
+                          ("getAngularVelocity", "angularVelocity"),
+                          ("getForce", "force"),
+                          ("getTorque", "torque"),
+                          ("getAccumulatedForce", "accumulatedForce"),
+                          ("getAccumulatedTorque", "accumulatedTorque")):
+        if getter in properties and field in body and properties[getter] != body[field]:
+            raise Rejected(f"body getter alias differs: {getter}")
+    if "getChangeInPosition" in properties:
+        current = body["transform"]["getTranslation"]
+        previous = body["previousTransform"]["getTranslation"]
+        if (len(current) != 2 or len(previous) != 2 or
+            properties["getChangeInPosition"] != [current[i] - previous[i] for i in range(2)]):
+            raise Rejected("change in position formula differs")
+    if "getChangeInOrientation" in properties:
+        current = body["transform"]["getRotationAngle"]
+        previous = body["previousTransform"]["getRotationAngle"]
+        change, _ = orientation_change(previous, current, body["angularVelocity"])
+        if properties["getChangeInOrientation"] != change:
+            raise Rejected("change in orientation formula differs")
+
+
+def check_snapshot(state):
+    check_translation_aliases(state)
+    for body in state["bodies"]:
+        check_body_getters(body)
+
+
 def check_counts(rows, fixture, *, reference):
     counts = Counter()
     state_step = fixture.get("start_step", 0)
@@ -128,6 +192,8 @@ def check_counts(rows, fixture, *, reference):
                 raise Rejected("wrong input order or fixture identity")
             input_seen = True
             input_hash = digest(line[:-1])
+            if fixture.get("check_translation_aliases") and "state" in row:
+                check_snapshot(row["state"])
         elif not input_seen:
             raise Rejected("record precedes input")
         if kind == "state":
@@ -136,13 +202,16 @@ def check_counts(rows, fixture, *, reference):
                 raise Rejected("missing or reordered state")
             last_state = row.get("state")
             if fixture.get("check_translation_aliases"):
-                check_translation_aliases(last_state)
+                check_snapshot(last_state)
         if kind == "outer-endpoint":
             group = fixture.get("inner_per_outer")
             if (type(group) is not int or group <= 0 or state_step % group or
                 row.get("step") != state_step or row.get("outerStep") != state_step // group or
                 row.get("state") != last_state):
                 raise Rejected("outer endpoint does not copy the matching inner state")
+        if kind == "instrumented-callback" and fixture.get("check_translation_aliases"):
+            for snapshot in row.get("values", []):
+                check_snapshot(snapshot)
         if kind == "event":
             step, order = row.get("step"), row.get("order")
             if type(step) is not int or type(order) is not int or step < event_step or order < 0:
@@ -182,7 +251,29 @@ def audit_reference(fixture, path):
         return {"status": "FAILED", "scope": "FROZEN_BASELINE_ONLY", "reason": str(error)}
 
 
+def canonical_path(path):
+    if path.startswith("outer-endpoint.state."):
+        path = "state.state." + path[len("outer-endpoint.state."):]
+    if path.startswith("instrumented-callback.values[].bodies[]."):
+        path = "state.state.bodies[]." + path[len("instrumented-callback.values[].bodies[]."):]
+        for getter, field in (("getTransform", "transform"),
+                              ("getPreviousTransform", "previousTransform"),
+                              ("getWorldCenter", "worldCenter"),
+                              ("getLinearVelocity", "velocity"),
+                              ("getAngularVelocity", "angularVelocity"),
+                              ("getForce", "force"),
+                              ("getTorque", "torque"),
+                              ("getAccumulatedForce", "accumulatedForce"),
+                              ("getAccumulatedTorque", "accumulatedTorque")):
+            prefix = "state.state.bodies[].properties." + getter
+            if path == prefix or path.startswith(prefix + ".") or path.startswith(prefix + "[]"):
+                path = "state.state.bodies[]." + field + path[len(prefix):]
+                break
+    return path
+
+
 def rule_for(fixture, path, result):
+    path = canonical_path(path)
     cache = result.setdefault("_rule_cache", {})
     if path in cache:
         return cache[path]
@@ -232,6 +323,19 @@ def sqrt_bounds(value):
     low = Fraction(floor, scale)
     high = low if low * low == value else Fraction(floor + 1, scale)
     return low, high
+
+
+@lru_cache(maxsize=4096)
+def cosine_bounds(angle, terms):
+    if abs(angle) > 4:
+        raise Rejected("angle outside certified cosine domain")
+    if type(terms) is not int or terms < 10:
+        raise Rejected("cosine enclosure has too few terms")
+    value = Fraction.from_float(float(abs(angle)))
+    approximation = sum(((-1)**index * value**(2 * index) / factorial(2 * index)
+                         for index in range(terms)), Fraction(0))
+    remainder = value**(2 * terms) / factorial(2 * terms)
+    return approximation - remainder, approximation + remainder
 
 
 @lru_cache(maxsize=16)
@@ -298,6 +402,101 @@ def check_direction(reference, candidate, rule, path, result):
     result["numeric_checks"] += 3
 
 
+def check_derived_pair(fixture, reference, candidate, path, result):
+    left = reference.get("properties", {})
+    right = candidate.get("properties", {})
+    if not left or not right:
+        return
+    for getter, source, metric in (("getChangeInPosition", "getTranslation[]", "position"),
+                                   ("getChangeInOrientation", "getRotationAngle", "orientation")):
+        if getter not in left:
+            continue
+        formula = fixture.get("derived_rules", {}).get("change_in_" + metric)
+        if not formula or formula["relative"] != 0:
+            continue
+        current_rule = rule_for(fixture, "state.state.bodies[].transform." + source, result)
+        previous_rule = rule_for(fixture, "state.state.bodies[].previousTransform." + source, result)
+        if not current_rule or not previous_rule:
+            continue
+        cap = Fraction(str(current_rule["absolute"])) + Fraction(str(previous_rule["absolute"]))
+        if metric == "position":
+            left_values, right_values = left[getter], right[getter]
+            for index in range(2):
+                current_left = Fraction.from_float(float(reference["transform"]["getTranslation"][index]))
+                previous_left = Fraction.from_float(float(reference["previousTransform"]["getTranslation"][index]))
+                current_right = Fraction.from_float(float(candidate["transform"]["getTranslation"][index]))
+                previous_right = Fraction.from_float(float(candidate["previousTransform"]["getTranslation"][index]))
+                exact_left = current_left - previous_left
+                exact_right = current_right - previous_right
+                rounded_left = Fraction.from_float(float(left_values[index]))
+                rounded_right = Fraction.from_float(float(right_values[index]))
+                rounding = abs(rounded_left - exact_left) + abs(rounded_right - exact_right)
+                if abs(rounded_left - rounded_right) > cap + rounding:
+                    raise Rejected("change in position derived limit exceeded")
+            result.setdefault("_derived_paths", set()).add(path + ".properties.getChangeInPosition[]")
+        else:
+            _, left_branch = orientation_change(reference["previousTransform"]["getRotationAngle"],
+                                                reference["transform"]["getRotationAngle"],
+                                                reference["angularVelocity"])
+            _, right_branch = orientation_change(candidate["previousTransform"]["getRotationAngle"],
+                                                 candidate["transform"]["getRotationAngle"],
+                                                 candidate["angularVelocity"])
+            if left_branch != right_branch:
+                raise Rejected("change in orientation branch differs")
+            rounding = Fraction.from_float(formula["rounding_ulps_at_two_pi"] * math.ulp(2 * math.pi))
+            difference = abs(Fraction.from_float(float(left[getter])) -
+                             Fraction.from_float(float(right[getter])))
+            if difference > cap + rounding:
+                raise Rejected("change in orientation derived limit exceeded")
+            result.setdefault("_derived_paths", set()).add(path + ".properties.getChangeInOrientation")
+
+
+def check_cost_pair(fixture, reference, candidate, path, result):
+    if not path.startswith(("state.state.bodies[].", "outer-endpoint.state.bodies[].",
+                            "instrumented-callback.values[].bodies[].")):
+        return
+    if "getCost" not in reference or "getRotationAngle" not in reference:
+        return
+    formula = fixture.get("derived_rules", {}).get("stored_cosine")
+    if not formula or formula["relative"] != 0:
+        return
+    if rule_for(fixture, path + ".getCost", result):
+        return
+    angle_rule = rule_for(fixture, path + ".getRotationAngle", result)
+    if not angle_rule or angle_rule["metric"] != "orientation" or angle_rule["relative"] != 0:
+        return
+    allowances = []
+    for transform in (reference, candidate):
+        angle = transform["getRotationAngle"]
+        cost = transform["getCost"]
+        sine = transform.get("getSint")
+        if cost < -1 or cost > 1:
+            raise Rejected("stored cosine outside source domain")
+        if sine is not None and ((angle > 0 and sine < 0) or (angle < 0 and sine >= 0)):
+            raise Rejected("stored sine sign differs from public angle")
+        low, high = cosine_bounds(angle, formula["taylor_terms"])
+        allowance = Fraction.from_float(formula["acos_ulp_multiplier"] * math.ulp(abs(angle)))
+        represented = Fraction.from_float(float(cost))
+        if represented < low - allowance or represented > high + allowance:
+            raise Rejected("stored cosine and public angle formula differ")
+        allowances.append(allowance + high - low)
+    angle_cap = Fraction(str(angle_rule["absolute"]))
+    if reference["getRotationAngle"] == candidate["getRotationAngle"]:
+        lower = upper = Fraction(0)
+    else:
+        lower, upper = orientation_error_bounds(reference["getRotationAngle"],
+                                                candidate["getRotationAngle"])
+    if lower > angle_cap:
+        raise Rejected("public angle limit exceeded before cosine check")
+    if upper > angle_cap:
+        result["unpassed_channels"].add(path + ".getCost")
+    cosine_difference = abs(Fraction.from_float(float(reference["getCost"])) -
+                            Fraction.from_float(float(candidate["getCost"])))
+    if cosine_difference > angle_cap + sum(allowances):
+        raise Rejected("stored cosine derived limit exceeded")
+    result.setdefault("_derived_paths", set()).add(path + ".getCost")
+
+
 def compare_value(fixture, reference, candidate, path, result):
     if type(reference) is not type(candidate) and not (
         type(reference) in (int, float) and type(candidate) in (int, float)
@@ -306,6 +505,9 @@ def compare_value(fixture, reference, candidate, path, result):
     if isinstance(reference, dict):
         if set(reference) != set(candidate):
             raise Rejected(f"fields differ: {path}")
+        check_cost_pair(fixture, reference, candidate, path, result)
+        if path == "instrumented-callback.values[].bodies[]":
+            check_derived_pair(fixture, reference, candidate, path, result)
         for key in reference:
             compare_value(fixture, reference[key], candidate[key], f"{path}.{key}" if path else key, result)
     elif isinstance(reference, list):
@@ -319,9 +521,34 @@ def compare_value(fixture, reference, candidate, path, result):
         if rule and rule["metric"] == "direction":
             check_direction(reference, candidate, rule, path, result)
             return
+        if canonical_path(path).startswith("state.state.bodies[].") and path.endswith(".getValues"):
+            if len(reference) != 6:
+                raise Rejected(f"invalid transform matrix: {path}")
+            base = path[:-len("getValues")]
+            for index, getter in enumerate(("getCost", "getSint", "getTranslationX",
+                                            "getSint", "getCost", "getTranslationY")):
+                compare_value(fixture, reference[index], candidate[index], base + getter, result)
+            return
         for left, right in zip(reference, candidate):
             compare_value(fixture, left, right, path + "[]", result)
     elif type(reference) in (int, float):
+        if path.endswith(".getCost") and path in result.get("_derived_paths", set()):
+            result["derived_checks"] += 1
+            return
+        if path.startswith("instrumented-callback.") and (
+            path.endswith(".properties.getChangeInPosition[]") or
+            path.endswith(".properties.getChangeInOrientation")
+        ):
+            if path in result.get("_derived_paths", set()):
+                result["derived_checks"] += 1
+            else:
+                result["unpassed_channels"].add(path)
+            return
+        if is_zero_numeric(fixture, path, result):
+            if reference != 0 or candidate != 0:
+                raise Rejected(f"zero invariant differs: {path}")
+            result["exact_numeric_checks"] += 1
+            return
         rule = rule_for(fixture, path, result)
         if rule:
             absolute, relative = rule["absolute"], rule["relative"]
@@ -358,7 +585,17 @@ def compare_value(fixture, reference, candidate, path, result):
 def is_exact_numeric(fixture, path, result):
     cache = result.setdefault("_exact_cache", {})
     if path not in cache:
-        cache[path] = any(matches_path(path, pattern) for pattern in fixture.get("exact_numeric", []))
+        canonical = canonical_path(path)
+        cache[path] = any(matches_path(path, pattern) or matches_path(canonical, pattern)
+                          for pattern in fixture.get("exact_numeric", []))
+    return cache[path]
+
+
+def is_zero_numeric(fixture, path, result):
+    path = canonical_path(path)
+    cache = result.setdefault("_zero_cache", {})
+    if path not in cache:
+        cache[path] = any(matches_path(path, pattern) for pattern in fixture.get("zero_numeric", []))
     return cache[path]
 
 
@@ -367,6 +604,7 @@ def compare(fixture, reference, candidate, receipt, expected_source, expected_ar
     if baseline["status"] != "PASSED":
         return {"status": "FAILED", "reason": baseline["reason"]}
     result = {"status": "PASSED", "numeric_checks": 0, "exact_numeric_checks": 0,
+              "derived_checks": 0,
               "unpassed_channels": set(), "counts": fixture["counts"]}
     try:
         load_receipt(receipt, candidate, fixture, expected_source, expected_artifact,
@@ -384,6 +622,8 @@ def compare(fixture, reference, candidate, receipt, expected_source, expected_ar
         result["unpassed_channels"] = sorted(result["unpassed_channels"])
         result.pop("_rule_cache", None)
         result.pop("_exact_cache", None)
+        result.pop("_zero_cache", None)
+        result.pop("_derived_paths", None)
         return result
     except (Rejected, OSError, EOFError, gzip.BadGzipFile, KeyError, TypeError) as error:
         return {"status": "FAILED", "reason": str(error)}

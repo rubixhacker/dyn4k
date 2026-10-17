@@ -1,11 +1,13 @@
 import gzip
 import hashlib
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
 
-from compare import audit_reference, compare
+from compare import audit_reference, compare, load_fixture
+from inventory import classify_reference
 from physical import audit_physical
 
 
@@ -204,6 +206,267 @@ class ComparatorSeamTest(unittest.TestCase):
         rows[2]["state"]["bodies"][0]["transform"]["getTranslationX"] = 2.01
         self.write_reference(rows)
         self.assertEqual("FAILED", audit_reference(self.fixture, self.root / "reference.jsonl.gz")["status"])
+
+    def test_configured_toi_fields_use_selected_limits(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = [rule for rule in selected["rules"]
+                                 if rule["path"].startswith("event.payload[].getTime")
+                                 or rule["path"].startswith("event.payload[].separation.")]
+        self.fixture["exact_numeric"] = ["inputs.dt", "event.step", "event.order", "state.step"]
+        toi = {"getTime": 0.5, "separation": {"getDistance": 0.2,
+               "getPoint1": [1.0, 2.0], "getPoint2": [3.0, 4.0],
+               "getNormal": [1.0, 0.0]}}
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = [toi]
+        rows[2]["state"] = {"bodies": []}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        for field, value in (("getTime", 0.500002),
+                             ("getDistance", 0.2002),
+                             ("getPoint1", [1.0002, 2.0]),
+                             ("getPoint2", [3.0, 4.0002]),
+                             ("getNormal", [-1.0, 0.0]),
+                             ("getNormal", [1.000003, 0.0]),
+                             ("getNormal", [0.0, 0.0])):
+            with self.subTest(field=field):
+                altered = json.loads(json.dumps(rows))
+                target = altered[1]["payload"][0]
+                if field != "getTime":
+                    target = target["separation"]
+                target[field] = value
+                self.write_candidate(altered)
+                self.assertEqual("FAILED", self.result()["status"])
+
+    def test_outer_endpoint_uses_inner_state_budget(self):
+        rows = json.loads(json.dumps(self.rows))
+        rows[2]["state"] = {"position": [2.0, 3.0]}
+        rows.append({"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                     "state": {"position": [2.0, 3.0]}})
+        self.fixture["counts"]["outer-endpoint"] = 1
+        self.fixture["inner_per_outer"] = 1
+        self.fixture["exact_numeric"].append("outer-endpoint.step")
+        self.fixture["exact_numeric"].append("outer-endpoint.outerStep")
+        self.write_reference(rows)
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["position"][0] = 2.05
+        altered[3]["state"]["position"][0] = 2.05
+        self.write_candidate(altered)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered[2]["state"]["position"][0] = 2.2
+        altered[3]["state"]["position"][0] = 2.2
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+
+    def test_static_fixture_values_are_exact_and_force_is_zero(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["exact_numeric"] = selected["exact_numeric"] + ["inputs.dt"]
+        self.fixture["zero_numeric"] = selected["zero_numeric"]
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = [{"getFriction": 0.5, "shape": {"getRadius": 0.7071067811865476}}]
+        rows[2]["state"] = {"bodies": [{"id": "b1", "force": [0.0, 0.0], "torque": 0.0}]}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        for section, field, value in (("event", "getFriction", 0.6),
+                                      ("event", "getRadius", 0.8),
+                                      ("state", "force", [0.01, 0.0]),
+                                      ("state", "torque", 0.01)):
+            with self.subTest(field=field):
+                altered = json.loads(json.dumps(rows))
+                if section == "state":
+                    altered[2]["state"]["bodies"][0][field] = value
+                else:
+                    target = altered[1]["payload"][0]
+                    (target["shape"] if field == "getRadius" else target)[field] = value
+                self.write_candidate(altered)
+                self.assertEqual("FAILED", self.result()["status"])
+
+    def test_previous_transform_and_wake_snapshot_inherit_primary_limits(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["exact_numeric"] = ["inputs.dt", "event.step", "event.order", "state.step",
+                                         "instrumented-callback.step", "instrumented-callback.order"]
+        body = {"id": "b1", "transform": {"getTranslation": [1.0, 2.0],
+                "getRotationAngle": 0.1}, "previousTransform": {
+                "getTranslation": [0.9, 2.0], "getRotationAngle": 0.09},
+                "velocity": [0.0, 0.0], "angularVelocity": 0.0}
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [body]}
+        rows.append({"kind": "instrumented-callback", "step": 1, "order": 0,
+                     "event": "before-wake", "values": [{"bodies": [body]}]})
+        self.fixture["counts"]["instrumented-callback"] = 1
+        self.write_reference(rows)
+        altered = json.loads(json.dumps(rows))
+        for snapshot in (altered[2]["state"], altered[3]["values"][0]):
+            body = snapshot["bodies"][0]
+            body["previousTransform"]["getTranslation"][0] += 0.00005
+            body["previousTransform"]["getRotationAngle"] += 0.00005
+        self.write_candidate(altered)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered[3]["values"][0]["bodies"][0]["previousTransform"]["getTranslation"][0] = 0.9002
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+
+    def test_matrix_getter_uses_component_limits_and_aliases(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["check_translation_aliases"] = True
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": 1.0, "getSint": 0.0, "getTranslation": [1.0, 2.0],
+            "getTranslationX": 1.0, "getTranslationY": 2.0,
+            "getValues": [1.0, 0.0, 1.0, 0.0, 1.0, 2.0]}}]}
+        self.write_reference(rows)
+        altered = json.loads(json.dumps(rows))
+        matrix = altered[2]["state"]["bodies"][0]["transform"]
+        matrix["getTranslation"] = [1.00005, 2.0]
+        matrix["getTranslationX"] = 1.00005
+        matrix["getValues"][2] = 1.00005
+        self.write_candidate(altered)
+        result = self.result()
+        self.assertEqual("UNPASSED", result["status"])
+        self.assertNotIn("state.state.bodies[].transform.getValues[]", result["unpassed_channels"])
+        matrix["getValues"][2] = 1.02
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+
+    def test_wake_getter_formula_rejects_changed_subtraction(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        self.fixture["check_translation_aliases"] = True
+        self.fixture["exact_numeric"] = ["inputs.dt", "event.step", "event.order", "state.step",
+                                         "instrumented-callback.step", "instrumented-callback.order"]
+        body = {"id": "b1", "transform": {"getTranslation": [1.0, 2.0],
+                "getTranslationX": 1.0, "getTranslationY": 2.0,
+                "getRotationAngle": 0.2}, "previousTransform": {
+                "getTranslation": [0.9, 2.0], "getTranslationX": 0.9,
+                "getTranslationY": 2.0, "getRotationAngle": 0.1},
+                "angularVelocity": 1.0,
+                "properties": {"getChangeInPosition": [1.0 - 0.9, 0.0],
+                               "getChangeInOrientation": 0.2 - 0.1}}
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": []}
+        rows.append({"kind": "instrumented-callback", "step": 1, "order": 0,
+                     "event": "before-wake", "values": [{"bodies": [body]}]})
+        self.fixture["counts"]["instrumented-callback"] = 1
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[3]["values"][0]["bodies"][0]["properties"]["getChangeInPosition"][0] += 0.00001
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[3]["values"][0]["bodies"][0]["properties"]["getChangeInOrientation"] += 0.00001
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[3]["values"][0]["bodies"][0]["properties"]["getChangeInPosition"][0] += 0.00001
+        self.write_reference(altered)
+        self.assertEqual("FAILED", audit_reference(self.fixture, self.root / "reference.jsonl.gz")["status"])
+
+    def test_inventory_requires_a_reason_for_every_legacy_numeric_path(self):
+        classification = classify_reference(self.fixture, self.root / "reference.jsonl.gz",
+                                            ["state.state.position[]", "state.state.sum"])
+        self.assertEqual(2, classification["legacy_count"])
+        self.assertEqual("APPROVED_LIMIT", classification["legacy_paths"]["state.state.position[]"]["status"])
+        self.assertEqual("APPROVED_LIMIT", classification["legacy_paths"]["state.state.sum"]["status"])
+        with self.assertRaisesRegex(ValueError, "missing legacy path"):
+            classify_reference(self.fixture, self.root / "reference.jsonl.gz", ["state.state.absent"])
+        with self.assertRaisesRegex(ValueError, "duplicate legacy path"):
+            classify_reference(self.fixture, self.root / "reference.jsonl.gz",
+                               ["state.state.sum", "state.state.sum"])
+
+    def test_wake_snapshot_static_fields_keep_exact_identity(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["exact_numeric"] = selected["exact_numeric"]
+        rows = json.loads(json.dumps(self.rows))
+        rows.append({"kind": "instrumented-callback", "step": 1, "order": 0,
+                     "event": "before-wake", "values": [{"bodies": [{"id": "b1",
+                     "fixtures": [{"getDensity": 1.0, "shape": {"getRadius": 0.7071067811865476}}],
+                     "properties": {"getMass": {"getInertia": 1.0 / 6.0}}}]}]})
+        self.fixture["counts"]["instrumented-callback"] = 1
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[-1]["values"][0]["bodies"][0]["properties"]["getMass"]["getInertia"] += 0.00001
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+
+    def test_wake_orientation_branch_change_fails_closed(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        self.fixture["exact_numeric"] = ["inputs.dt", "event.step", "event.order", "state.step",
+                                         "instrumented-callback.step", "instrumented-callback.order"]
+        self.fixture["check_translation_aliases"] = True
+        body = {"id": "b1", "transform": {"getTranslation": [0.0, 0.0],
+                "getTranslationX": 0.0, "getTranslationY": 0.0,
+                "getRotationAngle": 0.2}, "previousTransform": {
+                "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                "getTranslationY": 0.0, "getRotationAngle": -0.00004},
+                "angularVelocity": 1.0, "properties": {
+                "getChangeInPosition": [0.0, 0.0],
+                "getChangeInOrientation": (0.2 - (-0.00004 + 2 * math.pi)) + 2 * math.pi}}
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": []}
+        rows.append({"kind": "instrumented-callback", "step": 1, "order": 0,
+                     "event": "before-wake", "values": [{"bodies": [body]}]})
+        self.fixture["counts"]["instrumented-callback"] = 1
+        self.write_reference(rows)
+        altered = json.loads(json.dumps(rows))
+        changed = altered[-1]["values"][0]["bodies"][0]
+        changed["previousTransform"]["getRotationAngle"] = 0.00004
+        changed["properties"]["getChangeInOrientation"] = 0.2 - 0.00004
+        self.write_candidate(altered)
+        self.assertIn("branch differs", self.result()["reason"])
+
+    def test_acos_getter_bounds_stored_cosine_but_not_sine_length(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0}}]}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        result = self.result()
+        self.assertEqual("UNPASSED", result["status"])
+        self.assertIn("state.state.bodies[].transform.getSint", result["unpassed_channels"])
+        self.assertNotIn("state.state.bodies[].transform.getCost", result["unpassed_channels"])
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"]["getCost"] = 0.999
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"]["getSint"] = 0.9
+        self.write_candidate(altered)
+        self.assertEqual("UNPASSED", self.result()["status"])
+
+    def test_explicit_nominal_cosine_cap_keeps_precedence(self):
+        self.fixture["rules"] = [
+            {"path": "state.state.bodies[].transform.getCost", "metric": "scalar",
+             "absolute": 1e-10, "relative": 0, "unit": "dimensionless"},
+            {"path": "state.state.bodies[].transform.getRotationAngle", "metric": "orientation",
+             "absolute": 1e-7, "relative": 0, "unit": "rad"}]
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": math.cos(0.3), "getRotationAngle": 0.3}}]}
+        self.write_reference(rows)
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"] = {
+            "getCost": math.cos(0.30000001), "getRotationAngle": 0.30000001}
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
 
 
 if __name__ == "__main__":
