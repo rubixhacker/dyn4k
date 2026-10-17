@@ -26,7 +26,7 @@ package org.dyn4j
 
 class Epsilon private constructor() {
     companion object {
-        @JvmFieldBridge val E: Double = compute()
+        @kotlin.jvm.JvmField val E: Double = compute()
 
         @JvmStaticBridge
         fun compute(): Double {
