@@ -48,6 +48,24 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
+private class BodyCopyProbe : Body {
+    constructor() : super()
+    private constructor(source: BodyCopyProbe) : super(source)
+
+    override fun copy() = BodyCopyProbe(this)
+
+    fun setStoredState(forceX: Double, forceY: Double, torqueValue: Double, restTime: Double) {
+        force.set(forceX, forceY)
+        torque = torqueValue
+        atRestTime = restTime
+    }
+
+    fun storedForce() = force
+    fun restTime() = atRestTime
+    fun pendingForces() = forces
+    fun pendingTorques() = torques
+}
+
 class PhysicsBodyCoverageTest {
     private fun dynamicBody(): Body = Body().also {
         it.addFixture(Circle(1.0))
@@ -502,8 +520,11 @@ class PhysicsBodyCoverageTest {
         body.applyTorque(appliedTorque)
         body.setLinearVelocity(-1.0, 2.0)
         body.setAngularVelocity(0.5)
+        body.setAngularDamping(1.25)
+        body.setLinearDamping(2.5)
         body.setGravityScale(1.1)
         body.setBullet(true)
+        body.setAtRestDetectionEnabled(false)
         body.setOwner(Any())
         body.setUserData(Any())
         val copy = body.copy()
@@ -515,8 +536,12 @@ class PhysicsBodyCoverageTest {
         assertEquals(-1.0, copy.getLinearVelocity().x)
         assertEquals(2.0, copy.getLinearVelocity().y)
         assertEquals(0.5, copy.getAngularVelocity())
+        assertEquals(1.25, copy.getAngularDamping())
+        assertEquals(2.5, copy.getLinearDamping())
         assertEquals(1.1, copy.getGravityScale())
         assertTrue(copy.isBullet())
+        assertFalse(copy.isAtRest())
+        assertFalse(copy.isAtRestDetectionEnabled())
         assertEquals(null, copy.getOwner())
         assertEquals(null, copy.getUserData())
         assertEquals(null, copy.getFixtureModificationHandler())
@@ -532,6 +557,102 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.4, copy.getTorque())
         body.getMass().getCenter().x = 5.0
         assertEquals(0.0, copy.getMass().getCenter().x)
+        originalFixture.setDensity(2.75)
+        assertEquals(2.75, originalFixture.getDensity())
+        assertEquals(1.0, copy.getFixture(0).getDensity())
+        copy.getFixture(0).setFriction(0.75)
+        assertEquals(0.75, copy.getFixture(0).getFriction())
+        assertEquals(BodyFixture.DEFAULT_FRICTION, originalFixture.getFriction())
+    }
+
+    @Test
+    fun bodyCopyDuplicatesProtectedStateAndPendingCollections() {
+        val body = BodyCopyProbe()
+        body.addFixture(Circle(1.0))
+        body.setMass(MassType.NORMAL)
+        body.setLinearVelocity(-1.0, 2.0)
+        body.setAngularVelocity(0.5)
+        body.setAngularDamping(1.25)
+        body.setLinearDamping(2.5)
+        body.setGravityScale(1.1)
+        body.setBullet(true)
+        body.setAtRestDetectionEnabled(false)
+        body.setStoredState(5.0, 6.0, 4.0, 1.25)
+        body.pendingForces().add(Force(2.0, 3.0))
+        body.pendingForces().add(Force(-1.0, 4.0))
+        body.pendingTorques().add(Torque(0.4))
+        body.pendingTorques().add(Torque(-0.7))
+
+        val copy = body.copy()
+        assertNotSame(body, copy)
+        assertNotSame(body.storedForce(), copy.storedForce())
+        assertNotSame(body.pendingForces(), copy.pendingForces())
+        assertNotSame(body.pendingTorques(), copy.pendingTorques())
+        assertNotSame(body.getLinearVelocity(), copy.getLinearVelocity())
+        assertNotSame(body.getMass(), copy.getMass())
+        assertNotSame(body.getMass().getCenter(), copy.getMass().getCenter())
+        assertEquals(5.0, copy.storedForce().x)
+        assertEquals(6.0, copy.storedForce().y)
+        assertEquals(4.0, copy.getTorque())
+        assertEquals(1.25, copy.restTime())
+        assertEquals(-1.0, copy.getLinearVelocity().x)
+        assertEquals(2.0, copy.getLinearVelocity().y)
+        assertEquals(0.5, copy.getAngularVelocity())
+        assertEquals(1.25, copy.getAngularDamping())
+        assertEquals(2.5, copy.getLinearDamping())
+        assertEquals(1.1, copy.getGravityScale())
+        assertTrue(copy.isBullet())
+        assertFalse(copy.isAtRest())
+        assertFalse(copy.isAtRestDetectionEnabled())
+        assertEquals(body.getMass().getInertia(), copy.getMass().getInertia())
+        assertEquals(body.getMass().getInverseInertia(), copy.getMass().getInverseInertia())
+        assertEquals(body.getMass().getInverseMass(), copy.getMass().getInverseMass())
+        assertEquals(body.getMass().getMass(), copy.getMass().getMass())
+        assertEquals(body.getMass().getCenter().x, copy.getMass().getCenter().x)
+        assertEquals(body.getMass().getCenter().y, copy.getMass().getCenter().y)
+        assertEquals(body.getMass().getType(), copy.getMass().getType())
+        assertEquals(2, copy.pendingForces().size)
+        assertEquals(2, copy.pendingTorques().size)
+        for (index in 0 until 2) {
+            val sourceForce = body.pendingForces()[index]
+            val copiedForce = copy.pendingForces()[index]
+            assertNotSame(sourceForce, copiedForce)
+            assertNotSame(sourceForce.getForce(), copiedForce.getForce())
+            assertEquals(sourceForce.getForce().x, copiedForce.getForce().x)
+            assertEquals(sourceForce.getForce().y, copiedForce.getForce().y)
+            val sourceTorque = body.pendingTorques()[index]
+            val copiedTorque = copy.pendingTorques()[index]
+            assertNotSame(sourceTorque, copiedTorque)
+            assertEquals(sourceTorque.getTorque(), copiedTorque.getTorque())
+        }
+        body.setStoredState(9.0, 10.0, 8.0, 3.0)
+        body.pendingForces()[0].set(9.0, 10.0)
+        body.pendingTorques()[0].set(2.0)
+        body.pendingForces().clear()
+        body.pendingTorques().clear()
+        assertEquals(5.0, copy.storedForce().x)
+        assertEquals(6.0, copy.storedForce().y)
+        assertEquals(4.0, copy.getTorque())
+        assertEquals(1.25, copy.restTime())
+        assertEquals(2, copy.pendingForces().size)
+        assertEquals(2.0, copy.pendingForces()[0].getForce().x)
+        assertEquals(3.0, copy.pendingForces()[0].getForce().y)
+        assertEquals(-1.0, copy.pendingForces()[1].getForce().x)
+        assertEquals(4.0, copy.pendingForces()[1].getForce().y)
+        assertEquals(2, copy.pendingTorques().size)
+        assertEquals(0.4, copy.pendingTorques()[0].getTorque())
+        assertEquals(-0.7, copy.pendingTorques()[1].getTorque())
+
+        val sleeping = BodyCopyProbe()
+        sleeping.setAtRest(true)
+        sleeping.setStoredState(0.0, 0.0, 0.0, 2.25)
+        val sleepingCopy = sleeping.copy()
+        assertTrue(sleeping.isAtRest())
+        assertTrue(sleepingCopy.isAtRest())
+        assertEquals(2.25, sleepingCopy.restTime())
+        sleeping.setAtRest(false)
+        assertFalse(sleeping.isAtRest())
+        assertTrue(sleepingCopy.isAtRest())
     }
 
     @Test
