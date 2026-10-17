@@ -995,6 +995,50 @@ tasks.register<JavaExec>("runAndroidDetectionConsumer") {
     mainClass.set("DetectionConsumer")
 }
 
+val detectionParitySource = file("src/jvmConsumer/java/DetectionParityConsumer.java")
+val baselineDetectionParityConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(detectionParitySource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-parity-baseline-classes"))
+    options.release.set(8)
+}
+val candidateDetectionParityConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(detectionParitySource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-parity-candidate-classes"))
+    options.release.set(8)
+}
+val baselineDetectionParityOutput = layout.buildDirectory.file("consumer/detection-parity-baseline.tsv")
+val candidateDetectionParityOutput = layout.buildDirectory.file("consumer/detection-parity-candidate.tsv")
+tasks.register<JavaExec>("runBaselineDetectionParity") {
+    dependsOn(baselineDetectionParityConsumer)
+    classpath(baselineDetectionParityConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("DetectionParityConsumer")
+    outputs.file(baselineDetectionParityOutput)
+    doFirst { standardOutput = baselineDetectionParityOutput.get().asFile.outputStream() }
+    doLast { standardOutput.close() }
+}
+tasks.register<JavaExec>("runCandidateDetectionParity") {
+    dependsOn(candidateDetectionParityConsumer)
+    classpath(candidateDetectionParityConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("DetectionParityConsumer")
+    outputs.file(candidateDetectionParityOutput)
+    doFirst { standardOutput = candidateDetectionParityOutput.get().asFile.outputStream() }
+    doLast { standardOutput.close() }
+}
+tasks.register<Exec>("verifyDetectionParity") {
+    dependsOn("runBaselineDetectionParity", "runCandidateDetectionParity")
+    doFirst {
+        commandLine(
+            "python3", rootProject.file("scripts/verify-detection-parity.py").absolutePath,
+            baselineDetectionParityOutput.get().asFile.absolutePath,
+            candidateDetectionParityOutput.get().asFile.absolutePath
+        )
+    }
+}
+
 val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
 val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
