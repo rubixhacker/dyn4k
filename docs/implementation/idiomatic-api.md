@@ -46,7 +46,7 @@ simulation.removeStepListener(stepListener)
 
 `linearVelocity`, shape `center`, and world `gravity` expose live mutable vectors. Mutating a returned vector changes the object that the engine uses. Call `copy()` for an independent vector. Setting `linearVelocity` calls the core setter; the core can copy the supplied coordinates. The `bodies`, `joints`, and `fixtures` properties expose the core's live, read-only membership views. Add and remove members through the owner methods so the engine updates its bookkeeping.
 
-`find` and `raycastWhere` pass a Kotlin predicate through a core `DetectFilter`. The predicate receives the actual body and fixture objects. `onStepBegin`, `onStepEnd`, `onContactBegin`, and `onContactEnd` register core listeners and return those listeners for removal. Callbacks run at the core's normal event stage. Avoid changing world membership while the engine iterates it unless the core operation permits that change.
+`find` accepts bounds or a convex shape with a transform. `raycastWhere`, `raycastClosestWhere`, and `sweep` cover ray and moving-shape queries. Each helper passes a Kotlin predicate through a core `DetectFilter`. The predicate receives the actual body and fixture objects. `onStepBegin`, `onStepEnd`, `onContactBegin`, and `onContactEnd` register core listeners and return those listeners for removal. Callbacks run at the core's normal event stage. Avoid changing world membership while the engine iterates it unless the core operation permits that change.
 
 ## Mix Kotlin and Java use
 

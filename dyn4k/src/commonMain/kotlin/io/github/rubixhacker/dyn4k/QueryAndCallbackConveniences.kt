@@ -14,11 +14,32 @@ fun <T : PhysicsBody, V : ContactCollisionData<T>> PhysicsWorld<T, V>.find(
     include: (T, BodyFixture) -> Boolean,
 ): List<DetectResult<T, BodyFixture>> = detect(bounds, predicateFilter(include))
 
+fun <T : PhysicsBody, V : ContactCollisionData<T>> PhysicsWorld<T, V>.find(
+    convex: Convex,
+    transform: Transform,
+    include: (T, BodyFixture) -> Boolean,
+): List<ConvexDetectResult<T, BodyFixture>> = detect(convex, transform, predicateFilter(include))
+
 fun <T : PhysicsBody, V : ContactCollisionData<T>> PhysicsWorld<T, V>.raycastWhere(
     ray: Ray,
     maxLength: Double,
     include: (T, BodyFixture) -> Boolean,
 ): List<RaycastResult<T, BodyFixture>> = raycast(ray, maxLength, predicateFilter(include))
+
+fun <T : PhysicsBody, V : ContactCollisionData<T>> PhysicsWorld<T, V>.raycastClosestWhere(
+    ray: Ray,
+    maxLength: Double,
+    include: (T, BodyFixture) -> Boolean,
+): RaycastResult<T, BodyFixture>? = raycastClosest(ray, maxLength, predicateFilter(include))
+
+fun <T : PhysicsBody, V : ContactCollisionData<T>> PhysicsWorld<T, V>.sweep(
+    convex: Convex,
+    transform: Transform,
+    displacement: Vector2,
+    rotation: Double = 0.0,
+    include: (T, BodyFixture) -> Boolean,
+): List<ConvexCastResult<T, BodyFixture>> =
+    convexCast(convex, transform, displacement, rotation, predicateFilter(include))
 
 private fun <T : PhysicsBody> predicateFilter(
     include: (T, BodyFixture) -> Boolean,
