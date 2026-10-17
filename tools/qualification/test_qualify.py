@@ -206,6 +206,36 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "staged audit"):
                 qualify.verify_audit_against_staging(fake, Path(root))
 
+    def test_empty_staging_emits_failed_audit_for_every_publication(self):
+        with tempfile.TemporaryDirectory() as root:
+            repository = Path(root)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            marker = repository / "README.md"
+            marker.write_text("Empty staging fixture.\n")
+            subprocess.run(["git", "-C", str(repository), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm", "base"], check=True)
+            sha = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            output = repository / "audit.json"
+            result = subprocess.run(
+                ["python3", str(Path(__file__).with_name("qualify.py")), "audit-staging",
+                 "--candidate-sha", sha, "--repository", str(repository / "empty-staging"),
+                 "--output", str(output)], cwd=repository, text=True,
+                capture_output=True, check=False)
+            self.assertEqual(1, result.returncode, result.stderr)
+            audit = json.loads(output.read_text())
+            self.assertEqual(sha, audit["candidate_sha"])
+            self.assertEqual("FAILED", audit["status"])
+            self.assertEqual([], audit["artifacts"])
+            expected_publications = {
+                f"{qualify.target_publication_name(module, target)}: staged POM or Gradle metadata missing"
+                for module in qualify.MODULES
+                for target in {row["target"] for row in qualify.matrix()}
+            }
+            self.assertTrue(expected_publications.issubset(set(audit["errors"])))
+            self.assertEqual(46, len(audit["errors"]))
+
     def test_report_refuses_sha_other_than_checkout(self):
         with tempfile.TemporaryDirectory() as root:
             result = subprocess.run(

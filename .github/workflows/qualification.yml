@@ -18,6 +18,11 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
       - uses: gradle/actions/setup-gradle@v4
       - name: Harness regression tests
         run: python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
@@ -41,7 +46,7 @@ jobs:
       - name: Execute staged Kotlin and Java consumer
         run: >-
           ./gradlew -p consumers/qualification --no-daemon --console=plain run
-          -PqualificationRepository=$GITHUB_WORKSPACE/build/staging-repository
+          -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository"
       - name: Reject duplicate provider
         run: |
           if ./gradlew -p consumers/qualification --no-daemon --console=plain verifySingleProvider -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository" -PwithUpstream=true > "$RUNNER_TEMP/provider.log" 2>&1; then
@@ -53,7 +58,7 @@ jobs:
         run: >-
           ./gradlew -p consumers/qualification/portable --no-daemon --console=plain
           jvmTest linuxX64Test jsNodeTest wasmJsNodeTest wasmWasiNodeTest testAndroidHostTest
-          -PqualificationRepository=$GITHUB_WORKSPACE/build/staging-repository
+          -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository"
       - name: Run available foundation JVM and Linux tests
         run: >-
           python3 tools/qualification/qualify.py probe
