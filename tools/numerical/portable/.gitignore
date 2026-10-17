@@ -2,3 +2,4 @@ __pycache__/
 build/
 .gradle/
 .kotlin/
+kotlin-js-store/
