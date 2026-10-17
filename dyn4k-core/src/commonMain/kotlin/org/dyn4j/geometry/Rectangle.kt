@@ -58,10 +58,10 @@ open class Rectangle : Polygon {
 
     override fun copy() = Rectangle(this)
     override fun toString() = "Rectangle[${super.toString()}|Width=$width|Height=$height]"
-    fun getWidth() = width
-    fun getHeight() = height
-    fun getRotationAngle() = atan2(normals[1].y, normals[1].x)
-    fun getRotation() = Rotation.fromComponentsUnchecked(normals[1].x, normals[1].y)
+    open fun getWidth() = width
+    open fun getHeight() = height
+    open fun getRotationAngle() = atan2(normals[1].y, normals[1].x)
+    open fun getRotation() = Rotation.fromComponentsUnchecked(normals[1].x, normals[1].y)
     override fun getAxes(foci: Array<Vector2>?, transform: Transform): Array<Vector2> {
         val axes = Array(2 + (foci?.size ?: 0)) { Vector2() }
         axes[0] = transform.getTransformedR(normals[1])

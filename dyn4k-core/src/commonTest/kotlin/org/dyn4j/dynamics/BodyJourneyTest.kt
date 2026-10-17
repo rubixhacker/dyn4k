@@ -57,6 +57,42 @@ class BodyJourneyTest {
     }
 
     @Test
+    fun internalFieldReadsPreserveSubclassDispatch() {
+        val fixture = object : BodyFixture(Circle(1.0)) {
+            override fun getDensity() = 0.0
+        }
+        assertEquals(1.0, fixture.rawDensity())
+        val body = Body()
+        body.addFixture(fixture)
+        body.setMass(MassType.NORMAL)
+        assertTrue(body.getMass().getMass() > 0.0)
+
+        val force = object : Force(2.0, 0.0) {
+            var callbackTime = 0.0
+            override fun getForce() = Vector2(99.0, 0.0)
+            override fun isComplete(elapsedTime: Double): Boolean {
+                callbackTime = elapsedTime
+                return false
+            }
+        }
+        val torque = object : Torque(3.0) {
+            override fun getTorque() = 99.0
+        }
+        val step = object : TimeStep(0.5) {
+            override fun getDeltaTime() = 99.0
+        }
+        assertEquals(2.0, force.rawForce().x)
+        assertEquals(3.0, torque.rawTorque())
+        assertEquals(0.5, step.rawDeltaTime())
+        body.applyForce(force)
+        body.applyTorque(torque)
+        assertEquals(2.0, body.getAccumulatedForce().x)
+        assertEquals(3.0, body.getAccumulatedTorque())
+        body.integrateVelocity(Vector2(), step, Settings())
+        assertEquals(0.5, force.callbackTime)
+    }
+
+    @Test
     fun massAndRestStateTrackFixtureChanges() {
         val body = Body()
         assertTrue(body.isStatic())

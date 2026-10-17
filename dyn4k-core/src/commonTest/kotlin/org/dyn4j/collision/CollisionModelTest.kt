@@ -86,6 +86,41 @@ class CollisionModelTest {
     }
 
     @Test
+    fun nullPointFailsWhenAFixtureUsesItsShape() {
+        val empty = TestBody()
+        assertEquals(null, empty.getFixture(null))
+        assertTrue(empty.getFixtures(null).isEmpty())
+        assertFalse(empty.contains(null))
+        assertEquals(null, empty.removeFixture(null as Vector2?))
+        assertTrue(empty.removeFixtures(null).isEmpty())
+        assertEquals(0.0, empty.updateRadiusWith(null))
+        val emptyBounds = AABB(1.0, 1.0, 2.0, 2.0)
+        empty.computeAABB(null, emptyBounds)
+        assertEquals(AABB(0.0, 0.0, 0.0, 0.0), emptyBounds)
+
+        val body = TestBody()
+        var shapeReads = 0
+        val fixture = object : Fixture(Circle(1.0)) {
+            override fun getShape(): Convex {
+                shapeReads++
+                return super.getShape()
+            }
+        }
+        body.addFixture(fixture)
+        assertSame(fixture, body.getFixture(Vector2()))
+        shapeReads = 0
+        assertFailsWith<NullPointerException> { body.getFixture(null) }
+        assertEquals(1, shapeReads)
+        assertFailsWith<NullPointerException> { body.getFixtures(null) }
+        assertFailsWith<NullPointerException> { body.contains(null) }
+        assertFailsWith<NullPointerException> { body.removeFixture(null as Vector2?) }
+        assertFailsWith<NullPointerException> { body.removeFixtures(null) }
+        assertFailsWith<NullPointerException> { body.updateRadiusWith(null) }
+        assertFailsWith<NullPointerException> { body.computeAABB(null, AABB(0.0, 0.0, 0.0, 0.0)) }
+        assertSame(fixture, body.getFixture(0))
+    }
+
+    @Test
     fun fixtureViewsAndIteratorStayLive() {
         val body = TestBody()
         val events = mutableListOf<String>()
@@ -138,6 +173,16 @@ class CollisionModelTest {
         assertFailsWith<CopyException> { Unsafe.copy(BadFixture()) }
         val iterator = TestBody().getFixtureIterator()
         assertFailsWith<IndexOutOfBoundsException> { iterator.next() }
+    }
+
+    @Test
+    fun copyExceptionFromNamesPreservesMessage() {
+        val exception = CopyException("Source", "Copy")
+        assertEquals(
+            "The copy method on class 'Source' returns an object of class 'Copy'. " +
+                "You must override the copy method to return type 'Source'.",
+            exception.message
+        )
     }
 
     @Test

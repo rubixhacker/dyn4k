@@ -30,15 +30,12 @@ import kotlin.math.min
 import kotlin.math.sign
 import kotlin.math.sqrt
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.NullElementException
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class Polygon : AbstractShape, Convex, Wound {
-    @get:kotlin.jvm.JvmName("getVerticesField")
-    @JvmFieldBridge protected val vertices: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getNormalsField")
-    @JvmFieldBridge protected val normals: Array<Vector2>
+    @kotlin.jvm.JvmField protected val vertices: Array<Vector2>
+    @kotlin.jvm.JvmField protected val normals: Array<Vector2>
 
     internal constructor(center: Vector2, radius: Double, vertices: Array<Vector2>, normals: Array<Vector2>) : super(center, radius) {
         this.vertices = vertices
@@ -147,7 +144,7 @@ open class Polygon : AbstractShape, Convex, Wound {
     override fun getFarthestPoint(vector: Vector2, transform: Transform): Vector2 =
         transform.getTransformed(vertices[getFarthestVertexIndex(transform.getInverseTransformedR(vector))])
 
-    fun getFarthestVertexIndex(vector: Vector2): Int {
+    open fun getFarthestVertexIndex(vector: Vector2): Int {
         var maxIndex = 0
         val count = vertices.size
         var maximum = vector.dot(vertices[0])
