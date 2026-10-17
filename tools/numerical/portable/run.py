@@ -265,6 +265,11 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         trace, attributes, raw_counts = extract_xml(host, lane)
         outcome["xml"] = attributes
         outcome["raw_counts"] = raw_counts
+        outcome["started_cases"] = raw_counts["observed_cases"]
+        outcome["executed_cases"] = raw_counts["completed_cases"]
+        outcome["incomplete_cases"] = sorted(case_id for case_id, counts in
+                                             raw_counts["per_case"].items()
+                                             if counts["case_ends"] != 1)
         executed_runtime = runtime(host, lane / "gradle.log")
         outcome["runtime"] = executed_runtime
         comparisons = compare_frozen(lane, reference_dirs)
