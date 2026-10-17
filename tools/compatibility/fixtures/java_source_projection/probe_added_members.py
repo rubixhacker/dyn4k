@@ -81,7 +81,9 @@ def main() -> None:
         raise ValueError(f"expected 77 Java-source-nameable declarations, found {len(visible)}")
     source_root = args.work / "sources"
     source_root.mkdir(parents=True, exist_ok=True)
-    sources = [Path(__file__).parent / "extra" / "Names.java"]
+    fixture_root = Path(__file__).parent
+    node_dispatch = fixture_root / "org/dyn4j/geometry/simplify/NodeDispatchProbe.java"
+    sources = [fixture_root / "extra" / "Names.java", node_dispatch]
     mains = []
     for index, record in enumerate(visible, 1):
         package, name, contents = source_for(record, index)
@@ -95,6 +97,7 @@ def main() -> None:
     suite.write_text("package projection;\npublic final class Suite {\n"
                      "    public static void main(String[] args) {\n" +
                      "".join(f"        {name}.main(args);\n" for name in mains) +
+                     "        org.dyn4j.geometry.simplify.NodeDispatchProbe.main(args);\n" +
                      f"        System.out.println(\"ACTUAL_PROBES={len(mains)}\");\n"
                      "    }\n}\n")
     sources.append(suite)
@@ -129,22 +132,23 @@ def main() -> None:
                     capture_output=True, text=True, timeout=120)
                 (args.work / f"run-{provider}-{compiler}-{runtime}.log").write_text(
                     executed.stdout + executed.stderr)
-                if executed.returncode or executed.stdout.strip() != "ACTUAL_PROBES=77":
+                if executed.returncode or executed.stdout.strip() != "(1.0, 2.0)\nACTUAL_PROBES=77":
                     raise SystemExit(f"{provider} {compiler} {runtime} failed: "
                                      f"{executed.stdout}{executed.stderr}")
                 observations.append({"provider": provider, "compiler": compiler,
                                      "runtime": runtime, "probes": 77,
                                      "run_log_sha256": digest(args.work / f"run-{provider}-{compiler}-{runtime}.log")})
-    source_hashes = {"extra/Names.java": digest(sources[0])}
+    source_hashes = {"extra/Names.java": digest(sources[0]),
+                     str(node_dispatch.relative_to(fixture_root)): digest(node_dispatch)}
     source_hashes.update({str(path.relative_to(source_root)): digest(path)
-                          for path in sources[1:]})
+                          for path in sources[2:]})
     result = {"audit_sha256": digest(args.audit), "source_count": len(sources),
               "source_sha256": source_hashes,
               "providers": {name: digest(path) for name, path in providers.items()},
               "observations": observations}
     (args.work / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print(f"{len(visible)} adverse Java-source probes passed for "
-          f"{len(providers)} providers, 2 compilers, and 2 runtimes")
+    print(f"{len(visible)} adverse Java-source probes and one node dispatch control "
+          f"passed for {len(providers)} providers, 2 compilers, and 2 runtimes")
 
 
 if __name__ == "__main__":

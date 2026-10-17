@@ -94,12 +94,21 @@ Each source compiles against the baseline and the repaired providers.
 The compiled source executes with Java 8 and Java 21.
 The generated `result.json` records source, archive, and run-log hashes.
 
+`NodeDispatchProbe.java` is the positive protected-dispatch control.
+Its `SimplePolygonVertex.getPoint()` override returns `(99, 99)`, while the
+stored point is `(1, 2)`. `VertexClusterReduction.buildResult()` must return
+the stored point. The probe runner compiles this unchanged Java 8 source with
+the 77 adverse sources and runs it against the baseline, JVM, staged JVM,
+Android compile, and Android runtime archives. It rejects a result other than
+`(1.0, 2.0)` on both Java 8 and Java 21 runtimes.
+
 ## Executed checks before commit
 
 | Check | Observation |
 | --- | --- |
 | Strict JVM, Android compile, and Android runtime API inventories | Each found 216 required types and 3,078 required declarations. Each found zero missing signatures, mismatches, fixture failures, or inventory errors. Each exited 1 because 49 added-member paths remain in the strict report. These are exactly 39 hyphenated methods and 10 private nested members. |
 | Adverse Java source probes | All 77 nameable additions compiled and ran against the pinned baseline and all three repaired archives. Java 8 and Java 21 compiled the sources; both runtimes executed them. |
+| Protected node dispatch | The same probe run returned the stored `(1.0, 2.0)` point for all five providers, two compilers, and two runtimes. |
 | Unchanged Java corpus | All 2,385 cases passed with zero failures or ignores under Java 8 and Java 21. Both JVM and Android host archives were compiled against separately. |
 | Six available host lanes | Core ran 928 cases per lane. The Kotlin API ran 46 per lane, except 48 on JVM. JVM, Android host, Linux x64, JS Node, Wasm JS Node, and Wasm WASI Node passed with zero failures or skips. |
 | Staged consumers | The three unchanged World Java consumers ran on Java 8 and Java 21. The World and projection Kotlin consumers ran from staged JVM artifacts; the projection Kotlin consumer ran from Android host archives. |
