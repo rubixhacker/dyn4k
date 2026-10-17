@@ -45,13 +45,47 @@ def descriptor(jar: Path) -> dict:
             "exports": exports, "descriptor_lines": lines[1:]}
 
 
+def provider_check(jar: Path, dependencies: list[Path], expected_sha256: str | None) -> dict:
+    providers = []
+    expected_path = str(jar.resolve())
+    for path in [jar, *dependencies]:
+        resolved = path.resolve()
+        if not resolved.is_file():
+            return {"passed": False, "reason": "unreadable module-path entry",
+                    "expected_path": expected_path, "expected_sha256": expected_sha256,
+                    "entry": str(resolved), "providers": providers}
+        result = command(["jar", "--describe-module", "--file", str(resolved), "--release", "21"])
+        if result.returncode:
+            return {"passed": False, "reason": "unreadable module-path entry",
+                    "expected_path": expected_path, "expected_sha256": expected_sha256,
+                    "entry": str(resolved), "error": result.stderr.strip(), "providers": providers}
+        header = next((line for line in result.stdout.splitlines()
+                       if re.match(r"^[A-Za-z][A-Za-z0-9_.]*(?:@[^ ]+)?\s", line)), "")
+        name = header.split("@", 1)[0].split(" ", 1)[0] if header else ""
+        if name == MODULE_NAME:
+            providers.append({"path": str(resolved), "sha256": digest(resolved)})
+    reason = ("duplicate org.dyn4j providers" if len(providers) > 1 else
+              "expected org.dyn4j provider missing" if len(providers) == 0 else
+              "wrong org.dyn4j provider path" if providers[0]["path"] != expected_path else
+              "expected provider SHA-256 mismatch" if expected_sha256 is not None
+              and providers[0]["sha256"] != expected_sha256 else
+              "single org.dyn4j provider")
+    return {"passed": reason == "single org.dyn4j provider", "reason": reason,
+            "expected_path": expected_path, "expected_sha256": expected_sha256,
+            "providers": providers}
+
+
 def probe(jar: Path, mode: str, dependencies: list[Path] | None = None,
-          java8_java: Path | None = None) -> dict:
+          java8_java: Path | None = None, expected_provider_sha256: str | None = None) -> dict:
     dependencies = dependencies or []
     if mode == "module-descriptor":
         return descriptor(jar)
     if mode not in {"named-module-consumer", "java8-classpath"}:
         raise ValueError(f"unknown module probe: {mode}")
+    check = provider_check(jar, dependencies, expected_provider_sha256) if mode == "named-module-consumer" else None
+    if check is not None and not check["passed"]:
+        return {"passed": False, "compile_release": 9, "compile_exit_code": None,
+                "run_exit_code": None, "output": "", "java_version": "", "provider_check": check}
     with tempfile.TemporaryDirectory(prefix="dyn4k-module-probe-") as directory:
         classes = Path(directory) / "classes"
         classes.mkdir()
@@ -76,13 +110,16 @@ def probe(jar: Path, mode: str, dependencies: list[Path] | None = None,
             run_result = (command([str(java8_java), "-cp", os.pathsep.join([path, str(classes)]),
                                    "example.Main"])
                           if compile_result.returncode == 0 else None)
-        return {"passed": compile_result.returncode == 0 and run_result is not None
+        observed = {"passed": compile_result.returncode == 0 and run_result is not None
                 and run_result.returncode == 0 and run_result.stdout.strip() == "Named module consumer passed",
                 "compile_release": 9 if mode == "named-module-consumer" else 8,
                 "compile_exit_code": compile_result.returncode,
                 "run_exit_code": run_result.returncode if run_result else None,
                 "output": run_result.stdout if run_result else "",
                 "java_version": (version.stderr + version.stdout).splitlines()[0] if version.stderr or version.stdout else ""}
+        if check is not None:
+            observed["provider_check"] = check
+        return observed
 
 
 def main() -> None:
@@ -92,10 +129,12 @@ def main() -> None:
                         required=True)
     parser.add_argument("--dependency", type=Path, action="append", default=[])
     parser.add_argument("--java8-java", type=Path)
+    parser.add_argument("--expected-provider-sha256", help="SHA-256 of the staged org.dyn4j provider")
     parser.add_argument("--ledger", type=Path, default=Path("tools/compatibility/declaration-ledger.json"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    result = probe(args.jar, args.mode, args.dependency, args.java8_java)
+    result = probe(args.jar, args.mode, args.dependency, args.java8_java,
+                   args.expected_provider_sha256)
     if args.output:
         if args.output.exists():
             parser.error("evidence report exists; refusing to overwrite it")

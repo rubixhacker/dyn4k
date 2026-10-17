@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 
 
 FIXTURE = Path(__file__).resolve().parents[2] / "compatibility/fixtures/named_module"
+PROBE = Path(__file__).resolve().parents[2] / "compatibility/module_probe.py"
 SUCCESS = "Named module consumer passed"
 BASELINE_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
 
@@ -53,6 +55,28 @@ def assert_rejected(jar: Path, dependencies: list[Path], classes: Path,
     print(f"PASS {label}: {expected}")
 
 
+def assert_probe_rejected(jar: Path, dependencies: list[Path], candidate_sha256: str | None,
+                          expected_reason: str, label: str,
+                          expected_providers: list[Path]) -> None:
+    args = ["python3", str(PROBE), "--jar", str(jar), "--mode", "named-module-consumer"]
+    if candidate_sha256 is not None:
+        args.extend(["--expected-provider-sha256", candidate_sha256])
+    for dependency in dependencies:
+        args.extend(["--dependency", str(dependency)])
+    result = run(*args)
+    require(result.returncode == 1, f"{label}: probe accepted wrong provider: {result.stdout} {result.stderr}")
+    observed = json.loads(result.stdout)
+    check = observed["provider_check"]
+    require(not observed["passed"] and check["reason"] == expected_reason,
+            f"{label}: wrong failure: {result.stdout}")
+    for provider in expected_providers:
+        require(str(provider.resolve()) in result.stdout,
+                f"{label}: provider {provider} absent from diagnostic: {result.stdout}")
+        require(hashlib.sha256(provider.read_bytes()).hexdigest() in result.stdout,
+                f"{label}: provider hash {provider} absent from diagnostic: {result.stdout}")
+    print(f"PASS {label}: {expected_reason}; providers: {', '.join(str(p.resolve()) for p in expected_providers)}")
+
+
 def repack(source: Path, destination: Path, replacement: bytes | None) -> None:
     descriptor = "module-info.class"
     with zipfile.ZipFile(source) as source_jar, zipfile.ZipFile(destination, "w") as output:
@@ -81,6 +105,17 @@ def main() -> None:
         root = Path(directory)
         assert_pass(args.baseline, [], root / "baseline", "baseline")
         assert_pass(args.candidate, [args.stdlib], root / "candidate", "candidate")
+
+        candidate_sha256 = hashlib.sha256(args.candidate.read_bytes()).hexdigest()
+        assert_probe_rejected(args.baseline, [args.candidate, args.stdlib], None,
+                              "duplicate org.dyn4j providers", "baseline first dual module path",
+                              [args.baseline, args.candidate])
+        assert_probe_rejected(args.candidate, [args.baseline, args.stdlib], None,
+                              "duplicate org.dyn4j providers", "candidate first dual module path",
+                              [args.candidate, args.baseline])
+        assert_probe_rejected(args.baseline, [], candidate_sha256,
+                              "expected provider SHA-256 mismatch", "wrong staged candidate",
+                              [args.baseline])
 
         wrong_name = root / "wrong-name.jar"
         repack(args.candidate, wrong_name, None)

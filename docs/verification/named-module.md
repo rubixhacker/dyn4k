@@ -34,16 +34,31 @@ wrong name and missing export. Removing the Kotlin runtime from the module
 path fails at boot layer resolution. These checks prove that the passing
 consumer depends on the intended module identity, export, and runtime path.
 
+A raw Java module path can contain both the baseline and staged `org.dyn4j`
+JARs. Java selects the first provider in this case; the unchanged consumer can
+pass with either order. Run `module_probe.py` with every intended module-path
+JAR before claiming the staged provider ran. Its named-module mode rejects
+duplicate `org.dyn4j` providers before compilation and reports both resolved
+paths and SHA-256 hashes. It also checks that the sole provider is the `--jar`
+argument. Supply `--expected-provider-sha256` from the staged artifact record
+to reject a substituted JAR. An ordinary Java build does not invoke this
+check automatically. The Gradle qualification consumer has a separate
+resolved dependency-graph guard and an adverse duplicate-dependency test.
+The negative runner checks both provider orders and a baseline JAR supplied
+as the wrong staged candidate.
+
 ## Reproduce
 
 Use JDK 21 for Gradle, `javac`, `java`, `jar`, and `jdeps`. Set `ANDROID_HOME`
 to the installed SDK for the Android host test. The baseline JAR must have
 SHA-256 `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`.
+Set `EXPECTED_CORE_SHA256` from the staged publication record, independent of
+the JAR supplied to the probe.
 
 ```sh
 ./gradlew :dyn4k-core:publishJvmPublicationToStagingRepository :dyn4k:publishJvmPublicationToStagingRepository
 python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode module-descriptor
-python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode named-module-consumer --dependency "$KOTLIN_STDLIB_JAR"
+python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode named-module-consumer --dependency "$KOTLIN_STDLIB_JAR" --expected-provider-sha256 "$EXPECTED_CORE_SHA256"
 python3 tools/compatibility/module_probe.py --jar build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --mode java8-classpath --dependency "$KOTLIN_STDLIB_JAR" --java8-java "$JAVA8_HOME/bin/java"
 python3 tools/qualification/module/negative_tests.py --candidate build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar --baseline "$BASELINE_JAR" --stdlib "$KOTLIN_STDLIB_JAR" --java8 "$JAVA8_HOME/bin/java"
 ```
