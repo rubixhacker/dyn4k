@@ -107,11 +107,21 @@ class RawArtifactTests(unittest.TestCase):
             artifact.verify_bundle(workflow_bundle, manifest, sha)
             (workflow_bundle / "json/matrix-macosArm64.json").write_bytes(matrix_path.read_bytes())
             artifact.verify_bundle(workflow_bundle, manifest, sha)
+            inventory_path = workflow_bundle / "verification.json"
+            inventory_bytes = inventory_path.read_bytes()
+            windows_inventory = json.loads(inventory_bytes)
+            for item in windows_inventory["files"] + windows_inventory["staged_files"]:
+                item["path"] = item["path"].replace("/", "\\")
+            inventory_path.write_text(json.dumps(windows_inventory))
+            artifact.verify_bundle(workflow_bundle, manifest, sha)
+            windows_inventory["files"][0]["path"] = "..\\outside.xml"
+            inventory_path.write_text(json.dumps(windows_inventory))
+            with self.assertRaisesRegex(ValueError, "inventory path is unsafe"):
+                artifact.verify_bundle(workflow_bundle, manifest, sha)
+            inventory_path.write_bytes(inventory_bytes)
             archived_xml = next((workflow_bundle / "xml").rglob("*.xml"))
             os.utime(archived_xml, ns=(1_000_000_000, 1_000_000_000))
             artifact.verify_bundle(workflow_bundle, manifest, sha)
-            inventory_path = workflow_bundle / "verification.json"
-            inventory_bytes = inventory_path.read_bytes()
             inventory = json.loads(inventory_bytes)
             inventory["files"][0]["mtime_ns"] = 1
             inventory_path.write_text(json.dumps(inventory))

@@ -11,6 +11,17 @@ from pathlib import Path
 import qualify
 
 
+def portable_path(value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("bundle inventory path is missing")
+    path = value.replace("\\", "/")
+    parts = path.split("/")
+    if (any(part in ("", ".", "..") for part in parts)
+            or ":" in parts[0]):
+        raise ValueError(f"bundle inventory path is unsafe: {value}")
+    return "/".join(parts)
+
+
 def collect_group(repository, destination, manifest, group, started, finished, files,
                   recorded_times=None):
     group_id = group["id"]
@@ -23,7 +34,7 @@ def collect_group(repository, destination, manifest, group, started, finished, f
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"invalid report {path}: missing or symbolic")
         relative = path.relative_to(repository)
-        file_key = str(Path("xml") / relative)
+        file_key = portable_path((Path("xml") / relative).as_posix())
         if recorded_times is None:
             mtime_ns = path.stat().st_mtime_ns
         else:
@@ -58,7 +69,7 @@ def collect_group(repository, destination, manifest, group, started, finished, f
             if not math.isfinite(duration) or duration < 0 or not all(identity):
                 raise ValueError(f"invalid report {path}: case time or identity is invalid")
             observed.append(identity)
-        files.append({"path": str(bundled.relative_to(destination)),
+        files.append({"path": portable_path(bundled.relative_to(destination).as_posix()),
                       "sha256": qualify.digest(bundled), "mtime_ns": mtime_ns})
     if len(observed) != len(set(observed)) or set(observed) != set(expected):
         raise ValueError(f"partial, duplicate, or unexpected cases in {group_id}")
@@ -124,7 +135,7 @@ def capture_staging(repository, destination, targets):
             target_path = destination / "staged" / source.relative_to(staging)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target_path)
-            files.append({"path": str(target_path.relative_to(destination)),
+            files.append({"path": portable_path(target_path.relative_to(destination).as_posix()),
                           "sha256": qualify.digest(target_path)})
         gav.append(f"{qualify.GROUP}:{name}:{qualify.VERSION}")
     for target in targets:
@@ -140,7 +151,7 @@ def capture_staging(repository, destination, targets):
             target_path = destination / "staged" / sidecar.relative_to(staging)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(sidecar, target_path)
-            files.append({"path": str(target_path.relative_to(destination)),
+            files.append({"path": portable_path(target_path.relative_to(destination).as_posix()),
                           "sha256": qualify.digest(target_path)})
             hashes[target][module] = actual
     return gav, files, hashes
@@ -319,7 +330,9 @@ def verify_bundle(bundle, manifest, candidate_sha):
     if (not isinstance(recorded, list) or not recorded
             or any(not isinstance(item, dict) for item in recorded)):
         raise ValueError("bundle raw file inventory is missing")
-    recorded_times = {item.get("path"): item.get("mtime_ns") for item in recorded}
+    normalized_recorded = [{**item, "path": portable_path(item.get("path"))}
+                           for item in recorded]
+    recorded_times = {item["path"]: item.get("mtime_ns") for item in normalized_recorded}
     if len(recorded_times) != len(recorded):
         raise ValueError("bundle raw file inventory has duplicate paths")
     import tempfile
@@ -340,20 +353,26 @@ def verify_bundle(bundle, manifest, candidate_sha):
         raise ValueError("bundle counts differ from raw XML")
     if summary.get("expected") != sum(found.values()):
         raise ValueError("bundle expected count differs from frozen cases")
-    if sorted(files, key=lambda item: item["path"]) != sorted(summary.get("files", []),
+    if sorted(files, key=lambda item: item["path"]) != sorted(normalized_recorded,
                                                               key=lambda item: item["path"]):
         raise ValueError("bundle XML hashes differ from verification")
-    actual_paths = {str(path.relative_to(bundle)) for path in (bundle / "xml").rglob("*.xml")}
+    actual_paths = {path.relative_to(bundle).as_posix() for path in (bundle / "xml").rglob("*.xml")}
     if actual_paths != {item["path"] for item in files}:
         raise ValueError("bundle contains unlisted XML")
     staged_files = summary.get("staged_files")
     if not isinstance(staged_files, list) or not staged_files:
         raise ValueError("staged GAV provenance is missing")
+    if any(not isinstance(item, dict) for item in staged_files):
+        raise ValueError("staged GAV provenance is invalid")
+    staged_files = [{**item, "path": portable_path(item.get("path"))}
+                    for item in staged_files]
+    if len({item["path"] for item in staged_files}) != len(staged_files):
+        raise ValueError("staged GAV provenance has duplicate paths")
     for item in staged_files:
         path = bundle / item["path"]
         if not path.is_file() or path.is_symlink() or qualify.digest(path) != item["sha256"]:
             raise ValueError("staged GAV descriptor or checksum differs from bundle")
-    staged_paths = {str(path.relative_to(bundle)) for path in (bundle / "staged").rglob("*")
+    staged_paths = {path.relative_to(bundle).as_posix() for path in (bundle / "staged").rglob("*")
                     if path.is_file()}
     if staged_paths != {item["path"] for item in staged_files}:
         raise ValueError("bundle contains unlisted staged provenance")
