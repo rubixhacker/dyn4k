@@ -14,6 +14,8 @@ class QualificationTests(unittest.TestCase):
         "cleanseReturnsTheExactEmptyListAndASeparateEmptyArray",
         "cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult",
         "cleanseKeepsTheBaselineNullInputErrors",
+        "geometryExceptionsSupportCommonSubclasses",
+        "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState",
         "boundsShareTheCompatibilityObjectAndCopyIndependently",
         "projectedIntervalsRetainTheBaselineBoundaryRules",
         "rayPreservesItsLiveStartAndCopiesBothVectors",
@@ -43,7 +45,7 @@ class QualificationTests(unittest.TestCase):
             ("androidHost", "", ""),
         ):
             cases = qualify.expected_probe_cases(manifest, groups[group_id])
-            self.assertEqual(28, len(cases), group_id)
+            self.assertEqual(30, len(cases), group_id)
             self.assertEqual(
                 [(f"{prefix}io.github.rubixhacker.dyn4k.GeometryShapeTest", name + suffix)
                  for name in self.GEOMETRY_CASES],
@@ -54,8 +56,8 @@ class QualificationTests(unittest.TestCase):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         group = next(group for group in manifest["groups"] if group["id"] == "jvm")
         cases = qualify.expected_probe_cases(manifest, group)
-        self.assertEqual(28, len(cases))
-        suite = ET.Element("testsuite", tests="29", failures="0", errors="0", skipped="0")
+        self.assertEqual(30, len(cases))
+        suite = ET.Element("testsuite", tests="31", failures="0", errors="0", skipped="0")
         for classname, name in cases + [("io.github.rubixhacker.dyn4k.GeometryShapeTest", "unexpected[jvm]")]:
             ET.SubElement(suite, "testcase", classname=classname, name=name, time="0")
         xml = ET.tostring(suite, encoding="unicode")
@@ -70,8 +72,8 @@ class QualificationTests(unittest.TestCase):
                                            Path(root) / "result.json",
                                            manifest={**manifest, "groups": [report_group]})
                 self.assertEqual("PROBE_FAILED", result["status"])
-                self.assertEqual(28, result["expected"])
-                self.assertEqual(29, result["executed"])
+                self.assertEqual(30, result["expected"])
+                self.assertEqual(31, result["executed"])
                 self.assertIn("unexpected cases", result["reason"])
             finally:
                 os.chdir(previous)

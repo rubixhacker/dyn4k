@@ -126,7 +126,7 @@ def hosted_status(target, candidate_sha, runtime, source_probe, consumer_probe, 
         return "PROBE_FAILED", "both staged target binary hashes are required"
     required = [(consumer_probe, 1, "staged consumer")]
     if target != "jsSafari":
-        required.insert(0, (source_probe, 28, "source probe"))
+        required.insert(0, (source_probe, 30, "source probe"))
     for probe, expected, name in required:
         if not isinstance(probe, dict):
             return "PROBE_FAILED", f"{name} report is missing"
