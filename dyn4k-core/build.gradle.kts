@@ -1105,6 +1105,119 @@ tasks.register<JavaExec>("runAndroidCollisionModelConsumer") {
     classpath(androidCollisionModelConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("CollisionModelConsumer")
 }
+val dynamicsTestNames = listOf(
+    "AbstractPhysicsBodyTest", "BodyFixtureTest", "BodyTest", "ForceTest",
+    "SettingsTest", "TimeStepTest", "TorqueTest"
+)
+val compileBaselineDynamicsTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(dynamicsTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/dynamics/$it.java") }
+    })
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-dynamics-tests/baseline-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineDynamicsTests") {
+    dependsOn(compileBaselineDynamicsTests)
+    classpath(compileBaselineDynamicsTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(dynamicsTestNames.map { "org.dyn4j.dynamics.$it" })
+}
+val compileUpstreamDynamicsTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(dynamicsTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/dynamics/$it.java") }
+    })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-dynamics-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamDynamicsTests") {
+    dependsOn(compileUpstreamDynamicsTests)
+    classpath(compileUpstreamDynamicsTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(dynamicsTestNames.map { "org.dyn4j.dynamics.$it" })
+}
+val dynamicsConsumerSource = files("src/jvmConsumer/java/DynamicsConsumer.java", "src/jvmConsumer/java/DynamicsNullProbe.java")
+val baselineDynamicsConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(dynamicsConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/dynamics-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineDynamicsConsumer") {
+    dependsOn(baselineDynamicsConsumer)
+    classpath(baselineDynamicsConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("DynamicsConsumer")
+}
+tasks.register<JavaExec>("runBaselineDynamicsNullProbe") {
+    dependsOn(baselineDynamicsConsumer)
+    classpath(baselineDynamicsConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("DynamicsNullProbe")
+}
+val candidateDynamicsConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(dynamicsConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/dynamics-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateDynamicsConsumer") {
+    dependsOn(candidateDynamicsConsumer)
+    classpath(candidateDynamicsConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("DynamicsConsumer")
+}
+tasks.register<JavaExec>("runCandidateDynamicsNullProbe") {
+    dependsOn(candidateDynamicsConsumer)
+    classpath(candidateDynamicsConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("DynamicsNullProbe")
+}
+val stagedDynamicsConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(dynamicsConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/dynamics-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedDynamicsConsumer") {
+    dependsOn(stagedDynamicsConsumer)
+    classpath(stagedDynamicsConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("DynamicsConsumer")
+}
+val stagedDynamicsKotlinConsumer = tasks.register<JavaExec>("stagedDynamicsKotlinConsumer") {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    val output = layout.buildDirectory.dir("consumer/dynamics-staged-kotlin")
+    inputs.file(file("src/jvmConsumer/kotlin/DynamicsKotlinConsumer.kt"))
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(output)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", output.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/DynamicsKotlinConsumer.kt").absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedDynamicsKotlinConsumer") {
+    dependsOn(stagedDynamicsKotlinConsumer)
+    classpath(layout.buildDirectory.dir("consumer/dynamics-staged-kotlin"), stagedGeometryClasspath)
+    mainClass.set("DynamicsKotlinConsumer")
+}
+val androidDynamicsConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(dynamicsConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/dynamics-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidDynamicsConsumer") {
+    dependsOn(androidDynamicsConsumer, androidRuntimeJar)
+    classpath(androidDynamicsConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("DynamicsConsumer")
+}
+
 val polygonTestNames = mapOf(
     "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
     "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),

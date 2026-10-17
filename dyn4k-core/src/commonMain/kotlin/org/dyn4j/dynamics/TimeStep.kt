@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2010-2022 William Bittle  http://www.dyn4j.org/
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification, are permitted
+ * provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice, this list of conditions
+ *     and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright notice, this list of conditions
+ *     and the following disclaimer in the documentation and/or other materials provided with the
+ *     distribution.
+ *   * Neither the name of the copyright holder nor the names of its contributors may be used to endorse or
+ *     promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+ * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+ * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+package org.dyn4j.dynamics
+
+import org.dyn4j.exception.ValueOutOfRangeException
+import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
+
+open class TimeStep(dt: Double) {
+    @JvmField protected var dt0: Double
+    @JvmField protected var invdt0: Double
+    @JvmField protected var dt: Double
+    @JvmField protected var invdt: Double
+    @JvmField protected var dtRatio: Double
+
+    init {
+        if (dt <= 0.0) throw ValueOutOfRangeException("dt", dt, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
+        this.dt = dt
+        invdt = 1.0 / dt
+        dt0 = dt
+        invdt0 = invdt
+        dtRatio = 1.0
+    }
+
+    open fun update(dt: Double) {
+        if (dt <= 0.0) throw ValueOutOfRangeException("dt", dt, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
+        dt0 = this.dt
+        invdt0 = invdt
+        this.dt = dt
+        invdt = 1.0 / dt
+        dtRatio = invdt0 * dt
+    }
+    open fun getDeltaTime() = dt
+    @Suppress("INAPPLICABLE_JVM_NAME")
+    @JvmName("rawDeltaTime-dyn4k-internal")
+    @JvmSynthetic internal fun rawDeltaTime() = dt
+    open fun getInverseDeltaTime() = invdt
+    open fun getDeltaTimeRatio() = dtRatio
+    open fun getPrevousDeltaTime() = dt0
+    open fun getPreviousInverseDeltaTime() = invdt0
+    override fun toString() = "Step[DeltaTime=$dt|InverseDeltaTime=$invdt|PreviousDeltaTime=$dt0|PreviousInverseDeltaTime=$invdt0|DeltaTimeRatio=$dtRatio]"
+}
