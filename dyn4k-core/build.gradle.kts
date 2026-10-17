@@ -200,6 +200,109 @@ val jvmApi = mapOf(
             "transform", "transform0", "fixtures", "fixturesUnmodifiable", "radius", "userData",
             "enabled", "fixtureModificationHandler", "owner"
         )
+    ),
+    "org/dyn4j/dynamics/joint/AbstractJoint" to JvmApiSpec(
+        protectedFields = setOf("bodies", "collisionAllowed", "userData", "owner"),
+        staticMethods = setOf(
+            "getFrequency", "getNaturalFrequency", "getSpringDampingCoefficient", "getSpringStiffness",
+            "getConstraintImpulseMixing", "getErrorReductionParameter"
+        ),
+        protectedMethods = setOf(
+            "getFrequency", "getNaturalFrequency", "getSpringDampingCoefficient", "getSpringStiffness",
+            "getConstraintImpulseMixing", "getErrorReductionParameter"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/AbstractPairedBodyJoint" to JvmApiSpec(protectedFields = setOf("body1", "body2")),
+    "org/dyn4j/dynamics/joint/AbstractSingleBodyJoint" to JvmApiSpec(protectedFields = setOf("body")),
+    "org/dyn4j/dynamics/joint/AngleJoint" to JvmApiSpec(
+        protectedFields = setOf("ratio", "limitsEnabled", "lowerLimit", "upperLimit", "referenceAngle"),
+        packageFields = setOf(
+            "limitOffset", "adjustedLowerLimit", "adjustedUpperLimit", "angle", "axialMass",
+            "fixedRotation", "impulse", "lowerLimitImpulse", "upperLimitImpulse"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/DistanceJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "localAnchor1", "localAnchor2", "restDistance", "springEnabled", "springMode",
+            "springFrequency", "springStiffness", "springDamperEnabled", "springDampingRatio",
+            "springMaximumForceEnabled", "springMaximumForce", "upperLimit", "lowerLimit",
+            "upperLimitEnabled", "lowerLimitEnabled"
+        ),
+        packageFields = setOf(
+            "currentDistance", "damping", "n", "gamma", "bias", "mass", "softMass", "impulse",
+            "upperLimitImpulse", "lowerLimitImpulse"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/FrictionJoint" to JvmApiSpec(
+        protectedFields = setOf("localAnchor1", "localAnchor2", "maximumForce", "maximumTorque"),
+        packageFields = setOf("K", "angularMass", "linearImpulse", "angularImpulse")
+    ),
+    "org/dyn4j/dynamics/joint/MotorJoint" to JvmApiSpec(
+        protectedFields = setOf("linearTarget", "angularTarget", "correctionFactor", "maximumForce", "maximumTorque"),
+        packageFields = setOf("r1", "r2", "K", "angularMass", "linearError", "angularError", "linearImpulse", "angularImpulse")
+    ),
+    "org/dyn4j/dynamics/joint/PinJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "target", "localAnchor", "springEnabled", "springMode", "springFrequency", "springStiffness",
+            "springDamperEnabled", "springDampingRatio", "springMaximumForceEnabled", "springMaximumForce",
+            "correctionFactor", "correctionMaximumForce"
+        ),
+        packageFields = setOf("r", "damping", "bias", "gamma", "K", "linearError", "impulse")
+    ),
+    "org/dyn4j/dynamics/joint/PrismaticJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "localAnchor1", "localAnchor2", "xAxis", "yAxis", "referenceAngle", "upperLimitEnabled",
+            "lowerLimitEnabled", "upperLimit", "lowerLimit", "motorEnabled", "motorSpeed",
+            "maximumMotorForceEnabled", "maximumMotorForce", "springEnabled", "springDamperEnabled",
+            "springMode", "springFrequency", "springStiffness", "springDampingRatio",
+            "springMaximumForceEnabled", "springMaximumForce", "springRestOffset"
+        ),
+        packageFields = setOf(
+            "damping", "bias", "gamma", "K", "axialMass", "springMass", "perp", "axis", "s1",
+            "s2", "a1", "a2", "translation", "impulse", "springImpulse", "motorImpulse",
+            "lowerLimitImpulse", "upperLimitImpulse"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/PulleyJoint" to JvmApiSpec(
+        protectedFields = setOf("pulleyAnchor1", "pulleyAnchor2", "localAnchor1", "localAnchor2", "ratio", "slackEnabled"),
+        packageFields = setOf("overLength", "length", "n1", "n2", "invK", "impulse")
+    ),
+    "org/dyn4j/dynamics/joint/RevoluteJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "localAnchor1", "localAnchor2", "limitsEnabled", "lowerLimit", "upperLimit", "referenceAngle",
+            "limitOffset", "adjustedLowerLimit", "adjustedUpperLimit", "motorEnabled", "motorSpeed",
+            "motorMaximumTorqueEnabled", "motorMaximumTorque"
+        ),
+        packageFields = setOf(
+            "angle", "axialMass", "fixedRotation", "r1", "r2", "K", "impulse", "motorImpulse",
+            "lowerLimitImpulse", "upperLimitImpulse"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/WeldJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "localAnchor1", "localAnchor2", "limitsEnabled", "lowerLimit", "upperLimit", "referenceAngle",
+            "limitOffset", "adjustedLowerLimit", "adjustedUpperLimit", "springEnabled", "springDamperEnabled",
+            "springMode", "springFrequency", "springStiffness", "springDampingRatio",
+            "springMaximumTorqueEnabled", "springMaximumTorque"
+        ),
+        packageFields = setOf(
+            "angle", "r1", "r2", "K", "axialMass", "springMass", "damping", "bias", "gamma",
+            "impulse", "springImpulse", "lowerLimitImpulse", "upperLimitImpulse"
+        )
+    ),
+    "org/dyn4j/dynamics/joint/WheelJoint" to JvmApiSpec(
+        protectedFields = setOf(
+            "localAnchor1", "localAnchor2", "xAxis", "yAxis", "upperLimitEnabled", "lowerLimitEnabled",
+            "upperLimit", "lowerLimit", "motorEnabled", "motorSpeed", "motorMaximumTorqueEnabled",
+            "motorMaximumTorque", "springEnabled", "springDamperEnabled", "springMode", "springFrequency",
+            "springStiffness", "springDampingRatio", "springMaximumForceEnabled", "springMaximumForce",
+            "springRestOffset"
+        ),
+        packageFields = setOf(
+            "damping", "bias", "gamma", "translation", "invK", "axialMass", "springMass",
+            "motorMass", "wyAxis", "wxAxis", "s1y", "s2y", "s1x", "s2x", "impulse",
+            "lowerLimitImpulse", "upperLimitImpulse", "springImpulse", "motorImpulse"
+        )
     )
 )
 
@@ -216,7 +319,8 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 access: Int, name: String, descriptor: String,
                                 signature: String?, exceptions: Array<out String>?
                             ): MethodVisitor? {
-                                if (name in spec.staticMethods && access and Opcodes.ACC_PUBLIC != 0) {
+                                if (name in spec.staticMethods &&
+                                    access and (Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED) != 0) {
                                     methods += Triple(name, descriptor, signature)
                                 }
                                 return null
@@ -280,7 +384,8 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                     revised = revised and visibility.inv() and Opcodes.ACC_FINAL.inv()
                                 }
                                 if (name in spec.protectedMethods) {
-                                    revised = ((revised and visibility.inv()) or Opcodes.ACC_PROTECTED) and Opcodes.ACC_FINAL.inv()
+                                    revised = (revised and visibility.inv()) or Opcodes.ACC_PROTECTED
+                                    if (access and Opcodes.ACC_STATIC == 0) revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
                                 if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
@@ -317,11 +422,15 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                             override fun visitEnd() {
                                 for ((name, descriptor, signature) in companionMethods[owner].orEmpty()) {
                                     if ((name to descriptor) in present) continue
-                                    val visibility = if (name in spec.packageMethods ||
-                                        name + descriptor in spec.packageMethodSignatures) 0 else Opcodes.ACC_PUBLIC
+                                    val visibility = when {
+                                        name in spec.packageMethods || name + descriptor in spec.packageMethodSignatures -> 0
+                                        name in spec.protectedMethods -> Opcodes.ACC_PROTECTED
+                                        else -> Opcodes.ACC_PUBLIC
+                                    }
                                     val method = super.visitMethod(
                                         visibility or Opcodes.ACC_STATIC or
-                                            (if (owner == "org/dyn4j/Version") Opcodes.ACC_FINAL else 0) or
+                                            (if (owner == "org/dyn4j/Version" || name in spec.protectedMethods)
+                                                Opcodes.ACC_FINAL else 0) or
                                             (if (name in spec.varargMethods &&
                                                 Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                             ) Opcodes.ACC_VARARGS else 0),
@@ -929,4 +1038,176 @@ tasks.register<JavaExec>("runAndroidDynamicsConsumer") {
     dependsOn(androidDynamicsConsumer, androidRuntimeJar)
     classpath(androidDynamicsConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("DynamicsConsumer")
+}
+
+val jointTestNames = listOf(
+    "AbstractJointTest", "AbstractPairedBodyJointTest", "AbstractSingleBodyJointTest",
+    "AngleJointTest", "DistanceJointTest", "FrictionJointTest", "MotorJointTest",
+    "PinJointTest", "PrismaticJointTest", "PulleyJointTest", "RevoluteJointTest",
+    "WeldJointTest", "WheelJointTest"
+)
+val jointTestSourceNames = jointTestNames + listOf(
+    "BaseJointTest", "TestAbstractJoint", "TestAbstractPairedBodyJoint", "TestAbstractSingleBodyJoint"
+)
+val compileBaselineJointTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(jointTestSourceNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/dynamics/joint/$it.java") }
+    })
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-joint-tests/baseline-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineJointTests") {
+    dependsOn(compileBaselineJointTests)
+    classpath(compileBaselineJointTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(jointTestNames.map { "org.dyn4j.dynamics.joint.$it" })
+}
+val compileUpstreamJointTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(jointTestSourceNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/dynamics/joint/$it.java") }
+    })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-joint-tests/candidate-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamJointTests") {
+    dependsOn(compileUpstreamJointTests)
+    classpath(compileUpstreamJointTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(jointTestNames.map { "org.dyn4j.dynamics.joint.$it" })
+}
+
+val jointSimulationTestNames = listOf(
+    "AngleJointSimulationTest", "DistanceJointSimulationTest", "FrictionJointSimulationTest",
+    "MotorJointSimulationTest", "PinJointSimulationTest", "PrismaticJointSimulationTest",
+    "PulleyJointSimulationTest", "RevoluteJointSimulationTest", "WeldJointSimulationTest",
+    "WheelJointSimulationTest"
+)
+val compileBaselineJointSimulationTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(jointSimulationTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/simulation/$it.java") }
+    })
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-joint-simulation-tests/baseline-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineJointSimulationTests") {
+    dependsOn(compileBaselineJointSimulationTests)
+    classpath(compileBaselineJointSimulationTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(jointSimulationTestNames.map { "org.dyn4j.simulation.$it" })
+}
+val compileUpstreamJointSimulationTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(jointSimulationTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/simulation/$it.java") }
+    })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-joint-simulation-tests/candidate-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamJointSimulationTests") {
+    dependsOn(compileUpstreamJointSimulationTests)
+    classpath(compileUpstreamJointSimulationTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(jointSimulationTestNames.map { "org.dyn4j.simulation.$it" })
+}
+
+val jointConsumerSource = file("src/jvmConsumer/java/JointConsumer.java")
+val baselineJointConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(jointConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineJointConsumer") {
+    dependsOn(baselineJointConsumer)
+    classpath(baselineJointConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("JointConsumer")
+}
+val candidateJointConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(jointConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateJointConsumer") {
+    dependsOn(candidateJointConsumer)
+    classpath(candidateJointConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("JointConsumer")
+}
+val stagedJointConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(jointConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedJointConsumer") {
+    dependsOn(stagedJointConsumer)
+    classpath(stagedJointConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("JointConsumer")
+}
+val stagedJointKotlinConsumer = tasks.register<JavaExec>("stagedJointKotlinConsumer") {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    val output = layout.buildDirectory.dir("consumer/joint-staged-kotlin")
+    inputs.file(file("src/jvmConsumer/kotlin/JointKotlinConsumer.kt"))
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(output)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", output.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/JointKotlinConsumer.kt").absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedJointKotlinConsumer") {
+    dependsOn(stagedJointKotlinConsumer)
+    classpath(layout.buildDirectory.dir("consumer/joint-staged-kotlin"), stagedGeometryClasspath)
+    mainClass.set("JointKotlinConsumer")
+}
+val androidJointConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(jointConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidJointConsumer") {
+    dependsOn(androidJointConsumer, androidRuntimeJar)
+    classpath(androidJointConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("JointConsumer")
+}
+
+val jointMechanismConsumerSource = file("src/jvmConsumer/java/JointMechanismConsumer.java")
+val baselineJointMechanismConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(jointMechanismConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-mechanism-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineJointMechanismConsumer") {
+    dependsOn(baselineJointMechanismConsumer)
+    classpath(baselineJointMechanismConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("JointMechanismConsumer")
+}
+val candidateJointMechanismConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(jointMechanismConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/joint-mechanism-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateJointMechanismConsumer") {
+    dependsOn(candidateJointMechanismConsumer)
+    classpath(candidateJointMechanismConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("JointMechanismConsumer")
 }
