@@ -199,8 +199,7 @@ public final class Capture {
     }
     static Map<String,Object> props(Object value) {
         Map<String,Object> result=new TreeMap<>();if(value==null)return result;
-        result.put("type",value == org.dyn4j.collision.Filter.DEFAULT_FILTER
-            ? "org.dyn4j.collision.Filter$1" : value.getClass().getName());
+        result.put("type",protocolType(value));
         for(Method m:getters(value.getClass())) {
             Class<?> r=m.getReturnType();
             if(r==value.getClass())continue;
@@ -209,6 +208,12 @@ public final class Capture {
             }
         }
         return result;
+    }
+    static String protocolType(Object value) {
+        if (value == org.dyn4j.collision.Filter.DEFAULT_FILTER) return "org.dyn4j.collision.Filter$1";
+        if (value == org.dyn4j.collision.manifold.ManifoldPointId.DISTANCE)
+            return "org.dyn4j.collision.manifold.ManifoldPointId$1";
+        return value.getClass().getName();
     }
     static void line(BufferedWriter writer,Object value) {
         try {writer.write(json(value,0,new IdentityHashMap<>()));writer.newLine();}catch(IOException e){throw new UncheckedIOException(e);}
