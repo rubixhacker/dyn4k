@@ -1,0 +1,12 @@
+{
+  "commit": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "binary_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "test_files": 199,
+  "test_classes": 190,
+  "actual_executed_cases": 2385,
+  "failures": 0,
+  "ignored": 0,
+  "process_exit_code": 0,
+  "output": "ACTUAL_TESTS=2385\nFAILURES=0\nIGNORED=0\n",
+  "stderr": ""
+}
