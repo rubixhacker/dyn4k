@@ -1,0 +1,13 @@
+{
+  "base_manifest_sha256": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+  "candidate_identity_sha256": "2268581c6ce00d8c7354034f305e8cac61d29f1bbd88d7ad2538fbe710025a23",
+  "direct_fixture_sha256": "6bcf520ebf6da871e9e24f094f33129898265d184c5c1c4f7be3ed76425147f5",
+  "fixture_sha256": "f0ca0b94b8561ffa1dee407a321291a259a3fc72d50bed506b9ea795968eac67",
+  "fixture_version": "performance-ccd-v2",
+  "harness_sha256": "fb7e40062e06c4169c23e72ae3259e360cd9459dc79f1c31297e2da46a169ba9",
+  "identity_raw_sha256": "f26fff22f9de0ef6f6fe9bd7530a36fcb6f1e2b111b79737897f1f62a611bea1",
+  "qualification": "unpassed",
+  "schema": 1,
+  "source_commit": "9ce41f7cc7cfc0a7c7991b02335c5e285159f58d",
+  "trace_result_sha256": "eb63718bf5d817a24503966ed8e0446aeba9af2c27e15ab83a71a22b728aaca1"
+}

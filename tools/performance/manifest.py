@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import sys
 from pathlib import Path
+
+
+V1_MANIFEST_SHA256 = "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a"
+V1_MANIFEST_FILE = Path(__file__).resolve().parents[2] / "docs/research/performance-manifest-v1.json"
 
 
 TARGET_ROWS = {
@@ -227,6 +232,33 @@ def manifest():
     }
 
 
+def ccd_fixture_revision():
+    return {
+        "version": "performance-ccd-v2",
+        "base_manifest_version": 1,
+        "base_manifest_sha256": V1_MANIFEST_SHA256,
+        "family": "ccd",
+        "workload_ids": [item["id"] for item in scenarios() if item["family"] == "ccd"],
+        "body_hash": {
+            "algorithm": "zero_based_creation_index",
+            "counter_scope": "each_fixture",
+            "creation_order": ["left_wall", "right_wall", "bullet_circles_ascending_index"],
+            "warmup": "fresh_fixture_resets_counter",
+            "routes": ["baseline", "direct_kotlin", "compatibility"],
+            "other_families": "unchanged",
+        },
+        "qualification": "unpassed",
+    }
+
+
+def validate_ccd_fixture_revision(value):
+    if hashlib.sha256(V1_MANIFEST_FILE.read_bytes()).hexdigest() != V1_MANIFEST_SHA256:
+        raise ValueError("base manifest hash differs")
+    validate(json.loads(V1_MANIFEST_FILE.read_text()))
+    if value != ccd_fixture_revision():
+        raise ValueError("CCD fixture revision differs from the frozen rule")
+
+
 def validate(value):
     if value.get("version") != 1:
         raise ValueError("unsupported manifest version")
@@ -255,6 +287,14 @@ def validate(value):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "emit-ccd-fixture":
+        print(json.dumps(ccd_fixture_revision(), indent=2, sort_keys=True))
+        return
+    if len(sys.argv) == 3 and sys.argv[1] == "validate-ccd-fixture":
+        value = json.load(sys.stdin if sys.argv[2] == "-" else Path(sys.argv[2]).open())
+        validate_ccd_fixture_revision(value)
+        print("CCD fixture revision valid")
+        return
     if len(sys.argv) == 2 and sys.argv[1] == "emit":
         print(json.dumps(manifest(), indent=2, sort_keys=True))
         return

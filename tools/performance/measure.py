@@ -6,6 +6,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from manifest import manifest, validate
+from analyze import activity_status
 
 
 HERE = Path(__file__).resolve().parent
@@ -103,12 +105,13 @@ def compile_harness(javac, jar, work):
 def run_capture(command, output, stderr_path=None, timeout=None, rss_ceiling_bytes=None):
     if timeout is None and rss_ceiling_bytes is None:
         with output.open("w") as stream:
-            process = subprocess.run(command, stdout=stream, stderr=subprocess.PIPE, text=True)
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.PIPE, text=True)
+            _, error_output = process.communicate()
         if stderr_path is not None:
-            stderr_path.write_text(process.stderr)
+            stderr_path.write_text(error_output)
         if process.returncode:
-            raise RuntimeError(f"runner failed ({process.returncode}): {process.stderr}")
-        return process.stderr
+            raise RuntimeError(f"runner failed ({process.returncode}): {error_output}")
+        return error_output, process.pid
     stderr_file = stderr_path or output.with_suffix(".stderr")
     reason = "bounded_end"
     with output.open("w") as stdout, stderr_file.open("w") as stderr:
@@ -139,7 +142,7 @@ def run_capture(command, output, stderr_path=None, timeout=None, rss_ceiling_byt
     output.with_suffix(".termination.json").write_text(json.dumps({"reason": reason, "exit_code": returncode}) + "\n")
     if reason != "bounded_end" or returncode:
         raise RuntimeError(f"runner terminated: {reason}, exit {returncode}; raw files retained")
-    return stderr_file.read_text()
+    return stderr_file.read_text(), process.pid
 
 
 def validate_csv(path, family, variant, size, hz, steps, mode):
@@ -157,17 +160,39 @@ def validate_csv(path, family, variant, size, hz, steps, mode):
         raise ValueError("body count changed unexpectedly")
     if any(int(row["elapsed_ns"]) <= 0 for row in rows):
         raise ValueError("nonpositive elapsed step time")
+    for row in rows:
+        elapsed = int(row["elapsed_ns"])
+        mutation = int(row["mutation_ns"])
+        if mutation < 0 or mutation > elapsed:
+            raise ValueError("invalid mutation_ns")
+        if int(row["lateness_ns"]) < 0:
+            raise ValueError("invalid lateness_ns")
+        allocated = int(row["allocation_bytes"])
+        if allocated < 0 and (mode != "timing" or allocated != -1):
+            raise ValueError("invalid allocation_bytes")
+        if mode == "timing" and allocated != -1:
+            raise ValueError("timing allocation_bytes sentinel differs")
+        if int(row["heap_used_bytes"]) < 0 or int(row["rss_bytes"]) < 0:
+            raise ValueError("invalid heap_used_bytes or rss_bytes")
+        if int(row["awake_count"]) < 0 or int(row["awake_count"]) > count:
+            raise ValueError("invalid awake_count")
+        for field in ("contact_begins", "contact_ends", "toi_events"):
+            if int(row[field]) < 0:
+                raise ValueError(f"invalid {field}")
+        sampled = int(row["step"]) % hz == 0 or int(row["step"]) == steps - 1
+        for field in ("broadphase_candidates", "active_contact_pairs", "active_contact_points"):
+            value = int(row[field])
+            if (sampled and value < 0) or (not sampled and value != -1):
+                raise ValueError(f"invalid {field}")
+    for field in ("contact_begins", "contact_ends", "toi_events"):
+        if any(int(after[field]) < int(before[field]) for before, after in zip(rows, rows[1:])):
+            raise ValueError(f"nonmonotonic {field}")
     if any(not math.isfinite(float(row[field])) or float(row[field]) < 0
            for row in rows for field in ("linear_speed_sum_m_per_s", "angular_speed_sum_rad_per_s")):
         raise ValueError("invalid activity speed")
-    if family == "joint" and any(int(row["joint_count"]) != count for row in rows):
+    joints = count if family == "joint" else (count + 9) // 10 if family == "lifecycle" else 0
+    if any(int(row["joint_count"]) != joints for row in rows):
         raise ValueError("joint topology changed")
-    if family == "lifecycle" and any(int(row["joint_count"]) != (count + 9) // 10 for row in rows):
-        raise ValueError("lifecycle joint topology changed")
-    if mode != "timing" and any(int(row["allocation_bytes"]) < 0 for row in rows):
-        raise ValueError("allocation probe unavailable")
-    if any(int(row[field]) < 0 for field in ("broadphase_candidates", "active_contact_pairs", "active_contact_points") for row in (rows[0], rows[-1])):
-        raise ValueError("missing diagnostic activity sample")
     return rows
 
 
@@ -212,13 +237,15 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
     name = f"{family}.{variant}.{size}.{hz}hz.{api}.{mode}.r{repeat}"
     raw = out / f"{name}.csv"
     warmup_raw = out / f"{name}.warmup.csv"
+    stderr_raw = out / f"{name}.stderr.raw"
     if api == "baseline":
         command = [java, "-Xms256m", "-Xmx2g", "-XX:+UseG1GC", "-cp", os.pathsep.join((str(classes), str(jar))),
                    "BaselinePilot", family, variant, size, str(hz), str(steps), mode, str(warmup)]
     else:
         command = [str(runner), family, variant, size, str(hz), str(steps), mode, str(warmup), api]
-    run_capture(command, raw, warmup_raw, timeout=180 if stress else None,
-                rss_ceiling_bytes=3 * 1024 * 1024 * 1024 if stress else None)
+    _, process_pid = run_capture(command, raw, warmup_raw, timeout=180 if stress else None,
+                                 rss_ceiling_bytes=3 * 1024 * 1024 * 1024 if stress else None)
+    shutil.copyfile(warmup_raw, stderr_raw)
     warmup_lines = warmup_raw.read_text().splitlines()
     metadata = {}
     csv_lines = []
@@ -232,6 +259,9 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                          "rss_after_construction_bytes", "retained_heap_world_alive_bytes", "retained_collection_count_delta"}
     if not expected_metadata.issubset(metadata):
         raise ValueError("missing construction or retained-memory sample")
+    marker = {"direct_kotlin": 1, "compatibility": 2}.get(api)
+    if marker is not None and (metadata.get("process_pid") != process_pid or metadata.get("route_marker") != marker):
+        raise ValueError("candidate process or route identity differs from the launcher")
     warmup_raw.write_text("\n".join(csv_lines) + "\n")
     with warmup_raw.open(newline="") as stream:
         warmup_rows = list(csv.DictReader(stream))
@@ -241,6 +271,7 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
         raise ValueError("retained-memory collection probe unavailable")
     rows = validate_csv(raw, family, variant, size, hz, steps, mode)
     result = summary(rows, hz, mode)
+    result["activity_status"] = activity_status(rows, family, variant, manifest()["families"][family][size], hz)
     empty_rss = metadata["rss_empty_harness_bytes"]
     construction_rss = metadata["rss_after_construction_bytes"]
     warmup_rss = [int(row["rss_bytes"]) for row in warmup_rows if int(row["rss_bytes"]) >= 0]
@@ -251,6 +282,7 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                                              + [value - empty_rss for value in warmup_rss])
     result.update({"family": family, "variant": variant, "size": size, "hz": hz, "mode": mode, "api": api,
                    "warmup_steps": warmup, "warmup_raw": warmup_raw.name, "warmup_sha256": sha256(warmup_raw),
+                   "stderr_raw": stderr_raw.name, "stderr_sha256": sha256(stderr_raw),
                    "cold_construction_ns": metadata["construction_ns"],
                    "cold_construction_allocated_bytes": metadata["construction_allocated_bytes"],
                    "rss_empty_harness_bytes": empty_rss,
@@ -259,7 +291,7 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                    "retained_collection_count_delta": metadata["retained_collection_count_delta"],
                    "cold_first_step_ns": int(warmup_rows[0]["elapsed_ns"]) if warmup_rows else None,
                    "cold_process_initialization_ns": None,
-                   "raw": raw.name, "raw_sha256": sha256(raw),
+                   "raw": raw.name, "raw_sha256": sha256(raw), "process_pid": process_pid,
                    "status": "capacity_report" if stress else "pilot_only" if steps < 600 * hz else "raw_unqualified"})
     return result
 
