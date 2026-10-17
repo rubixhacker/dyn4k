@@ -1,3 +1,4 @@
+import java.lang.reflect.Modifier;
 import java.util.Collections;
 import java.util.List;
 import org.dyn4j.collision.BasicCollisionItem;
@@ -63,6 +64,7 @@ public final class ContactConsumer {
     }
 
     public static void main(String[] args) {
+        require(Modifier.isFinal(ContactConstraint.class.getModifiers()));
         Body first = new Body();
         Body second = new Body();
         BodyFixture fixture1 = first.addFixture(new Circle(0.5));

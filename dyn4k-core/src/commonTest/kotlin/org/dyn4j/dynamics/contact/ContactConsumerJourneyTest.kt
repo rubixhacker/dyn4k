@@ -23,6 +23,21 @@ import org.dyn4j.geometry.Vector2
 
 class ContactConsumerJourneyTest {
     @Test
+    fun subclassedSolverReceivesWarmStartDispatch() {
+        val solver = object : SequentialImpulses<Body>() {
+            var calls = 0
+
+            override fun warmStart(contactConstraints: List<ContactConstraint<Body>>, step: TimeStep, settings: Settings) {
+                calls++
+                super.warmStart(contactConstraints, step, settings)
+            }
+        }
+        val seam: ContactConstraintSolver<Body> = solver
+        seam.initialize(emptyList(), TimeStep(1.0 / 60.0), Settings())
+        assertEquals(1, solver.calls)
+    }
+
+    @Test
     fun twoBodiesExchangeAnImpulseThroughThePublicSolver() {
         val first = Body()
         val second = Body()
