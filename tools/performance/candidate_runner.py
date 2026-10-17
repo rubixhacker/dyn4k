@@ -134,8 +134,10 @@ def run(args):
     allowed = {item["id"] for item in manifest()["scenarios"]}
     if f"{family}.{variant}.{size}.{hz}hz.{route}" not in allowed:
         raise ValueError("workload is absent from the frozen manifest")
-    if mode not in ("timing", "allocation", "memory", "plateau") or int(steps) <= 0 or int(warmup) < 0:
+    if mode not in ("timing", "allocation", "memory", "plateau", "fixture_identity") or int(steps) <= 0 or int(warmup) < 0:
         raise ValueError("invalid measurement mode or step count")
+    if mode == "fixture_identity" and (family != "ccd" or int(steps) != 1 or int(warmup) != 0):
+        raise ValueError("CCD fixture identity requires one step and no warm-up")
     identity = json.loads(IDENTITY.read_text())
     paths = read_paths()
     if identity["source_trees"] != source_trees("HEAD"):

@@ -30,6 +30,7 @@ public final class BaselinePilot {
     private final String variant;
     private final int count;
     private final int hz;
+    private int nextCcdBodyIndex;
     private long contactBegins;
     private long contactEnds;
     private long toiEvents;
@@ -61,8 +62,24 @@ public final class BaselinePilot {
         if (world.getBodyCount() < count) throw new IllegalStateException("incomplete fixture");
     }
 
-    private static Body circle(double x, double y) {
-        Body body = new Body();
+    private static final class CcdBody extends Body {
+        private final int creationIndex;
+
+        private CcdBody(int creationIndex) {
+            this.creationIndex = creationIndex;
+        }
+
+        @Override public int hashCode() {
+            return creationIndex;
+        }
+    }
+
+    private Body newBody() {
+        return family.equals("ccd") ? new CcdBody(nextCcdBodyIndex++) : new Body();
+    }
+
+    private Body circle(double x, double y) {
+        Body body = newBody();
         BodyFixture fixture = body.addFixture(Geometry.createCircle(0.25));
         fixture.setDensity(1.0);
         fixture.setFriction(0.5);
@@ -73,7 +90,7 @@ public final class BaselinePilot {
     }
 
     private Body staticRectangle(double x, double y, double width, double height) {
-        Body body = new Body();
+        Body body = newBody();
         BodyFixture fixture = body.addFixture(Geometry.createRectangle(width, height));
         fixture.setDensity(1.0);
         fixture.setFriction(0.5);
@@ -122,6 +139,16 @@ public final class BaselinePilot {
             body.setBullet(true);
             body.setLinearVelocity(i % 2 == 0 ? 18.0 : -18.0, 0.0);
             addDynamic(body);
+        }
+    }
+
+    private void printCcdIdentity() {
+        if (!family.equals("ccd")) throw new IllegalArgumentException("CCD identity requires CCD fixture");
+        System.out.println("creation_index,hash_code,world_center_x,world_center_y,bullet");
+        for (int index = 0; index < world.getBodyCount(); index++) {
+            Body body = world.getBody(index);
+            Vector2 center = body.getWorldCenter();
+            System.out.println(index + "," + body.hashCode() + "," + center.x + "," + center.y + "," + body.isBullet());
         }
     }
 
@@ -432,7 +459,10 @@ public final class BaselinePilot {
         if (!size.equals("small") && !size.equals("medium") && !size.equals("stress")) throw new IllegalArgumentException("unknown size");
         if (family.equals("lifecycle") && !List.of("settle", "wake", "replace").contains(variant)) throw new IllegalArgumentException("unknown lifecycle variant");
         if (!family.equals("joint") && !family.equals("lifecycle") && !variant.equals("default")) throw new IllegalArgumentException("unknown variant");
-        if (mode.equals("plateau")) {
+        if (mode.equals("fixture_identity")) {
+            if (steps != 1 || warmup != 0) throw new IllegalArgumentException("identity requires one step and no warm-up");
+            new BaselinePilot(family, variant, count, hz).printCcdIdentity();
+        } else if (mode.equals("plateau")) {
             try {
                 plateau(family, variant, count, hz, warmup);
             } catch (InterruptedException exc) {

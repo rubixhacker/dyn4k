@@ -157,6 +157,11 @@ fun main(args: Array<String>) {
         "lifecycle" to listOf(100, 1000, 5000),
     )
     val count = sizes.getValue(family)[listOf("small", "medium", "stress").indexOf(size)]
+    if (mode == "fixture_identity") {
+        require(steps == 1 && warmup == 0) { "identity requires one step and no warm-up" }
+        DirectFixture(family, variant, count, hz).printCcdIdentity()
+        return
+    }
     if (mode == "plateau") {
         plateau(family, variant, count, hz, warmup)
         return

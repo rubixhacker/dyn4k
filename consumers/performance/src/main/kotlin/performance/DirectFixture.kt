@@ -41,6 +41,7 @@ internal class DirectFixture(
     val world: World<Body> = world()
     val dynamic = ArrayList<Body>(count)
     private lateinit var floor: Body
+    private var nextCcdBodyIndex = 0
     var contactBegins = 0L
         private set
     var contactEnds = 0L
@@ -67,7 +68,23 @@ internal class DirectFixture(
         check(world.getBodyCount() >= count) { "incomplete fixture" }
     }
 
-    private fun circle(x: Double, y: Double): Body = body {
+    private class CcdBody(private val creationIndex: Int) : Body() {
+        override fun hashCode(): Int = creationIndex
+    }
+
+    private fun newBody(): Body = if (family == "ccd") CcdBody(nextCcdBodyIndex++) else body()
+
+    fun printCcdIdentity() {
+        require(family == "ccd") { "CCD identity requires CCD fixture" }
+        println("creation_index,hash_code,world_center_x,world_center_y,bullet")
+        for (index in 0 until world.getBodyCount()) {
+            val moving = world.getBody(index)
+            val center = moving.getWorldCenter()
+            println("$index,${moving.hashCode()},${center.x},${center.y},${moving.isBullet()}")
+        }
+    }
+
+    private fun circle(x: Double, y: Double): Body = newBody().apply {
         fixture(Geometry.createCircle(0.25)) {
             density = 1.0
             friction = 0.5
@@ -78,7 +95,7 @@ internal class DirectFixture(
     }
 
     private fun staticRectangle(x: Double, y: Double, width: Double, height: Double): Body =
-        world.add(body {
+        world.add(newBody().apply {
             fixture(Geometry.createRectangle(width, height)) {
                 density = 1.0
                 friction = 0.5
