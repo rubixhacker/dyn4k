@@ -76,6 +76,10 @@ public final class WeldPulleyPhysicalCapture {
                 bodies = "[" + body("ground", first, true) + "," + body("member", second, true) + "]";
                 joint = "{\"type\":\"WeldJoint\",\"spring\":" + weld.isSpringEnabled()
                         + ",\"limits\":" + weld.isLimitsEnabled()
+                        + ",\"frequency\":" + value(weld.getSpringFrequency())
+                        + ",\"dampingRatio\":" + value(weld.getSpringDampingRatio())
+                        + ",\"lowerLimit\":" + value(weld.getLowerLimit())
+                        + ",\"upperLimit\":" + value(weld.getUpperLimit())
                         + ",\"anchor1\":" + vector(weld.getAnchor1())
                         + ",\"anchor2\":" + vector(weld.getAnchor2())
                         + ",\"referenceAngle\":" + value(weld.getLimitsReferenceAngle()) + "}";
@@ -117,8 +121,11 @@ public final class WeldPulleyPhysicalCapture {
             world.addBody(fixed);
             world.addBody(member);
             WeldJoint<Body> joint = new WeldJoint<>(fixed, member, new Vector2(-0.5, 2));
-            joint.setSpringEnabled(false);
-            joint.setLimitsEnabled(false);
+            joint.setSpringEnabled(true);
+            joint.setSpringDamperEnabled(true);
+            joint.setSpringFrequency(8);
+            joint.setSpringDampingRatio(0.3);
+            joint.setLimitsEnabled(0, 0);
             world.addJoint(joint);
             run(name, world, fixed, member, joint, null, args[1], args[2], args[3]);
         } else if (name.equals("pulley-taut")) {

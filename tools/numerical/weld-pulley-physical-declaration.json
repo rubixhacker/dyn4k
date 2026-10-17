@@ -8,12 +8,12 @@
   "phases": [["excitation", 1, 60], ["long-run", 61, 36000]],
   "cases": {
     "weld-rigid": {
-      "geometry": "A fixed 10 m by 0.5 m rectangle at the origin and a dynamic 1 m by 0.5 m rectangle centered at (0,2) m. The joint world anchor is (-0.5,2) m. Spring and limits are disabled. Gravity is (0,-9.8) m/s^2. The dynamic body starts with velocity (2,0) m/s and a queued force (0,-10) N applied at world point (0.5,2) m before step 1. No later body or joint mutation.",
+      "geometry": "A fixed 10 m by 0.5 m rectangle at the origin and a dynamic 1 m by 0.5 m rectangle centered at (0,2) m. The joint world anchor is (-0.5,2) m. The Weld spring is enabled at 8 Hz with damping ratio 0.3; equal angular limits [0,0] rad are enabled. Gravity is (0,-9.8) m/s^2. The dynamic body starts with velocity (2,0) m/s and a queued force (0,-10) N applied at world point (0.5,2) m before step 1. No later body or joint mutation.",
       "metrics": {
         "anchor_gap_m": {"absolute_limit": "0.01", "relative_limit": "0"},
         "angular_error_rad": {"absolute_limit": "0.017453292519943295", "relative_limit": "0"}
       },
-      "meaning": "A welded 1 m member may move by at most 1 cm at its shared anchor and rotate by at most one degree relative to the fixed member at every post-step sample."
+      "meaning": "A softly constrained welded 1 m member may move by at most 1 cm at its shared anchor and rotate by at most one degree relative to the fixed member at every post-step sample."
     },
     "pulley-taut": {
       "geometry": "Two dynamic radius-0.5 m circles start at (-1,0) and (1,0) m. Fixed pulley anchors are (-1,1) and (1,1) m. Body anchors start at their centers. The ratio is 1 and the rope starts at 2 m. Slack is disabled. Gravity is (0,-9.8) m/s^2. The second body starts with velocity (0,2) m/s. No later body or joint mutation.",
