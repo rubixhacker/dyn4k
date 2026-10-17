@@ -3,12 +3,76 @@ import os
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import qualify
 
 
 class QualificationTests(unittest.TestCase):
+    GEOMETRY_CASES = (
+        "boundsShareTheCompatibilityObjectAndCopyIndependently",
+        "projectedIntervalsRetainTheBaselineBoundaryRules",
+        "rayPreservesItsLiveStartAndCopiesBothVectors",
+        "combinedMassKeepsItsMutableCenterAndFixedModes",
+        "circleQueriesUseOneMutableShapeThroughBothApis",
+        "polygonExposesLiveVerticesAndKeepsItsCopyIndependent",
+        "rectangleProjectsAndCopiesAfterRotation",
+        "triangleUsesItsBaselineContainmentRule",
+        "segmentQueriesAndStaticIntersectionAgreeWithWorkedCoordinates",
+        "linkKeepsNeighborIdentityAndRejectsDirectTransform",
+        "curvedShapesSupportQueriesThroughBothApis",
+        "halfEllipseRetainsItsLiveEllipseCenterAcrossTranslation",
+        "sliceRetainsItsLiveCircleCenterAndQueriesItsArc",
+        "geometryFactoriesConstructEveryCurvedBaselineShape",
+    )
+
+    def test_frozen_host_manifest_names_integrated_geometry_cases(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        groups = {group["id"]: group for group in manifest["groups"]}
+        self.assertEqual(12, len(groups))
+        for group_id, prefix, suffix in (
+            ("jvm", "", "[jvm]"),
+            ("linuxX64", "linuxX64Test.", "[linuxX64]"),
+            ("jsNode", "jsNodeTest.", "[js, node]"),
+            ("wasmJsNode", "wasmJsNodeTest.", "[wasmJs, node]"),
+            ("wasmWasiNode", "wasmWasiNodeTest.", "[wasmWasi, node]"),
+            ("androidHost", "", ""),
+        ):
+            cases = qualify.expected_probe_cases(manifest, groups[group_id])
+            self.assertEqual(25, len(cases), group_id)
+            self.assertEqual(
+                [(f"{prefix}io.github.rubixhacker.dyn4k.GeometryShapeTest", name + suffix)
+                 for name in self.GEOMETRY_CASES],
+                [case for case in cases if case[0].endswith("GeometryShapeTest")], group_id)
+            self.assertEqual([], qualify.expected_probe_cases(manifest, groups["core-" + group_id]))
+
+    def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        group = next(group for group in manifest["groups"] if group["id"] == "jvm")
+        cases = qualify.expected_probe_cases(manifest, group)
+        self.assertEqual(25, len(cases))
+        suite = ET.Element("testsuite", tests="26", failures="0", errors="0", skipped="0")
+        for classname, name in cases + [("io.github.rubixhacker.dyn4k.GeometryShapeTest", "unexpected[jvm]")]:
+            ET.SubElement(suite, "testcase", classname=classname, name=name, time="0")
+        xml = ET.tostring(suite, encoding="unicode")
+        with tempfile.TemporaryDirectory() as root:
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                report = Path("probe.xml")
+                report_group = dict(group, report_pattern=str(report))
+                command = ["python3", "-c", "from pathlib import Path; Path('probe.xml').write_text(" + repr(xml) + ")"]
+                result = qualify.run_probe(command, [str(report)], "a" * 40,
+                                           Path(root) / "result.json",
+                                           manifest={**manifest, "groups": [report_group]})
+                self.assertEqual("PROBE_FAILED", result["status"])
+                self.assertEqual(25, result["expected"])
+                self.assertEqual(26, result["executed"])
+                self.assertIn("unexpected cases", result["reason"])
+            finally:
+                os.chdir(previous)
+
     def test_contract_covers_all_targets_and_runtime_families(self):
         rows = qualify.matrix()
         self.assertEqual(28, len(rows))
