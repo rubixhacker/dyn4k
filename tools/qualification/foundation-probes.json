@@ -12,6 +12,9 @@
   ],
   "case_sets": {
     "geometry": [
+      "cleanseReturnsTheExactEmptyListAndASeparateEmptyArray",
+      "cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult",
+      "cleanseKeepsTheBaselineNullInputErrors",
       "boundsShareTheCompatibilityObjectAndCopyIndependently",
       "projectedIntervalsRetainTheBaselineBoundaryRules",
       "rayPreservesItsLiveStartAndCopiesBothVectors",
