@@ -190,6 +190,8 @@ jobs:
   safari-browser:
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      SAFARI_BIN: ${{ github.workspace }}/tools/qualification/safari-launch.sh
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
