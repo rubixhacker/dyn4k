@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import os
-import re
-import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "baseline"))
+from verify import compare_jars
 
 
 CLASSES = (
@@ -22,37 +23,19 @@ CLASSES = (
 )
 
 
-def declarations(jar, class_name):
-    javap = os.path.join(os.environ["JAVA_HOME"], "bin", "javap")
-    output = subprocess.run(
-        (javap, "-protected", "-classpath", jar, class_name),
-        check=True,
-        text=True,
-        capture_output=True,
-    ).stdout
-    return {
-        re.sub(r"\s+", " ", line.strip()).replace(" static final ", " static ")
-        for line in output.splitlines()
-        if line.strip().endswith(";")
-    }
-
-
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: verify-foundation-jvm-api.py baseline.jar candidate.jar")
     baseline, candidate = sys.argv[1:]
-    missing = []
-    total = 0
-    for class_name in CLASSES:
-        expected = declarations(baseline, class_name)
-        actual = declarations(candidate, class_name)
-        total += len(expected)
-        missing.extend((class_name, item) for item in sorted(expected - actual))
-    for class_name, item in missing:
-        print(f"{class_name}: missing {item}", file=sys.stderr)
-    if missing:
-        raise SystemExit(1)
-    print(f"JVM API: {total} baseline public/protected declarations present in {len(CLASSES)} types")
+    result = compare_jars(Path(baseline), Path(candidate), set(CLASSES))
+    for name in result["missing_types"]:
+        print(f"{name}: missing class", file=sys.stderr)
+    for mismatch in result["signature_mismatches"]:
+        print(mismatch, file=sys.stderr)
+    count = len(result["missing_types"]) + len(result["signature_mismatches"])
+    if count:
+        raise SystemExit(f"{count} foundation JVM API mismatches")
+    print(f"JVM API: {result['compared_baseline_declarations']} baseline public/protected declarations present in {len(CLASSES)} types")
 
 
 if __name__ == "__main__":

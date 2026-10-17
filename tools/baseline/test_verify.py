@@ -9,6 +9,16 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("verify.py")
 GEOMETRY_SCRIPT = SCRIPT.parents[2] / "scripts/verify-geometry-jvm-api.py"
+FOUNDATION_SCRIPT = SCRIPT.parents[2] / "scripts/verify-foundation-jvm-api.py"
+FOUNDATION_TYPES = (
+    "org.dyn4j.Copyable", "org.dyn4j.Epsilon",
+    "org.dyn4j.exception.ArgumentNullException",
+    "org.dyn4j.geometry.Vector2", "org.dyn4j.geometry.Vector3",
+    "org.dyn4j.geometry.Rotation", "org.dyn4j.geometry.Matrix22",
+    "org.dyn4j.geometry.Matrix33", "org.dyn4j.geometry.Transform",
+    "org.dyn4j.geometry.Rotatable", "org.dyn4j.geometry.Translatable",
+    "org.dyn4j.geometry.Transformable", "org.dyn4j.geometry.Shiftable",
+)
 
 
 def command(*args):
@@ -251,6 +261,55 @@ class ComparatorTests(unittest.TestCase):
         subprocess.run(["jar", "cf", str(archive), "-C", str(classes), "."],
                        check=True, capture_output=True)
         return archive
+
+
+class FoundationComparatorTests(unittest.TestCase):
+    def test_static_hiding_rejects_added_final(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = self.foundation_jar(root / "baseline", "public static int count() { return 1; }")
+            candidate = self.foundation_jar(root / "candidate", "public static final int count() { return 1; }")
+            self.assert_java8_source(root, baseline, candidate,
+                                     "package org.dyn4j.geometry; public class Consumer extends Vector2 { public static int count() { return 2; } }",
+                                     candidate_passes=False)
+            result = subprocess.run([sys.executable, str(FOUNDATION_SCRIPT), str(baseline),
+                                     str(candidate)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("public static final int count()", result.stderr)
+
+    def test_wider_access_and_removed_method_final_are_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = self.foundation_jar(root / "baseline", "protected static final int count() { return 1; }")
+            candidate = self.foundation_jar(root / "candidate", "public static int count() { return 1; }")
+            self.assert_java8_source(root, baseline, candidate,
+                                     "package org.dyn4j.geometry; public class Consumer extends Vector2 { int run() { return Vector2.count(); } }",
+                                     candidate_passes=True)
+            result = subprocess.run([sys.executable, str(FOUNDATION_SCRIPT), str(baseline),
+                                     str(candidate)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    @staticmethod
+    def foundation_jar(root, vector_member):
+        sources = {}
+        for full_name in FOUNDATION_TYPES:
+            package, name = full_name.rsplit(".", 1)
+            member = vector_member if full_name == "org.dyn4j.geometry.Vector2" else ""
+            sources[name + ".java"] = f"package {package}; public class {name} {{ {member} }}"
+        return ComparatorTests.jar(root, sources)
+
+    def assert_java8_source(self, root, baseline, candidate, source, candidate_passes):
+        consumer = root / "Consumer.java"
+        consumer.write_text(source)
+        for archive, passes in ((baseline, True), (candidate, candidate_passes)):
+            output = root / ("baseline-classes" if archive == baseline else "candidate-classes")
+            result = subprocess.run(["javac", "--release", "8", "-classpath", str(archive),
+                                     "-d", str(output), str(consumer)], capture_output=True,
+                                    text=True)
+            if passes:
+                self.assertEqual(result.returncode, 0, result.stderr)
+            else:
+                self.assertNotEqual(result.returncode, 0, result.stderr)
 
 
 class RunReportTests(unittest.TestCase):
