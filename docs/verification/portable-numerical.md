@@ -25,6 +25,8 @@ For the 14 frozen case mappings, the common recorder also captures typed project
 
 The nominal force, torque, accumulated force and accumulated torque fields are positive zero in all 36,000 frozen samples and in the corresponding Java 8 projection: 432,000 exact-zero values across both traces. Its fixture does not yet contain the exact-zero rules present in the configured profile. The no-gravity, no-force setup and the pinned dyn4j 6.0.0 `AbstractPhysicsBody.accumulate` reset and empty force/torque lists support proposing the same exact-zero invariant for this case. The diagnostic reports it as prospective, tests nonzero and negative-zero controls, and keeps the four official paths unpassed pending profile adoption. It applies no new tolerance.
 
+The configured 120 Hz JVM wake sample also projected its before-wake state, impulse action, and after-wake state as three exact auxiliary records against the pinned reference. Its other old-source event differences remain failed.
+
 The physical diagnostic reuses the approved represented-geometry depth and phase schedule for default and configured sleep/wake cases. It reports all nine case counts and failed steps separately; default failures remain failures. The 36,000-step free-motion invariant is checked against its analytic limits. These diagnostics do not replace input, event, or complete-channel parity.
 
 The runner invokes that diagnostic for every frozen reference found in `--reference-dir`, using `/tmp/dyn4k-configured-control/baseline-trace` by default. Each host gets `frozen-comparison.json` with explicit unavailable references. A missing reference, nonmatching schema, or failed approved channel never becomes a parity pass.
