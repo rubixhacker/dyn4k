@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,8 @@ MODULES = ("dyn4k-core", "dyn4k")
 TARGETS = ("js", "wasmJs", "wasmWasi")
 VERSION = "0.1.0-alpha.1"
 CONSUMER = Path("consumers/qualification/browser-wasi")
+PHYSICS_CONSUMER_SOURCE = CONSUMER / "src/commonTest/kotlin/qualification/StagedWorldTest.kt"
+PHYSICS_CONSUMER_SHA256 = "e5a5a5f1a8e1e7cf3286d0f7be92795e14ad153ea4b1b5117fb7f560ee7a0189"
 RUNTIME_VERSIONS = {
     "chromium": {"minimum": "119.0.6045.105", "current": "155.0.8059.84"},
     "firefox": {"minimum": "120.0.1", "current": "158.0"},
@@ -68,6 +71,9 @@ def verify_reports(
     task_name: str,
     runtime_marker: str,
 ) -> dict[str, object]:
+    selected = re.fullmatch(r"(ChromeHeadless|Firefox)(\d+)", runtime_marker)
+    if selected is None:
+        raise ValueError(f"invalid selected browser marker: {runtime_marker}")
     files = sorted(report_dir.glob("TEST-*.xml"))
     if not files:
         raise ValueError(f"missing XML reports: {report_dir}")
@@ -91,7 +97,13 @@ def verify_reports(
         for case in cases:
             name = case.attrib.get("name", "")
             class_name = case.attrib.get("classname", "")
-            if not name.endswith("]") or f"{runtime_marker}" not in name:
+            parts = name.rsplit("[", 1)
+            platform = parts[1][:-1].split(", ") if len(parts) == 2 and name.endswith("]") else []
+            observed_browser = re.fullmatch(
+                r"(ChromeHeadless|Firefox)(\d+(?:\.\d+)*)", platform[2]
+            ) if len(platform) == 4 and platform[1] == "browser" else None
+            if (observed_browser is None or observed_browser.group(1) != selected.group(1)
+                    or observed_browser.group(2).split(".", 1)[0] != selected.group(2)):
                 raise ValueError(f"wrong runtime or missing runtime identity: {name}")
             prefix = f"{task_name}."
             if not class_name.startswith(prefix):
@@ -165,6 +177,14 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def verify_consumer_physics_contract(source: Path) -> str:
+    if (not source.is_file() or sha256(source) != PHYSICS_CONSUMER_SHA256
+            or ("qualification.StagedWorldTest",
+                "stagedModulesShareBodiesAndDeliverCollisionCallbacks") not in source_cases(source.parent)):
+        raise ValueError("staged physics contract differs from reviewed assertions")
+    return PHYSICS_CONSUMER_SHA256
 
 
 def command(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -263,6 +283,66 @@ def verified_stage(root: Path, sha: str, receipt: Path) -> dict[str, str]:
     return actual
 
 
+def audit_lane_receipt(receipt: Path) -> dict[str, object]:
+    lane = json.loads(receipt.read_text())
+    if lane.get("status") not in ("PASSED", "FAILED"):
+        raise ValueError("invalid lane status")
+    modules = lane.get("modules", {})
+    if not isinstance(modules, dict):
+        raise ValueError("invalid lane modules")
+    lane_dir = receipt.parent.resolve()
+
+    def check(path_text: object, digest: object) -> None:
+        path = Path(str(path_text)).resolve()
+        if not isinstance(digest, str) or not path.is_relative_to(lane_dir) or not path.is_file():
+            raise ValueError(f"missing or external evidence digest: {path}")
+        if sha256(path) != digest:
+            raise ValueError(f"evidence digest differs: {path}")
+
+    for module in modules.values():
+        if not isinstance(module, dict):
+            raise ValueError("invalid module receipt")
+        for field, digest_field in (
+            ("gradle_console", "gradle_console_sha256"),
+            ("raw_console", "raw_console_sha256"),
+            ("linked_executable", "linked_sha256"),
+            ("browser_attestation", "browser_attestation_sha256"),
+            ("result_json", "result_json_sha256"),
+        ):
+            if field in module:
+                check(module[field], module.get(digest_field))
+        for report in module.get("raw_xml", []):
+            if not isinstance(report, dict):
+                raise ValueError("invalid raw XML receipt")
+            check(report.get("path"), report.get("sha256"))
+        if "result_json" in module:
+            saved = json.loads(Path(str(module["result_json"])).read_text())
+            recorded = {key: value for key, value in module.items()
+                        if key not in ("result_json", "result_json_sha256")}
+            if saved != recorded:
+                raise ValueError("module result differs from lane receipt")
+        if "browser_attestation" in module and module.get("status") == "PASSED":
+            launches = [json.loads(line) for line in Path(str(module["browser_attestation"]))
+                        .read_text().splitlines()]
+            if not launches or launches != module.get("browser_processes"):
+                raise ValueError("browser process attestations differ from lane receipt")
+            if any(launch.get("selected_sha256") != lane.get("runtime_sha256")
+                   or launch.get("runtime") != lane.get("runtime") for launch in launches):
+                raise ValueError("browser process selected a different runtime")
+        if module.get("status") == "PASSED":
+            required = {"gradle_console", "linked_executable"}
+            required.add("raw_console" if lane.get("target") == "wasmWasi" else "browser_attestation")
+            if not required.issubset(module) or (lane.get("target") != "wasmWasi"
+                                                 and not module.get("raw_xml")):
+                raise ValueError("passing module has missing raw evidence digest")
+    if lane["status"] == "PASSED" and (
+        set(modules) != {*MODULES, "consumer"}
+        or any(module.get("status") != "PASSED" for module in modules.values())
+    ):
+        raise ValueError("passing lane has incomplete module receipts")
+    return lane
+
+
 def runtime_version(binary: Path, target: str, runtime: str, expected: str, role: str) -> str:
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError(f"runtime binary unavailable: {binary}")
@@ -282,6 +362,28 @@ def runtime_version(binary: Path, target: str, runtime: str, expected: str, role
     if expected != RUNTIME_VERSIONS[runtime][role]:
         raise ValueError(f"selected {role} version differs from pinned matrix: {expected}")
     return output
+
+
+def verify_browser_launches(attestation: Path, binary: Path, token: str,
+                            runtime: str) -> list[dict[str, object]]:
+    if not attestation.is_file():
+        raise ValueError(f"missing browser process attestation: {attestation}")
+    records = [json.loads(line) for line in attestation.read_text().splitlines()]
+    if not records:
+        raise ValueError("zero browser process attestations")
+    selected = binary.resolve()
+    allowed = {selected}
+    if runtime == "firefox":
+        allowed.add(selected.with_name("firefox-bin"))
+    for record in records:
+        image = Path(str(record.get("process_executable", ""))).resolve()
+        if (record.get("token") != token or record.get("runtime") != runtime
+                or record.get("selected_binary") != str(selected)
+                or record.get("selected_sha256") != sha256(selected)
+                or image not in allowed or not isinstance(record.get("pid"), int)
+                or record.get("process_sha256") != sha256(image)):
+            raise ValueError("browser process image differs from selected executable")
+    return records
 
 
 def test_source(root: Path, module: str) -> Path:
@@ -316,6 +418,9 @@ def gradle_test_task(module: str, target: str, configuration: str) -> str:
 def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
              runtime: str, role: str, configuration: str, binary: Path,
              expected_version: str) -> int:
+    if output.exists() and any(output.iterdir()):
+        print(f"lane output already contains evidence: {output}", file=sys.stderr)
+        return 1
     output.mkdir(parents=True, exist_ok=True)
     lane: dict[str, object] = {"candidate_sha": sha, "target": target,
                                "runtime": runtime, "version_role": role,
@@ -334,18 +439,24 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
         for module in (*MODULES, "consumer"):
             project = test_project(root, module)
             expected = source_cases(test_source(root, module))
-            if module == "consumer" and (
-                "qualification.StagedWorldTest",
-                "stagedModulesShareBodiesAndDeliverCollisionCallbacks",
-            ) not in expected:
-                raise ValueError("staged physics assertion is missing")
+            if module == "consumer":
+                lane["consumer_physics_source_sha256"] = verify_consumer_physics_contract(
+                    root / PHYSICS_CONSUMER_SOURCE
+                )
             module_output = output / module
             module_output.mkdir(exist_ok=True)
             env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"))
+            attestation = module_output / "browser-launches.jsonl"
+            token = secrets.token_hex(16)
+            launcher = root / "tools/qualification/browser_wasi/browser_launcher.py"
             if runtime == "chromium":
-                env.update(DYN4K_BROWSER="chromium", CHROME_BIN=str(binary))
+                env.update(DYN4K_BROWSER="chromium", CHROME_BIN=str(launcher))
             elif runtime == "firefox":
-                env.update(DYN4K_BROWSER="firefox", FIREFOX_BIN=str(binary))
+                env.update(DYN4K_BROWSER="firefox", FIREFOX_BIN=str(launcher))
+            if runtime != "wasmtime":
+                env.update(DYN4K_BROWSER_SELECTED_BINARY=str(binary),
+                           DYN4K_BROWSER_ATTESTATION=str(attestation),
+                           DYN4K_BROWSER_TOKEN=token, DYN4K_BROWSER_RUNTIME=runtime)
             gradle = [str(root / "gradlew")]
             if module == "consumer":
                 gradle += ["-p", str(project), f"-PqualificationRepository={root / 'build/staging-repository'}"]
@@ -362,72 +473,88 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             built = command(gradle, root, env)
             console = module_output / "gradle-console.log"
             console.write_text(built.stdout + built.stderr)
-            results[module] = {"status": "FAILED", "gradle_command": gradle,
-                               "gradle_exit_code": built.returncode,
-                               "gradle_console": str(console)}
-            if built.returncode:
-                raise ValueError(f"{module} Gradle task failed: {console}")
-            linked = linked_file(project, target, configuration, module)
-            if not linked.is_file():
-                raise ValueError(f"missing linked test executable: {linked}")
-            if configuration == "production" and target != "wasmWasi":
-                marker = f"qualification test input: {linked}"
-                if marker not in built.stdout:
-                    raise ValueError(f"production test did not select optimized input: {linked}")
-            if target == "wasmWasi":
-                invocation = [str(binary), "run", "-W", "gc=y", "-W", "exceptions=y",
-                              "-W", "function-references=y", "--invoke", "startUnitTests", str(linked)]
-                observed = command(invocation, root)
-                raw = module_output / "wasmtime-console.log"
-                raw.write_text(observed.stdout + observed.stderr)
-                if observed.returncode:
-                    raise ValueError(f"{module} Wasmtime tests failed: {raw}")
-                evidence = verify_wasmtime_output(observed.stdout, expected)
-                evidence["command"] = invocation
-                evidence["exit_code"] = observed.returncode
-                evidence["raw_console"] = str(raw)
-            else:
-                marker = ("ChromeHeadless" if runtime == "chromium" else "Firefox") + expected_version.split(".")[0]
-                evidence = verify_reports(report_dir, expected, f"{target}BrowserTest", marker)
-                xml_dir = module_output / "xml"
-                xml_dir.mkdir(exist_ok=True)
-                copied = []
-                for report in sorted(report_dir.glob("TEST-*.xml")):
-                    copy = xml_dir / report.name
-                    shutil.copy2(report, copy)
-                    copied.append({"path": str(copy), "sha256": sha256(copy)})
-                evidence["raw_xml"] = copied
-            evidence["gradle_command"] = gradle
-            evidence["gradle_exit_code"] = built.returncode
-            evidence["gradle_console"] = str(console)
-            evidence["linked_executable"] = str(linked)
-            evidence["linked_sha256"] = sha256(linked)
-            evidence["candidate_sha"] = sha
-            evidence["target"] = target
-            evidence["runtime"] = runtime
-            evidence["configuration"] = configuration
-            evidence["staging_receipt"] = str(receipt)
-            evidence["runtime_sha256"] = lane["runtime_sha256"]
-            evidence["status"] = "PASSED"
-            if sha256(binary) != lane["runtime_sha256"]:
-                raise ValueError(f"runtime binary changed during {module} execution")
-            runtime_version(binary, target, runtime, expected_version, role)
+            evidence: dict[str, object] = {
+                "status": "FAILED", "gradle_command": gradle,
+                "gradle_exit_code": built.returncode, "gradle_console": str(console),
+                "gradle_console_sha256": sha256(console), "candidate_sha": sha,
+                "target": target, "runtime": runtime, "configuration": configuration,
+                "staging_receipt": str(receipt), "runtime_sha256": lane["runtime_sha256"],
+            }
             results[module] = evidence
-            write_json(module_output / "result.json", evidence)
+            try:
+                if built.returncode:
+                    raise ValueError(f"{module} Gradle task failed: {console}")
+                linked = linked_file(project, target, configuration, module)
+                if not linked.is_file():
+                    raise ValueError(f"missing linked test executable: {linked}")
+                if configuration == "production" and target != "wasmWasi":
+                    marker = f"qualification test input: {linked}"
+                    if marker not in built.stdout:
+                        raise ValueError(f"production test did not select optimized input: {linked}")
+                frozen_linked = module_output / f"linked-executable{linked.suffix}"
+                shutil.copy2(linked, frozen_linked)
+                evidence.update(linked_source=str(linked), linked_executable=str(frozen_linked),
+                                linked_sha256=sha256(frozen_linked))
+                if target == "wasmWasi":
+                    invocation = [str(binary), "run", "-W", "gc=y", "-W", "exceptions=y",
+                                  "-W", "function-references=y", "--invoke", "startUnitTests",
+                                  str(frozen_linked)]
+                    observed = command(invocation, root)
+                    raw = module_output / "wasmtime-console.log"
+                    raw.write_text(observed.stdout + observed.stderr)
+                    evidence.update(command=invocation, exit_code=observed.returncode,
+                                    raw_console=str(raw), raw_console_sha256=sha256(raw))
+                    if observed.returncode:
+                        raise ValueError(f"{module} Wasmtime tests failed: {raw}")
+                    evidence.update(verify_wasmtime_output(observed.stdout, expected))
+                else:
+                    xml_dir = module_output / "xml"
+                    xml_dir.mkdir(exist_ok=True)
+                    copied = []
+                    for report in sorted(report_dir.glob("TEST-*.xml")):
+                        copy = xml_dir / report.name
+                        shutil.copy2(report, copy)
+                        copied.append({"path": str(copy), "sha256": sha256(copy)})
+                    evidence["raw_xml"] = copied
+                    if attestation.is_file():
+                        evidence.update(browser_attestation=str(attestation),
+                                        browser_attestation_sha256=sha256(attestation))
+                    marker = ("ChromeHeadless" if runtime == "chromium" else "Firefox") + expected_version.split(".")[0]
+                    evidence.update(verify_reports(xml_dir, expected, f"{target}BrowserTest", marker))
+                    launches = verify_browser_launches(attestation, binary, token, runtime)
+                    for launch in launches:
+                        runtime_version(Path(str(launch["process_executable"])), target, runtime,
+                                        expected_version, role)
+                    evidence["browser_processes"] = launches
+                if sha256(binary) != lane["runtime_sha256"]:
+                    raise ValueError(f"runtime binary changed during {module} execution")
+                runtime_version(binary, target, runtime, expected_version, role)
+                evidence["status"] = "PASSED"
+            finally:
+                result_path = module_output / "result.json"
+                write_json(result_path, evidence)
+                evidence["result_json"] = str(result_path)
+                evidence["result_json_sha256"] = sha256(result_path)
         candidate_identity(root, sha)
         lane["status"] = "PASSED"
     except (OSError, ValueError, json.JSONDecodeError) as error:
         lane["reason"] = str(error)
     write_json(output / "lane.json", lane)
+    try:
+        audit_lane_receipt(output / "lane.json")
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        lane["status"] = "FAILED"
+        lane["reason"] = f"lane receipt audit failed: {error}"
+        write_json(output / "lane.json", lane)
     return 0 if lane["status"] == "PASSED" else 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("stage", "run"))
-    parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--candidate-sha", required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("action", choices=("stage", "run", "audit"))
+    parser.add_argument("--root", type=Path)
+    parser.add_argument("--candidate-sha")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--target", choices=TARGETS)
     parser.add_argument("--runtime", choices=("chromium", "firefox", "wasmtime"))
@@ -436,6 +563,17 @@ def main() -> int:
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--expected-version")
     arguments = parser.parse_args()
+    if arguments.action == "audit":
+        if arguments.receipt is None:
+            parser.error("audit requires --receipt pointing to lane.json")
+        try:
+            audit_lane_receipt(arguments.receipt.resolve())
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+    if any(value is None for value in (arguments.root, arguments.candidate_sha, arguments.output)):
+        parser.error("stage and run require root, candidate-sha, and output")
     if arguments.action == "stage":
         return stage(arguments.root.resolve(), arguments.candidate_sha, arguments.output.resolve())
     required = (arguments.receipt, arguments.target, arguments.runtime, arguments.version_role,

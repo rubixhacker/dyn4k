@@ -22,6 +22,18 @@ python3 tools/qualification/browser_wasi/runner.py run \
 
 Run `js` and `wasmJs` on Chromium and Firefox at minimum and current versions. Run `wasmWasi` on Wasmtime at minimum and current versions. Each version needs development and production execution. The runner writes `lane.json`, a result JSON for each module, Gradle consoles, browser XML, and Wasmtime consoles. A passing lane requires the source case identities, zero skipped tests, the staged consumer physics test, the selected runtime, and the selected linked output. It checks the runtime binary hash again after each module.
 
+Karma launches browsers through `browser_launcher.py`. The launcher records the live process image and its hash. The runner checks that image against the selected browser installation and exact version. XML must name the selected browser family and exact major number. XML can omit patch detail, so the process image supplies the exact-version check.
+
+The staged world consumer source has a reviewed SHA-256 contract. An empty test or removal of its identity, step, collision, or contact assertions fails before a lane can pass. If the consumer source must change, review its behavior and update the pinned digest with the mutation controls.
+
+Each lane keeps a private copy of the linked test executable. Wasmtime executes that copy. Gradle, Wasmtime, and browser launch consoles and reports have SHA-256 digests in module and lane receipts. The runner refuses an output directory that already contains evidence. Audit retained bytes with:
+
+```sh
+python3 tools/qualification/browser_wasi/runner.py audit --receipt /path/to/lane.json
+```
+
+An older receipt without these raw-file digests cannot pass this audit. Preserve older failed receipts as failed evidence.
+
 The runner invokes Wasmtime with `-W gc=y -W exceptions=y -W function-references=y` and the test binary's `startUnitTests` export. Production WASI and Wasm JS tests consume Binaryen's `optimized` output. JavaScript production tests consume the production linked output. Browser tests use Karma and the selected `CHROME_BIN` or `FIREFOX_BIN`; the XML records the actual browser family and major version.
 
 ## Runtime selection
