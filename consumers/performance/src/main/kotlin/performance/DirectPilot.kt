@@ -57,12 +57,7 @@ private fun plateau(family: String, variant: String, count: Int, hz: Int, warmup
     }
 }
 
-private fun run(fixture: DirectFixture, steps: Int, mode: String, warmup: Int, rssBase: Long) {
-    require(mode in setOf("timing", "allocation", "memory")) { "unknown mode: $mode" }
-    val bean = ManagementFactory.getThreadMXBean() as ThreadMXBean
-    val allocation = mode != "timing" && bean.isThreadAllocatedMemorySupported
-    if (allocation) bean.isThreadAllocatedMemoryEnabled = true
-    val thread = Thread.currentThread().id
+private fun warm(fixture: DirectFixture, warmup: Int, mode: String) {
     System.err.println("warmup_step,elapsed_ns,rss_bytes")
     val warmStart = System.nanoTime()
     for (step in 0 until warmup) {
@@ -72,7 +67,15 @@ private fun run(fixture: DirectFixture, steps: Int, mode: String, warmup: Int, r
         fixture.world.step(1, 1.0 / fixture.hz)
         System.err.println("$step,${System.nanoTime() - began},${if (mode == "memory") rssBytes() else -1}")
     }
-    val measured = DirectFixture(fixture.family, fixture.variant, fixture.count, fixture.hz)
+}
+
+private fun run(family: String, variant: String, count: Int, hz: Int, steps: Int, mode: String, rssBase: Long) {
+    require(mode in setOf("timing", "allocation", "memory")) { "unknown mode: $mode" }
+    val bean = ManagementFactory.getThreadMXBean() as ThreadMXBean
+    val allocation = mode != "timing" && bean.isThreadAllocatedMemorySupported
+    if (allocation) bean.isThreadAllocatedMemoryEnabled = true
+    val thread = Thread.currentThread().id
+    val measured = DirectFixture(family, variant, count, hz)
     if (mode == "memory") {
         val before = collectionCount()
         System.gc()
@@ -86,11 +89,11 @@ private fun run(fixture: DirectFixture, steps: Int, mode: String, warmup: Int, r
     val start = System.nanoTime()
     System.out.println(STEP_HEADER)
     for (step in 0 until steps) {
-        val lateness = pace(start, step, fixture.hz)
+        val lateness = pace(start, step, hz)
         val allocatedBefore = if (allocation) bean.getThreadAllocatedBytes(thread) else -1
         val began = System.nanoTime()
         val mutation = measured.mutate(step)
-        measured.world.step(1, 1.0 / fixture.hz)
+        measured.world.step(1, 1.0 / hz)
         val elapsed = System.nanoTime() - began
         val allocated = if (allocation) bean.getThreadAllocatedBytes(thread) - allocatedBefore else -1
         var awake = 0
@@ -107,7 +110,7 @@ private fun run(fixture: DirectFixture, steps: Int, mode: String, warmup: Int, r
         var candidates = -1
         var activePairs = -1
         var activePoints = -1
-        if (step % fixture.hz == 0 || step == steps - 1) {
+        if (step % hz == 0 || step == steps - 1) {
             candidates = 0
             val broadphase = measured.world.getBroadphaseDetector().detectIterator(true)
             while (broadphase.hasNext()) {
@@ -133,6 +136,7 @@ private fun run(fixture: DirectFixture, steps: Int, mode: String, warmup: Int, r
             measured.toiEvents, candidates, activePairs, activePoints,
         ).joinToString(","))
     }
+    java.lang.ref.Reference.reachabilityFence(measured)
 }
 
 fun main(args: Array<String>) {
@@ -164,10 +168,12 @@ fun main(args: Array<String>) {
     val thread = Thread.currentThread().id
     val allocatedBefore = if (allocation) bean.getThreadAllocatedBytes(thread) else -1
     val began = System.nanoTime()
-    val fixture = DirectFixture(family, variant, count, hz)
+    var fixture: DirectFixture? = DirectFixture(family, variant, count, hz)
     System.err.println("#construction_ns=${System.nanoTime() - began}")
     System.err.println("#construction_allocated_bytes=${if (allocation) bean.getThreadAllocatedBytes(thread) - allocatedBefore else -1}")
     System.err.println("#rss_empty_harness_bytes=$rssBase")
     System.err.println("#rss_after_construction_bytes=${rssBytes()}")
-    run(fixture, steps, mode, warmup, rssBase)
+    warm(fixture!!, warmup, mode)
+    fixture = null
+    run(family, variant, count, hz, steps, mode, rssBase)
 }

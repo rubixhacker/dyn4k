@@ -327,13 +327,7 @@ public final class BaselinePilot {
         }
     }
 
-    private void run(int steps, String mode, int warmup, long rssBase) {
-        if (!mode.equals("timing") && !mode.equals("allocation") && !mode.equals("memory"))
-            throw new IllegalArgumentException("unknown mode: " + mode);
-        ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-        boolean allocation = !mode.equals("timing") && bean.isThreadAllocatedMemorySupported();
-        if (allocation) bean.setThreadAllocatedMemoryEnabled(true);
-        long thread = Thread.currentThread().getId();
+    private void warm(int warmup, String mode) {
         System.err.println("warmup_step,elapsed_ns,rss_bytes");
         long warmStart = System.nanoTime();
         for (int i = 0; i < warmup; i++) {
@@ -346,6 +340,15 @@ public final class BaselinePilot {
             long warmElapsed = System.nanoTime() - begin;
             System.err.println(i + "," + warmElapsed + "," + (mode.equals("memory") ? rssBytes() : -1));
         }
+    }
+
+    private static void run(String family, String variant, int count, int hz, int steps, String mode, long rssBase) {
+        if (!mode.equals("timing") && !mode.equals("allocation") && !mode.equals("memory"))
+            throw new IllegalArgumentException("unknown mode: " + mode);
+        ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        boolean allocation = !mode.equals("timing") && bean.isThreadAllocatedMemorySupported();
+        if (allocation) bean.setThreadAllocatedMemoryEnabled(true);
+        long thread = Thread.currentThread().getId();
         BaselinePilot measured = new BaselinePilot(family, variant, count, hz);
         if (mode.equals("memory")) {
             long beforeCollections = collections();
@@ -403,6 +406,7 @@ public final class BaselinePilot {
             }
             System.out.println(i + "," + elapsed + "," + mutation + "," + lateness + "," + allocated + "," + heap + "," + rss + "," + delta + "," + measured.world.getBodyCount() + "," + measured.world.getJointCount() + "," + awake + "," + linearSpeed + "," + angularSpeed + "," + measured.contactBegins + "," + measured.contactEnds + "," + measured.toiEvents + "," + candidates + "," + activePairs + "," + activePoints);
         }
+        java.lang.ref.Reference.reachabilityFence(measured);
     }
 
     public static void main(String[] args) {
@@ -447,7 +451,9 @@ public final class BaselinePilot {
             System.err.println("#construction_allocated_bytes=" + (allocation ? bean.getThreadAllocatedBytes(Thread.currentThread().getId()) - beforeAllocation : -1));
             System.err.println("#rss_empty_harness_bytes=" + rssBase);
             System.err.println("#rss_after_construction_bytes=" + rssBytes());
-            fixture.run(steps, mode, warmup, rssBase);
+            fixture.warm(warmup, mode);
+            fixture = null;
+            run(family, variant, count, hz, steps, mode, rssBase);
         }
     }
 }

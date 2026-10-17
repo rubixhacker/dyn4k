@@ -3,6 +3,7 @@ import argparse
 import csv
 import hashlib
 import json
+import statistics
 import tempfile
 from pathlib import Path
 
@@ -116,9 +117,12 @@ def plateau(args, out, evidence, java, classes, jar):
             with warmup.open(newline="") as stream:
                 warm = list(stream)
             status = plateau_status(cycles)
+            early = statistics.median(int(row["heap_after_collection_bytes"]) for row in cycles[20:40])
+            late = statistics.median(int(row["heap_after_collection_bytes"]) for row in cycles[80:100])
             result = {"workload_id": f"{family}.{variant}.{args.size}.{args.hz}hz.{api}",
                       "api": api, "process_pid": pid, "cycles": len(cycles),
                       "warmup_steps": len(warm) - 1, "plateau_status": status,
+                      "heap_drift_fraction": abs(late / early - 1.0) if early > 0 else None,
                       "warmup_status": warmup_status(list(csv.DictReader(warm)), args.hz),
                       "raw": raw.name, "raw_sha256": sha256(raw),
                       "warmup_raw": warmup.name, "warmup_sha256": sha256(warmup)}
