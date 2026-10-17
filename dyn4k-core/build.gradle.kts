@@ -667,17 +667,23 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                         owner.startsWith("org/dyn4j/collision/narrowphase/") ||
                         owner.startsWith("org/dyn4j/collision/manifold/") ||
                         owner.startsWith("org/dyn4j/collision/continuous/")
+                    val sourceProjectionType = entry.name.endsWith(".class") &&
+                        owner.startsWith("org/dyn4j/") &&
+                        (input.getEntry(owner + "\$Companion.class") != null ||
+                            ClassReader(bytes).superName == "java/lang/Enum")
                     val spec = if (entry.name.endsWith(".class"))
-                        jvmApi[owner] ?: if (detectionType) JvmApiSpec() else null
+                        jvmApi[owner] ?: if (detectionType || sourceProjectionType) JvmApiSpec() else null
                     else null
                     val content = if (spec == null) bytes else {
                         val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
                         val visitor = object : ClassVisitor(Opcodes.ASM9, writer) {
                             val present = mutableSetOf<Pair<String, String>>()
+                            var enumType = false
                             override fun visit(
                                 version: Int, access: Int, name: String, signature: String?,
                                 superName: String?, interfaces: Array<out String>?
                             ) {
+                                enumType = superName == "java/lang/Enum"
                                 val visibility = Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED or Opcodes.ACC_PRIVATE
                                 val revisedAccess = if (spec.packageType) access and visibility.inv() else access
                                 val extra = if (spec.appendIterable) arrayOf("java/lang/Iterable") else emptyArray()
@@ -701,7 +707,13 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                     in spec.packageFields -> access and visibility.inv()
                                     else -> access
                                 }
-                                return super.visitField(revised, name, descriptor, signature, value)
+                                val hiddenCompanion = name == "Companion" &&
+                                    descriptor == "L" + owner + "\$Companion;" &&
+                                    access and Opcodes.ACC_STATIC != 0
+                                return super.visitField(
+                                    if (hiddenCompanion) revised or Opcodes.ACC_SYNTHETIC else revised,
+                                    name, descriptor, signature, value
+                                )
                             }
                             override fun visitMethod(
                                 access: Int, name: String, descriptor: String,
@@ -712,6 +724,12 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val isVararg = name in spec.varargMethods &&
                                     Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                 var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                val hiddenEnumEntries = enumType && name == "getEntries" &&
+                                    descriptor == "()Lkotlin/enums/EnumEntries;" &&
+                                    access and Opcodes.ACC_STATIC != 0
+                                if (hiddenEnumEntries) {
+                                    revised = revised or Opcodes.ACC_SYNTHETIC
+                                }
                                 if (owner == "org/dyn4j/exception/CopyException" && name == "<init>" &&
                                     descriptor == "(Ljava/lang/String;Ljava/lang/String;)V") {
                                     revised = revised or Opcodes.ACC_SYNTHETIC
@@ -2076,6 +2094,44 @@ tasks.register<JavaExec>("runStagedWorldKotlinConsumer") {
     dependsOn(stagedWorldKotlinConsumer)
     classpath(layout.buildDirectory.dir("consumer/world-staged-kotlin"), stagedGeometryClasspath)
     mainClass.set("WorldKotlinConsumer")
+}
+val projectionKotlinSource = file("src/jvmConsumer/kotlin/ProjectionKotlinConsumer.kt")
+val stagedProjectionKotlinClasses = layout.buildDirectory.dir("consumer/projection-staged-kotlin")
+val stagedProjectionKotlinConsumer by tasks.registering(JavaExec::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    inputs.file(projectionKotlinSource)
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(stagedProjectionKotlinClasses)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", stagedProjectionKotlinClasses.get().asFile.absolutePath, projectionKotlinSource.absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedProjectionKotlinConsumer") {
+    dependsOn(stagedProjectionKotlinConsumer)
+    classpath(stagedProjectionKotlinClasses, stagedGeometryClasspath)
+    mainClass.set("org.dyn4j.geometry.simplify.ProjectionKotlinConsumer")
+}
+val androidProjectionKotlinClasses = layout.buildDirectory.dir("consumer/projection-android-kotlin")
+val androidProjectionKotlinClasspath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+val androidProjectionKotlinConsumer by tasks.registering(JavaExec::class) {
+    dependsOn(androidCompileJar)
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    inputs.file(projectionKotlinSource)
+    inputs.files(androidProjectionKotlinClasspath)
+    outputs.dir(androidProjectionKotlinClasses)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", androidProjectionKotlinClasspath.asPath,
+            "-d", androidProjectionKotlinClasses.get().asFile.absolutePath, projectionKotlinSource.absolutePath)
+    }
+}
+tasks.register<JavaExec>("runAndroidProjectionKotlinConsumer") {
+    dependsOn(androidProjectionKotlinConsumer, androidRuntimeJar)
+    classpath(androidProjectionKotlinClasses, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("org.dyn4j.geometry.simplify.ProjectionKotlinConsumer")
 }
 val androidWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(androidCompileJar)

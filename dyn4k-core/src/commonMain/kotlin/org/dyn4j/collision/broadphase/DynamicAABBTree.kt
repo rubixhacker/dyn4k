@@ -29,12 +29,18 @@ import org.dyn4j.collision.CollisionPair
 import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Ray
 import org.dyn4j.geometry.Vector2
+import kotlin.jvm.JvmName
 
 internal open class DynamicAABBTreeNode {
+    @get:JvmName("getLeft-dyn4k") @set:JvmName("setLeft-dyn4k")
     var left: DynamicAABBTreeNode? = null
+    @get:JvmName("getRight-dyn4k") @set:JvmName("setRight-dyn4k")
     var right: DynamicAABBTreeNode? = null
+    @get:JvmName("getParent-dyn4k") @set:JvmName("setParent-dyn4k")
     var parent: DynamicAABBTreeNode? = null
+    @get:JvmName("getHeight-dyn4k") @set:JvmName("setHeight-dyn4k")
     var height = 0
+    @get:JvmName("getAabb-dyn4k")
     val aabb = AABB(0.0, 0.0, 0.0, 0.0)
     open fun isLeaf() = left == null
     override fun toString() = "DynamicAABBTreeNode[AABB=$aabb|Height=$height]"
