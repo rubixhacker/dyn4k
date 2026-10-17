@@ -90,6 +90,13 @@ class ComparatorSeamTest(unittest.TestCase):
                 self.write_candidate(rows)
                 self.assertEqual("FAILED", self.result()["status"])
 
+    def test_equal_nonunit_normal_still_fails(self):
+        rows = json.loads(json.dumps(self.rows))
+        rows[2]["state"]["normal"] = [1.002, 0.0]
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("FAILED", self.result()["status"])
+
     def test_missing_nonfinite_unknown_and_order_fail_closed(self):
         mutations = [
             lambda r: r[2]["state"].pop("sum"),

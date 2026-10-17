@@ -267,6 +267,11 @@ def check_direction(reference, candidate, rule, path, result):
     unit_cap = Fraction(str(rule["unit_deviation"]))
     if min(angle_cap, magnitude_cap, unit_cap) < 0 or unit_cap >= 1:
         raise Rejected(f"invalid direction limit: {path}")
+    if left == right:
+        if not (1 - unit_cap)**2 <= left_square <= (1 + unit_cap)**2:
+            raise Rejected(f"direction is not unit length: {path}")
+        result["numeric_checks"] += 3
+        return
     dot = left[0] * right[0] + left[1] * right[1]
     cross = abs(left[0] * right[1] - left[1] * right[0])
     if dot <= 0:
@@ -323,11 +328,16 @@ def compare_value(fixture, reference, candidate, path, result):
             if not all(type(value) in (int, float) and math.isfinite(value) and value >= 0
                        for value in (absolute, relative)):
                 raise Rejected(f"invalid numeric limit: {path}")
+            if rule["metric"] not in ("scalar", "orientation"):
+                raise Rejected(f"unknown metric: {path}")
+            if reference == candidate:
+                if rule["metric"] == "orientation" and abs(reference) > 4:
+                    raise Rejected("orientation outside certified wrap domain")
+                result["numeric_checks"] += 1
+                return
             cap = Fraction(str(absolute)) + Fraction(str(relative)) * abs(Fraction.from_float(float(reference)))
             if rule["metric"] == "orientation":
                 lower, upper = orientation_error_bounds(reference, candidate)
-            elif rule["metric"] != "scalar":
-                raise Rejected(f"unknown metric: {path}")
             else:
                 lower = upper = abs(Fraction.from_float(float(candidate)) - Fraction.from_float(float(reference)))
             if lower > cap:
