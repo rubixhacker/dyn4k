@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -45,7 +46,14 @@ class QualificationTests(unittest.TestCase):
                 "failures": 0,
                 "skipped": 0,
                 "exit_code": 0,
+                "invocation_id": "a" * 32,
             }
+        }))
+        self.assertFalse(qualify.execution_succeeded({
+            "jvm:Java:minimum:default": {"unavailable_reason": "no runtime"}
+        }))
+        self.assertFalse(qualify.execution_succeeded({
+            "jvm:Java:minimum:default": {"exit_code": 0}
         }))
 
     def test_candidate_identity_and_counts_are_required(self):
@@ -57,7 +65,7 @@ class QualificationTests(unittest.TestCase):
                     "target": case["target"], "runtime": case["runtime"],
                     "version": case["version"], "configuration": case["configuration"]}
         target_hashes = {case["target"]: {evidence["artifact_sha256"]}}
-        self.assertEqual("PASSED", qualify.evaluate(
+        self.assertNotEqual("PASSED", qualify.evaluate(
             case, evidence, evidence["candidate_sha"], target_hashes)["status"])
         other_target_hashes = {case["target"]: {"c" * 64}}
         self.assertEqual("FAILED", qualify.evaluate(
@@ -67,6 +75,125 @@ class QualificationTests(unittest.TestCase):
                              ("configuration", "wrong")):
             changed = dict(evidence, **{field: value})
             self.assertEqual("FAILED", qualify.evaluate(case, changed)["status"])
+
+    def test_noop_cannot_reuse_prior_result(self):
+        case = qualify.expand(qualify.matrix())[0]
+        with tempfile.TemporaryDirectory() as root:
+            result_file = Path(root) / "lane.json"
+            result_file.write_text(json.dumps({"candidate_sha": "a" * 40}))
+            observed = qualify.execute_plan(
+                {case["id"]: {"command": ["/bin/true"], "result_file": str(result_file)}},
+                "a" * 40, Path(root) / "execution.json")
+            self.assertIn("error", observed[case["id"]])
+            self.assertFalse(result_file.exists())
+            self.assertEqual(1, len(list(Path(root).glob("lane.json.previous-*"))))
+
+    def test_probe_rejects_missing_group_and_duplicate_cases(self):
+        with tempfile.TemporaryDirectory() as root:
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                manifest = {"kind": "foundation-probe", "groups": [
+                    {"id": "present", "report_pattern": "one.xml",
+                     "cases": [{"classname": "C", "name": "one"}]},
+                    {"id": "missing", "report_pattern": "missing.xml",
+                     "cases": [{"classname": "C", "name": "two"}]},
+                ]}
+                writer = "from pathlib import Path; Path('one.xml').write_text('<testsuite tests=\"1\" skipped=\"0\" failures=\"0\" errors=\"0\"><testcase classname=\"C\" name=\"one\" time=\"0\"/></testsuite>')"
+                result = qualify.run_probe(
+                    ["python3", "-c", writer], ["one.xml", "missing.xml"],
+                    "a" * 40, Path(root) / "probe.json", manifest=manifest)
+                self.assertEqual("PROBE_FAILED", result["status"])
+                self.assertIn("missing", result["reason"])
+                duplicate = "from pathlib import Path; Path('one.xml').write_text('<testsuite tests=\"2\" skipped=\"0\" failures=\"0\" errors=\"0\"><testcase classname=\"C\" name=\"one\" time=\"0\"/><testcase classname=\"C\" name=\"one\" time=\"0\"/></testsuite>')"
+                result = qualify.run_probe(
+                    ["python3", "-c", duplicate], ["one.xml"],
+                    "a" * 40, Path(root) / "duplicate.json",
+                    manifest={"kind": "foundation-probe", "groups": [manifest["groups"][0]]})
+                self.assertEqual("PROBE_FAILED", result["status"])
+            finally:
+                os.chdir(previous)
+
+    def test_full_lane_needs_selected_runtime_suite_and_both_target_binaries(self):
+        case = qualify.expand(qualify.matrix())[0]
+        sha = "a" * 40
+        evidence = {**case, "candidate_sha": sha, "artifact_sha256": "b" * 64,
+                    "runtime_identity": "arbitrary", "runtime_version": "wrong",
+                    "expected": 2, "executed": 2, "failures": 0, "skipped": 0,
+                    "consumer": "PASSED", "suite": "complete"}
+        self.assertEqual("FAILED", qualify.evaluate(case, evidence, sha)["status"])
+        self.assertIn("manifest", qualify.evaluate(case, evidence, sha)["reason"])
+
+    def test_frozen_full_lane_rejects_runtime_binary_and_case_substitution(self):
+        case = qualify.expand(qualify.matrix())[0]
+        sha = "a" * 40
+        suite = {"schema": 1, "kind": "complete-port", "id": "frozen-five",
+                 "areas": ["geometry", "collision", "dynamics", "joints", "compatibility"],
+                 "cases": [{"id": area + ":worked", "area": area} for area in
+                           ("geometry", "collision", "dynamics", "joints", "compatibility")]}
+        hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
+        audit = {"candidate_sha": sha, "status": "PASSED", "artifacts": [
+            {"path": qualify.target_binary_path(module, case["target"]), "sha256": value}
+            for module, value in hashes.items()]}
+        candidate = {"schema": 1, "candidate_sha": sha,
+                     "suite_manifest_sha256": qualify.manifest_digest(suite),
+                     "audit_manifest_sha256": qualify.manifest_digest(audit),
+                     "lanes": {case["id"]: {
+                         "runtime_identity": "pinned JDK 8 image", "runtime_version": "8u472",
+                         "configuration": case["configuration"], "suite_id": suite["id"],
+                         "artifact_hashes": hashes}}}
+        evidence = {**case, "candidate_sha": sha,
+                    "runtime_identity": "pinned JDK 8 image", "runtime_version": "8u472",
+                    "suite_id": suite["id"], "expected": 5, "executed": 5,
+                    "failures": 0, "skipped": 0, "consumer": "PASSED",
+                    "artifact_hashes": hashes, "invocation_id": "d" * 32,
+                    "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                    "suite_manifest_sha256": qualify.manifest_digest(suite),
+                    "audit_manifest_sha256": qualify.manifest_digest(audit),
+                    "exit_code": 0, "command": ["/bin/true"],
+                    "case_results": [{"id": item["id"], "status": "PASSED"}
+                                     for item in suite["cases"]]}
+        self.assertEqual("PASSED", qualify.evaluate(
+            case, evidence, sha, candidate, suite, audit)["status"])
+        for changed in (
+            {**evidence, "runtime_version": "not-the-selected-version"},
+            {**evidence, "artifact_hashes": {**hashes, "dyn4k-core": "e" * 64}},
+            {**evidence, "artifact_hashes": {**hashes, "dyn4k": "e" * 64}},
+            {**evidence, "case_results": evidence["case_results"][:-1]},
+            {**evidence, "case_results": evidence["case_results"][:-1] + evidence["case_results"][:1]},
+            {**evidence, "expected": 2, "executed": 2},
+            {**evidence, "case_results": evidence["case_results"] +
+             [{"id": "extra", "status": "PASSED", "value": float("nan")}]},
+            {**evidence, "case_results": [{**evidence["case_results"][0], "value": float("nan")}] +
+             evidence["case_results"][1:]},
+            {**evidence, "candidate_manifest_sha256": "e" * 64},
+        ):
+            self.assertEqual("FAILED", qualify.evaluate(
+                case, changed, sha, candidate, suite, audit)["status"])
+        self.assertEqual("FAILED", qualify.evaluate(
+            case, evidence, sha, candidate, suite,
+            {**audit, "status": "FAILED"})["status"])
+
+    def test_dirty_tracked_checkout_rejects_matching_head(self):
+        with tempfile.TemporaryDirectory() as root:
+            repository = Path(root)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            source = repository / "build.gradle.kts"
+            source.write_text("version = 1\n")
+            subprocess.run(["git", "-C", str(repository), "add", "build.gradle.kts"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm", "base"], check=True)
+            sha = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            qualify.require_clean_checkout(repository, sha)
+            source.write_text("version = 2\n")
+            with self.assertRaisesRegex(ValueError, "dirty"):
+                qualify.require_clean_checkout(repository, sha)
+
+    def test_forged_audit_cannot_replace_staged_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            fake = {"candidate_sha": "a" * 40, "status": "PASSED", "artifacts": []}
+            with self.assertRaisesRegex(ValueError, "staged audit"):
+                qualify.verify_audit_against_staging(fake, Path(root))
 
     def test_report_refuses_sha_other_than_checkout(self):
         with tempfile.TemporaryDirectory() as root:

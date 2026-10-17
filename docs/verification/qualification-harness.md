@@ -10,7 +10,11 @@ This harness records what ran against one staged candidate. It does not turn a b
 
 The external JVM consumer in `consumers/qualification/` resolves `io.github.rubixhacker:dyn4k:0.1.0-alpha.1` from the staged repository. It executes Kotlin and Java public geometry calls. Its `verifySingleProvider` task rejects a graph containing both `dyn4k-core` and upstream `org.dyn4j:dyn4j`. The portable KMP consumer in `consumers/qualification/portable/` declares every approved target and runs a common public geometry test wherever an actual staged target artifact and runtime are available. These are foundation probes. They do not claim the full geometry, collision, dynamics, joint or compatibility suite.
 
-`probe` captures an actual Gradle command, XML test counts and exit status. A zero case count, skipped case, failure or command failure makes the probe fail. Probe output says `foundation probe only`. `execute` accepts an explicit JSON plan keyed by matrix case ID. Each plan entry supplies either `unavailable_reason`, or a command array and `result_file` for a runtime harness that writes observed evidence. Missing plans remain `NOT_RUN`. `record` evaluates all 112 cases and exits nonzero until each case passes. A lane needs a full candidate SHA, artifact SHA-256, runtime identity, positive expected count, matching executed count, zero failures and skips, a staged consumer pass, and `suite: complete`. A runtime result may include target, runtime, version and configuration; those values must match its case. An external harness must establish the minimum/current runtime pin and actual build configuration before supplying a passing record.
+`probe` uses the tracked `tools/qualification/foundation-probes.json` manifest. It requires every selected report group and exact case identity. Missing, duplicate, extra, skipped, failed, or non-finite cases fail. Core groups with no tests are declared as empty. Probe results use `PROBE_PASSED` or `PROBE_FAILED` and state `foundation probe only`; they cannot become full-lane results.
+
+`execute` accepts a JSON plan keyed by matrix case ID. Each entry supplies a command and result path, or an exact unavailability reason. Before a command, it moves any old result to a distinct `.previous-<id>` file. It gives the command `DYN4K_QUALIFICATION_INVOCATION`. The runner must write that value as `invocation_id` in a new JSON result. A no-op, failed command, stale file, wrong invocation, or invalid JSON fails execution. Missing plans remain `NOT_RUN`.
+
+`record` evaluates all 112 cases. It requires a clean tracked checkout at the candidate SHA. A full pass also requires a tracked `tools/qualification/full-suite-manifest.json` with every approved case and area. That file does not exist until [the complete compatibility corpus](https://github.com/rubixhacker/dyn4k/issues/42) can freeze it. A candidate manifest must select the exact runtime identity, version, configuration, suite ID, and both target binary hashes for each lane. The result must match those selections, include every distinct frozen case, and bind the suite, candidate, and staged audit digests. The audit is recomputed against staged files before it is accepted. A matching HEAD with dirty tracked inputs is invalid. There is no full-lane pass while the complete suite manifest is absent.
 
 Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has attempted but invalid or failing evidence; `UNAVAILABLE` names an absent runner or probe; `NOT_RUN` has no attempt. `record --availability <json>` accepts target, `target:runtime`, `target:runtime:version`, or exact case IDs with concrete reasons. More specific selectors take priority. A missing device or suite never becomes a pass or a zero measurement.
 
@@ -22,6 +26,7 @@ Set JDK 21 and the Android SDK paths for this pinned build. Stage the two module
 python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
 ./gradlew -p consumers/qualification --no-daemon run -PqualificationRepository="$PWD/build/staging-repository"
 ./gradlew -p consumers/qualification/portable --no-daemon jvmTest linuxX64Test -PqualificationRepository="$PWD/build/staging-repository"
+python3 tools/qualification/qualify.py probe --candidate-sha "$(git rev-parse HEAD)" --manifest tools/qualification/foundation-probes.json --group core-jvm --group jvm --report 'dyn4k-core/build/test-results/jvmTest/TEST-*.xml' --report 'dyn4k/build/test-results/jvmTest/TEST-*.xml' --output /tmp/foundation-probe.json -- ./gradlew --no-daemon :dyn4k-core:jvmTest :dyn4k:jvmTest
 python3 tools/qualification/qualify.py audit-staging --candidate-sha "$(git rev-parse HEAD)" --repository build/staging-repository --output /tmp/artifact-audit.json
 python3 tools/qualification/qualify.py record --candidate-sha "$(git rev-parse HEAD)" --output /tmp/runtime-matrix.json
 ```
@@ -37,7 +42,7 @@ python3 tools/qualification/qualify.py record --candidate-sha "$(git rev-parse H
 }
 ```
 
-The runtime runner must write its actual suite and consumer observations. The harness rejects missing output. The plan alone never passes a lane.
+The runtime runner must write `invocation_id` from its environment, actual case and consumer observations, and the selected manifest and artifact digests. The plan alone never passes a lane. The exact full-lane JSON schema is exercised in `tools/qualification/test_qualify.py`; the production gate will not accept a synthetic suite file outside the tracked candidate.
 
 ## Open qualification requirements
 
