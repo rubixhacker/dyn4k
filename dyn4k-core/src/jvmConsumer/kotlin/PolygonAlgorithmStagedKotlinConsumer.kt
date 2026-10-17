@@ -9,6 +9,10 @@ private class StagedPolygonExtension : VertexClusterReduction(0.1) {
     fun getClusterTolerance(): String = "extension"
 }
 
+private class SameSignaturePolygonExtension : VertexClusterReduction(0.25) {
+    fun getClusterTolerance(): Double = 9.0
+}
+
 fun main() {
     var checks = 0
     fun checkResult(condition: Boolean) {
@@ -38,5 +42,9 @@ fun main() {
     val extension = StagedPolygonExtension()
     checkResult(extension.clusterTolerance == 0.1)
     checkResult(extension.getClusterTolerance() == "extension")
+    val sameSignature = SameSignaturePolygonExtension()
+    checkResult(sameSignature.getClusterTolerance() == 9.0)
+    checkResult(sameSignature.clusterTolerance == 0.25)
+    checkResult(sameSignature.simplify(*cloud.copyOfRange(0, 4))!!.size == 4)
     println("PolygonAlgorithmStagedKotlinConsumer: $checks checks passed")
 }

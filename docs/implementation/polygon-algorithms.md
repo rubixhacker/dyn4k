@@ -15,13 +15,14 @@ getter. A Java subclass can therefore declare its own
 `String getClusterTolerance()` method.
 
 The common Kotlin class keeps `clusterTolerance` as a readable property for
-Kotlin consumers. Its JVM getter is marked synthetic, so Java source does not
-inherit that helper name. The getter and Kotlin metadata remain in the JVM
-artifact. `PolygonExtraMethodsProbe.java` compiles unchanged with Java 8
-against the baseline, staged JVM, and Android host class archives. It runs
-the subclass helper and inherited simplification algorithm. A common Kotlin
-subclass test reads the property, declares its own helper, and executes the
-algorithm on each available host.
+Kotlin consumers. Its synthetic JVM getter uses the name
+`getClusterTolerance-dyn4k`, which Java source cannot declare. This prevents
+a Java subclass's `getClusterTolerance(): double` helper from overriding
+Kotlin property reads at runtime. Kotlin metadata retains the property.
+`PolygonExtraMethodsProbe.java` compiles unchanged with Java 8 against the
+baseline, staged JVM, and Android host class archives. It runs both `String`
+and `double` helper forms and inherited simplification. Common Kotlin tests
+read the property from both subclass forms on each available host.
 
 The unchanged upstream Java polygon suites contain 290 cases. The portable
 polygon corpus contains 284 cases per available host. The separate
