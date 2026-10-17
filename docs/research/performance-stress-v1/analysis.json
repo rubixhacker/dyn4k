@@ -1,0 +1,17 @@
+{
+  "memory_attribution": "unvalidated",
+  "plateau": null,
+  "qualification": "unpassed",
+  "scenarios": [
+    {
+      "absolute_p99_limit_ns": 4166666.6666666665,
+      "activity": "valid",
+      "pilot_p99_ns": 14391203,
+      "pilot_p99_under_absolute_limit": false,
+      "qualified": false,
+      "scenario": "separated.default.stress.60",
+      "warmup": "unvalidated"
+    }
+  ],
+  "validated_probe": true
+}

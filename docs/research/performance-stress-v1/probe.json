@@ -1,0 +1,1 @@
+{"timer_min_positive_ns":20,"timer_median_pair_ns":30,"timer_p99_pair_ns":31,"allocation_supported":true,"controlled_payload_bytes":1048576,"controlled_allocated_bytes":1164520,"heap_live_bytes":3145728,"heap_after_collection_bytes":807464,"rss_live_bytes":47620096,"rss_after_collection_bytes":61308928,"collection_count_delta":1}
