@@ -59,6 +59,43 @@ def portable_case_id(fixture_key):
     raise Rejected("portable case mapping is absent")
 
 
+def strict_comparison(fixture, reference, portable):
+    result = {"status": "PASSED", "records": 0, "numeric_checks": 0,
+              "exact_numeric_checks": 0, "derived_checks": 0,
+              "unpassed_channels": set()}
+    sentinel = object()
+    try:
+        for left, right in zip_longest(reference_records(reference),
+                                       records(portable, allow_tagged_nonfinite=True),
+                                       fillvalue=sentinel):
+            if left is sentinel or right is sentinel:
+                raise Rejected("frozen record count differs")
+            result["records"] += 1
+            if left.get("kind") != right.get("kind"):
+                raise Rejected(f"frozen record kind differs at {result['records']}")
+            def zero_sign(left_value, right_value):
+                if (type(left_value) in (int, float) and type(right_value) in (int, float) and
+                        left_value == right_value == 0 and not exact(left_value, right_value)):
+                    raise Rejected(f"signed zero differs at frozen record {result['records']}")
+                if isinstance(left_value, dict) and isinstance(right_value, dict):
+                    for key in left_value.keys() & right_value.keys():
+                        zero_sign(left_value[key], right_value[key])
+                elif isinstance(left_value, list) and isinstance(right_value, list):
+                    for a, b in zip(left_value, right_value):
+                        zero_sign(a, b)
+            zero_sign(left, right)
+            approved.compare_value(fixture, left, right, left["kind"], result)
+        if result["unpassed_channels"]:
+            result["status"] = "UNPASSED"
+    except (Rejected, approved.Rejected, OSError, EOFError, KeyError, TypeError, ValueError) as error:
+        result["status"] = "FAILED"
+        result["reason"] = str(error)
+    result["unpassed_channels"] = sorted(result["unpassed_channels"])
+    for key in ("_rule_cache", "_exact_cache", "_zero_cache", "_derived_paths"):
+        result.pop(key, None)
+    return result
+
+
 def diagnostic(fixture_key, reference, portable):
     catalog = json.loads(CATALOG.read_text())
     fixtures = [item for item in catalog["fixtures"] if item["key"] == fixture_key]
@@ -72,6 +109,7 @@ def diagnostic(fixture_key, reference, portable):
         first = stream.readline()
     if hashlib.sha256(first.rstrip(b"\n")).hexdigest() != fixture["reference"]["input_sha256"]:
         raise Rejected("frozen input line SHA-256 differs")
+    strict = strict_comparison(approved_fixture, reference, portable)
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
     port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
@@ -139,6 +177,7 @@ def diagnostic(fixture_key, reference, portable):
                        "UNPASSED_INPUT_SCHEMA" if not header_exact else "UNPASSED_EVENT_SCHEMA"),
             "fixture_key": fixture_key, "reference_sha256": digest(reference),
             "portable_sha256": digest(portable), "input_header_exact": header_exact,
+            "strict_approved_comparison": strict,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,
             "event_records": events, "first_differences": first_differences,

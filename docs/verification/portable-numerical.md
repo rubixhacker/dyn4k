@@ -17,7 +17,7 @@ The six families are geometry/collision boundaries across scales and offsets; fr
 
 The receipt validator rejects missing or duplicate cases, missing steps, lost callbacks, altered action steps, reordered events, changed input, changed signed zero, missing endpoints, nonfinite values, stale artifacts, and an empty suite. The receipt binds the exact Git archive hash, commit, staged metadata and target artifact hashes, runtime identity, trace hash, and expected and executed counts.
 
-`reference_diagnostic.py` compares overlapping body channels with a frozen Java trace. It checks the frozen gzip and input hashes first, then records exact-value and signed-zero differences. It applies the approved comparator to matching channels and reports every failed budget. The result remains unpassed while the input headers, event schemas, or other required channels differ.
+`reference_diagnostic.py` first checks the frozen gzip and input hashes and attempts a streamed full-record comparison using the approved comparator, including an explicit signed-zero check. It then compares overlapping body channels and records exact-value and signed-zero differences. It applies the approved limits to matching channels and reports every failed budget. The result remains unpassed while the input headers, event schemas, or other required channels differ.
 
 The physical diagnostic reuses the approved represented-geometry depth and phase schedule for default and configured sleep/wake cases. It reports all nine case counts and failed steps separately; default failures remain failures. The 36,000-step free-motion invariant is checked against its analytic limits. These diagnostics do not replace input, event, or complete-channel parity.
 
