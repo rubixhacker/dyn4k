@@ -14,6 +14,14 @@ import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.geometry.Geometry
 
 class WorldResultTest {
+    private class ExtendedResult : DetectResult<Body, BodyFixture>() {
+        fun protectedValuesMatchPublic(): Boolean = body === getBody() && fixture === getFixture()
+        fun replaceProtected(bodyValue: Body, fixtureValue: BodyFixture) {
+            body = bodyValue
+            fixture = fixtureValue
+        }
+    }
+
     private class ExtendedCast : ConvexCastResult<Body, BodyFixture>() {
         fun protectedDetailMatchesPublic(): Boolean = timeOfImpact === getTimeOfImpact()
     }
@@ -31,6 +39,21 @@ class WorldResultTest {
         assertTrue(ExtendedCast().protectedDetailMatchesPublic())
         assertTrue(ExtendedDetect().protectedDetailMatchesPublic())
         assertTrue(ExtendedRay().protectedDetailMatchesPublic())
+    }
+
+    @Test
+    fun kotlinDetectSubclassKeepsProtectedBodyAndFixture() {
+        val body = Body()
+        val fixture = BodyFixture(Geometry.createCircle(0.5))
+        val result = ExtendedResult()
+        assertTrue(result.protectedValuesMatchPublic())
+        result.replaceProtected(body, fixture)
+        assertTrue(result.protectedValuesMatchPublic())
+        assertSame(body, result.getBody())
+        assertSame(fixture, result.getFixture())
+        val copy = result.copy()
+        assertSame(body, copy.getBody())
+        assertSame(fixture, copy.getFixture())
     }
 
     @Test

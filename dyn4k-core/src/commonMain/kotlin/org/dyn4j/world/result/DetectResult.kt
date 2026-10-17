@@ -30,11 +30,15 @@ import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 
 open class DetectResult<T : CollisionBody<E>, E : Fixture> : Copyable<DetectResult<T, E>> {
-    @get:kotlin.jvm.JvmName("bodyField")
-    @set:kotlin.jvm.JvmName("setBodyField")
+    @get:kotlin.jvm.JvmName("bodyField-dyn4k")
+    @get:kotlin.jvm.JvmSynthetic
+    @set:kotlin.jvm.JvmName("setBodyField-dyn4k")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var body: T? = null
-    @get:kotlin.jvm.JvmName("fixtureField")
-    @set:kotlin.jvm.JvmName("setFixtureField")
+    @get:kotlin.jvm.JvmName("fixtureField-dyn4k")
+    @get:kotlin.jvm.JvmSynthetic
+    @set:kotlin.jvm.JvmName("setFixtureField-dyn4k")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var fixture: E? = null
 
     constructor()
