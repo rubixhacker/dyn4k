@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -437,7 +438,9 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
     if not expected:
         problems.append("probe manifest has no required cases")
     completed = None
+    started_at_ns = finished_at_ns = None
     if not problems:
+        started_at_ns = time.time_ns()
         for pattern in patterns:
             for path in Path().glob(pattern):
                 path.unlink()
@@ -488,12 +491,14 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
                 problems.append(f'duplicate cases in group {group["id"]}')
             if set(observed_cases) != set(expected_cases):
                 problems.append(f'partial or unexpected cases in group {group["id"]}')
+        finished_at_ns = time.time_ns()
     if failures or skipped:
         problems.append("probe has failed or skipped cases")
     if executed != expected:
         problems.append("probe executed count differs from frozen expected count")
     result = {"candidate_sha": candidate_sha, "command": command,
               "exit_code": completed.returncode if completed else None,
+              "started_at_ns": started_at_ns, "finished_at_ns": finished_at_ns,
               "expected": expected, "executed": executed, "failures": failures,
               "skipped": skipped, "manifest_sha256": manifest_digest(manifest) if manifest else None,
               "status": "PROBE_FAILED" if problems else "PROBE_PASSED",
@@ -626,6 +631,7 @@ def main():
     record.add_argument("--candidate-manifest", type=Path)
     record.add_argument("--availability", type=Path)
     record.add_argument("--hosted-probe", action="append", type=Path, default=[])
+    record.add_argument("--raw-bundle", action="append", type=Path, default=[])
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -733,10 +739,24 @@ def main():
                         candidate_manifest, suite_manifest, audit_data)
                for case in cases]
     hosted_probes = []
-    for path in args.hosted_probe:
+    if len(args.raw_bundle) != len(args.hosted_probe):
+        parser.error("each hosted probe needs its matching raw XML bundle")
+    for path, bundle in zip(args.hosted_probe, args.raw_bundle):
         try:
-            hosted_probes.append(validate_hosted_probe(load_json_strict(path),
-                                                       args.candidate_sha, repository))
+            observed = validate_hosted_probe(load_json_strict(path),
+                                             args.candidate_sha, repository)
+            if observed["status"] == "PROBE_PASSED":
+                import artifact
+                try:
+                    verified = artifact.verify_bundle(
+                        bundle, load_json_strict(repository / "tools/qualification/foundation-probes.json"),
+                        args.candidate_sha)
+                    if verified["route"] != observed["target"]:
+                        raise ValueError("raw bundle target differs from hosted probe")
+                except (OSError, TypeError, ValueError, ET.ParseError) as error:
+                    observed = {**observed, "status": "PROBE_FAILED",
+                                "reason": f"raw XML bundle failed: {error}"}
+            hosted_probes.append(observed)
         except (OSError, ValueError) as error:
             parser.error(str(error))
     report = {"candidate_sha": args.candidate_sha, "total": len(results),

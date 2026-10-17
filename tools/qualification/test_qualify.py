@@ -35,7 +35,7 @@ class QualificationTests(unittest.TestCase):
     def test_frozen_host_manifest_names_integrated_geometry_cases(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         groups = {group["id"]: group for group in manifest["groups"]}
-        self.assertEqual(31, len(groups))
+        self.assertEqual(37, len(groups))
         for group_id, prefix, suffix in (
             ("jvm", "", "[jvm]"),
             ("linuxX64", "linuxX64Test.", "[linuxX64]"),
@@ -52,6 +52,8 @@ class QualificationTests(unittest.TestCase):
                 [case for case in cases if case[0].endswith("GeometryShapeTest")], group_id)
             self.assertEqual(286, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
+            self.assertEqual(2, len(qualify.expected_probe_cases(
+                manifest, groups["consumer-" + group_id])))
 
     def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
