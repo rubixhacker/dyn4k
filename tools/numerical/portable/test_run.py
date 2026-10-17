@@ -21,6 +21,21 @@ class ExtractionTest(unittest.TestCase):
         self.assertEqual(result["executable_sha256"], run.digest(executable))
         self.assertIn('version "1.8.', result["version"])
 
+    def test_node_receipt_uses_executed_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "node"
+            executable.write_text("#!/bin/sh\nprintf 'v99.1.0\\n'\n")
+            executable.chmod(0o755)
+            log = root / "gradle.log"
+            log.write_text("Starting process 'command '" + str(executable) +
+                           "''. Command: " + str(executable) + " test.js\n")
+            expected_sha = run.digest(executable)
+            result = run.runtime("node-js", log)
+        self.assertEqual(result["executable"], str(executable.resolve()))
+        self.assertEqual(result["executable_sha256"], expected_sha)
+        self.assertEqual(result["version"], "v99.1.0")
+
     def test_xml_extraction_retains_whole_trace_and_case_slice(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
