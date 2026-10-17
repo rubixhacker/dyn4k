@@ -30,9 +30,9 @@ import org.dyn4j.dynamics.PhysicsBody
 open class PhysicsBodyBroadphaseCollisionDataFilter<T : PhysicsBody>(
     private val world: PhysicsWorld<T, *>,
 ) : CollisionBodyBroadphaseCollisionDataFilter<T, BodyFixture>() {
-    override fun isAllowed(body1: T, fixture1: BodyFixture, body2: T, fixture2: BodyFixture): Boolean {
+    override fun isAllowed(body1: T?, fixture1: BodyFixture?, body2: T?, fixture2: BodyFixture?): Boolean {
         if (!super.isAllowed(body1, fixture1, body2, fixture2)) return false
-        if (!body1.isDynamic() && !body2.isDynamic() && !fixture1.isSensor() && !fixture2.isSensor()) return false
+        if (!body1!!.isDynamic() && !body2!!.isDynamic() && !fixture1!!.isSensor() && !fixture2!!.isSensor()) return false
         if (!world.isJointCollisionAllowed(body1, body2)) return false
         return true
     }

@@ -28,5 +28,5 @@ import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 
 interface BroadphaseCollisionDataFilter<T : CollisionBody<E>, E : Fixture> {
-    fun isAllowed(body1: T, fixture1: E, body2: T, fixture2: E): Boolean
+    fun isAllowed(body1: T?, fixture1: E?, body2: T?, fixture2: E?): Boolean
 }

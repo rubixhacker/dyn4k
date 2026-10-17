@@ -27,6 +27,7 @@ def declarations(archive, name):
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     header = next(line.strip() for line in lines if line.strip().endswith("{"))
+    final_class = " final class " in f" {header} "
     members = set()
     for index, raw in enumerate(lines):
         line = re.sub(r"\s+", " ", raw.strip())
@@ -35,8 +36,12 @@ def declarations(archive, name):
         descriptor = lines[index + 1].strip()
         if not descriptor.startswith("descriptor: "):
             raise ValueError(f"missing descriptor for {name}: {line}")
+        if final_class and "(" in line:
+            line = line.replace(" final ", " ", 1)
+        if "$" in name and line.split("(", 1)[0].endswith(name):
+            line = line.split(" ", 1)[0] + " <init>();"
         members.add(f"{line} {descriptor}")
-    return header, members
+    return header.split(" implements ", 1)[0].removesuffix("{").strip(), members
 
 
 def main():
