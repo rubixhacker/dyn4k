@@ -63,6 +63,23 @@ def structural_differences(reference, candidate, path="", limit=100):
     return differences[:limit]
 
 
+def value_differences(reference, candidate, path="", limit=100):
+    differences = []
+    def visit(left, right, location):
+        if len(differences) >= limit:
+            return
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(left.keys() & right.keys()):
+                visit(left[key], right[key], f"{location}.{key}")
+        elif isinstance(left, list) and isinstance(right, list):
+            for index, (a, b) in enumerate(zip(left, right)):
+                visit(a, b, f"{location}[{index}]")
+        elif not exact(left, right):
+            differences.append({"path": location, "reference": left, "portable": right})
+    visit(reference, candidate, path)
+    return differences[:limit]
+
+
 def reference_records(path):
     for _, value in approved.records(path):
         yield value
@@ -145,6 +162,15 @@ def diagnostic(fixture_key, reference, portable):
         raise Rejected("reference or matching portable input is absent") from error
     header_exact = exact(ref_header, port_header)
     input_schema_differences = structural_differences(ref_header, port_header, "inputs")
+    projection = port_header.get("frozenConfiguration", {})
+    configuration = {}
+    for name in ("settings", "world"):
+        part = projection.get(name)
+        configuration[name] = {
+            "exact": exact(ref_header[name], part),
+            "structural_differences": structural_differences(ref_header[name], part, name),
+            "value_differences": value_differences(ref_header[name], part, name),
+        }
     events = {"reference": 0, "portable": 0}
 
     def states(stream, label):
@@ -204,6 +230,7 @@ def diagnostic(fixture_key, reference, portable):
             "fixture_key": fixture_key, "reference_sha256": digest(reference),
             "portable_sha256": digest(portable), "input_header_exact": header_exact,
             "input_schema_differences": input_schema_differences,
+            "frozen_configuration_projection": configuration,
             "strict_approved_comparison": strict,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,

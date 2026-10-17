@@ -10,6 +10,23 @@ import kotlin.test.assertTrue
 
 class RecorderTest {
     @Test
+    fun frozenConfigurationUsesCommonWorldGetters() {
+        val world = World<Body>()
+        val body = Body()
+        body.addFixture(Geometry.createCircle(0.5))
+        body.setMass(MassType.NORMAL)
+        world.addBody(body)
+        val lines = mutableListOf<String>()
+        NumericalRecorder(lines::add).capture(
+            CaseSpec("long-free-60", "long-running-invariant", "default", 60, 1,
+                mapOf("velocity" to listOf(0.0, 0.0))), world)
+        assertTrue(lines.first().contains("\"frozenConfiguration\""))
+        assertTrue(lines.first().contains("\"getBroadphaseDetector\""))
+        assertTrue(lines.first().contains("\"getTimeOfImpactDetector\""))
+        assertTrue(lines.first().contains("\"getAngularToleranceSquared\""))
+    }
+
+    @Test
     fun recordsPublicWorldStateAndSignedZeroAtEveryStep() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reference_diagnostic import strict_comparison, structural_differences
+from reference_diagnostic import strict_comparison, structural_differences, value_differences
 
 
 class FrozenComparatorSeamTest(unittest.TestCase):
@@ -18,6 +18,8 @@ class FrozenComparatorSeamTest(unittest.TestCase):
         self.assertIn({"path": "inputs.state.bodies[0].speed",
                        "difference": "extra_portable"}, differences)
         self.assertIn({"path": "inputs.extra", "difference": "extra_portable"}, differences)
+        self.assertEqual(value_differences({"x": [-0.0]}, {"x": [0.0]}, "inputs"),
+                         [{"path": "inputs.x[0]", "reference": -0.0, "portable": 0.0}])
 
     def test_full_record_fields_signed_zero_and_order(self):
         fixture = {"exact_numeric": ["inputs.value"]}

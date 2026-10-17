@@ -111,12 +111,18 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.postSolve", step?.getDeltaTime())
             override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.end", step?.getDeltaTime())
         }
+        val frozenConfiguration = if (spec.id == "long-free-60" ||
+            spec.id.startsWith("contacts-default-") || spec.id.startsWith("contacts-configured-") ||
+            spec.profile == "frozen-weld-pulley")
+            mapOf("frozenConfiguration" to mapOf(
+                "settings" to FrozenConfiguration.settings(world.getSettings()),
+                "world" to FrozenConfiguration.world(world))) else emptyMap()
         line(mapOf("kind" to "inputs", "id" to spec.id, "family" to spec.family,
             "profile" to spec.profile, "hz" to spec.hz, "steps" to spec.steps,
             "dt" to dt, "input" to spec.input,
             "settings" to settings(world), "setup" to setup(world, bodies, joints),
             "initial" to (snapshot(world, bodies, joints, sums, dt, origin) +
-                mapOf("observations" to observe(world)))))
+                mapOf("observations" to observe(world)))) + frozenConfiguration)
         world.addContactListener(contacts)
         world.addTimeOfImpactListener(timeOfImpact)
         world.addStepListener(steps)
