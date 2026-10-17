@@ -75,6 +75,15 @@ class ReceiptConsumerTest(unittest.TestCase):
             with self.assertRaisesRegex(compare.Rejected, "unrecognized instrumented callback value"):
                 same_run.inspect(fixture, self.root / "unused")
 
+    def test_endpoint_copy_preserves_signed_zero(self):
+        fixture = {"counts": {"state": 1, "outer-endpoint": 1}}
+        rows = [(0, {"kind": "state", "step": 1, "state": {"x": -0.0}}),
+                (1, {"kind": "outer-endpoint", "step": 1, "state": {"x": 0.0}})]
+        with patch.object(compare, "records", return_value=iter(rows)), \
+             patch.object(compare, "check_snapshot"):
+            with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
+                same_run.inspect(fixture, self.root / "unused")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,7 @@ def inspect(fixture, trace):
             previous_state = row["state"]
         elif kind == "outer-endpoint":
             endpoints += 1
-            if row["state"] != previous_state or row["step"] != states:
+            if not compare.same_value(row["state"], previous_state) or row["step"] != states:
                 raise compare.Rejected("outer endpoint is not a state copy")
         elif kind == "instrumented-callback":
             values = row.get("values")
