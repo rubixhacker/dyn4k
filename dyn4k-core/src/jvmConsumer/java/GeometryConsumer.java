@@ -1,4 +1,7 @@
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import org.dyn4j.geometry.AABB;
 import org.dyn4j.geometry.Capsule;
 import org.dyn4j.geometry.Circle;
@@ -61,6 +64,36 @@ public final class GeometryConsumer {
             throw new AssertionError("Straight shape factory");
         if (Geometry.getWinding(vertices) <= 0.0 || Geometry.getWinding(Arrays.asList(vertices)) <= 0.0)
             throw new AssertionError("Winding overloads");
+        List<Vector2> immutableEmpty = Collections.emptyList();
+        if (Geometry.cleanse(immutableEmpty) != immutableEmpty)
+            throw new AssertionError("Immutable empty list identity");
+        List<Vector2> mutableEmpty = new ArrayList<>();
+        if (Geometry.cleanse(mutableEmpty) != mutableEmpty)
+            throw new AssertionError("Mutable empty list identity");
+        Vector2[] emptyArray = new Vector2[0];
+        Vector2[] cleansedEmptyArray = Geometry.cleanse(emptyArray);
+        if (cleansedEmptyArray == emptyArray || cleansedEmptyArray.length != 0)
+            throw new AssertionError("Empty vararg array copy");
+        Vector2 first = new Vector2(0.0, 0.0);
+        List<Vector2> nonempty = Arrays.asList(first, new Vector2(1.0, 0.0), new Vector2(0.0, 1.0));
+        List<Vector2> cleansed = Geometry.cleanse(nonempty);
+        cleansed.add(new Vector2(2.0, 2.0));
+        if (cleansed == nonempty || cleansed.size() != 4 || nonempty.size() != 3 || cleansed.get(0) != first)
+            throw new AssertionError("Nonempty list copy, mutability, or point identity");
+        try {
+            Geometry.cleanse((List<Vector2>) null);
+            throw new AssertionError("Null list exception missing");
+        } catch (org.dyn4j.exception.ArgumentNullException expected) {
+            if (!"points cannot be null".equals(expected.getMessage()))
+                throw new AssertionError("Null list exception message", expected);
+        }
+        try {
+            Geometry.cleanse(Arrays.asList(new Vector2(), null, new Vector2()));
+            throw new AssertionError("Null element exception missing");
+        } catch (org.dyn4j.exception.NullElementException expected) {
+            if (!"points contains a null element at index 1".equals(expected.getMessage()))
+                throw new AssertionError("Null element exception message", expected);
+        }
         if (Geometry.getRotationRadius((Vector2[]) null) != 0.0 || Geometry.getCounterClockwiseEdgeNormals((Vector2[]) null) != null)
             throw new AssertionError("Nullable radius and normals");
         if (Geometry.getRotationRadius(new Vector2(), new Vector2[] {new Vector2(1.0, 0.0), new Vector2(0.0, 2.0)}) != 2.0)
@@ -90,6 +123,6 @@ public final class GeometryConsumer {
                 throw new AssertionError("Range exception number: " + range);
         }
         org.dyn4j.geometry.GeometryPackageConsumer.run();
-        System.out.println("GeometryConsumer: 19 checks passed");
+        System.out.println("GeometryConsumer: 25 checks passed");
     }
 }
