@@ -7,12 +7,13 @@ import re
 import shutil
 import subprocess
 import sys
+from itertools import chain
 from pathlib import Path
 
 from cases import declared_cases
-from physical import nominal_free, sleep_wake
+from physical import nominal_free, sleep_wake_rows
 from reference_diagnostic import diagnostic, portable_case_id
-from receipt import Identity, Rejected, digest, seal
+from receipt import Identity, Rejected, digest, records, seal
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -142,13 +143,34 @@ def extract_xml(host, output):
     attributes = dict(re.findall(r'([a-z]+)="([^"]*)"', suite))
     shutil.copyfile(source, output / "matrix.xml")
     trace = output / "trace.jsonl"
+    cases = output / "cases"
+    cases.mkdir()
+    expected = {item["id"] for item in declared_cases()}
+    case_stream = None
+    active_case = None
     with source.open("r", encoding="utf-8") as stream, trace.open("x", encoding="utf-8") as target:
-        for line in stream:
-            if "NUMERICAL_JSON " not in line:
-                continue
-            payload = line.split("NUMERICAL_JSON ", 1)[1].split("]]>", 1)[0].strip()
-            json.loads(payload, parse_constant=lambda value: (_ for _ in ()).throw(Rejected(value)))
-            target.write(payload + "\n")
+        try:
+            for line in stream:
+                if "NUMERICAL_JSON " not in line:
+                    continue
+                payload = line.split("NUMERICAL_JSON ", 1)[1].split("]]>", 1)[0].strip()
+                row = json.loads(payload, parse_constant=lambda value: (_ for _ in ()).throw(Rejected(value)))
+                target.write(payload + "\n")
+                if row.get("kind") == "inputs":
+                    if case_stream is not None:
+                        case_stream.close()
+                    active_case = row.get("id")
+                    case_stream = ((cases / f"{active_case}.jsonl").open("x", encoding="utf-8")
+                                   if active_case in expected else None)
+                if case_stream is not None and row.get("id") == active_case:
+                    case_stream.write(payload + "\n")
+                    if row.get("kind") == "case-end":
+                        case_stream.close()
+                        case_stream = None
+                        active_case = None
+        finally:
+            if case_stream is not None:
+                case_stream.close()
     return trace, attributes
 
 
@@ -163,7 +185,7 @@ def absent_lane(output, name, commit, source_sha256, status, reason):
     return result
 
 
-def compare_frozen(trace, lane, reference_dirs):
+def compare_frozen(lane, reference_dirs):
     catalog = json.loads(CATALOG.read_text())
     results = []
     for fixture in catalog["fixtures"]:
@@ -177,8 +199,10 @@ def compare_frozen(trace, lane, reference_dirs):
                             "qualification": "UNPASSED"})
             continue
         try:
-            portable_case_id(key)
-            result = diagnostic(key, source, trace)
+            candidate = lane / "cases" / f"{portable_case_id(key)}.jsonl"
+            if not candidate.is_file():
+                raise Rejected("matching portable case trace is absent")
+            result = diagnostic(key, source, candidate)
         except (Rejected, OSError, EOFError, StopIteration, KeyError, TypeError, ValueError) as error:
             result = {"fixture_key": key, "status": "FAILED",
                       "reason": str(error), "qualification": "UNPASSED"}
@@ -213,14 +237,19 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             raise Rejected("matrix XML is missing or stale")
         trace, attributes = extract_xml(host, lane)
         outcome["xml"] = attributes
-        comparisons = compare_frozen(trace, lane, reference_dirs)
+        comparisons = compare_frozen(lane, reference_dirs)
         outcome["frozen_comparison_results"] = {
             "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
             "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
             "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}
-        physical = nominal_free(trace)
+        physical = nominal_free(lane / "cases/long-free-60.jsonl")
         outcome["physical"] = physical
-        sleep = sleep_wake(trace)
+        sleep_ids = ([f"contacts-default-{hz}" for hz in (30, 60, 120)] +
+                     [f"contacts-configured-{hz}-r{repetition}"
+                      for hz in (30, 60, 120) for repetition in (1, 2)])
+        sleep = sleep_wake_rows(chain.from_iterable(
+            records(lane / "cases" / f"{case_id}.jsonl", allow_tagged_nonfinite=True)
+            for case_id in sleep_ids if (lane / "cases" / f"{case_id}.jsonl").is_file()))
         outcome["sleep_wake_physical"] = sleep
         if completed.returncode:
             raise Rejected("Gradle task failed")

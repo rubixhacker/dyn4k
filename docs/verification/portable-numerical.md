@@ -7,7 +7,7 @@ ANDROID_HOME="$HOME/Android/Sdk" python3 tools/numerical/portable/run.py \
   --output /tmp/dyn4k-portable-numerical-evidence
 ```
 
-The runner executes JVM, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. Android host execution uses a JVM. It does not qualify an Android device. The publication log and manifest bind the staged artifacts to the clean source revision. Each completed lane retains its Gradle log, raw XML, JSONL trace, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
+The runner executes JVM, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. Android host execution uses a JVM. It does not qualify an Android device. The publication log and manifest bind the staged artifacts to the clean source revision. Each completed lane retains its Gradle log, raw XML, whole JSONL trace, per-case JSONL traces, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
 
 ## Recorded contract
 
