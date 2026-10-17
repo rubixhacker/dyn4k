@@ -422,8 +422,29 @@ def verify_bundle(bundle, manifest, candidate_sha, require_matrix=True):
     matrix_path = bundle / "json" / matrix_name
     if matrix_path.is_file():
         matrix = qualify.load_json_strict(matrix_path)
-        if matrix.get("candidate_sha") != candidate_sha or matrix.get("total") != 112:
+        expected_lanes = {case["id"] for case in qualify.expand(qualify.matrix())}
+        if (len(expected_lanes) != 112 or matrix.get("candidate_sha") != candidate_sha
+                or matrix.get("total") != len(expected_lanes)):
             raise ValueError("bundle runtime matrix candidate or size differs")
+        lanes = matrix.get("lanes")
+        if not isinstance(lanes, list) or len(lanes) != len(expected_lanes):
+            raise ValueError("bundle matrix lane set is incomplete")
+        if any(not isinstance(lane, dict) or not isinstance(lane.get("id"), str)
+               for lane in lanes):
+            raise ValueError("bundle matrix lane identity is invalid")
+        lane_ids = [lane["id"] for lane in lanes]
+        if len(set(lane_ids)) != len(lane_ids) or set(lane_ids) != expected_lanes:
+            raise ValueError("bundle matrix lane IDs are missing, duplicate, or unknown")
+        statuses = ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")
+        if any(lane.get("status") not in statuses for lane in lanes):
+            raise ValueError("bundle matrix lane status is invalid")
+        counted = {status: sum(lane["status"] == status for lane in lanes)
+                   for status in statuses}
+        declared = matrix.get("counts")
+        if (not isinstance(declared, dict) or set(declared) != set(statuses)
+                or any(type(value) is not int for value in declared.values())
+                or declared != counted):
+            raise ValueError("bundle matrix counts differ from lane records")
         if route != "ubuntu-host":
             bounded = matrix.get("bounded_hosted_probes", [])
             if bounded != [top]:

@@ -65,9 +65,12 @@ class RawArtifactTests(unittest.TestCase):
             probe_path.with_name("hosted-macosArm64-source.json").write_text(json.dumps(source))
             probe_path.with_name("hosted-macosArm64-consumer.json").write_text(json.dumps(consumer))
             matrix_path = repository / "matrix-macosArm64.json"
+            lanes = [{"id": case["id"], "status": "NOT_RUN", "reason": "no evidence supplied"}
+                     for case in qualify.expand(qualify.matrix())]
             matrix_path.write_text(json.dumps({"candidate_sha": sha,
                                                "total": 112,
                                                "bounded_hosted_probes": [hosted],
+                                               "lanes": lanes,
                                                "counts": {"PASSED": 0, "FAILED": 0,
                                                           "UNAVAILABLE": 0, "NOT_RUN": 112}}))
 
@@ -110,6 +113,36 @@ class RawArtifactTests(unittest.TestCase):
             artifact.verify_bundle(workflow_bundle, manifest, sha, require_matrix=False)
             (workflow_bundle / "json/matrix-macosArm64.json").write_bytes(matrix_path.read_bytes())
             artifact.verify_bundle(workflow_bundle, manifest, sha)
+
+            def reject_matrix(label, edit, reason):
+                changed = repository / f"bundle-matrix-{label}"
+                shutil.copytree(workflow_bundle, changed)
+                path = changed / "json/matrix-macosArm64.json"
+                data = json.loads(path.read_text())
+                edit(data)
+                path.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, reason):
+                    artifact.verify_bundle(changed, manifest, sha)
+
+            def empty_with_fabricated_passes(data):
+                data["lanes"] = []
+                data["counts"] = {"PASSED": 112, "FAILED": 0,
+                                  "UNAVAILABLE": 0, "NOT_RUN": 0}
+
+            def duplicate_lane(data):
+                data["lanes"][1] = dict(data["lanes"][0])
+
+            def unknown_lane(data):
+                data["lanes"][1]["id"] = "unknown:runtime:minimum:default"
+
+            def contradictory_counts(data):
+                data["counts"].update(PASSED=1, NOT_RUN=111)
+
+            reject_matrix("empty", empty_with_fabricated_passes, "matrix.*lane")
+            reject_matrix("missing", lambda data: data["lanes"].pop(), "matrix.*lane")
+            reject_matrix("duplicate", duplicate_lane, "matrix.*lane")
+            reject_matrix("unknown", unknown_lane, "matrix.*lane")
+            reject_matrix("contradictory", contradictory_counts, "matrix.*count")
             failed_top = repository / "bundle-failed-top"
             shutil.copytree(workflow_bundle, failed_top)
             top_path = failed_top / "json/hosted-macosArm64.json"
@@ -251,6 +284,7 @@ class RawArtifactTests(unittest.TestCase):
                 {"candidate_sha": sha, "status": "FAILED"}))
             (repository / "runtime-matrix.json").write_text(json.dumps(
                 {"candidate_sha": sha, "total": 112,
+                 "lanes": lanes,
                  "counts": {"PASSED": 0, "FAILED": 0, "UNAVAILABLE": 0, "NOT_RUN": 112}}))
             (repository / "provider.log").write_text("duplicate org.dyn4j provider\n")
             missing_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
