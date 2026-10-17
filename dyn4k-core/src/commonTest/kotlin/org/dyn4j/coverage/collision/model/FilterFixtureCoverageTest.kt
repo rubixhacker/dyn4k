@@ -587,6 +587,9 @@ class CollisionBodyCoverageTest {
         val body = bodyWithTwo()
         assertEquals(null, body.getFixture(Vector2(2.0, 2.0)))
         assertSame(body.getFixture(0), body.getFixture(Vector2()))
+        val polygon = body.addFixture(Geometry.createUnitCirclePolygon(5, 1.0))
+        polygon.getShape().translate(0.5, 0.0)
+        assertSame(polygon, body.getFixture(Vector2(1.25, 0.1)))
     }
     @Test fun getFixtureByIndex() {
         val body = bodyWithTwo()
@@ -661,6 +664,10 @@ class CollisionBodyCoverageTest {
         assertTrue(body.getFixtures(Vector2(3.0, 3.0)).isEmpty())
         assertEquals(2, body.getFixtures(Vector2()).size)
         assertSame(body.getFixture(0), body.getFixtures(Vector2(0.75, 0.0)).single())
+        val polygon = body.addFixture(Geometry.createUnitCirclePolygon(5, 1.0))
+        polygon.getShape().translate(0.5, 0.0)
+        assertEquals(3, body.getFixtures(Vector2()).size)
+        assertSame(polygon, body.getFixtures(Vector2(1.25, 0.1)).single())
     }
     @Test fun getLocalPoint() {
         val body = CoverageBody()
@@ -669,6 +676,12 @@ class CollisionBodyCoverageTest {
         val destination = Vector2()
         body.getLocalPoint(Vector2(3.0, 4.0), destination)
         assertEquals(Vector2(1.0, 1.0), destination)
+        body.getTransform().identity()
+        body.rotate(kotlin.math.PI / 2.0)
+        body.translate(2.0, 3.0)
+        val rotated = body.getLocalPoint(Vector2(2.0, 4.0))
+        assertEquals(1.0, rotated.x, 1e-12)
+        assertEquals(0.0, rotated.y, 1e-12)
     }
     @Test fun getLocalVector() {
         val body = CoverageBody()
@@ -677,6 +690,11 @@ class CollisionBodyCoverageTest {
         val destination = Vector2()
         body.getLocalVector(Vector2(1.0, 1.0), destination)
         assertEquals(Vector2(1.0, 1.0), destination)
+        body.getTransform().identity()
+        body.rotate(kotlin.math.PI / 2.0)
+        val rotated = body.getLocalVector(Vector2(0.0, 1.0))
+        assertEquals(1.0, rotated.x, 1e-12)
+        assertEquals(0.0, rotated.y, 1e-12)
     }
     @Test fun getSetOwner() {
         val body = CoverageBody(); val owner = Any()
@@ -723,6 +741,12 @@ class CollisionBodyCoverageTest {
         val destination = Vector2()
         body.getWorldPoint(Vector2(1.0, 1.0), destination)
         assertEquals(Vector2(3.0, 4.0), destination)
+        body.getTransform().identity()
+        body.rotate(kotlin.math.PI / 2.0)
+        body.translate(2.0, 3.0)
+        val rotated = body.getWorldPoint(Vector2(1.0, 0.0))
+        assertEquals(2.0, rotated.x, 1e-12)
+        assertEquals(4.0, rotated.y, 1e-12)
     }
     @Test fun getWorldVector() {
         val body = CoverageBody(); body.translate(2.0, 3.0)
@@ -730,6 +754,11 @@ class CollisionBodyCoverageTest {
         val destination = Vector2()
         body.getWorldVector(Vector2(1.0, 1.0), destination)
         assertEquals(Vector2(1.0, 1.0), destination)
+        body.getTransform().identity()
+        body.rotate(kotlin.math.PI / 2.0)
+        val rotated = body.getWorldVector(Vector2(1.0, 0.0))
+        assertEquals(0.0, rotated.x, 1e-12)
+        assertEquals(1.0, rotated.y, 1e-12)
     }
     @Test fun getSetEnabled() {
         val body = CoverageBody()
@@ -763,6 +792,10 @@ class CollisionBodyCoverageTest {
         assertEquals(1, body.getFixtureCount())
         assertEquals(1, body.removeFixtures(Vector2()).size)
         assertEquals(0, body.getFixtureCount())
+        body.addFixture(Circle(1.0))
+        body.addFixture(Circle(0.5))
+        assertEquals(2, body.removeFixtures(Vector2()).size)
+        assertEquals(0, body.getFixtureCount())
     }
     @Test fun removeFixtureByIndexOutOfBounds() {
         assertFailsWith<IndexOutOfBoundsException> { CoverageBody().removeFixture(0) }
@@ -779,6 +812,15 @@ class CollisionBodyCoverageTest {
         body.getTransform().identity()
         body.rotate(angle, Vector2(1.0, 1.0))
         assertEquals(0.6339745962155612, body.getTransform().getTranslationX(), 1e-12)
+        body.getTransform().identity()
+        body.rotate(angle, 1.0, 1.0)
+        assertEquals(-0.3660254037844386, body.getTransform().getTranslationY(), 1e-12)
+        body.getTransform().identity()
+        body.rotate(Rotation(angle), Vector2(1.0, 1.0))
+        assertEquals(0.6339745962155612, body.getTransform().getTranslationX(), 1e-12)
+        body.getTransform().identity()
+        body.rotate(Rotation(angle), 1.0, 1.0)
+        assertEquals(-0.3660254037844386, body.getTransform().getTranslationY(), 1e-12)
         body.getTransform().identity()
         body.translate(1.0, 1.0)
         body.rotateAboutCenter(angle)
@@ -804,6 +846,12 @@ class CollisionBodyCoverageTest {
         body.getFixture(0).setFilter(CategoryFilter(1, 3))
         body.getFixture(0).setSensor(true)
         body.getFixture(0).setUserData(Any())
+        body.updateRadius(Vector2())
+        body.setFixtureModificationHandler(object : org.dyn4j.collision.FixtureModificationHandler<Fixture> {
+            override fun onFixtureAdded(fixture: Fixture) = Unit
+            override fun onFixtureRemoved(fixture: Fixture) = Unit
+            override fun onAllFixturesRemoved() = Unit
+        })
         body.translate(2.0, 3.0)
         body.getPreviousTransform().set(body.getTransform())
         val copy = body.copy()
@@ -814,8 +862,10 @@ class CollisionBodyCoverageTest {
         assertNotSame(body.getFixture(0).getShape(), copy.getFixture(0).getShape())
         assertNotSame(body.getFixture(0).getFilter(), copy.getFixture(0).getFilter())
         assertEquals(body.getTransform().getTranslation(), copy.getTransform().getTranslation())
+        assertEquals(body.getRotationDiscRadius(), copy.getRotationDiscRadius())
         assertFalse(copy.isEnabled())
         assertTrue(copy.getFixture(0).isSensor())
+        assertEquals(null, copy.getFixtureModificationHandler())
         assertEquals(null, copy.getOwner())
         assertEquals(null, copy.getUserData())
         assertEquals(null, copy.getFixture(0).getUserData())
