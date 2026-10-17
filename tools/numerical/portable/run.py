@@ -33,6 +33,20 @@ HOST_TASKS = {
     "node-wasm-js": "wasmJsNodeTest",
     "node-wasm-wasi": "wasmWasiNodeTest",
 }
+MATRIX_METHODS = (
+    "geometryCollisionBoundaryAndScale",
+    "freeMotionForcesDampingAndRestitution",
+    "defaultContactsFrictionSleepAndWake",
+    "configured30Repeat1", "configured30Repeat2",
+    "configured60Repeat1", "configured60Repeat2",
+    "configured120Repeat1", "configured120Repeat2",
+    "everyJointWithInitialAndApplicableActiveModes",
+    "independentJointBooleanModes",
+    "independentJointNumericAndLimitModes",
+    "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure",
+    "continuousCollisionCasesAtFrozenRates",
+    "longRunningFreeMotionInvariantScene",
+)
 STAGE_TASKS = (
     ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
     ":dyn4k-core:publishJvmPublicationToStagingRepository",
@@ -139,7 +153,7 @@ def runtime(host, log_path):
     return result
 
 
-def extract_xml(host, output):
+def extract_xml(host, output, method=None):
     directory = PORTABLE / "build/test-results" / HOST_TASKS[host]
     matching = sorted(directory.glob("TEST-*PortableMatrixTest*.xml"))
     if len(matching) != 1:
@@ -149,16 +163,23 @@ def extract_xml(host, output):
         stream.readline()
         suite = stream.readline().decode()
     attributes = dict(re.findall(r'([a-z]+)="([^"]*)"', suite))
-    shutil.copyfile(source, output / "matrix.xml")
+    if method is None:
+        shutil.copyfile(source, output / "matrix.xml")
+    else:
+        xml_dir = output / "xml"
+        xml_dir.mkdir(exist_ok=True)
+        shutil.move(source, xml_dir / f"{method}.xml")
     trace = output / "trace.jsonl"
     cases = output / "cases"
-    cases.mkdir()
+    cases.mkdir(exist_ok=True)
     expected = {item["id"] for item in declared_cases()}
     observed = {}
     input_records = 0
     case_stream = None
     active_case = None
-    with source.open("r", encoding="utf-8") as stream, trace.open("x", encoding="utf-8") as target:
+    archived = output / "xml" / f"{method}.xml" if method is not None else source
+    with archived.open("r", encoding="utf-8") as stream, trace.open(
+            "a" if method is not None and trace.exists() else "x", encoding="utf-8") as target:
         try:
             for line in stream:
                 if "NUMERICAL_JSON " not in line:
@@ -256,28 +277,72 @@ def execute(host, output, commit, source_sha256, reference_dirs):
     lane.mkdir(parents=True, exist_ok=False)
     target_artifacts = artifacts(host)
     artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
-    started = __import__("time").time()
     env = os.environ.copy()
     env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
-    command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
-               f"-PportableRepository={ROOT / 'build/staging-repository'}",
-               "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
-               "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
-    if host == "jvm8":
-        command.extend(("-PportableJvm8=true", "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
-    with (lane / "gradle.log").open("x", encoding="utf-8") as log:
-        completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
-    outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": completed.returncode,
-               "status": "FAILED" if completed.returncode else "PASSED",
+    outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": 0,
+               "status": "PASSED",
                "qualification": "UNPASSED", "frozen_comparison": "NOT_RUN",
                "candidate_commit": commit, "source_sha256": source_sha256,
                "artifact_sha256": artifact_sha256}
     trace = None
     try:
-        xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob("TEST-*PortableMatrixTest*.xml"))
-        if len(xml) != 1 or xml[0].stat().st_mtime < started:
-            raise Rejected("matrix XML is missing or stale")
-        trace, attributes, raw_counts = extract_xml(host, lane)
+        attributes = {key: 0 for key in ("tests", "skipped", "failures", "errors")}
+        raw_counts = {"expected_cases": len(declared_cases()), "input_records": 0,
+                      "observed_cases": 0, "completed_cases": 0, "states": 0,
+                      "tagged_nonfinite_values": 0, "per_case": {}}
+        methods = []
+        runtimes = []
+        for method in MATRIX_METHODS:
+            started = __import__("time").time()
+            command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
+                       "--tests", f"portable.PortableMatrixTest.{method}",
+                       f"-PportableRepository={ROOT / 'build/staging-repository'}",
+                       "--rerun", "--no-daemon", "--console=plain", "--info",
+                       "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+            if host == "jvm8":
+                command.extend(("-PportableJvm8=true",
+                                "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
+            log_path = lane / f"gradle-{method}.log"
+            with log_path.open("x", encoding="utf-8") as log:
+                completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                                           stderr=subprocess.STDOUT, check=False)
+            method_result = {"method": method, "gradle_exit": completed.returncode,
+                             "log_sha256": digest(log_path)}
+            methods.append(method_result)
+            if completed.returncode:
+                outcome["gradle_exit"] = completed.returncode
+                outcome["status"] = "FAILED"
+            xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
+                "TEST-*PortableMatrixTest*.xml"))
+            if len(xml) != 1 or xml[0].stat().st_mtime < started:
+                method_result["reason"] = "matrix XML is missing or stale"
+                outcome["status"] = "FAILED"
+                continue
+            trace, row_attributes, row_counts = extract_xml(host, lane, method)
+            method_result["xml"] = row_attributes
+            method_result["xml_sha256"] = digest(lane / "xml" / f"{method}.xml")
+            method_result["cases"] = row_counts["completed_cases"]
+            for key in attributes:
+                attributes[key] += int(row_attributes.get(key, "-1"))
+            for key in ("input_records", "completed_cases", "states", "tagged_nonfinite_values"):
+                raw_counts[key] += row_counts[key]
+            duplicate = raw_counts["per_case"].keys() & row_counts["per_case"].keys()
+            if duplicate:
+                raise Rejected(f"case appears in more than one test method: {sorted(duplicate)[:5]}")
+            raw_counts["per_case"].update(row_counts["per_case"])
+            try:
+                runtimes.append(runtime(host, log_path))
+            except Rejected as error:
+                method_result["reason"] = str(error)
+                outcome["status"] = "FAILED"
+        outcome["methods"] = methods
+        raw_counts["observed_cases"] = len(raw_counts["per_case"])
+        if not runtimes:
+            raise Rejected("no executed target runtime was bound")
+        executed_runtime = runtimes[0]
+        if any(row != executed_runtime for row in runtimes[1:]):
+            raise Rejected("test methods used different target runtimes")
+        executed_runtime["method_executions"] = len(runtimes)
         outcome["xml"] = attributes
         outcome["raw_counts"] = raw_counts
         outcome["started_cases"] = raw_counts["observed_cases"]
@@ -285,7 +350,6 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         outcome["incomplete_cases"] = sorted(case_id for case_id, counts in
                                              raw_counts["per_case"].items()
                                              if counts["case_ends"] != 1)
-        executed_runtime = runtime(host, lane / "gradle.log")
         outcome["runtime"] = executed_runtime
         comparisons = compare_frozen(lane, reference_dirs)
         outcome["frozen_comparison_results"] = {
@@ -306,8 +370,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             records(lane / "cases" / f"{case_id}.jsonl", allow_tagged_nonfinite=True)
             for case_id in sleep_ids if (lane / "cases" / f"{case_id}.jsonl").is_file()))
         outcome["sleep_wake_physical"] = sleep
-        if completed.returncode:
-            raise Rejected("Gradle task failed")
+        if outcome["status"] == "FAILED":
+            raise Rejected("one or more method tasks failed or lacked current XML")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
                (("tests", 15), ("skipped", 0), ("failures", 0), ("errors", 0))):
             raise Rejected(f"matrix XML reports incomplete tests: {attributes}")

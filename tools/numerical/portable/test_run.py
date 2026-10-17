@@ -62,6 +62,37 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(len(trace.read_text().splitlines()), 3)
             self.assertTrue((output / "matrix.xml").is_file())
 
+    def test_method_xmls_append_to_one_trace_without_losing_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            results = root / "build/test-results/jvmTest"
+            results.mkdir(parents=True)
+            output = root / "evidence"
+            output.mkdir()
+            def report(case_id):
+                rows = [{"kind": "inputs", "id": case_id},
+                        {"kind": "state", "id": case_id, "step": 1},
+                        {"kind": "case-end", "id": case_id}]
+                (results / "TEST-portable.PortableMatrixTest.xml").write_text(
+                    '<?xml version="1.0"?>\n'
+                    '<testsuite tests="1" skipped="0" failures="0" errors="0">\n'
+                    '<system-out><![CDATA[' +
+                    ''.join("NUMERICAL_JSON " + json.dumps(row) + "\n" for row in rows) +
+                    ']]></system-out>\n</testsuite>\n')
+            with patch.object(run, "PORTABLE", root):
+                report("geometry-boundary-s0-o0-d0")
+                first = run.extract_xml("jvm", output, "geometryCollisionBoundaryAndScale")
+                report("long-free-60")
+                second = run.extract_xml("jvm", output, "longRunningFreeMotionInvariantScene")
+            self.assertEqual(first[0], second[0])
+            self.assertEqual(len(first[0].read_text().splitlines()), 6)
+            self.assertEqual(first[2]["completed_cases"], 1)
+            self.assertEqual(second[2]["completed_cases"], 1)
+            self.assertTrue((output / "xml/geometryCollisionBoundaryAndScale.xml").is_file())
+            self.assertTrue((output / "xml/longRunningFreeMotionInvariantScene.xml").is_file())
+            self.assertTrue((output / "cases/geometry-boundary-s0-o0-d0.jsonl").is_file())
+            self.assertTrue((output / "cases/long-free-60.jsonl").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
