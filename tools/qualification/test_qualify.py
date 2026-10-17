@@ -45,20 +45,20 @@ class QualificationTests(unittest.TestCase):
             ("androidHost", "", ""),
         ):
             cases = qualify.expected_probe_cases(manifest, groups[group_id])
-            self.assertEqual(32 if group_id == "jvm" else 30, len(cases), group_id)
+            self.assertEqual(44 if group_id == "jvm" else 42, len(cases), group_id)
             self.assertEqual(
                 [(f"{prefix}io.github.rubixhacker.dyn4k.GeometryShapeTest", name + suffix)
                  for name in self.GEOMETRY_CASES],
                 [case for case in cases if case[0].endswith("GeometryShapeTest")], group_id)
-            self.assertEqual(2, len(qualify.expected_probe_cases(
+            self.assertEqual(286, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
 
     def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         group = next(group for group in manifest["groups"] if group["id"] == "jvm")
         cases = qualify.expected_probe_cases(manifest, group)
-        self.assertEqual(32, len(cases))
-        suite = ET.Element("testsuite", tests="33", failures="0", errors="0", skipped="0")
+        self.assertEqual(44, len(cases))
+        suite = ET.Element("testsuite", tests="45", failures="0", errors="0", skipped="0")
         for classname, name in cases + [("io.github.rubixhacker.dyn4k.GeometryShapeTest", "unexpected[jvm]")]:
             ET.SubElement(suite, "testcase", classname=classname, name=name, time="0")
         xml = ET.tostring(suite, encoding="unicode")
@@ -73,8 +73,8 @@ class QualificationTests(unittest.TestCase):
                                            Path(root) / "result.json",
                                            manifest={**manifest, "groups": [report_group]})
                 self.assertEqual("PROBE_FAILED", result["status"])
-                self.assertEqual(32, result["expected"])
-                self.assertEqual(33, result["executed"])
+                self.assertEqual(44, result["expected"])
+                self.assertEqual(45, result["executed"])
                 self.assertIn("unexpected cases", result["reason"])
             finally:
                 os.chdir(previous)

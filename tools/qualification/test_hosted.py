@@ -24,11 +24,11 @@ class HostedQualificationTests(unittest.TestCase):
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
         groups = {group["id"]: group for group in manifest["groups"]}
         for target in hosted.NATIVE_TARGETS:
-            self.assertEqual(30, len(qualify.expected_probe_cases(manifest, groups[target])))
-            self.assertEqual(2, len(qualify.expected_probe_cases(manifest, groups[f"core-{target}"])))
+            self.assertEqual(42, len(qualify.expected_probe_cases(manifest, groups[target])))
+            self.assertEqual(286, len(qualify.expected_probe_cases(manifest, groups[f"core-{target}"])))
             self.assertEqual(2, len(qualify.expected_probe_cases(
                 manifest, groups[f"consumer-{target}"])))
-        self.assertEqual(32, len(qualify.expected_probe_cases(manifest, groups["jvm"])))
+        self.assertEqual(44, len(qualify.expected_probe_cases(manifest, groups["jvm"])))
         self.assertEqual(
             [("jsBrowserTest.qualification.StagedGeometryTest",
               "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, browser, Safari26.6.2, MacOS10.15.7]"),
@@ -134,14 +134,14 @@ class HostedQualificationTests(unittest.TestCase):
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
                    "xcode_version": "26.4.1", "simulators": {}}
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
-        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 32,
-                "executed": 32, "failures": 0, "skipped": 0, "exit_code": 0}
+        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 328,
+                "executed": 328, "failures": 0, "skipped": 0, "exit_code": 0}
         consumer = {**good, "expected": 2, "executed": 2}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         self.assertEqual("PROBE_PASSED", hosted.hosted_status(
             "macosArm64", sha, runtime, good, consumer, hashes, manifest)[0])
         for source, staged in (({**good, "candidate_sha": "d" * 40}, consumer),
-                               (None, consumer), ({**good, "executed": 30}, consumer),
+                               (None, consumer), ({**good, "executed": 327}, consumer),
                                (good, {**consumer, "status": "PROBE_FAILED"}),
                                (good, None)):
             self.assertEqual("PROBE_FAILED", hosted.hosted_status(
@@ -153,8 +153,8 @@ class HostedQualificationTests(unittest.TestCase):
         def frozen_digest(ids):
             return qualify.manifest_digest({**manifest, "groups": [group for group in manifest["groups"]
                                                             if group["id"] in ids]})
-        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 32,
-                  "executed": 32, "failures": 0, "skipped": 0, "exit_code": 0,
+        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 328,
+                  "executed": 328, "failures": 0, "skipped": 0, "exit_code": 0,
                   "manifest_sha256": frozen_digest(("core-macosArm64", "macosArm64"))}
         consumer = {**source, "expected": 2, "executed": 2,
                     "manifest_sha256": frozen_digest(("consumer-macosArm64",))}
