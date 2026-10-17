@@ -219,6 +219,7 @@ val jvmApi = mapOf(
             "enabled", "fixtureModificationHandler", "owner"
         )
     ),
+    "org/dyn4j/exception/CopyException" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/MonotoneChain" to JvmApiSpec(),
@@ -407,6 +408,10 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val isVararg = name in spec.varargMethods &&
                                     Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                 var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                if (owner == "org/dyn4j/exception/CopyException" && name == "<init>" &&
+                                    descriptor == "(Ljava/lang/String;Ljava/lang/String;)V") {
+                                    revised = revised or Opcodes.ACC_SYNTHETIC
+                                }
                                 if (name in spec.nonFinalStaticMethods && access and Opcodes.ACC_STATIC != 0) {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
@@ -989,9 +994,10 @@ tasks.register<JavaExec>("runUpstreamCollisionModelTests") {
 
 val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
 val collisionModelStaticHideSource = file("src/jvmConsumer/java/Issue35StaticHideConsumer.java")
+val copyExceptionAmbiguitySource = file("src/jvmConsumer/java/CopyExceptionAmbiguity.java")
 val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = baseline
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-baseline"))
     options.release.set(8)
@@ -1003,7 +1009,7 @@ tasks.register<JavaExec>("runBaselineCollisionModelConsumer") {
 }
 val candidateCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(tasks.named("jvmJar"))
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-candidate"))
     options.release.set(8)
@@ -1015,7 +1021,7 @@ tasks.register<JavaExec>("runCandidateCollisionModelConsumer") {
 }
 val stagedCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = stagedGeometryClasspath
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-staged"))
     options.release.set(8)
@@ -1027,7 +1033,7 @@ tasks.register<JavaExec>("runStagedCollisionModelConsumer") {
 }
 val androidCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(androidCompileJar)
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-android"))
     options.release.set(8)
