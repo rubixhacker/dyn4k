@@ -1,60 +1,62 @@
 package org.dyn4j.world
 
-internal class WorldTrackedArrayList<E> : ArrayList<E> {
+internal class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMutableList<E>() {
+    private val backing = ArrayList<E>(initialCapacity)
     private var structuralVersion = 0
 
-    constructor() : super()
-    constructor(initialCapacity: Int) : super(initialCapacity)
+    override val size: Int get() = backing.size
+    override fun get(index: Int): E = backing[index]
+    override fun set(index: Int, element: E): E = backing.set(index, element)
 
     override fun add(element: E): Boolean {
-        val added = super.add(element)
+        val added = backing.add(element)
         structuralVersion++
         return added
     }
 
     override fun add(index: Int, element: E) {
-        super.add(index, element)
+        backing.add(index, element)
         structuralVersion++
     }
 
     override fun addAll(elements: Collection<E>): Boolean {
-        val added = super.addAll(elements)
+        val added = backing.addAll(elements)
         structuralVersion++
         return added
     }
 
     override fun addAll(index: Int, elements: Collection<E>): Boolean {
-        val added = super.addAll(index, elements)
+        val added = backing.addAll(index, elements)
         structuralVersion++
         return added
     }
 
     override fun remove(element: E): Boolean {
-        val removed = super.remove(element)
+        val removed = backing.remove(element)
         if (removed) structuralVersion++
         return removed
     }
 
     override fun removeAt(index: Int): E {
-        val removed = super.removeAt(index)
+        val removed = backing.removeAt(index)
         structuralVersion++
         return removed
     }
 
     override fun removeAll(elements: Collection<E>): Boolean {
-        val removed = super.removeAll(elements)
+        val removed = backing.removeAll(elements)
         if (removed) structuralVersion++
         return removed
     }
 
     override fun retainAll(elements: Collection<E>): Boolean {
-        val removed = super.retainAll(elements)
+        val removed = backing.retainAll(elements)
         if (removed) structuralVersion++
         return removed
     }
 
     override fun clear() {
-        super.clear()
+        backing.clear()
         structuralVersion++
     }
 
