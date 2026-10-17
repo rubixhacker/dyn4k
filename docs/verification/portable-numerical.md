@@ -28,6 +28,7 @@ The nominal force, torque, accumulated force and accumulated torque fields are p
 The physical diagnostic reuses the approved represented-geometry depth and phase schedule for default and configured sleep/wake cases. It reports all nine case counts and failed steps separately; default failures remain failures. The 36,000-step free-motion invariant is checked against its analytic limits. These diagnostics do not replace input, event, or complete-channel parity.
 
 The runner invokes that diagnostic for every frozen reference found in `--reference-dir`, using `/tmp/dyn4k-configured-control/baseline-trace` by default. Each host gets `frozen-comparison.json` with explicit unavailable references. A missing reference, nonmatching schema, or failed approved channel never becomes a parity pass.
+Independent frozen case comparisons run in four bounded worker processes after each host test. The result list remains in fixture order, and each worker reads only the retained per-case trace and its pinned reference.
 
 ## Acceptance boundary
 

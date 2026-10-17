@@ -7,8 +7,11 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from itertools import chain
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import declared_cases
 from physical import nominal_free, sleep_wake_rows
@@ -210,28 +213,39 @@ def absent_lane(output, name, commit, source_sha256, status, reason):
     return result
 
 
+def _compare_frozen_one(job):
+    key, source, candidate = job
+    try:
+        if not candidate.is_file():
+            raise Rejected("matching portable case trace is absent")
+        return diagnostic(key, source, candidate)
+    except (Rejected, OSError, EOFError, StopIteration, KeyError, TypeError, ValueError) as error:
+        return {"fixture_key": key, "status": "FAILED",
+                "reason": str(error), "qualification": "UNPASSED"}
+
+
 def compare_frozen(lane, reference_dirs):
     catalog = json.loads(CATALOG.read_text())
-    results = []
+    resolved = []
+    jobs = []
     for fixture in catalog["fixtures"]:
         key = fixture["key"]
         filename = fixture["reference"]["file"]
         source = next((directory / filename for directory in reference_dirs
                        if (directory / filename).is_file()), None)
         if source is None:
-            results.append({"fixture_key": key, "status": "UNAVAILABLE_REFERENCE",
-                            "expected_reference_sha256": fixture["reference"]["gzip_sha256"],
-                            "qualification": "UNPASSED"})
-            continue
-        try:
-            candidate = lane / "cases" / f"{portable_case_id(key)}.jsonl"
-            if not candidate.is_file():
-                raise Rejected("matching portable case trace is absent")
-            result = diagnostic(key, source, candidate)
-        except (Rejected, OSError, EOFError, StopIteration, KeyError, TypeError, ValueError) as error:
-            result = {"fixture_key": key, "status": "FAILED",
-                      "reason": str(error), "qualification": "UNPASSED"}
-        results.append(result)
+            resolved.append({"fixture_key": key, "status": "UNAVAILABLE_REFERENCE",
+                             "expected_reference_sha256": fixture["reference"]["gzip_sha256"],
+                             "qualification": "UNPASSED"})
+        else:
+            jobs.append((key, source, lane / "cases" / f"{portable_case_id(key)}.jsonl"))
+            resolved.append(None)
+    if jobs:
+        with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as pool:
+            compared = iter(pool.map(_compare_frozen_one, jobs))
+            results = [entry if entry is not None else next(compared) for entry in resolved]
+    else:
+        results = resolved
     (lane / "frozen-comparison.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
     return results
 
