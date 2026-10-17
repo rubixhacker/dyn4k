@@ -29,6 +29,8 @@ import org.dyn4j.exception.ValueOutOfRangeException
 import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Mass
 import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
 
 open class BodyFixture : Fixture {
     @JvmField protected var density = DEFAULT_DENSITY
@@ -50,7 +52,9 @@ open class BodyFixture : Fixture {
         this.density = density
     }
     open fun getDensity() = density
-    internal fun rawDensity() = density
+    @Suppress("INAPPLICABLE_JVM_NAME")
+    @JvmName("rawDensity-dyn4k-internal")
+    @JvmSynthetic internal fun rawDensity() = density
     open fun setFriction(friction: Double) {
         if (friction < 0.0) throw ValueOutOfRangeException("friction", friction, ValueOutOfRangeException.MUST_BE_GREATER_THAN_OR_EQUAL_TO, 0.0)
         this.friction = friction

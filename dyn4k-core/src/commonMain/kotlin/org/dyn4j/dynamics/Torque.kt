@@ -27,6 +27,8 @@ package org.dyn4j.dynamics
 import org.dyn4j.Copyable
 import org.dyn4j.exception.ArgumentNullException
 import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
 
 open class Torque : Copyable<Torque> {
     @JvmField protected var torque: Double
@@ -40,6 +42,8 @@ open class Torque : Copyable<Torque> {
     open fun set(torque: Torque?) { this.torque = (torque ?: throw ArgumentNullException("torque")).torque }
     open fun isComplete(elapsedTime: Double) = true
     open fun getTorque() = torque
-    internal fun rawTorque() = torque
+    @Suppress("INAPPLICABLE_JVM_NAME")
+    @JvmName("rawTorque-dyn4k-internal")
+    @JvmSynthetic internal fun rawTorque() = torque
     override fun toString() = torque.toString()
 }
