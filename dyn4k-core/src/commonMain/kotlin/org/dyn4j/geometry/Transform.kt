@@ -144,7 +144,9 @@ open class Transform : Transformable, Copyable<Transform> {
     open fun getTranslationTransform() = Transform(1.0, 0.0, x, y)
     open fun getCost() = cost
     open fun getSint() = sint
+    @kotlin.jvm.JvmName("costValue-dyn4k-internal")
     @kotlin.jvm.JvmSynthetic fun costValue() = cost
+    @kotlin.jvm.JvmName("sintValue-dyn4k-internal")
     @kotlin.jvm.JvmSynthetic fun sintValue() = sint
     open fun getRotationAngle(): Double {
         val a = acos(cost)

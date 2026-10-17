@@ -69,7 +69,9 @@ open class Rotation : Copyable<Rotation> {
     open fun set(angle: Double): Rotation { cost = cos(angle); sint = sin(angle); return this }
     open fun getCost() = cost
     open fun getSint() = sint
+    @kotlin.jvm.JvmName("costValue-dyn4k-internal")
     @kotlin.jvm.JvmSynthetic fun costValue() = cost
+    @kotlin.jvm.JvmName("sintValue-dyn4k-internal")
     @kotlin.jvm.JvmSynthetic fun sintValue() = sint
     open fun toRadians(): Double {
         val c = clamp(cost)

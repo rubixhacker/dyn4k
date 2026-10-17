@@ -20,7 +20,7 @@ class FoundationExtraMethodsParityTest {
 
     @Test
     fun rotationKeepsFieldBasedMathAndGetterDispatch() {
-        val rotation = RotationExtension()
+        val rotation: Rotation = RotationExtension()
 
         assertEquals(17.0, rotation.getCost())
         assertEquals(19.0, rotation.getSint())
@@ -38,7 +38,7 @@ class FoundationExtraMethodsParityTest {
 
     @Test
     fun transformKeepsFieldBasedFactoryAndGetterDispatch() {
-        val transform = TransformExtension()
+        val transform: Transform = TransformExtension()
 
         assertEquals(23.0, transform.getCost())
         assertEquals(29.0, transform.getSint())
