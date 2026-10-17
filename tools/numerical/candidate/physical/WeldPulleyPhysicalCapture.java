@@ -110,6 +110,9 @@ public final class WeldPulleyPhysicalCapture {
 
     public static void main(String[] args) throws Exception {
         if (args.length != 6) throw new IllegalArgumentException("trace case declarationHash captureHash artifactHash candidateCommit");
+        Path trace = Path.of(args[0]).toAbsolutePath();
+        Files.createDirectories(trace.getParent());
+        RuntimeStamp.write(trace.getParent(), World.class, WeldPulleyPhysicalCapture.class);
         String name = args[1];
         World<Body> world = new World<>();
         world.setGravity(new Vector2(0, -9.8));

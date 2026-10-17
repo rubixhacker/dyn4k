@@ -102,7 +102,7 @@ def main():
                     "source_hash_method": "SHA-256 of git archive --format=tar HEAD",
                     "artifact_sha256": artifact_hash, "artifact_path": str(receipt.ARTIFACT.relative_to(ROOT)),
                     "capture_sha256": capture_hash, "build_config_sha256": receipt.build_config_hash(),
-                    "runtime": receipt.runtime_identity(), "trace_sha256": receipt.sha256(Path(args.trace).read_bytes()),
+                    "runtime": receipt.runtime_identity(args.trace), "trace_sha256": receipt.sha256(Path(args.trace).read_bytes()),
                     "reference_trace_sha256": manifest["cases"][args.case]["gzip_sha256"],
                     "expected_counts": result["counts"], "executed_counts": result["counts"],
                     "skipped": 0, "physical": result}
