@@ -38,8 +38,7 @@ import org.dyn4j.geometry.Transformable
 import org.dyn4j.geometry.Vector2
 import kotlin.math.max
 
-@Suppress("UNCHECKED_CAST")
-private fun <T> passNullable(value: T?): T = value as T
+internal expect fun <T> passNullable(value: T?): T
 
 interface FixtureModificationHandler<T : Fixture> {
     fun onFixtureAdded(fixture: T)
@@ -51,7 +50,9 @@ interface CollisionBody<T : Fixture> : Transformable, Shiftable, DataContainer, 
     companion object { const val TYPICAL_FIXTURE_COUNT = 1 }
     override fun copy(): CollisionBody<T>
     fun addFixture(fixture: T?): CollisionBody<T>
-    fun addFixture(convex: Convex): T
+    fun addFixture(convex: Convex?): T
+    @kotlin.jvm.JvmSynthetic
+    fun addFixture(absent: Nothing?): CollisionBody<T> = addFixture(fixture = null)
     fun getFixture(index: Int): T
     fun containsFixture(fixture: T?): Boolean
     fun getFixture(point: Vector2?): T?

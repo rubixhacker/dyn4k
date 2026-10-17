@@ -13,6 +13,7 @@ import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.UnitConversion
 import org.dyn4j.Unsafe
+import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.CopyException
 
 class CollisionModelTest {
@@ -55,13 +56,68 @@ class CollisionModelTest {
     private class TestBody : AbstractCollisionBody<Fixture> {
         constructor() : super()
         private constructor(body: TestBody) : super(body)
-        override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+        override fun addFixture(convex: Convex?): Fixture = Fixture(convex).also { addFixture(it) }
         override fun getLocalCenter() = Vector2()
         override fun copy() = TestBody(this)
         fun addDirectly(fixture: Fixture) { fixtures.add(fixture) }
         fun protectedIterator(): MutableIterator<Fixture> = fixtures.iterator()
         fun protectedSubList(): MutableList<Fixture> = fixtures.subList(0, 1)
         fun updateRadiusWith(center: Vector2?): Double { setRotationDiscRadius(center); return radius }
+    }
+
+    private class NullableShapeBody : AbstractCollisionBody<Fixture>() {
+        override fun addFixture(convex: Convex?): Fixture {
+            val shape = convex ?: throw ArgumentNullException("convex")
+            return Fixture(shape).also { addFixture(it) }
+        }
+        override fun getLocalCenter() = Vector2()
+        override fun copy() = NullableShapeBody()
+    }
+
+    @Test
+    fun nullableShapeOverrideReceivesNullThroughCollisionBody() {
+        val body: CollisionBody<Fixture> = NullableShapeBody()
+        val failure = assertFailsWith<ArgumentNullException> { body.addFixture(null as Convex?) }
+        assertEquals("convex cannot be null", failure.message)
+        val fixtureFailure = assertFailsWith<ArgumentNullException> { body.addFixture(null) }
+        assertEquals("fixture cannot be null", fixtureFailure.message)
+        val fixture = body.addFixture(Circle(1.0))
+        assertSame(fixture, body.getFixture(0))
+    }
+
+    @Test
+    fun nullPointFailsWhenAFixtureUsesItsShape() {
+        val empty = TestBody()
+        assertEquals(null, empty.getFixture(null))
+        assertTrue(empty.getFixtures(null).isEmpty())
+        assertFalse(empty.contains(null))
+        assertEquals(null, empty.removeFixture(null as Vector2?))
+        assertTrue(empty.removeFixtures(null).isEmpty())
+        assertEquals(0.0, empty.updateRadiusWith(null))
+        val emptyBounds = AABB(1.0, 1.0, 2.0, 2.0)
+        empty.computeAABB(null, emptyBounds)
+        assertEquals(AABB(0.0, 0.0, 0.0, 0.0), emptyBounds)
+
+        val body = TestBody()
+        var shapeReads = 0
+        val fixture = object : Fixture(Circle(1.0)) {
+            override fun getShape(): Convex {
+                shapeReads++
+                return super.getShape()
+            }
+        }
+        body.addFixture(fixture)
+        assertSame(fixture, body.getFixture(Vector2()))
+        shapeReads = 0
+        assertFailsWith<NullPointerException> { body.getFixture(null) }
+        assertEquals(1, shapeReads)
+        assertFailsWith<NullPointerException> { body.getFixtures(null) }
+        assertFailsWith<NullPointerException> { body.contains(null) }
+        assertFailsWith<NullPointerException> { body.removeFixture(null as Vector2?) }
+        assertFailsWith<NullPointerException> { body.removeFixtures(null) }
+        assertFailsWith<NullPointerException> { body.updateRadiusWith(null) }
+        assertFailsWith<NullPointerException> { body.computeAABB(null, AABB(0.0, 0.0, 0.0, 0.0)) }
+        assertSame(fixture, body.getFixture(0))
     }
 
     @Test
@@ -141,7 +197,7 @@ class CollisionModelTest {
             constructor() : super()
             private constructor(body: SubstitutingBody) : super(body)
             override fun getFixture(index: Int): Fixture = replacement
-            override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+            override fun addFixture(convex: Convex?): Fixture = Fixture(convex).also { addFixture(it) }
             override fun getLocalCenter() = Vector2()
             override fun copy() = SubstitutingBody(this)
         }

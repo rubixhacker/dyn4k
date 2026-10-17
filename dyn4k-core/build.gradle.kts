@@ -27,6 +27,7 @@ data class JvmApiSpec(
     val protectedFields: Set<String> = emptySet(),
     val packageFields: Set<String> = emptySet(),
     val staticMethods: Set<String> = emptySet(),
+    val nonFinalStaticMethods: Set<String> = emptySet(),
     val varargMethods: Set<String> = emptySet(),
     val packageMethods: Set<String> = emptySet(),
     val packageMethodSignatures: Set<String> = emptySet(),
@@ -202,6 +203,9 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Link" to JvmApiSpec(
         packageFields = setOf("point0", "point3")
+    ),
+    "org/dyn4j/collision/AbstractCollisionItem" to JvmApiSpec(
+        nonFinalStaticMethods = setOf("getHashCode", "equals")
     ),
     "org/dyn4j/collision/Filter" to JvmApiSpec(publicFields = setOf("DEFAULT_FILTER")),
     "org/dyn4j/collision/CategoryFilter" to JvmApiSpec(protectedFields = setOf("category", "mask")),
@@ -493,6 +497,9 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val isVararg = name in spec.varargMethods &&
                                     Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                 var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                if (name in spec.nonFinalStaticMethods && access and Opcodes.ACC_STATIC != 0) {
+                                    revised = revised and Opcodes.ACC_FINAL.inv()
+                                }
                                 if (name in spec.packageMethods || name + descriptor in spec.packageMethodSignatures ||
                                     (spec.packageNodeMethods && descriptor.startsWith("(Lorg/dyn4j/BinarySearchTreeNode;")) ||
                                     (name == "<init>" && descriptor in spec.packageConstructorDescriptors)) {
@@ -1324,9 +1331,10 @@ tasks.register<Exec>("verifyDetectionParity") {
 }
 
 val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
+val collisionModelStaticHideSource = file("src/jvmConsumer/java/Issue35StaticHideConsumer.java")
 val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
-    source(collisionModelConsumerSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
     classpath = baseline
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-baseline"))
     options.release.set(8)
@@ -1338,7 +1346,7 @@ tasks.register<JavaExec>("runBaselineCollisionModelConsumer") {
 }
 val candidateCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(tasks.named("jvmJar"))
-    source(collisionModelConsumerSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
     classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-candidate"))
     options.release.set(8)
@@ -1350,7 +1358,7 @@ tasks.register<JavaExec>("runCandidateCollisionModelConsumer") {
 }
 val stagedCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
-    source(collisionModelConsumerSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
     classpath = stagedGeometryClasspath
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-staged"))
     options.release.set(8)
@@ -1362,7 +1370,7 @@ tasks.register<JavaExec>("runStagedCollisionModelConsumer") {
 }
 val androidCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(androidCompileJar)
-    source(collisionModelConsumerSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource)
     classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-android"))
     options.release.set(8)
