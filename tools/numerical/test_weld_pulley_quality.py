@@ -94,6 +94,8 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
         mutations = [
             lambda r: r.pop(),
             lambda r: r[-1]["state"]["joint"].pop("anchor2"),
+            lambda r: r[-1]["state"].update(unbounded=1.0),
+            lambda r: r[-1]["state"]["joint"].update(unbounded=1.0),
             lambda r: r[-1]["state"]["joint"]["anchor2"].__setitem__(1, float("inf")),
             lambda r: r[-1]["state"]["joint"]["anchor2"].__setitem__(0, -0.25),
             lambda r: r[-1]["state"]["bodies"][0].update(id="wrong"),
@@ -115,6 +117,27 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
         self.assertEqual("INVALID", audit_quality(self.declaration, self.manifest, case, path)["status"])
         self.manifest["cases"][case]["stream_sha256"] = hashlib.sha256(packed(rows)).hexdigest()
         self.assertEqual("INVALID", self.audit(case, [rows[0]])["status"])
+
+    def test_frozen_baseline_and_actual_state_out_of_limit(self):
+        root = Path(__file__).resolve().parent
+        declaration = json.loads((root / "weld-pulley-physical-declaration.json").read_text())
+        manifest = json.loads((root / "weld-pulley-physical-manifest.json").read_text())
+        for case in ("weld-spring-equal", "pulley-taut"):
+            with self.subTest(case=case):
+                reference = root / "references" / manifest["cases"][case]["file"]
+                self.assertEqual("PHYSICAL_PASSED", audit_quality(declaration, manifest, case, reference)["status"])
+                rows = [json.loads(line) for line in gzip.decompress(reference.read_bytes()).splitlines()]
+                state = rows[4]["state"]
+                state["bodies"][1]["center"][1] += 0.02
+                state["joint"]["anchor2"][1] += 0.02
+                altered = packed(rows)
+                path = self.root / reference.name
+                path.write_bytes(gzip.compress(altered, mtime=0))
+                selected = copy.deepcopy(manifest)
+                selected["cases"][case]["gzip_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                selected["cases"][case]["stream_sha256"] = hashlib.sha256(altered).hexdigest()
+                selected["cases"][case]["input_sha256"] = hashlib.sha256(altered.splitlines()[0]).hexdigest()
+                self.assertEqual("PHYSICAL_FAILED", audit_quality(declaration, selected, case, path)["status"])
 
 
 if __name__ == "__main__":

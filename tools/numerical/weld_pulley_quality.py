@@ -4,6 +4,8 @@ import hashlib
 import json
 import math
 from decimal import Decimal, InvalidOperation, localcontext
+from fractions import Fraction
+from math import isqrt
 from pathlib import Path
 
 from compare import Rejected, parse
@@ -11,6 +13,7 @@ from compare import Rejected, parse
 
 CALLBACKS = ("begin", "postSolve", "end")
 U = 2 ** -53
+ROOT_SCALE = 10 ** 60
 
 
 def sha(data):
@@ -29,10 +32,20 @@ def vector(value):
     return tuple(number(item) for item in value)
 
 
-def distance(a, b):
-    x, y = vector(a)
-    p, q = vector(b)
-    return ((x - p) ** 2 + (y - q) ** 2).sqrt()
+def distance_interval(a, b):
+    x, y = (Fraction.from_float(float(value)) for value in vector(a))
+    p, q = (Fraction.from_float(float(value)) for value in vector(b))
+    square = (x - p) ** 2 + (y - q) ** 2
+    floor = isqrt((square.numerator * ROOT_SCALE ** 2) // square.denominator)
+    lower = Fraction(floor, ROOT_SCALE)
+    upper = lower if lower * lower == square else Fraction(floor + 1, ROOT_SCALE)
+    return lower, upper
+
+
+def shown(value):
+    with localcontext() as context:
+        context.prec = 80
+        return str(Decimal(value.numerator) / Decimal(value.denominator))
 
 
 def limit(declaration, case, name):
@@ -42,7 +55,7 @@ def limit(declaration, case, name):
     result = Decimal(rule["absolute_limit"])
     if not result.is_finite() or result <= 0:
         raise Rejected("invalid physical limit")
-    return result
+    return Fraction(result)
 
 
 def phases(declaration):
@@ -56,8 +69,14 @@ def phases(declaration):
 
 
 def weld(state):
+    if state.keys() != {"bodies", "joint"}:
+        raise Rejected("weld state paths differ")
     bodies = state["bodies"]
     joint = state["joint"]
+    if (len(bodies) != 2 or any(body.keys() != {"id", "center", "angle", "cost", "sint"} for body in bodies) or
+        joint.keys() != {"type", "spring", "limits", "frequency", "dampingRatio", "lowerLimit", "upperLimit",
+                         "anchor1", "anchor2", "referenceAngle"}):
+        raise Rejected("weld body or joint paths differ")
     if ([body["id"] for body in bodies] != ["ground", "member"] or
         joint["type"] != "WeldJoint" or joint["spring"] is not True or
         joint["limits"] is not True or number(joint["referenceAngle"]) != 0 or
@@ -78,13 +97,22 @@ def weld(state):
         if abs(observed - formula) > allowance:
             raise Rejected("weld moving anchor does not follow stored transform")
     angle = float(number(moving["angle"]) - number(fixed["angle"]))
-    return {"anchor_gap_m": distance(joint["anchor1"], joint["anchor2"]),
-            "angular_error_rad": Decimal.from_float(abs(math.remainder(angle, 2 * math.pi)))}
+    if abs(angle) > math.pi:
+        raise Rejected("weld angle is outside the source normalized range")
+    exact_angle = Fraction.from_float(abs(angle))
+    return {"anchor_gap_m": distance_interval(joint["anchor1"], joint["anchor2"]),
+            "angular_error_rad": (exact_angle, exact_angle)}
 
 
 def pulley(state):
+    if state.keys() != {"bodies", "joint"}:
+        raise Rejected("pulley state paths differ")
     bodies = state["bodies"]
     joint = state["joint"]
+    if (len(bodies) != 2 or any(body.keys() != {"id", "center"} for body in bodies) or
+        joint.keys() != {"type", "slack", "ratio", "length", "pulleyAnchor1", "pulleyAnchor2",
+                         "anchor1", "anchor2"}):
+        raise Rejected("pulley body or joint paths differ")
     if ([body["id"] for body in bodies] != ["left", "right"] or
         joint["type"] != "PulleyJoint" or joint["slack"] is not False or
         number(joint["ratio"]) != 1 or number(joint["length"]) != 2 or
@@ -93,11 +121,17 @@ def pulley(state):
         raise Rejected("pulley structure, anchors, ratio, or mode differs")
     if vector(joint["anchor1"]) != vector(bodies[0]["center"]) or vector(joint["anchor2"]) != vector(bodies[1]["center"]):
         raise Rejected("pulley body-anchor alias differs")
-    with localcontext() as context:
-        context.prec = 80
-        length1 = distance(joint["anchor1"], joint["pulleyAnchor1"])
-        length2 = distance(joint["anchor2"], joint["pulleyAnchor2"])
-        return {"absolute_rope_error_m": abs(length1 + length2 - Decimal(2))}
+    first = distance_interval(joint["anchor1"], joint["pulleyAnchor1"])
+    second = distance_interval(joint["anchor2"], joint["pulleyAnchor2"])
+    lower = first[0] + second[0] - 2
+    upper = first[1] + second[1] - 2
+    if lower >= 0:
+        absolute = lower, upper
+    elif upper <= 0:
+        absolute = -upper, -lower
+    else:
+        absolute = Fraction(0), max(-lower, upper)
+    return {"absolute_rope_error_m": absolute}
 
 
 def audit_quality(declaration, manifest, case, path):
@@ -139,6 +173,7 @@ def audit_quality(declaration, manifest, case, path):
             raise Rejected("incomplete executed counts")
         metrics = {key: {"checked": 0, "failed": 0, "maximum": "0", "first_failure": None}
                    for key in declaration["cases"][case]["metrics"]}
+        maxima = {key: Fraction(0) for key in metrics}
         for step in range(1, declaration["steps_per_case"] + 1):
             base = (step - 1) * 4
             for order, callback in enumerate(CALLBACKS):
@@ -149,16 +184,21 @@ def audit_quality(declaration, manifest, case, path):
                 raise Rejected("state identity or order differs")
             values = weld(row["state"]) if case == "weld-spring-equal" else pulley(row["state"])
             phase = "excitation" if step <= declaration["phases"][0][2] else "long-run"
-            for name, value in values.items():
+            for name, (lower, upper) in values.items():
                 item = metrics[name]
                 item["checked"] += 1
-                if value > Decimal(item["maximum"]):
-                    item["maximum"] = str(value)
-                if value > limit(declaration, case, name):
+                maxima[name] = max(maxima[name], upper)
+                ceiling = limit(declaration, case, name)
+                if lower <= ceiling < upper:
+                    raise Rejected("physical metric straddles its limit at enclosure precision")
+                if lower > ceiling:
                     item["failed"] += 1
                     if item["first_failure"] is None:
                         item["first_failure"] = {"step": step, "phase": phase,
-                                                 "value": str(value), "limit": str(limit(declaration, case, name))}
+                                                 "value_enclosure": [shown(lower), shown(upper)],
+                                                 "limit": str(ceiling)}
+        for name, value in maxima.items():
+            metrics[name]["maximum"] = shown(value)
         return {"status": "PHYSICAL_FAILED" if any(item["failed"] for item in metrics.values()) else "PHYSICAL_PASSED",
                 "scope": "FROZEN_BASELINE_ONLY", "case": case,
                 "counts": expected_counts, "metrics": metrics}
