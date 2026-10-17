@@ -4,16 +4,16 @@ The standalone consumer in `tools/numerical/portable` runs common Kotlin engine 
 
 ```sh
 ANDROID_HOME="$HOME/Android/Sdk" python3 tools/numerical/portable/run.py \
-  --output /tmp/dyn4k-portable-numerical-evidence
+  --output /var/tmp/dyn4k-portable-numerical-evidence
 ```
 
-The runner executes JVM, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. Android host execution uses a JVM. It does not qualify an Android device. The publication log and manifest bind the staged artifacts to the clean source revision. Each completed lane retains its Gradle log, raw XML, whole JSONL trace, per-case JSONL traces, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
+The runner executes JVM on Java 21 and Java 8, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. The Java 8 lane selects the Gradle test launcher from `/tmp/dyn4k-tools/jdk8`; its receipt hashes the process Gradle actually launched. Android host execution uses a JVM. It does not qualify an Android device. The publication log and manifest bind the staged artifacts to the clean source revision. Each completed lane retains its Gradle log, raw XML, whole JSONL trace, per-case JSONL traces, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
 
 ## Recorded contract
 
 The declaration in `cases.py` is the expected case set. The suite records every inner step, ordered step, contact, and time-of-impact callbacks, before-step actions, and configured outer endpoint copies. Endpoint copies do not advance the step or event history. Each state records body transforms, prior transforms, velocity, force, torque, rest state, energy, momentum, joint reactions, and fixed-origin position. Geometry cases also record direct SAT and GJK observations. Nonfinite values appear as tagged raw values; receipt inspection rejects them. Floating-point comparison uses binary64 bits, including the sign of zero, before any tolerance decision.
 
-The six families are geometry/collision boundaries across scales and offsets; free motion, forces, damping, and restitution; default and separately configured contact, friction, sleep, and wake; all ten joint types with initial and active modes; circle and pentagon CCD at 30, 60, and 120 Hz; and a 600-second free-motion invariant scene. Default sleep/wake uses its own 30/60/120 Hz step. Configured sleep/wake uses 120 Hz inner steps and separate 4/2/1 outer endpoint groups. Its six cases include both repetitions at each outer rate.
+The six families are geometry/collision boundaries across scales and offsets; free motion, forces, damping, and restitution; default and separately configured contact, friction, sleep, and wake; all ten joint types with initial and active modes; circle and pentagon CCD at 30, 60, and 120 Hz; and a 600-second free-motion invariant scene. A separate 600-step Angle ratio `-1` case retains the reproduced baseline nonfinite failure while allowing other test methods to run. Default sleep/wake uses its own 30/60/120 Hz step. Configured sleep/wake uses 120 Hz inner steps and separate 4/2/1 outer endpoint groups. Its six cases include both repetitions at each outer rate.
 
 The receipt validator rejects missing or duplicate cases, missing steps, lost callbacks, altered action steps, reordered events, changed input, changed signed zero, missing endpoints, nonfinite values, stale artifacts, and an empty suite. The receipt binds the exact Git archive hash, commit, staged metadata and target artifact hashes, runtime identity, trace hash, and expected and executed counts.
 
