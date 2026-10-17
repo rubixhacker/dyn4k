@@ -13,6 +13,11 @@ import org.dyn4j.geometry.Vector2
 
 class TimeOfImpactQueryTest {
     @Test
+    fun defaultDistanceEpsilonMatchesBaselineCubeRoot() {
+        assertEquals(4.806217383937352e-6, ConservativeAdvancement.DEFAULT_DISTANCE_EPSILON)
+    }
+
+    @Test
     fun movingCirclesReachContactAtHalfStep() {
         val result = TimeOfImpact()
         val separation = result.getSeparation()

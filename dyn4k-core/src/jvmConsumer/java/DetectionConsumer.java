@@ -17,11 +17,19 @@ import org.dyn4j.collision.narrowphase.TypedFallbackCondition;
 import org.dyn4j.geometry.Circle;
 import org.dyn4j.geometry.Convex;
 import org.dyn4j.geometry.Transform;
+import org.dyn4j.geometry.Polygon;
+import org.dyn4j.geometry.Rectangle;
 import org.dyn4j.geometry.Vector2;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class DetectionConsumer {
+    private static final class CustomRectangle extends Rectangle {
+        CustomRectangle() { super(2.0, 1.0); }
+    }
+    private static final class EpaExtension extends Epa {
+        public String maxIterationsField() { return "extension"; }
+    }
     private static final class ExtendedPenetration extends Penetration {
         int setterCalls;
         double fieldDepth() { return depth; }
@@ -42,6 +50,9 @@ public final class DetectionConsumer {
     }
 
     public static void main(String[] args) {
+        require(new EpaExtension().maxIterationsField().equals("extension"), "Epa Java extension helper");
+        require(new org.dyn4j.collision.narrowphase.SingleTypedFallbackCondition(Polygon.class, false)
+            .isMatch(CustomRectangle.class, Circle.class), "type-only Java subclass fallback");
         Circle first = new Circle(1.0);
         Circle second = new Circle(1.0);
         Transform origin = new Transform();

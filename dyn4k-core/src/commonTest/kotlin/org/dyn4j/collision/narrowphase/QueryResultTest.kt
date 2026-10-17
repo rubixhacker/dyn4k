@@ -6,11 +6,44 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Ray
+import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Geometry
 
 class QueryResultTest {
+    private class CustomRectangle : Rectangle(2.0, 1.0)
+    private class RuntimeRectangle : Rectangle(2.0, 1.0)
+
+    @Test
+    fun typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance() {
+        val polygon = convexClassOf(Polygon::class)
+        val rectangle = convexClassOf(Rectangle::class)
+        val circle = convexClassOf(Circle::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(true, condition.isMatch(rectangle, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, true).isMatch(rectangle, circle))
+        assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(rectangle, circle))
+    }
+
+    @Test
+    fun declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance() {
+        val custom = declareConvexSupertype(CustomRectangle::class, Rectangle::class)
+        val polygon = convexClassOf(Polygon::class)
+        val circle = convexClassOf(Circle::class)
+        assertEquals(true, SingleTypedFallbackCondition(polygon, false).isMatch(custom, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, true).isMatch(custom, circle))
+        assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(custom, circle))
+    }
+
+    @Test
+    fun runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration() {
+        val polygon = convexClassOf(Polygon::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(true, condition.isMatch(RuntimeRectangle(), Circle(1.0)))
+    }
+
     @Test
     fun resultSetAndShiftKeepExposedVectorIdentity() {
         val penetration = Penetration()

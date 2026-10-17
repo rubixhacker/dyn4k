@@ -55,10 +55,10 @@ interface NarrowphasePostProcessor {
 }
 
 open class MinkowskiSum(
-    internal val convex1: Convex,
-    internal val transform1: Transform,
-    internal val convex2: Convex,
-    internal val transform2: Transform
+    private val convex1: Convex,
+    private val transform1: Transform,
+    private val convex2: Convex,
+    private val transform2: Transform
 ) {
     fun getSupportPoint(direction: Vector2): Vector2 {
         val point1 = convex1.getFarthestPoint(direction, transform1)
@@ -84,11 +84,11 @@ open class MinkowskiSum(
 }
 
 open class MinkowskiSumPoint(supportPoint1: Vector2, supportPoint2: Vector2) {
-    @get:kotlin.jvm.JvmName("supportPoint1Field")
+    @get:kotlin.jvm.JvmName("supportPoint1-dyn4k")
     internal val supportPoint1: Vector2 = supportPoint1
-    @get:kotlin.jvm.JvmName("supportPoint2Field")
+    @get:kotlin.jvm.JvmName("supportPoint2-dyn4k")
     internal val supportPoint2: Vector2 = supportPoint2
-    @get:kotlin.jvm.JvmName("pointField")
+    @get:kotlin.jvm.JvmName("point-dyn4k")
     internal val point: Vector2 = supportPoint1.difference(supportPoint2)
     open fun getSupportPoint1() = supportPoint1
     open fun getSupportPoint2() = supportPoint2

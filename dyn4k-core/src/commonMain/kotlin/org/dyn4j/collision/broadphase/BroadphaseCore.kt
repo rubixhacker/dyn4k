@@ -150,15 +150,10 @@ interface BroadphaseDetector<T> : Shiftable {
 }
 
 abstract class AbstractBroadphaseDetector<T> : BroadphaseDetector<T> {
-    @get:kotlin.jvm.JvmName("aabbProducerField")
-    @JvmFieldBridge protected val aabbProducer: AABBProducer<T>
-    @get:kotlin.jvm.JvmName("aabbExpansionMethodField")
-    @JvmFieldBridge protected val aabbExpansionMethod: AABBExpansionMethod<T>
-    @get:kotlin.jvm.JvmName("broadphaseFilterField")
-    @JvmFieldBridge protected val broadphaseFilter: BroadphaseFilter<T>
-    @get:kotlin.jvm.JvmName("updateTrackingEnabledField")
-    @set:kotlin.jvm.JvmName("setUpdateTrackingEnabledField")
-    @JvmFieldBridge protected var updateTrackingEnabled = false
+    @kotlin.jvm.JvmField protected val aabbProducer: AABBProducer<T>
+    @kotlin.jvm.JvmField protected val aabbExpansionMethod: AABBExpansionMethod<T>
+    @kotlin.jvm.JvmField protected val broadphaseFilter: BroadphaseFilter<T>
+    @kotlin.jvm.JvmField protected var updateTrackingEnabled = false
 
     constructor(filter: BroadphaseFilter<T>?, producer: AABBProducer<T>?, expansion: AABBExpansionMethod<T>?) {
         if (filter == null) throw ArgumentNullException("broadphaseFilter")

@@ -68,6 +68,55 @@ def normalized_members(name, header, members):
     return result
 
 
+def method_key(member):
+    declaration, descriptor = member.split(" descriptor: ", 1)
+    if "(" not in declaration:
+        return None
+    name = declaration.split("(", 1)[0].rsplit(" ", 1)[-1]
+    if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name):
+        return None
+    if name.endswith("$annotations") or name.startswith("access$"):
+        return None
+    return name, descriptor.split(")", 1)[0] + ")"
+
+
+def supertypes(name, header):
+    plain = header
+    while "<" in plain:
+        updated = re.sub(r"<[^<>]*>", "", plain)
+        if updated == plain:
+            break
+        plain = updated
+    remainder = plain.split(name, 1)[1].removesuffix("{").strip()
+    result = []
+    for keyword in ("extends", "implements"):
+        match = re.search(rf"\b{keyword} (.*?)(?=\b(?:extends|implements)\b|$)", remainder)
+        if match:
+            result.extend(part.strip() for part in match.group(1).split(",") if part.strip())
+    if not result and name != "java.lang.Object":
+        result.append("java.lang.Object")
+    return result
+
+
+def inherited_method_keys(baseline, name, cache, seen=None):
+    if name in cache:
+        return cache[name]
+    if seen is None:
+        seen = set()
+    if name in seen:
+        return set()
+    seen.add(name)
+    try:
+        header, members = surface(baseline, name)
+    except subprocess.CalledProcessError:
+        return set()
+    keys = {key for member in members if (key := method_key(member)) is not None}
+    for parent in supertypes(name, header):
+        keys.update(inherited_method_keys(baseline, parent, cache, seen))
+    cache[name] = keys
+    return keys
+
+
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: verify-detection-jvm-api.py baseline.jar candidate.jar")
@@ -75,6 +124,8 @@ def main():
     expected_types = types(baseline)
     actual_types = set(types(candidate))
     missing = []
+    added = []
+    ancestor_cache = {}
     member_count = 0
     for name in expected_types:
         if name not in actual_types:
@@ -88,11 +139,23 @@ def main():
         actual_members = normalized_members(name, actual_header, actual_members)
         member_count += len(expected_members)
         missing.extend(f"{name}: missing {member}" for member in sorted(expected_members - actual_members))
+        if expected_header.startswith("public "):
+            inherited = set()
+            for parent in supertypes(name, expected_header):
+                inherited.update(inherited_method_keys(baseline, parent, ancestor_cache))
+            baseline_keys = {key for member in expected_members if (key := method_key(member)) is not None}
+            baseline_keys.update(inherited)
+            added.extend(
+                f"{name}: added {member}" for member in sorted(actual_members - expected_members)
+                if (key := method_key(member)) is not None and key not in baseline_keys
+            )
     for line in missing:
         print(line, file=sys.stderr)
-    if missing:
-        raise SystemExit(f"{len(missing)} detection JVM declarations differ")
-    print(f"Detection JVM API: {member_count} declarations in {len(expected_types)} types present")
+    for line in added:
+        print(line, file=sys.stderr)
+    if missing or added:
+        raise SystemExit(f"{len(missing)} missing, {len(added)} added detection JVM declarations")
+    print(f"Detection JVM API: {member_count} declarations in {len(expected_types)} types present, no added Java methods")
 
 
 if __name__ == "__main__":

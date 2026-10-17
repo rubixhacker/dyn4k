@@ -106,12 +106,8 @@ internal class ExpandingSimplex(simplex: List<@kotlin.jvm.JvmSuppressWildcards V
 }
 
 open class Epa : MinkowskiPenetrationSolver {
-    @get:kotlin.jvm.JvmName("maxIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxIterationsField")
-    @JvmFieldBridge protected var maxIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("distanceEpsilonField")
-    @set:kotlin.jvm.JvmName("setDistanceEpsilonField")
-    @JvmFieldBridge protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
+    @kotlin.jvm.JvmField protected var maxIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
 
     override fun getPenetration(simplex: List<@kotlin.jvm.JvmSuppressWildcards Vector2>, minkowskiSum: MinkowskiSum, penetration: Penetration) {
         val expanding = ExpandingSimplex(simplex)
@@ -147,27 +143,13 @@ open class Epa : MinkowskiPenetrationSolver {
 }
 
 open class Gjk : NarrowphaseDetector, DistanceDetector, RaycastDetector {
-    @get:kotlin.jvm.JvmName("solverField")
-    @set:kotlin.jvm.JvmName("setSolverField")
-    @JvmFieldBridge protected var minkowskiPenetrationSolver: MinkowskiPenetrationSolver = Epa()
-    @get:kotlin.jvm.JvmName("maxDetectIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxDetectIterationsField")
-    @JvmFieldBridge protected var maxDetectIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("maxDistanceIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxDistanceIterationsField")
-    @JvmFieldBridge protected var maxDistanceIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("maxRaycastIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxRaycastIterationsField")
-    @JvmFieldBridge protected var maxRaycastIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("detectEpsilonField")
-    @set:kotlin.jvm.JvmName("setDetectEpsilonField")
-    @JvmFieldBridge protected var detectEpsilon = DEFAULT_DETECT_EPSILON
-    @get:kotlin.jvm.JvmName("distanceEpsilonField")
-    @set:kotlin.jvm.JvmName("setDistanceEpsilonField")
-    @JvmFieldBridge protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
-    @get:kotlin.jvm.JvmName("raycastEpsilonField")
-    @set:kotlin.jvm.JvmName("setRaycastEpsilonField")
-    @JvmFieldBridge protected var raycastEpsilon = DEFAULT_RAYCAST_EPSILON
+    @kotlin.jvm.JvmField protected var minkowskiPenetrationSolver: MinkowskiPenetrationSolver = Epa()
+    @kotlin.jvm.JvmField protected var maxDetectIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var maxDistanceIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var maxRaycastIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var detectEpsilon = DEFAULT_DETECT_EPSILON
+    @kotlin.jvm.JvmField protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
+    @kotlin.jvm.JvmField protected var raycastEpsilon = DEFAULT_RAYCAST_EPSILON
 
     constructor()
     constructor(solver: MinkowskiPenetrationSolver?) {

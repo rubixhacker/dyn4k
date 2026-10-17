@@ -7,12 +7,22 @@ import org.dyn4j.collision.narrowphase.CircleDetector
 import org.dyn4j.collision.narrowphase.Gjk
 import org.dyn4j.collision.narrowphase.Penetration
 import org.dyn4j.collision.narrowphase.Separation
+import org.dyn4j.collision.narrowphase.SingleTypedFallbackCondition
+import org.dyn4j.collision.narrowphase.convexClassOf
+import org.dyn4j.collision.narrowphase.declareConvexSupertype
 import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Polygon
+import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
+private class CustomRectangle : Rectangle(2.0, 1.0)
+
 fun main() {
+    val custom = declareConvexSupertype(CustomRectangle::class, Rectangle::class)
+    check(SingleTypedFallbackCondition(convexClassOf(Polygon::class), false)
+        .isMatch(custom, convexClassOf(Circle::class)))
     val first = Circle(1.0)
     val second = Circle(1.0)
     val origin = Transform()
