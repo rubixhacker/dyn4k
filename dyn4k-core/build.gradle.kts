@@ -32,6 +32,7 @@ data class JvmApiSpec(
     val packageMethods: Set<String> = emptySet(),
     val packageMethodSignatures: Set<String> = emptySet(),
     val packageConstructorDescriptors: Set<String> = emptySet(),
+    val protectedConstructorDescriptors: Set<String> = emptySet(),
     val packageType: Boolean = false,
     val packageNodeMethods: Boolean = false,
     val protectedMethods: Set<String> = emptySet(),
@@ -322,6 +323,89 @@ val jvmApi = mapOf(
             "lowerLimitImpulse", "upperLimitImpulse", "springImpulse", "motorImpulse"
         )
     ),
+    "org/dyn4j/collision/broadphase/AABBBroadphaseProxy" to JvmApiSpec(
+        packageType = true, packageFields = setOf("item", "aabb")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphasePair" to JvmApiSpec(
+        packageType = true, packageFields = setOf("first", "second"),
+        packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphaseItem" to JvmApiSpec(
+        packageType = true, packageFields = setOf("body", "fixture"),
+        protectedConstructorDescriptors = setOf("(Lorg/dyn4j/collision/broadphase/BroadphaseItem;)V")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTreeNode" to JvmApiSpec(
+        packageType = true, packageFields = setOf("left", "right", "parent", "height", "aabb")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTreeLeaf" to JvmApiSpec(
+        packageType = true, packageFields = setOf("item")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTree" to JvmApiSpec(
+        packageMethods = setOf("isValid")
+    ),
+    "org/dyn4j/collision/broadphase/Sap" to JvmApiSpec(
+        packageMethods = setOf("insert"),
+        packageMethodSignatures = setOf("update(Lorg/dyn4j/collision/broadphase/AABBBroadphaseProxy;Ljava/lang/Object;)V")
+    ),
+    "org/dyn4j/collision/broadphase/AbstractBroadphaseDetector" to JvmApiSpec(
+        protectedFields = setOf("AABB_REDUCTION_RATIO", "aabbProducer", "aabbExpansionMethod", "broadphaseFilter", "updateTrackingEnabled"),
+        staticMethods = setOf("raycast"),
+        packageMethodSignatures = setOf("raycast(Lorg/dyn4j/geometry/Vector2;DDDLorg/dyn4j/geometry/AABB;)Z")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphaseDetectorDecoratorAdapter" to JvmApiSpec(
+        protectedFields = setOf("detector")
+    ),
+    "org/dyn4j/collision/narrowphase/ExpandingSimplexEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point1", "point2", "normal", "distance")
+    ),
+    "org/dyn4j/collision/narrowphase/ExpandingSimplex" to JvmApiSpec(packageType = true),
+    "org/dyn4j/collision/narrowphase/MinkowskiSumPoint" to JvmApiSpec(
+        packageFields = setOf("supportPoint1", "supportPoint2", "point")
+    ),
+    "org/dyn4j/collision/narrowphase/MinkowskiSum" to JvmApiSpec(
+        packageFields = setOf("convex1", "convex2", "transform1", "transform2")
+    ),
+    "org/dyn4j/collision/narrowphase/AbstractFallbackCondition" to JvmApiSpec(
+        packageFields = setOf("sortIndex")
+    ),
+    "org/dyn4j/collision/narrowphase/FallbackNarrowphaseDetector" to JvmApiSpec(
+        protectedFields = setOf("primaryNarrowphaseDetector", "fallbackNarrowphaseDetector", "fallbackConditions")
+    ),
+    "org/dyn4j/collision/narrowphase/Penetration" to JvmApiSpec(protectedFields = setOf("normal", "depth")),
+    "org/dyn4j/collision/narrowphase/Separation" to JvmApiSpec(
+        protectedFields = setOf("normal", "distance", "point1", "point2")
+    ),
+    "org/dyn4j/collision/narrowphase/Raycast" to JvmApiSpec(
+        protectedFields = setOf("point", "normal", "distance")
+    ),
+    "org/dyn4j/collision/narrowphase/Containment" to JvmApiSpec(
+        protectedFields = setOf("aContainedInB", "bContainedInA")
+    ),
+    "org/dyn4j/collision/narrowphase/CircleDetector" to JvmApiSpec(
+        staticMethods = setOf("detect", "distance", "contains", "raycast")
+    ),
+    "org/dyn4j/collision/narrowphase/SegmentDetector" to JvmApiSpec(staticMethods = setOf("raycast")),
+    "org/dyn4j/collision/narrowphase/Epa" to JvmApiSpec(
+        protectedFields = setOf("maxIterations", "distanceEpsilon")
+    ),
+    "org/dyn4j/collision/narrowphase/Gjk" to JvmApiSpec(
+        protectedFields = setOf(
+            "minkowskiPenetrationSolver", "maxDetectIterations", "maxDistanceIterations",
+            "maxRaycastIterations", "detectEpsilon", "distanceEpsilon", "raycastEpsilon"
+        )
+    ),
+    "org/dyn4j/collision/manifold/IndexedManifoldPointId" to JvmApiSpec(
+        protectedFields = setOf("referenceEdgeIndex", "incidentEdgeIndex", "incidentVertexIndex", "flipped")
+    ),
+    "org/dyn4j/collision/manifold/ManifoldPoint" to JvmApiSpec(
+        protectedFields = setOf("id", "point", "depth"),
+        protectedConstructorDescriptors = setOf("(Lorg/dyn4j/collision/manifold/ManifoldPointId;Lorg/dyn4j/geometry/Vector2;D)V")
+    ),
+    "org/dyn4j/collision/manifold/Manifold" to JvmApiSpec(protectedFields = setOf("points", "normal")),
+    "org/dyn4j/collision/continuous/TimeOfImpact" to JvmApiSpec(protectedFields = setOf("time", "separation")),
+    "org/dyn4j/collision/continuous/ConservativeAdvancement" to JvmApiSpec(
+        protectedFields = setOf("distanceDetector", "distanceEpsilon", "maxIterations")
+    ),
     "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/MonotoneChain" to JvmApiSpec(),
@@ -473,7 +557,13 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                 for (entry in input.entries().asSequence()) {
                     val owner = entry.name.removeSuffix(".class")
                     val bytes = input.getInputStream(entry).use { it.readBytes() }
-                    val spec = if (entry.name.endsWith(".class")) jvmApi[owner] else null
+                    val detectionType = owner.startsWith("org/dyn4j/collision/broadphase/") ||
+                        owner.startsWith("org/dyn4j/collision/narrowphase/") ||
+                        owner.startsWith("org/dyn4j/collision/manifold/") ||
+                        owner.startsWith("org/dyn4j/collision/continuous/")
+                    val spec = if (entry.name.endsWith(".class"))
+                        jvmApi[owner] ?: if (detectionType) JvmApiSpec() else null
+                    else null
                     val content = if (spec == null) bytes else {
                         val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
                         val visitor = object : ClassVisitor(Opcodes.ASM9, writer) {
@@ -527,6 +617,9 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (name in spec.protectedMethods) {
                                     revised = (revised and visibility.inv()) or Opcodes.ACC_PROTECTED
                                     if (access and Opcodes.ACC_STATIC == 0) revised = revised and Opcodes.ACC_FINAL.inv()
+                                }
+                                if (name == "<init>" && descriptor in spec.protectedConstructorDescriptors) {
+                                    revised = (revised and visibility.inv()) or Opcodes.ACC_PROTECTED
                                 }
                                 if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
@@ -585,6 +678,24 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val noOpJointShift = owner in noOpJointShiftTypes && name == "shift" &&
                                     descriptor == "(Lorg/dyn4j/geometry/Vector2;)V"
                                 if (nullableShapeCenter || noOpJointShift) {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitMethodInsn(
+                                            opcode: Int, methodOwner: String, methodName: String,
+                                            methodDescriptor: String, isInterface: Boolean
+                                        ) {
+                                            if (methodOwner == "kotlin/jvm/internal/Intrinsics" &&
+                                                methodName == "checkNotNullParameter") {
+                                                super.visitInsn(Opcodes.POP)
+                                                super.visitInsn(Opcodes.POP)
+                                            } else {
+                                                super.visitMethodInsn(
+                                                    opcode, methodOwner, methodName, methodDescriptor, isInterface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (detectionType) {
                                     return object : MethodVisitor(Opcodes.ASM9, method) {
                                         override fun visitMethodInsn(
                                             opcode: Int, methodOwner: String, methodName: String,
@@ -1103,6 +1214,238 @@ tasks.register<JavaExec>("runUpstreamCollisionModelTests") {
         listOf("org.dyn4j.UnitConversionTest", "org.dyn4j.exception.ExceptionsTest"))
 }
 
+val detectionTestPackages = listOf("broadphase", "narrowphase", "manifold", "continuous")
+val compileUpstreamDetectionTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    val testRoot = upstreamCheckout.get().asFile.resolve("src/test/java/org/dyn4j/collision")
+    detectionTestPackages.forEach { packageName ->
+        source(fileTree(testRoot.resolve(packageName)) { include("*Test.java") })
+    }
+    source(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/collision/TestCollisionBody.java") })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-detection-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamDetectionTests") {
+    dependsOn(compileUpstreamDetectionTests)
+    classpath(compileUpstreamDetectionTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    doFirst {
+        val testRoot = upstreamCheckout.get().asFile.resolve("src/test/java/org/dyn4j/collision")
+        args(detectionTestPackages.flatMap { packageName ->
+            testRoot.resolve(packageName).listFiles().orEmpty().filter { it.name.endsWith("Test.java") }
+                .sortedBy { it.name }.map { "org.dyn4j.collision.$packageName.${it.name.removeSuffix(".java")}" }
+        })
+    }
+}
+val compileUpstreamDetectionAndroidTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, androidCompileJar)
+    val testRoot = upstreamCheckout.get().asFile.resolve("src/test/java/org/dyn4j/collision")
+    detectionTestPackages.forEach { packageName ->
+        source(fileTree(testRoot.resolve(packageName)) { include("*Test.java") })
+    }
+    source(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/collision/TestCollisionBody.java") })
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-detection-android-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamDetectionAndroidTests") {
+    dependsOn(compileUpstreamDetectionAndroidTests, androidRuntimeJar)
+    classpath(compileUpstreamDetectionAndroidTests.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    doFirst {
+        val testRoot = upstreamCheckout.get().asFile.resolve("src/test/java/org/dyn4j/collision")
+        args(detectionTestPackages.flatMap { packageName ->
+            testRoot.resolve(packageName).listFiles().orEmpty().filter { it.name.endsWith("Test.java") }
+                .sortedBy { it.name }.map { "org.dyn4j.collision.$packageName.${it.name.removeSuffix(".java")}" }
+        })
+    }
+}
+
+tasks.register<Exec>("verifyDetectionJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        commandLine(
+            "python3", rootProject.file("scripts/verify-detection-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
+        )
+    }
+}
+
+val polygonTestNames = mapOf(
+    "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
+    "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),
+    "simplify" to listOf(
+        "DouglasPeuckerTest", "SegmentTreeTest", "SimplePolygonVertexTest",
+        "VertexClusterReductionTest", "VisvalingamTest"
+    )
+)
+val polygonTestSources = polygonTestNames.flatMap { (packageName, names) ->
+    (names + when (packageName) {
+        "decompose" -> listOf("AbstractDecomposeTest")
+        "simplify" -> listOf("AbstractSimplifyTest")
+        else -> emptyList()
+    }).map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/geometry/$packageName/$it.java")
+    } }
+} + listOf(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/geometry/RobustGeometryTest.java") })
+val compileUpstreamPolygonTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(polygonTestSources)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-polygon-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamPolygonTests") {
+    dependsOn(compileUpstreamPolygonTests)
+    classpath(
+        compileUpstreamPolygonTests.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(polygonTestNames.flatMap { (packageName, names) ->
+        names.map { "org.dyn4j.geometry.$packageName.$it" }
+    })
+}
+tasks.register<Exec>("verifyPolygonJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        environment("JAVA_HOME", System.getenv("JAVA_HOME"))
+        commandLine(
+            "python3", rootProject.file("scripts/verify-polygon-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
+        )
+    }
+}
+tasks.register<Exec>("verifyDetectionAndroidApi") {
+    dependsOn(verifyBaseline, androidCompileJar)
+    doFirst {
+        commandLine(
+            "python3", rootProject.file("scripts/verify-detection-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/compile_library_classes_jar/androidMain/bundleAndroidMainClassesToCompileJar/classes.jar").get().asFile.absolutePath
+        )
+    }
+}
+
+val detectionConsumerSource = file("src/jvmConsumer/java/DetectionConsumer.java")
+val baselineDetectionConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(detectionConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineDetectionConsumer") {
+    dependsOn(baselineDetectionConsumer)
+    classpath(baselineDetectionConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("DetectionConsumer")
+}
+val candidateDetectionConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(detectionConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateDetectionConsumer") {
+    dependsOn(candidateDetectionConsumer)
+    classpath(candidateDetectionConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("DetectionConsumer")
+}
+val stagedDetectionConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(detectionConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedDetectionConsumer") {
+    dependsOn(stagedDetectionConsumer)
+    classpath(stagedDetectionConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("DetectionConsumer")
+}
+val stagedKotlinDetectionClasses = layout.buildDirectory.dir("consumer/detection-kotlin-staged")
+val stagedKotlinDetectionConsumer by tasks.registering(JavaExec::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    outputs.dir(stagedKotlinDetectionClasses)
+    doFirst {
+        stagedKotlinDetectionClasses.get().asFile.mkdirs()
+        args(
+            "-no-stdlib", "-no-reflect", "-jvm-target", "1.8",
+            "-classpath", stagedGeometryClasspath.asPath,
+            "-d", stagedKotlinDetectionClasses.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/DetectionKotlinConsumer.kt").absolutePath
+        )
+    }
+}
+tasks.register<JavaExec>("runStagedKotlinDetectionConsumer") {
+    dependsOn(stagedKotlinDetectionConsumer)
+    classpath(stagedKotlinDetectionClasses, stagedGeometryClasspath)
+    mainClass.set("DetectionKotlinConsumerKt")
+}
+val androidDetectionConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(detectionConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidDetectionConsumer") {
+    dependsOn(androidDetectionConsumer, androidRuntimeJar)
+    classpath(androidDetectionConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("DetectionConsumer")
+}
+
+val detectionParitySource = file("src/jvmConsumer/java/DetectionParityConsumer.java")
+val baselineDetectionParityConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(detectionParitySource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-parity-baseline-classes"))
+    options.release.set(8)
+}
+val candidateDetectionParityConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(detectionParitySource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/detection-parity-candidate-classes"))
+    options.release.set(8)
+}
+val baselineDetectionParityOutput = layout.buildDirectory.file("consumer/detection-parity-baseline.tsv")
+val candidateDetectionParityOutput = layout.buildDirectory.file("consumer/detection-parity-candidate.tsv")
+tasks.register<JavaExec>("runBaselineDetectionParity") {
+    dependsOn(baselineDetectionParityConsumer)
+    classpath(baselineDetectionParityConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("DetectionParityConsumer")
+    outputs.file(baselineDetectionParityOutput)
+    doFirst { standardOutput = baselineDetectionParityOutput.get().asFile.outputStream() }
+    doLast { standardOutput.close() }
+}
+tasks.register<JavaExec>("runCandidateDetectionParity") {
+    dependsOn(candidateDetectionParityConsumer)
+    classpath(candidateDetectionParityConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("DetectionParityConsumer")
+    outputs.file(candidateDetectionParityOutput)
+    doFirst { standardOutput = candidateDetectionParityOutput.get().asFile.outputStream() }
+    doLast { standardOutput.close() }
+}
+tasks.register<Exec>("verifyDetectionParity") {
+    dependsOn("runBaselineDetectionParity", "runCandidateDetectionParity")
+    doFirst {
+        commandLine(
+            "python3", rootProject.file("scripts/verify-detection-parity.py").absolutePath,
+            baselineDetectionParityOutput.get().asFile.absolutePath,
+            candidateDetectionParityOutput.get().asFile.absolutePath
+        )
+    }
+}
+
 val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
 val collisionModelStaticHideSource = file("src/jvmConsumer/java/Issue35StaticHideConsumer.java")
 val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
@@ -1153,7 +1496,6 @@ tasks.register<JavaExec>("runAndroidCollisionModelConsumer") {
     classpath(androidCollisionModelConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("CollisionModelConsumer")
 }
-
 val dynamicsTestNames = listOf(
     "AbstractPhysicsBodyTest", "BodyFixtureTest", "BodyTest", "ForceTest",
     "SettingsTest", "TimeStepTest", "TorqueTest"
@@ -1561,51 +1903,151 @@ tasks.register<JavaExec>("runCandidateJointMechanismConsumer") {
     mainClass.set("JointMechanismConsumer")
 }
 
-val polygonTestNames = mapOf(
-    "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
-    "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),
-    "simplify" to listOf(
-        "DouglasPeuckerTest", "SegmentTreeTest", "SimplePolygonVertexTest",
-        "VertexClusterReductionTest", "VisvalingamTest"
-    )
+val contactTestNames = listOf(
+    "ContactConstraintTest", "ForceCollisionTimeOfImpactSolverTest",
+    "SequentialImpulsesTest", "SolvableContactTest"
 )
-val polygonTestSources = polygonTestNames.flatMap { (packageName, names) ->
-    (names + when (packageName) {
-        "decompose" -> listOf("AbstractDecomposeTest")
-        "simplify" -> listOf("AbstractSimplifyTest")
-        else -> emptyList()
-    }).map { upstreamCheckout.map { dir ->
-        dir.file("src/test/java/org/dyn4j/geometry/$packageName/$it.java")
-    } }
-} + listOf(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/geometry/RobustGeometryTest.java") })
-val compileUpstreamPolygonTests by tasks.registering(JavaCompile::class) {
-    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
-    source(polygonTestSources)
-    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
-    destinationDirectory.set(layout.buildDirectory.dir("upstream-polygon-tests/classes"))
+val compileBaselineContactTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(contactTestNames.map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/dynamics/contact/$it.java")
+    } })
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-contact-tests/baseline-classes"))
     options.release.set(8)
 }
-tasks.register<JavaExec>("runUpstreamPolygonTests") {
-    dependsOn(compileUpstreamPolygonTests)
-    classpath(
-        compileUpstreamPolygonTests.flatMap { it.destinationDirectory },
-        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime,
-        file("src/upstreamPolygonTest/resources")
-    )
+tasks.register<JavaExec>("runBaselineContactTests") {
+    dependsOn(compileBaselineContactTests)
+    classpath(compileBaselineContactTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
     mainClass.set("org.junit.runner.JUnitCore")
-    args(polygonTestNames.flatMap { (packageName, names) ->
-        names.map { "org.dyn4j.geometry.$packageName.$it" }
-    })
+    args(contactTestNames.map { "org.dyn4j.dynamics.contact.$it" })
 }
-tasks.register<Exec>("verifyPolygonJvmApi") {
+val compileUpstreamContactTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(contactTestNames.map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/dynamics/contact/$it.java")
+    } })
+    source(upstreamCheckout.map { it.file("src/main/java/org/dyn4j/world/ValueMixer.java") })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-contact-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamContactTests") {
+    dependsOn(compileUpstreamContactTests)
+    classpath(compileUpstreamContactTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"),
+        jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(contactTestNames.map { "org.dyn4j.dynamics.contact.$it" })
+}
+val compileUpstreamContactAndroidTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, androidCompileJar)
+    source(contactTestNames.map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/dynamics/contact/$it.java")
+    } })
+    source(upstreamCheckout.map { it.file("src/main/java/org/dyn4j/world/ValueMixer.java") })
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-contact-android-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamContactAndroidTests") {
+    dependsOn(compileUpstreamContactAndroidTests, androidRuntimeJar)
+    classpath(compileUpstreamContactAndroidTests.flatMap { it.destinationDirectory }, androidRuntimeJar,
+        jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(contactTestNames.map { "org.dyn4j.dynamics.contact.$it" })
+}
+
+val contactConsumerSource = file("src/jvmConsumer/java/ContactConsumer.java")
+val baselineContactConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(contactConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/contact-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineContactConsumer") {
+    dependsOn(baselineContactConsumer)
+    classpath(baselineContactConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("ContactConsumer")
+}
+val candidateContactConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(contactConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/contact-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateContactConsumer") {
+    dependsOn(candidateContactConsumer)
+    classpath(candidateContactConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("ContactConsumer")
+}
+val stagedContactConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(contactConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/contact-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedContactConsumer") {
+    dependsOn(stagedContactConsumer)
+    classpath(stagedContactConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("ContactConsumer")
+}
+val stagedContactKotlinConsumer = tasks.register<JavaExec>("stagedContactKotlinConsumer") {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    val output = layout.buildDirectory.dir("consumer/contact-staged-kotlin")
+    inputs.file(file("src/jvmConsumer/kotlin/ContactKotlinConsumer.kt"))
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(output)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", output.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/ContactKotlinConsumer.kt").absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedContactKotlinConsumer") {
+    dependsOn(stagedContactKotlinConsumer)
+    classpath(layout.buildDirectory.dir("consumer/contact-staged-kotlin"), stagedGeometryClasspath)
+    mainClass.set("ContactKotlinConsumer")
+}
+val androidContactConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(contactConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/contact-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidContactConsumer") {
+    dependsOn(androidContactConsumer, androidRuntimeJar)
+    classpath(androidContactConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("ContactConsumer")
+}
+
+tasks.register<Exec>("verifyContactJvmApi") {
     dependsOn(verifyBaseline, tasks.named("jvmJar"))
     doFirst {
-        environment("JAVA_HOME", System.getenv("JAVA_HOME"))
-        commandLine(
-            "python3", rootProject.file("scripts/verify-polygon-jvm-api.py").absolutePath,
+        commandLine("python3", rootProject.file("scripts/verify-contact-jvm-api.py").absolutePath,
             baseline.singleFile.absolutePath,
-            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
-        )
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyContactAndroidApi") {
+    dependsOn(verifyBaseline, androidCompileJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-contact-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/compile_library_classes_jar/androidMain/bundleAndroidMainClassesToCompileJar/classes.jar").get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyContactAndroidRuntimeApi") {
+    dependsOn(verifyBaseline, androidRuntimeJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-contact-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/runtime_library_classes_jar/androidMain/bundleAndroidMainClassesToRuntimeJar/classes.jar").get().asFile.absolutePath)
     }
 }
 
