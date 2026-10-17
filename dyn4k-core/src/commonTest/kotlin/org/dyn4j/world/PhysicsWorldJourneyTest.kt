@@ -166,6 +166,23 @@ class PhysicsWorldJourneyTest {
     }
 
     @Test
+    fun sleepingBodyWakesAndMovesAfterImpulse() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val body = Body()
+        body.addFixture(Circle(0.5))
+        body.setMass(MassType.NORMAL)
+        world.addBody(body)
+
+        body.setAtRest(true)
+        assertTrue(body.isAtRest())
+        body.applyImpulse(Vector2(1.0, 0.0))
+        assertFalse(body.isAtRest())
+        world.step(1)
+        assertTrue(body.getTransform().getTranslationX() > 0.0)
+    }
+
+    @Test
     fun configuredTimeOfImpactSolverReceivesBulletCollision() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
