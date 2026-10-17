@@ -100,6 +100,24 @@ class RawArtifactTests(unittest.TestCase):
             self.assertEqual(286, complete["groups"]["core-macosArm64"])
             self.assertEqual(4, len(complete["gav"]))
             self.assertEqual(4, len(list((repository / "bundle-complete/staged").rglob("*.pom"))))
+            workflow_bundle = repository / "bundle-workflow"
+            workflow_result = artifact.stage_hosted(repository, manifest, sha, target,
+                                                    probe_path, None, workflow_bundle)
+            self.assertEqual("PROBE_PASSED", workflow_result["status"])
+            artifact.verify_bundle(workflow_bundle, manifest, sha)
+            (workflow_bundle / "json/matrix-macosArm64.json").write_bytes(matrix_path.read_bytes())
+            artifact.verify_bundle(workflow_bundle, manifest, sha)
+            archived_xml = next((workflow_bundle / "xml").rglob("*.xml"))
+            os.utime(archived_xml, ns=(1_000_000_000, 1_000_000_000))
+            artifact.verify_bundle(workflow_bundle, manifest, sha)
+            inventory_path = workflow_bundle / "verification.json"
+            inventory_bytes = inventory_path.read_bytes()
+            inventory = json.loads(inventory_bytes)
+            inventory["files"][0]["mtime_ns"] = 1
+            inventory_path.write_text(json.dumps(inventory))
+            with self.assertRaisesRegex(ValueError, "stale report"):
+                artifact.verify_bundle(workflow_bundle, manifest, sha)
+            inventory_path.write_bytes(inventory_bytes)
             source_xml = next((repository / "dyn4k-core/build/test-results/macosArm64Test").glob("*.xml"))
             original = source_xml.read_bytes()
 
@@ -140,6 +158,19 @@ class RawArtifactTests(unittest.TestCase):
             source_xml.write_bytes(original)
             self.assertEqual(330, artifact.verify_bundle(repository / "bundle-complete",
                                                           manifest, sha)["executed"])
+            bundle = repository / "bundle-complete"
+            bundled_sidecar = bundle / "json/hosted-macosArm64-source.json"
+            sidecar_bytes = bundled_sidecar.read_bytes()
+            bundled_sidecar.write_text(json.dumps({**source, "started_at_ns": started + 1}))
+            with self.assertRaisesRegex(ValueError, "differs from hosted observation"):
+                artifact.verify_bundle(bundle, manifest, sha)
+            bundled_sidecar.write_bytes(sidecar_bytes)
+            staged_pom = next((bundle / "staged").rglob("*.pom"))
+            pom_bytes = staged_pom.read_bytes()
+            staged_pom.write_bytes(pom_bytes + b" ")
+            with self.assertRaisesRegex(ValueError, "descriptor or checksum differs"):
+                artifact.verify_bundle(bundle, manifest, sha)
+            staged_pom.write_bytes(pom_bytes)
             first_core = next((repository / "bundle-complete/xml/dyn4k-core/build/test-results/macosArm64Test").glob("*.xml"))
             first_core.unlink()
             with self.assertRaisesRegex(ValueError, "partial|missing"):

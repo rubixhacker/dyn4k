@@ -3,15 +3,14 @@ import json
 import math
 import shutil
 import argparse
-import subprocess
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import qualify
 
 
-def collect_group(repository, destination, manifest, group, started, finished, files):
+def collect_group(repository, destination, manifest, group, started, finished, files,
+                  recorded_times=None):
     group_id = group["id"]
     expected = qualify.expected_probe_cases(manifest, group)
     paths = sorted(repository.glob(group["report_pattern"]))
@@ -21,9 +20,17 @@ def collect_group(repository, destination, manifest, group, started, finished, f
     for path in paths:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"invalid report {path}: missing or symbolic")
-        if not started <= path.stat().st_mtime_ns <= finished:
+        relative = path.relative_to(repository)
+        file_key = str(Path("xml") / relative)
+        if recorded_times is None:
+            mtime_ns = path.stat().st_mtime_ns
+        else:
+            if file_key not in recorded_times:
+                raise ValueError(f"raw report has no bound file time: {file_key}")
+            mtime_ns = recorded_times[file_key]
+        if type(mtime_ns) is not int or not started <= mtime_ns <= finished:
             raise ValueError(f"stale report {path}: outside bound execution")
-        bundled = destination / "xml" / path.relative_to(repository)
+        bundled = destination / "xml" / relative
         bundled.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, bundled)
         suite = ET.parse(bundled).getroot()
@@ -50,7 +57,7 @@ def collect_group(repository, destination, manifest, group, started, finished, f
                 raise ValueError(f"invalid report {path}: case time or identity is invalid")
             observed.append(identity)
         files.append({"path": str(bundled.relative_to(destination)),
-                      "sha256": qualify.digest(bundled)})
+                      "sha256": qualify.digest(bundled), "mtime_ns": mtime_ns})
     if len(observed) != len(set(observed)) or set(observed) != set(expected):
         raise ValueError(f"partial, duplicate, or unexpected cases in {group_id}")
     return len(observed)
@@ -77,6 +84,8 @@ def copy_json(path, destination):
     if not path.is_file() or path.is_symlink():
         raise ValueError(f"missing evidence JSON: {path.name}")
     data = qualify.load_json_strict(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"evidence JSON is not an object: {path.name}")
     target = destination / "json" / path.name
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(path, target)
@@ -104,8 +113,12 @@ def capture_staging(repository, destination, targets):
                                       ("version", qualify.VERSION)):
                     if root.findtext(namespace + key) != expected:
                         raise ValueError(f"staged GAV differs in {name} {key}")
-            elif qualify.load_json_strict(source).get("component", {}).get("version") != qualify.VERSION:
-                raise ValueError(f"staged Gradle metadata version differs in {name}")
+            else:
+                metadata = qualify.load_json_strict(source)
+                if (not isinstance(metadata, dict)
+                        or not isinstance(metadata.get("component"), dict)
+                        or metadata["component"].get("version") != qualify.VERSION):
+                    raise ValueError(f"staged Gradle metadata version differs in {name}")
             target_path = destination / "staged" / source.relative_to(staging)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target_path)
@@ -247,6 +260,8 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
 
 def verify_bundle(bundle, manifest, candidate_sha):
     summary = qualify.load_json_strict(bundle / "verification.json")
+    if not isinstance(summary, dict):
+        raise ValueError("bundle verification JSON is not an object")
     if summary.get("candidate_sha") != candidate_sha:
         raise ValueError("bundle candidate SHA differs from requested candidate")
     if summary.get("status") != "PROBE_PASSED":
@@ -269,15 +284,27 @@ def verify_bundle(bundle, manifest, candidate_sha):
     groups = {group["id"]: group for group in manifest["groups"]}
     found = {}
     files = []
+    recorded = summary.get("files")
+    if (not isinstance(recorded, list) or not recorded
+            or any(not isinstance(item, dict) for item in recorded)):
+        raise ValueError("bundle raw file inventory is missing")
+    recorded_times = {item.get("path"): item.get("mtime_ns") for item in recorded}
+    if len(recorded_times) != len(recorded):
+        raise ValueError("bundle raw file inventory has duplicate paths")
     import tempfile
     with tempfile.TemporaryDirectory() as temporary:
         scratch = Path(temporary)
         for name, ids in selections.items():
             probe = qualify.load_json_strict(bundle / "json" / name)
+            if route != "ubuntu-host":
+                role = "consumer_probe" if name.endswith("-consumer.json") else "source_probe"
+                if probe != top.get(role):
+                    raise ValueError(f"bundled {role} differs from hosted observation")
             started, finished = check_probe(probe, manifest, groups, ids, candidate_sha)
             for group_id in ids:
                 found[group_id] = collect_group(bundle / "xml", scratch, manifest,
-                                                groups[group_id], started, finished, files)
+                                                groups[group_id], started, finished, files,
+                                                recorded_times)
     if found != summary.get("groups") or sum(found.values()) != summary.get("executed"):
         raise ValueError("bundle counts differ from raw XML")
     if summary.get("expected") != sum(found.values()):
