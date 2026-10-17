@@ -139,25 +139,27 @@ class PortableMatrixTest {
         }
     }
 
-    @Test
-    fun configuredContactsKeepInnerTimeAndOuterEndpointsSeparate() {
-        for ((outerHz, group) in listOf(30 to 4, 60 to 2, 120 to 1)) {
-            for (repetition in 1..2) {
-                val (world, target) = sleepWorld(true)
-                recorder.capture(CaseSpec("contacts-configured-$outerHz-r$repetition",
-                    "contacts-friction-sleep-wake", "configured", 120, 72000,
-                    mapOf("outerHz" to outerHz, "repetition" to repetition, "innerHz" to 120,
-                        "linearTolerance" to 1.0 / 4096.0, "positionIterations" to 8,
-                        "impulse" to listOf(1.0, 0.0), "actionStep" to 36001), group), world) { step, _ ->
-                    if (step == 36001) {
-                        val sleeping = target.isAtRest()
-                        target.applyImpulse(Vector2(1.0, 0.0), target.getWorldCenter())
-                        "wake-impulse; sleepingBefore=$sleeping"
-                    } else null
-                }
-            }
+    private fun configuredContacts(outerHz: Int, group: Int, repetition: Int) {
+        val (world, target) = sleepWorld(true)
+        recorder.capture(CaseSpec("contacts-configured-$outerHz-r$repetition",
+            "contacts-friction-sleep-wake", "configured", 120, 72000,
+            mapOf("outerHz" to outerHz, "repetition" to repetition, "innerHz" to 120,
+                "linearTolerance" to 1.0 / 4096.0, "positionIterations" to 8,
+                "impulse" to listOf(1.0, 0.0), "actionStep" to 36001), group), world) { step, _ ->
+            if (step == 36001) {
+                val sleeping = target.isAtRest()
+                target.applyImpulse(Vector2(1.0, 0.0), target.getWorldCenter())
+                "wake-impulse; sleepingBefore=$sleeping"
+            } else null
         }
     }
+
+    @Test fun configured30Repeat1() = configuredContacts(30, 4, 1)
+    @Test fun configured30Repeat2() = configuredContacts(30, 4, 2)
+    @Test fun configured60Repeat1() = configuredContacts(60, 2, 1)
+    @Test fun configured60Repeat2() = configuredContacts(60, 2, 2)
+    @Test fun configured120Repeat1() = configuredContacts(120, 1, 1)
+    @Test fun configured120Repeat2() = configuredContacts(120, 1, 2)
 
     private fun joint(type: String, mode: String, a: Body, b: Body): Joint<Body> {
         val active = mode == "active"
