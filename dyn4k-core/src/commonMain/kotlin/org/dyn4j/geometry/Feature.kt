@@ -33,7 +33,7 @@ abstract class Feature : Copyable<Feature> {
 
     constructor(index: Int) { this.index = index }
     protected constructor(feature: Feature) { index = feature.index }
-    fun getIndex() = index
+    open fun getIndex() = index
     companion object { const val NOT_INDEXED = -1 }
 }
 
