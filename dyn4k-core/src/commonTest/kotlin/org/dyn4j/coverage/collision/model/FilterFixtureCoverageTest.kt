@@ -295,7 +295,7 @@ internal open class CoverageBody : AbstractCollisionBody<Fixture> {
     constructor() : super()
     constructor(capacity: Int) : super(capacity)
     protected constructor(body: CoverageBody) : super(body)
-    override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+    override fun addFixture(convex: Convex?): Fixture = Fixture(convex).also { addFixture(it) }
     override fun getLocalCenter() = Vector2()
     override fun copy() = CoverageBody(this)
     fun addDirect(fixture: Fixture) { fixtures.add(fixture) }
@@ -560,7 +560,12 @@ class CollisionBodyCoverageTest {
         assertEquals(2, body.getFixtureCount())
         assertSame(first, body.getFixture(0))
     }
-    @Test fun addNullConvex() { assertFailsWith<NullPointerException> { Fixture(null) } }
+    @Test fun addNullConvex() {
+        val body = CoverageBody()
+        val failure = assertFailsWith<ArgumentNullException> { body.addFixture(null as Convex?) }
+        assertEquals("shape cannot be null", failure.message)
+        assertEquals(0, body.getFixtureCount())
+    }
     @Test fun addNullFixture() { assertFailsWith<NullPointerException> { CoverageBody().addFixture(null as Fixture?) } }
     @Test fun containsPoint() {
         val body = bodyWithTwo()
@@ -945,7 +950,7 @@ class CollisionBodyCoverageTest {
             constructor() : super()
             private constructor(body: SubstitutingBody) : super(body)
             override fun getFixture(index: Int): Fixture = replacement
-            override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+            override fun addFixture(convex: Convex?): Fixture = Fixture(convex).also { addFixture(it) }
             override fun getLocalCenter() = Vector2()
             override fun copy() = SubstitutingBody(this)
         }
