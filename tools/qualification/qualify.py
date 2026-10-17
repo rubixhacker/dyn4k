@@ -372,7 +372,14 @@ def expected_probe_cases(manifest, group):
     if "cases" in group:
         cases = group["cases"]
     else:
-        names = manifest.get("case_names", [])
+        case_sets = manifest.get("case_sets", {})
+        if not isinstance(case_sets, dict):
+            raise ValueError("probe case sets are invalid")
+        names = (case_sets.get(group["case_set"])
+                 if "case_set" in group else manifest.get("case_names", []))
+        if (not isinstance(names, list) or any(not isinstance(name, str) or not name
+                                               for name in names)):
+            raise ValueError("probe case names are invalid")
         cases = [{"classname": group.get("classname"),
                   "name": name + group.get("name_suffix", "")} for name in names]
         additional_names = group.get("additional_case_names", [])
@@ -381,9 +388,8 @@ def expected_probe_cases(manifest, group):
         cases.extend({"classname": group.get("additional_classname"),
                       "name": name + group.get("name_suffix", "")}
                      for name in additional_names)
-        case_sets = manifest.get("case_sets", {})
         extra_case_sets = group.get("extra_case_sets", [])
-        if not isinstance(case_sets, dict) or not isinstance(extra_case_sets, list):
+        if not isinstance(extra_case_sets, list):
             raise ValueError("probe case sets are invalid")
         for extra in extra_case_sets:
             if not isinstance(extra, dict) or not isinstance(extra.get("case_set"), str):

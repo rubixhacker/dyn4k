@@ -25,11 +25,14 @@ class HostedQualificationTests(unittest.TestCase):
         groups = {group["id"]: group for group in manifest["groups"]}
         for target in hosted.NATIVE_TARGETS:
             self.assertEqual(30, len(qualify.expected_probe_cases(manifest, groups[target])))
-            self.assertEqual([], qualify.expected_probe_cases(manifest, groups[f"core-{target}"]))
-            self.assertEqual(1, len(qualify.expected_probe_cases(
+            self.assertEqual(2, len(qualify.expected_probe_cases(manifest, groups[f"core-{target}"])))
+            self.assertEqual(2, len(qualify.expected_probe_cases(
                 manifest, groups[f"consumer-{target}"])))
+        self.assertEqual(32, len(qualify.expected_probe_cases(manifest, groups["jvm"])))
         self.assertEqual(
             [("jsBrowserTest.qualification.StagedGeometryTest",
+              "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, browser, Safari26.6.2, MacOS10.15.7]"),
+             ("jsBrowserTest.qualification.StagedGeometryTest",
               "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser, Safari26.6.2, MacOS10.15.7]")],
             qualify.expected_probe_cases(manifest, groups["consumer-jsSafari"]))
 
@@ -62,26 +65,30 @@ class HostedQualificationTests(unittest.TestCase):
     def test_safari_report_requires_the_frozen_browser_case_identity(self):
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
         group = next(group for group in manifest["groups"] if group["id"] == "consumer-jsSafari")
-        classname, name = qualify.expected_probe_cases(manifest, group)[0]
+        cases = qualify.expected_probe_cases(manifest, group)
         with tempfile.TemporaryDirectory() as root:
             previous = Path.cwd()
             os.chdir(root)
             try:
                 selected = {**manifest, "groups": [dict(group, report_pattern="report.xml")]}
-                for observed, expected_status in ((name, "PROBE_PASSED"),
-                                                  (name.replace("Safari26.6.2", "Safari26.6.3"),
-                                                   "PROBE_FAILED")):
-                    suite = ET.Element("testsuite", tests="1", failures="0", errors="0",
+                wrong_runtime = [(classname, name.replace("Safari26.6.2", "Safari26.6.3"))
+                                 for classname, name in cases]
+                unexpected = [*cases, (cases[0][0], "unexpectedCase[js, browser, Safari26.6.2, MacOS10.15.7]")]
+                for observed, expected_status in ((cases, "PROBE_PASSED"),
+                                                  (wrong_runtime, "PROBE_FAILED"),
+                                                  (unexpected, "PROBE_FAILED")):
+                    suite = ET.Element("testsuite", tests=str(len(observed)), failures="0", errors="0",
                                        skipped="0", time="0.1")
-                    ET.SubElement(suite, "testcase", classname=classname,
-                                  name=observed, time="0.1")
+                    for classname, name in observed:
+                        ET.SubElement(suite, "testcase", classname=classname,
+                                      name=name, time="0.1")
                     xml = ET.tostring(suite, encoding="unicode")
                     command = ["python3", "-c", "from pathlib import Path; "
                                "Path('report.xml').write_text(" + repr(xml) + ")"]
                     result = qualify.run_probe(command, ["report.xml"], "a" * 40,
                                                Path(root) / "result.json", selected)
                     self.assertEqual(expected_status, result["status"])
-                    self.assertEqual(1, result["executed"])
+                    self.assertEqual(len(observed), result["executed"])
             finally:
                 os.chdir(previous)
 
@@ -126,18 +133,19 @@ class HostedQualificationTests(unittest.TestCase):
         sha = "a" * 40
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
                    "xcode_version": "26.4.1", "simulators": {}}
-        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 30,
-                "executed": 30, "failures": 0, "skipped": 0, "exit_code": 0}
-        consumer = {**good, "expected": 1, "executed": 1}
+        manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
+        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 32,
+                "executed": 32, "failures": 0, "skipped": 0, "exit_code": 0}
+        consumer = {**good, "expected": 2, "executed": 2}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         self.assertEqual("PROBE_PASSED", hosted.hosted_status(
-            "macosArm64", sha, runtime, good, consumer, hashes)[0])
+            "macosArm64", sha, runtime, good, consumer, hashes, manifest)[0])
         for source, staged in (({**good, "candidate_sha": "d" * 40}, consumer),
-                               (None, consumer), ({**good, "executed": 24}, consumer),
+                               (None, consumer), ({**good, "executed": 30}, consumer),
                                (good, {**consumer, "status": "PROBE_FAILED"}),
                                (good, None)):
             self.assertEqual("PROBE_FAILED", hosted.hosted_status(
-                "macosArm64", sha, runtime, source, staged, hashes)[0])
+                "macosArm64", sha, runtime, source, staged, hashes, manifest)[0])
 
     def test_bounded_result_cannot_promote_full_lane(self):
         sha = "a" * 40
@@ -145,10 +153,10 @@ class HostedQualificationTests(unittest.TestCase):
         def frozen_digest(ids):
             return qualify.manifest_digest({**manifest, "groups": [group for group in manifest["groups"]
                                                             if group["id"] in ids]})
-        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 30,
-                  "executed": 30, "failures": 0, "skipped": 0, "exit_code": 0,
+        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 32,
+                  "executed": 32, "failures": 0, "skipped": 0, "exit_code": 0,
                   "manifest_sha256": frozen_digest(("core-macosArm64", "macosArm64"))}
-        consumer = {**source, "expected": 1, "executed": 1,
+        consumer = {**source, "expected": 2, "executed": 2,
                     "manifest_sha256": frozen_digest(("consumer-macosArm64",))}
         probe = {"candidate_sha": sha, "target": "macosArm64", "status": "PROBE_PASSED",
                  "runtime": {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",

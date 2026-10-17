@@ -117,16 +117,20 @@ def target_hashes(staging, target):
     return hashes
 
 
-def hosted_status(target, candidate_sha, runtime, source_probe, consumer_probe, hashes):
+def hosted_status(target, candidate_sha, runtime, source_probe, consumer_probe, hashes, manifest):
     status, reason = runtime_status(target, runtime)
     if status != "READY":
         return status, reason
     if not isinstance(hashes, dict) or set(hashes) != set(qualify.MODULES) or any(
             not qualify.SHA64.fullmatch(str(value)) for value in hashes.values()):
         return "PROBE_FAILED", "both staged target binary hashes are required"
-    required = [(consumer_probe, 1, "staged consumer")]
+    groups = {group["id"]: group for group in manifest["groups"]}
+    required = [(consumer_probe, len(qualify.expected_probe_cases(
+        manifest, groups[f"consumer-{target}"])), "staged consumer")]
     if target != "jsSafari":
-        required.insert(0, (source_probe, 30, "source probe"))
+        count = sum(len(qualify.expected_probe_cases(manifest, groups[group_id]))
+                    for group_id in (f"core-{target}", target))
+        required.insert(0, (source_probe, count, "source probe"))
     for probe, expected, name in required:
         if not isinstance(probe, dict):
             return "PROBE_FAILED", f"{name} report is missing"
@@ -202,7 +206,7 @@ def run_hosted(target, candidate_sha, output):
             output.with_name(output.stem + "-consumer.json"), consumer_manifest)
         result["status"], result["reason"] = hosted_status(
             target, candidate_sha, runtime, result["source_probe"],
-            result["consumer_probe"], result["artifact_hashes"])
+            result["consumer_probe"], result["artifact_hashes"], manifest)
     except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         result.update(status="PROBE_FAILED", reason=str(error))
     finally:
