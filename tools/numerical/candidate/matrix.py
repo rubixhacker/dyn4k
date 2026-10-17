@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -24,6 +25,10 @@ FAMILIES = (
     ("ccd", "ccd", "CCD-world-", 180),
     ("long", "long", "L-", 91),
 )
+SCALES = (0.01, 1.0, 100.0)
+OFFSETS = ((0.0, 0.0), (1000.0, 1000.0), (-1000.0, 1000.0),
+           (1000000.0, -1000000.0), (-1000000.0, 1000000.0))
+SPLIT_FAMILIES = {"motion", "contacts", "ccd", "long"}
 
 
 def digest(path):
@@ -168,28 +173,68 @@ def run_provider(provider, jar, java21, stdlib, directory, selected):
             continue
         target = directory / name
         target.mkdir()
-        args = [str(java21 / "bin" / "java"), "-Xmx2g", "-cp",
-                ":".join(str(part) for part in classpath), "CandidateCases",
-                str(target), family, filter_value]
-        exit_code = command(args, target / "run.log")
-        run = {"command": args, "exit_code": exit_code,
-               "log_sha256": digest(target / "run.log"), "expected_case_count": expected}
-        try:
-            run.update(inspect(target, digest(jar), name))
-            if run["runtime"]["process_command_sha256"] != digest(java21 / "bin" / "java"):
-                raise ValueError("recorder ran under a different Java executable")
-            if not run["runtime"]["java_version"].startswith("21."):
-                raise ValueError("recorder did not run on Java 21")
-            if run["case_count"] != expected:
-                run["coverage_failure"] = f"{run['case_count']} / {expected} declared cases"
-        except (OSError, ValueError, KeyError, TypeError) as failure:
-            run["inspection_failure"] = str(failure)
+        def execute(chunk_name, case_filter):
+            output = target / chunk_name if chunk_name else target
+            if chunk_name:
+                output.mkdir()
+            args = [str(java21 / "bin" / "java"), "-Xmx2g", "-cp",
+                    ":".join(str(part) for part in classpath), "CandidateCases",
+                    str(output), family, case_filter]
+            exit_code = command(args, output / "run.log")
+            record = {"command": args, "exit_code": exit_code,
+                      "log_sha256": digest(output / "run.log")}
+            try:
+                record.update(inspect(output, digest(jar), name))
+                if record["runtime"]["process_command_sha256"] != digest(java21 / "bin" / "java"):
+                    raise ValueError("recorder ran under a different Java executable")
+                if not record["runtime"]["java_version"].startswith("21."):
+                    raise ValueError("recorder did not run on Java 21")
+            except (OSError, ValueError, KeyError, TypeError) as failure:
+                record["inspection_failure"] = str(failure)
+            if chunk_name:
+                (output / "chunk.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+            print(json.dumps({"provider": provider, "family": name, "chunk": chunk_name,
+                              "exit_code": exit_code, "case_count": record.get("case_count"),
+                              "failures": len(record.get("failures", [])),
+                              "inspection_failure": record.get("inspection_failure")}), flush=True)
+            return record
+        if name in SPLIT_FAMILIES:
+            chunks = {}
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = {}
+                for scale_index, scale in enumerate(SCALES):
+                    for origin_index, origin in enumerate(OFFSETS):
+                        chunk_name = f"s{scale_index}-o{origin_index}"
+                        suffix = f"s{scale}-o{origin[0]},{origin[1]}"
+                        compound_filter = filter_value + "&&" + suffix
+                        futures[pool.submit(execute, chunk_name, compound_filter)] = chunk_name
+                for future in as_completed(futures):
+                    chunks[futures[future]] = future.result()
+            run = {"chunks": chunks, "expected_case_count": expected,
+                   "case_count": sum(item.get("case_count", 0) for item in chunks.values()),
+                   "summary_rows": sum(item.get("summary_rows", 0) for item in chunks.values()),
+                   "query_rows": sum(item.get("query_rows", 0) for item in chunks.values()),
+                   "executed_steps": sum(item.get("executed_steps", 0) for item in chunks.values()),
+                   "failures": [failure for item in chunks.values() for failure in item.get("failures", [])],
+                   "traces": {file: trace for item in chunks.values()
+                              for file, trace in item.get("traces", {}).items()},
+                   "query_case_sha256": {key: value for item in chunks.values()
+                                         for key, value in item.get("query_case_sha256", {}).items()},
+                   "exit_code": max(item["exit_code"] for item in chunks.values())}
+            errors = {chunk: item["inspection_failure"] for chunk, item in chunks.items()
+                      if item.get("inspection_failure")}
+            if errors:
+                run["inspection_failure"] = errors
+        else:
+            run = execute("", filter_value)
+            run["expected_case_count"] = expected
+        if run.get("case_count") != expected:
+            run["coverage_failure"] = f"{run.get('case_count')} / {expected} declared cases"
         runs[name] = run
         (directory / "progress.json").write_text(json.dumps({
             "provider_sha256": digest(jar), "compilation": compilation,
             "families": runs}, indent=2, sort_keys=True) + "\n")
-        print(json.dumps({"provider": provider, "family": name, "exit_code": exit_code,
-                          "case_count": run.get("case_count"),
+        print(json.dumps({"provider": provider, "family": name, "case_count": run.get("case_count"),
                           "failures": len(run.get("failures", [])),
                           "inspection_failure": run.get("inspection_failure")}), flush=True)
     return {"provider_sha256": digest(jar), "compilation": compilation, "families": runs}

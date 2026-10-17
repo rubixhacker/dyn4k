@@ -39,7 +39,11 @@ public final class Capture {
         summary=Files.newBufferedWriter(path.resolve("summary.jsonl"), StandardOpenOption.CREATE_NEW);
     }
     public static void close() throws IOException { queries.close(); summary.close(); }
-    public static boolean accepts(String id) {return filter.isEmpty() || id.contains(filter);}
+    public static boolean accepts(String id) {
+        if(filter.isEmpty())return true;
+        for(String part:filter.split("&&",-1))if(part.isEmpty()||!id.contains(part))return false;
+        return true;
+    }
     public static void rejected(String id, String reason) { query(id, Map.of("rejected",reason)); }
     public static void failedSetup(String id, RuntimeException failure) {
         failedCases++;
@@ -48,7 +52,7 @@ public final class Capture {
         System.out.println("REJECTED " + id + " setup " + failure);
     }
     public static void query(String id,Object value) {
-        if (!filter.isEmpty() && !id.contains(filter)) return;
+        if (!accepts(id)) return;
         line(queries, Map.of("id",id,"payload",value));
     }
     public static void record(String id,String event,Object... values) {
@@ -61,7 +65,7 @@ public final class Capture {
     }
     @SuppressWarnings("unchecked")
     public static boolean run(String id,World<Body> world,int n,double dt,double scale,double ox,double oy,IntConsumer before) {
-        if (!filter.isEmpty() && !id.contains(filter)) return false;
+        if (!accepts(id)) return false;
         current=id; originX=ox;originY=oy; step=counts.getOrDefault(id,0); order=0;
         events=solved=toi=0; maxReaction=maxTorque=0; sleepingSteps=0; maxima.clear(); ids.clear(); initial.clear();rotations.clear();
         for(int i=0;i<world.getBodyCount();i++) {
