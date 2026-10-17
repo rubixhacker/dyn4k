@@ -75,7 +75,7 @@ internal fun <Q> worldLiveUnmodifiableList(backing: MutableList<Q>): List<Q> {
         @Suppress("UNCHECKED_CAST")
         return (backing as WorldTrackedArrayList<Q>).liveView()
     }
-    return worldPlatformUnmodifiableList(worldReadOnlyView(backing))
+    return worldPlatformUnmodifiableBackingList(backing, worldReadOnlyView(backing))
 }
 
 private fun <Q> worldReadOnlyView(backing: MutableList<Q>): List<Q> = object : AbstractList<Q>(), RandomAccess {

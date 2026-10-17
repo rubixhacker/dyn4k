@@ -360,6 +360,32 @@ class PhysicsWorldJourneyTest {
     }
 
     @Test
+    fun allWorldAndGraphPublicViewsKeepIdentityAndRandomAccess() {
+        val world = World<Body>()
+        val graph = ConstraintGraph<Body>()
+        val graphBody = Body()
+        graph.addBody(graphBody)
+        val node = graph.getNode(graphBody)!!
+        val getters: List<() -> List<*>> = listOf(
+            { world.getBodies() }, { world.getCollisionListeners() }, { world.getBoundsListeners() },
+            { world.getJoints() }, { world.getContactListeners() }, { world.getDestructionListeners() },
+            { world.getTimeOfImpactListeners() }, { world.getStepListeners() },
+            { node.getContactConstraints() }, { node.getJoints() }
+        )
+        for (getView in getters) {
+            val view = getView()
+            assertSame(view, getView())
+            assertTrue(view is RandomAccess)
+            assertTrue(view.subList(0, 0) is RandomAccess)
+        }
+        val bodies = world.getBodies()
+        val body = Body()
+        world.addBody(body)
+        assertSame(bodies, world.getBodies())
+        assertSame(body, bodies[0])
+    }
+
+    @Test
     fun emptyPublicViewRejectsDefaultMutations() {
         val world = World<Body>()
         val graph = ConstraintGraph<Body>()
