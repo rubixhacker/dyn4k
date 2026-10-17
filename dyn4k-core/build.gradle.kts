@@ -332,7 +332,13 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                 for (entry in input.entries().asSequence()) {
                     val owner = entry.name.removeSuffix(".class")
                     val bytes = input.getInputStream(entry).use { it.readBytes() }
-                    val spec = if (entry.name.endsWith(".class")) jvmApi[owner] else null
+                    val detectionType = owner.startsWith("org/dyn4j/collision/broadphase/") ||
+                        owner.startsWith("org/dyn4j/collision/narrowphase/") ||
+                        owner.startsWith("org/dyn4j/collision/manifold/") ||
+                        owner.startsWith("org/dyn4j/collision/continuous/")
+                    val spec = if (entry.name.endsWith(".class"))
+                        jvmApi[owner] ?: if (detectionType) JvmApiSpec() else null
+                    else null
                     val content = if (spec == null) bytes else {
                         val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
                         val visitor = object : ClassVisitor(Opcodes.ASM9, writer) {
@@ -402,6 +408,24 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 // The baseline permits a null center in this protected constructor.
                                 if (owner == "org/dyn4j/geometry/AbstractShape" && name == "<init>" &&
                                     descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V") {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitMethodInsn(
+                                            opcode: Int, methodOwner: String, methodName: String,
+                                            methodDescriptor: String, isInterface: Boolean
+                                        ) {
+                                            if (methodOwner == "kotlin/jvm/internal/Intrinsics" &&
+                                                methodName == "checkNotNullParameter") {
+                                                super.visitInsn(Opcodes.POP)
+                                                super.visitInsn(Opcodes.POP)
+                                            } else {
+                                                super.visitMethodInsn(
+                                                    opcode, methodOwner, methodName, methodDescriptor, isInterface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (detectionType) {
                                     return object : MethodVisitor(Opcodes.ASM9, method) {
                                         override fun visitMethodInsn(
                                             opcode: Int, methodOwner: String, methodName: String,

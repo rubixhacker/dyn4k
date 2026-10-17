@@ -62,7 +62,7 @@ def normalized_members(name, header, members):
         declaration = member.split(" descriptor: ", 1)[0]
         if re.search(r"\baccess\$\d+\(", declaration) or " this$0;" in declaration:
             continue
-        if final_owner or " static " in f" {declaration} ":
+        if "(" in declaration and (final_owner or " static " in f" {declaration} "):
             member = member.replace(" final ", " ")
         result.add(member)
     return result

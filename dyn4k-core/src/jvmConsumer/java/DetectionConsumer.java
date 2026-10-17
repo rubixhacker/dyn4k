@@ -69,6 +69,15 @@ public final class DetectionConsumer {
         require(new ConservativeAdvancement().getTimeOfImpact(first, origin, new Vector2(4, 0), 0,
             second, impactStart, new Vector2(), 0, toi), "time of impact");
         require(Math.abs(toi.getTime() - 0.5) < 1e-8, "impact fraction");
+        require(!CircleDetector.detect(first, origin, second, far, null), "circle miss leaves null result unused");
+        require(!new Gjk().detect(first, origin, second, far, null), "gjk miss leaves null result unused");
+        require(!new org.dyn4j.collision.narrowphase.Sat().detect(first, origin, second, far, null), "sat miss leaves null result unused");
+        require(!new Gjk().distance(first, origin, second, overlap, null), "overlap leaves null separation unused");
+        require(!CircleDetector.raycast(new org.dyn4j.geometry.Ray(new Vector2(-3, 4), new Vector2(1, 0)),
+            5.0, first, origin, null), "ray miss leaves null result unused");
+        require(!CircleDetector.contains(first, origin, second, far, null), "containment miss leaves null result unused");
+        require(!new ConservativeAdvancement().getTimeOfImpact(first, origin, new Vector2(), 0,
+            second, far, new Vector2(), 0, null), "stationary separation leaves null result unused");
         require(!new CollisionBodyBroadphaseFilter<org.dyn4j.collision.CollisionBody<?>>()
             .isAllowed(null, null), "null filter pair");
         List<ManifoldPoint> points = new ArrayList<ManifoldPoint>();
