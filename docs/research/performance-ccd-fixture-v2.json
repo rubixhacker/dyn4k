@@ -1,0 +1,52 @@
+{
+  "base_manifest_sha256": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+  "base_manifest_version": 1,
+  "body_hash": {
+    "algorithm": "zero_based_creation_index",
+    "counter_scope": "each_fixture",
+    "creation_order": [
+      "left_wall",
+      "right_wall",
+      "bullet_circles_ascending_index"
+    ],
+    "other_families": "unchanged",
+    "routes": [
+      "baseline",
+      "direct_kotlin",
+      "compatibility"
+    ],
+    "warmup": "fresh_fixture_resets_counter"
+  },
+  "family": "ccd",
+  "qualification": "unpassed",
+  "version": "performance-ccd-v2",
+  "workload_ids": [
+    "ccd.default.small.30hz.baseline",
+    "ccd.default.small.30hz.direct_kotlin",
+    "ccd.default.small.30hz.compatibility",
+    "ccd.default.small.60hz.baseline",
+    "ccd.default.small.60hz.direct_kotlin",
+    "ccd.default.small.60hz.compatibility",
+    "ccd.default.small.120hz.baseline",
+    "ccd.default.small.120hz.direct_kotlin",
+    "ccd.default.small.120hz.compatibility",
+    "ccd.default.medium.30hz.baseline",
+    "ccd.default.medium.30hz.direct_kotlin",
+    "ccd.default.medium.30hz.compatibility",
+    "ccd.default.medium.60hz.baseline",
+    "ccd.default.medium.60hz.direct_kotlin",
+    "ccd.default.medium.60hz.compatibility",
+    "ccd.default.medium.120hz.baseline",
+    "ccd.default.medium.120hz.direct_kotlin",
+    "ccd.default.medium.120hz.compatibility",
+    "ccd.default.stress.30hz.baseline",
+    "ccd.default.stress.30hz.direct_kotlin",
+    "ccd.default.stress.30hz.compatibility",
+    "ccd.default.stress.60hz.baseline",
+    "ccd.default.stress.60hz.direct_kotlin",
+    "ccd.default.stress.60hz.compatibility",
+    "ccd.default.stress.120hz.baseline",
+    "ccd.default.stress.120hz.direct_kotlin",
+    "ccd.default.stress.120hz.compatibility"
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "purpose": "Temporary performance fixture diagnosis; not qualification",
+  "inputs": {
+    "core": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+    "facade": "7e32875e21cac6bf1dfdc09627f0db2b31211c706054865db6d24dc5ef638647",
+    "BaselinePilot.java": "59acd426bf0738ac12aed4ccc4a8e568cbd5eea29389d8274998b8ddb7b07a3a",
+    "DirectFixture.kt": "599874460f38103e32bcd94d1e4f96fb5bd576cc345ca176e768ab55f6d755ad",
+    "DirectPilot.kt": "40d49b42558b2249e8d30dd153ecf982f2f34b705a5864fcfbf608cf411b568f",
+    "baseline": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+    "StableBody.java": "86a34394b86cfadc307b6f2138f820578f6f90cf9deb1925ee9123e0fe39b180"
+  },
+  "runs": {
+    "original": {
+      "comparisons": {
+        "compatibility vs direct": {
+          "different_channels": 436,
+          "first_difference": [
+            27,
+            "contact_begins",
+            "8",
+            "7"
+          ]
+        },
+        "baseline vs compatibility": {
+          "different_channels": 410,
+          "first_difference": [
+            27,
+            "contact_begins",
+            "7",
+            "8"
+          ]
+        },
+        "baseline vs direct": {
+          "different_channels": 444,
+          "first_difference": [
+            28,
+            "linear_speed_sum_m_per_s",
+            "411.28069241058563",
+            "420.3171433310896"
+          ]
+        }
+      },
+      "final": {
+        "baseline": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "165.64849825673855",
+          "angular_speed_sum_rad_per_s": "310.1893302423583",
+          "contact_begins": "62",
+          "contact_ends": "57",
+          "toi_events": "196",
+          "broadphase_candidates": "9",
+          "active_contact_pairs": "5",
+          "active_contact_points": "5"
+        },
+        "compatibility": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "138.20585250965493",
+          "angular_speed_sum_rad_per_s": "330.8933717581253",
+          "contact_begins": "65",
+          "contact_ends": "58",
+          "toi_events": "177",
+          "broadphase_candidates": "9",
+          "active_contact_pairs": "7",
+          "active_contact_points": "7"
+        },
+        "direct": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "147.6797121968651",
+          "angular_speed_sum_rad_per_s": "306.860475754646",
+          "contact_begins": "66",
+          "contact_ends": "56",
+          "toi_events": "161",
+          "broadphase_candidates": "10",
+          "active_contact_pairs": "10",
+          "active_contact_points": "10"
+        }
+      }
+    },
+    "stable": {
+      "comparisons": {
+        "compatibility vs direct": {
+          "different_channels": 0,
+          "first_difference": null
+        },
+        "baseline vs compatibility": {
+          "different_channels": 156,
+          "first_difference": [
+            28,
+            "angular_speed_sum_rad_per_s",
+            "149.72830303378078",
+            "149.7283030337808"
+          ]
+        },
+        "baseline vs direct": {
+          "different_channels": 156,
+          "first_difference": [
+            28,
+            "angular_speed_sum_rad_per_s",
+            "149.72830303378078",
+            "149.7283030337808"
+          ]
+        }
+      },
+      "final": {
+        "baseline": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "142.29545485009388",
+          "angular_speed_sum_rad_per_s": "318.16097647258783",
+          "contact_begins": "67",
+          "contact_ends": "63",
+          "toi_events": "267",
+          "broadphase_candidates": "12",
+          "active_contact_pairs": "4",
+          "active_contact_points": "4"
+        },
+        "compatibility": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "142.29545485007887",
+          "angular_speed_sum_rad_per_s": "318.1609764725932",
+          "contact_begins": "67",
+          "contact_ends": "63",
+          "toi_events": "267",
+          "broadphase_candidates": "12",
+          "active_contact_pairs": "4",
+          "active_contact_points": "4"
+        },
+        "direct": {
+          "body_count": "27",
+          "joint_count": "0",
+          "awake_count": "25",
+          "linear_speed_sum_m_per_s": "142.29545485007887",
+          "angular_speed_sum_rad_per_s": "318.1609764725932",
+          "contact_begins": "67",
+          "contact_ends": "63",
+          "toi_events": "267",
+          "broadphase_candidates": "12",
+          "active_contact_pairs": "4",
+          "active_contact_points": "4"
+        }
+      }
+    }
+  }
+}
