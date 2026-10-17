@@ -27,12 +27,21 @@ def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: verify-foundation-jvm-api.py baseline.jar candidate.jar")
     baseline, candidate = sys.argv[1:]
-    result = compare_jars(Path(baseline), Path(candidate), set(CLASSES), visibility="-package")
+    try:
+        result = compare_jars(Path(baseline), Path(candidate), set(CLASSES), visibility="-package")
+    except (OSError, ValueError) as error:
+        raise SystemExit(str(error)) from error
     for name in result["missing_types"]:
         print(f"{name}: missing class", file=sys.stderr)
     for mismatch in result["signature_mismatches"]:
         print(mismatch, file=sys.stderr)
-    count = len(result["missing_types"]) + len(result["signature_mismatches"])
+    for risk in result["added_member_risks"]:
+        print(f"{risk['candidate_type']}: added {risk['declaration']} "
+              f"from {risk['declaring_type']} ({risk['descriptor']})", file=sys.stderr)
+    for error in result["inventory_errors"]:
+        print(error, file=sys.stderr)
+    count = (len(result["missing_types"]) + len(result["signature_mismatches"])
+             + len(result["added_member_risks"]) + len(result["inventory_errors"]))
     if count:
         raise SystemExit(f"{count} foundation JVM API mismatches")
     print(f"JVM API: {result['compared_baseline_declarations']} baseline package-visible declarations present in {len(CLASSES)} types")
