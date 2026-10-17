@@ -199,7 +199,7 @@ def nominal_zero_diagnostic(reference, portable):
     baseline = (row for row in reference_records(reference) if row.get("kind") == "state")
     candidate = (row for row in records(portable, allow_tagged_nonfinite=True)
                  if row.get("kind") == "state")
-    result = {"status": "PROSPECTIVE_EXACT_ZERO", "steps": 0,
+    result = {"status": "PASSED", "steps": 0,
               "checked_values": 0, "failed_values": 0, "first_failures": []}
     def values(value):
         return value if isinstance(value, list) else [value]
@@ -458,7 +458,8 @@ def diagnostic(fixture_key, reference, portable):
                         approved_failures.append({"step": checked, "body": index,
                                                   "channel": name, "reason": str(error)})
     status = ("FAILED_APPROVED_PROJECTION" if projected["status"] == "FAILED" or
-              approved_failure_count or signed_zero_differences else
+              approved_failure_count or signed_zero_differences or
+              (nominal_zero is not None and nominal_zero["status"] != "PASSED") else
               "UNPASSED_RULES" if projected["status"] == "UNPASSED" else
               "PASSED_APPROVED_PROJECTION")
     return {"status": status,

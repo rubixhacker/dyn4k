@@ -68,7 +68,7 @@ class FrozenComparatorSeamTest(unittest.TestCase):
             candidate.write_text(json.dumps({"kind": "action"}) + "\n")
             self.assertEqual(auxiliary_record_diagnostic(reference, candidate)["differing_records"], 1)
 
-    def test_nominal_zero_proposal_rejects_nonzero_and_negative_zero(self):
+    def test_approved_nominal_zero_rejects_nonzero_and_negative_zero(self):
         with tempfile.TemporaryDirectory() as directory:
             reference = Path(directory) / "reference.jsonl.gz"
             candidate = Path(directory) / "candidate.jsonl"
@@ -81,8 +81,10 @@ class FrozenComparatorSeamTest(unittest.TestCase):
                 candidate.write_text(json.dumps({"kind": "state", "step": 1,
                     "frozenState": {"bodies": [projected]}}) + "\n")
                 return nominal_zero_diagnostic(reference, candidate)
-            self.assertEqual(check(body)["status"], "PROSPECTIVE_EXACT_ZERO")
+            self.assertEqual(check(body)["status"], "PASSED")
+            self.assertEqual(check({**body, "force": [-0.0, 0.0]})["status"], "FAILED")
             self.assertEqual(check({**body, "force": [-0.0, 0.0]})["failed_values"], 1)
+            self.assertEqual(check({**body, "torque": 0.001})["status"], "FAILED")
             self.assertEqual(check({**body, "torque": 0.001})["failed_values"], 1)
 
     def test_step_event_projection_detects_order_and_omission(self):
