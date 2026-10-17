@@ -24,13 +24,14 @@
  */
 package org.dyn4j.world.result
 
-import kotlin.jvm.JvmField
+import org.dyn4j.JvmFieldBridge
 import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 import org.dyn4j.collision.narrowphase.Penetration
 
 open class ConvexDetectResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E> {
-    @JvmField protected val penetration: Penetration
+    @get:kotlin.jvm.JvmName("penetrationField")
+    @JvmFieldBridge protected val penetration: Penetration
 
     constructor() : super() {
         penetration = Penetration()

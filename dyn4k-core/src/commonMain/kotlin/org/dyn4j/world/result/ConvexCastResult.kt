@@ -24,13 +24,14 @@
  */
 package org.dyn4j.world.result
 
-import kotlin.jvm.JvmField
+import org.dyn4j.JvmFieldBridge
 import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 import org.dyn4j.collision.continuous.TimeOfImpact
 
 open class ConvexCastResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E>, Comparable<ConvexCastResult<T, E>> {
-    @JvmField protected val timeOfImpact: TimeOfImpact
+    @get:kotlin.jvm.JvmName("timeOfImpactField")
+    @JvmFieldBridge protected val timeOfImpact: TimeOfImpact
 
     constructor() : super() {
         timeOfImpact = TimeOfImpact()

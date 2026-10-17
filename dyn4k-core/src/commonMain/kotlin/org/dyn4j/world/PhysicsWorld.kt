@@ -75,10 +75,10 @@ interface PhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>> :
     fun setGravity(x: Double, y: Double)
     fun getGravity(): Vector2
 
-    fun getContactListeners(): List<ContactListener<T>>
-    fun getDestructionListeners(): List<DestructionListener<T>>
-    fun getStepListeners(): List<StepListener<T>>
-    fun getTimeOfImpactListeners(): List<TimeOfImpactListener<T>>
+    fun getContactListeners(): List<ContactListener<T>?>
+    fun getDestructionListeners(): List<DestructionListener<T>?>
+    fun getStepListeners(): List<StepListener<T>?>
+    fun getTimeOfImpactListeners(): List<TimeOfImpactListener<T>?>
     fun removeAllContactListeners()
     fun removeAllDestructionListeners()
     fun removeAllStepListeners()

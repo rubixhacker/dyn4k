@@ -24,14 +24,18 @@
  */
 package org.dyn4j.world.result
 
-import kotlin.jvm.JvmField
+import org.dyn4j.JvmFieldBridge
 import org.dyn4j.Copyable
 import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 
 open class DetectResult<T : CollisionBody<E>, E : Fixture> : Copyable<DetectResult<T, E>> {
-    @JvmField protected var body: T? = null
-    @JvmField protected var fixture: E? = null
+    @get:kotlin.jvm.JvmName("bodyField")
+    @set:kotlin.jvm.JvmName("setBodyField")
+    @JvmFieldBridge protected var body: T? = null
+    @get:kotlin.jvm.JvmName("fixtureField")
+    @set:kotlin.jvm.JvmName("setFixtureField")
+    @JvmFieldBridge protected var fixture: E? = null
 
     constructor()
 

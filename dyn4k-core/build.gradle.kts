@@ -328,9 +328,21 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/world/CollisionItemAdapter" to JvmApiSpec(packageType = true),
     "org/dyn4j/world/AbstractPhysicsWorld" to JvmApiSpec(
+        protectedFields = setOf(
+            "settings", "timeStep", "gravity", "valueMixer", "contactConstraintSolver",
+            "timeOfImpactSolver", "ccdBroadphase", "joints", "jointsUnmodifiable",
+            "contactListeners", "contactListenersUnmodifiable", "destructionListeners",
+            "destructionListenersUnmodifiable", "timeOfImpactListeners", "timeOfImpactListenersUnmodifiable",
+            "stepListeners", "stepListenersUnmodifiable", "time", "updateRequired",
+            "constraintGraph", "contactCollisions", "ccdCollisionData"
+        ),
         protectedMethods = setOf("handleFixtureRemoved", "handleAllFixturesRemoved")
     ),
     "org/dyn4j/world/World" to JvmApiSpec(protectedMethods = setOf("createCollisionData")),
+    "org/dyn4j/world/result/DetectResult" to JvmApiSpec(protectedFields = setOf("body", "fixture")),
+    "org/dyn4j/world/result/ConvexDetectResult" to JvmApiSpec(protectedFields = setOf("penetration")),
+    "org/dyn4j/world/result/ConvexCastResult" to JvmApiSpec(protectedFields = setOf("timeOfImpact")),
+    "org/dyn4j/world/result/RaycastResult" to JvmApiSpec(protectedFields = setOf("raycast")),
     "org/dyn4j/collision/broadphase/AABBBroadphaseProxy" to JvmApiSpec(
         packageType = true, packageFields = setOf("item", "aabb")
     ),

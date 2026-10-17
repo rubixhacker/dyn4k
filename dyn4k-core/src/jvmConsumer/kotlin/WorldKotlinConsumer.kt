@@ -12,10 +12,10 @@ object WorldKotlinConsumer {
         box.setMass(MassType.NORMAL)
         box.translate(0.0, 3.0)
         world.addBody(box)
-        val view = world.bodies
+        val view = world.getBodies()
         check(view.size == 1 && view[0] === box)
         world.step(30)
-        check(box.transform.translationY < 3.0)
+        check(box.getTransform().getTranslationY() < 3.0)
         check(world.containsBody(box))
         println("WorldKotlinConsumer OK")
     }

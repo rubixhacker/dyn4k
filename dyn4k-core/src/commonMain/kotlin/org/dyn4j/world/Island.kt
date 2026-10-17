@@ -24,6 +24,7 @@
  */
 package org.dyn4j.world
 
+import org.dyn4j.JvmFieldBridge
 import org.dyn4j.collision.Collisions
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
@@ -35,9 +36,9 @@ import org.dyn4j.geometry.Vector2
 import kotlin.math.min
 
 class Island<T : PhysicsBody> {
-    @JvmField internal val bodies: MutableList<T>
-    @JvmField internal val joints: MutableList<Joint<T>>
-    @JvmField internal val contactConstraints: MutableList<ContactConstraint<T>>
+    @JvmFieldBridge internal val bodies: MutableList<T>
+    @JvmFieldBridge internal val joints: MutableList<Joint<T>>
+    @JvmFieldBridge internal val contactConstraints: MutableList<ContactConstraint<T>>
 
     constructor() : this(64, 16)
 

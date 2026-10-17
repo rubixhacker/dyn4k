@@ -24,13 +24,14 @@
  */
 package org.dyn4j.world.result
 
-import kotlin.jvm.JvmField
+import org.dyn4j.JvmFieldBridge
 import org.dyn4j.collision.CollisionBody
 import org.dyn4j.collision.Fixture
 import org.dyn4j.collision.narrowphase.Raycast
 
 open class RaycastResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E>, Comparable<RaycastResult<T, E>> {
-    @JvmField protected val raycast: Raycast
+    @get:kotlin.jvm.JvmName("raycastField")
+    @JvmFieldBridge protected val raycast: Raycast
 
     constructor() : super() {
         raycast = Raycast()

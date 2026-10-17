@@ -1,0 +1,220 @@
+package org.dyn4j.world
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import org.dyn4j.dynamics.Body
+import org.dyn4j.dynamics.ContinuousDetectionMode
+import org.dyn4j.dynamics.Settings
+import org.dyn4j.dynamics.TimeStep
+import org.dyn4j.dynamics.contact.Contact
+import org.dyn4j.dynamics.contact.ContactConstraint
+import org.dyn4j.dynamics.contact.SequentialImpulses
+import org.dyn4j.dynamics.contact.TimeOfImpactSolver
+import org.dyn4j.dynamics.joint.PinJoint
+import org.dyn4j.collision.BasicCollisionPair
+import org.dyn4j.collision.CollisionPair
+import org.dyn4j.collision.continuous.TimeOfImpact
+import org.dyn4j.collision.continuous.TimeOfImpactDetector
+import org.dyn4j.collision.broadphase.BroadphaseDetector
+import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Convex
+import org.dyn4j.geometry.MassType
+import org.dyn4j.geometry.Transform
+import org.dyn4j.geometry.Vector2
+import org.dyn4j.world.listener.StepListenerAdapter
+import org.dyn4j.world.listener.ContactListenerAdapter
+import org.dyn4j.world.listener.DestructionListenerAdapter
+import org.dyn4j.dynamics.joint.Joint
+
+class PhysicsWorldJourneyTest {
+    @Test
+    fun elapsedTimeStepsAndCarriesTheRemainder() {
+        val world = World<Body>()
+        val frequency = world.getSettings().getStepFrequency()
+
+        assertFalse(world.update(frequency / 2.0))
+        assertEquals(frequency / 2.0, world.getAccumulatedTime(), 1.0e-12)
+        assertTrue(world.update(frequency / 2.0))
+        assertEquals(0.0, world.getAccumulatedTime(), 1.0e-12)
+    }
+
+    @Test
+    fun removingBodyClearsOwnershipAndWorldState() {
+        val world = World<Body>()
+        val body = Body()
+        body.addFixture(Circle(1.0))
+        world.addBody(body)
+
+        assertSame(world, body.getOwner())
+        assertTrue(world.removeBody(body))
+        assertEquals(null, body.getOwner())
+        assertTrue(world.isEmpty())
+    }
+
+    @Test
+    fun jointIteratorRemovesTheJointFromTheWorld() {
+        val world = World<Body>()
+        val body = Body()
+        world.addBody(body)
+        val joint = PinJoint(body, Vector2())
+        world.addJoint(joint)
+        val view = world.getJoints()
+        val iterator = world.getJointIterator()
+
+        assertSame(joint, iterator.next())
+        iterator.remove()
+        assertFailsWith<IllegalStateException> { iterator.remove() }
+        assertTrue(view.isEmpty())
+        assertEquals(null, joint.getOwner())
+    }
+
+    @Test
+    fun removingBodyDestroysAttachedJointAndNotifiesListeners() {
+        val world = World<Body>()
+        val body = Body()
+        world.addBody(body)
+        val joint = PinJoint(body, Vector2())
+        world.addJoint(joint)
+        var destroyed = 0
+        world.addDestructionListener(object : DestructionListenerAdapter<Body>() {
+            override fun destroyed(joint: Joint<Body>?) {
+                destroyed++
+            }
+        })
+
+        assertTrue(world.removeBody(body, true))
+        assertEquals(1, destroyed)
+        assertEquals(0, world.getJointCount())
+        assertEquals(null, joint.getOwner())
+    }
+
+    @Test
+    fun stepListenersObserveTheBaselineStageOrder() {
+        val world = World<Body>()
+        val stages = ArrayList<String>()
+        world.addStepListener(object : StepListenerAdapter<Body>() {
+            override fun begin(step: org.dyn4j.dynamics.TimeStep?, world: PhysicsWorld<Body, *>?) {
+                stages.add("begin")
+            }
+
+            override fun updatePerformed(step: org.dyn4j.dynamics.TimeStep?, world: PhysicsWorld<Body, *>?) {
+                stages.add("update")
+            }
+
+            override fun postSolve(step: org.dyn4j.dynamics.TimeStep?, world: PhysicsWorld<Body, *>?) {
+                stages.add("postSolve")
+            }
+
+            override fun end(step: org.dyn4j.dynamics.TimeStep?, world: PhysicsWorld<Body, *>?) {
+                stages.add("end")
+            }
+        })
+
+        world.step(1)
+        assertEquals(listOf("begin", "update", "postSolve", "end"), stages)
+        stages.clear()
+        world.step(1)
+        assertEquals(listOf("begin", "postSolve", "end"), stages)
+    }
+
+    @Test
+    fun overlappingBodiesReachContactListenersAndCustomSolver() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val dynamic = Body()
+        dynamic.addFixture(Circle(1.0))
+        dynamic.setMass(MassType.NORMAL)
+        val fixed = Body()
+        fixed.addFixture(Circle(1.0))
+        world.addBody(dynamic)
+        world.addBody(fixed)
+
+        var began = 0
+        var initialized = 0
+        world.addContactListener(object : ContactListenerAdapter<Body>() {
+            override fun begin(collision: ContactCollisionData<Body>?, contact: Contact?) {
+                began++
+            }
+        })
+        world.setContactConstraintSolver(object : SequentialImpulses<Body>() {
+            override fun initialize(contactConstraints: List<ContactConstraint<Body>>, step: TimeStep, settings: Settings) {
+                initialized++
+                super.initialize(contactConstraints, step, settings)
+            }
+        })
+
+        world.step(1)
+        assertTrue(began > 0)
+        assertTrue(initialized > 0)
+    }
+
+    @Test
+    fun nullableListenerEntriesFollowTheBaselineListContract() {
+        val world = World<Body>()
+        val listeners = world.getContactListeners()
+
+        assertTrue(world.addContactListener(null))
+        assertEquals(1, listeners.size)
+        assertNull(listeners[0])
+        assertTrue(world.removeContactListener(null))
+        assertTrue(listeners.isEmpty())
+    }
+
+    @Test
+    fun configuredTimeOfImpactSolverReceivesBulletCollision() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        world.getSettings().setContinuousDetectionMode(ContinuousDetectionMode.ALL)
+        world.getSettings().setMaximumTranslation(20.0)
+        val bullet = Body()
+        bullet.addFixture(Circle(0.5))
+        bullet.setMass(MassType.NORMAL)
+        bullet.setBullet(true)
+        bullet.setLinearVelocity(600.0, 0.0)
+        val target = Body()
+        target.addFixture(Circle(0.5))
+        target.translate(5.0, 0.0)
+        world.addBody(bullet)
+        world.addBody(target)
+
+        val originalBroadphase = world.getContinuousCollisionDetectionBroadphaseDetector()
+        world.setContinuousCollisionDetectionBroadphaseDetector(object : BroadphaseDetector<Body> by originalBroadphase {
+            override fun detectIterator(): MutableIterator<CollisionPair<Body>> =
+                mutableListOf<CollisionPair<Body>>(BasicCollisionPair(bullet, target)).iterator()
+
+            override fun detect(a: Body, b: Body): Boolean = true
+        })
+        world.setTimeOfImpactDetector(object : TimeOfImpactDetector {
+            override fun getTimeOfImpact(
+                convex1: Convex, transform1: Transform, dp1: Vector2, da1: Double,
+                convex2: Convex, transform2: Transform, dp2: Vector2, da2: Double,
+                toi: TimeOfImpact
+            ): Boolean = getTimeOfImpact(convex1, transform1, dp1, da1, convex2, transform2, dp2, da2, 0.0, 1.0, toi)
+
+            override fun getTimeOfImpact(
+                convex1: Convex, transform1: Transform, dp1: Vector2, da1: Double,
+                convex2: Convex, transform2: Transform, dp2: Vector2, da2: Double,
+                t1: Double, t2: Double, toi: TimeOfImpact
+            ): Boolean {
+                toi.setTime(0.5)
+                toi.getSeparation().setDistance(0.01)
+                return true
+            }
+        })
+
+        var resolved = 0
+        world.setTimeOfImpactSolver(object : TimeOfImpactSolver<Body> {
+            override fun solve(body1: Body, body2: Body, timeOfImpact: TimeOfImpact, settings: Settings) {
+                resolved++
+            }
+        })
+
+        world.step(1)
+        assertTrue(resolved > 0)
+    }
+}
