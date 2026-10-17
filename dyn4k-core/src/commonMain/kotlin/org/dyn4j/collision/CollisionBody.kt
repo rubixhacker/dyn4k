@@ -51,7 +51,9 @@ interface CollisionBody<T : Fixture> : Transformable, Shiftable, DataContainer, 
     companion object { const val TYPICAL_FIXTURE_COUNT = 1 }
     override fun copy(): CollisionBody<T>
     fun addFixture(fixture: T?): CollisionBody<T>
-    fun addFixture(convex: Convex): T
+    fun addFixture(convex: Convex?): T
+    @kotlin.jvm.JvmSynthetic
+    fun addFixture(absent: Nothing?): CollisionBody<T> = addFixture(fixture = null)
     fun getFixture(index: Int): T
     fun containsFixture(fixture: T?): Boolean
     fun getFixture(point: Vector2?): T?
