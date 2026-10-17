@@ -53,9 +53,9 @@ class QualificationTests(unittest.TestCase):
             self.assertIn((f"{prefix}org.dyn4j.geometry.GeometryCopyExtensionTest",
                            "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState" + suffix),
                           cases)
-            self.assertEqual(433, len(qualify.expected_probe_cases(
+            self.assertEqual(441, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
-            self.assertEqual(2, len(qualify.expected_probe_cases(
+            self.assertEqual(3, len(qualify.expected_probe_cases(
                 manifest, groups["consumer-" + group_id])))
 
     def test_frozen_core_manifest_names_integrated_epsilon_on_every_host(self):
@@ -69,7 +69,7 @@ class QualificationTests(unittest.TestCase):
             epsilon = (prefix + "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
                        "compute" + group["name_suffix"])
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(433, len(cases), group["id"])
+            self.assertEqual(441, len(cases), group["id"])
             self.assertEqual(1, cases.count(epsilon), group["id"])
             collision = (prefix + "org.dyn4j.collision.CollisionModelTest",
                          "copyExceptionFromNamesPreservesMessage" + group["name_suffix"])
@@ -94,6 +94,42 @@ class QualificationTests(unittest.TestCase):
                 expected = (prefix + "io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
                             name + group["name_suffix"])
                 self.assertEqual(1, cases.count(expected), group["id"])
+
+    def test_frozen_manifest_names_integrated_foundation_and_staged_consumer(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        groups = {group["id"]: group for group in manifest["groups"]}
+        for group in (group for group in groups.values() if group["id"].startswith("core-")):
+            prefix = group["classname"].removesuffix(
+                "org.dyn4j.geometry.FoundationPackageBridgeTest")
+            cases = qualify.expected_probe_cases(manifest, group)
+            self.assertEqual(441, len(cases), group["id"])
+            for classname, names in (
+                ("FoundationExtraMethodsParityTest", (
+                    "rotationKeepsFieldBasedMathAndGetterDispatch",
+                    "transformKeepsFieldBasedFactoryAndGetterDispatch")),
+                ("Vector2NormalizationParityTest", (
+                    "normalizeUsesOneReciprocalAndMutatesTheSameVector",
+                    "getNormalizedUsesOneReciprocalAndReturnsANewVector",
+                    "normalizeReadsFieldsWithoutCallingOverriddenMagnitude",
+                    "getNormalizedCallsOverriddenMagnitudeOnTheSource",
+                    "zeroThresholdLeavesMutableVectorAndReturnsFreshZeroCopy",
+                    "invalidMagnitudeKeepsTheBaselineFloatingPointBehavior")),
+            ):
+                for name in names:
+                    expected = (prefix + "org.dyn4j.geometry." + classname,
+                                name + group["name_suffix"])
+                    self.assertEqual(1, cases.count(expected), group["id"])
+        consumers = [group for group in groups.values()
+                     if group["id"].startswith("consumer-")]
+        self.assertEqual(13, len(consumers))
+        for group in consumers:
+            cases = qualify.expected_probe_cases(manifest, group)
+            self.assertEqual(3, len(cases), group["id"])
+            base_class, base_name = cases[0]
+            expected = (base_class.replace("StagedGeometryTest", "StagedFoundationExtraMethodsTest"),
+                        "publishedAliasesRetainKotlinHelpersAndGetterOverrides" +
+                        base_name.removeprefix("namedConstructorsResolveFromPublishedCommonAndPlatformVariants"))
+            self.assertEqual(1, cases.count(expected), group["id"])
 
     def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
