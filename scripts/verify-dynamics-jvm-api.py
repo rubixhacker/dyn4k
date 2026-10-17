@@ -15,7 +15,7 @@ def surface(jar, name):
         ("javap", "-classpath", jar, "-protected", "-s", f"org.dyn4j.dynamics.{name}"),
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
-    header = next(line.strip() for line in output if line.strip().endswith("{"))
+    header = re.sub(r"\s+", " ", next(line.strip() for line in output if line.strip().endswith("{")))
     declarations = set()
     for index, line in enumerate(output):
         line = re.sub(r"\s+", " ", line.strip())
@@ -41,14 +41,6 @@ def constants(jar, name):
     return fields
 
 
-def type_identity(header):
-    match = re.match(r"public (?:(?:abstract|final) )?(class|interface|enum) ([^ ]+)(?: extends ([^ ]+))?", header)
-    if match is None:
-        raise ValueError(f"unknown type header: {header}")
-    base = match.group(3)
-    return match.group(1), match.group(2), base.rstrip(",") if base else None
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("baseline")
@@ -59,8 +51,8 @@ def main():
     for name in TYPES:
         expected_header, expected = surface(args.baseline, name)
         actual_header, actual = surface(args.candidate, name)
-        if type_identity(expected_header) != type_identity(actual_header):
-            missing.append(f"{name}: type identity changed: {actual_header}")
+        if expected_header != actual_header:
+            missing.append(f"{name}: type header changed: {expected_header} -> {actual_header}")
         count += len(expected)
         missing.extend(f"{name}: missing {declaration}" for declaration in sorted(expected - actual))
         expected_constants = constants(args.baseline, name)

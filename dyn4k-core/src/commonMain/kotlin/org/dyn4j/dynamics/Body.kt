@@ -24,7 +24,12 @@
  */
 package org.dyn4j.dynamics
 
-open class Body : AbstractPhysicsBody {
+import org.dyn4j.DataContainer
+import org.dyn4j.Ownable
+import org.dyn4j.collision.CollisionBody
+import org.dyn4j.geometry.Transformable
+
+open class Body : AbstractPhysicsBody, PhysicsBody, CollisionBody<BodyFixture>, Transformable, DataContainer, Ownable {
     constructor() : super()
     constructor(fixtureCount: Int) : super(fixtureCount)
     protected constructor(body: Body) : super(body)

@@ -25,7 +25,10 @@
 package org.dyn4j.dynamics
 
 import org.dyn4j.Epsilon
+import org.dyn4j.DataContainer
+import org.dyn4j.Ownable
 import org.dyn4j.collision.AbstractCollisionBody
+import org.dyn4j.collision.CollisionBody
 import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.ValueOutOfRangeException
 import org.dyn4j.geometry.AABB
@@ -35,13 +38,15 @@ import org.dyn4j.geometry.Interval
 import org.dyn4j.geometry.Mass
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Transform
+import org.dyn4j.geometry.Transformable
 import org.dyn4j.geometry.Vector2
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlin.jvm.JvmField
 
-abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, PhysicsBody {
+abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, PhysicsBody,
+    CollisionBody<BodyFixture>, Transformable, DataContainer, Ownable {
     @JvmField protected var mass = Mass()
     @JvmField protected val linearVelocity = Vector2()
     @JvmField protected var angularVelocity = 0.0
