@@ -47,10 +47,10 @@ class SegmentTreeLeaf(
 }
 
 open class SimplePolygonVertex(val index: Int, val point: Vector2) {
-    lateinit var prev: SimplePolygonVertex
-    lateinit var next: SimplePolygonVertex
-    lateinit var prevSegment: SegmentTreeLeaf
-    lateinit var nextSegment: SegmentTreeLeaf
+    var prev: SimplePolygonVertex? = null
+    var next: SimplePolygonVertex? = null
+    var prevSegment: SegmentTreeLeaf? = null
+    var nextSegment: SegmentTreeLeaf? = null
     override fun toString(): String = point.toString()
 }
 

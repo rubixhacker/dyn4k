@@ -228,6 +228,27 @@ public final class PolygonAlgorithmConsumer {
         Method isAdjacent = monotoneType.getDeclaredMethod("isAdjacent", monotoneType);
         isAdjacent.setAccessible(true);
         check(Boolean.FALSE.equals(isAdjacent.invoke(first, second)), "unlinked monotone vertices are not adjacent");
+
+        Class<?> polygonVertexType = Class.forName("org.dyn4j.geometry.simplify.SimplePolygonVertex");
+        Constructor<?> polygonVertexConstructor = polygonVertexType.getDeclaredConstructor(int.class, Vector2.class);
+        polygonVertexConstructor.setAccessible(true);
+        Object polygonVertex = polygonVertexConstructor.newInstance(2, new Vector2(1, 2));
+        for (String link : new String[] {"next", "nextSegment", "prev", "prevSegment"}) {
+            check(readPolygonVertexLink(polygonVertexType, polygonVertex, link) == null,
+                "unlinked polygon vertex " + link);
+        }
+    }
+
+    private static Object readPolygonVertexLink(Class<?> type, Object vertex, String link) throws Exception {
+        try {
+            Method getter = type.getDeclaredMethod("get" + Character.toUpperCase(link.charAt(0)) + link.substring(1));
+            getter.setAccessible(true);
+            return getter.invoke(vertex);
+        } catch (NoSuchMethodException baselineField) {
+            Field field = type.getDeclaredField(link);
+            field.setAccessible(true);
+            return field.get(vertex);
+        }
     }
 
     private static Vector2[] loadPolygon1() {

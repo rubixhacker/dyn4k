@@ -43,34 +43,36 @@ abstract class AbstractSimplifier : Simplifier {
 
     protected fun buildSegmentTree(start: SimplePolygonVertex): SegmentTree {
         val tree = SegmentTree()
-        var vertex = start.next
+        var vertex = start.next!!
         while (vertex !== start) {
-            tree.add(vertex.prevSegment)
-            vertex = vertex.next
+            tree.add(vertex.prevSegment!!)
+            vertex = vertex.next!!
         }
-        tree.add(vertex.prevSegment)
+        tree.add(vertex.prevSegment!!)
         return tree
     }
 
     protected fun buildResult(start: SimplePolygonVertex): List<Vector2> {
         val result = mutableListOf(start.point)
-        var current = start.next
+        var current = start.next!!
         while (current !== start) {
             result.add(current.point)
-            current = current.next
+            current = current.next!!
         }
         return result
     }
 
     protected fun isSelfIntersectionProduced(vertex: SimplePolygonVertex, tree: SegmentTree): Boolean {
-        val p1 = vertex.prev.point
-        val p2 = vertex.next.point
+        val previous = vertex.prev!!
+        val next = vertex.next!!
+        val p1 = previous.point
+        val p2 = next.point
         val iterator = tree.getAABBDetectIterator(AABB.createFromPoints(p1, p2))
         while (iterator.hasNext()) {
             val leaf = iterator.next()
             if (vertex.index == leaf.index1 || vertex.index == leaf.index2 ||
-                vertex.prev.index == leaf.index1 || vertex.prev.index == leaf.index2 ||
-                vertex.next.index == leaf.index1 || vertex.next.index == leaf.index2
+                previous.index == leaf.index1 || previous.index == leaf.index2 ||
+                next.index == leaf.index1 || next.index == leaf.index2
             ) continue
             if (intersects(p1, p2, leaf.point1, leaf.point2)) return true
         }
@@ -164,7 +166,7 @@ open class VertexClusterReduction(val clusterTolerance: Double) : AbstractSimpli
             val vertex = SimplePolygonVertex(result.size, point)
             if (nextPoint != null) vertex.nextSegment = SegmentTreeLeaf(point, nextPoint, result.size, result.size + 1)
             if (previous != null) {
-                vertex.prevSegment = previous.nextSegment
+                vertex.prevSegment = previous.nextSegment!!
                 previous.next = vertex
                 vertex.prev = previous
             }
@@ -184,10 +186,10 @@ open class VertexClusterReduction(val clusterTolerance: Double) : AbstractSimpli
     }
 
     private fun removeVertex(vertex: SimplePolygonVertex, tree: SegmentTree) {
-        val previous = vertex.prev
-        val next = vertex.next
-        val previousSegment = vertex.prevSegment
-        val nextSegment = vertex.nextSegment
+        val previous = vertex.prev!!
+        val next = vertex.next!!
+        val previousSegment = vertex.prevSegment!!
+        val nextSegment = vertex.nextSegment!!
         previous.next = next
         next.prev = previous
         val replacement = SegmentTreeLeaf(previous.point, next.point, previous.index, next.index)
@@ -230,8 +232,8 @@ class DouglasPeucker(clusterTolerance: Double, val epsilon: Double) : VertexClus
         }
         var vertex = start
         while (vertex !== end) {
-            tree.remove(vertex.nextSegment)
-            vertex = vertex.next
+            tree.remove(vertex.nextSegment!!)
+            vertex = vertex.next!!
         }
         start.next = end
         end.prev = start
@@ -316,7 +318,7 @@ class Visvalingam(clusterTolerance: Double, val minimumTriangleArea: Double) : V
         }
         val queue = AreaPriorityQueue()
         for (vertex in nodes) {
-            vertex.prevSegment = vertex.prev.nextSegment
+            vertex.prevSegment = vertex.prev!!.nextSegment!!
             queue.add(vertex)
         }
         return queue
@@ -331,13 +333,13 @@ class Visvalingam(clusterTolerance: Double, val minimumTriangleArea: Double) : V
         val nextSegment = vertex.nextSegment
         previous.next = next
         next.prev = previous
-        previous.area = getTriangleArea(previous.prev.point, previous.point, next.point)
-        next.area = getTriangleArea(previous.point, next.point, next.next.point)
+        previous.area = getTriangleArea(previous.prev!!.point, previous.point, next.point)
+        next.area = getTriangleArea(previous.point, next.point, next.next!!.point)
         val replacement = SegmentTreeLeaf(previous.point, next.point, previous.index, next.index)
         previous.nextSegment = replacement
         next.prevSegment = replacement
-        tree.remove(previousSegment)
-        tree.remove(nextSegment)
+        tree.remove(previousSegment!!)
+        tree.remove(nextSegment!!)
         tree.add(replacement)
         queue.remove(previous)
         queue.remove(next)
