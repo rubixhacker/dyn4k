@@ -52,6 +52,10 @@ public final class PolygonAlgorithmConsumer {
         @Override public Vector2[] simplify(Vector2... points) { return points; }
         @Override public List<Vector2> simplify(List<Vector2> points) { return points; }
     }
+    private static final class CustomClusterReduction extends VertexClusterReduction {
+        CustomClusterReduction() { super(0.1); }
+        public String getClusterTolerance() { return "extension"; }
+    }
     private static final class CustomBayazit extends Bayazit {
         private boolean called;
         @Override protected void decomposePolygon(List<Vector2> polygon, List<Convex> pieces) {
@@ -94,6 +98,7 @@ public final class PolygonAlgorithmConsumer {
         check(new CustomDecomposer().decompose(customPoints).isEmpty(), "decomposer list override");
         check(new CustomAbstractDecomposer().decompose(customPoints).isEmpty(), "abstract decomposer list override");
         check(new CustomSimplifier().simplify(customPoints) == customPoints, "simplifier list override");
+        check("extension".equals(new CustomClusterReduction().getClusterTolerance()), "simplifier helper extension");
         for (HullGenerator generator : generators) {
             expectNullPoints(() -> generator.generate((Vector2[]) null));
         }
