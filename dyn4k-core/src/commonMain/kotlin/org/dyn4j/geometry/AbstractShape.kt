@@ -24,18 +24,10 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
-
 abstract class AbstractShape : Shape {
-    @get:kotlin.jvm.JvmName("getCenterField")
-    @set:kotlin.jvm.JvmName("setCenterField")
-    @JvmFieldBridge protected var center: Vector2
-    @get:kotlin.jvm.JvmName("getRadiusField")
-    @set:kotlin.jvm.JvmName("setRadiusField")
-    @JvmFieldBridge protected var radius: Double
-    @get:kotlin.jvm.JvmName("getUserDataField")
-    @set:kotlin.jvm.JvmName("setUserDataField")
-    @JvmFieldBridge protected var userData: Any? = null
+    @kotlin.jvm.JvmField protected var center: Vector2
+    @kotlin.jvm.JvmField protected var radius: Double
+    @kotlin.jvm.JvmField protected var userData: Any? = null
 
     protected constructor(radius: Double) : this(Vector2(), radius)
     protected constructor(center: Vector2, radius: Double) {
