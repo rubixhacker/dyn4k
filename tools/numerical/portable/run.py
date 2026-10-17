@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from cases import declared_cases
-from physical import nominal_free
+from physical import nominal_free, sleep_wake
 from reference_diagnostic import diagnostic, portable_case_id
 from receipt import Identity, Rejected, digest, seal
 
@@ -220,6 +220,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}
         physical = nominal_free(trace)
         outcome["physical"] = physical
+        sleep = sleep_wake(trace)
+        outcome["sleep_wake_physical"] = sleep
         if completed.returncode:
             raise Rejected("Gradle task failed")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
@@ -233,9 +235,9 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
                         "artifact_sha256": identity.artifact_sha256,
                         "frozen_comparison": "UNPASSED"})
-        if physical["status"] != "PASSED":
+        if physical["status"] != "PASSED" or sleep["status"] != "PHYSICAL_PASSED":
             outcome["status"] = "FAILED"
-            outcome["reason"] = "long-running physical diagnostic failed"
+            outcome["reason"] = "physical diagnostic failed"
     except (Rejected, OSError, ValueError, KeyError) as error:
         outcome["status"] = "FAILED"
         outcome["reason"] = str(error)

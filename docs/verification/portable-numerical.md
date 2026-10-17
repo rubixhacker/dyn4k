@@ -19,6 +19,8 @@ The receipt validator rejects missing or duplicate cases, missing steps, lost ca
 
 `reference_diagnostic.py` compares overlapping body channels with a frozen Java trace. It checks the frozen gzip and input hashes first, then records exact-value and signed-zero differences. It applies the approved comparator to matching channels and reports every failed budget. The result remains unpassed while the input headers, event schemas, or other required channels differ.
 
+The physical diagnostic reuses the approved represented-geometry depth and phase schedule for default and configured sleep/wake cases. It reports all nine case counts and failed steps separately; default failures remain failures. The 36,000-step free-motion invariant is checked against its analytic limits. These diagnostics do not replace input, event, or complete-channel parity.
+
 The runner invokes that diagnostic for every frozen reference found in `--reference-dir`, using `/tmp/dyn4k-configured-control/baseline-trace` by default. Each host gets `frozen-comparison.json` with explicit unavailable references. A missing reference, nonmatching schema, or failed approved channel never becomes a parity pass.
 
 ## Acceptance boundary

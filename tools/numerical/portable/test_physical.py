@@ -7,6 +7,11 @@ import physical
 
 
 class PhysicalDiagnosticTest(unittest.TestCase):
+    def test_missing_sleep_wake_case_cannot_pass(self):
+        result = physical.sleep_wake_rows([], keys=["default-sleep-30"])
+        self.assertEqual(result["status"], "INVALID")
+        self.assertEqual(result["cases"]["default-sleep-30"]["states"], 0)
+
     def test_nominal_position_limit_is_checked_per_component(self):
         with tempfile.TemporaryDirectory() as tmp:
             trace = Path(tmp) / "trace.jsonl"
