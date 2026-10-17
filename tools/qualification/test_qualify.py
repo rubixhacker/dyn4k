@@ -56,7 +56,12 @@ class QualificationTests(unittest.TestCase):
                     "consumer": "PASSED", "suite": "complete",
                     "target": case["target"], "runtime": case["runtime"],
                     "version": case["version"], "configuration": case["configuration"]}
-        self.assertEqual("PASSED", qualify.evaluate(case, evidence)["status"])
+        target_hashes = {case["target"]: {evidence["artifact_sha256"]}}
+        self.assertEqual("PASSED", qualify.evaluate(
+            case, evidence, evidence["candidate_sha"], target_hashes)["status"])
+        other_target_hashes = {case["target"]: {"c" * 64}}
+        self.assertEqual("FAILED", qualify.evaluate(
+            case, evidence, evidence["candidate_sha"], other_target_hashes)["status"])
         for field, value in (("expected", 0), ("skipped", 1), ("consumer", "NOT_RUN"),
                              ("artifact_sha256", ""), ("runtime_version", ""),
                              ("configuration", "wrong")):
