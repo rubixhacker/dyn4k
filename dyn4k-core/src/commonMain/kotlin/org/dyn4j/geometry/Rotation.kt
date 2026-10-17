@@ -140,6 +140,7 @@ open class Rotation : Copyable<Rotation> {
             if (value <= 1.0 && value >= -1.0) value else if (1.0 < value) 1.0 else -1.0
 
         @JvmStaticBridge fun of(angle: Double) = Rotation(angle)
+        internal fun fromComponentsUnchecked(cost: Double, sint: Double) = Rotation(cost, sint)
         @JvmStaticBridge fun ofDegrees(angle: Double) = Rotation(angle / 180.0 * PI)
         @JvmStaticBridge fun of(direction: Vector2): Rotation {
             val magnitude = sqrt(direction.x * direction.x + direction.y * direction.y)
