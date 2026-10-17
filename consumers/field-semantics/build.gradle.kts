@@ -7,3 +7,8 @@ dependencies {
 }
 application { mainClass.set("FieldTypesKt") }
 tasks.named<JavaCompile>("compileJava") { options.release.set(8) }
+tasks.register<JavaExec>("runJavaFields") {
+    dependsOn("classes")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("FieldChildren")
+}

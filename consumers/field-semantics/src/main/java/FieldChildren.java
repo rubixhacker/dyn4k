@@ -35,4 +35,34 @@ public final class FieldChildren {
         public void setValue(String next) { value = next + "-bean"; }
         public String readBean() { return getValue(); }
     }
+
+    public static void main(String[] args) {
+        Vector2Child vector2 = new Vector2Child();
+        if (vector2.x != 4.0) throw new AssertionError("Vector2 field read");
+        vector2.x = 7.0;
+        if (vector2.x != 7.0 || vector2.readBean() != 14.0) throw new AssertionError("Vector2 field write");
+
+        Vector3Child vector3 = new Vector3Child();
+        if (vector3.z != 1.0) throw new AssertionError("Vector3 field read");
+        vector3.z = 7.0;
+        if (vector3.z != 7.0 || vector3.readBean() != 14.0) throw new AssertionError("Vector3 field write");
+
+        Matrix22Child matrix22 = new Matrix22Child();
+        if (matrix22.m00 != 4.0) throw new AssertionError("Matrix22 field read");
+        matrix22.m00 = 7.0;
+        if (matrix22.m00 != 7.0 || matrix22.readBean() != 14.0) throw new AssertionError("Matrix22 field write");
+
+        Matrix33Child matrix33 = new Matrix33Child();
+        if (matrix33.m22 != 4.0) throw new AssertionError("Matrix33 field read");
+        matrix33.m22 = 7.0;
+        if (matrix33.m22 != 7.0 || matrix33.readBean() != 14.0) throw new AssertionError("Matrix33 field write");
+
+        ReferenceChild reference = new ReferenceChild();
+        if (!"raw".equals(reference.value)) throw new AssertionError("Reference field read");
+        reference.value = "next";
+        if (!"next".equals(reference.value) || !"next-bean".equals(reference.readBean())) {
+            throw new AssertionError("Reference field write");
+        }
+        System.out.println("FieldChildren: 15 Java field and bean checks passed");
+    }
 }
