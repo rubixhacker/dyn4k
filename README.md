@@ -7,6 +7,9 @@ vectors, rotations, matrices, transforms, and the first public consumer tests.
 Full engine coverage and target qualification remain open. Public repository:
 [rubixhacker/dyn4k](https://github.com/rubixhacker/dyn4k).
 
+- [Complete-port specification](https://github.com/rubixhacker/dyn4k/issues/32)
+- [Implementation work and evidence](docs/planning/implementation-ledger.md)
+
 - [Decision map](https://github.com/rubixhacker/dyn4k/issues/1)
 - [Agreed charter](docs/planning/charter.md)
 - [Domain language](CONTEXT.md)
