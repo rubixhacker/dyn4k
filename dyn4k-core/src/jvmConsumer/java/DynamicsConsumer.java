@@ -90,11 +90,60 @@ public class DynamicsConsumer {
         @Override public Mass createMass() { massCalls++; return super.createMass(); }
     }
 
+    private static final class ExtensionForce extends Force {
+        public String rawForce$io_github_rubixhacker_dyn4k_core() { return "force"; }
+    }
+
+    private static final class ExtensionTorque extends Torque {
+        public String rawTorque$io_github_rubixhacker_dyn4k_core() { return "torque"; }
+    }
+
+    private static final class ExtensionFixture extends BodyFixture {
+        ExtensionFixture() { super(new Circle(1.0)); }
+        public String rawDensity$io_github_rubixhacker_dyn4k_core() { return "fixture"; }
+    }
+
+    private static final class ExtensionStep extends TimeStep {
+        ExtensionStep() { super(0.5); }
+        public String rawDeltaTime$io_github_rubixhacker_dyn4k_core() { return "step"; }
+    }
+
+    private static final class SameSignatureForce extends Force {
+        public Vector2 rawForce$io_github_rubixhacker_dyn4k_core() { return new Vector2(7.0, 0.0); }
+    }
+
+    private static final class SameSignatureTorque extends Torque {
+        public double rawTorque$io_github_rubixhacker_dyn4k_core() { return 7.0; }
+    }
+
+    private static final class SameSignatureFixture extends BodyFixture {
+        SameSignatureFixture() { super(new Circle(1.0)); }
+        public double rawDensity$io_github_rubixhacker_dyn4k_core() { return 7.0; }
+    }
+
+    private static final class SameSignatureStep extends TimeStep {
+        SameSignatureStep() { super(0.5); }
+        public double rawDeltaTime$io_github_rubixhacker_dyn4k_core() { return 7.0; }
+    }
+
     private static void require(boolean value, String message) {
         if (!value) throw new AssertionError(message);
     }
 
     public static void main(String[] args) {
+        String extensionHelpers = new ExtensionForce().rawForce$io_github_rubixhacker_dyn4k_core()
+            + new ExtensionTorque().rawTorque$io_github_rubixhacker_dyn4k_core()
+            + new ExtensionFixture().rawDensity$io_github_rubixhacker_dyn4k_core()
+            + new ExtensionStep().rawDeltaTime$io_github_rubixhacker_dyn4k_core();
+        require("forcetorquefixturestep".equals(extensionHelpers), "extension helper dispatch");
+        require(new SameSignatureForce().rawForce$io_github_rubixhacker_dyn4k_core().x == 7.0,
+            "force helper with matching return type");
+        require(new SameSignatureTorque().rawTorque$io_github_rubixhacker_dyn4k_core() == 7.0,
+            "torque helper with matching return type");
+        require(new SameSignatureFixture().rawDensity$io_github_rubixhacker_dyn4k_core() == 7.0,
+            "fixture helper with matching return type");
+        require(new SameSignatureStep().rawDeltaTime$io_github_rubixhacker_dyn4k_core() == 7.0,
+            "step helper with matching return type");
         ProbeBody body = new ProbeBody();
         List<BodyFixture> fixtures = body.getFixtures();
         BodyFixture fixture = body.addFixture(new Circle(1.0));
