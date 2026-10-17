@@ -250,6 +250,13 @@ def execute_plan(plan, candidate_sha, output):
     return evidence
 
 
+def execution_succeeded(evidence):
+    return bool(evidence) and all(
+        "error" not in result and result.get("exit_code", 0) == 0
+        for result in evidence.values()
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -313,7 +320,7 @@ def main():
         if unknown:
             parser.error("unknown lane: " + ", ".join(sorted(unknown)))
         evidence = execute_plan(plan, args.candidate_sha, args.output)
-        return 0 if evidence else 1
+        return 0 if execution_succeeded(evidence) else 1
     evidence = json.loads(args.evidence.read_text()) if args.evidence else {}
     if evidence and not args.audit:
         parser.error("staged audit is required when lane evidence is supplied")

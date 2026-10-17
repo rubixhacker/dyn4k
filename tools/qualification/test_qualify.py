@@ -31,6 +31,23 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate org.dyn4j provider"):
                 qualify.check_providers(graph.read_text())
 
+    def test_executor_failure_cannot_return_success(self):
+        self.assertFalse(qualify.execution_succeeded({
+            "jvm:Java:minimum:default": {
+                "error": "command failed or result file missing",
+                "exit_code": 1,
+            }
+        }))
+        self.assertTrue(qualify.execution_succeeded({
+            "jvm:Java:minimum:default": {
+                "expected": 1,
+                "executed": 1,
+                "failures": 0,
+                "skipped": 0,
+                "exit_code": 0,
+            }
+        }))
+
     def test_candidate_identity_and_counts_are_required(self):
         case = qualify.expand(qualify.matrix())[0]
         evidence = {"candidate_sha": "a" * 40, "artifact_sha256": "b" * 64,
