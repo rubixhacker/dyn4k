@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2024 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2022 William Bittle  http://www.dyn4j.org/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -28,22 +28,13 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import org.dyn4j.Copyable
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class AABB : Translatable, Copyable<AABB> {
-    @get:kotlin.jvm.JvmName("getMinXField")
-    @set:kotlin.jvm.JvmName("setMinXField")
-    @JvmFieldBridge protected var minX: Double
-    @get:kotlin.jvm.JvmName("getMinYField")
-    @set:kotlin.jvm.JvmName("setMinYField")
-    @JvmFieldBridge protected var minY: Double
-    @get:kotlin.jvm.JvmName("getMaxXField")
-    @set:kotlin.jvm.JvmName("setMaxXField")
-    @JvmFieldBridge protected var maxX: Double
-    @get:kotlin.jvm.JvmName("getMaxYField")
-    @set:kotlin.jvm.JvmName("setMaxYField")
-    @JvmFieldBridge protected var maxY: Double
+    @kotlin.jvm.JvmField protected var minX: Double
+    @kotlin.jvm.JvmField protected var minY: Double
+    @kotlin.jvm.JvmField protected var maxX: Double
+    @kotlin.jvm.JvmField protected var maxY: Double
 
     constructor(minX: Double, minY: Double, maxX: Double, maxY: Double) {
         if (minX > maxX) throw ValueOutOfRangeException("minX", minX, ValueOutOfRangeException.MUST_BE_LESS_THAN_OR_EQUAL_TO, "maxX", maxX)
@@ -66,14 +57,14 @@ open class AABB : Translatable, Copyable<AABB> {
 
     override fun copy() = AABB(this)
 
-    fun zero() {
+    open fun zero() {
         minX = 0.0
         minY = 0.0
         maxX = 0.0
         maxY = 0.0
     }
 
-    fun set(aabb: AABB): AABB {
+    open fun set(aabb: AABB): AABB {
         minX = aabb.minX
         minY = aabb.minY
         maxX = aabb.maxX
@@ -102,13 +93,13 @@ open class AABB : Translatable, Copyable<AABB> {
     }
 
     override fun translate(vector: Vector2) = translate(vector.x, vector.y)
-    fun getTranslated(vector: Vector2) = AABB(minX + vector.x, minY + vector.y, maxX + vector.x, maxY + vector.y)
-    fun getWidth() = maxX - minX
-    fun getHeight() = maxY - minY
-    fun getPerimeter() = 2.0 * (getWidth() + getHeight())
-    fun getArea() = getWidth() * getHeight()
+    open fun getTranslated(vector: Vector2) = AABB(minX + vector.x, minY + vector.y, maxX + vector.x, maxY + vector.y)
+    open fun getWidth() = maxX - minX
+    open fun getHeight() = maxY - minY
+    open fun getPerimeter() = 2.0 * (getWidth() + getHeight())
+    open fun getArea() = getWidth() * getHeight()
 
-    fun union(aabb: AABB): AABB {
+    open fun union(aabb: AABB): AABB {
         minX = min(minX, aabb.minX)
         minY = min(minY, aabb.minY)
         maxX = max(maxX, aabb.maxX)
@@ -116,7 +107,7 @@ open class AABB : Translatable, Copyable<AABB> {
         return this
     }
 
-    fun union(aabb1: AABB, aabb2: AABB): AABB {
+    open fun union(aabb1: AABB, aabb2: AABB): AABB {
         minX = min(aabb1.minX, aabb2.minX)
         minY = min(aabb1.minY, aabb2.minY)
         maxX = max(aabb1.maxX, aabb2.maxX)
@@ -124,11 +115,11 @@ open class AABB : Translatable, Copyable<AABB> {
         return this
     }
 
-    fun getUnion(aabb: AABB) = copy().union(aabb)
+    open fun getUnion(aabb: AABB) = copy().union(aabb)
 
-    fun intersection(aabb: AABB) = intersection(this, aabb)
+    open fun intersection(aabb: AABB) = intersection(this, aabb)
 
-    fun intersection(aabb1: AABB, aabb2: AABB): AABB {
+    open fun intersection(aabb1: AABB, aabb2: AABB): AABB {
         minX = max(aabb1.minX, aabb2.minX)
         minY = max(aabb1.minY, aabb2.minY)
         maxX = min(aabb1.maxX, aabb2.maxX)
@@ -137,9 +128,9 @@ open class AABB : Translatable, Copyable<AABB> {
         return this
     }
 
-    fun getIntersection(aabb: AABB) = copy().intersection(aabb)
+    open fun getIntersection(aabb: AABB) = copy().intersection(aabb)
 
-    fun expand(expansion: Double): AABB {
+    open fun expand(expansion: Double): AABB {
         val e = expansion * 0.5
         minX -= e
         minY -= e
@@ -158,18 +149,18 @@ open class AABB : Translatable, Copyable<AABB> {
         return this
     }
 
-    fun getExpanded(expansion: Double) = copy().expand(expansion)
-    fun overlaps(aabb: AABB) = minX <= aabb.maxX && maxX >= aabb.minX && minY <= aabb.maxY && maxY >= aabb.minY
-    fun contains(aabb: AABB) = minX <= aabb.minX && maxX >= aabb.maxX && minY <= aabb.minY && maxY >= aabb.maxY
-    fun contains(point: Vector2) = contains(point.x, point.y)
-    fun contains(x: Double, y: Double) = minX <= x && maxX >= x && minY <= y && maxY >= y
-    fun isDegenerate() = minX == maxX || minY == maxY
-    fun isDegenerate(error: Double) = abs(maxX - minX) <= error || abs(maxY - minY) <= error
-    fun getCenter() = Vector2(minX + (maxX - minX) * 0.5, minY + (maxY - minY) * 0.5)
-    fun getMinX() = minX
-    fun getMinY() = minY
-    fun getMaxX() = maxX
-    fun getMaxY() = maxY
+    open fun getExpanded(expansion: Double) = copy().expand(expansion)
+    open fun overlaps(aabb: AABB) = minX <= aabb.maxX && maxX >= aabb.minX && minY <= aabb.maxY && maxY >= aabb.minY
+    open fun contains(aabb: AABB) = minX <= aabb.minX && maxX >= aabb.maxX && minY <= aabb.minY && maxY >= aabb.maxY
+    open fun contains(point: Vector2) = contains(point.x, point.y)
+    open fun contains(x: Double, y: Double) = minX <= x && maxX >= x && minY <= y && maxY >= y
+    open fun isDegenerate() = minX == maxX || minY == maxY
+    open fun isDegenerate(error: Double) = abs(maxX - minX) <= error || abs(maxY - minY) <= error
+    open fun getCenter() = Vector2(minX + (maxX - minX) * 0.5, minY + (maxY - minY) * 0.5)
+    open fun getMinX() = minX
+    open fun getMinY() = minY
+    open fun getMaxX() = maxX
+    open fun getMaxY() = maxY
 
     companion object {
         private fun checkedRadius(radius: Double): Double {

@@ -29,12 +29,8 @@ import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ArgumentNullException
 
 open class Ray : Copyable<Ray> {
-    @get:kotlin.jvm.JvmName("getStartField")
-    @set:kotlin.jvm.JvmName("setStartField")
-    @JvmFieldBridge protected var start: Vector2
-    @get:kotlin.jvm.JvmName("getDirectionField")
-    @set:kotlin.jvm.JvmName("setDirectionField")
-    @JvmFieldBridge protected var direction: Vector2
+    @kotlin.jvm.JvmField protected var start: Vector2
+    @kotlin.jvm.JvmField protected var direction: Vector2
 
     constructor(direction: Double) : this(Vector2(direction))
     constructor(direction: Vector2?) : this(Vector2(), direction)
@@ -53,18 +49,18 @@ open class Ray : Copyable<Ray> {
 
     override fun copy() = Ray(this)
     override fun toString() = "Ray[Start=$start|Direction=${getDirection()}]"
-    fun getStart() = start
-    fun setStart(start: Vector2?) {
+    open fun getStart() = start
+    open fun setStart(start: Vector2?) {
         this.start = start ?: throw ArgumentNullException("start")
     }
-    fun setDirection(direction: Double) {
+    open fun setDirection(direction: Double) {
         this.direction = Vector2(direction)
     }
-    fun getDirection() = direction.getDirection()
-    fun setDirection(direction: Vector2?) {
+    open fun getDirection() = direction.getDirection()
+    open fun setDirection(direction: Vector2?) {
         if (direction == null) throw ArgumentNullException("direction")
         if (direction.isZero()) throw IllegalArgumentException("The direction cannot be the zero vector")
         this.direction = direction
     }
-    fun getDirectionVector() = direction
+    open fun getDirectionVector() = direction
 }

@@ -101,20 +101,20 @@ open class Mass : Copyable<Mass> {
         return 31 * result + type.hashCode()
     }
 
-    fun isInfinite() = type == MassType.INFINITE
-    fun setType(type: MassType?) {
+    open fun isInfinite() = type == MassType.INFINITE
+    open fun setType(type: MassType?) {
         if (type == null) throw ArgumentNullException("type")
         if (type == MassType.NORMAL && (mass <= 0.0 || inertia <= 0.0)) return
         if (type == MassType.FIXED_LINEAR_VELOCITY && inertia <= 0.0) return
         if (type == MassType.FIXED_ANGULAR_VELOCITY && mass <= 0.0) return
         this.type = type
     }
-    fun getType() = type
-    fun getCenter() = center
-    fun getMass() = if (type == MassType.INFINITE || type == MassType.FIXED_LINEAR_VELOCITY) 0.0 else mass
-    fun getInertia() = if (type == MassType.INFINITE || type == MassType.FIXED_ANGULAR_VELOCITY) 0.0 else inertia
-    fun getInverseMass() = if (type == MassType.INFINITE || type == MassType.FIXED_LINEAR_VELOCITY) 0.0 else invMass
-    fun getInverseInertia() = if (type == MassType.INFINITE || type == MassType.FIXED_ANGULAR_VELOCITY) 0.0 else invInertia
+    open fun getType() = type
+    open fun getCenter() = center
+    open fun getMass() = if (type == MassType.INFINITE || type == MassType.FIXED_LINEAR_VELOCITY) 0.0 else mass
+    open fun getInertia() = if (type == MassType.INFINITE || type == MassType.FIXED_ANGULAR_VELOCITY) 0.0 else inertia
+    open fun getInverseMass() = if (type == MassType.INFINITE || type == MassType.FIXED_LINEAR_VELOCITY) 0.0 else invMass
+    open fun getInverseInertia() = if (type == MassType.INFINITE || type == MassType.FIXED_ANGULAR_VELOCITY) 0.0 else invInertia
 
     companion object {
      fun create(masses: List<Mass?>?): Mass {
