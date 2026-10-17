@@ -266,9 +266,12 @@ class Geometry {
             }
             return Polygon(*vertices)
         }
-     fun cleanse(points: List<Vector2?>?): MutableList<Vector2> {
+     fun cleanse(points: List<Vector2?>?): List<Vector2> {
             if (points == null) throw ArgumentNullException("points")
-            if (points.isEmpty()) return points as MutableList<Vector2>
+            if (points.isEmpty()) {
+                @Suppress("UNCHECKED_CAST")
+                return points as List<Vector2>
+            }
             val result = mutableListOf<Vector2>()
             var winding = 0.0
             for (index in points.indices) {
