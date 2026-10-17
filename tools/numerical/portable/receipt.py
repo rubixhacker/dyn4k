@@ -3,6 +3,7 @@ import json
 import math
 import struct
 from dataclasses import asdict, dataclass
+from itertools import zip_longest
 from pathlib import Path
 
 
@@ -23,7 +24,11 @@ class Identity:
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    result = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            result.update(block)
+    return result.hexdigest()
 
 
 def exact(left, right):
@@ -77,6 +82,165 @@ def records(path):
             yield value
 
 
+def require(condition, message):
+    if not condition:
+        raise Rejected(message)
+
+
+def validate_setup(header, case):
+    settings = header.get("settings")
+    setup = header.get("setup")
+    require(isinstance(settings, dict) and isinstance(setup, dict), "input settings or setup is absent")
+    required_settings = {"gravity", "stepFrequency", "maximumTranslation", "maximumRotation",
+                         "atRestDetectionEnabled", "maximumAtRestLinearVelocity",
+                         "maximumAtRestAngularVelocity", "minimumAtRestTime", "velocityIterations",
+                         "positionIterations", "warmStartingEnabled", "maximumWarmStartDistance",
+                         "linearTolerance", "angularTolerance", "maximumLinearCorrection",
+                         "maximumAngularCorrection", "baumgarte", "continuousDetectionMode",
+                         "narrowphase", "timeOfImpact"}
+    require(required_settings <= settings.keys(), "input settings omit a required field")
+    require(exact(settings["timeOfImpact"].get("distanceEpsilon"), 4.806217383937352e-6),
+            "default TOI distance epsilon differs from pinned cbrt value")
+    bodies = setup.get("bodies")
+    joints = setup.get("joints")
+    require(isinstance(bodies, list) and bodies and isinstance(joints, list),
+            "input body or joint setup is absent")
+    for index, body in enumerate(bodies):
+        require(body.get("id") == f"b{index}", "input body identity differs")
+        require({"transform", "massType", "mass", "inertia", "massCenter", "linearDamping",
+                 "angularDamping", "initialVelocity", "initialAngularVelocity",
+                 "atRestDetectionEnabled", "bullet", "fixtures"} <= body.keys(),
+                "input body setup omits a required field")
+        require(isinstance(body["fixtures"], list) and body["fixtures"],
+                "input fixture setup is empty")
+        require(len(body["fixtures"]) == 1, "input fixture count differs")
+        for fixture_index, fixture in enumerate(body["fixtures"]):
+            require(fixture.get("id") == f"b{index}f{fixture_index}", "input fixture identity differs")
+            require({"density", "friction", "restitution", "restitutionVelocity", "sensor",
+                     "filter", "shape"} <= fixture.keys(), "input fixture setup omits a required field")
+            require(fixture["filter"] == "DEFAULT_FILTER", "unsupported fixture filter")
+            require(isinstance(fixture["shape"], dict) and "type" in fixture["shape"],
+                    "input shape setup is absent")
+            require(exact(fixture["density"], 1.0) and fixture["sensor"] is False,
+                    "input fixture density or sensor differs")
+    for index, joint in enumerate(joints):
+        require(joint.get("id") == f"j{index}" and isinstance(joint.get("mode"), dict) and
+                isinstance(joint.get("bodies"), list), "input joint identity or mode is absent")
+    family = case["family"]
+    input_values = case["input"]
+    if family == "geometry-collision":
+        scale = input_values["scale"]
+        ox, oy = input_values["origin"]
+        delta = input_values["delta"]
+        require(len(bodies) == 2 and not joints and
+                exact(bodies[0]["fixtures"][0]["shape"].get("radius"), scale) and
+                exact(bodies[1]["fixtures"][0]["shape"].get("radius"), 0.5 * scale) and
+                exact(bodies[0]["transform"]["getTranslation"], [ox, oy]) and
+                exact(bodies[1]["transform"]["getTranslation"], [ox + scale * (1.5 + delta), oy]),
+                "geometry boundary input differs")
+    if family == "free-motion":
+        require(input_values["durationSeconds"] == 10, "motion duration differs")
+        if case["id"] == "motion-forces-60":
+            require(len(bodies) == 1 and not joints and
+                    exact(settings["gravity"], [0.0, 0.0]) and
+                    exact(bodies[0]["linearDamping"], input_values["damping"]) and
+                    exact(bodies[0]["angularDamping"], input_values["damping"]) and
+                    exact(bodies[0]["fixtures"][0]["shape"].get("radius"), 0.5) and
+                    exact(input_values["force"], [1.0, 0.0]) and
+                    exact(input_values["torque"], 0.25), "force and damping input differs")
+        else:
+            require(len(bodies) == 2 and not joints and
+                    exact(settings["gravity"], input_values["gravity"]) and
+                    [body["fixtures"][0]["shape"]["type"] for body in bodies] == ["Rectangle", "Circle"] and
+                    all(exact(body["fixtures"][0]["restitution"], input_values["restitution"])
+                        and exact(body["fixtures"][0]["restitutionVelocity"], 0.0) for body in bodies),
+                    "restitution input differs")
+    if family == "contacts-friction-sleep-wake":
+        require(len(bodies) == 2 and not joints and
+                [body["fixtures"][0]["shape"].get("type") for body in bodies] == ["Rectangle", "Rectangle"] and
+                [body["massType"] for body in bodies] == ["INFINITE", "NORMAL"] and
+                all(exact(body["fixtures"][0]["friction"], 0.5) for body in bodies) and
+                exact(settings["gravity"], [0.0, -9.8]) and
+                exact(bodies[0]["transform"]["getTranslation"], [0.0, -0.25]) and
+                exact(bodies[1]["transform"]["getTranslation"], [0.0, 0.51]),
+                "sleep/wake input differs")
+        if case["profile"] == "configured":
+            require(exact(settings["linearTolerance"], 1.0 / 4096.0) and
+                    settings["positionIterations"] == 8 and case.get("outer_group") in (1, 2, 4),
+                    "configured quality input differs")
+    if family == "joints-limits-motors":
+        require(len(joints) == 1 and joints[0]["mode"].get("type") == input_values["jointType"],
+                "joint type or mode is absent")
+        if case["id"].startswith("joint-"):
+            active = input_values["mode"] == "active"
+            mode = joints[0]["mode"]
+            require(len(bodies) == 2 and joints[0]["bodies"] in ([0, 1], [1]) and
+                    exact(settings["gravity"], [0.0, 0.0]), "joint body input differs")
+            flag = {"Angle": "limitsEnabled", "Distance": "springEnabled",
+                    "Prismatic": "motorEnabled", "Pulley": "slackEnabled",
+                    "Revolute": "motorEnabled", "Weld": "springEnabled",
+                    "Wheel": "motorEnabled", "Pin": "springEnabled"}.get(input_values["jointType"])
+            if flag:
+                require(mode.get(flag) is active, "joint active mode differs")
+            if input_values["jointType"] == "Friction":
+                require(exact(mode.get("maximumForce"), 20.0 if active else 10.0) and
+                        exact(mode.get("maximumTorque"), 0.5 if active else 0.25),
+                        "friction joint mode differs")
+            if input_values["jointType"] == "Motor":
+                require(exact(mode.get("maximumForce"), 10.0 if active else 1000.0),
+                        "motor joint mode differs")
+        elif case["id"] == "P-JINT-Weld-enabled-equal":
+            mode = joints[0]["mode"]
+            require(mode.get("limitsEnabled") is True and
+                    exact([mode.get("lowerLimit"), mode.get("upperLimit")], input_values["limits"]) and
+                    mode.get("springEnabled") is True and mode.get("springDamperEnabled") is True and
+                    exact(mode.get("springDampingRatio"), 0.3), "frozen weld mode differs")
+        else:
+            require(len(bodies) == 3 and joints[0]["bodies"] == [1, 2] and
+                    exact(bodies[2]["initialVelocity"], input_values["sourceVelocity"]),
+                    "frozen pulley input differs")
+    if family == "ccd":
+        require(len(bodies) == 2 and not joints and bodies[1]["bullet"] is True and
+                exact(bodies[1]["initialVelocity"], [0.0, input_values["speed"]]) and
+                settings["continuousDetectionMode"] == input_values["mode"] and
+                exact(settings["gravity"], [0.0, 0.0]) and
+                exact(bodies[1]["transform"]["getTranslation"], [0.0, 1.0]) and
+                bodies[1]["fixtures"][0]["shape"]["type"] == (
+                    "Circle" if input_values["shape"] == "circle" else "Polygon"),
+                "CCD input differs")
+    if family == "long-running-invariant":
+        require(len(bodies) == 1 and not joints and
+                exact(bodies[0]["initialVelocity"], input_values["velocity"]) and
+                exact(bodies[0]["initialAngularVelocity"], input_values["angularVelocity"]) and
+                exact(settings["gravity"], [0.0, 0.0]) and
+                settings["atRestDetectionEnabled"] is False, "long-run input differs")
+
+
+def validate_state(state, body_ids, joint_ids):
+    require(isinstance(state, dict) and isinstance(state.get("bodies"), list) and
+            isinstance(state.get("joints"), list), "state body or joint channel is absent")
+    require([body.get("id") for body in state["bodies"]] == body_ids and
+            [joint.get("id") for joint in state["joints"]] == joint_ids,
+            "state body or joint identity differs")
+    required_body = {"transform", "previousTransform", "worldCenter", "fixedOriginPosition",
+                     "velocity", "angularVelocity", "force", "torque", "accumulatedForce",
+                     "accumulatedTorque", "atRest", "bullet", "rotationIncrementSum",
+                     "kineticEnergy", "linearMomentum", "angularMomentumCenter"}
+    for body in state["bodies"]:
+        require(required_body <= body.keys(), "state body channel is absent")
+        for transform_name in ("transform", "previousTransform"):
+            transform = body[transform_name]
+            require({"getTranslation", "getTranslationX", "getTranslationY", "getCost",
+                     "getSint", "getRotationAngle", "getValues"} <= transform.keys(),
+                    "state transform channel is absent")
+            require(exact(transform["getTranslation"],
+                          [transform["getTranslationX"], transform["getTranslationY"]]),
+                    "state transform aliases differ")
+    for joint in state["joints"]:
+        require({"reactionForce", "reactionTorque", "mode"} <= joint.keys(),
+                "state joint channel is absent")
+
+
 def inspect(path, cases):
     expected = {case["id"]: case for case in cases}
     if not expected or len(expected) != len(cases):
@@ -96,6 +260,8 @@ def inspect(path, cases):
     last_state = None
     step_callback_count = 0
     action_steps = []
+    body_ids = []
+    joint_ids = []
     for row in records(path):
         kind = row.get("kind")
         case_id = row.get("id")
@@ -110,6 +276,11 @@ def inspect(path, cases):
                 raise Rejected(f"{case_id}: input differs")
             if not exact(row.get("dt"), 1.0 / case["hz"]):
                 raise Rejected(f"{case_id}: dt differs")
+            if case.get("require_setup"):
+                validate_setup(row, case)
+                body_ids = [body["id"] for body in row["setup"]["bodies"]]
+                joint_ids = [joint["id"] for joint in row["setup"]["joints"]]
+                validate_state(row.get("initial"), body_ids, joint_ids)
             current = case_id
             next_step = 1
             last_order = -1
@@ -130,12 +301,15 @@ def inspect(path, cases):
                 active_step = step
                 last_order = -1
                 step_callback_count = 0
-            if type(step) is not int or type(order) is not int or step != next_step or order <= last_order:
+            if (type(step) is not int or type(order) is not int or step != next_step or
+                    step > expected[current]["steps"] or order <= last_order):
                 raise Rejected(f"{case_id}: missing step or changed event order")
             last_order = order
             if kind == "state":
                 if state_count != step - 1 or "state" not in row:
                     raise Rejected(f"{case_id}: missing or duplicate state")
+                if expected[case_id].get("require_setup"):
+                    validate_state(row["state"], body_ids, joint_ids)
                 if step_callback_count < expected[case_id].get("min_step_events", 0):
                     raise Rejected(f"{case_id}: step {step} has too few callbacks")
                 state_count += 1
@@ -188,14 +362,14 @@ def inspect(path, cases):
 def compare_exact(reference, candidate, cases):
     inspect(reference, cases)
     inspect(candidate, cases)
-    left = list(records(reference))
-    right = list(records(candidate))
-    if len(left) != len(right):
-        raise Rejected("record count differs")
-    for number, (a, b) in enumerate(zip(left, right), 1):
+    number = 0
+    sentinel = object()
+    for number, (a, b) in enumerate(zip_longest(records(reference), records(candidate), fillvalue=sentinel), 1):
+        if a is sentinel or b is sentinel:
+            raise Rejected("record count differs")
         if not exact(a, b):
             raise Rejected(f"record {number} differs")
-    return {"status": "PASSED", "records": len(left)}
+    return {"status": "PASSED", "records": number}
 
 
 def seal(trace, cases, identity, artifacts):

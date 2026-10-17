@@ -166,7 +166,7 @@ class PortableMatrixTest {
                 if (active) { setSpringEnabled(true); setSpringFrequency(8.0); setLimitsEnabled(1.0, 3.0) }
             }
             "Friction" -> FrictionJoint(a, b, b.getWorldCenter()).apply {
-                if (active) { setMaximumForce(10.0); setMaximumTorque(0.25) }
+                if (active) { setMaximumForce(20.0); setMaximumTorque(0.5) }
             }
             "Motor" -> MotorJoint(a, b).apply {
                 if (active) { setLinearTarget(Vector2(0.5, 0.5)); setMaximumForce(10.0); setMaximumTorque(0.25) }

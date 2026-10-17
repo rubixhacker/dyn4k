@@ -39,6 +39,37 @@ class ReceiptContractTest(unittest.TestCase):
             self.assertRaises(receipt.Rejected, receipt.inspect, path,
                               [{**CASES[0], "input": {"velocity": [0.0, 1.0]}}])
 
+    def test_required_input_setup_cannot_be_omitted_or_relabelled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write(Path(tmp), "trace.jsonl", sample())
+            self.assertRaises(receipt.Rejected, receipt.inspect, path,
+                              [{**CASES[0], "require_setup": True}])
+        keys = ("gravity", "stepFrequency", "maximumTranslation", "maximumRotation",
+                "atRestDetectionEnabled", "maximumAtRestLinearVelocity",
+                "maximumAtRestAngularVelocity", "minimumAtRestTime", "velocityIterations",
+                "positionIterations", "warmStartingEnabled", "maximumWarmStartDistance",
+                "linearTolerance", "angularTolerance", "maximumLinearCorrection",
+                "maximumAngularCorrection", "baumgarte", "continuousDetectionMode", "narrowphase")
+        settings = {key: 0 for key in keys}
+        settings["timeOfImpact"] = {"distanceEpsilon": 4.806217383937352e-6}
+        def body(index, x, radius):
+            return {"id": f"b{index}", "transform": {"getTranslation": [x, 0.0]},
+                    "massType": "NORMAL", "mass": 1.0, "inertia": 1.0,
+                    "massCenter": [0.0, 0.0], "linearDamping": 0.0,
+                    "angularDamping": 0.0, "initialVelocity": [0.0, 0.0],
+                    "initialAngularVelocity": 0.0, "atRestDetectionEnabled": True,
+                    "bullet": False, "fixtures": [{"id": f"b{index}f0", "density": 1.0,
+                    "friction": 0.2, "restitution": 0.0, "restitutionVelocity": 1.0,
+                    "sensor": False, "filter": "DEFAULT_FILTER",
+                    "shape": {"type": "Circle", "radius": radius}}]}
+        header = {"settings": settings, "setup": {"bodies": [body(0, 0.0, 1.0),
+                                                               body(1, 1.5, 0.5)], "joints": []}}
+        case = {"family": "geometry-collision", "input": {"scale": 1.0,
+                "origin": [0.0, 0.0], "delta": 0.0}}
+        receipt.validate_setup(header, case)
+        header["setup"]["bodies"][1]["fixtures"][0]["shape"]["radius"] = 0.75
+        self.assertRaises(receipt.Rejected, receipt.validate_setup, header, case)
+
     def test_input_signed_zero_and_event_order_are_exact(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

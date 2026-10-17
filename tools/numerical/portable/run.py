@@ -11,6 +11,7 @@ from pathlib import Path
 
 from cases import declared_cases
 from physical import nominal_free
+from reference_diagnostic import diagnostic, portable_case_id
 from receipt import Identity, Rejected, digest, inspect, seal, verify
 
 
@@ -26,6 +27,15 @@ HOST_TASKS = {
     "node-wasm-js": "wasmJsNodeTest",
     "node-wasm-wasi": "wasmWasiNodeTest",
 }
+STAGE_TASKS = (
+    ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
+    ":dyn4k-core:publishJvmPublicationToStagingRepository",
+    ":dyn4k-core:publishAndroidPublicationToStagingRepository",
+    ":dyn4k-core:publishLinuxX64PublicationToStagingRepository",
+    ":dyn4k-core:publishJsPublicationToStagingRepository",
+    ":dyn4k-core:publishWasmJsPublicationToStagingRepository",
+    ":dyn4k-core:publishWasmWasiPublicationToStagingRepository",
+)
 ARTIFACT_NAME = {
     "jvm": ("jvm", "jar"),
     "android-host": ("android", "aar"),
@@ -40,6 +50,7 @@ OTHER_LANES = (
     "watchos-arm64", "watchos-device-arm64", "watchos-simulator-arm64",
     "android-native-arm32", "android-native-arm64", "android-native-x86", "android-native-x64",
 )
+CATALOG = ROOT / "tools/numerical/fixtures.json"
 
 
 def git(*args):
@@ -63,6 +74,30 @@ def artifacts(host):
         if not path.is_file():
             raise Rejected(f"staged publication is absent: {path}")
     return {"target": main, "metadata": metadata}
+
+
+def stage(output, commit, source_sha256):
+    started = __import__("time").time()
+    env = os.environ.copy()
+    env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
+    command = [str(ROOT / "gradlew"), *STAGE_TASKS, "--rerun-tasks", "--no-daemon",
+               "--console=plain", "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+    with (output / "publication.log").open("x", encoding="utf-8") as log:
+        completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                                   stderr=subprocess.STDOUT, check=False)
+    if completed.returncode:
+        raise Rejected("staged publication build failed; see publication.log")
+    if clean_identity() != (commit, source_sha256):
+        raise Rejected("source changed during staged publication build")
+    files = {str(path.relative_to(STAGED)): path
+             for host in HOST_TASKS for path in artifacts(host).values()}
+    if any(path.stat().st_mtime < started for path in files.values()):
+        raise Rejected("staged publication is older than this build")
+    manifest = {"candidate_commit": commit, "source_sha256": source_sha256,
+                "artifact_sha256": {name: digest(path) for name, path in files.items()},
+                "publication_log_sha256": digest(output / "publication.log")}
+    (output / "publication.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest
 
 
 def runtime(host, log_path):
@@ -105,9 +140,6 @@ def extract_xml(host, output):
         stream.readline()
         suite = stream.readline().decode()
     attributes = dict(re.findall(r'([a-z]+)="([^"]*)"', suite))
-    if any(int(attributes.get(key, "-1")) != expected for key, expected in
-           (("tests", 7), ("skipped", 0), ("failures", 0), ("errors", 0))):
-        raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
     shutil.copyfile(source, output / "matrix.xml")
     trace = output / "trace.jsonl"
     with source.open("r", encoding="utf-8") as stream, trace.open("x", encoding="utf-8") as target:
@@ -131,42 +163,84 @@ def absent_lane(output, name, commit, source_sha256, status, reason):
     return result
 
 
-def execute(host, output, commit, source_sha256):
+def compare_frozen(trace, lane, reference_dirs):
+    catalog = json.loads(CATALOG.read_text())
+    results = []
+    for fixture in catalog["fixtures"]:
+        key = fixture["key"]
+        filename = fixture["reference"]["file"]
+        source = next((directory / filename for directory in reference_dirs
+                       if (directory / filename).is_file()), None)
+        if source is None:
+            results.append({"fixture_key": key, "status": "UNAVAILABLE_REFERENCE",
+                            "expected_reference_sha256": fixture["reference"]["gzip_sha256"],
+                            "qualification": "UNPASSED"})
+            continue
+        try:
+            portable_case_id(key)
+            result = diagnostic(key, source, trace)
+        except (Rejected, OSError, KeyError, TypeError, ValueError) as error:
+            result = {"fixture_key": key, "status": "FAILED",
+                      "reason": str(error), "qualification": "UNPASSED"}
+        results.append(result)
+    (lane / "frozen-comparison.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+    return results
+
+
+def execute(host, output, commit, source_sha256, reference_dirs):
     lane = output / host
     lane.mkdir(parents=True, exist_ok=False)
     target_artifacts = artifacts(host)
+    artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
     started = __import__("time").time()
     env = os.environ.copy()
     env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
     command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
-               "--rerun-tasks", "--no-daemon", "--console=plain", "--info"]
+               "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
+               "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
     with (lane / "gradle.log").open("x", encoding="utf-8") as log:
         completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
     outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": completed.returncode,
                "status": "FAILED" if completed.returncode else "PASSED",
-               "qualification": "UNPASSED", "frozen_comparison": "NOT_COMPARABLE_PORTABLE_SCHEMA"}
+               "qualification": "UNPASSED", "frozen_comparison": "NOT_COMPARABLE_PORTABLE_SCHEMA",
+               "candidate_commit": commit, "source_sha256": source_sha256,
+               "artifact_sha256": artifact_sha256}
     try:
-        if completed.returncode:
-            raise Rejected("Gradle task failed")
         xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob("TEST-*PortableMatrixTest*.xml"))
         if len(xml) != 1 or xml[0].stat().st_mtime < started:
             raise Rejected("matrix XML is missing or stale")
         trace, attributes = extract_xml(host, lane)
+        outcome["xml"] = attributes
+        outcome["trace_sha256"] = digest(trace)
+        if completed.returncode:
+            raise Rejected("Gradle task failed")
+        if any(int(attributes.get(key, "-1")) != expected for key, expected in
+               (("tests", 7), ("skipped", 0), ("failures", 0), ("errors", 0))):
+            raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
         counts = inspect(trace, declared_cases())
-        identity = Identity(commit, source_sha256, {name: digest(path) for name, path in target_artifacts.items()}, runtime(host, lane / "gradle.log"))
+        if clean_identity() != (commit, source_sha256):
+            raise Rejected("source changed during host execution")
+        identity = Identity(commit, source_sha256, artifact_sha256, runtime(host, lane / "gradle.log"))
         sealed = seal(trace, declared_cases(), identity, target_artifacts)
         verify(sealed, trace, declared_cases(), identity, target_artifacts)
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
         physical = nominal_free(trace)
+        comparisons = compare_frozen(trace, lane, reference_dirs)
         outcome.update({"xml": attributes, "counts": counts, "trace_sha256": digest(trace),
-                        "artifact_sha256": identity.artifact_sha256, "physical": physical})
+                        "artifact_sha256": identity.artifact_sha256, "physical": physical,
+                        "frozen_comparison": "UNPASSED", "frozen_comparison_results":
+                            {"available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
+                             "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
+                             "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}})
         if physical["status"] != "PASSED":
             outcome["status"] = "FAILED"
             outcome["reason"] = "long-running physical diagnostic failed"
     except (Rejected, OSError, ValueError, KeyError) as error:
         outcome["status"] = "FAILED"
         outcome["reason"] = str(error)
+    if not (lane / "receipt.json").exists():
+        (lane / "receipt.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     (lane / "result.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     return outcome
 
@@ -175,6 +249,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
+    parser.add_argument("--reference-dir", type=Path, action="append", default=[])
     args = parser.parse_args()
     output = Path(args.output).resolve()
     if output.exists():
@@ -182,7 +257,21 @@ def main():
     try:
         commit, source_sha256 = clean_identity()
         output.mkdir(parents=True)
-        results = [execute(host, output, commit, source_sha256) for host in args.hosts]
+        try:
+            publication = stage(output, commit, source_sha256)
+        except Rejected as error:
+            results = [absent_lane(output, host, commit, source_sha256, "NOT_RUN",
+                                   f"Staged publication failed: {error}") for host in HOST_TASKS]
+            results += [absent_lane(output, name, commit, source_sha256,
+                                    "NOT_RUN" if name == "android-device" else "UNAVAILABLE",
+                                    f"Staged publication failed: {error}") for name in OTHER_LANES]
+            summary = {"commit": commit, "source_sha256": source_sha256,
+                       "status": "FAILED", "reason": str(error), "lanes": results}
+            (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+            print(json.dumps(summary, sort_keys=True))
+            return 1
+        reference_dirs = args.reference_dir or [Path("/tmp/dyn4k-configured-control/baseline-trace")]
+        results = [execute(host, output, commit, source_sha256, reference_dirs) for host in args.hosts]
         for host in HOST_TASKS:
             if host not in args.hosts:
                 results.append(absent_lane(output, host, commit, source_sha256, "NOT_RUN",
@@ -192,7 +281,8 @@ def main():
             reason = ("This consumer executed Android host tests only" if name == "android-device"
                       else "Target runtime is not available on this Bazzite host")
             results.append(absent_lane(output, name, commit, source_sha256, status, reason))
-        summary = {"commit": commit, "source_sha256": source_sha256, "lanes": results}
+        summary = {"commit": commit, "source_sha256": source_sha256,
+                   "publication": publication, "lanes": results}
         (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         print(json.dumps(summary, sort_keys=True))
         return 0 if all(result["status"] == "PASSED" for result in results if result["host"] in args.hosts) else 1

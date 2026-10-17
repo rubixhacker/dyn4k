@@ -26,6 +26,8 @@ class RecorderTest {
         )
         assertTrue(lines.size >= 4)
         assertTrue(lines.first().contains("\"velocity\":[-0.0,1.0]"))
+        assertTrue(lines.first().contains("\"fixtures\""))
+        assertTrue(lines.first().contains("\"radius\":0.5"))
         assertTrue(lines.any { it.contains("\"kind\":\"state\"") && it.contains("\"signedZero\":-0.0") })
         assertEquals(2, lines.count { it.contains("\"kind\":\"state\"") })
         assertTrue(lines.any { it.contains("\"kind\":\"state\"") && it.contains("\"step\":1") })

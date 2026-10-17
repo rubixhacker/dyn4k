@@ -1,20 +1,13 @@
 # Portable numerical consumer
 
-The standalone consumer in `tools/numerical/portable` runs common Kotlin engine calls through staged `dyn4k-core` Maven publications. Its Gradle build does not include project source modules or the Java recorder. Run it from a clean commit after staging the metadata, JVM, Android, Linux x64, JS, Wasm JS, and Wasm WASI publications from that commit.
+The standalone consumer in `tools/numerical/portable` runs common Kotlin engine calls through staged `dyn4k-core` Maven publications. Its Gradle build does not include project source modules or the Java recorder. Run it from a clean commit. The runner freshly builds and hashes the metadata, JVM, Android, Linux x64, JS, Wasm JS, and Wasm WASI publications before any host task executes.
 
 ```sh
-ANDROID_HOME="$HOME/Android/Sdk" ./gradlew \
-  :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository \
-  :dyn4k-core:publishJvmPublicationToStagingRepository \
-  :dyn4k-core:publishAndroidPublicationToStagingRepository \
-  :dyn4k-core:publishLinuxX64PublicationToStagingRepository \
-  :dyn4k-core:publishJsPublicationToStagingRepository \
-  :dyn4k-core:publishWasmJsPublicationToStagingRepository \
-  :dyn4k-core:publishWasmWasiPublicationToStagingRepository --no-daemon
-python3 tools/numerical/portable/run.py --output /tmp/dyn4k-portable-numerical-evidence
+ANDROID_HOME="$HOME/Android/Sdk" python3 tools/numerical/portable/run.py \
+  --output /tmp/dyn4k-portable-numerical-evidence
 ```
 
-The runner executes JVM, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. Android host execution uses a JVM. It does not qualify an Android device. Each completed lane retains its Gradle log, raw XML, JSONL trace, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
+The runner executes JVM, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI test tasks. Android host execution uses a JVM. It does not qualify an Android device. The publication log and manifest bind the staged artifacts to the clean source revision. Each completed lane retains its Gradle log, raw XML, JSONL trace, SHA-256 receipt, and result. Every lane without execution gets a `NOT_RUN` or `UNAVAILABLE` receipt with zero executed cases and an unpassed qualification status.
 
 ## Recorded contract
 
@@ -24,7 +17,9 @@ The six families are geometry/collision boundaries across scales and offsets; fr
 
 The receipt validator rejects missing or duplicate cases, missing steps, lost callbacks, altered action steps, reordered events, changed input, changed signed zero, missing endpoints, nonfinite values, stale artifacts, and an empty suite. The receipt binds the exact Git archive hash, commit, staged metadata and target artifact hashes, runtime identity, trace hash, and expected and executed counts.
 
-`reference_diagnostic.py` can compare overlapping body channels with a frozen Java trace. It checks the frozen gzip and input hashes first. It reports exact-value counts and raw differences before any tolerance. The result remains `UNPASSED_INPUT_SCHEMA` while the two input headers and event schemas differ.
+`reference_diagnostic.py` compares overlapping body channels with a frozen Java trace. It checks the frozen gzip and input hashes first, then records exact-value and signed-zero differences. It applies the approved comparator to matching channels and reports every failed budget. The result remains unpassed while the input headers, event schemas, or other required channels differ.
+
+The runner invokes that diagnostic for every frozen reference found in `--reference-dir`, using `/tmp/dyn4k-configured-control/baseline-trace` by default. Each host gets `frozen-comparison.json` with explicit unavailable references. A missing reference, nonmatching schema, or failed approved channel never becomes a parity pass.
 
 ## Acceptance boundary
 

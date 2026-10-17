@@ -56,6 +56,7 @@ def declared_cases():
                   "input": {"velocity": [0.25, -0.125], "angularVelocity": 0.5,
                             "durationSeconds": 600}})
     for case in cases:
+        case["require_setup"] = True
         case["min_step_events"] = 1
         case["expected_actions"] = []
         if case["id"] == "motion-forces-60":

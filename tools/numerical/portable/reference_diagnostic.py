@@ -17,6 +17,17 @@ CATALOG = Path(__file__).resolve().parents[1] / "fixtures.json"
 CHANNELS = ("transform.getTranslation.0", "transform.getTranslation.1",
             "previousTransform.getTranslation.0", "previousTransform.getTranslation.1",
             "velocity.0", "velocity.1", "angularVelocity", "rotationIncrementSum", "atRest")
+RULE_PATHS = {
+    "transform.getTranslation.0": "state.state.bodies[].transform.getTranslation[]",
+    "transform.getTranslation.1": "state.state.bodies[].transform.getTranslation[]",
+    "previousTransform.getTranslation.0": "state.state.bodies[].previousTransform.getTranslation[]",
+    "previousTransform.getTranslation.1": "state.state.bodies[].previousTransform.getTranslation[]",
+    "velocity.0": "state.state.bodies[].velocity[]",
+    "velocity.1": "state.state.bodies[].velocity[]",
+    "angularVelocity": "state.state.bodies[].angularVelocity",
+    "rotationIncrementSum": "state.state.bodies[].rotationIncrementSum",
+    "atRest": "state.state.bodies[].atRest",
+}
 
 
 def channel(body, name):
@@ -53,6 +64,7 @@ def diagnostic(fixture_key, reference, portable):
     if len(fixtures) != 1:
         raise Rejected("fixture key is absent or duplicated")
     fixture = fixtures[0]
+    approved_fixture = approved.load_fixture(fixture_key)
     if digest(reference) != fixture["reference"]["gzip_sha256"]:
         raise Rejected("frozen reference gzip SHA-256 differs")
     with gzip.open(reference, "rb") as stream:
@@ -79,6 +91,11 @@ def diagnostic(fixture_key, reference, portable):
     differing_values = 0
     maxima = {name: 0.0 for name in CHANNELS if name != "atRest"}
     first_differences = []
+    approved_result = {"numeric_checks": 0, "exact_numeric_checks": 0,
+                       "derived_checks": 0, "unpassed_channels": set()}
+    approved_failure_count = 0
+    approved_failures = []
+    signed_zero_differences = 0
     for baseline, candidate in zip_longest(states(ref, "reference"), states(port, "portable")):
         if baseline is None or candidate is None:
             raise Rejected("state count differs")
@@ -94,23 +111,41 @@ def diagnostic(fixture_key, reference, portable):
                 raise Rejected(f"body identity differs at step {checked}")
             for name in CHANNELS:
                 a, b = channel(left, name), channel(right, name)
+                if (isinstance(a, (int, float)) and isinstance(b, (int, float)) and
+                    a == b == 0 and not exact(a, b)):
+                    signed_zero_differences += 1
                 if exact(a, b):
                     exact_values += 1
-                    continue
-                differing_values += 1
-                if isinstance(a, (int, float)) and isinstance(b, (int, float)) and math.isfinite(a) and math.isfinite(b):
-                    if name != "atRest":
-                        maxima[name] = max(maxima[name], abs(a - b))
-                if len(first_differences) < 20:
-                    first_differences.append({"step": checked, "body": index, "channel": name,
-                                              "reference": a, "portable": b})
-    return {"status": "UNPASSED_INPUT_SCHEMA" if not header_exact else "UNPASSED_EVENT_SCHEMA",
+                else:
+                    differing_values += 1
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and math.isfinite(a) and math.isfinite(b):
+                        if name != "atRest":
+                            maxima[name] = max(maxima[name], abs(a - b))
+                    if len(first_differences) < 20:
+                        first_differences.append({"step": checked, "body": index, "channel": name,
+                                                  "reference": a, "portable": b})
+                try:
+                    approved.compare_value(approved_fixture, a, b, RULE_PATHS[name], approved_result)
+                except approved.Rejected as error:
+                    approved_failure_count += 1
+                    if len(approved_failures) < 20:
+                        approved_failures.append({"step": checked, "body": index,
+                                                  "channel": name, "reason": str(error)})
+    return {"status": ("FAILED_APPROVED_CHANNEL" if approved_failure_count or signed_zero_differences else
+                       "UNPASSED_INPUT_SCHEMA" if not header_exact else "UNPASSED_EVENT_SCHEMA"),
             "fixture_key": fixture_key, "reference_sha256": digest(reference),
             "portable_sha256": digest(portable), "input_header_exact": header_exact,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,
             "event_records": events, "first_differences": first_differences,
-            "tolerances_applied": False}
+            "signed_zero_differences": signed_zero_differences,
+            "approved_channel_checks": {"numeric_checks": approved_result["numeric_checks"],
+                                        "exact_numeric_checks": approved_result["exact_numeric_checks"],
+                                        "unpassed_channels": sorted(approved_result["unpassed_channels"]),
+                                        "failed_checks": approved_failure_count,
+                                        "first_failures": approved_failures},
+            "tolerances_applied": bool(approved_result["numeric_checks"]),
+            "qualification": "UNPASSED"}
 
 
 def main():

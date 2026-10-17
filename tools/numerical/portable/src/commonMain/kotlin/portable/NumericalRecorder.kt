@@ -1,13 +1,31 @@
 package portable
 
 import org.dyn4j.collision.continuous.TimeOfImpact
+import org.dyn4j.collision.continuous.ConservativeAdvancement
+import org.dyn4j.collision.Filter
+import org.dyn4j.collision.narrowphase.Gjk
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.TimeStep
+import org.dyn4j.dynamics.joint.AngleJoint
+import org.dyn4j.dynamics.joint.DistanceJoint
+import org.dyn4j.dynamics.joint.FrictionJoint
+import org.dyn4j.dynamics.joint.Joint
+import org.dyn4j.dynamics.joint.MotorJoint
+import org.dyn4j.dynamics.joint.PinJoint
+import org.dyn4j.dynamics.joint.PrismaticJoint
+import org.dyn4j.dynamics.joint.PulleyJoint
+import org.dyn4j.dynamics.joint.RevoluteJoint
+import org.dyn4j.dynamics.joint.WeldJoint
+import org.dyn4j.dynamics.joint.WheelJoint
 import org.dyn4j.dynamics.contact.Contact
 import org.dyn4j.dynamics.contact.SolvedContact
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
+import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Convex
+import org.dyn4j.geometry.Polygon
+import org.dyn4j.geometry.Rectangle
 import org.dyn4j.world.ContactCollisionData
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
@@ -96,10 +114,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         line(mapOf("kind" to "inputs", "id" to spec.id, "family" to spec.family,
             "profile" to spec.profile, "hz" to spec.hz, "steps" to spec.steps,
             "dt" to dt, "input" to spec.input,
-            "settings" to mapOf("gravity" to vector(world.getGravity()),
-                "linearTolerance" to world.getSettings().getLinearTolerance(),
-                "positionIterations" to world.getSettings().getPositionConstraintSolverIterations(),
-                "continuousDetectionMode" to world.getSettings().getContinuousDetectionMode().name),
+            "settings" to settings(world), "setup" to setup(world, bodies, joints),
             "initial" to (snapshot(world, bodies, joints, sums, dt, origin) +
                 mapOf("observations" to observe(world)))))
         world.addContactListener(contacts)
@@ -142,7 +157,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         }
     }
 
-    private fun snapshot(world: World<Body>, bodies: List<Body>, joints: List<org.dyn4j.dynamics.joint.Joint<Body>>, sums: List<Double>, dt: Double, origin: List<Double>): Map<String, Any?> =
+    private fun snapshot(world: World<Body>, bodies: List<Body>, joints: List<Joint<Body>>, sums: List<Double>, dt: Double, origin: List<Double>): Map<String, Any?> =
         mapOf("gravity" to vector(world.getGravity()),
             "bodies" to bodies.mapIndexed { index, body -> mapOf(
                 "id" to "b$index", "transform" to transform(body.getTransform()),
@@ -163,7 +178,136 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 "rotationIncrementSum" to sums[index]) },
             "joints" to joints.mapIndexed { index, joint -> mapOf(
                 "id" to "j$index", "reactionForce" to vector(joint.getReactionForce(1.0 / dt)),
-                "reactionTorque" to joint.getReactionTorque(1.0 / dt)) })
+                "reactionTorque" to joint.getReactionTorque(1.0 / dt),
+                "mode" to jointMode(joint)) })
+
+    private fun settings(world: World<Body>): Map<String, Any?> {
+        val value = world.getSettings()
+        val toi = world.getTimeOfImpactDetector() as? ConservativeAdvancement
+            ?: error("unsupported time-of-impact detector")
+        val narrowphase = world.getNarrowphaseDetector() as? Gjk
+            ?: error("unsupported narrowphase detector")
+        return mapOf(
+            "gravity" to vector(world.getGravity()),
+            "stepFrequency" to value.getStepFrequency(),
+            "maximumTranslation" to value.getMaximumTranslation(),
+            "maximumRotation" to value.getMaximumRotation(),
+            "atRestDetectionEnabled" to value.isAtRestDetectionEnabled(),
+            "maximumAtRestLinearVelocity" to value.getMaximumAtRestLinearVelocity(),
+            "maximumAtRestAngularVelocity" to value.getMaximumAtRestAngularVelocity(),
+            "minimumAtRestTime" to value.getMinimumAtRestTime(),
+            "velocityIterations" to value.getVelocityConstraintSolverIterations(),
+            "positionIterations" to value.getPositionConstraintSolverIterations(),
+            "warmStartingEnabled" to value.isWarmStartingEnabled(),
+            "maximumWarmStartDistance" to value.getMaximumWarmStartDistance(),
+            "linearTolerance" to value.getLinearTolerance(),
+            "angularTolerance" to value.getAngularTolerance(),
+            "maximumLinearCorrection" to value.getMaximumLinearCorrection(),
+            "maximumAngularCorrection" to value.getMaximumAngularCorrection(),
+            "baumgarte" to value.getBaumgarte(),
+            "continuousDetectionMode" to value.getContinuousDetectionMode().name,
+            "narrowphase" to mapOf("type" to "Gjk", "distanceEpsilon" to narrowphase.getDistanceEpsilon(),
+                "raycastEpsilon" to narrowphase.getRaycastEpsilon()),
+            "timeOfImpact" to mapOf("type" to "ConservativeAdvancement",
+                "distanceEpsilon" to toi.getDistanceEpsilon(), "maxIterations" to toi.getMaxIterations()))
+    }
+
+    private fun setup(world: World<Body>, bodies: List<Body>, joints: List<Joint<Body>>): Map<String, Any?> =
+        mapOf("bodies" to bodies.mapIndexed { index, body -> mapOf(
+            "id" to "b$index", "transform" to transform(body.getTransform()),
+            "massType" to body.getMass().getType().name,
+            "mass" to body.getMass().getMass(), "inertia" to body.getMass().getInertia(),
+            "massCenter" to vector(body.getMass().getCenter()),
+            "linearDamping" to body.getLinearDamping(), "angularDamping" to body.getAngularDamping(),
+            "initialVelocity" to vector(body.getLinearVelocity()),
+            "initialAngularVelocity" to body.getAngularVelocity(),
+            "atRestDetectionEnabled" to body.isAtRestDetectionEnabled(),
+            "bullet" to body.isBullet(),
+            "fixtures" to body.getFixtures().mapIndexed { fixtureIndex, fixture -> mapOf(
+                "id" to "b${index}f$fixtureIndex", "density" to fixture.getDensity(),
+                "friction" to fixture.getFriction(), "restitution" to fixture.getRestitution(),
+                "restitutionVelocity" to fixture.getRestitutionVelocity(),
+                "sensor" to fixture.isSensor(),
+                "filter" to if (fixture.getFilter() === Filter.DEFAULT_FILTER) "DEFAULT_FILTER"
+                    else error("unsupported fixture filter"),
+                "shape" to shape(fixture.getShape())) }) },
+            "joints" to joints.mapIndexed { index, joint -> mapOf(
+                "id" to "j$index", "bodies" to joint.getBodies().map { bodies.indexOf(it) },
+                "collisionAllowed" to joint.isCollisionAllowed(), "enabled" to joint.isEnabled(),
+                "mode" to jointMode(joint)) })
+
+    private fun shape(value: Convex): Map<String, Any?> = when (value) {
+        is Circle -> mapOf("type" to "Circle", "radius" to value.getRadius(),
+            "center" to vector(value.getCenter()))
+        is Rectangle -> mapOf("type" to "Rectangle", "width" to value.getWidth(),
+            "height" to value.getHeight(), "vertices" to value.getVertices().map(::vector))
+        is Polygon -> mapOf("type" to "Polygon", "vertices" to value.getVertices().map(::vector))
+        else -> error("unsupported fixture shape: ${value::class}")
+    }
+
+    private fun jointMode(value: Joint<Body>): Map<String, Any?> = when (value) {
+        is AngleJoint<*> -> mapOf("type" to "Angle", "ratio" to value.getRatio(),
+            "limitsEnabled" to value.isLimitsEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimit" to value.getUpperLimit())
+        is DistanceJoint<*> -> mapOf("type" to "Distance", "anchor1" to vector(value.getAnchor1()),
+            "anchor2" to vector(value.getAnchor2()), "restDistance" to value.getRestDistance(),
+            "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
+            "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "maximumSpringForceEnabled" to value.isMaximumSpringForceEnabled(),
+            "maximumSpringForce" to value.getMaximumSpringForce(),
+            "lowerLimitEnabled" to value.isLowerLimitEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimitEnabled" to value.isUpperLimitEnabled(), "upperLimit" to value.getUpperLimit())
+        is FrictionJoint<*> -> mapOf("type" to "Friction", "anchor1" to vector(value.getAnchor1()),
+            "anchor2" to vector(value.getAnchor2()), "maximumForce" to value.getMaximumForce(),
+            "maximumTorque" to value.getMaximumTorque())
+        is MotorJoint<*> -> mapOf("type" to "Motor", "linearTarget" to vector(value.getLinearTarget()),
+            "angularTarget" to value.getAngularTarget(), "maximumForce" to value.getMaximumForce(),
+            "maximumTorque" to value.getMaximumTorque(), "correctionFactor" to value.getCorrectionFactor())
+        is PinJoint<*> -> mapOf("type" to "Pin", "target" to vector(value.getTarget()),
+            "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
+            "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "maximumSpringForceEnabled" to value.isMaximumSpringForceEnabled(),
+            "maximumSpringForce" to value.getMaximumSpringForce())
+        is PrismaticJoint<*> -> mapOf("type" to "Prismatic", "axis" to vector(value.getAxis()),
+            "anchor1" to vector(value.getAnchor1()), "anchor2" to vector(value.getAnchor2()),
+            "referenceAngle" to value.getReferenceAngle(),
+            "motorEnabled" to value.isMotorEnabled(), "motorSpeed" to value.getMotorSpeed(),
+            "maximumMotorForceEnabled" to value.isMaximumMotorForceEnabled(),
+            "maximumMotorForce" to value.getMaximumMotorForce(),
+            "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
+            "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "lowerLimitEnabled" to value.isLowerLimitEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimitEnabled" to value.isUpperLimitEnabled(), "upperLimit" to value.getUpperLimit())
+        is PulleyJoint<*> -> mapOf("type" to "Pulley", "ratio" to value.getRatio(),
+            "slackEnabled" to value.isSlackEnabled(), "length" to value.getLength(),
+            "anchor1" to vector(value.getAnchor1()), "anchor2" to vector(value.getAnchor2()),
+            "pulleyAnchor1" to vector(value.getPulleyAnchor1()),
+            "pulleyAnchor2" to vector(value.getPulleyAnchor2()))
+        is RevoluteJoint<*> -> mapOf("type" to "Revolute", "anchor1" to vector(value.getAnchor1()),
+            "anchor2" to vector(value.getAnchor2()), "motorEnabled" to value.isMotorEnabled(),
+            "motorSpeed" to value.getMotorSpeed(), "maximumMotorTorqueEnabled" to value.isMaximumMotorTorqueEnabled(),
+            "maximumMotorTorque" to value.getMaximumMotorTorque(),
+            "limitsEnabled" to value.isLimitsEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimit" to value.getUpperLimit())
+        is WeldJoint<*> -> mapOf("type" to "Weld", "anchor1" to vector(value.getAnchor1()),
+            "anchor2" to vector(value.getAnchor2()), "springEnabled" to value.isSpringEnabled(),
+            "springDamperEnabled" to value.isSpringDamperEnabled(), "springFrequency" to value.getSpringFrequency(),
+            "springDampingRatio" to value.getSpringDampingRatio(),
+            "maximumSpringTorqueEnabled" to value.isMaximumSpringTorqueEnabled(),
+            "maximumSpringTorque" to value.getMaximumSpringTorque(),
+            "limitsEnabled" to value.isLimitsEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimit" to value.getUpperLimit())
+        is WheelJoint<*> -> mapOf("type" to "Wheel", "axis" to vector(value.getAxis()),
+            "anchor1" to vector(value.getAnchor1()), "anchor2" to vector(value.getAnchor2()),
+            "motorEnabled" to value.isMotorEnabled(), "motorSpeed" to value.getMotorSpeed(),
+            "maximumMotorTorqueEnabled" to value.isMaximumMotorTorqueEnabled(),
+            "maximumMotorTorque" to value.getMaximumMotorTorque(),
+            "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
+            "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "lowerLimitEnabled" to value.isLowerLimitEnabled(), "lowerLimit" to value.getLowerLimit(),
+            "upperLimitEnabled" to value.isUpperLimitEnabled(), "upperLimit" to value.getUpperLimit())
+        else -> error("unsupported joint type: ${value::class}")
+    }
 
     private fun transform(value: Transform): Map<String, Any?> = mapOf(
         "getTranslation" to vector(value.getTranslation()),
