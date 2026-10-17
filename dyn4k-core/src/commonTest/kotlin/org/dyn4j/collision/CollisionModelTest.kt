@@ -57,6 +57,7 @@ class CollisionModelTest {
         override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
         override fun getLocalCenter() = Vector2()
         override fun copy() = TestBody(this)
+        fun addDirectly(fixture: Fixture) { fixtures.add(fixture) }
     }
 
     @Test
@@ -112,5 +113,53 @@ class CollisionModelTest {
         assertFailsWith<CopyException> { Unsafe.copy(BadFixture()) }
         val iterator = TestBody().getFixtureIterator()
         assertFailsWith<IndexOutOfBoundsException> { iterator.next() }
+    }
+
+    @Test
+    fun nullFirstPairThrowsDuringEquality() {
+        val first = BasicCollisionPair<Any?>(null, "x")
+        val second = BasicCollisionPair<Any?>(null, "x")
+        assertFailsWith<NullPointerException> { first == second }
+    }
+
+    @Test
+    fun nullCollisionItemCanBeCopied() {
+        val item = BasicCollisionItem<TestBody, Fixture>(null, null)
+        assertSame(null, item.getBody())
+        assertSame(null, item.getFixture())
+        assertSame(null, item.copy().getBody())
+    }
+
+    @Test
+    fun bodyCopyUsesOverriddenFixtureGetter() {
+        val replacement = Fixture(Circle(2.0))
+        class SubstitutingBody : AbstractCollisionBody<Fixture> {
+            constructor() : super()
+            private constructor(body: SubstitutingBody) : super(body)
+            override fun getFixture(index: Int): Fixture = replacement
+            override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+            override fun getLocalCenter() = Vector2()
+            override fun copy() = SubstitutingBody(this)
+        }
+        val body = SubstitutingBody()
+        body.addFixture(Circle(1.0))
+        val copy = body.copy()
+        assertEquals(2.0, copy.getFixtures()[0].getShape().getRadius(Vector2()))
+    }
+
+    @Test
+    fun fixtureViewIteratorFailsAfterBodyMutation() {
+        val body = TestBody()
+        body.addFixture(Circle(1.0))
+        val iterator = body.getFixtures().iterator()
+        body.addFixture(Circle(2.0))
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        val listIterator = body.getFixtures().listIterator()
+        body.addDirectly(Fixture(Circle(3.0)))
+        assertFailsWith<ConcurrentModificationException> { listIterator.next() }
+        val empty = TestBody()
+        val emptyIterator = empty.getFixtures().iterator()
+        empty.removeAllFixtures()
+        assertFailsWith<ConcurrentModificationException> { emptyIterator.next() }
     }
 }

@@ -28,14 +28,14 @@ import org.dyn4j.Copyable
 import kotlin.math.max
 
 interface CollisionItem<T : CollisionBody<E>, E : Fixture> : Copyable<CollisionItem<T, E>> {
-    fun getBody(): T
-    fun getFixture(): E
+    fun getBody(): T?
+    fun getFixture(): E?
 }
 
 abstract class AbstractCollisionItem<T : CollisionBody<E>, E : Fixture> : CollisionItem<T, E>, Copyable<CollisionItem<T, E>> {
     companion object {
-        @kotlin.jvm.JvmStatic fun getHashCode(body: CollisionBody<*>, fixture: Fixture): Int =
-            (1 * 17 + body.hashCode()) * 17 + fixture.hashCode()
+        @kotlin.jvm.JvmStatic fun getHashCode(body: CollisionBody<*>?, fixture: Fixture?): Int =
+            (1 * 17 + body!!.hashCode()) * 17 + fixture!!.hashCode()
 
         @kotlin.jvm.JvmStatic fun equals(item: CollisionItem<*, *>?, obj: Any?): Boolean =
             item === obj || item != null && obj is CollisionItem<*, *> &&
@@ -44,10 +44,10 @@ abstract class AbstractCollisionItem<T : CollisionBody<E>, E : Fixture> : Collis
 }
 
 class BasicCollisionItem<T : CollisionBody<E>, E : Fixture> : AbstractCollisionItem<T, E>, CollisionItem<T, E> {
-    private val body: T
-    private val fixture: E
+    private val body: T?
+    private val fixture: E?
 
-    constructor(body: T, fixture: E) { this.body = body; this.fixture = fixture }
+    constructor(body: T?, fixture: E?) { this.body = body; this.fixture = fixture }
     protected constructor(item: BasicCollisionItem<T, E>) : this(item.body, item.fixture)
     override fun getBody() = body
     override fun getFixture() = fixture
@@ -75,8 +75,10 @@ abstract class AbstractCollisionPair<T> : CollisionPair<T>, Copyable<CollisionPa
             if (pair == null || obj !is CollisionPair<*>) return false
             val first = pair.getFirst()
             val second = pair.getSecond()
-            return first == obj.getFirst() && second == obj.getSecond() ||
-                first == obj.getSecond() && second == obj.getFirst()
+            val otherFirst = obj.getFirst()
+            val otherSecond = obj.getSecond()
+            return first!!.equals(otherFirst) && second!!.equals(otherSecond) ||
+                first.equals(otherSecond) && second!!.equals(otherFirst)
         }
     }
 }

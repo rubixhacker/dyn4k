@@ -1,5 +1,6 @@
 import java.util.Iterator;
 import java.util.List;
+import java.util.ConcurrentModificationException;
 import org.dyn4j.Unsafe;
 import org.dyn4j.UnitConversion;
 import org.dyn4j.collision.AbstractCollisionBody;
@@ -54,6 +55,14 @@ public final class CollisionModelConsumer {
         int protectedCount() { return this.fixtures.size(); }
         boolean protectedEnabled() { return this.enabled; }
         void updateRadius() { setRotationDiscRadius(new Vector2()); }
+    }
+
+    private static class SubstitutingBody extends Body {
+        final Fixture replacement = new Fixture(new Circle(2.0));
+        SubstitutingBody() { super(); }
+        SubstitutingBody(SubstitutingBody other) { super(other); }
+        @Override public Fixture getFixture(int index) { return replacement; }
+        @Override public SubstitutingBody copy() { return new SubstitutingBody(this); }
     }
 
     public static void main(String[] args) {
@@ -117,12 +126,29 @@ public final class CollisionModelConsumer {
         check(body.removeAllFixtures().size() == 1 && view.isEmpty());
         check(events.toString().equals("ARAX"));
 
+        SubstitutingBody substituting = new SubstitutingBody();
+        substituting.addFixture(new Circle(1.0));
+        check(substituting.copy().getFixtures().get(0).getShape().getRadius(new Vector2()) == 2.0);
+
+        Body changing = new Body();
+        changing.addFixture(new Circle(1.0));
+        Iterator<Fixture> viewIterator = changing.getFixtures().iterator();
+        changing.addFixture(new Circle(2.0));
+        try { viewIterator.next(); throw new AssertionError("missing ConcurrentModificationException"); }
+        catch (ConcurrentModificationException expected) { checks++; }
+
         AxisAlignedBounds bounds = new AxisAlignedBounds(4, 4);
         check(bounds.isOutside(new AABB(3, 3, 4, 4)));
         bounds.translate(3, 3);
         check(!bounds.isOutside(new AABB(3, 3, 4, 4)));
         check(bounds.copy().getBounds().equals(bounds.getBounds()));
         check(new BasicCollisionPair<>("a", "b").equals(new BasicCollisionPair<>("b", "a")));
+        try {
+            new BasicCollisionPair<Object>(null, "x").equals(new BasicCollisionPair<Object>(null, "x"));
+            throw new AssertionError("missing NullPointerException");
+        } catch (NullPointerException expected) { checks++; }
+        BasicCollisionItem<Body, Fixture> nullItem = new BasicCollisionItem<>(null, null);
+        check(nullItem.getBody() == null && nullItem.getFixture() == null);
         check(new BasicCollisionItem<>(body, fixture).copy().getBody() == body);
         check(UnitConversion.feetToMeters(1.0) == 0.0254 * 12.0);
         System.out.println("collision consumer checks=" + checks);

@@ -101,10 +101,34 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
 
     constructor() : this(CollisionBody.TYPICAL_FIXTURE_COUNT)
     constructor(fixtureCount: Int) {
-        fixtures = ArrayList(if (fixtureCount <= 0) CollisionBody.TYPICAL_FIXTURE_COUNT else fixtureCount)
+        fixtures = TrackedFixtureList(if (fixtureCount <= 0) CollisionBody.TYPICAL_FIXTURE_COUNT else fixtureCount)
         fixturesUnmodifiable = object : AbstractList<T>() {
             override val size: Int get() = fixtures.size
             override fun get(index: Int): T = fixtures[index]
+            override fun iterator(): Iterator<T> = listIterator()
+            override fun listIterator(): ListIterator<T> = listIterator(0)
+            override fun listIterator(index: Int): ListIterator<T> {
+                if (index < 0 || index > size) throw IndexOutOfBoundsException()
+                val tracked = fixtures
+                val expected = (tracked as TrackedFixtureList<T>).version
+                return object : ListIterator<T> {
+                    private var cursor = index
+                    override fun hasNext() = cursor < fixtures.size
+                    override fun next(): T {
+                        if (expected != tracked.version) throw ConcurrentModificationException()
+                        if (!hasNext()) throw NoSuchElementException()
+                        return fixtures[cursor++]
+                    }
+                    override fun hasPrevious() = cursor > 0
+                    override fun previous(): T {
+                        if (expected != tracked.version) throw ConcurrentModificationException()
+                        if (!hasPrevious()) throw NoSuchElementException()
+                        return fixtures[--cursor]
+                    }
+                    override fun nextIndex() = cursor
+                    override fun previousIndex() = cursor - 1
+                }
+            }
         }
         transform = Transform()
         transform0 = Transform()
@@ -115,7 +139,7 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
         radius = body.radius
         transform.set(body.transform)
         transform0.set(body.transform0)
-        for (fixture in body.fixtures) fixtures.add(Unsafe.copy(fixture))
+        for (index in body.fixtures.indices) fixtures.add(Unsafe.copy(body.getFixture(index)))
     }
 
     override fun addFixture(fixture: T?): CollisionBody<T> {
@@ -252,5 +276,17 @@ abstract class AbstractCollisionBody<T : Fixture> : CollisionBody<T>, Transforma
             index--
             removed = true
         }
+    }
+
+    private class TrackedFixtureList<E>(capacity: Int) : AbstractMutableList<E>() {
+        private val backing = ArrayList<E>(capacity)
+        var version: Int = 0
+            private set
+        override val size: Int get() = backing.size
+        override fun get(index: Int): E = backing[index]
+        override fun set(index: Int, element: E): E = backing.set(index, element)
+        override fun add(index: Int, element: E) { backing.add(index, element); version++ }
+        override fun removeAt(index: Int): E = backing.removeAt(index).also { version++ }
+        override fun clear() { backing.clear(); version++ }
     }
 }
