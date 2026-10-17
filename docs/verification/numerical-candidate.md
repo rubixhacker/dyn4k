@@ -24,14 +24,16 @@ PYTHONDONTWRITEBYTECODE=1 python3 tools/numerical/candidate/receipt.py verify --
 
 | Family | Candidate path and observed scope |
 | --- | --- |
-| Geometry and collision boundaries, including scale and offset extremes | `calibration/GeometryCases.java` covers circle SAT/GJK boundaries and thin triangles at three scales and five offsets. A staged JVM boundary query executed. |
-| Free motion, forces, damping, restitution | `calibration/SceneCases.java` includes integrator, damping, free motion, and bounce scenes. A force/damping trace and a 600-second nominal free-motion trace executed. |
-| Contacts, friction, sleep, wake | The calibration slide/stack/bounce scenes and `default` and `configured` sleep/wake consumers execute the public World. Default 30/60/120 Hz and configured 4/2/1 inner-step grouping executed. |
+| Geometry and collision boundaries, including scale and offset extremes | `calibration/GeometryCases.java` covers circle SAT/GJK boundaries and thin triangles at three scales and five offsets. A Java 21 run emitted 591 query rows, including six thin-triangle construction rejections. |
+| Free motion, forces, damping, restitution | `calibration/SceneCases.java` includes integrator, damping, free motion, and bounce scenes. Java 21 ran 30 force/damping cases with 18,000 states, 135 bounce cases with 94,500 states, and the 600-second nominal free-motion trace. |
+| Contacts, friction, sleep, wake | The calibration slide/stack/bounce scenes and `default` and `configured` sleep/wake consumers execute the public World. Java 21 ran 15 slide cases with 9,000 states and one 600-second stack with 36,000 states. Default 30/60/120 Hz and configured 4/2/1 inner-step grouping executed. |
 | Every joint and applicable limit or motor | `calibration/JointCases.java` enumerates Angle, Distance, Friction, Motor, Pin, Prismatic, Pulley, Revolute, Weld, and Wheel settings. `InteractionCases.java` includes the four selected Weld/Pulley members. The full candidate joint matrix reached 231 completed rows out of 232 attempts; one row emitted nonfinite state at step 171 and is rejected. A separate pinned-baseline-only capture reproduces the same failure, so this is a failed baseline physical case, not a port-only regression. |
-| Continuous collision detection | `calibration/SceneCases.java` has circle and polygon bullet scenes with detection modes at 30/60/120 Hz and three scales. A staged 60 Hz circle/ALL path reported two TOI payload callbacks. This short path does not qualify the complete CCD matrix. |
-| Long-running invariants | Nominal free motion, configured/default sleep/wake, and separately declared Weld/Pulley physical traces run 600 simulated seconds. The free-motion summary records analytic position, energy, and momentum residuals; the source and target math premises still need qualification. |
+| Continuous collision detection | `calibration/SceneCases.java` has circle and pentagon bullet scenes with ALL/NONE modes at 30/60/120 Hz, three scales, and five offsets. Java 21 ran all 180 declared combinations with 12,600 states and 180 TOI payload callbacks. |
+| Long-running invariants | Nominal free motion, configured/default sleep/wake, one stack and one spring/damper scene, and separately declared Weld/Pulley physical traces run 600 simulated seconds. The free-motion summary records analytic position, energy, and momentum residuals; the source and target math premises still need qualification. |
 
-These are executable paths and host observations. A representative run does not close the unexecuted scale, mode, and target combinations. A nonfinite or skipped row blocks full family completion.
+These are executable paths and host observations on the pre-integration staged JVM artifact. The unexecuted stack/spring combinations, failed Angle mode, absent frozen comparisons for calibration cases, and unrun target paths keep the family gates open. A nonfinite or skipped row blocks full family completion.
+
+The Java 21 recorder compiled with `javac --release 21`; its default 30/60/120 Hz and configured 30 Hz gzip hashes equal the Java 25 captures. The recorder's Java source uses Java 9+ factories and Java 16+ language features, so `javac --release 8` rejects it. A separate Java 8-compatible staged `WorldQualityConsumer` compiled with `--release 8` produced six default/configured 30/60/120 Hz rows identical on Temurin 8 and 21. That smoke run is not a frozen-schema Java 8 capture. Common Kotlin portable capture and frozen comparability require their own executed target evidence.
 
 ## Observed gates
 
