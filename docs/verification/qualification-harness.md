@@ -1,0 +1,49 @@
+# Qualification harness
+
+This harness records what ran against one staged candidate. It does not turn a build, a host probe, or an empty suite into runtime qualification. [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43) remains open until every required case and the independent performance and compatibility gates pass.
+
+## What the harness checks
+
+`tools/qualification/qualify.py matrix` emits the complete approved support matrix: 21 targets, 28 target/runtime families, and 112 cases after minimum/current and two build configurations. The configuration names correspond to the [approved support contract](https://github.com/rubixhacker/dyn4k/issues/6#issuecomment-5651793360): JVM no-optimize/default; Android debug/R8; web development/production; Native debug `-g`/optimized `-opt`. A matrix row is a requirement, not a result.
+
+`audit-staging` checks both module roots and all target publications referenced by their Gradle metadata. It checks POM identity and descriptive metadata, target mapping, sources, API documentation and license artifacts, an embedded JAR license, and SHA-256 sidecars. It writes every observed POM, module metadata file and distributable artifact with its computed SHA-256. Any missing publication fails the audit. The current build publishes some staged artifacts but does not attach API documentation artifacts; that remains a real failure.
+
+The external JVM consumer in `consumers/qualification/` resolves `io.github.rubixhacker:dyn4k:0.1.0-alpha.1` from the staged repository. It executes Kotlin and Java public geometry calls. Its `verifySingleProvider` task rejects a graph containing both `dyn4k-core` and upstream `org.dyn4j:dyn4j`. The portable KMP consumer in `consumers/qualification/portable/` declares every approved target and runs a common public geometry test wherever an actual staged target artifact and runtime are available. These are foundation probes. They do not claim the full geometry, collision, dynamics, joint or compatibility suite.
+
+`probe` uses the tracked `tools/qualification/foundation-probes.json` manifest. Each of the six available `dyn4k` host groups pins 25 cases: seven foundation, four tree, and 14 integrated geometry cases. The six core groups declare zero cases. The JVM/Linux command therefore expects 50 cases, the JS/Wasm command expects 75, and the Android host command expects 25. Each selected report group and case identity must match the frozen manifest. Missing, renamed, duplicate, extra, skipped, failed, or non-finite cases fail. Probe results use `PROBE_PASSED` or `PROBE_FAILED` and state `foundation probe only`; they cannot become full-lane results.
+
+`execute` accepts a JSON plan keyed by matrix case ID. Each entry supplies a command and result path, or an exact unavailability reason. Before a command, it moves any old result to a distinct `.previous-<id>` file. It gives the command `DYN4K_QUALIFICATION_INVOCATION`. The runner must write that value as `invocation_id` in a new JSON result. A no-op, failed command, stale file, wrong invocation, or invalid JSON fails execution. Missing plans remain `NOT_RUN`.
+
+`record` evaluates all 112 cases. It requires a clean checkout at the candidate SHA, including untracked files hidden by ignore rules. The input check excludes generated `build/`, `.gradle/`, and `.kotlin/` files only under the repository root and the four Gradle project roots. It also excludes `tools/qualification/__pycache__/` and the generated `kotlin-js-store/yarn.lock` files at the repository root and in `consumers/qualification/portable/`. An untracked source, build script, or ignored `local.properties` invalidates the candidate, even if a source path contains a directory named `build`. A full pass also requires a tracked `tools/qualification/full-suite-manifest.json` with every approved case and area. That file does not exist until [the complete compatibility corpus](https://github.com/rubixhacker/dyn4k/issues/42) can freeze it. A candidate manifest must select the exact runtime identity, version, configuration, suite ID, and both target binary hashes for each lane. The result must match those selections, include every distinct frozen case, and bind the suite, candidate, and staged audit digests. The audit is recomputed against staged files before it is accepted. There is no full-lane pass while the complete suite manifest is absent.
+
+Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has attempted but invalid or failing evidence; `UNAVAILABLE` names an absent runner or probe; `NOT_RUN` has no attempt. `record --availability <json>` accepts target, `target:runtime`, `target:runtime:version`, or exact case IDs with concrete reasons. More specific selectors take priority. A missing device or suite never becomes a pass or a zero measurement.
+
+## Local commands
+
+Set JDK 21 and the Android SDK paths for this pinned build. Stage the two module roots and the target publications you can build with Gradle. Then run:
+
+```sh
+python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
+./gradlew -p consumers/qualification --no-daemon run -PqualificationRepository="$PWD/build/staging-repository"
+./gradlew -p consumers/qualification/portable --no-daemon jvmTest linuxX64Test -PqualificationRepository="$PWD/build/staging-repository"
+python3 tools/qualification/qualify.py probe --candidate-sha "$(git rev-parse HEAD)" --manifest tools/qualification/foundation-probes.json --group core-jvm --group jvm --report 'dyn4k-core/build/test-results/jvmTest/TEST-*.xml' --report 'dyn4k/build/test-results/jvmTest/TEST-*.xml' --output /tmp/foundation-probe.json -- ./gradlew --no-daemon :dyn4k-core:jvmTest :dyn4k:jvmTest
+python3 tools/qualification/qualify.py audit-staging --candidate-sha "$(git rev-parse HEAD)" --repository build/staging-repository --output /tmp/artifact-audit.json
+python3 tools/qualification/qualify.py record --candidate-sha "$(git rev-parse HEAD)" --output /tmp/runtime-matrix.json
+```
+
+`audit-staging` and `record` are expected to exit nonzero while contract gaps remain. The dedicated CI workflow runs host foundation probes, staged consumers, the duplicate-provider diagnosis, artifact audit, and full matrix recording. It uploads JSON evidence keyed to the workflow commit. Runtime owners can use `execute` with a plan such as:
+
+```json
+{
+  "jvm:Java:minimum:default": {
+    "command": ["/path/to/jdk8/bin/java", "-jar", "/path/to/complete-suite-runner.jar"],
+    "result_file": "/path/to/observed-result.json"
+  }
+}
+```
+
+The runtime runner must write `invocation_id` from its environment, actual case and consumer observations, and the selected manifest and artifact digests. The plan alone never passes a lane. The exact full-lane JSON schema is exercised in `tools/qualification/test_qualify.py`; the production gate will not accept a synthetic suite file outside the tracked candidate.
+
+## Open qualification requirements
+
+The current engine has a foundation suite only. Full portable correctness, exact runtime pins, both executed build configurations, physical Apple devices, Android ABI execution, browser/Safari, old Linux kernels, and Windows remain unpassed until their own observations exist. [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42) and [Freeze and validate the performance fixture and reference-environment manifest](https://github.com/rubixhacker/dyn4k/issues/17) remain independent final blockers. A host JVM or Linux run cannot establish Apple, device, or release qualification.

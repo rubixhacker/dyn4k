@@ -1,0 +1,131 @@
+name: Staged qualification evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/port-qualification-harness
+      - codex/dyn4k-port
+  pull_request:
+
+jobs:
+  staged-jvm-and-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Harness regression tests
+        run: python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
+      - name: Stage root and JVM publications
+        run: >-
+          ./gradlew --no-daemon --console=plain
+          :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository
+          :dyn4k-core:publishJvmPublicationToStagingRepository
+          :dyn4k-core:publishAndroidPublicationToStagingRepository
+          :dyn4k-core:publishLinuxX64PublicationToStagingRepository
+          :dyn4k-core:publishJsPublicationToStagingRepository
+          :dyn4k-core:publishWasmJsPublicationToStagingRepository
+          :dyn4k-core:publishWasmWasiPublicationToStagingRepository
+          :dyn4k:publishKotlinMultiplatformPublicationToStagingRepository
+          :dyn4k:publishJvmPublicationToStagingRepository
+          :dyn4k:publishAndroidPublicationToStagingRepository
+          :dyn4k:publishLinuxX64PublicationToStagingRepository
+          :dyn4k:publishJsPublicationToStagingRepository
+          :dyn4k:publishWasmJsPublicationToStagingRepository
+          :dyn4k:publishWasmWasiPublicationToStagingRepository
+      - name: Execute staged Kotlin and Java consumer
+        run: >-
+          ./gradlew -p consumers/qualification --no-daemon --console=plain run
+          -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository"
+      - name: Reject duplicate provider
+        run: |
+          if ./gradlew -p consumers/qualification --no-daemon --console=plain verifySingleProvider -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository" -PwithUpstream=true > "$RUNNER_TEMP/provider.log" 2>&1; then
+            cat "$RUNNER_TEMP/provider.log"
+            exit 1
+          fi
+          grep -F 'duplicate org.dyn4j provider' "$RUNNER_TEMP/provider.log"
+      - name: Execute staged portable host consumers
+        run: >-
+          ./gradlew -p consumers/qualification/portable --no-daemon --console=plain
+          jvmTest linuxX64Test jsNodeTest wasmJsNodeTest wasmWasiNodeTest testAndroidHostTest
+          -PqualificationRepository="$GITHUB_WORKSPACE/build/staging-repository"
+      - name: Run available foundation JVM and Linux tests
+        run: >-
+          python3 tools/qualification/qualify.py probe
+          --candidate-sha "$GITHUB_SHA"
+          --manifest tools/qualification/foundation-probes.json
+          --group core-jvm --group jvm --group core-linuxX64 --group linuxX64
+          --report 'dyn4k-core/build/test-results/jvmTest/TEST-*.xml'
+          --report 'dyn4k/build/test-results/jvmTest/TEST-*.xml'
+          --report 'dyn4k-core/build/test-results/linuxX64Test/TEST-*.xml'
+          --report 'dyn4k/build/test-results/linuxX64Test/TEST-*.xml'
+          --output "$RUNNER_TEMP/foundation-probe.json"
+          -- ./gradlew --no-daemon --console=plain
+          :dyn4k-core:jvmTest :dyn4k:jvmTest
+          :dyn4k-core:linuxX64Test :dyn4k:linuxX64Test
+      - name: Run available foundation JS and Wasm tests
+        run: >-
+          python3 tools/qualification/qualify.py probe
+          --candidate-sha "$GITHUB_SHA"
+          --manifest tools/qualification/foundation-probes.json
+          --group core-jsNode --group jsNode
+          --group core-wasmJsNode --group wasmJsNode
+          --group core-wasmWasiNode --group wasmWasiNode
+          --report 'dyn4k-core/build/test-results/jsNodeTest/TEST-*.xml'
+          --report 'dyn4k/build/test-results/jsNodeTest/TEST-*.xml'
+          --report 'dyn4k-core/build/test-results/wasmJsNodeTest/TEST-*.xml'
+          --report 'dyn4k/build/test-results/wasmJsNodeTest/TEST-*.xml'
+          --report 'dyn4k-core/build/test-results/wasmWasiNodeTest/TEST-*.xml'
+          --report 'dyn4k/build/test-results/wasmWasiNodeTest/TEST-*.xml'
+          --output "$RUNNER_TEMP/web-probe.json"
+          -- ./gradlew --no-daemon --console=plain
+          :dyn4k-core:jsNodeTest :dyn4k:jsNodeTest
+          :dyn4k-core:wasmJsNodeTest :dyn4k:wasmJsNodeTest
+          :dyn4k-core:wasmWasiNodeTest :dyn4k:wasmWasiNodeTest
+      - name: Run Android host foundation test
+        run: >-
+          python3 tools/qualification/qualify.py probe
+          --candidate-sha "$GITHUB_SHA"
+          --manifest tools/qualification/foundation-probes.json
+          --group core-androidHost --group androidHost
+          --report 'dyn4k-core/build/test-results/testAndroidHostTest/TEST-*.xml'
+          --report 'dyn4k/build/test-results/testAndroidHostTest/TEST-*.xml'
+          --output "$RUNNER_TEMP/android-host-probe.json"
+          -- ./gradlew --no-daemon --console=plain
+          :dyn4k-core:testAndroidHostTest :dyn4k:testAndroidHostTest
+      - name: Audit staged artifact contract
+        if: always()
+        run: >-
+          python3 tools/qualification/qualify.py audit-staging
+          --candidate-sha "$GITHUB_SHA"
+          --repository build/staging-repository
+          --output "$RUNNER_TEMP/artifact-audit.json"
+      - name: Record every required runtime lane
+        if: always()
+        run: >-
+          python3 tools/qualification/qualify.py record
+          --candidate-sha "$GITHUB_SHA"
+          --output "$RUNNER_TEMP/runtime-matrix.json"
+      - name: Upload bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/foundation-probe.json
+            ${{ runner.temp }}/web-probe.json
+            ${{ runner.temp }}/android-host-probe.json
+            ${{ runner.temp }}/artifact-audit.json
+            ${{ runner.temp }}/runtime-matrix.json
+            ${{ runner.temp }}/provider.log
+          if-no-files-found: warn
