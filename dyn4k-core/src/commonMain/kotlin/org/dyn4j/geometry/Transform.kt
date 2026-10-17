@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.PI
@@ -34,14 +33,10 @@ import kotlin.math.sin
 import org.dyn4j.Copyable
 
 open class Transform : Transformable, Copyable<Transform> {
-    @get:kotlin.jvm.JvmName("getCostField")
-    @set:kotlin.jvm.JvmName("setCostField")
-    @JvmFieldBridge protected var cost: Double = 1.0
-    @get:kotlin.jvm.JvmName("getSintField")
-    @set:kotlin.jvm.JvmName("setSintField")
-    @JvmFieldBridge protected var sint: Double = 0.0
-    @JvmFieldBridge protected var x: Double = 0.0
-    @JvmFieldBridge protected var y: Double = 0.0
+    @kotlin.jvm.JvmField protected var cost: Double = 1.0
+    @kotlin.jvm.JvmField protected var sint: Double = 0.0
+    @kotlin.jvm.JvmField protected var x: Double = 0.0
+    @kotlin.jvm.JvmField protected var y: Double = 0.0
 
     constructor()
     constructor(transform: Transform) {
@@ -55,17 +50,19 @@ open class Transform : Transformable, Copyable<Transform> {
     override fun toString() =
         "[" + cost + " " + -sint + " | " + x + "][" + sint + " " + cost + " | " + y + "]"
 
-    internal fun rotateComponents(c: Double, s: Double) {
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(c: Double, s: Double) {
         val nc = clamp(c * cost - s * sint)
         val ns = clamp(s * cost + c * sint)
         val nx = c * x - s * y
         val ny = s * x + c * y
         cost = nc; sint = ns; x = nx; y = ny
     }
-    override fun rotate(theta: Double) = rotateComponents(cos(theta), sin(theta))
+    override fun rotate(theta: Double) = rotate(cos(theta), sin(theta))
     override fun rotate(rotation: Rotation) =
-        rotateComponents(rotation.costValue(), rotation.sintValue())
-    internal fun rotateComponents(c: Double, s: Double, x: Double, y: Double) {
+        rotate(rotation.costValue(), rotation.sintValue())
+    @kotlin.jvm.JvmName("rotate")
+    internal fun rotate(c: Double, s: Double, x: Double, y: Double) {
         val nc = clamp(c * cost - s * sint)
         val ns = clamp(s * cost + c * sint)
         cost = nc; sint = ns
@@ -74,9 +71,9 @@ open class Transform : Transformable, Copyable<Transform> {
         this.y = s * cx + c * cy + y
     }
     override fun rotate(theta: Double, x: Double, y: Double) =
-        rotateComponents(cos(theta), sin(theta), x, y)
+        rotate(cos(theta), sin(theta), x, y)
     override fun rotate(rotation: Rotation, x: Double, y: Double) =
-        rotateComponents(rotation.costValue(), rotation.sintValue(), x, y)
+        rotate(rotation.costValue(), rotation.sintValue(), x, y)
     override fun rotate(theta: Double, point: Vector2) = rotate(theta, point.x, point.y)
     override fun rotate(rotation: Rotation, point: Vector2) =
         rotate(rotation, point.x, point.y)

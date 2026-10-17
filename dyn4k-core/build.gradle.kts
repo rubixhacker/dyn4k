@@ -11,6 +11,7 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.FieldVisitor
+import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -64,7 +65,12 @@ val jvmApi = mapOf(
         publicFields = setOf("E"), staticMethods = setOf("compute")
     ),
     "org/dyn4j/geometry/Vector2" to JvmApiSpec(
-        publicFields = setOf("x", "y", "X_AXIS", "Y_AXIS", "INV_X_AXIS", "INV_Y_AXIS"),
+        publicFields = setOf("x", "y"),
+        packageFields = setOf("X_AXIS", "Y_AXIS", "INV_X_AXIS", "INV_Y_AXIS"),
+        packageMethodSignatures = setOf(
+            "rotate(DD)Lorg/dyn4j/geometry/Vector2;",
+            "rotate(DDDD)Lorg/dyn4j/geometry/Vector2;"
+        ),
         staticMethods = setOf("create", "tripleProduct")
     ),
     "org/dyn4j/geometry/Vector3" to JvmApiSpec(
@@ -72,6 +78,13 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Rotation" to JvmApiSpec(
         protectedFields = setOf("cost", "sint"),
+        packageMethodSignatures = setOf(
+            "rotate45Helper(DD)Lorg/dyn4j/geometry/Rotation;",
+            "getRotated45Helper(DD)Lorg/dyn4j/geometry/Rotation;",
+            "rotate(DD)Lorg/dyn4j/geometry/Rotation;",
+            "dot(Lorg/dyn4j/geometry/Vector2;)D",
+            "cross(Lorg/dyn4j/geometry/Vector2;)D"
+        ),
         staticMethods = setOf(
             "of", "ofDegrees", "rotation0", "rotation45", "rotation90", "rotation135",
             "rotation180", "rotation225", "rotation270", "rotation315",
@@ -85,7 +98,8 @@ val jvmApi = mapOf(
         publicFields = setOf("m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22")
     ),
     "org/dyn4j/geometry/Transform" to JvmApiSpec(
-        protectedFields = setOf("cost", "sint", "x", "y")
+        protectedFields = setOf("cost", "sint", "x", "y"),
+        packageMethodSignatures = setOf("rotate(DD)V", "rotate(DDDD)V")
     ),
     "org/dyn4j/geometry/AABB" to JvmApiSpec(
         protectedFields = setOf("minX", "minY", "maxX", "maxY"),
@@ -204,7 +218,122 @@ val jvmApi = mapOf(
             "transform", "transform0", "fixtures", "fixturesUnmodifiable", "radius", "userData",
             "enabled", "fixtureModificationHandler", "owner"
         )
+    ),
+    "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/MonotoneChain" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/GrahamScan" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/GiftWrap" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/DivideAndConquer" to JvmApiSpec(packageMethods = setOf("divide")),
+    "org/dyn4j/geometry/hull/LinkedVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "next", "prev")
+    ),
+    "org/dyn4j/geometry/hull/LinkedVertexHull" to JvmApiSpec(
+        packageType = true, packageFields = setOf("leftMost", "rightMost", "size"), staticMethods = setOf("merge")
+    ),
+    "org/dyn4j/geometry/hull/MinXYPointComparator" to JvmApiSpec(
+        packageType = true, packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/hull/ReferencePointComparator" to JvmApiSpec(
+        packageType = true, packageFields = setOf("reference")
+    ),
+    "org/dyn4j/geometry/decompose/ClosestEdgeToVertexSearchCriteria" to JvmApiSpec(
+        packageType = true, packageFields = setOf("vertex", "closest")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeList" to JvmApiSpec(
+        packageType = true, packageFields = setOf("vertices", "edges", "faces"),
+        packageMethods = setOf("getReferenceFace", "getPreviousEdge", "getYMonotonePolygons", "triangulateYMonotonePolygon", "isReflex"),
+        packageMethodSignatures = setOf(
+            "addHalfEdges(Lorg/dyn4j/geometry/decompose/DoubleEdgeListVertex;Lorg/dyn4j/geometry/decompose/DoubleEdgeListVertex;)V",
+            "removeHalfEdges(Lorg/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge;)V",
+            "removeHalfEdges(ILorg/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge;)V"
+        )
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListFace" to JvmApiSpec(
+        packageType = true, packageFields = setOf("edge"), packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListHalfEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("origin", "twin", "next", "face"),
+        packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/decompose/DoubleEdgeListVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "leaving")
+    ),
+    "org/dyn4j/geometry/decompose/Decomposer" to JvmApiSpec(),
+    "org/dyn4j/geometry/decompose/AbstractDecomposer" to JvmApiSpec(),
+    "org/dyn4j/geometry/decompose/Bayazit" to JvmApiSpec(),
+    "org/dyn4j/geometry/decompose/EarClipping" to JvmApiSpec(
+        packageMethods = setOf("createTriangulation", "isReflex", "isEar"), varargMethods = setOf("createTriangulation")
+    ),
+    "org/dyn4j/geometry/decompose/EarClippingVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "prev", "next", "ear", "reflex", "index")
+    ),
+    "org/dyn4j/geometry/decompose/MonotoneChainType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/decompose/MonotonePolygonType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/decompose/MonotonePolygon" to JvmApiSpec(
+        packageType = true, packageFields = setOf("type", "vertices")
+    ),
+    "org/dyn4j/geometry/decompose/MonotoneVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("data", "next", "previous", "chainType")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLine" to JvmApiSpec(
+        packageMethods = setOf("createTriangulation", "start", "end", "split", "merge", "regular"),
+        varargMethods = setOf("createTriangulation")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("referenceY", "v0", "v1", "helper", "slope")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineState" to JvmApiSpec(
+        packageType = true, packageFields = setOf("referenceY", "tree", "dcel"),
+        packageMethods = setOf("getType")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point", "index", "type", "next", "prev", "left", "right"),
+        packageMethods = setOf("isLeft")
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineVertexType" to JvmApiSpec(packageType = true),
+    "org/dyn4j/geometry/simplify/SegmentTree" to JvmApiSpec(
+        packageType = true, packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/geometry/simplify/Simplifier" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/AbstractSimplifier" to JvmApiSpec(varargMethods = setOf("simplify")),
+    "org/dyn4j/geometry/simplify/VertexClusterReduction" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/DouglasPeucker" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/Visvalingam" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/SegmentTreeNode" to JvmApiSpec(
+        packageType = true, packageFields = setOf("left", "right", "parent", "height", "aabb")
+    ),
+    "org/dyn4j/geometry/simplify/SegmentTreeLeaf" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point1", "point2", "index1", "index2")
+    ),
+    "org/dyn4j/geometry/simplify/SimplePolygonVertex" to JvmApiSpec(
+        packageType = true, packageFields = setOf("index", "point", "prev", "next", "prevSegment", "nextSegment")
+    ),
+    "org/dyn4j/geometry/simplify/DouglasPeucker\$FarthestVertex" to JvmApiSpec(
+        packageFields = setOf("index", "distance")
+    ),
+    "org/dyn4j/geometry/simplify/Visvalingam\$AreaTrackedVertex" to JvmApiSpec(
+        packageFields = setOf("area")
     )
+)
+
+val baselineFinalPolygonMethods = mapOf(
+    "org/dyn4j/geometry/hull/DivideAndConquer" to setOf("divide"),
+    "org/dyn4j/geometry/hull/LinkedVertexHull" to setOf("toArray", "merge"),
+    "org/dyn4j/geometry/decompose/DoubleEdgeList" to setOf(
+        "addHalfEdges", "getPreviousEdge", "getReferenceFace", "removeHalfEdges",
+        "triangulateYMonotonePolygon", "getYMonotonePolygons"
+    ),
+    "org/dyn4j/geometry/decompose/EarClipping" to setOf("createTriangulation", "isReflex", "isEar"),
+    "org/dyn4j/geometry/decompose/SweepLine" to setOf(
+        "createTriangulation", "start", "end", "split", "merge", "regular"
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineState" to setOf("getType"),
+    "org/dyn4j/geometry/decompose/SweepLineVertex" to setOf("isLeft"),
+    "org/dyn4j/geometry/simplify/AbstractSimplifier" to setOf(
+        "buildSegmentTree", "buildResult", "isSelfIntersectionProduced", "intersects"
+    ),
+    "org/dyn4j/geometry/simplify/VertexClusterReduction" to setOf("buildVertexList")
 )
 
 val patchJvmArchive: (File) -> Unit = { jar ->
@@ -295,10 +424,52 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
                                     access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
-                                val revisedSignature = signature?.replace(
-                                    "Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;"
-                                )
+                                if (name in baselineFinalPolygonMethods[owner].orEmpty() &&
+                                    !(owner == "org/dyn4j/geometry/decompose/DoubleEdgeList" &&
+                                        revised and Opcodes.ACC_PUBLIC != 0)
+                                ) revised = revised or Opcodes.ACC_FINAL
+                                val revisedSignature = signature
+                                    ?.replace("Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;")
+                                    ?.let { value ->
+                                        if (owner.startsWith("org/dyn4j/geometry/hull/") ||
+                                            owner.startsWith("org/dyn4j/geometry/decompose/") ||
+                                            owner.startsWith("org/dyn4j/geometry/simplify/")) {
+                                            value.replace("+Lorg/dyn4j/geometry/Vector2;", "Lorg/dyn4j/geometry/Vector2;")
+                                        } else value
+                                    }
                                 val method = super.visitMethod(revised, name, descriptor, revisedSignature, exceptions)
+                                val nullPointArrayMethod = descriptor.startsWith("([Lorg/dyn4j/geometry/Vector2;)") &&
+                                    when (owner) {
+                                        "org/dyn4j/geometry/hull/MonotoneChain",
+                                        "org/dyn4j/geometry/hull/GrahamScan",
+                                        "org/dyn4j/geometry/hull/GiftWrap",
+                                        "org/dyn4j/geometry/hull/DivideAndConquer" -> name == "generate"
+                                        "org/dyn4j/geometry/decompose/Bayazit" -> name == "decompose"
+                                        "org/dyn4j/geometry/decompose/EarClipping",
+                                        "org/dyn4j/geometry/decompose/SweepLine" ->
+                                            name == "decompose" || name == "triangulate" || name == "createTriangulation"
+                                        else -> false
+                                    }
+                                if (nullPointArrayMethod) {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitCode() {
+                                            super.visitCode()
+                                            val nonNull = Label()
+                                            super.visitVarInsn(Opcodes.ALOAD, 1)
+                                            super.visitJumpInsn(Opcodes.IFNONNULL, nonNull)
+                                            super.visitTypeInsn(Opcodes.NEW, "org/dyn4j/exception/ArgumentNullException")
+                                            super.visitInsn(Opcodes.DUP)
+                                            super.visitLdcInsn("points")
+                                            super.visitMethodInsn(
+                                                Opcodes.INVOKESPECIAL, "org/dyn4j/exception/ArgumentNullException",
+                                                "<init>", "(Ljava/lang/String;)V", false
+                                            )
+                                            super.visitInsn(Opcodes.ATHROW)
+                                            super.visitLabel(nonNull)
+                                            super.visitFrame(Opcodes.F_SAME, 0, null, 0, null)
+                                        }
+                                    }
+                                }
                                 // The baseline permits a null center in this protected constructor.
                                 if (owner == "org/dyn4j/geometry/AbstractShape" && name == "<init>" &&
                                     descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V") {
@@ -319,16 +490,57 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                         }
                                     }
                                 }
+                                if (owner == "org/dyn4j/geometry/simplify/AbstractSimplifier" &&
+                                    name == "simplify" && descriptor == "([Lorg/dyn4j/geometry/Vector2;)[Lorg/dyn4j/geometry/Vector2;") {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitCode() {
+                                            super.visitCode()
+                                            val nonNull = Label()
+                                            super.visitVarInsn(Opcodes.ALOAD, 1)
+                                            super.visitJumpInsn(Opcodes.IFNONNULL, nonNull)
+                                            super.visitInsn(Opcodes.ACONST_NULL)
+                                            super.visitInsn(Opcodes.ARETURN)
+                                            super.visitLabel(nonNull)
+                                            super.visitFrame(Opcodes.F_SAME, 0, null, 0, null)
+                                        }
+                                    }
+                                }
                                 return method
                             }
                             override fun visitEnd() {
+                                if (owner == "org/dyn4j/geometry/decompose/SweepLineState") {
+                                    val method = super.visitMethod(
+                                        Opcodes.ACC_FINAL, "initialize",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/PriorityQueue;",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/PriorityQueue<Lorg/dyn4j/geometry/decompose/SweepLineVertex;>;",
+                                        null
+                                    )
+                                    method.visitCode()
+                                    method.visitTypeInsn(Opcodes.NEW, "java/util/PriorityQueue")
+                                    method.visitInsn(Opcodes.DUP)
+                                    method.visitVarInsn(Opcodes.ALOAD, 0)
+                                    method.visitVarInsn(Opcodes.ALOAD, 1)
+                                    method.visitMethodInsn(
+                                        Opcodes.INVOKEVIRTUAL, owner, "initializeSorted",
+                                        "([Lorg/dyn4j/geometry/Vector2;)Ljava/util/List;", false
+                                    )
+                                    method.visitMethodInsn(
+                                        Opcodes.INVOKESPECIAL, "java/util/PriorityQueue", "<init>",
+                                        "(Ljava/util/Collection;)V", false
+                                    )
+                                    method.visitInsn(Opcodes.ARETURN)
+                                    method.visitMaxs(0, 0)
+                                    method.visitEnd()
+                                }
                                 for ((name, descriptor, signature) in companionMethods[owner].orEmpty()) {
                                     if ((name to descriptor) in present) continue
                                     val visibility = if (name in spec.packageMethods ||
                                         name + descriptor in spec.packageMethodSignatures) 0 else Opcodes.ACC_PUBLIC
                                     val method = super.visitMethod(
                                         visibility or Opcodes.ACC_STATIC or
-                                            (if (owner == "org/dyn4j/Version") Opcodes.ACC_FINAL else 0) or
+                                            (if (owner == "org/dyn4j/Version" ||
+                                                name in baselineFinalPolygonMethods[owner].orEmpty()
+                                            ) Opcodes.ACC_FINAL else 0) or
                                             (if (name in spec.varargMethods &&
                                                 Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                             ) Opcodes.ACC_VARARGS else 0),
@@ -937,4 +1149,100 @@ tasks.register<JavaExec>("runAndroidDynamicsConsumer") {
     dependsOn(androidDynamicsConsumer, androidRuntimeJar)
     classpath(androidDynamicsConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("DynamicsConsumer")
+}
+
+val polygonTestNames = mapOf(
+    "hull" to listOf("DivideAndConquerTest", "GiftWrapTest", "GrahamScanTest", "MonotoneChainTest"),
+    "decompose" to listOf("BayazitTest", "EarClippingTest", "SweepLineTest"),
+    "simplify" to listOf(
+        "DouglasPeuckerTest", "SegmentTreeTest", "SimplePolygonVertexTest",
+        "VertexClusterReductionTest", "VisvalingamTest"
+    )
+)
+val polygonTestSources = polygonTestNames.flatMap { (packageName, names) ->
+    (names + when (packageName) {
+        "decompose" -> listOf("AbstractDecomposeTest")
+        "simplify" -> listOf("AbstractSimplifyTest")
+        else -> emptyList()
+    }).map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/geometry/$packageName/$it.java")
+    } }
+} + listOf(upstreamCheckout.map { it.file("src/test/java/org/dyn4j/geometry/RobustGeometryTest.java") })
+val compileUpstreamPolygonTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(polygonTestSources)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-polygon-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamPolygonTests") {
+    dependsOn(compileUpstreamPolygonTests)
+    classpath(
+        compileUpstreamPolygonTests.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(polygonTestNames.flatMap { (packageName, names) ->
+        names.map { "org.dyn4j.geometry.$packageName.$it" }
+    })
+}
+tasks.register<Exec>("verifyPolygonJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        environment("JAVA_HOME", System.getenv("JAVA_HOME"))
+        commandLine(
+            "python3", rootProject.file("scripts/verify-polygon-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
+        )
+    }
+}
+
+val polygonConsumerSource = file("src/jvmConsumer/java/PolygonAlgorithmConsumer.java")
+val baselinePolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(polygonConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/baseline"))
+    options.release.set(8)
+}
+val candidatePolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(polygonConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/candidate"))
+    options.release.set(8)
+}
+val stagedPolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(polygonConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselinePolygonConsumer") {
+    dependsOn(baselinePolygonConsumer)
+    classpath(
+        baselinePolygonConsumer.flatMap { it.destinationDirectory }, baseline,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
+}
+tasks.register<JavaExec>("runCandidatePolygonConsumer") {
+    dependsOn(candidatePolygonConsumer)
+    classpath(
+        candidatePolygonConsumer.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
+}
+tasks.register<JavaExec>("runStagedPolygonConsumer") {
+    dependsOn(stagedPolygonConsumer)
+    classpath(
+        stagedPolygonConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
 }

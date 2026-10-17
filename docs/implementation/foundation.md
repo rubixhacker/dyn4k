@@ -56,6 +56,13 @@ Common Rotation and Transform define public `getCost()` and `getSint()` methods.
 JVM accessor names keep their protected properties from colliding with those
 methods. JVM and Android archives retain the baseline protected fields.
 
+The compatibility promise covers unchanged Java source. Kotlin 2.4.20 may
+resolve `child.x` through `getX()` when `child` has a Java subclass type that
+defines that bean method. A `Vector2`-typed or `dyn4k.Vector2`-typed expression
+uses the public field. This Kotlin subclass-typed property difference is not
+covered by the Java source-compatibility promise. Keep the mixed Kotlin
+diagnostic separate from the passing Java field and Kotlin base/alias checks.
+
 Common Copyable uses the baseline covariant bound. Kotlin 2.4.20 requires a
 targeted finite-bound suppression for this declaration. The compiler emits
 the matching JVM generic signature. Check the bound again before changing
