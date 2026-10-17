@@ -34,7 +34,7 @@ import org.dyn4j.Epsilon
 import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
-open class Capsule(width: Double, height: Double) : AbstractShape(max(width, height) * 0.5), Convex {
+open class Capsule : AbstractShape, Convex {
     @get:kotlin.jvm.JvmName("getLengthField")
     @JvmFieldBridge protected val length: Double
     @get:kotlin.jvm.JvmName("getCapRadiusField")
@@ -44,7 +44,7 @@ open class Capsule(width: Double, height: Double) : AbstractShape(max(width, hei
     @get:kotlin.jvm.JvmName("getLocalXAxisField")
     @JvmFieldBridge protected val localXAxis: Vector2
 
-    init {
+    constructor(width: Double, height: Double) : super(max(width, height) * 0.5) {
         if (width <= 0.0) throw ValueOutOfRangeException("width", width, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (height <= 0.0) throw ValueOutOfRangeException("height", height, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (abs(width - height) < Epsilon.E) throw IllegalArgumentException("The width and height cannot be near equal - use a Circle instead.")
@@ -62,14 +62,11 @@ open class Capsule(width: Double, height: Double) : AbstractShape(max(width, hei
         }
     }
 
-    protected constructor(capsule: Capsule) : this(
-        if (capsule.localXAxis.x == 0.0) capsule.capRadius * 2.0 else capsule.length,
-        if (capsule.localXAxis.x == 0.0) capsule.length else capsule.capRadius * 2.0
-    ) {
-        center.set(capsule.center)
-        radius = capsule.radius
-        foci[0].set(capsule.foci[0]); foci[1].set(capsule.foci[1])
-        localXAxis.set(capsule.localXAxis)
+    protected constructor(capsule: Capsule) : super(capsule) {
+        capRadius = capsule.capRadius
+        foci = arrayOf(capsule.foci[0].copy(), capsule.foci[1].copy())
+        length = capsule.length
+        localXAxis = capsule.localXAxis.copy()
     }
 
     override fun copy() = Capsule(this)

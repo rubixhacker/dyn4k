@@ -122,7 +122,27 @@ public final class GeometryConsumer {
             if (!range.equals(String.format("radius cannot be %f", value)))
                 throw new AssertionError("Range exception number: " + range);
         }
+        RuntimeException[] extensions = {
+            new ExtendedEmpty(), new ExtendedIndex(), new ExtendedElement(), new ExtendedRange()
+        };
+        for (RuntimeException extension : extensions) {
+            if (extension.getMessage() == null)
+                throw new AssertionError("Exception subclass message");
+        }
         org.dyn4j.geometry.GeometryPackageConsumer.run();
-        System.out.println("GeometryConsumer: 25 checks passed");
+        System.out.println("GeometryConsumer: 26 checks passed");
+    }
+
+    private static final class ExtendedEmpty extends org.dyn4j.exception.EmptyCollectionException {
+        ExtendedEmpty() { super("points"); }
+    }
+    private static final class ExtendedIndex extends org.dyn4j.exception.InvalidIndexException {
+        ExtendedIndex() { super(2); }
+    }
+    private static final class ExtendedElement extends org.dyn4j.exception.NullElementException {
+        ExtendedElement() { super("points", 2); }
+    }
+    private static final class ExtendedRange extends org.dyn4j.exception.ValueOutOfRangeException {
+        ExtendedRange() { super("radius", 0.0); }
     }
 }
