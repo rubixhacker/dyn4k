@@ -4,6 +4,7 @@ import java.util.ConcurrentModificationException;
 import org.dyn4j.Unsafe;
 import org.dyn4j.UnitConversion;
 import org.dyn4j.collision.AbstractCollisionBody;
+import org.dyn4j.collision.AbstractBounds;
 import org.dyn4j.collision.AbstractCollisionItem;
 import org.dyn4j.collision.AbstractCollisionPair;
 import org.dyn4j.collision.AxisAlignedBounds;
@@ -17,6 +18,7 @@ import org.dyn4j.collision.Fixture;
 import org.dyn4j.collision.FixtureModificationHandler;
 import org.dyn4j.collision.TypeFilter;
 import org.dyn4j.exception.CopyException;
+import org.dyn4j.exception.ArgumentNullException;
 import org.dyn4j.geometry.AABB;
 import org.dyn4j.geometry.Circle;
 import org.dyn4j.geometry.Convex;
@@ -72,6 +74,19 @@ public final class CollisionModelConsumer {
         @Override public SubstitutingBody copy() { return new SubstitutingBody(this); }
     }
 
+    private static class NullAwareBounds extends AbstractBounds {
+        boolean sawNull;
+        NullAwareBounds() { super((Vector2) null); }
+        @Override public void translate(Vector2 vector) {
+            if (vector == null) sawNull = true;
+            else super.translate(vector);
+        }
+        @Override public boolean isOutside(CollisionBody<?> body) { return false; }
+        @Override public boolean isOutside(AABB aabb) { return false; }
+        @Override public boolean isOutside(AABB aabb, Transform transform, Fixture fixture) { return false; }
+        @Override public NullAwareBounds copy() { return new NullAwareBounds(); }
+    }
+
     private static class ObservedItem implements CollisionItem<Body, Fixture> {
         private final String tag;
         private final StringBuilder calls;
@@ -123,6 +138,7 @@ public final class CollisionModelConsumer {
 
     public static void main(String[] args) {
         RootFilter root = new RootFilter();
+        check(new NullAwareBounds().sawNull);
         ChildFilter child = new ChildFilter();
         check(root.isAllowed(child));
         check(child.isAllowed(root));
@@ -154,6 +170,8 @@ public final class CollisionModelConsumer {
         check(new CopyException(BadFixture.class, Fixture.class).getMessage().contains(Fixture.class.getName()));
 
         Body body = new Body();
+        try { body.addFixture((Fixture) null); throw new AssertionError("null fixture accepted"); }
+        catch (ArgumentNullException expected) { check("fixture cannot be null".equals(expected.getMessage())); }
         StringBuilder events = new StringBuilder();
         body.setFixtureModificationHandler(new FixtureModificationHandler<Fixture>() {
             public void onFixtureAdded(Fixture fixture) { events.append('A'); }
@@ -228,6 +246,12 @@ public final class CollisionModelConsumer {
         check(empty.removeFixture((Vector2)null) == null);
         check(empty.removeFixtures((Vector2)null).isEmpty());
         check(!empty.contains(null));
+        Body nullRejecting = new Body();
+        nullRejecting.addFixture(new Circle(1.0));
+        try { nullRejecting.getFixture((Vector2)null); throw new AssertionError("missing null point failure"); }
+        catch (NullPointerException expected) { checks++; }
+        try { nullRejecting.getFixtures((Vector2)null); throw new AssertionError("missing null point list failure"); }
+        catch (NullPointerException expected) { checks++; }
         Body nullGet = nullPointBody();
         check(nullGet.getFixture((Vector2)null) == nullGet.getFixture(0));
         Body nullGetMany = nullPointBody();
