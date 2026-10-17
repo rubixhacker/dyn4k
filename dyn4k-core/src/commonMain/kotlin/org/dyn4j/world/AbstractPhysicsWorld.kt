@@ -60,54 +60,82 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
     AbstractCollisionWorld<T, BodyFixture, V>, PhysicsWorld<T, V>, Shiftable, DataContainer {
 
     @get:kotlin.jvm.JvmName("settingsField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val settings: Settings
     @get:kotlin.jvm.JvmName("timeStepField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeStep: TimeStep
     @get:kotlin.jvm.JvmName("gravityField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val gravity: Vector2
     @get:kotlin.jvm.JvmName("valueMixerField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setValueMixerField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var valueMixer: ValueMixer
     @get:kotlin.jvm.JvmName("contactConstraintSolverField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setContactConstraintSolverField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var contactConstraintSolver: ContactConstraintSolver<T>
     @get:kotlin.jvm.JvmName("timeOfImpactSolverField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setTimeOfImpactSolverField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var timeOfImpactSolver: TimeOfImpactSolver<T>
     @get:kotlin.jvm.JvmName("ccdBroadphaseField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setCcdBroadphaseField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var ccdBroadphase: BroadphaseDetector<T>
     @get:kotlin.jvm.JvmName("jointsField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val joints: MutableList<Joint<T>>
     @get:kotlin.jvm.JvmName("jointsUnmodifiableField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val jointsUnmodifiable: List<Joint<T>>
     @get:kotlin.jvm.JvmName("contactListenersField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactListeners: MutableList<ContactListener<T>?>
     @get:kotlin.jvm.JvmName("contactListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactListenersUnmodifiable: List<ContactListener<T>?>
     @get:kotlin.jvm.JvmName("destructionListenersField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val destructionListeners: MutableList<DestructionListener<T>?>
     @get:kotlin.jvm.JvmName("destructionListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val destructionListenersUnmodifiable: List<DestructionListener<T>?>
     @get:kotlin.jvm.JvmName("timeOfImpactListenersField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeOfImpactListeners: MutableList<TimeOfImpactListener<T>?>
     @get:kotlin.jvm.JvmName("timeOfImpactListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeOfImpactListenersUnmodifiable: List<TimeOfImpactListener<T>?>
     @get:kotlin.jvm.JvmName("stepListenersField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val stepListeners: MutableList<StepListener<T>?>
     @get:kotlin.jvm.JvmName("stepListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val stepListenersUnmodifiable: List<StepListener<T>?>
     @get:kotlin.jvm.JvmName("timeField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setTimeField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var time: Double = 0.0
     @get:kotlin.jvm.JvmName("updateRequiredField")
+    @get:kotlin.jvm.JvmSynthetic
     @set:kotlin.jvm.JvmName("setUpdateRequiredField")
+    @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var updateRequired: Boolean = true
     @get:kotlin.jvm.JvmName("constraintGraphField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val constraintGraph: ConstraintGraph<T>
     @get:kotlin.jvm.JvmName("contactCollisionsField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactCollisions: MutableList<V>
     @get:kotlin.jvm.JvmName("ccdCollisionDataField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val ccdCollisionData: MutableSet<CollisionPair<T>>
 
     constructor() : this(CollisionWorld.DEFAULT_INITIAL_BODY_CAPACITY, PhysicsWorld.DEFAULT_INITIAL_JOINT_CAPACITY)

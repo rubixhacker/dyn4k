@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 import org.dyn4j.collision.continuous.TimeOfImpact
 import org.dyn4j.collision.narrowphase.Penetration
 import org.dyn4j.collision.narrowphase.Raycast
@@ -13,6 +14,25 @@ import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.geometry.Geometry
 
 class WorldResultTest {
+    private class ExtendedCast : ConvexCastResult<Body, BodyFixture>() {
+        fun protectedDetailMatchesPublic(): Boolean = timeOfImpact === getTimeOfImpact()
+    }
+
+    private class ExtendedDetect : ConvexDetectResult<Body, BodyFixture>() {
+        fun protectedDetailMatchesPublic(): Boolean = penetration === getPenetration()
+    }
+
+    private class ExtendedRay : RaycastResult<Body, BodyFixture>() {
+        fun protectedDetailMatchesPublic(): Boolean = raycast === getRaycast()
+    }
+
+    @Test
+    fun kotlinResultSubclassesKeepProtectedDetailObjects() {
+        assertTrue(ExtendedCast().protectedDetailMatchesPublic())
+        assertTrue(ExtendedDetect().protectedDetailMatchesPublic())
+        assertTrue(ExtendedRay().protectedDetailMatchesPublic())
+    }
+
     @Test
     fun detectResultSharesBodyAndFixtureAcrossCopies() {
         val body = Body()

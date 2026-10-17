@@ -32,6 +32,39 @@ import org.dyn4j.world.listener.DestructionListenerAdapter
 import org.dyn4j.dynamics.joint.Joint
 
 class PhysicsWorldJourneyTest {
+    private class ExtendedWorld : World<Body>() {
+        var created = 0
+
+        fun protectedStateMatchesPublic(): Boolean =
+            settings === getSettings() && gravity === getGravity() &&
+                contactConstraintSolver === getContactConstraintSolver()
+
+        protected override fun createCollisionData(
+            pair: CollisionPair<org.dyn4j.collision.CollisionItem<Body, org.dyn4j.dynamics.BodyFixture>>
+        ): WorldCollisionData<Body> {
+            created++
+            return super.createCollisionData(pair)
+        }
+    }
+
+    @Test
+    fun kotlinSubclassKeepsProtectedStateAndFactoryDispatch() {
+        val world = ExtendedWorld()
+        world.setGravity(0.0, 0.0)
+        assertTrue(world.protectedStateMatchesPublic())
+        val moving = Body()
+        moving.addFixture(Circle(1.0))
+        moving.setMass(MassType.NORMAL)
+        val fixed = Body()
+        fixed.addFixture(Circle(1.0))
+        world.addBody(moving)
+        world.addBody(fixed)
+
+        world.step(1)
+        assertTrue(world.created > 0)
+        assertTrue(world.protectedStateMatchesPublic())
+    }
+
     @Test
     fun elapsedTimeStepsAndCarriesTheRemainder() {
         val world = World<Body>()

@@ -31,6 +31,7 @@ import org.dyn4j.collision.continuous.TimeOfImpact
 
 open class ConvexCastResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E>, Comparable<ConvexCastResult<T, E>> {
     @get:kotlin.jvm.JvmName("timeOfImpactField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeOfImpact: TimeOfImpact
 
     constructor() : super() {

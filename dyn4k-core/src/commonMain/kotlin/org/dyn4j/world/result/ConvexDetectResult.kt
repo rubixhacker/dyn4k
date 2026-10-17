@@ -31,6 +31,7 @@ import org.dyn4j.collision.narrowphase.Penetration
 
 open class ConvexDetectResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E> {
     @get:kotlin.jvm.JvmName("penetrationField")
+    @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val penetration: Penetration
 
     constructor() : super() {
