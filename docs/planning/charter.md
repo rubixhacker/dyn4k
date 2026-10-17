@@ -17,3 +17,7 @@ These requirements were agreed directly with the user during initial Wayfinder c
 
 The Kotlin API shape, meaning and evidence of target support, numerical acceptance thresholds, performance budgets, artifact packaging, and distribution requirements remain decisions on the map. Research findings are evidence, not user approval of a design.
 
+## Implementation authorization
+
+On 2026-10-17, the user authorized completion of the port, publication of the spec and implementation issues, and selection of the remaining recommended choices. This advances the work beyond the original planning destination. The [complete-port spec](https://github.com/rubixhacker/dyn4k/issues/32) links the approved API, support, performance, and artifact decisions and records the implementation contract. Earlier research remains evidence; unfinished empirical checks remain open requirements.
+
