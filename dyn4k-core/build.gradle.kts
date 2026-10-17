@@ -1678,7 +1678,8 @@ tasks.register<JavaExec>("runAndroidWorldTests") {
     args(worldTestClasses)
 }
 val worldConsumerSource = files(
-    "src/jvmConsumer/java/WorldConsumer.java", "src/jvmConsumer/java/WorldAdvancedConsumer.java"
+    "src/jvmConsumer/java/WorldConsumer.java", "src/jvmConsumer/java/WorldAdvancedConsumer.java",
+    "src/jvmConsumer/java/WorldQualityConsumer.java"
 )
 val baselineWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
@@ -1697,6 +1698,11 @@ tasks.register<JavaExec>("runBaselineWorldAdvancedConsumer") {
     classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
     mainClass.set("WorldAdvancedConsumer")
 }
+tasks.register<JavaExec>("runBaselineWorldQualityConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldQualityConsumer")
+}
 val candidateWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(tasks.named("jvmJar"))
     source(worldConsumerSource)
@@ -1714,6 +1720,11 @@ tasks.register<JavaExec>("runCandidateWorldAdvancedConsumer") {
     classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     mainClass.set("WorldAdvancedConsumer")
 }
+tasks.register<JavaExec>("runCandidateWorldQualityConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldQualityConsumer")
+}
 val stagedWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
     source(worldConsumerSource)
@@ -1730,6 +1741,11 @@ tasks.register<JavaExec>("runStagedWorldAdvancedConsumer") {
     dependsOn(stagedWorldConsumer)
     classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
     mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runStagedWorldQualityConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldQualityConsumer")
 }
 val stagedWorldKotlinConsumer = tasks.register<JavaExec>("stagedWorldKotlinConsumer") {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
@@ -1766,6 +1782,11 @@ tasks.register<JavaExec>("runAndroidWorldAdvancedConsumer") {
     dependsOn(androidWorldConsumer, androidRuntimeJar)
     classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runAndroidWorldQualityConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldQualityConsumer")
 }
 tasks.register<Exec>("verifyWorldJvmApi") {
     dependsOn(verifyBaseline, tasks.named("jvmJar"))
