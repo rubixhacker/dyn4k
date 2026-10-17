@@ -33,6 +33,16 @@ private class CollisionProbeWorld : AbstractCollisionWorld<Body, BodyFixture, Wo
 
 class CollisionWorldJourneyTest {
     @Test
+    fun publicBodyAndCollisionListenerViewsMarkRandomAccess() {
+        val world = World<Body>()
+        val views = listOf(world.getBodies(), world.getCollisionListeners(), world.getBoundsListeners())
+        for (view in views) {
+            assertTrue(view is RandomAccess)
+            assertTrue(view.subList(0, 0) is RandomAccess)
+        }
+    }
+
+    @Test
     fun bodiesAndLiveViewFollowWorldOwnership() {
         val world = World<Body>()
         val bodies = world.getBodies()

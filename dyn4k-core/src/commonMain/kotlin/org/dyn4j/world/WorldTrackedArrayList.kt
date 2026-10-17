@@ -232,6 +232,14 @@ internal open class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : Abstra
             return removed
         }
 
+        override fun clear() {
+            checkVersion()
+            val removedCount = viewSize
+            backing.subList(offset, offset + removedCount).clear()
+            structuralVersion++
+            recordStructuralChange(-removedCount)
+        }
+
         override fun subList(fromIndex: Int, toIndex: Int): MutableList<E> {
             checkVersion()
             checkSubListRange(fromIndex, toIndex, viewSize)

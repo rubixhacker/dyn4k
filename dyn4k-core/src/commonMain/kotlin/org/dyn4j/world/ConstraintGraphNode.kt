@@ -33,9 +33,9 @@ class ConstraintGraphNode<T : PhysicsBody>(@kotlin.jvm.JvmField protected val bo
         worldTrackedArrayList<ContactConstraint<T>>()
     @kotlin.jvm.JvmField protected val joints: MutableList<Joint<T>> = worldTrackedArrayList<Joint<T>>()
     @kotlin.jvm.JvmField protected val contactConstraintsUnmodifiable: List<ContactConstraint<T>> =
-        (contactConstraints as WorldTrackedArrayList<ContactConstraint<T>>).liveView()
+        worldLiveUnmodifiableList(contactConstraints)
     @kotlin.jvm.JvmField protected val jointsUnmodifiable: List<Joint<T>> =
-        (joints as WorldTrackedArrayList<Joint<T>>).liveView()
+        worldLiveUnmodifiableList(joints)
 
     fun getBody(): T = body
     fun getJoints(): List<Joint<T>> = jointsUnmodifiable

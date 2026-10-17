@@ -18,7 +18,23 @@ import org.dyn4j.geometry.Vector2
 
 class GraphContactJourneyTest {
     @Test
-    fun graphProtectedSortAndReplaceAllInvalidateSavedViews() {
+    fun emptyNestedGraphClearInvalidatesSavedSiblings() {
+        val node = ConstraintGraphNode(Body())
+        val joint = PinJoint(node.getBody(), Vector2())
+        node.mutableJoints().add(joint)
+        val rootIterator = node.mutableJoints().iterator()
+        val parent = node.mutableJoints().subList(0, 1)
+        val child = parent.subList(0, 0)
+        val sibling = parent.subList(0, 1)
+        child.clear()
+        assertEquals(0, child.size)
+        assertSame(joint, parent[0])
+        assertFailsWith<ConcurrentModificationException> { rootIterator.next() }
+        assertFailsWith<ConcurrentModificationException> { sibling[0] }
+    }
+
+    @Test
+    fun trackedGraphEdgeSortAndReplaceAllInvalidateSavedViews() {
         val body = Body()
         val fixture = body.addFixture(Circle(0.5))
         val other = Body()
@@ -27,30 +43,27 @@ class GraphContactJourneyTest {
             BasicCollisionPair(BasicCollisionItem(body, fixture), BasicCollisionItem(other, otherFixture))
         )
         val joint = PinJoint(body, Vector2())
-        val node = ConstraintGraphNode(body)
-        node.mutableContacts().add(contact)
-        node.mutableJoints().add(joint)
-
-        fun <E> verify(backing: MutableList<E>, view: List<E>, mutate: (WorldTrackedArrayList<E>) -> Unit) {
+        fun <E> verify(backing: WorldTrackedArrayList<E>, mutate: (WorldTrackedArrayList<E>) -> Unit) {
+            val view = backing.liveView()
             val iterator = backing.iterator()
             val protectedSublist = backing.subList(0, 1)
             val publicSublist = view.subList(0, 1)
             val original = backing[0]
-            mutate(backing as WorldTrackedArrayList<E>)
+            mutate(backing)
             assertSame(original, view[0])
             assertFailsWith<ConcurrentModificationException> { iterator.next() }
             assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
             assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
         }
 
-        val contacts = node.getContactConstraints()
-        val joints = node.getJoints()
-        verify(node.mutableContacts(), contacts) { it.sortElements(Comparator { _, _ -> 0 }) }
-        verify(node.mutableContacts(), contacts) { it.replaceAllElements { value -> value } }
-        verify(node.mutableJoints(), joints) { it.sortElements(Comparator { _, _ -> 0 }) }
-        verify(node.mutableJoints(), joints) { it.replaceAllElements { value -> value } }
-        assertSame(contacts, node.getContactConstraints())
-        assertSame(joints, node.getJoints())
+        val contacts = WorldTrackedArrayList<ContactConstraint<Body>>()
+        val joints = WorldTrackedArrayList<PinJoint<Body>>()
+        contacts.add(contact)
+        joints.add(joint)
+        verify(contacts) { it.sortElements(Comparator { _, _ -> 0 }) }
+        verify(contacts) { it.replaceAllElements { value -> value } }
+        verify(joints) { it.sortElements(Comparator { _, _ -> 0 }) }
+        verify(joints) { it.replaceAllElements { value -> value } }
     }
 
     @Test

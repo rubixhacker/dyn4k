@@ -157,7 +157,7 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         ccdBroadphase.setUpdateTrackingEnabled(true)
         val jointList = worldTrackedArrayList<Joint<T>>(jointCapacity)
         joints = jointList
-        jointsUnmodifiable = jointList.liveView()
+        jointsUnmodifiable = worldLiveUnmodifiableList(jointList)
         val contactListenerList = worldTrackedArrayList<ContactListener<T>?>()
         val destructionListenerList = worldTrackedArrayList<DestructionListener<T>?>()
         val timeOfImpactListenerList = worldTrackedArrayList<TimeOfImpactListener<T>?>()
@@ -166,10 +166,10 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         destructionListeners = destructionListenerList
         timeOfImpactListeners = timeOfImpactListenerList
         stepListeners = stepListenerList
-        contactListenersUnmodifiable = contactListenerList.liveView()
-        destructionListenersUnmodifiable = destructionListenerList.liveView()
-        timeOfImpactListenersUnmodifiable = timeOfImpactListenerList.liveView()
-        stepListenersUnmodifiable = stepListenerList.liveView()
+        contactListenersUnmodifiable = worldLiveUnmodifiableList(contactListenerList)
+        destructionListenersUnmodifiable = worldLiveUnmodifiableList(destructionListenerList)
+        timeOfImpactListenersUnmodifiable = worldLiveUnmodifiableList(timeOfImpactListenerList)
+        stepListenersUnmodifiable = worldLiveUnmodifiableList(stepListenerList)
         constraintGraph = ConstraintGraph(bodyCapacity, jointCapacity)
         contactCollisions = ArrayList(Collisions.getEstimatedCollisionPairs(bodyCapacity))
         ccdCollisionData = LinkedHashSet()

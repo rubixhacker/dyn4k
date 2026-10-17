@@ -48,18 +48,7 @@ class PhysicsWorldJourneyTest {
         fun jointBackingIterator(): MutableIterator<Joint<Body>> = joints.iterator()
         fun stepBackingSubList(): MutableList<StepListener<Body>?> = stepListeners.subList(0, 1)
         fun jointBackingSubList(): MutableList<Joint<Body>> = joints.subList(0, 1)
-        fun sortStepBacking() {
-            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>)
-                .sortElements(Comparator { _, _ -> 0 })
-        }
-
-        fun replaceAllStepBacking() {
-            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>)
-                .replaceAllElements { it }
-        }
-
-        fun removeIfStepBacking(predicate: (StepListener<Body>?) -> Boolean): Boolean =
-            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>).removeIfElements(predicate)
+        fun clearEmptyStepSubList() { stepListeners.subList(0, 0).clear() }
         fun backingListsHaveRandomAccess(): Boolean =
             stepListeners is RandomAccess && joints is RandomAccess
 
@@ -249,62 +238,76 @@ class PhysicsWorldJourneyTest {
     }
 
     @Test
-    fun protectedSortInvalidatesSavedWorldIteratorsAndSubLists() {
-        val world = ExtendedWorld()
-        val listener = StepListenerAdapter<Body>()
-        world.addStepListener(listener)
-        val publicView = world.getStepListeners()
-        val iterator = world.stepBackingIterator()
-        val protectedSublist = world.stepBackingSubList()
-        val publicSublist = publicView.subList(0, 1)
-        world.sortStepBacking()
-        assertSame(publicView, world.getStepListeners())
-        assertSame(listener, publicView[0])
-        assertFailsWith<ConcurrentModificationException> { iterator.next() }
-        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
-        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
-    }
-
-    @Test
-    fun protectedReplaceAllInvalidatesSavedWorldIteratorsAndSubLists() {
-        val world = ExtendedWorld()
-        val listener = StepListenerAdapter<Body>()
-        world.addStepListener(listener)
-        val publicView = world.getStepListeners()
-        val iterator = world.stepBackingIterator()
-        val protectedSublist = world.stepBackingSubList()
-        val publicSublist = publicView.subList(0, 1)
-        world.replaceAllStepBacking()
-        assertSame(publicView, world.getStepListeners())
-        assertSame(listener, publicView[0])
-        assertFailsWith<ConcurrentModificationException> { iterator.next() }
-        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
-        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
-    }
-
-    @Test
-    fun protectedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() {
+    fun emptyProtectedSubListClearInvalidatesSavedWorldTraversals() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
-        val second = StepListenerAdapter<Body>()
         world.addStepListener(first)
-        world.addStepListener(second)
-        val publicView = world.getStepListeners()
+        val view = world.getStepListeners()
         val iterator = world.stepBackingIterator()
         val protectedSublist = world.stepBackingSubList()
+        val publicSublist = view.subList(0, 1)
+        world.clearEmptyStepSubList()
+        assertSame(view, world.getStepListeners())
+        assertSame(first, view[0])
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+    }
+
+    @Test
+    fun trackedSortInvalidatesSavedIteratorsAndSubLists() {
+        val backing = WorldTrackedArrayList<StepListener<Body>?>()
+        val listener = StepListenerAdapter<Body>()
+        backing.add(listener)
+        val publicView = backing.liveView()
+        val iterator = backing.iterator()
+        val protectedSublist = backing.subList(0, 1)
+        val publicSublist = publicView.subList(0, 1)
+        backing.sortElements(Comparator { _, _ -> 0 })
+        assertSame(listener, publicView[0])
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+    }
+
+    @Test
+    fun trackedReplaceAllInvalidatesSavedIteratorsAndSubLists() {
+        val backing = WorldTrackedArrayList<StepListener<Body>?>()
+        val listener = StepListenerAdapter<Body>()
+        backing.add(listener)
+        val publicView = backing.liveView()
+        val iterator = backing.iterator()
+        val protectedSublist = backing.subList(0, 1)
+        val publicSublist = publicView.subList(0, 1)
+        backing.replaceAllElements { it }
+        assertSame(listener, publicView[0])
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+    }
+
+    @Test
+    fun trackedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() {
+        val backing = WorldTrackedArrayList<StepListener<Body>?>()
+        val first = StepListenerAdapter<Body>()
+        val second = StepListenerAdapter<Body>()
+        backing.add(first)
+        backing.add(second)
+        val publicView = backing.liveView()
+        val iterator = backing.iterator()
+        val protectedSublist = backing.subList(0, 1)
         var visited = 0
         assertFailsWith<IllegalStateException> {
-            world.removeIfStepBacking {
+            backing.removeIfElements {
                 if (visited++ == 1) throw IllegalStateException()
                 true
             }
         }
-        assertSame(publicView, world.getStepListeners())
         assertEquals(2, publicView.size)
         assertSame(first, iterator.next())
         assertSame(first, protectedSublist[0])
-        val beforeRemoval = world.stepBackingIterator()
-        assertTrue(world.removeIfStepBacking { it === first })
+        val beforeRemoval = backing.iterator()
+        assertTrue(backing.removeIfElements { it === first })
         assertSame(second, publicView[0])
         assertFailsWith<ConcurrentModificationException> { beforeRemoval.next() }
     }
