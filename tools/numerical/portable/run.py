@@ -265,6 +265,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         trace, attributes, raw_counts = extract_xml(host, lane)
         outcome["xml"] = attributes
         outcome["raw_counts"] = raw_counts
+        executed_runtime = runtime(host, lane / "gradle.log")
+        outcome["runtime"] = executed_runtime
         comparisons = compare_frozen(lane, reference_dirs)
         outcome["frozen_comparison_results"] = {
             "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
@@ -286,7 +288,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
         if clean_identity() != (commit, source_sha256):
             raise Rejected("source changed during host execution")
-        identity = Identity(commit, source_sha256, artifact_sha256, runtime(host, lane / "gradle.log"))
+        identity = Identity(commit, source_sha256, artifact_sha256, executed_runtime)
         sealed = seal(trace, declared_cases(), identity, target_artifacts)
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
         outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
