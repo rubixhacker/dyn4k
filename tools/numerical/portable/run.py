@@ -269,7 +269,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
     outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": completed.returncode,
                "status": "FAILED" if completed.returncode else "PASSED",
-               "qualification": "UNPASSED", "frozen_comparison": "NOT_COMPARABLE_PORTABLE_SCHEMA",
+               "qualification": "UNPASSED", "frozen_comparison": "NOT_RUN",
                "candidate_commit": commit, "source_sha256": source_sha256,
                "artifact_sha256": artifact_sha256}
     trace = None
@@ -291,7 +291,12 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         outcome["frozen_comparison_results"] = {
             "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
             "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
-            "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}
+            "failed": sum(item["status"].startswith("FAILED") for item in comparisons),
+            "unpassed": sum(item["status"].startswith("UNPASSED") for item in comparisons),
+            "passed": sum(item["status"] == "PASSED_APPROVED_PROJECTION" for item in comparisons)}
+        outcome["frozen_comparison"] = (
+            "PASSED_APPROVED_PROJECTION" if all(item["status"] ==
+                "PASSED_APPROVED_PROJECTION" for item in comparisons) else "UNPASSED")
         physical = nominal_free(lane / "cases/long-free-60.jsonl")
         outcome["physical"] = physical
         sleep_ids = ([f"contacts-default-{hz}" for hz in (30, 60, 120)] +
@@ -312,8 +317,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         sealed = seal(trace, declared_cases(), identity, target_artifacts)
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
         outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
-                        "artifact_sha256": identity.artifact_sha256,
-                        "frozen_comparison": "UNPASSED"})
+                        "artifact_sha256": identity.artifact_sha256})
         if physical["status"] != "PASSED" or sleep["status"] != "PHYSICAL_PASSED":
             outcome["status"] = "FAILED"
             outcome["reason"] = "physical diagnostic failed"

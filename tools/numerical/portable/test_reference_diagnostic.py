@@ -9,6 +9,7 @@ from reference_diagnostic import (strict_comparison, structural_differences,
                                   step_event_diagnostic, frozen_event_diagnostic,
                                   projected_records, auxiliary_record_diagnostic)
 from reference_diagnostic import nominal_zero_diagnostic
+from reference_diagnostic import projected_comparison
 
 
 class FrozenComparatorSeamTest(unittest.TestCase):
@@ -29,6 +30,29 @@ class FrozenComparatorSeamTest(unittest.TestCase):
             candidate.write_text("".join(json.dumps(row) + "\n" for row in rows))
             with self.assertRaisesRegex(Exception, "event projection is absent"):
                 list(projected_records(candidate))
+
+    def test_complete_projected_stream_can_pass_approved_comparator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "reference.jsonl.gz"
+            candidate = Path(directory) / "candidate.jsonl"
+            baseline = [{"kind": "inputs", "value": 1.0},
+                        {"kind": "event", "step": 1, "order": 0, "method": "begin"},
+                        {"kind": "state", "step": 1, "state": {"value": -0.0}}]
+            with gzip.open(reference, "wt") as output:
+                for row in baseline:
+                    output.write(json.dumps(row) + "\n")
+            def check(rows):
+                candidate.write_text("".join(json.dumps(row) + "\n" for row in rows))
+                return projected_comparison({"exact_numeric": ["inputs.value",
+                    "event.step", "event.order", "state.step", "state.state.value"]},
+                    reference, candidate)
+            rows = [{"kind": "inputs", "frozenInput": baseline[0]},
+                    {"kind": "event", "frozenEvent": baseline[1]},
+                    {"kind": "state", "step": 1, "frozenState": baseline[2]["state"]},
+                    {"kind": "case-end"}]
+            self.assertEqual(check(rows)["status"], "PASSED")
+            rows[2] = {"kind": "state", "step": 1, "frozenState": {"value": 0.0}}
+            self.assertEqual(check(rows)["status"], "FAILED")
 
     def test_auxiliary_projection_detects_missing_action(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -457,8 +457,11 @@ def diagnostic(fixture_key, reference, portable):
                     if len(approved_failures) < 20:
                         approved_failures.append({"step": checked, "body": index,
                                                   "channel": name, "reason": str(error)})
-    return {"status": ("FAILED_APPROVED_CHANNEL" if approved_failure_count or signed_zero_differences else
-                       "UNPASSED_INPUT_SCHEMA" if not header_exact else "UNPASSED_EVENT_SCHEMA"),
+    status = ("FAILED_APPROVED_PROJECTION" if projected["status"] == "FAILED" or
+              approved_failure_count or signed_zero_differences else
+              "UNPASSED_RULES" if projected["status"] == "UNPASSED" else
+              "PASSED_APPROVED_PROJECTION")
+    return {"status": status,
             "fixture_key": fixture_key, "reference_sha256": digest(reference),
             "portable_sha256": digest(portable), "input_header_exact": header_exact,
             "input_schema_differences": input_schema_differences,
