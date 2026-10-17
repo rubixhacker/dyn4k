@@ -20,7 +20,7 @@ class ComparatorSeamTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.rows = [
             {"kind": "inputs", "id": "sample", "dt": 0.5},
-            {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin", "payload": [{"velocity": [1.0, -2.0]}]},
+            {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin", "payload": [{"velocity": [1.0, -2.0], "getPoint": [0.0, 0.0], "getDepth": 0.1, "getNormalImpulse": 0.25}]},
             {"kind": "state", "step": 1, "state": {"position": [2.0, 3.0], "normal": [1.0, 0.0], "angle": 3.141592653589793, "sum": 9.0}},
         ]
         self.fixture = {
@@ -30,6 +30,9 @@ class ComparatorSeamTest(unittest.TestCase):
             "counts": {"inputs": 1, "event": 1, "state": 1},
             "rules": [
                 {"path": "event.payload[].velocity[]", "metric": "scalar", "absolute": 0.1, "relative": 0, "unit": "m/s"},
+                {"path": "event.payload[].getPoint[]", "metric": "scalar", "absolute": 0.01, "relative": 0, "unit": "m"},
+                {"path": "event.payload[].getDepth", "metric": "scalar", "absolute": 0.01, "relative": 0, "unit": "m"},
+                {"path": "event.payload[].getNormalImpulse", "metric": "scalar", "absolute": 0.01, "relative": 0, "unit": "N s"},
                 {"path": "state.state.position[]", "metric": "scalar", "absolute": 0.1, "relative": 0.01, "unit": "m"},
                 {"path": "state.state.normal", "metric": "direction", "absolute": 0.01, "relative": 0, "magnitude_absolute": 0.001, "unit_deviation": 0.001, "unit": "rad"},
                 {"path": "state.state.angle", "metric": "orientation", "absolute": 0.01, "relative": 0, "unit": "rad"},
@@ -97,6 +100,15 @@ class ComparatorSeamTest(unittest.TestCase):
         self.write_candidate(rows)
         self.assertEqual("FAILED", self.result()["status"])
 
+    def test_direct_callback_channels_use_their_approved_units(self):
+        for name, value in (("getPoint", [0.02, 0.0]),
+                            ("getDepth", 0.12), ("getNormalImpulse", 0.27)):
+            with self.subTest(name=name):
+                rows = json.loads(json.dumps(self.rows))
+                rows[1]["payload"][0][name] = value
+                self.write_candidate(rows)
+                self.assertEqual("FAILED", self.result()["status"])
+
     def test_missing_nonfinite_unknown_and_order_fail_closed(self):
         mutations = [
             lambda r: r[2]["state"].pop("sum"),
@@ -110,6 +122,22 @@ class ComparatorSeamTest(unittest.TestCase):
             mutate(rows)
             self.write_candidate(rows)
             self.assertNotEqual("PASSED", self.result()["status"])
+
+    def test_swapped_callbacks_fail_even_when_counts_match(self):
+        rows = json.loads(json.dumps(self.rows))
+        second = json.loads(json.dumps(rows[1]))
+        second["order"] = 1
+        second["method"] = "end"
+        rows.insert(2, second)
+        self.fixture["counts"]["event"] = 2
+        self.write_reference(rows)
+        candidate = json.loads(json.dumps(rows))
+        candidate[1], candidate[2] = candidate[2], candidate[1]
+        self.write_candidate(candidate)
+        self.assertEqual("FAILED", self.result()["status"])
+        candidate[1]["order"], candidate[2]["order"] = 0, 1
+        self.write_candidate(candidate)
+        self.assertEqual("FAILED", self.result()["status"])
 
     def test_identity_counts_and_skips_fail_closed(self):
         self.write_candidate(self.rows, counts={"inputs": 1, "event": 1, "state": 2})

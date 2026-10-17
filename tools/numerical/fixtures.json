@@ -101,6 +101,8 @@
         {"path": "event.payload[].angularVelocity2", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "rad/s"},
         {"path": "event.payload[].constraint.contacts[].getPoint[]", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
         {"path": "event.payload[].constraint.contacts[].getDepth", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
+        {"path": "event.payload[].getPoint[]", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
+        {"path": "event.payload[].getDepth", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
         {"path": "event.payload[].manifold.points[].getPoint[]", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
         {"path": "event.payload[].manifold.points[].getDepth", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
         {"path": "event.payload[].penetration.getDepth", "metric": "scalar", "absolute": 1e-4, "relative": 0, "unit": "m"},
@@ -109,9 +111,11 @@
         {"path": "event.payload[].manifold.getNormal", "metric": "direction", "absolute": 1e-4, "relative": 0, "magnitude_absolute": 1e-6, "unit_deviation": 1e-6, "unit": "rad"},
         {"path": "event.payload[].penetration.getNormal", "metric": "direction", "absolute": 1e-4, "relative": 0, "magnitude_absolute": 1e-6, "unit_deviation": 1e-6, "unit": "rad"},
         {"path": "event.payload[].constraint.contacts[].getNormalImpulse", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "N s"},
-        {"path": "event.payload[].constraint.contacts[].getTangentialImpulse", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "N s"}
+        {"path": "event.payload[].constraint.contacts[].getTangentialImpulse", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "N s"},
+        {"path": "event.payload[].getNormalImpulse", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "N s"},
+        {"path": "event.payload[].getTangentialImpulse", "metric": "scalar", "absolute": 1e-3, "relative": 0, "unit": "N s"}
       ],
-      "exact_numeric": ["inputs.*", "event.step", "event.order", "state.step", "state.outerStep", "state.innerWithinOuter", "outer-endpoint.step", "outer-endpoint.outerStep", "action.step", "action.order", "instrumented-callback.step", "instrumented-callback.order", "event.payload[].getDeltaTime", "event.payload[].getDeltaTimeRatio", "event.payload[].getInverseDeltaTime", "event.payload[].getPreviousInverseDeltaTime", "event.payload[].getPrevousDeltaTime", "event.payload[].constraint.contacts[].manifoldId.*"]
+      "exact_numeric": ["inputs.*", "event.step", "event.order", "state.step", "state.outerStep", "state.innerWithinOuter", "outer-endpoint.step", "outer-endpoint.outerStep", "action.step", "action.order", "instrumented-callback.step", "instrumented-callback.order", "event.payload[].getDeltaTime", "event.payload[].getDeltaTimeRatio", "event.payload[].getInverseDeltaTime", "event.payload[].getPreviousInverseDeltaTime", "event.payload[].getPrevousDeltaTime", "event.payload[].constraint.contacts[].manifoldId.*", "event.payload[].manifoldId.*"]
     },
     "weld-pulley": {
       "family": "joint-modes",
