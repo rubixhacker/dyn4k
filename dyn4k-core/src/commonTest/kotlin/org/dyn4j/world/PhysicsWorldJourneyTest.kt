@@ -46,6 +46,10 @@ class PhysicsWorldJourneyTest {
 
         fun stepBackingIterator(): MutableIterator<StepListener<Body>?> = stepListeners.iterator()
         fun jointBackingIterator(): MutableIterator<Joint<Body>> = joints.iterator()
+        fun stepBackingSubList(): MutableList<StepListener<Body>?> = stepListeners.subList(0, 1)
+        fun jointBackingSubList(): MutableList<Joint<Body>> = joints.subList(0, 1)
+        fun backingListsHaveRandomAccess(): Boolean =
+            stepListeners is RandomAccess && joints is RandomAccess
 
         fun protectedStateMatchesPublic(): Boolean =
             settings === getSettings() && gravity === getGravity() &&
@@ -205,6 +209,78 @@ class PhysicsWorldJourneyTest {
         world.addJoint(PinJoint(body, Vector2()))
         assertEquals(2, joints.size)
         assertFailsWith<ConcurrentModificationException> { jointSubList[0] }
+    }
+
+    @Test
+    fun protectedSubListsRejectStructuralChangeOnly() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val replacement = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        val steps = world.stepBackingSubList()
+        world.replaceStepListener(0, replacement)
+        assertSame(replacement, steps[0])
+        world.addStepListener(StepListenerAdapter())
+        assertFailsWith<ConcurrentModificationException> { steps[0] }
+        assertFailsWith<ConcurrentModificationException> { steps.size }
+
+        val body = Body()
+        world.addBody(body)
+        val joint = PinJoint(body, Vector2())
+        world.addJoint(joint)
+        val joints = world.jointBackingSubList()
+        world.replaceJoint(0, joint)
+        assertSame(joint, joints[0])
+        world.addJoint(PinJoint(body, Vector2()))
+        assertFailsWith<ConcurrentModificationException> { joints[0] }
+        assertFailsWith<ConcurrentModificationException> { joints.size }
+    }
+
+    @Test
+    fun protectedNestedSubListChangesKeepParentLiveAndInvalidateSiblings() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val added = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        val parent = world.stepBackingSubList()
+        val nested = parent.subList(0, 1)
+        val sibling = parent.subList(0, 1)
+        nested.add(added)
+        assertEquals(2, parent.size)
+        assertSame(added, parent[1])
+        assertSame(added, world.getStepListeners()[1])
+        assertFailsWith<ConcurrentModificationException> { sibling[0] }
+        val iterator = nested.listIterator()
+        assertSame(first, iterator.next())
+        iterator.remove()
+        assertEquals(1, parent.size)
+        assertSame(added, world.getStepListeners()[0])
+    }
+
+    @Test
+    fun publicSubListsUseBaselineRangeErrors() {
+        val world = World<Body>()
+        world.addStepListener(StepListenerAdapter())
+        val views: List<List<*>> = listOf(world.getStepListeners(), world.getJoints())
+        for (view in views) {
+            assertFailsWith<IllegalArgumentException> { view.subList(1, 0) }
+            assertFailsWith<IndexOutOfBoundsException> { view.subList(-1, 0) }
+        }
+    }
+
+    @Test
+    fun worldListsAndSubListsMarkRandomAccess() {
+        val world = ExtendedWorld()
+        val body = Body()
+        world.addBody(body)
+        world.addStepListener(StepListenerAdapter())
+        world.addJoint(PinJoint(body, Vector2()))
+        assertTrue(world.backingListsHaveRandomAccess())
+        val views = listOf(world.getStepListeners(), world.getJoints())
+        for (view in views) {
+            assertTrue(view is RandomAccess)
+            assertTrue(view.subList(0, 1) is RandomAccess)
+        }
     }
 
     @Test

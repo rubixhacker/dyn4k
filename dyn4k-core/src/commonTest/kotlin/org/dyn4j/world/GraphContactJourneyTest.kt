@@ -100,6 +100,58 @@ class GraphContactJourneyTest {
     }
 
     @Test
+    fun graphProtectedSubListsRejectStructuralChangeOnly() {
+        val a = Body()
+        val af = a.addFixture(Circle(0.5))
+        val b = Body()
+        val bf = b.addFixture(Circle(0.5))
+        val contact = ContactConstraint(
+            BasicCollisionPair(BasicCollisionItem(a, af), BasicCollisionItem(b, bf))
+        )
+        val joint = PinJoint(a, Vector2())
+        val graph = ConstraintGraph<Body>()
+        graph.addBody(a)
+        graph.addBody(b)
+        graph.addContactConstraint(contact)
+        graph.addJoint(joint)
+        val node = graph.getNode(a)!!
+        val contacts = node.mutableContacts().subList(0, 1)
+        val joints = node.mutableJoints().subList(0, 1)
+        node.mutableContacts()[0] = contact
+        node.mutableJoints()[0] = joint
+        assertSame(contact, contacts[0])
+        assertSame(joint, joints[0])
+        graph.addContactConstraint(contact)
+        graph.addJoint(PinJoint(a, Vector2()))
+        assertFailsWith<ConcurrentModificationException> { contacts[0] }
+        assertFailsWith<ConcurrentModificationException> { contacts.size }
+        assertFailsWith<ConcurrentModificationException> { joints[0] }
+        assertFailsWith<ConcurrentModificationException> { joints.size }
+    }
+
+    @Test
+    fun graphPublicSubListsUseBaselineRangeErrors() {
+        val node = ConstraintGraphNode(Body())
+        val views: List<List<*>> = listOf(node.getContactConstraints(), node.getJoints())
+        for (view in views) {
+            assertFailsWith<IllegalArgumentException> { view.subList(1, 0) }
+            assertFailsWith<IndexOutOfBoundsException> { view.subList(-1, 0) }
+        }
+    }
+
+    @Test
+    fun graphListsAndSubListsMarkRandomAccess() {
+        val node = ConstraintGraphNode(Body())
+        assertTrue(node.mutableContacts() is RandomAccess)
+        assertTrue(node.mutableJoints() is RandomAccess)
+        val views = listOf(node.getContactConstraints(), node.getJoints())
+        for (view in views) {
+            assertTrue(view is RandomAccess)
+            assertTrue(view.subList(0, 0) is RandomAccess)
+        }
+    }
+
+    @Test
     fun contactViewsTrackEdgesAndBodyRemoval() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
