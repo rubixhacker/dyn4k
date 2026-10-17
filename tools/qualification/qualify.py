@@ -259,12 +259,16 @@ def require_clean_checkout(repository, candidate_sha):
         raise ValueError("dirty tracked checkout invalidates candidate evidence: " + tracked.strip())
     untracked = subprocess.check_output(
         ["git", "-C", str(repository), "ls-files", "--others", "-z"])
-    generated_directories = {b"build", b".gradle", b".kotlin", b"__pycache__"}
+    gradle_roots = (b"", b"dyn4k/", b"dyn4k-core/", b"consumers/qualification/",
+                    b"consumers/qualification/portable/")
+    generated_prefixes = tuple(root + directory + b"/" for root in gradle_roots
+                               for directory in (b"build", b".gradle", b".kotlin"))
+    generated_prefixes += (b"tools/qualification/__pycache__/",)
     generated_files = {b"kotlin-js-store/yarn.lock",
                        b"consumers/qualification/portable/kotlin-js-store/yarn.lock"}
     relevant = [path for path in untracked.split(b"\0") if path
                 and path not in generated_files
-                and not generated_directories.intersection(path.split(b"/"))]
+                and not path.startswith(generated_prefixes)]
     if relevant:
         names = ", ".join(os.fsdecode(path) for path in relevant[:5])
         raise ValueError(f"untracked checkout inputs invalidate candidate evidence: {names}")

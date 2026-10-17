@@ -211,6 +211,8 @@ class QualificationTests(unittest.TestCase):
             sha = subprocess.check_output(
                 ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
             for generated in ("build/generated/Unexpected.kt",
+                              "dyn4k/build/generated/Unexpected.kt",
+                              "consumers/qualification/portable/build/generated/Unexpected.kt",
                               "tools/qualification/__pycache__/qualify.pyc",
                               "kotlin-js-store/yarn.lock",
                               "consumers/qualification/portable/kotlin-js-store/yarn.lock"):
@@ -219,6 +221,7 @@ class QualificationTests(unittest.TestCase):
                 path.write_text("generated\n")
             qualify.require_clean_checkout(repository, sha)
             for relevant in ("src/commonMain/kotlin/Unexpected.kt",
+                             "src/commonMain/kotlin/build/Unexpected.kt",
                              "extra.gradle.kts", "local.properties"):
                 path = repository / relevant
                 path.parent.mkdir(parents=True, exist_ok=True)
