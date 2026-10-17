@@ -229,12 +229,14 @@ def validate_setup(header, case):
                     "baseline Angle failure input differs")
         elif case["id"] == "P-JINT-Weld-enabled-equal":
             mode = joints[0]["mode"]
-            require(mode.get("limitsEnabled") is True and
+            require(exact(settings["gravity"], [0.0, -9.8]) and
+                    mode.get("limitsEnabled") is True and
                     exact([mode.get("lowerLimit"), mode.get("upperLimit")], input_values["limits"]) and
                     mode.get("springEnabled") is True and mode.get("springDamperEnabled") is True and
                     exact(mode.get("springDampingRatio"), 0.3), "frozen weld mode differs")
         else:
-            require(len(bodies) == 3 and joints[0]["bodies"] == [1, 2] and
+            require(exact(settings["gravity"], [0.0, -9.8]) and
+                    len(bodies) == 3 and joints[0]["bodies"] == [1, 2] and
                     (exact(bodies[2]["initialVelocity"], input_values["sourceVelocity"])
                      if input_values["segment"] != "main" else
                      len(bodies[2]["initialVelocity"]) == 2 and
@@ -304,6 +306,7 @@ def inspect(path, cases):
     endpoint_steps = set()
     active_step = 0
     last_state = None
+    last_frozen_state = None
     step_callback_count = 0
     action_steps = []
     body_ids = []
@@ -320,6 +323,8 @@ def inspect(path, cases):
                     raise Rejected(f"{case_id}: {field} differs")
             if "input" in case and not exact(row.get("input"), case["input"]):
                 raise Rejected(f"{case_id}: input differs")
+            if "start_step" in case and not exact(row.get("startStep"), case["start_step"]):
+                raise Rejected(f"{case_id}: start step differs")
             if not exact(row.get("dt"), 1.0 / case["hz"]):
                 raise Rejected(f"{case_id}: dt differs")
             if case.get("require_setup"):
@@ -327,8 +332,21 @@ def inspect(path, cases):
                 body_ids = [body["id"] for body in row["setup"]["bodies"]]
                 joint_ids = [joint["id"] for joint in row["setup"]["joints"]]
                 validate_state(row.get("initial"), body_ids, joint_ids)
+            if case.get("require_frozen_projection"):
+                frozen = row.get("frozenConfiguration")
+                require(isinstance(frozen, dict) and
+                        all(isinstance(frozen.get(key), dict) for key in ("settings", "world", "state")),
+                        f"{case_id}: frozen input projection is absent")
+                frozen_input = row.get("frozenInput")
+                require(isinstance(frozen_input, dict) and
+                        frozen_input.get("kind") == "inputs" and
+                        exact(frozen_input.get("dt"), row["dt"]) and
+                        exact(frozen_input.get("steps"), row["steps"]) and
+                        all(exact(frozen_input.get(key), frozen[key])
+                            for key in ("settings", "world", "state")),
+                        f"{case_id}: frozen input envelope is absent or inconsistent")
             current = case_id
-            next_step = 1
+            next_step = case.get("start_step", 0) + 1
             last_order = -1
             event_count = 0
             state_count = 0
@@ -336,6 +354,7 @@ def inspect(path, cases):
             endpoint_steps = set()
             active_step = 0
             last_state = None
+            last_frozen_state = None
             step_callback_count = 0
             action_steps = []
         elif kind in ("event", "action", "state"):
@@ -347,20 +366,31 @@ def inspect(path, cases):
                 active_step = step
                 last_order = -1
                 step_callback_count = 0
+            max_step = expected[current].get("start_step", 0) + expected[current]["steps"]
             if (type(step) is not int or type(order) is not int or step != next_step or
-                    step > expected[current]["steps"] or order <= last_order):
+                    step > max_step or order <= last_order):
                 raise Rejected(f"{case_id}: missing step or changed event order")
             last_order = order
             if kind == "state":
-                if state_count != step - 1 or "state" not in row:
+                if state_count != step - expected[current].get("start_step", 0) - 1 or "state" not in row:
                     raise Rejected(f"{case_id}: missing or duplicate state")
                 if expected[case_id].get("require_setup"):
                     validate_state(row["state"], body_ids, joint_ids)
+                if expected[case_id].get("require_frozen_projection"):
+                    frozen = row.get("frozenState")
+                    require(isinstance(frozen, dict) and isinstance(frozen.get("bodies"), list) and
+                            isinstance(frozen.get("joints"), list),
+                            f"{case_id}: frozen step projection is absent")
+                    if expected[case_id].get("require_setup"):
+                        require([body.get("id") for body in frozen["bodies"]] == body_ids and
+                                [joint.get("id") for joint in frozen["joints"]] == joint_ids,
+                                f"{case_id}: frozen step identity differs")
                 if step_callback_count < expected[case_id].get("min_step_events", 0):
                     raise Rejected(f"{case_id}: step {step} has too few callbacks")
                 state_count += 1
                 total_states += 1
                 last_state = row["state"]
+                last_frozen_state = row.get("frozenState")
                 next_step += 1
             else:
                 event_count += 1
@@ -376,6 +406,9 @@ def inspect(path, cases):
                 row["order"] <= last_order or row["step"] in endpoint_steps or
                 not exact(row.get("state"), last_state)):
                 raise Rejected(f"{case_id}: invalid endpoint copy")
+            if expected[current].get("require_frozen_projection"):
+                require(exact(row.get("frozenState"), last_frozen_state),
+                        f"{case_id}: frozen endpoint copy differs")
             last_order = row["order"]
             endpoint_steps.add(row["step"])
             endpoints += 1

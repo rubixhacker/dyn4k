@@ -116,6 +116,7 @@ def declared_cases():
         cases.append({"id": f"P-JINT-Pulley-slack-transition-{segment}",
                       "family": "joints-limits-motors", "profile": "frozen-weld-pulley",
                       "hz": 60, "steps": steps,
+                      "start_step": 1 if segment == "preparation-1" else 0,
                       "input": {"jointType": "Pulley", "segment": segment,
                                 "sourceVelocity": [0.0, 10.0] if segment != "preparation-0" else [0.0, 0.0]}})
     cases.append({"id": "P-J-Angle-ratio-limits-off--1.0", "family": "joints-limits-motors",
@@ -134,6 +135,10 @@ def declared_cases():
                             "durationSeconds": 600}})
     for case in cases:
         case["require_setup"] = True
+        case["require_frozen_projection"] = (case["id"] == "long-free-60" or
+            case["id"].startswith("contacts-default-") or
+            case["id"].startswith("contacts-configured-") or
+            case["profile"] == "frozen-weld-pulley")
         case["min_step_events"] = 1
         case["expected_actions"] = []
         if case["id"] == "motion-forces-60":

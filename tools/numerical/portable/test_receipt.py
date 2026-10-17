@@ -39,6 +39,44 @@ class ReceiptContractTest(unittest.TestCase):
             self.assertRaises(receipt.Rejected, receipt.inspect, path,
                               [{**CASES[0], "input": {"velocity": [0.0, 1.0]}}])
 
+    def test_continuation_case_preserves_absolute_step(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = copy.deepcopy(sample())
+            rows[0]["startStep"] = 1
+            rows[1]["step"] = 2
+            rows[2]["step"] = 3
+            rows[3]["step"] = 3
+            path = self.write(Path(directory), "continuation.jsonl", rows)
+            continuation = [{**CASES[0], "start_step": 1}]
+            self.assertEqual(receipt.inspect(path, continuation)["states"], 2)
+            self.assertRaises(receipt.Rejected, receipt.inspect, path, CASES)
+
+    def test_frozen_projection_cannot_disappear_from_a_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            case = [{**CASES[0], "require_frozen_projection": True}]
+            rows = copy.deepcopy(sample())
+            self.assertRaises(receipt.Rejected, receipt.inspect,
+                              self.write(folder, "missing.jsonl", rows), case)
+            rows[0]["frozenConfiguration"] = {key: {} for key in ("settings", "world", "state")}
+            rows[0]["frozenInput"] = {"kind": "inputs", "dt": rows[0]["dt"],
+                "steps": rows[0]["steps"], "settings": {}, "world": {}, "state": {}}
+            for row in rows:
+                if row["kind"] == "state":
+                    row["frozenState"] = {"bodies": [], "joints": []}
+            complete = self.write(folder, "complete.jsonl", rows)
+            self.assertEqual(receipt.inspect(complete, case)["executed_cases"], 1)
+            rows[1].pop("frozenState")
+            self.assertRaises(receipt.Rejected, receipt.inspect,
+                              self.write(folder, "omitted-state.jsonl", rows), case)
+            rows = copy.deepcopy(sample())
+            rows[0]["frozenConfiguration"] = {key: {} for key in ("settings", "world", "state")}
+            rows[0]["frozenInput"] = {"kind": "inputs", "dt": rows[0]["dt"],
+                "steps": rows[0]["steps"], "settings": {}, "world": {}, "state": {}}
+            rows[0]["frozenInput"]["dt"] *= 2
+            self.assertRaises(receipt.Rejected, receipt.inspect,
+                              self.write(folder, "altered-envelope.jsonl", rows), case)
+
     def test_required_input_setup_cannot_be_omitted_or_relabelled(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self.write(Path(tmp), "trace.jsonl", sample())

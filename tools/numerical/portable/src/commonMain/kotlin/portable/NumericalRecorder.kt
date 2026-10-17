@@ -45,6 +45,7 @@ data class CaseSpec(
     val steps: Int,
     val input: Map<String, Any?>,
     val outerGroup: Int = 0,
+    val startStep: Int = 0,
 )
 
 class NumericalRecorder(private val emit: (String) -> Unit) {
@@ -53,19 +54,26 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 before: (Int, World<Body>) -> String? = { _, _ -> null }) {
         require(spec.hz in setOf(30, 60, 120))
         require(spec.steps > 0)
+        require(spec.startStep >= 0)
         val dt = 1.0 / spec.hz
+        val frozen = spec.id == "long-free-60" ||
+            spec.id.startsWith("contacts-default-") || spec.id.startsWith("contacts-configured-") ||
+            spec.profile == "frozen-weld-pulley"
         val origin = (spec.input["origin"] as? List<*>)?.let { listOf(it[0] as Double, it[1] as Double) } ?: listOf(0.0, 0.0)
         val bodies = (0 until world.getBodyCount()).map(world::getBody)
         val joints = (0 until world.getJointCount()).map(world::getJoint)
         val rotations = bodies.map { it.getTransform().getRotationAngle() }.toMutableList()
         val sums = MutableList(bodies.size) { 0.0 }
-        var step = 0
+        var step = spec.startStep
         var order = 0
         var events = 0
         var endpoints = 0
-        fun event(name: String, payload: Any?) {
+        fun event(name: String, payload: Any?, time: TimeStep? = null) {
+            val frozenEvent = if (frozen && name.startsWith("step."))
+                mapOf("frozenEvent" to FrozenEvent.step(spec, name, step, order, time))
+                else emptyMap()
             line(mapOf("kind" to "event", "id" to spec.id, "step" to step,
-                "order" to order++, "name" to name, "payload" to payload))
+                "order" to order++, "name" to name, "payload" to payload) + frozenEvent)
             events++
         }
         val contacts = object : ContactListener<Body> {
@@ -106,19 +114,40 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             }
         }
         val steps = object : StepListener<Body> {
-            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.begin", step?.getDeltaTime())
-            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.updatePerformed", step?.getDeltaTime())
-            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.postSolve", step?.getDeltaTime())
-            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.end", step?.getDeltaTime())
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.begin", step?.getDeltaTime(), step)
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.updatePerformed", step?.getDeltaTime(), step)
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.postSolve", step?.getDeltaTime(), step)
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.end", step?.getDeltaTime(), step)
         }
-        val frozenConfiguration = if (spec.id == "long-free-60" ||
-            spec.id.startsWith("contacts-default-") || spec.id.startsWith("contacts-configured-") ||
-            spec.profile == "frozen-weld-pulley")
-            mapOf("frozenConfiguration" to mapOf(
-                "settings" to FrozenConfiguration.settings(world.getSettings()),
-                "world" to FrozenConfiguration.world(world))) else emptyMap()
+        val frozenConfiguration = if (frozen) {
+            val settings = FrozenConfiguration.settings(world.getSettings())
+            val worldConfiguration = FrozenConfiguration.world(world)
+            val initialState = FrozenState.capture(world, bodies, joints, sums, dt, origin,
+                initial = true)
+            val frozenInput = mutableMapOf<String, Any?>(
+                "kind" to "inputs", "id" to FrozenEvent.id(spec), "dt" to dt,
+                "steps" to spec.steps, "origin" to origin,
+                "scale" to (spec.input["scale"] ?: 1.0),
+                "settings" to settings, "world" to worldConfiguration,
+                "state" to initialState)
+            if (spec.id.startsWith("contacts-configured-")) {
+                val outerHz = spec.input["outerHz"] as Int
+                frozenInput["grouping"] = mapOf(
+                    "outerHz" to outerHz, "repetition" to (spec.input["repetition"] as Int),
+                    "innerPerOuter" to spec.outerGroup,
+                    "outerDt" to 1.0 / outerHz,
+                    "outerSteps" to spec.steps / spec.outerGroup,
+                    "actionInnerStep" to (spec.input["actionStep"] as Int))
+            }
+            mapOf("frozenInput" to frozenInput,
+                "frozenConfiguration" to mapOf(
+                "settings" to settings,
+                "world" to worldConfiguration,
+                "state" to initialState))
+        } else emptyMap()
         line(mapOf("kind" to "inputs", "id" to spec.id, "family" to spec.family,
             "profile" to spec.profile, "hz" to spec.hz, "steps" to spec.steps,
+            "startStep" to spec.startStep,
             "dt" to dt, "input" to spec.input,
             "settings" to settings(world), "setup" to setup(world, bodies, joints),
             "initial" to (snapshot(world, bodies, joints, sums, dt, origin) +
@@ -128,11 +157,11 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         world.addStepListener(steps)
         try {
             for (number in 1..spec.steps) {
-                step = number
+                step = spec.startStep + number
                 order = 0
                 val action = before(number, world)
                 if (action != null) {
-                    line(mapOf("kind" to "action", "id" to spec.id, "step" to number,
+                    line(mapOf("kind" to "action", "id" to spec.id, "step" to step,
                         "order" to order++, "name" to action))
                     events++
                 }
@@ -146,11 +175,14 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 }
                 val state = snapshot(world, bodies, joints, sums, dt, origin) +
                     mapOf("observations" to observe(world))
-                line(mapOf("kind" to "state", "id" to spec.id, "step" to number,
-                    "order" to order++, "state" to state))
+                val frozenState = if (frozen) mapOf("frozenState" to
+                    FrozenState.capture(world, bodies, joints, sums, dt, origin,
+                        initial = false)) else emptyMap()
+                line(mapOf("kind" to "state", "id" to spec.id, "step" to step,
+                    "order" to order++, "state" to state) + frozenState)
                 if (spec.outerGroup > 0 && number % spec.outerGroup == 0) {
-                    line(mapOf("kind" to "endpoint", "id" to spec.id, "step" to number,
-                        "order" to order++, "state" to state))
+                    line(mapOf("kind" to "endpoint", "id" to spec.id, "step" to step,
+                        "order" to order++, "state" to state) + frozenState)
                     endpoints++
                 }
             }

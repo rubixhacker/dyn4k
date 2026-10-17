@@ -231,7 +231,7 @@ class PortableMatrixTest {
             }
         }
         val weldWorld = World<Body>()
-        weldWorld.setGravity(0.0, 0.0)
+        weldWorld.setGravity(0.0, -9.8)
         val weldGround = body(weldWorld, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true, 0.0)
         val weldBody = body(weldWorld, Geometry.createRectangle(1.0, 0.5), 0.0, 2.0, false, 0.0)
         val weld = WeldJoint(weldGround, weldBody, weldBody.getWorldCenter().sum(-0.5, 0.0))
@@ -262,7 +262,7 @@ class PortableMatrixTest {
         recorder.capture(CaseSpec("P-JINT-Pulley-slack-transition-preparation-1",
             "joints-limits-motors", "frozen-weld-pulley", 60, 2,
             mapOf("jointType" to "Pulley", "segment" to "preparation-1",
-                "sourceVelocity" to listOf(0.0, 10.0))), pulleyWorld)
+                "sourceVelocity" to listOf(0.0, 10.0)), startStep = 1), pulleyWorld)
         recorder.capture(CaseSpec("P-JINT-Pulley-slack-transition-main",
             "joints-limits-motors", "frozen-weld-pulley", 60, 600,
             mapOf("jointType" to "Pulley", "segment" to "main",
