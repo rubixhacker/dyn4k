@@ -70,3 +70,7 @@ publishing {
 tasks.withType<Jar>().configureEach {
     from(rootProject.file("LICENSE.md")) { into("META-INF") }
 }
+
+tasks.named<JavaCompile>("compileJvmTestJava") {
+    options.release.set(8)
+}

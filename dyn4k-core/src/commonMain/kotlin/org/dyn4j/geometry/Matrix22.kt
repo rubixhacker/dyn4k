@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.abs
@@ -35,10 +34,10 @@ import org.dyn4j.Epsilon
 import org.dyn4j.exception.ArgumentNullException
 
 open class Matrix22 : Copyable<Matrix22> {
-    @JvmFieldBridge var m00: Double = 0.0
-    @JvmFieldBridge var m01: Double = 0.0
-    @JvmFieldBridge var m10: Double = 0.0
-    @JvmFieldBridge var m11: Double = 0.0
+    @kotlin.jvm.JvmField var m00: Double = 0.0
+    @kotlin.jvm.JvmField var m01: Double = 0.0
+    @kotlin.jvm.JvmField var m10: Double = 0.0
+    @kotlin.jvm.JvmField var m11: Double = 0.0
 
     constructor()
     constructor(m00: Double, m01: Double, m10: Double, m11: Double) {
