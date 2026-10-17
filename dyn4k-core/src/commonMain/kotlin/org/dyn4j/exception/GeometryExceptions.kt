@@ -26,14 +26,14 @@ package org.dyn4j.exception
 
 import kotlin.math.abs
 
-class EmptyCollectionException(argumentName: String) : IllegalArgumentException("$argumentName cannot be empty")
+open class EmptyCollectionException(argumentName: String) : IllegalArgumentException("$argumentName cannot be empty")
 
-class NullElementException : NullPointerException {
+open class NullElementException : NullPointerException {
     constructor(argumentName: String, index: Int) : super("$argumentName contains a null element at index $index")
     constructor(argumentName: String) : super("$argumentName contains a null element")
 }
 
-class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The index $index is out of bounds")
+open class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The index $index is out of bounds")
 
 private fun fixedSix(value: Double): String {
     if (value.isNaN()) return "NaN"
@@ -72,7 +72,7 @@ private fun fixedSix(value: Double): String {
     return "$sign$integer.${digits.substring(decimalPosition)}"
 }
 
-class ValueOutOfRangeException : IllegalArgumentException {
+open class ValueOutOfRangeException : IllegalArgumentException {
     constructor(argumentName: String, value: Double, boundType: String, bound: Double) :
         super("${fixedSix(value)} was supplied for $argumentName: $argumentName must be $boundType ${fixedSix(bound)}")
 
