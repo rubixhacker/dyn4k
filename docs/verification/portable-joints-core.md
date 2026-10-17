@@ -21,14 +21,16 @@ The exact source-commit command used `ANDROID_HOME=/home/stewart/Android/Sdk`, J
 
 Each common host executed exactly the 174 portable identities with no missing, unexpected, duplicate, failure, error, or skip. The Android lane is a host test, not a device. The bundle hash below is SHA-256 of the six raw XML files concatenated in filename order.
 
+The exact-head rerun at `a263d06ae9ff65a1c8d41880b8937ed6e8b6aa96` retained all 36 raw XML files under `/tmp/dyn4k-joint-core-xml/`. Its `manifest.json` lists the 174 expected identities, each host's identity-set digest, and each XML file hash. Every host's normalized identity-set SHA-256 is `64fedab63e928e049a87c5890ada513a99cf9b49cdc2a9b85b9825c9295ff6de`; the archived XML was parsed and compared case by case with the 176 pinned originals minus the two Java-only null cases. The XML bundle hashes below are from this retained rerun.
+
 | Host task | Cases | Failures | Errors | Skips | XML bundle SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `jvmTest` | 174 | 0 | 0 | 0 | `51b891cbbf90d21404371d2ff1e9faf23c9a9bb2cddd82cc3743d0ced906fa13` |
-| `linuxX64Test` | 174 | 0 | 0 | 0 | `254ae8a49dfc8961c6dc781fcb5d503ace7014598589d4eae274663505a30f7b` |
-| `jsNodeTest` | 174 | 0 | 0 | 0 | `1beb8533562837c3f54f6ea43b0cbcbcf441b1156b096f4ff9bb7ca6e3a31fe8` |
-| `wasmJsNodeTest` | 174 | 0 | 0 | 0 | `2e6e3a123e244e09c2a3a4ae49c21dcce2a8a7667d69dbea99c75de3619664ce` |
-| `wasmWasiNodeTest` | 174 | 0 | 0 | 0 | `7d6e95a5247eee9a37174b69f659affe1d5ffda0bee7e708a29f1a47db165eb0` |
-| `testAndroidHostTest` | 174 | 0 | 0 | 0 | `c316c76b664bbb4af7d6d778f6f1822ebec8e3e2e89531d69c589af164b4d51f` |
+| `jvmTest` | 174 | 0 | 0 | 0 | `7cbee9ead79b8b56cc5dcfd9fde0326208a059419a689c8e920acf221136bbe2` |
+| `linuxX64Test` | 174 | 0 | 0 | 0 | `a4bc8646db0cf8f8b7ab38efc90a4f726f725adc1f8658f2a22cbdb4d0908cba` |
+| `jsNodeTest` | 174 | 0 | 0 | 0 | `e9eb84df013d5be826fbfbf9fcad49d29fb2340aa5145af28afb57f0896ac271` |
+| `wasmJsNodeTest` | 174 | 0 | 0 | 0 | `51298b95e757e62685ac6654b0dd40d83031d92332ceec1bf6cc1c89e3df4dff` |
+| `wasmWasiNodeTest` | 174 | 0 | 0 | 0 | `a3b21565943ae5ef63587025f84a5a291bbe84694128be374b44f81756234bbf` |
+| `testAndroidHostTest` | 174 | 0 | 0 | 0 | `48bdf6dd113c9248bef5a169bcb4105825399a6ea70ae2d4ef78ba6a061300c1` |
 
 The negative oracle check changed the pinned spring-stiffness expectation from `3968.803 ± 0.001` to `3969.803 ± 0.001`. The focused JVM run failed `DistanceJointCoreCoverageTest.computeSpringStiffnessFrequency` with **1 test, 1 failure**. The expectation was restored before source commit `3e95c97`, and all six final host suites passed. The raw session records the edit and failure at [the local turn log](/var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T14-44-08-01a14b64-a146-71a1-b471-1be8ae8bf581.jsonl:430).
 
@@ -38,42 +40,42 @@ The common tests retain the upstream constructor, anchor, configuration, mode, l
 
 | Host | Common class | Cases | XML SHA-256 |
 | --- | --- | ---: | --- |
-| `jvmTest` | `AbstractJointCoreCoverageTest` | 24 | `8e51a862fa4be71167c10428f1411f99fd53ed5c6a29f42294809f6a89b71a23` |
-| `jvmTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `2ec9cbd3549021d61425ee3572c3865430b1007a34ef53bae6ab050cc21fbc53` |
-| `jvmTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `6881e59ac5c4ec4f9524841772bca84244ea61e4983d31914e5b91a06ca4ce9c` |
-| `jvmTest` | `DistanceJointCoreCoverageTest` | 42 | `8991cf6ab77d328b7244ef68bbbd3964a0f912858ea757292763a993de98042f` |
-| `jvmTest` | `PrismaticJointCoreCoverageTest` | 46 | `1ab4aa5ab01f978b661e327dfb2cc005a1adced49925f9731f03225a297a75a8` |
-| `jvmTest` | `RevoluteJointCoreCoverageTest` | 30 | `849b5992c75f95d64638592fb3073b4ac469eae2fb556523f392f19f10e34d79` |
-| `linuxX64Test` | `AbstractJointCoreCoverageTest` | 24 | `9d09c02b40283e1eee1d2aa4180fb67d82cf7d33e5cbcbea36b664a2fac7336e` |
-| `linuxX64Test` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `52d854dbb9744dfcd5e9583481cc8b96076590ddbe28ac28db1e02c0fb14b607` |
-| `linuxX64Test` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `2b5876476b210e262d324960a82179844a37214982dfadacdcbdd8ffd2e5857a` |
-| `linuxX64Test` | `DistanceJointCoreCoverageTest` | 42 | `93e229da808038019c4edbb4e63938cb6a15cc75ec0f8d7d345b07c703cd9428` |
-| `linuxX64Test` | `PrismaticJointCoreCoverageTest` | 46 | `b94eb93a3ce9fc695ed536009a0c0ddfa6700fc839d505cab146df4fa31feb0e` |
-| `linuxX64Test` | `RevoluteJointCoreCoverageTest` | 30 | `c1e16838219ee4bd2aaaf489f022a2bb0a167e1d7bf6d9079f17cb558e56607e` |
-| `jsNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `f0867ba58f542395f33cf263e0c0e80e949ad8d16f3d02053ef858bb1c53ca89` |
-| `jsNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `8f09ba32bffd262551625d18775470fcd10b664ee4bd5b3b834f2b6e0af5c59d` |
-| `jsNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `d6da87f6c7449628bb13d01a1f202d34221f75eb287f865ec4fbd535e27bbf1e` |
-| `jsNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `018ec0117b36ebd5ed9a1d72588d0f36f544385b56a8e5ea9505f5350e02c25f` |
-| `jsNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `2f6a270a1cc97bb52fd3db3211badef3befb62da0930f4249c18056fbba2cf37` |
-| `jsNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `ee7ec81caad23aa6a9008f2d0e4027be4fd21b313baa394ee5d89d1534181b0b` |
-| `wasmJsNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `15bc6d96cb8c862c2e617e2b2cae3fcd059d24d32048c2cc85be7b6c307ec8ae` |
-| `wasmJsNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `0c83a55ceb97e3f0b0b11fd5ca9dc14a05564ff64be3df5f62f47eccfc9dc422` |
-| `wasmJsNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `e9af2c0f3efc16da54caea7c7c0bf41661eb7594d42f73ad75f727a66a7602f5` |
-| `wasmJsNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `a81459ed62adc3ebf38f68082e5ee3a823e6edfb41f5241a33cd9477ee10b313` |
-| `wasmJsNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `0ccef9d168626be5ae3dfb126621affec224dfebc57fcbd3bf35c4ec7ed69766` |
-| `wasmJsNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `7a018fc635bbfc589cfe11a3414da0ee56f4ed0baae39482a4a14da143b44b9f` |
-| `wasmWasiNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `9ad3b4e5b8f54e92218d8ba9f92c4abb1d081af2d19a8b7c506988cdd10c37a1` |
-| `wasmWasiNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `207ea061b3f9cec5e95465d34f1ef4599a88d6e8f7e5a9694c9bacc2932a9637` |
-| `wasmWasiNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `a82fcbd04fe11cb5ddfa0eb65b5eb6d5a1a17fc6099678409ddfd4e31dfd48f2` |
-| `wasmWasiNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `5e9c74b08721529c269263bb9a705cb1106b8a10cd6e5ca08c8c8d079848e1a3` |
-| `wasmWasiNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `112889432f82ab515a2ac4bc36b1e126dc2725ef2c45dff966c6f98e064b3ce5` |
-| `wasmWasiNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `8f23704cd52440df56c66aa595b159ea04ed8b0c7321f07f097579bcb842ef23` |
-| `testAndroidHostTest` | `AbstractJointCoreCoverageTest` | 24 | `fd2c0869a27d957d68f061d241417c2f17cceda62e842bc004095547f7a2744f` |
-| `testAndroidHostTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `6350f6cea643d3d27a9c5bce07e3517720e6ed0a5944e4b2e072abca57a6263f` |
-| `testAndroidHostTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `6a69a3eaf3cc3315fc3832e4c39c861a8de9dd7612afb13b040425dbc8894507` |
-| `testAndroidHostTest` | `DistanceJointCoreCoverageTest` | 42 | `f76041391bf7d409b080f34e71ede64d7895c79a7b24ab021d36e9e7806d305c` |
-| `testAndroidHostTest` | `PrismaticJointCoreCoverageTest` | 46 | `35d8244c4d68eddd3cc71e762370d6f1a29ff18179d9ed17567719bf9ee44efe` |
-| `testAndroidHostTest` | `RevoluteJointCoreCoverageTest` | 30 | `a4243398e207689729e8e13a67f293450022e35cfcc9e2c9b476ed1d776f1c3a` |
+| `jvmTest` | `AbstractJointCoreCoverageTest` | 24 | `55fe609ea6bf82e3e520ca57b1abada6afe580179cefa2532705ffd4bdb2218a` |
+| `jvmTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `59c02f9148d80895f7a9e194ce90bedce6e2f81a25dc7228f2e17db32b3252ec` |
+| `jvmTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `8155a49f8c30a840636b7c18be502f6f583a6fec98124e29b89a4a25b2d929f0` |
+| `jvmTest` | `DistanceJointCoreCoverageTest` | 42 | `75012370ec87ddfb8fe419647e0acbd82dbb08a47a71e5622ee18397cfa9fa01` |
+| `jvmTest` | `PrismaticJointCoreCoverageTest` | 46 | `32800e62546b47e842ff97ed2e53ef771bebc8dec3f43fd0484dcc41de36e2bc` |
+| `jvmTest` | `RevoluteJointCoreCoverageTest` | 30 | `66f1b3ad0a24cefb458db1a12e99e0ab2920b5a68cf213956fdcc826c18a5860` |
+| `linuxX64Test` | `AbstractJointCoreCoverageTest` | 24 | `d7df537591afe1a450119027e58dbf3c3540447af3e4469e577c641bced437fc` |
+| `linuxX64Test` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `f7eff150532bfd90eec8e486f057d9479bf0bc4639d50be88fd255c63cc8ea2d` |
+| `linuxX64Test` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `a23b5ff81d2fc472c43eed6b4bcb7c8df8b8f77b7ae6ca8ba9a3c456bd23c36e` |
+| `linuxX64Test` | `DistanceJointCoreCoverageTest` | 42 | `ee35f437af3a5d3c898c83eb2f37fcbc6d493d8808b1bbc95e4f27a5fe84cf3f` |
+| `linuxX64Test` | `PrismaticJointCoreCoverageTest` | 46 | `343478d3f20b9179bed49ff26f8d81841dba2a96eb5f0bfc8ee2d8ecf19fa656` |
+| `linuxX64Test` | `RevoluteJointCoreCoverageTest` | 30 | `f5e7f97cef55d1cb6ec53aefe567fa1f509d3e10adadcac034657f19f4a7ba40` |
+| `jsNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `2b69722bac9376c2b930b329b4e5c98c031d49217cea8f8f92233680338bb7b0` |
+| `jsNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `3b86e39733363226b8d071e1329e6377513a1403ec32d88443354dc5a6acfc51` |
+| `jsNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `445018329d6caa3ad3f6fa5e7d2ef7cfb0cb94149ff8df7f76655fb8c51b5736` |
+| `jsNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `75ee3c1d95b487665ae7daa1c43801e4dd6d87eec460749a66431cf9e7d3b596` |
+| `jsNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `c18e82e22b3002788418fa51d847b53a8bfa3ab2b9df47f039f4724c6a0588b3` |
+| `jsNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `1cfdf0c8d5bc6b349542a72a4f08876e2f52a1fe0e71a8c10905b62dac022515` |
+| `wasmJsNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `80aff270940a2270c3a607f250f3e5475a6834f7aff56e3ceba82e996c106e6d` |
+| `wasmJsNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `331956376a8f97a9943c9c03f24fe9306bca48a4bd3f03e9772153137b09246f` |
+| `wasmJsNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `5823b070280e3cb23ff77b5d299163270eb4ba32169bb746e9e8d96ff80c19c2` |
+| `wasmJsNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `95b62f60aae2e13177ff6fa6c9521dc4eba940142d9c6b6e0b5e60ab1d231421` |
+| `wasmJsNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `cd5d22241a1b94258866d5cb11cb41081ce9da3d0034611c711906ada7eb11d0` |
+| `wasmJsNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `79adc683360751cc6a037bbb51dc6955b9378f29a210798954894717d526f3a0` |
+| `wasmWasiNodeTest` | `AbstractJointCoreCoverageTest` | 24 | `8a74798a5bc6a0eefbed3333d49622f37ee872d0ea49e8c3f48fa7c758d0fdb2` |
+| `wasmWasiNodeTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `abeb7bd63da5859f987c16aca3e0076d3773a0f2d0e5566ffddaec69901df17c` |
+| `wasmWasiNodeTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `9d90da65ba156a662ac620f56fd15c100cc77852b3929215ed1c082fdde9511d` |
+| `wasmWasiNodeTest` | `DistanceJointCoreCoverageTest` | 42 | `01f111316948cca899f1a83978a8744e6fe24260cd27295be33cb0dc5b3a756e` |
+| `wasmWasiNodeTest` | `PrismaticJointCoreCoverageTest` | 46 | `0151f9f3c567e8cda63c6024520adf1f19343b6d46a08cc44b5cc1055a873b09` |
+| `wasmWasiNodeTest` | `RevoluteJointCoreCoverageTest` | 30 | `2058c41bc91986adcb4710c4f78fcbfe9e3ac42dcc4d7ffbccfb401b6462d593` |
+| `testAndroidHostTest` | `AbstractJointCoreCoverageTest` | 24 | `bf54f2000ff5ff78be5fb0227617012e71fe725968f266d30aaee2232dfe9c09` |
+| `testAndroidHostTest` | `AbstractPairedBodyJointCoreCoverageTest` | 19 | `8f33cf6ce9776df71aef890102fe0415e09aed460778d9720877c35607e3fe1d` |
+| `testAndroidHostTest` | `AbstractSingleBodyJointCoreCoverageTest` | 13 | `55d6c7955eca3ad4deb6ba99a8915802ee5c52c40e6c8da8cb42c4660460df29` |
+| `testAndroidHostTest` | `DistanceJointCoreCoverageTest` | 42 | `d090cbe0fe0d1fbe019bf95d81d623e67aabd87686aea5291d829dc41065efce` |
+| `testAndroidHostTest` | `PrismaticJointCoreCoverageTest` | 46 | `2fb3ff1b8318c43ee6a3608c39b4c6135968a3bb8adc5d589a701b2356179317` |
+| `testAndroidHostTest` | `RevoluteJointCoreCoverageTest` | 30 | `3590680c1ecfda0151cf322da1a5dc742cb57f5d477411d70b8566e4ad72191e` |
 
 ## Source, fixture, artifact, and log hashes
 
@@ -83,6 +85,8 @@ The common tests retain the upstream constructor, anchor, configuration, mode, l
 | Pinned baseline JVM artifact | `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e` |
 | Candidate JVM artifact | `944b4581beff66b5c1b7c233e54a759a18da312bd689325645cad764bcb0802a` |
 | Exact source-commit gate log | `99cfb2aee370fd62e38c383dc1839ad99e304a1409d3a65305e06a905138894b` |
+| Retained exact-head gate log | `a5fcb67200a9af69e10d30f101e09dd9c21611a532abd8f76906fbba9652811d` |
+| Retained XML identity/count/hash manifest | `2c7f37270d2d93e46ece774b6419c9c2ed4ae12d6d9dfca005064a147187d672` |
 | World dependency gate log | `2538770584a4ec0fd5f17608e7fe6819b3a0271fce7b8beb28793a5fcb5992ec` |
 | `AbstractJointTest.java` pinned fixture | `0b3f742384f20f23b6c05e771f4046a77e7b850b98d61189912d3e5916fed78f` |
 | `AbstractPairedBodyJointTest.java` pinned fixture | `ce94730b4740b00194d80e5ae085d3a4ebcddf74dcbd06edf02611552ed442bc` |
@@ -326,5 +330,7 @@ Source: `/var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T14-44-0
 ```json
 {"timestamp":"2026-10-17T19:44:10.376Z","ordinal":7,"type":"turn_context","payload":{"turn_id":"01a14b64-a216-7df2-ab95-fc356a8b78b5","root_turn_id":"01a14b64-a216-7df2-ab95-fc356a8b78b5","disabled_plugin_ids":[],"cwd":"/var/home/stewart/Workspace/dyn4k-port-coverage-joints-core","approval_policy":"never","approvals_reviewer":"user","sandbox_policy":{"type":"danger-full-access"},"permission_profile":{"type":"disabled"},"model":"gpt-6-sol","comp_hash":"3000","collaboration_mode":{"mode":"default","settings":{"model":"gpt-6-sol","reasoning_effort":"high","developer_instructions":null}},"multi_agent_version":"v2","realtime_active":false,"effort":"high","summary":"none"}}
 ```
+
+The continuation's raw `turn_context` at `/var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T14-44-08-01a14b64-a146-71a1-b471-1be8ae8bf581.jsonl:998` also records `payload.model = gpt-6-sol` and the same worktree.
 
 This is a bounded [full compatibility corpus](https://github.com/rubixhacker/dyn4k/issues/42) slice. The 32 candidate world simulations, other joint groups, remaining target families, migration applications, and full qualification stay open.
