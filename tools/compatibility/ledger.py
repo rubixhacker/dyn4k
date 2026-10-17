@@ -10,6 +10,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baseline"))
 import verify as oracle
+import module_probe
+
+
+MODULE_SOURCE = "src/main/java/module-info.java"
+FIXTURE_SHA256 = {
+    "module-info.java": "acc256154b37acb90c2abc9113404f585edec3e900697dfd4ef56267240ea0ce",
+    "example/Main.java": "2cd5a3ad610ccd7e1de179eefdf69d19196391438ee423e8f3eeac6c8abf391f",
+}
 
 
 def sha256(data: bytes) -> str:
@@ -76,6 +84,18 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
         raise ValueError("saved baseline inventory differs from pinned source or JAR")
     production = {path: tracked_sha(source, path) for path in production_paths}
     tests = {path: tracked_sha(source, path) for path in test_paths}
+    module_source = (source / MODULE_SOURCE).read_text()
+    module_name = re.search(r"\bmodule\s+([A-Za-z0-9_.]+)\s*\{", module_source)
+    module_exports = sorted(re.findall(r"\bexports\s+([A-Za-z0-9_.]+)\s*;", module_source))
+    fixture_sha = {path: sha256((module_probe.FIXTURE / path).read_bytes()) for path in FIXTURE_SHA256}
+    if (MODULE_SOURCE not in production or module_name is None
+            or module_name.group(1) != module_probe.MODULE_NAME
+            or set(module_exports) != module_probe.EXPORTS or len(module_exports) != 17
+            or fixture_sha != FIXTURE_SHA256 or not module_probe.descriptor(jar)["passed"]):
+        raise ValueError("pinned module descriptor or unchanged consumer fixture differs")
+    module = {"id": "module-info.java", "source_file": MODULE_SOURCE,
+              "sha256": production[MODULE_SOURCE], "name": module_name.group(1),
+              "exports": module_exports, "fixture_sha256": fixture_sha}
     run = json.loads(baseline_run.read_text())
     oracle.validate_run_report(run)
     if (run.get("commit") != oracle.COMMIT or run.get("binary_sha256") != oracle.BINARY_SHA256
@@ -86,13 +106,14 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
               "actual_executed_cases": run["actual_executed_cases"], "ignored": run["ignored"]}
     return {"baseline": baseline, "production": production, "tests": tests,
             "baseline_test_counts": counts,
-            "declarations": declaration_inventory(signatures, production)}
+            "declarations": declaration_inventory(signatures, production), "module": module}
 
 
 def generate(expected: dict) -> dict:
     return {
         "schema_version": 1, "baseline": expected["baseline"],
         "baseline_test_counts": expected.get("baseline_test_counts"),
+        "module": {**expected["module"], "candidate": None, "evidence": []},
         "production": [{"id": path, "sha256": digest,
                         "owner_type": path.removeprefix("src/main/java/").removesuffix(".java").replace("/", "."),
                         "candidate": None, "evidence": []}
@@ -155,6 +176,133 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
     if not required:
         return "passed evidence report lacks matching execution identity or complete results"
     return None
+
+
+def validate_module(item: object, expected: dict, baseline: dict, root: Path,
+                    candidate_revision: str | None) -> tuple[list[str], list[str]]:
+    invalid = []
+    gaps = []
+    if not isinstance(item, dict):
+        return ["module: executable obligation missing"], gaps
+    for field, value in expected.items():
+        if item.get(field) != value:
+            invalid.append(f"module: changed {field}")
+    candidate = item.get("candidate")
+    jar = None
+    if candidate is None:
+        gaps.append("module: module-info.java: missing counterpart")
+    elif not isinstance(candidate, dict):
+        invalid.append("module: invalid candidate mapping")
+    else:
+        artifact = candidate.get("artifact")
+        if (candidate.get("identity") != module_probe.MODULE_NAME
+                or not isinstance(candidate.get("commit"), str)
+                or not re.fullmatch(r"[0-9a-f]{40}", candidate["commit"])
+                or candidate_revision and candidate["commit"] != candidate_revision
+                or not isinstance(artifact, str) or not artifact or Path(artifact).is_absolute()
+                or ".." in Path(artifact).parts):
+            invalid.append("module: invalid or stale candidate mapping")
+        else:
+            jar = root / artifact
+            if (not jar.is_file() or not re.fullmatch(r"[0-9a-f]{64}", str(candidate.get("artifact_sha256")))
+                    or sha256(jar.read_bytes()) != candidate["artifact_sha256"]
+                    or candidate["artifact_sha256"] == oracle.BINARY_SHA256):
+                invalid.append("module: candidate artifact missing, changed, or baseline JAR")
+                jar = None
+    evidence = item.get("evidence")
+    if not isinstance(evidence, list):
+        return invalid + ["module: evidence list missing"], gaps
+    needed = {"module-descriptor", "named-module-consumer", "java8-classpath"}
+    passed = set()
+    seen = set()
+    for record in evidence:
+        if not isinstance(record, dict) or record.get("kind") not in needed:
+            invalid.append("module: unknown evidence kind")
+            continue
+        kind = record["kind"]
+        if kind in seen:
+            invalid.append(f"module: duplicate {kind} evidence")
+            continue
+        seen.add(kind)
+        status = record.get("status")
+        if status not in {"missing", "unrun", "ignored", "unapproved_exception", "passed"}:
+            invalid.append(f"module: {kind}: unknown evidence status")
+        elif status != "passed":
+            gaps.append(f"module: {kind}: {status}")
+        elif jar is None:
+            invalid.append(f"module: {kind}: passed evidence has no verified candidate JAR")
+        else:
+            report_path = record.get("report")
+            if (not isinstance(report_path, str) or not report_path or Path(report_path).is_absolute()
+                    or ".." in Path(report_path).parts):
+                invalid.append(f"module: {kind}: report path missing or unsafe")
+                continue
+            report_file = root / report_path
+            if not report_file.is_file() or sha256(report_file.read_bytes()) != record.get("report_sha256"):
+                invalid.append(f"module: {kind}: report missing or changed")
+                continue
+            try:
+                report = json.loads(report_file.read_text())
+            except ValueError:
+                invalid.append(f"module: {kind}: report is invalid JSON")
+                continue
+            if not isinstance(report, dict) or any((
+                    report.get("schema_version") != 1,
+                    report.get("kind") != kind,
+                    report.get("baseline") != baseline,
+                    report.get("candidate_identity") != module_probe.MODULE_NAME,
+                    report.get("candidate_commit") != candidate["commit"],
+                    report.get("artifact_sha256") != candidate["artifact_sha256"],
+                    report.get("source_sha256") != expected["sha256"],
+                    report.get("fixture_sha256") != expected["fixture_sha256"],
+            )):
+                invalid.append(f"module: {kind}: report identity differs")
+                continue
+            dependencies = report.get("dependencies")
+            if not isinstance(dependencies, list):
+                invalid.append(f"module: {kind}: dependency list missing")
+                continue
+            paths = []
+            for dependency in dependencies:
+                if not isinstance(dependency, dict):
+                    invalid.append(f"module: {kind}: invalid dependency")
+                    continue
+                name = dependency.get("path")
+                if (not isinstance(name, str) or not name or Path(name).is_absolute()
+                        or ".." in Path(name).parts):
+                    invalid.append(f"module: {kind}: unsafe dependency path")
+                    continue
+                path = root / name
+                if (not path.is_file() or path.suffix != ".jar"
+                        or sha256(path.read_bytes()) != dependency.get("sha256")
+                        or dependency.get("sha256") == oracle.BINARY_SHA256):
+                    invalid.append(f"module: {kind}: dependency missing, changed, or baseline JAR")
+                    continue
+                paths.append(path)
+            if len(paths) != len(dependencies):
+                continue
+            java8 = None
+            if kind == "java8-classpath":
+                java8_name = report.get("java8_java")
+                if not isinstance(java8_name, str) or not java8_name:
+                    invalid.append("module: Java 8 executable path missing")
+                    continue
+                java8 = Path(java8_name)
+                if not java8.is_file() or sha256(java8.read_bytes()) != report.get("java8_java_sha256"):
+                    invalid.append("module: Java 8 executable missing or changed")
+                    continue
+            try:
+                observed = module_probe.probe(jar, kind, paths, java8)
+            except (OSError, ValueError) as error:
+                invalid.append(f"module: {kind}: probe failed: {error}")
+                continue
+            if not observed["passed"] or report.get("observed") != observed:
+                invalid.append(f"module: {kind}: recorded pass differs from executed probe")
+            else:
+                passed.add(kind)
+    for kind in sorted(needed - passed):
+        gaps.append(f"module: module-info.java: unrun {kind}")
+    return invalid, gaps
 
 
 def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str | None = None) -> dict:
@@ -248,9 +396,14 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
                 owner = key.removeprefix(prefix).removesuffix(".java").replace("/", ".")
                 if item.get("owner_type") != owner:
                     invalid.append(f"{section}: changed owner {key}")
+    module_invalid, module_gaps = validate_module(ledger.get("module"), expected["module"],
+                                                   expected["baseline"], root, candidate_revision)
+    invalid.extend(module_invalid)
+    gaps.extend(module_gaps)
     return {"passed": not invalid and not gaps, "invalid": invalid, "gaps": gaps,
             "missing_counterparts": sum("missing counterpart" in gap for gap in gaps),
-            "counts": {name: len(expected[name]) for name in ("production", "tests", "declarations")}}
+            "counts": {**{name: len(expected[name]) for name in ("production", "tests", "declarations")},
+                       "module": 1}}
 
 
 def main() -> None:

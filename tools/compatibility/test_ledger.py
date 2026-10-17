@@ -1,11 +1,15 @@
 import copy
 import hashlib
 import json
+import os
+import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from ledger import validate
+from module_probe import EXPORTS, descriptor, probe
 
 
 def sha(value):
@@ -20,6 +24,10 @@ class LedgerTests(unittest.TestCase):
             "tests": {"src/test/java/p/ATest.java": sha("class ATest {}")},
             "declarations": {"p.A|type": ("src/main/java/p/A.java", "public class p.A"),
                              "p.A|run|()V": ("src/main/java/p/A.java", "public void run(); descriptor: ()V")},
+            "module": {"id": "module-info.java", "source_file": "src/main/java/module-info.java",
+                       "sha256": sha("module org.dyn4j { exports p; }"), "name": "org.dyn4j",
+                       "exports": ["p"], "fixture_sha256": {"module-info.java": sha("requires org.dyn4j"),
+                                                           "example/Main.java": sha("consumer")}},
         }
         self.ledger = {
             "schema_version": 1, "baseline": copy.deepcopy(self.reference["baseline"]),
@@ -32,6 +40,7 @@ class LedgerTests(unittest.TestCase):
             "declarations": [{"id": key, "source_file": source, "signature": signature,
                               "candidate": None, "evidence": []}
                              for key, (source, signature) in self.reference["declarations"].items()],
+            "module": {**self.reference["module"], "candidate": None, "evidence": []},
         }
 
     def check_invalid(self, changed):
@@ -44,7 +53,67 @@ class LedgerTests(unittest.TestCase):
         result = validate(self.ledger, self.reference, Path("."))
         self.assertEqual(result["invalid"], [])
         self.assertFalse(result["passed"])
-        self.assertEqual(result["missing_counterparts"], 4)
+        self.assertEqual(result["missing_counterparts"], 5)
+        for kind in ("module-descriptor", "named-module-consumer", "java8-classpath"):
+            self.assertTrue(any(f"unrun {kind}" in gap for gap in result["gaps"]))
+
+    def test_omitted_module_obligation_fails(self):
+        self.check_invalid(lambda value: value.pop("module"))
+
+    def test_fabricated_module_pass_fails(self):
+        def forge(value):
+            value["module"]["evidence"] = [{"kind": "named-module-consumer", "status": "passed",
+                                                "report": "missing.json", "report_sha256": "0" * 64}]
+        self.check_invalid(forge)
+
+    def test_module_descriptor_and_fixture_identity_cannot_change(self):
+        self.check_invalid(lambda value: value["module"].update(name="dyn4k.core.jvm"))
+        self.check_invalid(lambda value: value["module"].update(exports=[]))
+        self.check_invalid(lambda value: value["module"]["fixture_sha256"].update({"module-info.java": "stale"}))
+
+    def test_forged_modular_consumer_report_cannot_replace_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "candidate.jar"
+            with zipfile.ZipFile(jar, "w") as archive:
+                archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+            value = copy.deepcopy(self.ledger)
+            candidate = {"identity": "org.dyn4j", "commit": "a" * 40,
+                         "artifact": "candidate.jar", "artifact_sha256": hashlib.sha256(jar.read_bytes()).hexdigest()}
+            value["module"]["candidate"] = candidate
+            report = {"schema_version": 1, "kind": "named-module-consumer",
+                      "baseline": self.reference["baseline"], "candidate_identity": "org.dyn4j",
+                      "candidate_commit": candidate["commit"], "artifact_sha256": candidate["artifact_sha256"],
+                      "source_sha256": self.reference["module"]["sha256"],
+                      "fixture_sha256": self.reference["module"]["fixture_sha256"],
+                      "dependencies": [],
+                      "observed": {"passed": True, "compile_release": 9, "compile_exit_code": 0,
+                                   "run_exit_code": 0, "output": "Named module consumer passed\n",
+                                   "java_version": "openjdk version \"21\""}}
+            path = root / "report.json"
+            path.write_text(json.dumps(report))
+            value["module"]["evidence"] = [{"kind": "named-module-consumer", "status": "passed",
+                                              "report": "report.json",
+                                              "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}]
+            result = validate(value, self.reference, root, "a" * 40)
+            self.assertTrue(any("recorded pass differs from executed probe" in error
+                                for error in result["invalid"]), result)
+
+    def test_modern_runtime_cannot_satisfy_java8_classpath_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "not Java 8"):
+                probe(Path(directory) / "candidate.jar", "java8-classpath", java8_java=Path(sys.executable))
+
+    @unittest.skipUnless(os.environ.get("DYN4K_BASELINE_JAR"), "pinned baseline JAR not supplied")
+    def test_pinned_baseline_named_module_fixture(self):
+        jar = Path(os.environ["DYN4K_BASELINE_JAR"])
+        self.assertEqual(hashlib.sha256(jar.read_bytes()).hexdigest(),
+                         "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e")
+        observed = descriptor(jar)
+        self.assertEqual(observed["name"], "org.dyn4j")
+        self.assertEqual(set(observed["exports"]), EXPORTS)
+        self.assertTrue(observed["passed"])
+        self.assertTrue(probe(jar, "named-module-consumer")["passed"])
 
     def test_omitted_file_declaration_and_test_fail(self):
         for section in ("production", "declarations", "tests"):
