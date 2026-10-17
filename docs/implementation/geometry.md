@@ -13,20 +13,27 @@ the root `org.dyn4j.geometry` package and the supporting declarations used by
 | [Traverse and mutate baseline tree data structures](https://github.com/rubixhacker/dyn4k/issues/46) | Root AVL/tree classes, `Reference`, `Version` | Separate owner |
 | [Turn input polygons into usable convex shapes](https://github.com/rubixhacker/dyn4k/issues/36) | Geometry hull, decomposition, and simplification packages | Separate owner |
 
-The Java package and static compatibility surface is assembled in the JVM
-artifact from common Kotlin classes. `scripts/verify-geometry-jvm-api.py`
-compares baseline and candidate `javap -package` declarations for 26 geometry
-types and five supporting types owned here (585 declarations). The unchanged
-upstream geometry test suite has 20
-classes and 446 cases. The Java consumer uses identical source for baseline,
-candidate, and staged Maven JVM artifacts and has 19 checks. The Kotlin API
-consumer has 14 common tests. The checks cover construction, queries,
-transforms, copies, live arrays, Java package and protected access, factory
-overloads, mutable identity, and errors.
+The JVM and Android archives shape package fields and static entry points from
+common Kotlin classes. The owned classes use `@kotlin.jvm.JvmField` for
+protected stored fields. This keeps direct field access without adding helper
+methods that can collide with Java subclass methods. Six shape classes retain
+protected field visibility in the archives, even where the Java baseline uses
+package fields. This safe widening lets Kotlin subclasses use the same fields
+described by their metadata. Private stored fields keep private Kotlin
+accessors. The strict geometry audit checks 551 baseline declarations in 31
+owned types on both archives. After the integration merge, the strict all-root
+audit checks 908 baseline declarations in 41 types on both archives.
 
-The full root-package audit has identified 13 missing package declarations in
-the foundation classes owned by [Resolve staged vector and transform consumers
-on the pinned toolchain](https://github.com/rubixhacker/dyn4k/issues/33).
-The exact dependency and affected members
-are recorded in `/tmp/dyn4k-issue34-handoff.md`. Empirical native device,
-store, and other target qualification remain open until their own checks run.
+Common Kotlin marks every baseline-overridable method in the owned open classes
+`open`. `Link.rotate(double, double, double)` and `Link.translate(double,
+double)` remain final, as in the baseline. The archive keeps those final flags.
+The unchanged upstream geometry suite has 20 classes and 446 Java cases.
+Geometry has 20 common tests on each available host, including a copy test in
+the baseline Java package. A staged external Kotlin consumer tests base-typed
+subclass dispatch on JVM, Linux x64, JS, both Wasm hosts, and Android host.
+The Java consumer also compiles unchanged against the baseline and the staged
+JVM and Android host archives.
+
+Target qualification and independent review remain open until their separate
+evidence is complete. The original foundation dependency is recorded in
+`/tmp/dyn4k-issue34-handoff.md`.
