@@ -1,10 +1,10 @@
 def declared_cases():
     cases = []
-    for scale in (0.01, 1.0, 100.0):
-        for ox, oy in ((0.0, 0.0), (1000.0, 1000.0), (-1000.0, 1000.0),
-                       (1000000.0, -1000000.0), (-1000000.0, 1000000.0)):
-            for delta in (-1e-8, -1e-12, 0.0, 1e-12, 1e-8):
-                cases.append({"id": f"geometry-boundary-s{scale}-o{ox},{oy}-d{delta}",
+    for scale_index, scale in enumerate((0.01, 1.0, 100.0)):
+        for origin_index, (ox, oy) in enumerate(((0.0, 0.0), (1000.0, 1000.0), (-1000.0, 1000.0),
+                                                  (1000000.0, -1000000.0), (-1000000.0, 1000000.0))):
+            for delta_index, delta in enumerate((-1e-8, -1e-12, 0.0, 1e-12, 1e-8)):
+                cases.append({"id": f"geometry-boundary-s{scale_index}-o{origin_index}-d{delta_index}",
                               "family": "geometry-collision", "profile": "default", "hz": 60,
                               "steps": 1, "input": {"scale": scale, "origin": [ox, oy],
                                                     "delta": delta, "signedZero": -0.0}})
@@ -12,8 +12,8 @@ def declared_cases():
                   "hz": 60, "steps": 600, "input": {"force": [1.0, 0.0], "torque": 0.25,
                                                      "damping": 0.1, "durationSeconds": 10}})
     for hz in (30, 60, 120):
-        for restitution in (0.0, 0.5, 1.0):
-            cases.append({"id": f"motion-restitution-e{restitution}-{hz}", "family": "free-motion",
+        for restitution_index, restitution in enumerate((0.0, 0.5, 1.0)):
+            cases.append({"id": f"motion-restitution-e{restitution_index}-{hz}", "family": "free-motion",
                           "profile": "default", "hz": hz, "steps": 10 * hz,
                           "input": {"restitution": restitution, "gravity": [0.0, -9.8],
                                     "durationSeconds": 10}})

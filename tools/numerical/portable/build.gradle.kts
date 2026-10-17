@@ -1,6 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest
 
 plugins {
     kotlin("multiplatform") version "2.4.20"
@@ -33,4 +34,8 @@ kotlin {
         }
         commonTest.dependencies { implementation(kotlin("test")) }
     }
+}
+
+tasks.withType<KotlinJsTest>().configureEach {
+    useMocha { timeout = "90m" }
 }

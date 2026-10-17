@@ -45,16 +45,17 @@ class PortableMatrixTest {
 
     @Test
     fun geometryCollisionBoundaryAndScale() {
-        for (scale in listOf(0.01, 1.0, 100.0)) for ((ox, oy) in listOf(
+        for ((scaleIndex, scale) in listOf(0.01, 1.0, 100.0).withIndex()) for ((originIndex, origin) in listOf(
             0.0 to 0.0, 1000.0 to 1000.0, -1000.0 to 1000.0,
-            1000000.0 to -1000000.0, -1000000.0 to 1000000.0))
-            for (delta in listOf(-1e-8, -1e-12, 0.0, 1e-12, 1e-8)) {
+            1000000.0 to -1000000.0, -1000000.0 to 1000000.0).withIndex())
+            for ((deltaIndex, delta) in listOf(-1e-8, -1e-12, 0.0, 1e-12, 1e-8).withIndex()) {
+            val (ox, oy) = origin
             val world = World<Body>()
             world.setGravity(0.0, 0.0)
             val first = body(world, Geometry.createCircle(scale), ox, oy, true)
             val second = body(world, Geometry.createCircle(0.5 * scale),
                 ox + scale * (1.5 + delta), oy, false)
-            recorder.capture(CaseSpec("geometry-boundary-s$scale-o$ox,$oy-d$delta", "geometry-collision",
+            recorder.capture(CaseSpec("geometry-boundary-s$scaleIndex-o$originIndex-d$deltaIndex", "geometry-collision",
                 "default", 60, 1, mapOf("scale" to scale, "origin" to listOf(ox, oy),
                     "delta" to delta, "signedZero" to -0.0)), world, observe = {
                 val a = first.getFixture(0).getShape()
@@ -95,7 +96,7 @@ class PortableMatrixTest {
                 "force-and-torque"
             } else null
         }
-        for (hz in listOf(30, 60, 120)) for (restitution in listOf(0.0, 0.5, 1.0)) {
+        for (hz in listOf(30, 60, 120)) for ((restitutionIndex, restitution) in listOf(0.0, 0.5, 1.0).withIndex()) {
             val bounceWorld = World<Body>()
             bounceWorld.setGravity(0.0, -9.8)
             val ground = body(bounceWorld, Geometry.createRectangle(20.0, 0.5), 0.0, -0.25, true)
@@ -104,7 +105,7 @@ class PortableMatrixTest {
             ball.getFixture(0).setRestitution(restitution)
             ground.getFixture(0).setRestitutionVelocity(0.0)
             ball.getFixture(0).setRestitutionVelocity(0.0)
-            recorder.capture(CaseSpec("motion-restitution-e$restitution-$hz", "free-motion",
+            recorder.capture(CaseSpec("motion-restitution-e$restitutionIndex-$hz", "free-motion",
                 "default", hz, 10 * hz, mapOf("restitution" to restitution,
                     "gravity" to listOf(0.0, -9.8), "durationSeconds" to 10)), bounceWorld)
         }

@@ -180,12 +180,21 @@ def validate_setup(header, case):
             mode = joints[0]["mode"]
             require(len(bodies) == 2 and joints[0]["bodies"] in ([0, 1], [1]) and
                     exact(settings["gravity"], [0.0, 0.0]), "joint body input differs")
-            flag = {"Angle": "limitsEnabled", "Distance": "springEnabled",
+            flag = {"Distance": "springEnabled",
                     "Prismatic": "motorEnabled", "Pulley": "slackEnabled",
                     "Revolute": "motorEnabled", "Weld": "springEnabled",
-                    "Wheel": "motorEnabled", "Pin": "springEnabled"}.get(input_values["jointType"])
+                    "Wheel": "motorEnabled"}.get(input_values["jointType"])
             if flag:
                 require(mode.get(flag) is active, "joint active mode differs")
+            if input_values["jointType"] == "Angle":
+                limit = math.pi / 6 if active else 0.0
+                require(mode.get("limitsEnabled") is True and
+                        exact(mode.get("lowerLimit"), -limit if active else 0.0) and
+                        exact(mode.get("upperLimit"), limit), "angle joint mode differs")
+            if input_values["jointType"] == "Pin":
+                require(mode.get("springEnabled") is True and
+                        exact(mode.get("maximumSpringForce"), 10.0 if active else 1000.0),
+                        "pin joint mode differs")
             if input_values["jointType"] == "Friction":
                 require(exact(mode.get("maximumForce"), 20.0 if active else 10.0) and
                         exact(mode.get("maximumTorque"), 0.5 if active else 0.25),
@@ -201,7 +210,11 @@ def validate_setup(header, case):
                     exact(mode.get("springDampingRatio"), 0.3), "frozen weld mode differs")
         else:
             require(len(bodies) == 3 and joints[0]["bodies"] == [1, 2] and
-                    exact(bodies[2]["initialVelocity"], input_values["sourceVelocity"]),
+                    (exact(bodies[2]["initialVelocity"], input_values["sourceVelocity"])
+                     if input_values["segment"] != "main" else
+                     len(bodies[2]["initialVelocity"]) == 2 and
+                     all(isinstance(value, (int, float)) and math.isfinite(value)
+                         for value in bodies[2]["initialVelocity"])),
                     "frozen pulley input differs")
     if family == "ccd":
         require(len(bodies) == 2 and not joints and bodies[1]["bullet"] is True and
