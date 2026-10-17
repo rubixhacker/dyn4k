@@ -964,6 +964,30 @@ tasks.withType<Jar>().configureEach {
     if (name == "jvmJar") doLast { patchJvmArchive(archiveFile.get().asFile) }
 }
 
+val jvmModuleInfo by tasks.registering(JavaCompile::class) {
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(tasks.named("compileKotlinJvm"))
+    source("src/jvmModule/java/module-info.java")
+    destinationDirectory.set(layout.buildDirectory.dir("classes/java/jvmModule"))
+    classpath = files()
+    inputs.files(jvmMain.output.classesDirs, requireNotNull(jvmMain.runtimeDependencyFiles))
+    options.release.set(9)
+    modularity.inferModulePath.set(false)
+    doFirst {
+        options.compilerArgs.addAll(listOf(
+            "--module-path", requireNotNull(jvmMain.runtimeDependencyFiles).asPath,
+            "--patch-module", "org.dyn4j=${jvmMain.output.classesDirs.asPath}"
+        ))
+    }
+}
+
+tasks.withType<Jar>().configureEach {
+    if (name == "jvmJar") {
+        dependsOn(jvmModuleInfo)
+        from(jvmModuleInfo.flatMap { it.destinationDirectory })
+    }
+}
+
 tasks.matching {
     it.name == "bundleAndroidMainClassesToCompileJar" ||
         it.name == "bundleAndroidMainClassesToRuntimeJar" ||
@@ -1051,6 +1075,10 @@ if (providers.gradleProperty("qualificationProduction").orNull == "true") {
         ))
         doFirst { logger.lifecycle("qualification test input: ${inputFileProperty.get().asFile}") }
     }
+}
+
+tasks.named<org.gradle.jvm.tasks.Jar>("jvmSourcesJar") {
+    from(file("src/jvmModule/java/module-info.java")) { into("jvmModule") }
 }
 
 publishing {
