@@ -30,11 +30,8 @@ import org.dyn4j.geometry.Shiftable
 import org.dyn4j.geometry.Vector2
 
 open class Penetration : Shiftable, Copyable<Penetration> {
-    @get:kotlin.jvm.JvmName("normalField")
-    @JvmFieldBridge protected val normal: Vector2
-    @get:kotlin.jvm.JvmName("depthField")
-    @set:kotlin.jvm.JvmName("setDepthField")
-    @JvmFieldBridge protected var depth: Double = 0.0
+    @kotlin.jvm.JvmField protected val normal: Vector2
+    @kotlin.jvm.JvmField protected var depth: Double = 0.0
 
     constructor() { normal = Vector2() }
     protected constructor(normal: Vector2, depth: Double) { this.normal = normal.copy(); this.depth = depth }
@@ -51,21 +48,17 @@ open class Penetration : Shiftable, Copyable<Penetration> {
     override fun shift(shift: Vector2) {}
     override fun copy(): Penetration = Penetration(this)
     override fun toString() = "Penetration[Normal=$normal|Depth=$depth]"
+    @kotlin.jvm.JvmName("setDirect-dyn4k")
     internal fun setDirect(x: Double, y: Double, depth: Double) {
         normal.x = x; normal.y = y; this.depth = depth
     }
 }
 
 open class Separation : Shiftable, Copyable<Separation> {
-    @get:kotlin.jvm.JvmName("normalField")
-    @JvmFieldBridge protected val normal: Vector2
-    @get:kotlin.jvm.JvmName("distanceField")
-    @set:kotlin.jvm.JvmName("setDistanceField")
-    @JvmFieldBridge protected var distance: Double = 0.0
-    @get:kotlin.jvm.JvmName("point1Field")
-    @JvmFieldBridge protected val point1: Vector2
-    @get:kotlin.jvm.JvmName("point2Field")
-    @JvmFieldBridge protected val point2: Vector2
+    @kotlin.jvm.JvmField protected val normal: Vector2
+    @kotlin.jvm.JvmField protected var distance: Double = 0.0
+    @kotlin.jvm.JvmField protected val point1: Vector2
+    @kotlin.jvm.JvmField protected val point2: Vector2
 
     constructor() { normal = Vector2(); point1 = Vector2(); point2 = Vector2() }
     protected constructor(normal: Vector2, distance: Double, point1: Vector2, point2: Vector2) {
@@ -98,6 +91,7 @@ open class Separation : Shiftable, Copyable<Separation> {
     }
     override fun copy(): Separation = Separation(this)
     override fun toString() = "Separation[Point1=$point1|Point2=$point2|Normal=$normal|Distance=$distance]"
+    @kotlin.jvm.JvmName("setDirect-dyn4k")
     internal fun setDirect(normalX: Double, normalY: Double, distance: Double, p1x: Double, p1y: Double, p2x: Double, p2y: Double) {
         normal.x = normalX; normal.y = normalY; this.distance = distance
         point1.x = p1x; point1.y = p1y; point2.x = p2x; point2.y = p2y
@@ -105,13 +99,9 @@ open class Separation : Shiftable, Copyable<Separation> {
 }
 
 open class Raycast : Shiftable, Copyable<Raycast> {
-    @get:kotlin.jvm.JvmName("pointField")
-    @JvmFieldBridge protected val point: Vector2
-    @get:kotlin.jvm.JvmName("normalField")
-    @JvmFieldBridge protected val normal: Vector2
-    @get:kotlin.jvm.JvmName("distanceField")
-    @set:kotlin.jvm.JvmName("setDistanceField")
-    @JvmFieldBridge protected var distance: Double = 0.0
+    @kotlin.jvm.JvmField protected val point: Vector2
+    @kotlin.jvm.JvmField protected val normal: Vector2
+    @kotlin.jvm.JvmField protected var distance: Double = 0.0
 
     constructor() { point = Vector2(); normal = Vector2() }
     protected constructor(point: Vector2, normal: Vector2, distance: Double) {
@@ -136,18 +126,15 @@ open class Raycast : Shiftable, Copyable<Raycast> {
     override fun shift(shift: Vector2) { point.x += shift.x; point.y += shift.y }
     override fun copy(): Raycast = Raycast(this)
     override fun toString() = "Raycast[Point=$point|Normal=$normal|Distance=$distance]"
+    @kotlin.jvm.JvmName("setDirect-dyn4k")
     internal fun setDirect(pointX: Double, pointY: Double, normalX: Double, normalY: Double, distance: Double) {
         point.x = pointX; point.y = pointY; normal.x = normalX; normal.y = normalY; this.distance = distance
     }
 }
 
 open class Containment : Copyable<Containment> {
-    @get:kotlin.jvm.JvmName("aContainedInBField")
-    @set:kotlin.jvm.JvmName("setAContainedInBField")
-    @JvmFieldBridge protected var aContainedInB: Boolean = false
-    @get:kotlin.jvm.JvmName("bContainedInAField")
-    @set:kotlin.jvm.JvmName("setBContainedInAField")
-    @JvmFieldBridge protected var bContainedInA: Boolean = false
+    @kotlin.jvm.JvmField protected var aContainedInB: Boolean = false
+    @kotlin.jvm.JvmField protected var bContainedInA: Boolean = false
 
     constructor()
     protected constructor(a: Boolean, b: Boolean) { aContainedInB = a; bContainedInA = b }

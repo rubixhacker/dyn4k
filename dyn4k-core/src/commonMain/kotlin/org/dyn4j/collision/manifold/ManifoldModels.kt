@@ -46,14 +46,10 @@ interface ManifoldPointId : Copyable<ManifoldPointId> {
 }
 
 open class IndexedManifoldPointId : ManifoldPointId {
-    @get:kotlin.jvm.JvmName("referenceEdgeIndexField")
-    @JvmFieldBridge protected val referenceEdgeIndex: Int
-    @get:kotlin.jvm.JvmName("incidentEdgeIndexField")
-    @JvmFieldBridge protected val incidentEdgeIndex: Int
-    @get:kotlin.jvm.JvmName("incidentVertexIndexField")
-    @JvmFieldBridge protected val incidentVertexIndex: Int
-    @get:kotlin.jvm.JvmName("flippedField")
-    @JvmFieldBridge protected val flipped: Boolean
+    @kotlin.jvm.JvmField protected val referenceEdgeIndex: Int
+    @kotlin.jvm.JvmField protected val incidentEdgeIndex: Int
+    @kotlin.jvm.JvmField protected val incidentVertexIndex: Int
+    @kotlin.jvm.JvmField protected val flipped: Boolean
 
     constructor(referenceEdgeIndex: Int, incidentEdgeIndex: Int, incidentVertexIndex: Int) :
         this(referenceEdgeIndex, incidentEdgeIndex, incidentVertexIndex, false)
@@ -86,14 +82,9 @@ open class IndexedManifoldPointId : ManifoldPointId {
 }
 
 open class ManifoldPoint : Shiftable, Copyable<ManifoldPoint> {
-    @get:kotlin.jvm.JvmName("idField")
-    @set:kotlin.jvm.JvmName("setIdField")
-    @JvmFieldBridge protected var id: ManifoldPointId
-    @get:kotlin.jvm.JvmName("pointField")
-    @JvmFieldBridge protected val point: Vector2
-    @get:kotlin.jvm.JvmName("depthField")
-    @set:kotlin.jvm.JvmName("setDepthField")
-    @JvmFieldBridge protected var depth: Double = 0.0
+    @kotlin.jvm.JvmField protected var id: ManifoldPointId
+    @kotlin.jvm.JvmField protected val point: Vector2
+    @kotlin.jvm.JvmField protected var depth: Double = 0.0
 
     constructor(id: ManifoldPointId?) { this.id = id ?: ManifoldPointId.DISTANCE; point = Vector2() }
     internal constructor(id: ManifoldPointId, point: Vector2, depth: Double) {
@@ -114,16 +105,15 @@ open class ManifoldPoint : Shiftable, Copyable<ManifoldPoint> {
         id = other.id.copy(); depth = other.depth; point.x = other.point.x; point.y = other.point.y
     }
     override fun shift(shift: Vector2) { shiftPointDirect(shift) }
+    @kotlin.jvm.JvmName("shiftPointDirect-dyn4k")
     internal fun shiftPointDirect(shift: Vector2) { point.x += shift.x; point.y += shift.y }
     override fun copy(): ManifoldPoint = ManifoldPoint(this)
     override fun toString() = "ManifoldPoint[Id=$id|Point=$point|Depth=$depth]"
 }
 
 open class Manifold : Shiftable, Copyable<Manifold> {
-    @get:kotlin.jvm.JvmName("pointsField")
-    @JvmFieldBridge protected val points: MutableList<ManifoldPoint>
-    @get:kotlin.jvm.JvmName("normalField")
-    @JvmFieldBridge protected val normal: Vector2
+    @kotlin.jvm.JvmField protected val points: MutableList<ManifoldPoint>
+    @kotlin.jvm.JvmField protected val normal: Vector2
 
     constructor() { points = ArrayList(2); normal = Vector2() }
     protected constructor(normal: Vector2, points: List<@kotlin.jvm.JvmSuppressWildcards ManifoldPoint>) {
@@ -153,8 +143,11 @@ open class Manifold : Shiftable, Copyable<Manifold> {
     override fun shift(shift: Vector2) { for (point in points) point.shiftPointDirect(shift) }
     override fun copy(): Manifold = Manifold(this)
     override fun toString() = "Manifold[Normal=$normal|Points={${points.joinToString(",")}}]"
+    @kotlin.jvm.JvmName("appendPointDirect-dyn4k")
     internal fun appendPointDirect(point: ManifoldPoint) { points.add(point) }
+    @kotlin.jvm.JvmName("setNormalDirect-dyn4k")
     internal fun setNormalDirect(x: Double, y: Double) { normal.x = x; normal.y = y }
+    @kotlin.jvm.JvmName("pointCountDirect-dyn4k")
     internal fun pointCountDirect() = points.size
 }
 
