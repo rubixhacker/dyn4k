@@ -144,8 +144,8 @@ open class Transform : Transformable, Copyable<Transform> {
     open fun getTranslationTransform() = Transform(1.0, 0.0, x, y)
     open fun getCost() = cost
     open fun getSint() = sint
-    open fun costValue() = cost
-    open fun sintValue() = sint
+    @kotlin.jvm.JvmSynthetic fun costValue() = cost
+    @kotlin.jvm.JvmSynthetic fun sintValue() = sint
     open fun getRotationAngle(): Double {
         val a = acos(cost)
         return if (sint >= 0.0) a else -a
