@@ -8,10 +8,11 @@ The user authorized implementation, recommended remaining choices, and GitHub pu
 
 ## Work graph
 
-- [Run the fixed baseline corpus and inventory its compatibility surface](https://github.com/rubixhacker/dyn4k/issues/45): Luna; implementation in progress.
+- [Run the fixed baseline corpus and inventory its compatibility surface](https://github.com/rubixhacker/dyn4k/issues/45): Luna baseline and Sol verifier repair merged; final production-dependency check remains before closure.
 - [Resolve staged vector and transform consumers on the pinned toolchain](https://github.com/rubixhacker/dyn4k/issues/33): Sol; implementation in progress.
 - [Create and query every baseline shape through both APIs](https://github.com/rubixhacker/dyn4k/issues/34): Sol; not started.
-- [Use baseline trees, filters, bounds, and collision objects from consumers](https://github.com/rubixhacker/dyn4k/issues/35): Sol; not started.
+- [Traverse and mutate baseline tree data structures](https://github.com/rubixhacker/dyn4k/issues/46): Sol; starts after foundation.
+- [Use baseline filters, bounds, and collision objects from consumers](https://github.com/rubixhacker/dyn4k/issues/35): Sol; not started.
 - [Turn input polygons into usable convex shapes](https://github.com/rubixhacker/dyn4k/issues/36): Sol; not started.
 - [Run collision, distance, ray, and time-of-impact queries](https://github.com/rubixhacker/dyn4k/issues/37): Sol; not started.
 - [Apply forces and inspect body state through both APIs](https://github.com/rubixhacker/dyn4k/issues/38): Sol; not started.
@@ -28,6 +29,11 @@ The user authorized implementation, recommended remaining choices, and GitHub pu
 - Use separate ticket branches and worktrees based on the integration branch. Merge the latest integration branch into each ticket branch before handoff.
 - Close a ticket only when all acceptance criteria have evidence. Keep failed and unavailable qualification separate.
 - Review the integrated diff with independent standards and spec reviewers. Run the retrospective after review.
+
+## Integrated evidence
+
+- Baseline verifier repair: `53aa120a3e0111823c36bb8e20ecdf0d56caf7b1` merges `5f0601100ebb19e965e51dea15995570763b5d04`. The merged verifier ran 2,385 unchanged baseline cases with zero failures or ignored cases, and its four regression tests passed. It inventories 268 production source files, 199 test files, 2,171 test annotations, and 297 baseline binary types. See `/tmp/dyn4k-baseline-fix-result.md` and `/tmp/dyn4k-merge-baseline-fix-result.md`. This evidence does not qualify the incomplete candidate.
+- The pinned upstream geometry algorithm packages import geometry and root tree/reference APIs, but no collision model APIs. [Turn input polygons into usable convex shapes](https://github.com/rubixhacker/dyn4k/issues/36) now depends on the geometry and tree tickets. Its acceptance criteria are unchanged.
 
 ## Open qualification limits
 
