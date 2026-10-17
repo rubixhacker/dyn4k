@@ -21,8 +21,8 @@ protected field visibility in the archives, even where the Java baseline uses
 package fields. This safe widening lets Kotlin subclasses use the same fields
 described by their metadata. Private stored fields keep private Kotlin
 accessors. The strict geometry audit checks 551 baseline declarations in 31
-owned types on both archives. The all-root audit also checks foundation
-declarations after the integration merge.
+owned types on both archives. After the integration merge, the strict all-root
+audit checks 908 baseline declarations in 41 types on both archives.
 
 Common Kotlin marks every baseline-overridable method in the owned open classes
 `open`. `Link.rotate(double, double, double)` and `Link.translate(double,
@@ -34,6 +34,6 @@ subclass dispatch on JVM, Linux x64, JS, both Wasm hosts, and Android host.
 The Java consumer also compiles unchanged against the baseline and the staged
 JVM and Android host archives.
 
-The all-root declaration audit and target qualification remain open until their
-separate evidence is complete. The foundation dependency is recorded in
+Target qualification and independent review remain open until their separate
+evidence is complete. The original foundation dependency is recorded in
 `/tmp/dyn4k-issue34-handoff.md`.
