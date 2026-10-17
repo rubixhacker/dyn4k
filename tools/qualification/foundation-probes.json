@@ -12,16 +12,16 @@
   ],
   "groups": [
     {"id": "core-jvm", "report_pattern": "dyn4k-core/build/test-results/jvmTest/TEST-*.xml", "cases": []},
-    {"id": "jvm", "report_pattern": "dyn4k/build/test-results/jvmTest/TEST-*.xml", "classname": "io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[jvm]"},
+    {"id": "jvm", "report_pattern": "dyn4k/build/test-results/jvmTest/TEST-*.xml", "classname": "io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[jvm]", "additional_classname": "io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]},
     {"id": "core-linuxX64", "report_pattern": "dyn4k-core/build/test-results/linuxX64Test/TEST-*.xml", "cases": []},
-    {"id": "linuxX64", "report_pattern": "dyn4k/build/test-results/linuxX64Test/TEST-*.xml", "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[linuxX64]"},
+    {"id": "linuxX64", "report_pattern": "dyn4k/build/test-results/linuxX64Test/TEST-*.xml", "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[linuxX64]", "additional_classname": "linuxX64Test.io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]},
     {"id": "core-jsNode", "report_pattern": "dyn4k-core/build/test-results/jsNodeTest/TEST-*.xml", "cases": []},
-    {"id": "jsNode", "report_pattern": "dyn4k/build/test-results/jsNodeTest/TEST-*.xml", "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[js, node]"},
+    {"id": "jsNode", "report_pattern": "dyn4k/build/test-results/jsNodeTest/TEST-*.xml", "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[js, node]", "additional_classname": "jsNodeTest.io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]},
     {"id": "core-wasmJsNode", "report_pattern": "dyn4k-core/build/test-results/wasmJsNodeTest/TEST-*.xml", "cases": []},
-    {"id": "wasmJsNode", "report_pattern": "dyn4k/build/test-results/wasmJsNodeTest/TEST-*.xml", "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[wasmJs, node]"},
+    {"id": "wasmJsNode", "report_pattern": "dyn4k/build/test-results/wasmJsNodeTest/TEST-*.xml", "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[wasmJs, node]", "additional_classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]},
     {"id": "core-wasmWasiNode", "report_pattern": "dyn4k-core/build/test-results/wasmWasiNodeTest/TEST-*.xml", "cases": []},
-    {"id": "wasmWasiNode", "report_pattern": "dyn4k/build/test-results/wasmWasiNodeTest/TEST-*.xml", "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[wasmWasi, node]"},
+    {"id": "wasmWasiNode", "report_pattern": "dyn4k/build/test-results/wasmWasiNodeTest/TEST-*.xml", "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[wasmWasi, node]", "additional_classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]},
     {"id": "core-androidHost", "report_pattern": "dyn4k-core/build/test-results/testAndroidHostTest/TEST-*.xml", "cases": []},
-    {"id": "androidHost", "report_pattern": "dyn4k/build/test-results/testAndroidHostTest/TEST-*.xml", "classname": "io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": ""}
+    {"id": "androidHost", "report_pattern": "dyn4k/build/test-results/testAndroidHostTest/TEST-*.xml", "classname": "io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "", "additional_classname": "io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"]}
   ]
 }

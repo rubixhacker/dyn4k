@@ -114,6 +114,17 @@ class QualificationTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_probe_manifest_names_each_added_tree_case(self):
+        manifest = {"case_names": ["foundation"]}
+        group = {"classname": "dyn4k.FoundationTest", "name_suffix": "[jvm]",
+                 "additional_classname": "dyn4k.TreeTest",
+                 "additional_case_names": ["inserts", "removes"]}
+        self.assertEqual([
+            ("dyn4k.FoundationTest", "foundation[jvm]"),
+            ("dyn4k.TreeTest", "inserts[jvm]"),
+            ("dyn4k.TreeTest", "removes[jvm]"),
+        ], qualify.expected_probe_cases(manifest, group))
+
     def test_full_lane_needs_selected_runtime_suite_and_both_target_binaries(self):
         case = qualify.expand(qualify.matrix())[0]
         sha = "a" * 40

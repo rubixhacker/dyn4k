@@ -361,6 +361,12 @@ def expected_probe_cases(manifest, group):
         names = manifest.get("case_names", [])
         cases = [{"classname": group.get("classname"),
                   "name": name + group.get("name_suffix", "")} for name in names]
+        additional_names = group.get("additional_case_names", [])
+        if not isinstance(additional_names, list):
+            raise ValueError("additional probe case names must be a list")
+        cases.extend({"classname": group.get("additional_classname"),
+                      "name": name + group.get("name_suffix", "")}
+                     for name in additional_names)
     if not isinstance(cases, list):
         raise ValueError("probe cases must be a list")
     identities = []
