@@ -33,6 +33,15 @@ public final class CollisionModelConsumer {
         checks++;
     }
 
+    private static String baselineNullCopyMessage(String argument) {
+        String version = System.getProperty("java.specification.version");
+        if ("1.8".equals(version)) return null;
+        if ("21".equals(version)) {
+            return "Cannot invoke \"java.lang.Class.getName()\" because \"" + argument + "\" is null";
+        }
+        throw new AssertionError("unsupported Java version: " + version);
+    }
+
     private static class RootFilter extends TypeFilter {}
     private static class ChildFilter extends RootFilter {}
     private static class OtherFilter extends TypeFilter {}
@@ -173,11 +182,11 @@ public final class CollisionModelConsumer {
                 "'. You must override the copy method to return type '" + BadFixture.class.getName() + "'."));
         try { new CopyException(null, null); throw new AssertionError("missing null source failure"); }
         catch (NullPointerException expected) {
-            check(expected.getMessage() == null || expected.getMessage().contains("\"source\" is null"));
+            check(java.util.Objects.equals(baselineNullCopyMessage("source"), expected.getMessage()));
         }
         try { new CopyException(BadFixture.class, null); throw new AssertionError("missing null copy failure"); }
         catch (NullPointerException expected) {
-            check(expected.getMessage() == null || expected.getMessage().contains("\"copy\" is null"));
+            check(java.util.Objects.equals(baselineNullCopyMessage("copy"), expected.getMessage()));
         }
 
         Body body = new Body();
