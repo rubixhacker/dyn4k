@@ -284,7 +284,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         if completed.returncode:
             raise Rejected("Gradle task failed")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
-               (("tests", 14), ("skipped", 0), ("failures", 0), ("errors", 0))):
+               (("tests", 15), ("skipped", 0), ("failures", 0), ("errors", 0))):
             raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
         if clean_identity() != (commit, source_sha256):
             raise Rejected("source changed during host execution")

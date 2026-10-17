@@ -97,6 +97,23 @@ class ReceiptContractTest(unittest.TestCase):
         header["setup"]["joints"][0]["mode"]["limitsEnabled"] = True
         self.assertRaises(receipt.Rejected, receipt.validate_setup, header, case)
 
+        mode = header["setup"]["joints"][0]["mode"]
+        mode["ratio"] = 2.0
+        numeric = {**case, "id": "joint-Angle-Ratio-2.0",
+                   "input": {"jointType": "Angle", "field": "Ratio", "initialValue": 2.0}}
+        receipt.validate_setup(header, numeric)
+        mode["ratio"] = 1.0
+        self.assertRaises(receipt.Rejected, receipt.validate_setup, header, numeric)
+
+        mode["lowerLimit"], mode["upperLimit"] = -0.5, 0.5
+        mode["limitsEnabled"] = True
+        limits = {**case, "id": "joint-Angle-limits-range",
+                  "input": {"jointType": "Angle", "limits": "range",
+                            "lowerLimit": -0.5, "upperLimit": 0.5}}
+        receipt.validate_setup(header, limits)
+        mode["upperLimit"] = 0.0
+        self.assertRaises(receipt.Rejected, receipt.validate_setup, header, limits)
+
     def test_input_signed_zero_and_event_order_are_exact(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

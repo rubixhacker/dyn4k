@@ -267,7 +267,9 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
             "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
             "maximumSpringForceEnabled" to value.isMaximumSpringForceEnabled(),
-            "maximumSpringForce" to value.getMaximumSpringForce())
+            "maximumSpringForce" to value.getMaximumSpringForce(),
+            "correctionFactor" to value.getCorrectionFactor(),
+            "maximumCorrectionForce" to value.getMaximumCorrectionForce())
         is PrismaticJoint<*> -> mapOf("type" to "Prismatic", "axis" to vector(value.getAxis()),
             "anchor1" to vector(value.getAnchor1()), "anchor2" to vector(value.getAnchor2()),
             "referenceAngle" to value.getReferenceAngle(),

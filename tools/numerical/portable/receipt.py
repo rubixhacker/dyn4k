@@ -187,7 +187,16 @@ def validate_setup(header, case):
                             ("Distance", "Prismatic", "Wheel") else
                             mode.get(field[0].lower() + field[1:]))
                 require(exact(captured, [value, value] if isinstance(captured, list) else value),
-                        "joint boolean mode input differs")
+                        "joint mode input differs")
+                return
+            if "limits" in input_values:
+                enabled = ([mode.get("lowerLimitEnabled"), mode.get("upperLimitEnabled")]
+                           if input_values["jointType"] in ("Distance", "Prismatic", "Wheel")
+                           else mode.get("limitsEnabled"))
+                require(exact(enabled, [True, True] if isinstance(enabled, list) else True) and
+                        exact(mode.get("lowerLimit"), input_values["lowerLimit"]) and
+                        exact(mode.get("upperLimit"), input_values["upperLimit"]),
+                        "joint limit input differs")
                 return
             active = input_values["mode"] == "active"
             flag = {"Distance": "springEnabled",

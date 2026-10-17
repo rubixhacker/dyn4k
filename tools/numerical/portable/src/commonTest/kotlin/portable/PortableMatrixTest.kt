@@ -379,6 +379,137 @@ class PortableMatrixTest {
             }
     }
 
+    private val numericJointFields = mapOf(
+        "Angle" to mapOf("Ratio" to listOf(0.5, 1.0, 2.0, -1.0)),
+        "Distance" to mapOf("SpringDampingRatio" to listOf(0.0, 0.2, 1.0),
+            "SpringFrequency" to listOf(2.0, 8.0), "MaximumSpringForce" to listOf(0.0, 10.0, 1000.0)),
+        "Friction" to mapOf("MaximumForce" to listOf(0.0, 10.0, 1000.0),
+            "MaximumTorque" to listOf(0.0, 0.25, 10.0)),
+        "Motor" to mapOf("CorrectionFactor" to listOf(0.0, 0.3, 1.0),
+            "MaximumForce" to listOf(0.0, 10.0, 1000.0), "MaximumTorque" to listOf(0.0, 0.25, 10.0)),
+        "Pin" to mapOf("SpringDampingRatio" to listOf(0.0, 0.2, 1.0),
+            "SpringFrequency" to listOf(2.0, 8.0), "CorrectionFactor" to listOf(0.0, 0.3, 1.0),
+            "MaximumSpringForce" to listOf(0.0, 10.0, 1000.0),
+            "MaximumCorrectionForce" to listOf(0.0, 10.0, 1000.0)),
+        "Prismatic" to mapOf("SpringDampingRatio" to listOf(0.0, 0.2, 1.0),
+            "SpringFrequency" to listOf(2.0, 8.0), "MaximumSpringForce" to listOf(0.0, 10.0, 1000.0),
+            "MaximumMotorForce" to listOf(0.0, 10.0, 1000.0), "MotorSpeed" to listOf(-1.0, 0.0, 1.0)),
+        "Pulley" to mapOf("Ratio" to listOf(0.5, 1.0, 2.0)),
+        "Revolute" to mapOf("MaximumMotorTorque" to listOf(0.0, 0.25, 10.0),
+            "MotorSpeed" to listOf(-PI / 2, 0.0, PI / 2)),
+        "Weld" to mapOf("SpringDampingRatio" to listOf(0.0, 0.2, 1.0),
+            "SpringFrequency" to listOf(2.0, 8.0), "MaximumSpringTorque" to listOf(0.0, 0.25, 10.0)),
+        "Wheel" to mapOf("SpringDampingRatio" to listOf(0.0, 0.2, 1.0),
+            "SpringFrequency" to listOf(2.0, 8.0), "MaximumSpringForce" to listOf(0.0, 10.0, 1000.0),
+            "MaximumMotorTorque" to listOf(0.0, 0.25, 10.0),
+            "MotorSpeed" to listOf(-PI / 2, 0.0, PI / 2)),
+    )
+
+    private fun setNumericMode(joint: Joint<Body>, field: String, value: Double) {
+        when (field) {
+            "Ratio" -> when (joint) {
+                is AngleJoint<*> -> joint.setRatio(value)
+                is PulleyJoint<*> -> joint.setRatio(value)
+                else -> error("unsupported ratio mode")
+            }
+            "SpringDampingRatio" -> when (joint) {
+                is DistanceJoint<*> -> joint.setSpringDampingRatio(value)
+                is PinJoint<*> -> joint.setSpringDampingRatio(value)
+                is PrismaticJoint<*> -> joint.setSpringDampingRatio(value)
+                is WeldJoint<*> -> joint.setSpringDampingRatio(value)
+                is WheelJoint<*> -> joint.setSpringDampingRatio(value)
+                else -> error("unsupported spring damping mode")
+            }
+            "SpringFrequency" -> when (joint) {
+                is DistanceJoint<*> -> joint.setSpringFrequency(value)
+                is PinJoint<*> -> joint.setSpringFrequency(value)
+                is PrismaticJoint<*> -> joint.setSpringFrequency(value)
+                is WeldJoint<*> -> joint.setSpringFrequency(value)
+                is WheelJoint<*> -> joint.setSpringFrequency(value)
+                else -> error("unsupported spring frequency mode")
+            }
+            "CorrectionFactor" -> when (joint) {
+                is MotorJoint<*> -> joint.setCorrectionFactor(value)
+                is PinJoint<*> -> joint.setCorrectionFactor(value)
+                else -> error("unsupported correction mode")
+            }
+            "MaximumForce" -> when (joint) {
+                is FrictionJoint<*> -> joint.setMaximumForce(value)
+                is MotorJoint<*> -> joint.setMaximumForce(value)
+                else -> error("unsupported maximum force mode")
+            }
+            "MaximumSpringForce" -> when (joint) {
+                is DistanceJoint<*> -> joint.setMaximumSpringForce(value)
+                is PinJoint<*> -> joint.setMaximumSpringForce(value)
+                is PrismaticJoint<*> -> joint.setMaximumSpringForce(value)
+                is WheelJoint<*> -> joint.setMaximumSpringForce(value)
+                else -> error("unsupported spring force mode")
+            }
+            "MaximumMotorForce" -> (joint as PrismaticJoint<*>).setMaximumMotorForce(value)
+            "MaximumCorrectionForce" -> (joint as PinJoint<*>).setMaximumCorrectionForce(value)
+            "MaximumTorque" -> when (joint) {
+                is FrictionJoint<*> -> joint.setMaximumTorque(value)
+                is MotorJoint<*> -> joint.setMaximumTorque(value)
+                else -> error("unsupported maximum torque mode")
+            }
+            "MaximumSpringTorque" -> (joint as WeldJoint<*>).setMaximumSpringTorque(value)
+            "MaximumMotorTorque" -> when (joint) {
+                is RevoluteJoint<*> -> joint.setMaximumMotorTorque(value)
+                is WheelJoint<*> -> joint.setMaximumMotorTorque(value)
+                else -> error("unsupported motor torque mode")
+            }
+            "MotorSpeed" -> when (joint) {
+                is PrismaticJoint<*> -> joint.setMotorSpeed(value)
+                is RevoluteJoint<*> -> joint.setMotorSpeed(value)
+                is WheelJoint<*> -> joint.setMotorSpeed(value)
+                else -> error("unsupported motor speed mode")
+            }
+            else -> error("unknown joint value $field")
+        }
+    }
+
+    @Test
+    fun independentJointNumericAndLimitModes() {
+        fun seed(type: String): Pair<World<Body>, Joint<Body>> {
+            val world = World<Body>()
+            world.setGravity(0.0, 0.0)
+            val ground = body(world, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true)
+            val moving = body(world, Geometry.createCircle(0.5), 0.0, 2.0, false)
+            val selected = joint(type, "active", ground, moving)
+            world.addJoint(selected)
+            return world to selected
+        }
+        for ((type, fields) in numericJointFields) for ((field, values) in fields)
+            for (value in values) {
+                val (world, selected) = seed(type)
+                if (type == "Pin" && field in listOf("CorrectionFactor", "MaximumCorrectionForce"))
+                    (selected as PinJoint<*>).setSpringEnabled(false)
+                setNumericMode(selected, field, value)
+                recorder.capture(CaseSpec("joint-$type-$field-$value", "joints-limits-motors",
+                    "default", 60, 600, mapOf("jointType" to type, "field" to field,
+                        "initialValue" to value)), world)
+            }
+        for (type in listOf("Angle", "Distance", "Prismatic", "Revolute", "Weld", "Wheel"))
+            for (variant in listOf("range", "equal")) {
+                val (world, selected) = seed(type)
+                val limit = if (type in listOf("Angle", "Revolute", "Weld")) PI / 6 else 1.0
+                val lower = if (variant == "range") { if (type == "Distance") 1.0 else -limit } else 0.0
+                val upper = if (variant == "range") { if (type == "Distance") 3.0 else limit } else 0.0
+                when (selected) {
+                    is AngleJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    is DistanceJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    is PrismaticJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    is RevoluteJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    is WeldJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    is WheelJoint<*> -> selected.setLimitsEnabled(lower, upper)
+                    else -> error("unsupported joint limits")
+                }
+                recorder.capture(CaseSpec("joint-$type-limits-$variant", "joints-limits-motors",
+                    "default", 60, 600, mapOf("jointType" to type, "limits" to variant,
+                        "lowerLimit" to lower, "upperLimit" to upper)), world)
+            }
+    }
+
     @Test
     fun baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() {
         val world = World<Body>()

@@ -1,3 +1,6 @@
+import math
+
+
 BOOLEAN_JOINT_FIELDS = {
     "Angle": ("LimitsEnabled",),
     "Distance": ("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
@@ -13,6 +16,34 @@ BOOLEAN_JOINT_FIELDS = {
     "Wheel": ("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
               "MotorEnabled", "MaximumMotorTorqueEnabled", "SpringEnabled",
               "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+}
+
+NUMERIC_JOINT_FIELDS = {
+    "Angle": {"Ratio": (0.5, 1.0, 2.0, -1.0)},
+    "Distance": {"SpringDampingRatio": (0.0, 0.2, 1.0), "SpringFrequency": (2.0, 8.0),
+                 "MaximumSpringForce": (0.0, 10.0, 1000.0)},
+    "Friction": {"MaximumForce": (0.0, 10.0, 1000.0),
+                 "MaximumTorque": (0.0, 0.25, 10.0)},
+    "Motor": {"CorrectionFactor": (0.0, 0.3, 1.0),
+              "MaximumForce": (0.0, 10.0, 1000.0),
+              "MaximumTorque": (0.0, 0.25, 10.0)},
+    "Pin": {"SpringDampingRatio": (0.0, 0.2, 1.0), "SpringFrequency": (2.0, 8.0),
+            "CorrectionFactor": (0.0, 0.3, 1.0),
+            "MaximumSpringForce": (0.0, 10.0, 1000.0),
+            "MaximumCorrectionForce": (0.0, 10.0, 1000.0)},
+    "Prismatic": {"SpringDampingRatio": (0.0, 0.2, 1.0), "SpringFrequency": (2.0, 8.0),
+                  "MaximumSpringForce": (0.0, 10.0, 1000.0),
+                  "MaximumMotorForce": (0.0, 10.0, 1000.0),
+                  "MotorSpeed": (-1.0, 0.0, 1.0)},
+    "Pulley": {"Ratio": (0.5, 1.0, 2.0)},
+    "Revolute": {"MaximumMotorTorque": (0.0, 0.25, 10.0),
+                 "MotorSpeed": (-math.pi / 2, 0.0, math.pi / 2)},
+    "Weld": {"SpringDampingRatio": (0.0, 0.2, 1.0), "SpringFrequency": (2.0, 8.0),
+             "MaximumSpringTorque": (0.0, 0.25, 10.0)},
+    "Wheel": {"SpringDampingRatio": (0.0, 0.2, 1.0), "SpringFrequency": (2.0, 8.0),
+              "MaximumSpringForce": (0.0, 10.0, 1000.0),
+              "MaximumMotorTorque": (0.0, 0.25, 10.0),
+              "MotorSpeed": (-math.pi / 2, 0.0, math.pi / 2)},
 }
 
 
@@ -61,6 +92,23 @@ def declared_cases():
                               "hz": 60, "steps": 600,
                               "input": {"jointType": joint_type, "field": field,
                                         "variant": variant, "initialValue": variant == "true"}})
+    for joint_type, fields in NUMERIC_JOINT_FIELDS.items():
+        for field, values in fields.items():
+            for value in values:
+                cases.append({"id": f"joint-{joint_type}-{field}-{value}",
+                              "family": "joints-limits-motors", "profile": "default",
+                              "hz": 60, "steps": 600,
+                              "input": {"jointType": joint_type, "field": field,
+                                        "initialValue": value}})
+    for joint_type in ("Angle", "Distance", "Prismatic", "Revolute", "Weld", "Wheel"):
+        limit = math.pi / 6 if joint_type in ("Angle", "Revolute", "Weld") else 1.0
+        range_limits = (1.0, 3.0) if joint_type == "Distance" else (-limit, limit)
+        for variant, (lower, upper) in (("range", range_limits), ("equal", (0.0, 0.0))):
+            cases.append({"id": f"joint-{joint_type}-limits-{variant}",
+                          "family": "joints-limits-motors", "profile": "default",
+                          "hz": 60, "steps": 600,
+                          "input": {"jointType": joint_type, "limits": variant,
+                                    "lowerLimit": lower, "upperLimit": upper}})
     cases.append({"id": "P-JINT-Weld-enabled-equal", "family": "joints-limits-motors",
                   "profile": "frozen-weld-pulley", "hz": 60, "steps": 600,
                   "input": {"jointType": "Weld", "limits": [0.0, 0.0], "offCenterForce": [0.0, -10.0]}})
