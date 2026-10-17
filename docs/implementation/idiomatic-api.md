@@ -48,6 +48,20 @@ simulation.removeStepListener(stepListener)
 
 `linearVelocity`, shape `center`, and world `gravity` expose live mutable vectors. Mutating a returned vector changes the object that the engine uses. Call `copy()` for an independent vector. Setting `linearVelocity` calls the core setter; the core can copy the supplied coordinates. The `bodies`, `joints`, and `fixtures` properties expose the core's live, read-only membership views. Add and remove members through the owner methods so the engine updates its bookkeeping.
 
+Vector operators `+`, `-`, `*`, `/`, and unary `-` return new vectors. With a mutable binding, `+=`, `-=`, `*=`, and `/=` calculate a new vector and reassign that binding. They leave references to the old vector unchanged. Use the core methods `add`, `subtract`, `multiply`, and `divide` when the same vector object must change. A fixed `val` binding can call those methods; it cannot use assignment operators.
+
+```kotlin
+var selected = first.linearVelocity
+val shared = selected
+selected += Vector2(1.0, 0.0)
+check(selected !== shared)
+check(first.linearVelocity === shared)
+shared.add(Vector2(1.0, 0.0))
+check(first.linearVelocity === shared)
+```
+
+Here the first operation changes only the local `selected` binding. The named method changes the body's live velocity vector. Use the same length and time units for both operands.
+
 `find` accepts bounds or a convex shape with a transform. `raycastWhere`, `raycastClosestWhere`, and `sweep` cover ray and moving-shape queries. Each helper passes a Kotlin predicate through a core `DetectFilter`. The predicate receives the actual body and fixture objects. `onStepBegin`, `onStepEnd`, `onContactBegin`, and `onContactEnd` register core listeners and return those listeners for removal. Callbacks run at the core's normal event stage. Avoid changing world membership while the engine iterates it unless the core operation permits that change.
 
 ## Mix Kotlin and Java use

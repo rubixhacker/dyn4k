@@ -7,6 +7,59 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class IdiomaticApiTest {
+    @Test
+    fun mutableVectorBindingReassignsValuesWithoutChangingSharedReferences() {
+        var value = Vector2(2.0, 3.0)
+        val shared: org.dyn4j.geometry.Vector2 = value
+        value += Vector2(4.0, -1.0)
+        assertNotSame(shared, value)
+        assertEquals(2.0, shared.x)
+        assertEquals(3.0, shared.y)
+        assertEquals(6.0, value.x)
+        assertEquals(2.0, value.y)
+
+        val afterAddition = value
+        value -= Vector2(1.0, 3.0)
+        assertNotSame(afterAddition, value)
+        assertEquals(6.0, afterAddition.x)
+        assertEquals(5.0, value.x)
+        assertEquals(-1.0, value.y)
+
+        val afterSubtraction = value
+        value *= 2.0
+        assertNotSame(afterSubtraction, value)
+        assertEquals(5.0, afterSubtraction.x)
+        assertEquals(10.0, value.x)
+        assertEquals(-2.0, value.y)
+
+        val afterMultiplication = value
+        value /= 2.0
+        assertNotSame(afterMultiplication, value)
+        assertEquals(10.0, afterMultiplication.x)
+        assertEquals(5.0, value.x)
+        assertEquals(-1.0, value.y)
+    }
+
+    @Test
+    fun fixedVectorBindingMutatesSharedStateThroughNamedMethods() {
+        val value = Vector2(2.0, 3.0)
+        val compatibility: org.dyn4j.geometry.Vector2 = value
+        value.add(Vector2(4.0, -1.0))
+        assertSame(compatibility, value)
+        assertEquals(6.0, compatibility.x)
+        assertEquals(2.0, compatibility.y)
+        value.subtract(Vector2(1.0, 3.0))
+        assertEquals(5.0, compatibility.x)
+        assertEquals(-1.0, compatibility.y)
+        value.multiply(2.0)
+        assertEquals(10.0, compatibility.x)
+        assertEquals(-2.0, compatibility.y)
+        value.divide(2.0)
+        assertSame(compatibility, value)
+        assertEquals(5.0, compatibility.x)
+        assertEquals(-1.0, compatibility.y)
+    }
+
     private class ObservedWorld : World<Body>() {
         var steps = 0
         var observedBody: Body? = null
@@ -128,7 +181,7 @@ class IdiomaticApiTest {
         assertEquals(6.0, result.x)
         assertEquals(2.0, result.y)
         assertNotSame(left, result)
-        left += right
+        left.add(right)
         assertEquals(6.0, left.x)
         assertEquals(2.0, left.y)
         assertEquals(12.0, left dotWith Vector2(2.0, 0.0))

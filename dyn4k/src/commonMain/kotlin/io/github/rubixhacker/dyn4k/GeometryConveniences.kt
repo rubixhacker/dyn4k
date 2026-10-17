@@ -6,10 +6,6 @@ operator fun Vector2.times(scalar: Double): Vector2 = product(scalar)
 operator fun Double.times(vector: Vector2): Vector2 = vector.product(this)
 operator fun Vector2.div(scalar: Double): Vector2 = quotient(scalar)
 operator fun Vector2.unaryMinus(): Vector2 = getNegative()
-operator fun Vector2.plusAssign(other: Vector2) { add(other) }
-operator fun Vector2.minusAssign(other: Vector2) { subtract(other) }
-operator fun Vector2.timesAssign(scalar: Double) { multiply(scalar) }
-operator fun Vector2.divAssign(scalar: Double) { divide(scalar) }
 infix fun Vector2.dotWith(other: Vector2): Double = dot(other)
 infix fun Vector2.crossWith(other: Vector2): Double = cross(other)
 

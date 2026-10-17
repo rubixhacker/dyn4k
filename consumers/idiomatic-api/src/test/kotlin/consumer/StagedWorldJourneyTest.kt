@@ -3,10 +3,29 @@ package consumer
 import io.github.rubixhacker.dyn4k.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class StagedWorldJourneyTest {
+    @Test
+    fun publishedVectorAssignmentRebindsWhileNamedMutationKeepsIdentity() {
+        var value = Vector2(1.0, 2.0)
+        val shared: org.dyn4j.geometry.Vector2 = value
+        value += Vector2(3.0, 4.0)
+        assertNotSame(shared, value)
+        assertEquals(1.0, shared.x)
+        assertEquals(2.0, shared.y)
+        assertEquals(4.0, value.x)
+        assertEquals(6.0, value.y)
+
+        val fixed = shared
+        fixed.add(Vector2(3.0, 4.0))
+        assertSame(shared, fixed)
+        assertEquals(4.0, shared.x)
+        assertEquals(6.0, shared.y)
+    }
+
     private class ExtendedWorld : World<Body>() {
         var dispatchCount = 0
         var observedBody: Body? = null
