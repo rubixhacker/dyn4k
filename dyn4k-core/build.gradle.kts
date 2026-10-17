@@ -1530,6 +1530,23 @@ tasks.register<JavaExec>("runUpstreamContactTests") {
     mainClass.set("org.junit.runner.JUnitCore")
     args(contactTestNames.map { "org.dyn4j.dynamics.contact.$it" })
 }
+val compileUpstreamContactAndroidTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, androidCompileJar)
+    source(contactTestNames.map { upstreamCheckout.map { dir ->
+        dir.file("src/test/java/org/dyn4j/dynamics/contact/$it.java")
+    } })
+    source(upstreamCheckout.map { it.file("src/main/java/org/dyn4j/world/ValueMixer.java") })
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-contact-android-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamContactAndroidTests") {
+    dependsOn(compileUpstreamContactAndroidTests, androidRuntimeJar)
+    classpath(compileUpstreamContactAndroidTests.flatMap { it.destinationDirectory }, androidRuntimeJar,
+        jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(contactTestNames.map { "org.dyn4j.dynamics.contact.$it" })
+}
 
 val contactConsumerSource = file("src/jvmConsumer/java/ContactConsumer.java")
 val baselineContactConsumer by tasks.registering(JavaCompile::class) {
@@ -1614,6 +1631,14 @@ tasks.register<Exec>("verifyContactAndroidApi") {
         commandLine("python3", rootProject.file("scripts/verify-contact-jvm-api.py").absolutePath,
             baseline.singleFile.absolutePath,
             layout.buildDirectory.file("intermediates/compile_library_classes_jar/androidMain/bundleAndroidMainClassesToCompileJar/classes.jar").get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyContactAndroidRuntimeApi") {
+    dependsOn(verifyBaseline, androidRuntimeJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-contact-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/runtime_library_classes_jar/androidMain/bundleAndroidMainClassesToRuntimeJar/classes.jar").get().asFile.absolutePath)
     }
 }
 

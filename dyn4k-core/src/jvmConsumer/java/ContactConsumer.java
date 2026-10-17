@@ -15,10 +15,12 @@ import org.dyn4j.dynamics.Settings;
 import org.dyn4j.dynamics.TimeStep;
 import org.dyn4j.dynamics.contact.Contact;
 import org.dyn4j.dynamics.contact.ContactConstraint;
+import org.dyn4j.dynamics.contact.ContactConstraintSolver;
 import org.dyn4j.dynamics.contact.ContactUpdateHandler;
 import org.dyn4j.dynamics.contact.ForceCollisionTimeOfImpactSolver;
 import org.dyn4j.dynamics.contact.SequentialImpulses;
 import org.dyn4j.dynamics.contact.SolvedContact;
+import org.dyn4j.dynamics.contact.TimeOfImpactSolver;
 import org.dyn4j.geometry.Circle;
 import org.dyn4j.geometry.MassType;
 import org.dyn4j.geometry.Vector2;
@@ -35,6 +37,28 @@ public final class ContactConsumer {
         protected void warmStart(List<ContactConstraint<Body>> constraints, TimeStep step, Settings settings) {
             warmStarts++;
             super.warmStart(constraints, step, settings);
+        }
+    }
+
+    private static final class DelegatingSolver implements ContactConstraintSolver<Body> {
+        private final SequentialImpulses<Body> delegate = new SequentialImpulses<Body>();
+        public void initialize(List<ContactConstraint<Body>> contacts, TimeStep step, Settings settings) {
+            delegate.initialize(contacts, step, settings);
+        }
+        public void solveVelocityContraints(List<ContactConstraint<Body>> contacts, TimeStep step, Settings settings) {
+            delegate.solveVelocityContraints(contacts, step, settings);
+        }
+        public boolean solvePositionContraints(List<ContactConstraint<Body>> contacts, TimeStep step, Settings settings) {
+            return delegate.solvePositionContraints(contacts, step, settings);
+        }
+    }
+
+    private static final class CountingToiSolver extends ForceCollisionTimeOfImpactSolver<Body> {
+        private int calls;
+        @Override
+        public void solve(Body first, Body second, TimeOfImpact toi, Settings settings) {
+            calls++;
+            super.solve(first, second, toi, settings);
         }
     }
 
@@ -99,6 +123,7 @@ public final class ContactConsumer {
         solver.initialize(constraints, step, settings);
         solver.solveVelocityContraints(constraints, step, settings);
         require(solver.warmStarts == 1);
+        require(new DelegatingSolver().solvePositionContraints(Collections.<ContactConstraint<Body>>emptyList(), step, settings));
         require(first.getLinearVelocity().x < 1.0);
         require(second.getLinearVelocity().x > 0.0);
         require(liveContacts.get(0).isSolved());
@@ -106,6 +131,12 @@ public final class ContactConsumer {
         constraint.update(manifold, settings, handler);
         require(callbacks[1] == 1);
         require(liveContacts.get(0).getNormalImpulse() == impulse);
+        settings.setWarmStartingEnabled(false);
+        constraint.update(manifold, settings, handler);
+        require(liveContacts.get(0).getNormalImpulse() == 0.0);
+        fixture1.setSensor(true);
+        constraint.update(manifold, settings, handler);
+        require(liveContacts.get(0).isIgnored());
         manifold.clear();
         constraint.update(manifold, settings, handler);
         require(callbacks[2] == 1 && liveContacts.isEmpty());
@@ -122,7 +153,10 @@ public final class ContactConsumer {
         separation.setNormal(new Vector2(1.0, 0.0));
         TimeOfImpact toi = new TimeOfImpact();
         toi.setSeparation(separation);
-        new ForceCollisionTimeOfImpactSolver<Body>().solve(moving, fixed, toi, settings);
+        CountingToiSolver customToi = new CountingToiSolver();
+        TimeOfImpactSolver<Body> toiSeam = customToi;
+        toiSeam.solve(moving, fixed, toi, settings);
+        require(customToi.calls == 1);
         require(moving.getTransform().getTranslationX() == 0.2);
         require(fixed.getTransform().getTranslationX() == 2.5);
 
