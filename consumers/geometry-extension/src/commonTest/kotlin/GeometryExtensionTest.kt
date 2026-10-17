@@ -10,6 +10,7 @@ import kotlin.test.assertTrue
 private class CustomEllipse : Ellipse(2.0, 1.0) {
     override fun getWidth(): Double = 9.0
     override fun getHeight(): Double = 8.0
+    fun storedHalfWidth(): Double = halfWidth
 }
 
 private class CustomBounds : AABB(0.0, 0.0, 1.0, 1.0) {
@@ -28,12 +29,14 @@ private class CustomRay : Ray(Vector2(1.0, 0.0)) {
 class GeometryExtensionTest {
     @Test
     fun publicGeometryOverridesDispatchThroughBaseTypes() {
-        val ellipse: Ellipse = CustomEllipse()
+        val ellipseExtension = CustomEllipse()
+        val ellipse: Ellipse = ellipseExtension
         val bounds: AABB = CustomBounds()
         val interval: Interval = CustomInterval()
         val ray: Ray = CustomRay()
         assertEquals(9.0, ellipse.getWidth())
         assertEquals(8.0, ellipse.getHeight())
+        assertEquals(1.0, ellipseExtension.storedHalfWidth())
         assertTrue(ellipse.toString().contains("Width=9") && ellipse.toString().contains("Height=8"))
         assertEquals(7.0, bounds.getWidth())
         assertEquals(-1.0, bounds.getMinX())

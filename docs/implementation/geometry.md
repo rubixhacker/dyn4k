@@ -16,10 +16,13 @@ the root `org.dyn4j.geometry` package and the supporting declarations used by
 The JVM and Android archives shape package fields and static entry points from
 common Kotlin classes. The owned classes use `@kotlin.jvm.JvmField` for
 protected stored fields. This keeps direct field access without adding helper
-methods that can collide with Java subclass methods. Private stored fields keep
-private Kotlin accessors. The strict geometry audit checks 551 baseline
-declarations in 31 owned types on both archives. The all-root audit also checks
-foundation declarations after the integration merge.
+methods that can collide with Java subclass methods. Six shape classes retain
+protected field visibility in the archives, even where the Java baseline uses
+package fields. This safe widening lets Kotlin subclasses use the same fields
+described by their metadata. Private stored fields keep private Kotlin
+accessors. The strict geometry audit checks 551 baseline declarations in 31
+owned types on both archives. The all-root audit also checks foundation
+declarations after the integration merge.
 
 Common Kotlin marks every baseline-overridable method in the owned open classes
 `open`. `Link.rotate(double, double, double)` and `Link.translate(double,

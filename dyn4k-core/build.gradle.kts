@@ -113,7 +113,7 @@ val jvmApi = mapOf(
         protectedFields = setOf("center", "radius", "userData")
     ),
     "org/dyn4j/geometry/Polygon" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals"),
+        protectedFields = setOf("vertices", "normals"),
         packageMethods = setOf("getFarthestVertexIndex"),
         packageConstructorDescriptors = setOf(
             "(Lorg/dyn4j/geometry/Vector2;D[Lorg/dyn4j/geometry/Vector2;[Lorg/dyn4j/geometry/Vector2;)V"
@@ -164,22 +164,24 @@ val jvmApi = mapOf(
         packageFields = setOf("width", "height")
     ),
     "org/dyn4j/geometry/Capsule" to JvmApiSpec(
-        packageFields = setOf("length", "capRadius", "foci", "localXAxis"),
-        protectedFields = setOf("EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR")
+        protectedFields = setOf(
+            "length", "capRadius", "foci", "localXAxis",
+            "EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR"
+        )
     ),
     "org/dyn4j/geometry/Ellipse" to JvmApiSpec(
-        packageFields = setOf("halfWidth", "halfHeight", "rotation"),
+        protectedFields = setOf("halfWidth", "halfHeight", "rotation"),
         staticMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse"),
         packageMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse")
     ),
     "org/dyn4j/geometry/HalfEllipse" to JvmApiSpec(
-        packageFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
+        protectedFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
     ),
     "org/dyn4j/geometry/Slice" to JvmApiSpec(
-        packageFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
+        protectedFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
     ),
     "org/dyn4j/geometry/Segment" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals", "length"),
+        protectedFields = setOf("vertices", "normals", "length"),
         staticMethods = setOf(
             "getLocation", "getPointOnLineClosestToPoint", "getPointOnSegmentClosestToPoint",
             "getLineIntersection", "getSegmentIntersection", "getFarthestFeature", "getFarthestPoint"
