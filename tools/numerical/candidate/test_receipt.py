@@ -5,9 +5,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare
+import same_run
 
 
 TOOL = Path(__file__).with_name("receipt.py")
@@ -59,6 +62,18 @@ class ReceiptConsumerTest(unittest.TestCase):
                 result = self.inspect(rows)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(json.loads(result.stdout)["status"], "FAILED")
+
+    def test_literal_instrumented_callback_is_not_a_state_snapshot(self):
+        fixture = {"counts": {"state": 0, "instrumented-callback": 1}}
+        rows = [(0, {"kind": "instrumented-callback", "event": "experimental-input-binding",
+                     "values": ["pinned source", "experiment declaration"]})]
+        with patch.object(compare, "records", return_value=iter(rows)):
+            self.assertEqual(same_run.inspect(fixture, self.root / "unused"),
+                             {"states": 0, "endpoint_copies": 0, "instrumented_callbacks": 1})
+        rows[0][1]["values"] = [1]
+        with patch.object(compare, "records", return_value=iter(rows)):
+            with self.assertRaisesRegex(compare.Rejected, "unrecognized instrumented callback value"):
+                same_run.inspect(fixture, self.root / "unused")
 
 
 if __name__ == "__main__":

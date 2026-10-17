@@ -23,8 +23,14 @@ def inspect(fixture, trace):
             if row["state"] != previous_state or row["step"] != states:
                 raise compare.Rejected("outer endpoint is not a state copy")
         elif kind == "instrumented-callback":
-            for state in row.get("values", []):
-                compare.check_snapshot(state)
+            values = row.get("values")
+            if not isinstance(values, list):
+                raise compare.Rejected("instrumented callback values are missing")
+            for value in values:
+                if isinstance(value, dict):
+                    compare.check_snapshot(value)
+                elif not isinstance(value, str):
+                    raise compare.Rejected("unrecognized instrumented callback value")
             callbacks += 1
         elif kind == "event":
             for payload in row.get("payload", []):
