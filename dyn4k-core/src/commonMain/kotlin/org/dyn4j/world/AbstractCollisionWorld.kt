@@ -70,38 +70,31 @@ import org.dyn4j.world.result.RaycastResult
 @Suppress("UNCHECKED_CAST")
 private fun <Q> worldUnsafe(value: Q?): Q = value as Q
 
-internal fun <Q> worldLiveUnmodifiableList(backing: MutableList<Q>): List<Q> =
-    worldPlatformUnmodifiableList(worldReadOnlyView(backing))
+internal fun <Q> worldLiveUnmodifiableList(backing: MutableList<Q>): List<Q> {
+    if (backing is WorldTrackedArrayList<*>) {
+        @Suppress("UNCHECKED_CAST")
+        return (backing as WorldTrackedArrayList<Q>).liveView()
+    }
+    return worldPlatformUnmodifiableList(worldReadOnlyView(backing))
+}
 
-private fun <Q> worldReadOnlyView(backing: MutableList<Q>): MutableList<Q> = object : AbstractMutableList<Q>(), RandomAccess {
+private fun <Q> worldReadOnlyView(backing: MutableList<Q>): List<Q> = object : AbstractList<Q>(), RandomAccess {
     override val size: Int get() = backing.size
     override fun get(index: Int): Q = backing[index]
-    override fun set(index: Int, element: Q): Q = throw UnsupportedOperationException()
-    override fun add(index: Int, element: Q): Unit = throw UnsupportedOperationException()
-    override fun removeAt(index: Int): Q = throw UnsupportedOperationException()
-    override fun clear(): Unit = throw UnsupportedOperationException()
-    override fun addAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
-    override fun addAll(index: Int, elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
-    override fun removeAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
-    override fun retainAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
-    override fun iterator(): MutableIterator<Q> = listIterator()
-    override fun listIterator(): MutableListIterator<Q> = listIterator(0)
-    override fun listIterator(index: Int): MutableListIterator<Q> {
+    override fun iterator(): Iterator<Q> = listIterator()
+    override fun listIterator(): ListIterator<Q> = listIterator(0)
+    override fun listIterator(index: Int): ListIterator<Q> {
         val iterator = backing.listIterator(index)
-        return object : MutableListIterator<Q> {
+        return object : ListIterator<Q> {
             override fun hasNext() = iterator.hasNext()
             override fun next() = iterator.next()
             override fun hasPrevious() = iterator.hasPrevious()
             override fun previous() = iterator.previous()
             override fun nextIndex() = iterator.nextIndex()
             override fun previousIndex() = iterator.previousIndex()
-            override fun remove(): Unit = throw UnsupportedOperationException()
-            override fun add(element: Q): Unit = throw UnsupportedOperationException()
-            override fun set(element: Q): Unit = throw UnsupportedOperationException()
         }
     }
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Q> =
-        worldReadOnlyView(backing.subList(fromIndex, toIndex))
+    override fun subList(fromIndex: Int, toIndex: Int): List<Q> = worldReadOnlyView(backing.subList(fromIndex, toIndex))
 }
 
 abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : CollisionData<T, E>> :
