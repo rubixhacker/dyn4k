@@ -66,6 +66,11 @@ def expand(rows):
             for config in configs[row["kind"]]]
 
 
+def target_publication_name(module, target):
+    suffix = target.lower().replace("wasmjs", "wasm-js").replace("wasmwasi", "wasm-wasi")
+    return f"{module}-{suffix}"
+
+
 def check_providers(graph):
     if re.search(r"(?:^|\W)org\.dyn4j:dyn4j(?::|\W)", graph) and re.search(
         r"(?:^|\W)io\.github\.rubixhacker:dyn4k-core(?:-jvm)?(?::|\W)", graph
@@ -73,7 +78,7 @@ def check_providers(graph):
         raise ValueError("duplicate org.dyn4j provider: exclude org.dyn4j:dyn4j from the consumer dependency graph")
 
 
-def evaluate(case, evidence, candidate_sha=None, artifact_hashes=None):
+def evaluate(case, evidence, candidate_sha=None, artifact_hashes_by_target=None):
     result = {"id": case["id"], "status": "NOT_RUN"}
     if evidence is None:
         result["reason"] = "no evidence supplied"
@@ -92,8 +97,9 @@ def evaluate(case, evidence, candidate_sha=None, artifact_hashes=None):
         problems.append("candidate SHA differs from report")
     if not SHA64.fullmatch(str(evidence.get("artifact_sha256", ""))):
         problems.append("artifact SHA-256 is missing or malformed")
-    if artifact_hashes is not None and evidence.get("artifact_sha256") not in artifact_hashes:
-        problems.append("artifact SHA-256 is absent from staged audit")
+    if (artifact_hashes_by_target is not None and evidence.get("artifact_sha256") not in
+            artifact_hashes_by_target.get(case["target"], set())):
+        problems.append("artifact SHA-256 is not the staged dyn4k binary for this target")
     if not evidence.get("runtime_identity"):
         problems.append("runtime identity is empty")
     if not evidence.get("runtime_version"):
@@ -137,7 +143,7 @@ def audit_staging(root, candidate_sha):
             published = {item.get("available-at", {}).get("module")
                          for item in root_data.get("variants", [])}
             published.discard(None)
-            expected = {module + "-" + target.lower().replace("wasmjs", "wasm-js").replace("wasmwasi", "wasm-wasi")
+            expected = {target_publication_name(module, target)
                         for target in {row["target"] for row in matrix()}}
             if published != expected:
                 errors.append(f"{module}: root metadata target mapping differs: missing={sorted(expected - published)} extra={sorted(published - expected)}")
@@ -196,6 +202,24 @@ def audit_staging(root, candidate_sha):
                             errors.append(f"{path.name}: embedded license missing")
     return {"candidate_sha": candidate_sha, "artifacts": artifacts,
             "status": "PASSED" if not errors else "FAILED", "errors": errors}
+
+
+def target_binary_hashes(artifacts):
+    targets_by_publication = {
+        target_publication_name("dyn4k", row["target"]): row["target"]
+        for row in matrix()
+    }
+    result = {target: set() for target in targets_by_publication.values()}
+    for artifact in artifacts:
+        path = Path(artifact["path"])
+        module = path.parts[-3] if len(path.parts) >= 3 else ""
+        target = targets_by_publication.get(module)
+        if target is None or path.suffix.lower() not in (".jar", ".aar", ".klib"):
+            continue
+        if any(term in path.name.lower() for term in ("sources", "javadoc", "dokka", "license")):
+            continue
+        result[target].add(artifact["sha256"])
+    return result
 
 
 def run_probe(command, report_paths, candidate_sha, output):
@@ -327,7 +351,7 @@ def main():
     audit_data = json.loads(args.audit.read_text()) if args.audit else None
     if audit_data and audit_data.get("candidate_sha") != args.candidate_sha:
         parser.error("audit candidate SHA differs from report")
-    artifact_hashes = {item["sha256"] for item in audit_data["artifacts"]} if audit_data else None
+    artifact_hashes_by_target = target_binary_hashes(audit_data["artifacts"]) if audit_data else None
     cases = expand(matrix())
     availability = json.loads(args.availability.read_text()) if args.availability else {}
     valid_availability = {row["target"] for row in matrix()} | {
@@ -347,7 +371,8 @@ def main():
                         availability.get(case["target"]))))
             if reason:
                 evidence[case["id"]] = {"unavailable_reason": reason}
-    results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha, artifact_hashes) for case in cases]
+    results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha, artifact_hashes_by_target)
+               for case in cases]
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
                          for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")},
