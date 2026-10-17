@@ -24,6 +24,8 @@
  */
 package org.dyn4j
 
-interface Copyable<T : Copyable<T>> {
+// Kotlin 2.4.20 needs this suppression to express the baseline bound.
+@Suppress("FINITE_BOUNDS_VIOLATION")
+interface Copyable<T : Copyable<out T>> {
     fun copy(): T
 }

@@ -91,15 +91,6 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                         val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
                         val visitor = object : ClassVisitor(Opcodes.ASM9, writer) {
                             val present = mutableSetOf<Pair<String, String>>()
-                            override fun visit(
-                                version: Int, access: Int, name: String, signature: String?,
-                                superName: String?, interfaces: Array<out String>?
-                            ) {
-                                val revised = if (owner == "org/dyn4j/Copyable")
-                                    "<T::Lorg/dyn4j/Copyable<+TT;>;>Ljava/lang/Object;"
-                                else signature
-                                super.visit(version, access, name, revised, superName, interfaces)
-                            }
                             override fun visitField(
                                 access: Int, name: String, descriptor: String,
                                 signature: String?, value: Any?

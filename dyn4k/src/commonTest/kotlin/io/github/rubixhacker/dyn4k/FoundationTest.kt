@@ -3,7 +3,21 @@ package io.github.rubixhacker.dyn4k
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
+
+private open class CopyParent(val value: Int) : Copyable<CopyChild> {
+    override fun copy() = CopyChild(value)
+}
+
+private class CopyChild(value: Int) : CopyParent(value)
+
+private class CopyOther : Copyable<CopyParent> {
+    override fun copy(): CopyParent = CopyChild(17)
+}
+
+private fun copyParent(value: Copyable<CopyParent>): CopyParent = value.copy()
 
 class FoundationTest {
     @Test
@@ -76,6 +90,15 @@ class FoundationTest {
         transform.identity()
         assertEquals(1.0, sameTransform.getCost(), 1e-12)
         assertEquals(0.0, sameTransform.getSint(), 1e-12)
+    }
+
+    @Test
+    fun copyableAcceptsParentWhoseCopyIsAChild() {
+        val parent = CopyParent(3)
+        assertEquals(3, parent.copy().value)
+        val copiedParent = copyParent(CopyOther())
+        assertEquals(17, copiedParent.value)
+        assertTrue(copiedParent is CopyChild)
     }
 
     @Test

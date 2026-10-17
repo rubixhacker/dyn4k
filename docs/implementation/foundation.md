@@ -56,6 +56,11 @@ Common Rotation and Transform define public `getCost()` and `getSint()` methods.
 JVM accessor names keep their protected properties from colliding with those
 methods. JVM and Android archives retain the baseline protected fields.
 
+Common Copyable uses the baseline covariant bound. Kotlin 2.4.20 requires a
+targeted finite-bound suppression for this declaration. The compiler emits
+the matching JVM generic signature. Check the bound again before changing
+the Kotlin compiler version.
+
 To stage the two modules locally, publish the selected target publications
 to `build/staging-repository`. Staging does not publish a public release.
 The POM files declare the BSD 3-Clause license and the `dyn4k` dependency
