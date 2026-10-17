@@ -1,5 +1,7 @@
 /*
+ * Copyright (c) 2010-2020 William Bittle  http://www.dyn4j.org/
  * Copyright (c) 2010-2021 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2022 William Bittle  http://www.dyn4j.org/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -214,14 +216,16 @@ open class EarClipping : AbstractDecomposer(), Triangulator {
     }
 
     override fun decompose(vararg points: Vector2?): List<Convex> {
-        val dcel = createTriangulation(*points)
+        val dcel = createTriangulationArray(points)
         dcel.hertelMehlhorn()
         return dcel.getConvexDecomposition()
     }
 
-    override fun triangulate(vararg points: Vector2?): List<Triangle> = createTriangulation(*points).getTriangulation()
+    override fun triangulate(vararg points: Vector2?): List<Triangle> = createTriangulationArray(points).getTriangulation()
 
-    fun createTriangulation(vararg points: Vector2?): DoubleEdgeList {
+    fun createTriangulation(vararg points: Vector2?): DoubleEdgeList = createTriangulationArray(points)
+
+    private fun createTriangulationArray(points: Array<out Vector2?>): DoubleEdgeList {
         if (points.size < 4) throw ValueOutOfRangeException(
             "points.length", points.size, ValueOutOfRangeException.MUST_BE_GREATER_THAN_OR_EQUAL_TO, 4
         )

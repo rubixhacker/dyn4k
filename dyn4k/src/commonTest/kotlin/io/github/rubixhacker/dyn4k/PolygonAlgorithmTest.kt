@@ -3,6 +3,7 @@ package io.github.rubixhacker.dyn4k
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.dyn4j.geometry.hull.DivideAndConquer
 import org.dyn4j.geometry.hull.GiftWrap
@@ -26,6 +27,19 @@ class PolygonAlgorithmTest {
             )
             assertEquals(4, hull.size)
             assertEquals(4.0, Polygon(*hull).getArea(), 1e-12)
+        }
+    }
+
+    @Test
+    fun shortPointCloudsRetainNullElementsAcrossHullGenerators() {
+        for (generator in listOf(MonotoneChain(), GrahamScan(), GiftWrap(), DivideAndConquer())) {
+            assertEquals(0, generator.generate().size)
+            val one = generator.generate(null)
+            assertEquals(1, one.size)
+            assertNull(one[0])
+            val two = generator.generate(Vector2(0.0, 0.0), null)
+            assertEquals(2, two.size)
+            assertNull(two[1])
         }
     }
 
@@ -125,7 +139,8 @@ class PolygonAlgorithmTest {
         for (simplifier in listOf(
             VertexClusterReduction(0.0), DouglasPeucker(0.0, 0.0), Visvalingam(0.0, 0.0)
         )) {
-            assertEquals(emptyList(), simplifier.simplify(emptyList()))
+            val empty = mutableListOf<Vector2?>()
+            assertTrue(simplifier.simplify(empty) === empty)
             assertEquals(null, simplifier.simplify(null as List<Vector2?>?))
             assertEquals(4, simplifier.simplify(polygon)!!.size)
         }

@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2010-2021 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2022 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2026 William Bittle  http://www.dyn4j.org/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -123,8 +125,10 @@ open class VertexClusterReduction(val clusterTolerance: Double) : AbstractSimpli
         )
     }
 
+    @Suppress("UNCHECKED_CAST")
     override fun simplify(vertices: List<Vector2?>?): List<Vector2>? {
-        if (vertices == null || vertices.isEmpty()) return vertices?.filterNotNull()
+        if (vertices == null) return null
+        if (vertices.isEmpty()) return vertices as List<Vector2>
         val all = buildVertexList(vertices)
         if (all.isEmpty()) return emptyList()
         if (all.size == 1) return listOf(all[0].point)
