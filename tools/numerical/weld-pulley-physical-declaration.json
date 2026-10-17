@@ -1,0 +1,28 @@
+{
+  "status": "SELECTED_BEFORE_BASELINE_EXECUTION",
+  "decision": "Prospective application-level physical quality for a separate Weld and Pulley fixture. The four older traces keep their parity role and measured residual failures.",
+  "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "step_seconds": "1/60",
+  "steps_per_case": 36000,
+  "phases": [["excitation", 1, 60], ["long-run", 61, 36000]],
+  "cases": {
+    "weld-spring-equal": {
+      "geometry": "A fixed 10 m by 0.5 m rectangle at the origin and a dynamic 1 m by 0.5 m rectangle centered at (0,2) m. The joint world anchor is (-0.5,2) m. The Weld spring is enabled at 8 Hz with damping ratio 0.3; equal angular limits [0,0] rad are enabled. Gravity is (0,-9.8) m/s^2. The dynamic body starts with velocity (2,0) m/s and a queued force (0,-10) N applied at world point (0.5,2) m before step 1. No later body or joint mutation.",
+      "metrics": {
+        "anchor_gap_m": {"absolute_limit": "0.01", "relative_limit": "0"},
+        "angular_error_rad": {"absolute_limit": "0.017453292519943295", "relative_limit": "0"}
+      },
+      "meaning": "A softly constrained welded 1 m member may move by at most 1 cm at its shared anchor and rotate by at most one degree relative to the fixed member at every post-step sample."
+    },
+    "pulley-taut": {
+      "geometry": "Two dynamic radius-0.5 m circles start at (-1,0) and (1,0) m. Fixed pulley anchors are (-1,1) and (1,1) m. Body anchors start at their centers. The ratio is 1 and the rope starts at 2 m. Slack is disabled. Gravity is (0,-9.8) m/s^2. The second body starts with velocity (0,2) m/s. No later body or joint mutation.",
+      "metrics": {
+        "absolute_rope_error_m": {"absolute_limit": "0.01", "relative_limit": "0"}
+      },
+      "meaning": "The taut 2 m rope may depart from its fixed total length by at most 1 cm at every post-step sample. Both extension and compression count."
+    }
+  },
+  "metric_definition": "Weld anchor gap is Euclidean distance between getAnchor1 and getAnchor2. Weld angular error is the shortest directed angle from the joint's initial relative angle to getAngularTranslation. Pulley error is |distance(getAnchor1,getPulleyAnchor1)+distance(getAnchor2,getPulleyAnchor2)-getLength| with ratio exactly 1.",
+  "basis": "The limits express an application choice: one-centimetre attachment play on a one-metre member, one degree of relative orientation, and one-centimetre rope-length play on a two-metre rope. They are neither dyn4j solver stopping tolerances nor limits fitted to recorded maxima. A baseline failure remains a failure."
+}
