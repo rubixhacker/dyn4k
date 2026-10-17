@@ -24,7 +24,6 @@ plugins {
 data class JvmApiSpec(
     val publicFields: Set<String> = emptySet(),
     val protectedFields: Set<String> = emptySet(),
-    val publicGetters: Set<String> = emptySet(),
     val staticMethods: Set<String> = emptySet()
 )
 
@@ -42,7 +41,6 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Rotation" to JvmApiSpec(
         protectedFields = setOf("cost", "sint"),
-        publicGetters = setOf("getCost", "getSint"),
         staticMethods = setOf(
             "of", "ofDegrees", "rotation0", "rotation45", "rotation90", "rotation135",
             "rotation180", "rotation225", "rotation270", "rotation315",
@@ -56,8 +54,7 @@ val jvmApi = mapOf(
         publicFields = setOf("m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22")
     ),
     "org/dyn4j/geometry/Transform" to JvmApiSpec(
-        protectedFields = setOf("cost", "sint", "x", "y"),
-        publicGetters = setOf("getCost", "getSint")
+        protectedFields = setOf("cost", "sint", "x", "y")
     )
 )
 
@@ -120,11 +117,7 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 signature: String?, exceptions: Array<out String>?
                             ): MethodVisitor {
                                 present += name to descriptor
-                                val visibility = Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED or Opcodes.ACC_PRIVATE
-                                val revised = if (name in spec.publicGetters)
-                                    (access and visibility.inv() and Opcodes.ACC_FINAL.inv()) or
-                                        Opcodes.ACC_PUBLIC else access
-                                return super.visitMethod(revised, name, descriptor, signature, exceptions)
+                                return super.visitMethod(access, name, descriptor, signature, exceptions)
                             }
                             override fun visitEnd() {
                                 for ((name, descriptor) in companionMethods[owner].orEmpty()) {

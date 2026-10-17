@@ -34,7 +34,11 @@ import kotlin.math.sin
 import org.dyn4j.Copyable
 
 open class Transform : Transformable, Copyable<Transform> {
+    @get:kotlin.jvm.JvmName("getCostField")
+    @set:kotlin.jvm.JvmName("setCostField")
     @JvmFieldBridge protected var cost: Double = 1.0
+    @get:kotlin.jvm.JvmName("getSintField")
+    @set:kotlin.jvm.JvmName("setSintField")
     @JvmFieldBridge protected var sint: Double = 0.0
     @JvmFieldBridge protected var x: Double = 0.0
     @JvmFieldBridge protected var y: Double = 0.0
@@ -141,6 +145,8 @@ open class Transform : Transformable, Copyable<Transform> {
     open fun setTranslation(x: Double, y: Double) { this.x = x; this.y = y }
     open fun setTranslation(translation: Vector2) = setTranslation(translation.x, translation.y)
     open fun getTranslationTransform() = Transform(1.0, 0.0, x, y)
+    open fun getCost() = cost
+    open fun getSint() = sint
     open fun costValue() = cost
     open fun sintValue() = sint
     open fun getRotationAngle(): Double {

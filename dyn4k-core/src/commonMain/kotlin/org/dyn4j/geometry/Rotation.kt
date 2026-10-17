@@ -38,7 +38,11 @@ import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
 
 open class Rotation : Copyable<Rotation> {
+    @get:kotlin.jvm.JvmName("getCostField")
+    @set:kotlin.jvm.JvmName("setCostField")
     @JvmFieldBridge protected var cost: Double = 1.0
+    @get:kotlin.jvm.JvmName("getSintField")
+    @set:kotlin.jvm.JvmName("setSintField")
     @JvmFieldBridge protected var sint: Double = 0.0
 
     protected constructor(cost: Double, sint: Double) { this.cost = cost; this.sint = sint }
@@ -68,6 +72,8 @@ open class Rotation : Copyable<Rotation> {
     open fun set(rotation: Rotation): Rotation { cost = rotation.cost; sint = rotation.sint; return this }
     open fun setIdentity(): Rotation { cost = 1.0; sint = 0.0; return this }
     open fun set(angle: Double): Rotation { cost = cos(angle); sint = sin(angle); return this }
+    open fun getCost() = cost
+    open fun getSint() = sint
     open fun costValue() = cost
     open fun sintValue() = sint
     open fun toRadians(): Double {

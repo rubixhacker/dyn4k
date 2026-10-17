@@ -59,6 +59,26 @@ class FoundationTest {
     }
 
     @Test
+    fun rotationAndTransformExposeMutableCompatibilityValues() {
+        val rotation = Rotation()
+        val sameRotation: org.dyn4j.geometry.Rotation = rotation
+        assertSame(rotation, rotation.set(kotlin.math.PI / 2.0))
+        assertSame(rotation, sameRotation)
+        assertEquals(0.0, rotation.getCost(), 1e-12)
+        assertEquals(1.0, rotation.getSint(), 1e-12)
+
+        val transform = Transform()
+        val sameTransform: org.dyn4j.geometry.Transform = transform
+        transform.setRotation(rotation)
+        assertSame(transform, sameTransform)
+        assertEquals(0.0, transform.getCost(), 1e-12)
+        assertEquals(1.0, transform.getSint(), 1e-12)
+        transform.identity()
+        assertEquals(1.0, sameTransform.getCost(), 1e-12)
+        assertEquals(0.0, sameTransform.getSint(), 1e-12)
+    }
+
+    @Test
     fun epsilonAndVectorOperationsMatchWorkedValues() {
         assertEquals(1.1102230246251565e-16, Epsilon.E, 0.0)
         val projected = Vector2(3.0, 4.0).project(Vector2(1.0, 0.0))

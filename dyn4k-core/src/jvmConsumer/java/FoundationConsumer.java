@@ -28,6 +28,12 @@ public final class FoundationConsumer {
             throw new AssertionError("protected transform");
         ExposedRotation protectedRotation = new ExposedRotation();
         if (protectedRotation.getSint() != 1.0) throw new AssertionError("protected rotation");
+        Rotation overridingRotation = new OverrideRotation();
+        if (overridingRotation.getCost() != 3.0 || overridingRotation.getSint() != 3.0)
+            throw new AssertionError("rotation virtual dispatch");
+        Transform overridingTransform = new OverrideTransform();
+        if (overridingTransform.getCost() != 3.0 || overridingTransform.getSint() != 3.0)
+            throw new AssertionError("transform virtual dispatch");
         try {
             new Matrix22((double[]) null);
             throw new AssertionError("missing null exception");
@@ -35,7 +41,7 @@ public final class FoundationConsumer {
             if (!"values cannot be null".equals(expected.getMessage()))
                 throw new AssertionError("null exception message", expected);
         }
-        System.out.println("FoundationConsumer: 10 checks passed");
+        System.out.println("FoundationConsumer: 12 checks passed");
     }
 
     private static final class ExposedTransform extends Transform {
@@ -45,5 +51,15 @@ public final class FoundationConsumer {
     private static final class ExposedRotation extends Rotation {
         ExposedRotation() { super(0.0, 1.0); }
         @Override public double getCost() { return super.getCost(); }
+    }
+
+    private static final class OverrideRotation extends Rotation {
+        @Override public double getCost() { return this.cost + 2.0; }
+        @Override public double getSint() { return this.sint + 3.0; }
+    }
+
+    private static final class OverrideTransform extends Transform {
+        @Override public double getCost() { return this.cost + 2.0; }
+        @Override public double getSint() { return this.sint + 3.0; }
     }
 }

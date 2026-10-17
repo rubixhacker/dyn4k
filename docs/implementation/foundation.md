@@ -52,6 +52,10 @@ a public/protected declaration comparison check the JVM JAR. The Android
 consumer checks the Android class archives. Other targets use the common
 Kotlin declarations without an archive step.
 
+Common Rotation and Transform define public `getCost()` and `getSint()` methods.
+JVM accessor names keep their protected properties from colliding with those
+methods. JVM and Android archives retain the baseline protected fields.
+
 To stage the two modules locally, publish the selected target publications
 to `build/staging-repository`. Staging does not publish a public release.
 The POM files declare the BSD 3-Clause license and the `dyn4k` dependency
