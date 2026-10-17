@@ -331,8 +331,16 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             '\t' -> listOf('\\', 't')
             else -> listOf(character)
         } }.joinToString("") + "\""
-        is Double -> if (value.isFinite()) value.toString() else json(mapOf("nonfinite" to value.toString()))
-        is Float -> if (value.isFinite()) value.toString() else json(mapOf("nonfinite" to value.toString()))
+        is Double -> when {
+            value == 0.0 && 1.0 / value < 0.0 -> "-0.0"
+            value.isFinite() -> value.toString()
+            else -> json(mapOf("nonfinite" to value.toString()))
+        }
+        is Float -> when {
+            value == 0.0f && 1.0f / value < 0.0f -> "-0.0"
+            value.isFinite() -> value.toString()
+            else -> json(mapOf("nonfinite" to value.toString()))
+        }
         is Number, is Boolean -> value.toString()
         is List<*> -> value.joinToString(prefix = "[", postfix = "]", separator = ",") { json(it) }
         is Map<*, *> -> value.entries.sortedBy { it.key.toString() }.joinToString(prefix = "{", postfix = "}", separator = ",") { json(it.key.toString()) + ":" + json(it.value) }
