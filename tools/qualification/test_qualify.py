@@ -53,10 +53,24 @@ class QualificationTests(unittest.TestCase):
             self.assertIn((f"{prefix}org.dyn4j.geometry.GeometryCopyExtensionTest",
                            "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState" + suffix),
                           cases)
-            self.assertEqual(431, len(qualify.expected_probe_cases(
+            self.assertEqual(432, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
             self.assertEqual(2, len(qualify.expected_probe_cases(
                 manifest, groups["consumer-" + group_id])))
+
+    def test_frozen_core_manifest_names_integrated_epsilon_on_every_host(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        groups = {group["id"]: group for group in manifest["groups"]}
+        core_groups = [group for group in groups.values() if group["id"].startswith("core-")]
+        self.assertEqual(12, len(core_groups))
+        for group in core_groups:
+            prefix = group["classname"].removesuffix(
+                "org.dyn4j.geometry.FoundationPackageBridgeTest")
+            epsilon = (prefix + "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+                       "compute" + group["name_suffix"])
+            cases = qualify.expected_probe_cases(manifest, group)
+            self.assertEqual(432, len(cases), group["id"])
+            self.assertEqual(1, cases.count(epsilon), group["id"])
 
     def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())

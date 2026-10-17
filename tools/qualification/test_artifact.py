@@ -51,7 +51,7 @@ class RawArtifactTests(unittest.TestCase):
                         "manifest_sha256": qualify.manifest_digest(selected),
                         "started_at_ns": started, "finished_at_ns": finished}
 
-            source = probe(("core-macosArm64", "macosArm64"), 474)
+            source = probe(("core-macosArm64", "macosArm64"), 475)
             consumer = probe(("consumer-macosArm64",), 2)
             hosted = {"candidate_sha": sha, "target": target, "status": "PROBE_PASSED",
                       "runtime": {"system": "Darwin", "machine": "arm64",
@@ -96,8 +96,8 @@ class RawArtifactTests(unittest.TestCase):
             complete = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
                                              matrix_path, repository / "bundle-complete")
             self.assertEqual("PROBE_PASSED", complete["status"])
-            self.assertEqual(476, complete["executed"])
-            self.assertEqual(431, complete["groups"]["core-macosArm64"])
+            self.assertEqual(477, complete["executed"])
+            self.assertEqual(432, complete["groups"]["core-macosArm64"])
             self.assertEqual(4, len(complete["gav"]))
             self.assertEqual(4, len(list((repository / "bundle-complete/staged").rglob("*.pom"))))
             workflow_bundle = repository / "bundle-workflow"
@@ -166,7 +166,7 @@ class RawArtifactTests(unittest.TestCase):
             self.assertEqual("PROBE_FAILED", stale_xml["status"])
             self.assertIn("stale report", stale_xml["reason"])
             source_xml.write_bytes(original)
-            self.assertEqual(476, artifact.verify_bundle(repository / "bundle-complete",
+            self.assertEqual(477, artifact.verify_bundle(repository / "bundle-complete",
                                                           manifest, sha)["executed"])
             bundle = repository / "bundle-complete"
             bundled_sidecar = bundle / "json/hosted-macosArm64-source.json"
@@ -222,8 +222,8 @@ class RawArtifactTests(unittest.TestCase):
                                                      repository / "ubuntu-complete")
             self.assertEqual("PROBE_PASSED", complete_ubuntu["status"])
             self.assertEqual("Linux", complete_ubuntu["runtime"]["system"])
-            self.assertEqual(2858, complete_ubuntu["executed"])
-            self.assertEqual(2858, artifact.verify_bundle(repository / "ubuntu-complete",
+            self.assertEqual(2864, complete_ubuntu["executed"])
+            self.assertEqual(2864, artifact.verify_bundle(repository / "ubuntu-complete",
                                                            manifest, sha)["executed"])
             summary_path = repository / "ubuntu-complete/verification.json"
             summary = json.loads(summary_path.read_text())
