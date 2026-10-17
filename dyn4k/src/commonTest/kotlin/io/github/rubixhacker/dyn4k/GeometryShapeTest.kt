@@ -7,9 +7,72 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 import org.dyn4j.exception.ArgumentNullException
+import org.dyn4j.exception.EmptyCollectionException
+import org.dyn4j.exception.InvalidIndexException
 import org.dyn4j.exception.NullElementException
+import org.dyn4j.exception.ValueOutOfRangeException
 
 class GeometryShapeTest {
+    @Test
+    fun geometryExceptionsSupportCommonSubclasses() {
+        class Empty : EmptyCollectionException("points")
+        class Index : InvalidIndexException(2)
+        class Element : NullElementException("points", 2)
+        class Range : ValueOutOfRangeException("radius", 0.0)
+
+        assertEquals("points cannot be empty", Empty().message)
+        assertEquals("The index 2 is out of bounds", Index().message)
+        assertEquals("points contains a null element at index 2", Element().message)
+        assertEquals("radius cannot be 0.000000", Range().message)
+    }
+
+    @Test
+    fun curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState() {
+        val capsule = CopyAwareCapsule()
+        val capsuleCopy = capsule.duplicate()
+        assertTrue(capsuleCopy.firstFocus() is CopyTaggedVector)
+        assertEquals(11.0, capsuleCopy.firstFocus().x)
+        assertEquals(22.0, capsuleCopy.firstFocus().y)
+        assertFalse(capsuleCopy.firstFocus() === capsule.firstFocus())
+        capsule.firstFocus().x = 5.0
+        assertEquals(11.0, capsuleCopy.firstFocus().x)
+
+        val slice = CopyAwareSlice()
+        val sliceCopy = slice.duplicate()
+        assertTrue(sliceCopy.firstVertex() is CopyTaggedVector)
+        assertEquals(11.0, sliceCopy.firstVertex().x)
+        assertEquals(22.0, sliceCopy.firstVertex().y)
+        assertTrue(sliceCopy.firstNormal() is CopyTaggedVector)
+        assertEquals(13.0, sliceCopy.firstNormal().x)
+        assertEquals(24.0, sliceCopy.firstNormal().y)
+        assertFalse(sliceCopy.firstVertex() === slice.firstVertex())
+        slice.firstVertex().y = 7.0
+        assertEquals(22.0, sliceCopy.firstVertex().y)
+        assertEquals(0.7, sliceCopy.getTheta())
+    }
+
+    private class CopyTaggedVector(x: Double, y: Double) : Vector2(x, y) {
+        override fun copy(): Vector2 = CopyTaggedVector(x + 10.0, y + 20.0)
+    }
+
+    private class CopyAwareCapsule : Capsule {
+        constructor() : super(2.0, 4.0) { foci[0] = CopyTaggedVector(1.0, 2.0) }
+        private constructor(other: CopyAwareCapsule) : super(other)
+        fun duplicate() = CopyAwareCapsule(this)
+        fun firstFocus(): Vector2 = foci[0]
+    }
+
+    private class CopyAwareSlice : Slice {
+        constructor() : super(2.0, 0.7) {
+            vertices[0] = CopyTaggedVector(1.0, 2.0)
+            normals[0] = CopyTaggedVector(3.0, 4.0)
+        }
+        private constructor(other: CopyAwareSlice) : super(other)
+        fun duplicate() = CopyAwareSlice(this)
+        fun firstVertex(): Vector2 = vertices[0]
+        fun firstNormal(): Vector2 = normals[0]
+    }
+
     @Test
     fun cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() {
         val immutable = emptyList<Vector2?>()

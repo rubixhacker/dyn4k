@@ -32,14 +32,7 @@ import kotlin.math.sqrt
 import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
-open class Slice(radius: Double, theta: Double) : AbstractShape(
-    Vector2(2.0 * radius * sin(theta * 0.5) / (1.5 * theta), 0.0),
-    max(
-        2.0 * radius * sin(theta * 0.5) / (1.5 * theta),
-        Vector2(2.0 * radius * sin(theta * 0.5) / (1.5 * theta), 0.0)
-            .distance(Vector2(radius, 0.0).rotate(0.5 * theta))
-    )
-), Convex {
+open class Slice : AbstractShape, Convex {
     @get:kotlin.jvm.JvmName("getAlphaField")
     @JvmFieldBridge protected val alpha: Double
     @get:kotlin.jvm.JvmName("getCosAlphaField")
@@ -53,7 +46,14 @@ open class Slice(radius: Double, theta: Double) : AbstractShape(
     @get:kotlin.jvm.JvmName("getRotationFieldValue")
     @JvmFieldBridge protected val rotation: Rotation
 
-    init {
+    constructor(radius: Double, theta: Double) : super(
+        Vector2(2.0 * radius * sin(theta * 0.5) / (1.5 * theta), 0.0),
+        max(
+            2.0 * radius * sin(theta * 0.5) / (1.5 * theta),
+            Vector2(2.0 * radius * sin(theta * 0.5) / (1.5 * theta), 0.0)
+                .distance(Vector2(radius, 0.0).rotate(0.5 * theta))
+        )
+    ) {
         if (radius <= 0.0) throw ValueOutOfRangeException("radius", radius, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (theta <= 0.0) throw ValueOutOfRangeException("theta", theta, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (theta > PI) throw ValueOutOfRangeException("theta", theta, ValueOutOfRangeException.MUST_BE_LESS_THAN_OR_EQUAL_TO, PI)
@@ -69,12 +69,13 @@ open class Slice(radius: Double, theta: Double) : AbstractShape(
         rotation = Rotation()
     }
 
-    protected constructor(other: Slice) : this(other.sliceRadius, other.getTheta()) {
-        center.set(other.center)
-        this.radius = other.radius
-        rotation.set(other.rotation)
-        for (index in vertices.indices) vertices[index].set(other.vertices[index])
-        for (index in normals.indices) normals[index].set(other.normals[index])
+    protected constructor(other: Slice) : super(other) {
+        alpha = other.alpha
+        cosAlpha = other.cosAlpha
+        rotation = other.rotation.copy()
+        sliceRadius = other.sliceRadius
+        vertices = Array(other.vertices.size) { other.vertices[it].copy() }
+        normals = Array(other.normals.size) { other.normals[it].copy() }
     }
     override fun copy() = Slice(this)
     override fun toString() = "Slice[${super.toString()}|Radius=$sliceRadius|Theta=${getTheta()}]"
