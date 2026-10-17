@@ -261,8 +261,10 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
     override fun updateAtRestTime(timestep: TimeStep?, settings: Settings?): Double {
         if (atRestDetectionEnabled) {
             if (isStatic()) return -1.0
-            if (linearVelocity.getMagnitudeSquared() > settings!!.getMaximumAtRestLinearVelocitySquared() ||
-                abs(angularVelocity) > settings.getMaximumAtRestAngularVelocity()) atRestTime = 0.0
+            val maximumLinearVelocitySquared = settings!!.getMaximumAtRestLinearVelocitySquared()
+            val maximumAngularVelocity = settings.getMaximumAtRestAngularVelocity()
+            if (linearVelocity.getMagnitudeSquared() > maximumLinearVelocitySquared ||
+                abs(angularVelocity) > maximumAngularVelocity) atRestTime = 0.0
             else atRestTime += timestep!!.rawDeltaTime()
         } else atRestTime = 0.0
         return atRestTime

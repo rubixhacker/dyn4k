@@ -72,6 +72,18 @@ public class DynamicsConsumer {
         @Override public void set(Settings settings) { setCalls++; super.set(settings); }
     }
 
+    private static final class ThresholdSettings extends Settings {
+        final StringBuilder calls = new StringBuilder();
+        @Override public double getMaximumAtRestLinearVelocitySquared() {
+            calls.append('L');
+            return super.getMaximumAtRestLinearVelocitySquared();
+        }
+        @Override public double getMaximumAtRestAngularVelocity() {
+            calls.append('A');
+            return super.getMaximumAtRestAngularVelocity();
+        }
+    }
+
     private static final class SpecialFixture extends BodyFixture {
         int massCalls;
         SpecialFixture(Convex shape) { super(shape); }
@@ -138,6 +150,10 @@ public class DynamicsConsumer {
         OverriddenSettings settings = new OverriddenSettings();
         settings.reset();
         require(settings.setCalls == 0, "settings reset dispatch");
+        ThresholdSettings thresholds = new ThresholdSettings();
+        timingBody.setLinearVelocity(10.0, 0.0);
+        timingBody.updateAtRestTime(new TimeStep(0.1), thresholds);
+        require("LA".contentEquals(thresholds.calls), "rest threshold getter order");
         ProbeBody empty = new ProbeBody();
         empty.integrateVelocity(null, null, null);
         AABB sweep = new AABB(1.0, 1.0, 2.0, 2.0);
