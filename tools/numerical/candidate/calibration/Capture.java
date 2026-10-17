@@ -41,7 +41,9 @@ public final class Capture {
     public static void close() throws IOException { queries.close(); summary.close(); }
     public static boolean accepts(String id) {
         if(filter.isEmpty())return true;
-        for(String part:filter.split("&&",-1))if(part.isEmpty()||!id.contains(part))return false;
+        String[] parts=filter.split("&&",-1);
+        if(parts[0].isEmpty()||!id.startsWith(parts[0]))return false;
+        for(int i=1;i<parts.length;i++)if(parts[i].isEmpty()||!id.contains(parts[i]))return false;
         return true;
     }
     public static void rejected(String id, String reason) { query(id, Map.of("rejected",reason)); }
