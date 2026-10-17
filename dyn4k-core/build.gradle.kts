@@ -189,6 +189,11 @@ val jvmApi = mapOf(
     "org/dyn4j/geometry/Link" to JvmApiSpec(
         packageFields = setOf("point0", "point3")
     ),
+    "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/MonotoneChain" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/GrahamScan" to JvmApiSpec(),
+    "org/dyn4j/geometry/hull/GiftWrap" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/DivideAndConquer" to JvmApiSpec(packageMethods = setOf("divide")),
     "org/dyn4j/geometry/hull/LinkedVertex" to JvmApiSpec(
         packageType = true, packageFields = setOf("point", "next", "prev")
@@ -224,6 +229,9 @@ val jvmApi = mapOf(
     "org/dyn4j/geometry/decompose/DoubleEdgeListVertex" to JvmApiSpec(
         packageType = true, packageFields = setOf("point", "leaving")
     ),
+    "org/dyn4j/geometry/decompose/Decomposer" to JvmApiSpec(),
+    "org/dyn4j/geometry/decompose/AbstractDecomposer" to JvmApiSpec(),
+    "org/dyn4j/geometry/decompose/Bayazit" to JvmApiSpec(),
     "org/dyn4j/geometry/decompose/EarClipping" to JvmApiSpec(
         packageMethods = setOf("createTriangulation", "isReflex", "isEar"), varargMethods = setOf("createTriangulation")
     ),
@@ -257,7 +265,11 @@ val jvmApi = mapOf(
     "org/dyn4j/geometry/simplify/SegmentTree" to JvmApiSpec(
         packageType = true, packageConstructorDescriptors = setOf("()V")
     ),
+    "org/dyn4j/geometry/simplify/Simplifier" to JvmApiSpec(),
     "org/dyn4j/geometry/simplify/AbstractSimplifier" to JvmApiSpec(varargMethods = setOf("simplify")),
+    "org/dyn4j/geometry/simplify/VertexClusterReduction" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/DouglasPeucker" to JvmApiSpec(),
+    "org/dyn4j/geometry/simplify/Visvalingam" to JvmApiSpec(),
     "org/dyn4j/geometry/simplify/SegmentTreeNode" to JvmApiSpec(
         packageType = true, packageFields = setOf("left", "right", "parent", "height", "aabb")
     ),
@@ -360,10 +372,48 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
                                     access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
-                                val revisedSignature = signature?.replace(
-                                    "Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;"
-                                )
+                                val revisedSignature = signature
+                                    ?.replace("Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;")
+                                    ?.let { value ->
+                                        if (owner.startsWith("org/dyn4j/geometry/hull/") ||
+                                            owner.startsWith("org/dyn4j/geometry/decompose/") ||
+                                            owner.startsWith("org/dyn4j/geometry/simplify/")) {
+                                            value.replace("+Lorg/dyn4j/geometry/Vector2;", "Lorg/dyn4j/geometry/Vector2;")
+                                        } else value
+                                    }
                                 val method = super.visitMethod(revised, name, descriptor, revisedSignature, exceptions)
+                                val nullPointArrayMethod = descriptor.startsWith("([Lorg/dyn4j/geometry/Vector2;)") &&
+                                    when (owner) {
+                                        "org/dyn4j/geometry/hull/MonotoneChain",
+                                        "org/dyn4j/geometry/hull/GrahamScan",
+                                        "org/dyn4j/geometry/hull/GiftWrap",
+                                        "org/dyn4j/geometry/hull/DivideAndConquer" -> name == "generate"
+                                        "org/dyn4j/geometry/decompose/Bayazit" -> name == "decompose"
+                                        "org/dyn4j/geometry/decompose/EarClipping",
+                                        "org/dyn4j/geometry/decompose/SweepLine" ->
+                                            name == "decompose" || name == "triangulate" || name == "createTriangulation"
+                                        else -> false
+                                    }
+                                if (nullPointArrayMethod) {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitCode() {
+                                            super.visitCode()
+                                            val nonNull = Label()
+                                            super.visitVarInsn(Opcodes.ALOAD, 1)
+                                            super.visitJumpInsn(Opcodes.IFNONNULL, nonNull)
+                                            super.visitTypeInsn(Opcodes.NEW, "org/dyn4j/exception/ArgumentNullException")
+                                            super.visitInsn(Opcodes.DUP)
+                                            super.visitLdcInsn("points")
+                                            super.visitMethodInsn(
+                                                Opcodes.INVOKESPECIAL, "org/dyn4j/exception/ArgumentNullException",
+                                                "<init>", "(Ljava/lang/String;)V", false
+                                            )
+                                            super.visitInsn(Opcodes.ATHROW)
+                                            super.visitLabel(nonNull)
+                                            super.visitFrame(Opcodes.F_SAME, 0, null, 0, null)
+                                        }
+                                    }
+                                }
                                 // The baseline permits a null center in this protected constructor.
                                 if (owner == "org/dyn4j/geometry/AbstractShape" && name == "<init>" &&
                                     descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V") {

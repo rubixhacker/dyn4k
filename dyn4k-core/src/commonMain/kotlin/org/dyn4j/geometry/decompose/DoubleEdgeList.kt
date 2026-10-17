@@ -73,7 +73,7 @@ class DoubleEdgeListFace {
         }
         return count
     }
-    override fun toString(): String = "Face[Edge=$edge]"
+    override fun toString(): String = "Face[Edge=${if (::edge.isInitialized) edge else null}]"
 }
 
 enum class MonotoneChainType { LEFT, RIGHT, TOP, BOTTOM }
@@ -83,7 +83,8 @@ class MonotoneVertex<E>(val data: E) {
     lateinit var next: MonotoneVertex<E>
     lateinit var previous: MonotoneVertex<E>
     lateinit var chainType: MonotoneChainType
-    fun isAdjacent(vertex: MonotoneVertex<E>): Boolean = vertex === previous || vertex === next
+    fun isAdjacent(vertex: MonotoneVertex<E>): Boolean =
+        (::previous.isInitialized && vertex === previous) || (::next.isInitialized && vertex === next)
     override fun toString(): String = data.toString()
 }
 

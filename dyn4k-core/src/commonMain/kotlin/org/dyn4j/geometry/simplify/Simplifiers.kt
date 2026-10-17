@@ -130,8 +130,8 @@ open class VertexClusterReduction(val clusterTolerance: Double) : AbstractSimpli
         if (vertices == null) return null
         if (vertices.isEmpty()) return vertices as List<Vector2>
         val all = buildVertexList(vertices)
-        if (all.isEmpty()) return emptyList()
-        if (all.size == 1) return listOf(all[0].point)
+        if (all.isEmpty()) return mutableListOf()
+        if (all.size == 1) return mutableListOf(all[0].point)
         val reduced = mutableListOf(all[0].point)
         var start = all[0]
         val tree = buildSegmentTree(start)
@@ -300,7 +300,7 @@ class Visvalingam(clusterTolerance: Double, val minimumTriangleArea: Double) : V
             if (isSelfIntersectionProduced(vertex, tree)) continue
             if (removeVertex(vertex, queue, tree)) break
         }
-        return emptyList()
+        return mutableListOf()
     }
 
     private fun buildTriangleAreaQueue(polygon: List<Vector2>): AreaPriorityQueue {

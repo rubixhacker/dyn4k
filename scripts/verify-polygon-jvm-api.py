@@ -29,7 +29,6 @@ def declarations(jar, class_name):
     return {
         re.sub(r"\s+", " ", line.strip())
         .replace("final ", "")
-        .replace("<? extends org.dyn4j.geometry.Vector2>", "<org.dyn4j.geometry.Vector2>")
         for line in output.splitlines()
         if line.strip().endswith(";")
         and "access$" not in line

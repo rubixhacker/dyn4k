@@ -18,6 +18,19 @@ import org.dyn4j.geometry.simplify.Visvalingam
 
 class PolygonAlgorithmTest {
     @Test
+    fun shortSimplifierResultsCanBeExtended() {
+        for (simplifier in listOf(
+            VertexClusterReduction(0.0), DouglasPeucker(0.0, 0.0), Visvalingam(0.0, 0.0)
+        )) {
+            for (input in listOf(listOf<Vector2?>(null), listOf(Vector2(1.0, 2.0)))) {
+                val result = simplifier.simplify(input)!! as MutableList<Vector2>
+                val originalSize = result.size
+                result.add(Vector2(3.0, 4.0))
+                assertEquals(originalSize + 1, result.size)
+            }
+        }
+    }
+    @Test
     fun pointCloudBecomesAUsableSquareThroughEveryHullGenerator() {
         val generators = listOf(MonotoneChain(), GrahamScan(), GiftWrap(), DivideAndConquer())
         for (generator in generators) {

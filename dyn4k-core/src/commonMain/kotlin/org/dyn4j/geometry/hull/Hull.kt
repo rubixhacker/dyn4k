@@ -168,8 +168,8 @@ open class GiftWrap : AbstractHullGenerator() {
 }
 
 class LinkedVertex(val point: Vector2) {
-    var next: LinkedVertex = this
-    var prev: LinkedVertex = this
+    var next: LinkedVertex? = null
+    var prev: LinkedVertex? = null
     override fun toString(): String = point.toString()
 }
 
@@ -190,9 +190,9 @@ class LinkedVertexHull() {
 
     fun toArray(): Array<Vector2> {
         val points = Array(size) { leftMost.point }
-        var vertex = leftMost
+        var vertex: LinkedVertex? = leftMost
         for (i in 0 until size) {
-            points[i] = vertex.point
+            points[i] = vertex!!.point
             vertex = vertex.next
         }
         return points
@@ -210,11 +210,11 @@ class LinkedVertexHull() {
             while (true) {
                 val prevLu = lu
                 val prevRu = ru
-                while (limitRightU > 0 && RobustGeometry.getLocation(ru.next.point, lu.point, ru.point) <= 0.0) {
-                    ru = ru.next; limitRightU--
+                while (limitRightU > 0 && RobustGeometry.getLocation(ru.next!!.point, lu.point, ru.point) <= 0.0) {
+                    ru = ru.next!!; limitRightU--
                 }
-                while (limitLeftU > 0 && RobustGeometry.getLocation(lu.prev.point, lu.point, ru.point) <= 0.0) {
-                    lu = lu.prev; limitLeftU--
+                while (limitLeftU > 0 && RobustGeometry.getLocation(lu.prev!!.point, lu.point, ru.point) <= 0.0) {
+                    lu = lu.prev!!; limitLeftU--
                 }
                 if (lu === prevLu && ru === prevRu) break
             }
@@ -225,11 +225,11 @@ class LinkedVertexHull() {
             while (true) {
                 val prevLl = ll
                 val prevRl = rl
-                while (limitRightL > 0 && RobustGeometry.getLocation(rl.prev.point, ll.point, rl.point) >= 0.0) {
-                    rl = rl.prev; limitRightL--
+                while (limitRightL > 0 && RobustGeometry.getLocation(rl.prev!!.point, ll.point, rl.point) >= 0.0) {
+                    rl = rl.prev!!; limitRightL--
                 }
-                while (limitLeftL > 0 && RobustGeometry.getLocation(ll.next.point, ll.point, rl.point) >= 0.0) {
-                    ll = ll.next; limitLeftL--
+                while (limitLeftL > 0 && RobustGeometry.getLocation(ll.next!!.point, ll.point, rl.point) >= 0.0) {
+                    ll = ll.next!!; limitLeftL--
                 }
                 if (ll === prevLl && rl === prevRl) break
             }
@@ -240,7 +240,7 @@ class LinkedVertexHull() {
             var vertex = lu
             do {
                 hull.size++
-                vertex = vertex.next
+                vertex = vertex.next!!
             } while (vertex !== lu)
             return hull
         }
