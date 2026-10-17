@@ -22,3 +22,5 @@ typealias Triangle = org.dyn4j.geometry.Triangle
 typealias Segment = org.dyn4j.geometry.Segment
 typealias Link = org.dyn4j.geometry.Link
 typealias Geometry = org.dyn4j.geometry.Geometry
+typealias Shape = org.dyn4j.geometry.Shape
+typealias Convex = org.dyn4j.geometry.Convex
