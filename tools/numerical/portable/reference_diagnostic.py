@@ -38,6 +38,31 @@ def channel(body, name):
     return value
 
 
+def structural_differences(reference, candidate, path="", limit=100):
+    differences = []
+    def visit(left, right, location):
+        if len(differences) >= limit:
+            return
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(left.keys() - right.keys()):
+                differences.append({"path": f"{location}.{key}", "difference": "missing_portable"})
+            for key in sorted(right.keys() - left.keys()):
+                differences.append({"path": f"{location}.{key}", "difference": "extra_portable"})
+            for key in sorted(left.keys() & right.keys()):
+                visit(left[key], right[key], f"{location}.{key}")
+        elif isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                differences.append({"path": location, "difference": "list_length",
+                                    "reference": len(left), "portable": len(right)})
+            for index, (a, b) in enumerate(zip(left, right)):
+                visit(a, b, f"{location}[{index}]")
+        elif type(left) is not type(right) and not (
+                type(left) in (int, float) and type(right) in (int, float)):
+            differences.append({"path": location, "difference": "type"})
+    visit(reference, candidate, path)
+    return differences[:limit]
+
+
 def reference_records(path):
     for _, value in approved.records(path):
         yield value
@@ -119,6 +144,7 @@ def diagnostic(fixture_key, reference, portable):
     except StopIteration as error:
         raise Rejected("reference or matching portable input is absent") from error
     header_exact = exact(ref_header, port_header)
+    input_schema_differences = structural_differences(ref_header, port_header, "inputs")
     events = {"reference": 0, "portable": 0}
 
     def states(stream, label):
@@ -177,6 +203,7 @@ def diagnostic(fixture_key, reference, portable):
                        "UNPASSED_INPUT_SCHEMA" if not header_exact else "UNPASSED_EVENT_SCHEMA"),
             "fixture_key": fixture_key, "reference_sha256": digest(reference),
             "portable_sha256": digest(portable), "input_header_exact": header_exact,
+            "input_schema_differences": input_schema_differences,
             "strict_approved_comparison": strict,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,

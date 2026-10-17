@@ -4,10 +4,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reference_diagnostic import strict_comparison
+from reference_diagnostic import strict_comparison, structural_differences
 
 
 class FrozenComparatorSeamTest(unittest.TestCase):
+    def test_input_schema_gaps_are_reported_without_rewriting_values(self):
+        differences = structural_differences(
+            {"state": {"bodies": [{"id": "b0", "velocity": [0.0, 0.0]}]}},
+            {"state": {"bodies": [{"id": "b0", "speed": 0.0}]}, "extra": True},
+            "inputs")
+        self.assertIn({"path": "inputs.state.bodies[0].velocity",
+                       "difference": "missing_portable"}, differences)
+        self.assertIn({"path": "inputs.state.bodies[0].speed",
+                       "difference": "extra_portable"}, differences)
+        self.assertIn({"path": "inputs.extra", "difference": "extra_portable"}, differences)
+
     def test_full_record_fields_signed_zero_and_order(self):
         fixture = {"exact_numeric": ["inputs.value"]}
         baseline = [{"kind": "inputs", "value": -0.0},
