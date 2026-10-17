@@ -8,6 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import ledger
 from ledger import validate
 from module_probe import EXPORTS, descriptor, probe
 
@@ -130,6 +131,57 @@ class LedgerTests(unittest.TestCase):
         self.check_invalid(lambda value: value["production"][0].update(sha256="stale"))
         self.check_invalid(lambda value: value["baseline"].update(sources_sha256="stale"))
 
+    def test_baseline_run_hashes_require_exact_test_and_resource_inputs(self):
+        tests = {"src/test/java/p/ATest.java": sha("test")}
+        resources = {"src/test/resources/p/data.dat": sha("data")}
+        expected = tests | resources
+        ledger.require_baseline_test_inputs(expected, tests, resources)
+        near_misses = [
+            expected | {"src/test/java/p/ATest.java": sha("changed")},
+            {"src/test/java/p/OtherTest.java": sha("test"), **resources},
+            {**tests, "src/test/resources/p/other.dat": sha("data")},
+            expected | {"src/test/resources/p/extra.dat": sha("extra")},
+        ]
+        for observed in near_misses:
+            with self.subTest(observed=observed):
+                with self.assertRaisesRegex(ValueError, "test input hashes"):
+                    ledger.require_baseline_test_inputs(observed, tests, resources)
+
+    def test_signature_report_cannot_claim_portable_kind_or_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "candidate.jar"
+            artifact.write_bytes(b"candidate")
+            value = copy.deepcopy(self.ledger)
+            item = value["declarations"][0]
+            candidate = {"identity": "p.A", "commit": "a" * 40,
+                         "artifact": "candidate.jar", "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()}
+            item["candidate"] = candidate
+            report = {"kind": "java-signature", "target": "linuxX64", "baseline": self.reference["baseline"],
+                      "candidate_identity": candidate["identity"], "candidate_commit": candidate["commit"],
+                      "artifact_sha256": candidate["artifact_sha256"],
+                      "source_sha256": self.reference["production"][item["source_file"]],
+                      "passed_identities": [item["id"]], "command": ["java", "Runner"],
+                      "expected_cases": 1, "actual_executed_cases": 1, "failures": 0, "ignored": 0,
+                      "process_exit_code": 0, "output": "ACTUAL_TESTS=1\nFAILURES=0\nIGNORED=0\n"}
+            path = root / "report.json"
+            path.write_text(json.dumps(report))
+            record = {"kind": "common-portable", "target": "linuxX64", "status": "passed",
+                      "report": "report.json", "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            item["evidence"] = [record]
+            self.assertTrue(validate(value, self.reference, root, "a" * 40)["invalid"])
+            report["kind"] = "common-portable"
+            report["target"] = "jvm"
+            path.write_text(json.dumps(report))
+            record["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertTrue(validate(value, self.reference, root, "a" * 40)["invalid"])
+            report["target"] = "linuxX64"
+            path.write_text(json.dumps(report))
+            record["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            valid = validate(value, self.reference, root, "a" * 40)
+            self.assertEqual(valid["invalid"], [])
+            self.assertFalse(any(item["id"] in gap and "unrun common-portable" in gap for gap in valid["gaps"]))
+
     def test_fabricated_passed_evidence_fails(self):
         self.check_invalid(lambda value: value["tests"][0]["evidence"].append(
             {"kind": "java-test", "status": "passed", "report": "missing.json", "report_sha256": "fake"}))
@@ -168,7 +220,8 @@ class LedgerTests(unittest.TestCase):
             value = copy.deepcopy(self.ledger)
             item = value["tests"][0]
             item["candidate"] = candidate
-            report = {"baseline": self.reference["baseline"], "candidate_identity": "p.ATest",
+            report = {"kind": "java-test", "target": "jvm", "baseline": self.reference["baseline"],
+                      "candidate_identity": "p.ATest",
                       "candidate_commit": "a" * 40, "artifact_sha256": candidate["artifact_sha256"],
                       "source_sha256": item["sha256"], "passed_identities": [item["id"]],
                       "command": ["java", "Runner"], "expected_cases": 1,
@@ -177,7 +230,7 @@ class LedgerTests(unittest.TestCase):
                       "output": "ACTUAL_TESTS=1\nFAILURES=0\nIGNORED=0\n"}
             path = root / "report.json"
             path.write_text(json.dumps(report))
-            item["evidence"] = [{"kind": "java-test", "status": "passed", "report": "report.json",
+            item["evidence"] = [{"kind": "java-test", "target": "jvm", "status": "passed", "report": "report.json",
                                  "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}]
             valid = validate(value, self.reference, root, "a" * 40)
             self.assertEqual(valid["invalid"], [])

@@ -24,16 +24,31 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def tracked_paths(source: Path, prefix: str) -> list[str]:
+def tracked_files(source: Path, prefix: str) -> list[str]:
     output = subprocess.run(["git", "-C", str(source), "ls-tree", "-r", "--name-only",
                              oracle.COMMIT, prefix], check=True, capture_output=True, text=True).stdout
-    return sorted(path for path in output.splitlines() if path.endswith(".java"))
+    return sorted(output.splitlines())
+
+
+def tracked_paths(source: Path, prefix: str) -> list[str]:
+    return [path for path in tracked_files(source, prefix) if path.endswith(".java")]
 
 
 def tracked_sha(source: Path, path: str) -> str:
     content = subprocess.run(["git", "-C", str(source), "show", f"{oracle.COMMIT}:{path}"],
                              check=True, capture_output=True).stdout
     return sha256(content)
+
+
+def require_baseline_test_inputs(observed: object, tests: dict[str, str],
+                                 resources: dict[str, str]) -> None:
+    expected = tests | resources
+    if not isinstance(observed, dict) or observed != expected:
+        actual = observed if isinstance(observed, dict) else {}
+        missing = sorted(expected.keys() - actual.keys())
+        extra = sorted(actual.keys() - expected.keys())
+        changed = sorted(key for key in expected.keys() & actual.keys() if expected[key] != actual[key])
+        raise ValueError(f"baseline test input hashes differ: missing={missing}, extra={extra}, changed={changed}")
 
 
 def declaration_inventory(signatures: dict[str, str], production: dict[str, str]) -> dict[str, tuple[str, str]]:
@@ -84,6 +99,7 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
         raise ValueError("saved baseline inventory differs from pinned source or JAR")
     production = {path: tracked_sha(source, path) for path in production_paths}
     tests = {path: tracked_sha(source, path) for path in test_paths}
+    resources = {path: tracked_sha(source, path) for path in tracked_files(source, "src/test/resources")}
     module_source = (source / MODULE_SOURCE).read_text()
     module_name = re.search(r"\bmodule\s+([A-Za-z0-9_.]+)\s*\{", module_source)
     module_exports = sorted(re.findall(r"\bexports\s+([A-Za-z0-9_.]+)\s*;", module_source))
@@ -98,8 +114,9 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
               "exports": module_exports, "fixture_sha256": fixture_sha}
     run = json.loads(baseline_run.read_text())
     oracle.validate_run_report(run)
+    require_baseline_test_inputs(run.get("test_input_sha256"), tests, resources)
     if (run.get("commit") != oracle.COMMIT or run.get("binary_sha256") != oracle.BINARY_SHA256
-            or run.get("test_files") != 199 or run.get("test_input_sha256", {}).items() < tests.items()
+            or run.get("test_files") != 199
             or saved.get("test_annotations") != 2171):
         raise ValueError("baseline run or annotation count differs from pinned test inputs")
     counts = {"textual_annotations": saved["test_annotations"],
@@ -155,7 +172,12 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
     candidate = item.get("candidate")
     if not isinstance(candidate, dict):
         return "passed evidence has no counterpart"
+    kind = evidence.get("kind")
+    target = evidence.get("target")
+    if not isinstance(kind, str) or not isinstance(target, str) or not target:
+        return "passed evidence kind or target is missing"
     required = (report.get("baseline") == baseline and report.get("candidate_identity") == candidate.get("identity")
+                and report.get("kind") == kind and report.get("target") == target
                 and report.get("candidate_commit") == candidate.get("commit")
                 and report.get("artifact_sha256") == candidate.get("artifact_sha256")
                 and report.get("source_sha256") == source_sha256
