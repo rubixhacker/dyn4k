@@ -29,22 +29,15 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class Slice : AbstractShape, Convex {
-    @get:kotlin.jvm.JvmName("getAlphaField")
-    @JvmFieldBridge protected val alpha: Double
-    @get:kotlin.jvm.JvmName("getCosAlphaField")
-    @JvmFieldBridge protected val cosAlpha: Double
-    @get:kotlin.jvm.JvmName("getSliceRadiusField")
-    @JvmFieldBridge protected val sliceRadius: Double
-    @get:kotlin.jvm.JvmName("getVerticesField")
-    @JvmFieldBridge protected val vertices: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getNormalsField")
-    @JvmFieldBridge protected val normals: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getRotationFieldValue")
-    @JvmFieldBridge protected val rotation: Rotation
+    @kotlin.jvm.JvmField protected val alpha: Double
+    @kotlin.jvm.JvmField protected val cosAlpha: Double
+    @kotlin.jvm.JvmField protected val sliceRadius: Double
+    @kotlin.jvm.JvmField protected val vertices: Array<Vector2>
+    @kotlin.jvm.JvmField protected val normals: Array<Vector2>
+    @kotlin.jvm.JvmField protected val rotation: Rotation
 
     constructor(radius: Double, theta: Double) : super(
         Vector2(2.0 * radius * sin(theta * 0.5) / (1.5 * theta), 0.0),
@@ -179,9 +172,9 @@ open class Slice : AbstractShape, Convex {
         super.translate(x, y)
         for (vertex in vertices) vertex.add(x, y)
     }
-    fun getRotationAngle(): Double = rotation.toRadians()
-    fun getRotation(): Rotation = rotation.copy()
-    fun getTheta(): Double = alpha * 2.0
-    fun getSliceRadius(): Double = sliceRadius
-    fun getCircleCenter(): Vector2 = vertices[0]
+    open fun getRotationAngle(): Double = rotation.toRadians()
+    open fun getRotation(): Rotation = rotation.copy()
+    open fun getTheta(): Double = alpha * 2.0
+    open fun getSliceRadius(): Double = sliceRadius
+    open fun getCircleCenter(): Vector2 = vertices[0]
 }
