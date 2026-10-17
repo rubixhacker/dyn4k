@@ -2,7 +2,7 @@
 
 ## Reader and scope
 
-This report maps the seven root dynamics test files from pinned dyn4j 6.0.0 source revision `058bf6d982a0fb89b54050f929f6ea9dae53b714` to common Kotlin tests. The corpus began at body source `cb4492f20fc980445b7f5377234cadefc5426428` and includes committed integration head `3b42d0501a65039d6b0dc823f1ca3ebb535c23ad`. This report covers the body test subtree only; it does not qualify the complete compatibility corpus or any full runtime lane.
+This report maps the seven root dynamics test files from pinned dyn4j 6.0.0 source revision `058bf6d982a0fb89b54050f929f6ea9dae53b714` to common Kotlin tests. The corpus began at body source `cb4492f20fc980445b7f5377234cadefc5426428` and includes committed integration head `77eb64beffd53ef6574de22cbe34137294e9d94a`. This report covers the body test subtree only; it does not qualify the complete compatibility corpus or any full runtime lane.
 
 The pinned files contain 124 `@Test` annotations. JUnit 4 executes 124 cases for these files against the baseline and the integrated candidate. None of the seven files uses a parameterized runner or inherits test methods. The final exact-head run, including raw XML paths and hashes, is recorded in `/tmp/dyn4k-portable-body-final-assertions-result.md`.
 
