@@ -1,0 +1,29 @@
+{
+  "candidate_identity_sha256": "b4e1caab18e7529004d26bc544615495b8bb949c588d9aefc889892d0a374224",
+  "qualification": "unpassed",
+  "routes": {
+    "compatibility": {
+      "api_sha256": null,
+      "core_sha256": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+      "exit_code": 0,
+      "origin": {
+        "api": "unavailable",
+        "core": "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "java_version": "21.0.9",
+        "pid": "3166273"
+      }
+    },
+    "direct_kotlin": {
+      "api_sha256": "7e32875e21cac6bf1dfdc09627f0db2b31211c706054865db6d24dc5ef638647",
+      "core_sha256": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+      "exit_code": 0,
+      "origin": {
+        "api": "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar",
+        "core": "/var/home/stewart/Workspace/dyn4k-performance/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "java_version": "21.0.9",
+        "pid": "3166253"
+      }
+    }
+  },
+  "schema": 1
+}
