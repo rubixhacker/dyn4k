@@ -26,8 +26,10 @@ class ExtractionTest(unittest.TestCase):
             output = root / "evidence"
             output.mkdir()
             with patch.object(run, "PORTABLE", root):
-                trace, attributes = run.extract_xml("jvm", output)
+                trace, attributes, raw_counts = run.extract_xml("jvm", output)
             self.assertEqual(attributes["tests"], "1")
+            self.assertEqual(raw_counts["completed_cases"], 1)
+            self.assertEqual(raw_counts["states"], 1)
             self.assertEqual(trace.read_text(), (output / "cases" / f"{case_id}.jsonl").read_text())
             self.assertEqual(len(trace.read_text().splitlines()), 3)
             self.assertTrue((output / "matrix.xml").is_file())

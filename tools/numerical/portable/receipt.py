@@ -202,6 +202,12 @@ def validate_setup(header, case):
             if input_values["jointType"] == "Motor":
                 require(exact(mode.get("maximumForce"), 10.0 if active else 1000.0),
                         "motor joint mode differs")
+        elif case["id"] == "P-J-Angle-ratio-limits-off--1.0":
+            mode = joints[0]["mode"]
+            require(len(bodies) == 2 and not mode.get("limitsEnabled") and
+                    exact(mode.get("ratio"), -1.0) and
+                    exact(bodies[1]["initialAngularVelocity"], -math.pi / 6),
+                    "baseline Angle failure input differs")
         elif case["id"] == "P-JINT-Weld-enabled-equal":
             mode = joints[0]["mode"]
             require(mode.get("limitsEnabled") is True and

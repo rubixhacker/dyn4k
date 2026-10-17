@@ -2,6 +2,8 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest
+import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 
 plugins {
     kotlin("multiplatform") version "2.4.20"
@@ -38,4 +40,12 @@ kotlin {
 
 tasks.withType<KotlinJsTest>().configureEach {
     useMocha { timeout = "90m" }
+}
+
+if (providers.gradleProperty("portableJvm8").orNull == "true") {
+    tasks.named<Test>("jvmTest") {
+        javaLauncher.set(javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(8))
+        })
+    }
 }

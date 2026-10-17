@@ -22,6 +22,7 @@ STAGED = ROOT / "build/staging-repository/io/github/rubixhacker"
 VERSION = "0.1.0-alpha.1"
 HOST_TASKS = {
     "jvm": "jvmTest",
+    "jvm8": "jvmTest",
     "android-host": "testAndroidHostTest",
     "linux-x64": "linuxX64Test",
     "node-js": "jsNodeTest",
@@ -39,6 +40,7 @@ STAGE_TASKS = (
 )
 ARTIFACT_NAME = {
     "jvm": ("jvm", "jar"),
+    "jvm8": ("jvm", "jar"),
     "android-host": ("android", "aar"),
     "linux-x64": ("linuxx64", "klib"),
     "node-js": ("js", "klib"),
@@ -146,6 +148,8 @@ def extract_xml(host, output):
     cases = output / "cases"
     cases.mkdir()
     expected = {item["id"] for item in declared_cases()}
+    observed = {}
+    input_records = 0
     case_stream = None
     active_case = None
     with source.open("r", encoding="utf-8") as stream, trace.open("x", encoding="utf-8") as target:
@@ -156,6 +160,19 @@ def extract_xml(host, output):
                 payload = line.split("NUMERICAL_JSON ", 1)[1].split("]]>", 1)[0].strip()
                 row = json.loads(payload, parse_constant=lambda value: (_ for _ in ()).throw(Rejected(value)))
                 target.write(payload + "\n")
+                case_id = row.get("id")
+                if row.get("kind") == "inputs":
+                    input_records += 1
+                if case_id in expected:
+                    count = observed.setdefault(case_id, {"inputs": 0, "states": 0,
+                                                           "events": 0, "endpoints": 0,
+                                                           "case_ends": 0, "tagged_nonfinite_values": 0})
+                    kind = row.get("kind")
+                    field = {"inputs": "inputs", "state": "states", "event": "events",
+                             "endpoint": "endpoints", "case-end": "case_ends"}.get(kind)
+                    if field is not None:
+                        count[field] += 1
+                    count["tagged_nonfinite_values"] += payload.count('"nonfinite":')
                 if row.get("kind") == "inputs":
                     if case_stream is not None:
                         case_stream.close()
@@ -171,7 +188,13 @@ def extract_xml(host, output):
         finally:
             if case_stream is not None:
                 case_stream.close()
-    return trace, attributes
+    raw_counts = {"expected_cases": len(expected), "input_records": input_records,
+                  "observed_cases": len(observed),
+                  "completed_cases": sum(item["case_ends"] == 1 for item in observed.values()),
+                  "states": sum(item["states"] for item in observed.values()),
+                  "tagged_nonfinite_values": sum(item["tagged_nonfinite_values"] for item in observed.values()),
+                  "per_case": observed}
+    return trace, attributes, raw_counts
 
 
 def absent_lane(output, name, commit, source_sha256, status, reason):
@@ -223,6 +246,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
                "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+    if host == "jvm8":
+        command.extend(("-PportableJvm8=true", "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
     with (lane / "gradle.log").open("x", encoding="utf-8") as log:
         completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
     outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": completed.returncode,
@@ -235,8 +260,9 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob("TEST-*PortableMatrixTest*.xml"))
         if len(xml) != 1 or xml[0].stat().st_mtime < started:
             raise Rejected("matrix XML is missing or stale")
-        trace, attributes = extract_xml(host, lane)
+        trace, attributes, raw_counts = extract_xml(host, lane)
         outcome["xml"] = attributes
+        outcome["raw_counts"] = raw_counts
         comparisons = compare_frozen(lane, reference_dirs)
         outcome["frozen_comparison_results"] = {
             "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
@@ -254,7 +280,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         if completed.returncode:
             raise Rejected("Gradle task failed")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
-               (("tests", 12), ("skipped", 0), ("failures", 0), ("errors", 0))):
+               (("tests", 13), ("skipped", 0), ("failures", 0), ("errors", 0))):
             raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
         if clean_identity() != (commit, source_sha256):
             raise Rejected("source changed during host execution")

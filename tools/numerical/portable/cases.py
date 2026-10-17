@@ -44,6 +44,9 @@ def declared_cases():
                       "hz": 60, "steps": steps,
                       "input": {"jointType": "Pulley", "segment": segment,
                                 "sourceVelocity": [0.0, 10.0] if segment != "preparation-0" else [0.0, 0.0]}})
+    cases.append({"id": "P-J-Angle-ratio-limits-off--1.0", "family": "joints-limits-motors",
+                  "profile": "baseline-failed", "hz": 60, "steps": 600,
+                  "input": {"jointType": "Angle", "ratio": -1.0, "limitsEnabled": False}})
     for hz in (30, 60, 120):
         for shape in ("circle", "pentagon"):
             for mode in ("ALL", "NONE"):

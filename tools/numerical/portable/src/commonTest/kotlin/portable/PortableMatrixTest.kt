@@ -276,6 +276,22 @@ class PortableMatrixTest {
     }
 
     @Test
+    fun baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val first = body(world, Geometry.createCircle(0.5), 0.0, 0.0, false)
+        val second = body(world, Geometry.createCircle(0.5), 0.0, 2.0, false)
+        second.setAngularVelocity(-PI / 6)
+        val joint = AngleJoint(first, second)
+        joint.setLimitsEnabled(false)
+        joint.setRatio(-1.0)
+        world.addJoint(joint)
+        recorder.capture(CaseSpec("P-J-Angle-ratio-limits-off--1.0", "joints-limits-motors",
+            "baseline-failed", 60, 600,
+            mapOf("jointType" to "Angle", "ratio" to -1.0, "limitsEnabled" to false)), world)
+    }
+
+    @Test
     fun continuousCollisionCasesAtFrozenRates() {
         for (hz in listOf(30, 60, 120)) for (shape in listOf("circle", "pentagon"))
             for (mode in listOf(ContinuousDetectionMode.ALL, ContinuousDetectionMode.NONE)) {
