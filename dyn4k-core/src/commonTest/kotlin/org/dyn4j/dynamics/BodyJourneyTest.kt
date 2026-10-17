@@ -8,8 +8,10 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
+import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.ValueOutOfRangeException
 
 class BodyJourneyTest {
@@ -115,5 +117,12 @@ class BodyJourneyTest {
         }
         assertEquals(0.0, body.updateAtRestTime(TimeStep(0.1), settings))
         assertEquals("LA", calls.toString())
+    }
+
+    @Test
+    fun nullShapeOverloadsReportTheBaselineError() {
+        val body = Body()
+        assertEquals("convex cannot be null", assertFailsWith<ArgumentNullException> { body.addFixture(null as Convex?) }.message)
+        assertEquals("convex cannot be null", assertFailsWith<ArgumentNullException> { body.addFixture(null, 1.0) }.message)
     }
 }

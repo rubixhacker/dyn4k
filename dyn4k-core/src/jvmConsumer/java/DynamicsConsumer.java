@@ -173,6 +173,18 @@ public class DynamicsConsumer {
         } catch (ArgumentNullException expected) {
             require("convex cannot be null".equals(expected.getMessage()), "null shape diagnostic");
         }
+        try {
+            empty.addFixture((Convex) null);
+            throw new AssertionError("null one-argument shape accepted");
+        } catch (ArgumentNullException expected) {
+            require("convex cannot be null".equals(expected.getMessage()), "null one-argument shape diagnostic");
+        }
+        try {
+            empty.addFixture((Convex) null, 1.0);
+            throw new AssertionError("null two-argument shape accepted");
+        } catch (ArgumentNullException expected) {
+            require("convex cannot be null".equals(expected.getMessage()), "null two-argument shape diagnostic");
+        }
         System.out.println("DYNAMICS_CONSUMER_OK");
     }
 }

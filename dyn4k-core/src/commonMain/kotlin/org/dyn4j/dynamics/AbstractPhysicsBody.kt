@@ -77,16 +77,16 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
         for (item in body.torques) torques.add(item.copy())
     }
 
-    override fun addFixture(convex: Convex): BodyFixture =
+    override fun addFixture(convex: Convex?): BodyFixture =
         addFixture(convex, BodyFixture.DEFAULT_DENSITY, BodyFixture.DEFAULT_FRICTION, BodyFixture.DEFAULT_RESTITUTION)
-    override fun addFixture(convex: Convex, density: Double): BodyFixture =
+    override fun addFixture(convex: Convex?, density: Double): BodyFixture =
         addFixture(convex, density, BodyFixture.DEFAULT_FRICTION, BodyFixture.DEFAULT_RESTITUTION)
     override fun addFixture(convex: Convex?, density: Double, friction: Double, restitution: Double): BodyFixture {
         val fixture = BodyFixture(convex ?: throw ArgumentNullException("convex"))
         fixture.setDensity(density)
         fixture.setFriction(friction)
         fixture.setRestitution(restitution)
-        super.addFixture(fixture)
+        super<AbstractCollisionBody>.addFixture(fixture)
         setAtRest(false)
         return fixture
     }
