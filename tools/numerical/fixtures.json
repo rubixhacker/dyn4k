@@ -69,6 +69,7 @@
       "family": "contacts-friction-sleep-wake",
       "profile": "internal binary64(1/120 s), outer groups 4/2/1, linearTolerance 1/4096 m, at most 8 position iterations",
       "check_translation_aliases": true,
+      "callback_fixed_body_id": "b0",
       "duration_seconds": 600,
       "scale_m": 1,
       "origin_m": [0, 0],

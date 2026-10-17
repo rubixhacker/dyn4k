@@ -157,6 +157,14 @@ class ComparatorSeamTest(unittest.TestCase):
             self.assertEqual("FAILED", self.result()["status"])
         self.write_candidate(self.rows)
 
+    def test_identical_reference_bytes_need_a_candidate_receipt(self):
+        self.write_candidate(self.rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        (self.root / "receipt.json").unlink()
+        result = self.result()
+        self.assertEqual("FAILED", result["status"])
+        self.assertIn("No such file", result["reason"])
+
     def test_reference_hash_and_empty_suite_fail_closed(self):
         self.assertEqual("PASSED", audit_reference(self.fixture, self.root / "reference.jsonl.gz")["status"])
         bad = self.root / "bad.jsonl.gz"
@@ -238,6 +246,29 @@ class ComparatorSeamTest(unittest.TestCase):
                 self.write_candidate(altered)
                 self.assertEqual("FAILED", self.result()["status"])
 
+    def test_fixed_floor_callback_velocities_remain_zero(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["callback_fixed_body_id"] = "b0"
+        self.fixture["rules"] = [rule for rule in selected["rules"]
+                                 if rule["path"].startswith("event.payload[].velocity")
+                                 or rule["path"].startswith("event.payload[].angularVelocity")]
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = [{"body1": "b0", "body2": "b1", "velocity1": [0.0, 0.0],
+                                "velocity2": [0.0, 0.0], "angularVelocity1": 0.0,
+                                "angularVelocity2": 0.0}]
+        rows[2]["state"] = {"bodies": []}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        for field, value in (("velocity1", [0.0005, 0.0]), ("angularVelocity1", 0.0005)):
+            with self.subTest(field=field):
+                altered = json.loads(json.dumps(rows))
+                altered[1]["payload"][0][field] = value
+                self.write_candidate(altered)
+                result = self.result()
+                self.assertEqual("FAILED", result["status"])
+                self.assertIn("fixed callback body velocity", result["reason"])
+
     def test_outer_endpoint_uses_inner_state_budget(self):
         rows = json.loads(json.dumps(self.rows))
         rows[2]["state"] = {"position": [2.0, 3.0]}
@@ -318,7 +349,7 @@ class ComparatorSeamTest(unittest.TestCase):
         rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
             "getCost": 1.0, "getSint": 0.0, "getTranslation": [1.0, 2.0],
             "getTranslationX": 1.0, "getTranslationY": 2.0,
-            "getValues": [1.0, 0.0, 1.0, 0.0, 1.0, 2.0]}}]}
+            "getValues": [1.0, -0.0, 1.0, 0.0, 1.0, 2.0]}}]}
         self.write_reference(rows)
         altered = json.loads(json.dumps(rows))
         matrix = altered[2]["state"]["bodies"][0]["transform"]
@@ -483,7 +514,7 @@ class ComparatorSeamTest(unittest.TestCase):
         rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
             "getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0,
             "getTranslation": [1.0, 2.0], "getTranslationX": 1.0,
-            "getTranslationY": 2.0, "getValues": [1.0, 0.0, 1.0, 0.0, 1.0, 2.0]}}]}
+            "getTranslationY": 2.0, "getValues": [1.0, -0.0, 1.0, 0.0, 1.0, 2.0]}}]}
         self.write_reference(rows)
         self.write_candidate(rows)
         self.assertEqual("PASSED", self.result()["status"])
@@ -498,6 +529,29 @@ class ComparatorSeamTest(unittest.TestCase):
                 self.assertEqual("FAILED", self.result()["status"])
         altered = json.loads(json.dumps(rows))
         altered[2]["state"]["bodies"][0]["transform"]["getValues"][3] = 0.00005
+        self.write_candidate(altered)
+        self.assertEqual("FAILED", self.result()["status"])
+        self.assertIn("matrix getter alias", self.result()["reason"])
+
+    def test_matrix_alias_preserves_signed_zero(self):
+        selected = load_fixture("configured-30-r1")
+        self.fixture["rules"] = selected["rules"]
+        self.fixture["derived_rules"] = selected["derived_rules"]
+        self.fixture["exact_numeric"] = selected["exact_numeric"]
+        self.fixture["zero_numeric"] = selected["zero_numeric"]
+        self.fixture["check_translation_aliases"] = True
+        rows = json.loads(json.dumps(self.rows))
+        rows[1]["payload"] = []
+        rows[2]["state"] = {"bodies": [{"id": "b1", "transform": {
+            "getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0,
+            "getTranslation": [1.0, 2.0],
+            "getTranslationX": 1.0, "getTranslationY": 2.0,
+            "getValues": [1.0, -0.0, 1.0, 0.0, 1.0, 2.0]}}]}
+        self.write_reference(rows)
+        self.write_candidate(rows)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered = json.loads(json.dumps(rows))
+        altered[2]["state"]["bodies"][0]["transform"]["getValues"][1] = 0.0
         self.write_candidate(altered)
         self.assertEqual("FAILED", self.result()["status"])
         self.assertIn("matrix getter alias", self.result()["reason"])

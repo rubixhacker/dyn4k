@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import re
+import struct
 from collections import Counter
 from fractions import Fraction
 from functools import lru_cache
@@ -15,6 +16,16 @@ from pathlib import Path
 
 class Rejected(ValueError):
     pass
+
+
+def same_value(left, right):
+    if type(left) in (int, float) and type(right) in (int, float):
+        return struct.pack(">d", float(left)) == struct.pack(">d", float(right))
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(same_value(a, b) for a, b in zip(left, right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(same_value(left[key], right[key]) for key in left)
+    return left == right
 
 
 def digest(data):
@@ -94,19 +105,25 @@ def check_translation_aliases(state):
                 continue
             transform = body[name]
             translation = transform["getTranslation"]
-            if (len(translation) != 2 or transform["getTranslationX"] != translation[0] or
-                transform["getTranslationY"] != translation[1]):
+            if (len(translation) != 2 or not same_value(transform["getTranslationX"], translation[0]) or
+                not same_value(transform["getTranslationY"], translation[1])):
                 raise Rejected("translation getter alias differs")
             if "getValues" in transform:
                 values = transform["getValues"]
-                if (len(values) != 6 or values[2] != translation[0] or
-                    values[5] != translation[1] or values[0] != transform["getCost"] or
-                    values[1] != -transform["getSint"] or
-                    values[3] != transform["getSint"] or values[4] != transform["getCost"]):
+                if (len(values) != 6 or not same_value(values[2], translation[0]) or
+                    not same_value(values[5], translation[1]) or
+                    not same_value(values[0], transform["getCost"]) or
+                    not same_value(values[1], -transform["getSint"]) or
+                    not same_value(values[3], transform["getSint"]) or
+                    not same_value(values[4], transform["getCost"])):
                     raise Rejected("matrix getter alias differs")
-        if "fixedOriginPosition" in body and body["fixedOriginPosition"] != body["transform"]["getTranslation"]:
+        if "fixedOriginPosition" in body and not same_value(
+            body["fixedOriginPosition"], body["transform"]["getTranslation"]
+        ):
             raise Rejected("fixed origin position alias differs")
-        if "worldCenter" in body and body["worldCenter"] != body["transform"]["getTranslation"]:
+        if "worldCenter" in body and not same_value(
+            body["worldCenter"], body["transform"]["getTranslation"]
+        ):
             raise Rejected("world center alias differs")
 
 
@@ -152,7 +169,7 @@ def check_body_getters(body):
                           ("getTorque", "torque"),
                           ("getAccumulatedForce", "accumulatedForce"),
                           ("getAccumulatedTorque", "accumulatedTorque")):
-        if getter in properties and field in body and properties[getter] != body[field]:
+        if getter in properties and field in body and not same_value(properties[getter], body[field]):
             raise Rejected(f"body getter alias differs: {getter}")
     if "getChangeInPosition" in properties:
         current = body["transform"]["getTranslation"]
@@ -172,6 +189,22 @@ def check_snapshot(state):
     check_translation_aliases(state)
     for body in state["bodies"]:
         check_body_getters(body)
+
+
+def check_fixed_body_callback_velocities(event, fixture):
+    fixed_id = fixture.get("callback_fixed_body_id")
+    if fixed_id is None:
+        return
+    for side in (1, 2):
+        if event.get(f"body{side}") != fixed_id:
+            continue
+        for name in (f"velocity{side}", f"angularVelocity{side}"):
+            if name not in event:
+                continue
+            value = event[name]
+            components = value if isinstance(value, list) else [value]
+            if not components or any(component != 0 for component in components):
+                raise Rejected(f"fixed callback body velocity is not zero: {name}")
 
 
 def check_counts(rows, fixture, *, reference):
@@ -213,6 +246,9 @@ def check_counts(rows, fixture, *, reference):
             for snapshot in row.get("values", []):
                 check_snapshot(snapshot)
         if kind == "event":
+            for payload in row.get("payload", []):
+                if isinstance(payload, dict):
+                    check_fixed_body_callback_velocities(payload, fixture)
             step, order = row.get("step"), row.get("order")
             if type(step) is not int or type(order) is not int or step < event_step or order < 0:
                 raise Rejected("invalid event step or order")
