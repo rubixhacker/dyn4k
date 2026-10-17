@@ -31,18 +31,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class Capsule : AbstractShape, Convex {
-    @get:kotlin.jvm.JvmName("getLengthField")
-    @JvmFieldBridge protected val length: Double
-    @get:kotlin.jvm.JvmName("getCapRadiusField")
-    @JvmFieldBridge protected val capRadius: Double
-    @get:kotlin.jvm.JvmName("getFociField")
-    @JvmFieldBridge protected val foci: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getLocalXAxisField")
-    @JvmFieldBridge protected val localXAxis: Vector2
+    @kotlin.jvm.JvmField protected val length: Double
+    @kotlin.jvm.JvmField protected val capRadius: Double
+    @kotlin.jvm.JvmField protected val foci: Array<Vector2>
+    @kotlin.jvm.JvmField protected val localXAxis: Vector2
 
     constructor(width: Double, height: Double) : super(max(width, height) * 0.5) {
         if (width <= 0.0) throw ValueOutOfRangeException("width", width, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
@@ -161,10 +156,10 @@ open class Capsule : AbstractShape, Convex {
         foci[0].add(x, y)
         foci[1].add(x, y)
     }
-    fun getRotationAngle(): Double = atan2(localXAxis.y, localXAxis.x)
-    fun getRotation(): Rotation = Rotation.fromComponentsUnchecked(localXAxis.x, localXAxis.y)
-    fun getLength(): Double = length
-    fun getCapRadius(): Double = capRadius
+    open fun getRotationAngle(): Double = atan2(localXAxis.y, localXAxis.x)
+    open fun getRotation(): Rotation = Rotation.fromComponentsUnchecked(localXAxis.x, localXAxis.y)
+    open fun getLength(): Double = length
+    open fun getCapRadius(): Double = capRadius
 
     companion object {
         const val EDGE_FEATURE_SELECTION_CRITERIA = 0.98
