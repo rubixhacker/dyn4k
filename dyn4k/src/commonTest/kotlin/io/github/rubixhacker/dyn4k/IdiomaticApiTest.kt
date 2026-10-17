@@ -117,5 +117,15 @@ class IdiomaticApiTest {
             candidate === built.bodies[0]
         }
         assertSame(built.bodies[0], hits.single().getBody())
+        val closest = built.raycastClosestWhere(Ray(Vector2(-3.0, 0.0), Vector2(1.0, 0.0)), 10.0) { candidate, _ ->
+            candidate === built.bodies[0]
+        }
+        assertSame(built.bodies[0], closest!!.getBody())
+        val overlaps = built.find(circle(0.5), Transform()) { candidate, _ -> candidate === built.bodies[0] }
+        assertSame(built.bodies[0], overlaps.single().getBody())
+        val sweep = built.sweep(circle(0.25), Transform().apply { translate(-3.0, 0.0) }, Vector2(6.0, 0.0)) {
+            candidate, _ -> candidate === built.bodies[0]
+        }
+        assertSame(built.bodies[0], sweep.single().getBody())
     }
 }
