@@ -8,6 +8,8 @@ Use `--candidate PATH` to compare a candidate JAR with the pinned baseline. The 
 
 Use `--inventory-only` to refresh the inventory without running tests. Run `tools/baseline/verify.sh --help` for path overrides.
 
+`scripts/verify-foundation-jvm-api.py` applies the same source checks to 13 foundation types, including package-visible members used by Java source in `org.dyn4j` packages.
+
 The JAR is the production dependency for the oracle only. The runner compiles the unchanged upstream tests with JUnit 4.13.1 and Hamcrest 1.3, then executes test classes in one JUnit process. It includes `src/test/resources`. `javac --release 8` limits the harness and tests to Java 8 APIs and bytecode. The report records compiler and runtime versions, harness bytecode version, dependency hashes, and each test input hash. No upstream source is changed.
 
 The verifier rejects changed, untracked, or ignored source inputs before checkout. It checks every production Java entry in the sources JAR against the pinned Git revision. It leaves a dirty checkout in place and reports the problem. The suite must run exactly 2,385 cases with no failures or ignored cases. `check-run --report PATH` checks a saved run report.

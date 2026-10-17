@@ -277,6 +277,19 @@ class FoundationComparatorTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout)
             self.assertIn("public static final int count()", result.stderr)
 
+    def test_package_method_absence_breaks_same_package_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = self.foundation_jar(root / "baseline", "void rotate(int angle) {}")
+            candidate = self.foundation_jar(root / "candidate", "")
+            self.assert_java8_source(root, baseline, candidate,
+                                     "package org.dyn4j.geometry; public class Consumer { void run(Vector2 value) { value.rotate(1); } }",
+                                     candidate_passes=False)
+            result = subprocess.run([sys.executable, str(FOUNDATION_SCRIPT), str(baseline),
+                                     str(candidate)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("rotate(int)", result.stderr)
+
     def test_wider_access_and_removed_method_final_are_compatible(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
