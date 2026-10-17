@@ -287,6 +287,25 @@ val jvmApi = mapOf(
     )
 )
 
+val baselineFinalPolygonMethods = mapOf(
+    "org/dyn4j/geometry/hull/DivideAndConquer" to setOf("divide"),
+    "org/dyn4j/geometry/hull/LinkedVertexHull" to setOf("toArray", "merge"),
+    "org/dyn4j/geometry/decompose/DoubleEdgeList" to setOf(
+        "addHalfEdges", "getPreviousEdge", "getReferenceFace", "removeHalfEdges",
+        "triangulateYMonotonePolygon", "getYMonotonePolygons"
+    ),
+    "org/dyn4j/geometry/decompose/EarClipping" to setOf("createTriangulation", "isReflex", "isEar"),
+    "org/dyn4j/geometry/decompose/SweepLine" to setOf(
+        "createTriangulation", "start", "end", "split", "merge", "regular"
+    ),
+    "org/dyn4j/geometry/decompose/SweepLineState" to setOf("getType"),
+    "org/dyn4j/geometry/decompose/SweepLineVertex" to setOf("isLeft"),
+    "org/dyn4j/geometry/simplify/AbstractSimplifier" to setOf(
+        "buildSegmentTree", "buildResult", "isSelfIntersectionProduced", "intersects"
+    ),
+    "org/dyn4j/geometry/simplify/VertexClusterReduction" to setOf("buildVertexList")
+)
+
 val patchJvmArchive: (File) -> Unit = { jar ->
         val temporary = jar.resolveSibling(jar.name + ".patched")
         ZipFile(jar).use { input ->
@@ -372,6 +391,10 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
                                     access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
+                                if (name in baselineFinalPolygonMethods[owner].orEmpty() &&
+                                    !(owner == "org/dyn4j/geometry/decompose/DoubleEdgeList" &&
+                                        revised and Opcodes.ACC_PUBLIC != 0)
+                                ) revised = revised or Opcodes.ACC_FINAL
                                 val revisedSignature = signature
                                     ?.replace("Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;")
                                     ?.let { value ->
@@ -482,7 +505,9 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                         name + descriptor in spec.packageMethodSignatures) 0 else Opcodes.ACC_PUBLIC
                                     val method = super.visitMethod(
                                         visibility or Opcodes.ACC_STATIC or
-                                            (if (owner == "org/dyn4j/Version") Opcodes.ACC_FINAL else 0) or
+                                            (if (owner == "org/dyn4j/Version" ||
+                                                name in baselineFinalPolygonMethods[owner].orEmpty()
+                                            ) Opcodes.ACC_FINAL else 0) or
                                             (if (name in spec.varargMethods &&
                                                 Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                             ) Opcodes.ACC_VARARGS else 0),
