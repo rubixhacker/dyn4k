@@ -12,7 +12,7 @@ The external JVM consumer in `consumers/qualification/` resolves `io.github.rubi
 
 `probe` captures an actual Gradle command, XML test counts and exit status. A zero case count, skipped case, failure or command failure makes the probe fail. Probe output says `foundation probe only`. `execute` accepts an explicit JSON plan keyed by matrix case ID. Each plan entry supplies either `unavailable_reason`, or a command array and `result_file` for a runtime harness that writes observed evidence. Missing plans remain `NOT_RUN`. `record` evaluates all 112 cases and exits nonzero until each case passes. A lane needs a full candidate SHA, artifact SHA-256, runtime identity, positive expected count, matching executed count, zero failures and skips, a staged consumer pass, and `suite: complete`. A runtime result may include target, runtime, version and configuration; those values must match its case. An external harness must establish the minimum/current runtime pin and actual build configuration before supplying a passing record.
 
-Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has attempted but invalid or failing evidence; `UNAVAILABLE` names an absent runner or probe; `NOT_RUN` has no attempt. A missing device or suite never becomes a pass or a zero measurement.
+Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has attempted but invalid or failing evidence; `UNAVAILABLE` names an absent runner or probe; `NOT_RUN` has no attempt. `record --availability <json>` accepts target, `target:runtime`, `target:runtime:version`, or exact case IDs with concrete reasons. More specific selectors take priority. A missing device or suite never becomes a pass or a zero measurement.
 
 ## Local commands
 

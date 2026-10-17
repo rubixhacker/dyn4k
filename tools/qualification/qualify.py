@@ -258,6 +258,7 @@ def main():
     record.add_argument("--candidate-sha", required=True)
     record.add_argument("--evidence", type=Path)
     record.add_argument("--audit", type=Path)
+    record.add_argument("--availability", type=Path)
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -321,6 +322,24 @@ def main():
         parser.error("audit candidate SHA differs from report")
     artifact_hashes = {item["sha256"] for item in audit_data["artifacts"]} if audit_data else None
     cases = expand(matrix())
+    availability = json.loads(args.availability.read_text()) if args.availability else {}
+    valid_availability = {row["target"] for row in matrix()} | {
+        f'{row["target"]}:{row["runtime"]}' for row in matrix()} | {
+        f'{case["target"]}:{case["runtime"]}:{case["version"]}' for case in cases} | {
+        case["id"] for case in cases}
+    unknown = set(availability) - valid_availability
+    if unknown:
+        parser.error("unknown availability selector: " + ", ".join(sorted(unknown)))
+    if any(not isinstance(reason, str) or not reason.strip() for reason in availability.values()):
+        parser.error("every unavailable reason must be nonempty text")
+    for case in cases:
+        if case["id"] not in evidence:
+            reason = availability.get(case["id"],
+                availability.get(f'{case["target"]}:{case["runtime"]}:{case["version"]}',
+                    availability.get(f'{case["target"]}:{case["runtime"]}',
+                        availability.get(case["target"]))))
+            if reason:
+                evidence[case["id"]] = {"unavailable_reason": reason}
     results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha, artifact_hashes) for case in cases]
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
