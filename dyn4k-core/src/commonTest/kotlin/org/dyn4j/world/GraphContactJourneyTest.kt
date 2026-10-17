@@ -18,6 +18,42 @@ import org.dyn4j.geometry.Vector2
 
 class GraphContactJourneyTest {
     @Test
+    fun graphProtectedSortAndReplaceAllInvalidateSavedViews() {
+        val body = Body()
+        val fixture = body.addFixture(Circle(0.5))
+        val other = Body()
+        val otherFixture = other.addFixture(Circle(0.5))
+        val contact = ContactConstraint(
+            BasicCollisionPair(BasicCollisionItem(body, fixture), BasicCollisionItem(other, otherFixture))
+        )
+        val joint = PinJoint(body, Vector2())
+        val node = ConstraintGraphNode(body)
+        node.mutableContacts().add(contact)
+        node.mutableJoints().add(joint)
+
+        fun <E> verify(backing: MutableList<E>, view: List<E>, mutate: (WorldTrackedArrayList<E>) -> Unit) {
+            val iterator = backing.iterator()
+            val protectedSublist = backing.subList(0, 1)
+            val publicSublist = view.subList(0, 1)
+            val original = backing[0]
+            mutate(backing as WorldTrackedArrayList<E>)
+            assertSame(original, view[0])
+            assertFailsWith<ConcurrentModificationException> { iterator.next() }
+            assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+            assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+        }
+
+        val contacts = node.getContactConstraints()
+        val joints = node.getJoints()
+        verify(node.mutableContacts(), contacts) { it.sortElements(Comparator { _, _ -> 0 }) }
+        verify(node.mutableContacts(), contacts) { it.replaceAllElements { value -> value } }
+        verify(node.mutableJoints(), joints) { it.sortElements(Comparator { _, _ -> 0 }) }
+        verify(node.mutableJoints(), joints) { it.replaceAllElements { value -> value } }
+        assertSame(contacts, node.getContactConstraints())
+        assertSame(joints, node.getJoints())
+    }
+
+    @Test
     fun graphContactAndJointViewsKeepLiveIdentityAndFailFastIterators() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))

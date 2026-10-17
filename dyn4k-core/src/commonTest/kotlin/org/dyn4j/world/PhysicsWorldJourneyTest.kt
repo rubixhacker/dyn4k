@@ -48,6 +48,18 @@ class PhysicsWorldJourneyTest {
         fun jointBackingIterator(): MutableIterator<Joint<Body>> = joints.iterator()
         fun stepBackingSubList(): MutableList<StepListener<Body>?> = stepListeners.subList(0, 1)
         fun jointBackingSubList(): MutableList<Joint<Body>> = joints.subList(0, 1)
+        fun sortStepBacking() {
+            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>)
+                .sortElements(Comparator { _, _ -> 0 })
+        }
+
+        fun replaceAllStepBacking() {
+            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>)
+                .replaceAllElements { it }
+        }
+
+        fun removeIfStepBacking(predicate: (StepListener<Body>?) -> Boolean): Boolean =
+            (stepListeners as WorldTrackedArrayList<StepListener<Body>?>).removeIfElements(predicate)
         fun backingListsHaveRandomAccess(): Boolean =
             stepListeners is RandomAccess && joints is RandomAccess
 
@@ -234,6 +246,67 @@ class PhysicsWorldJourneyTest {
         world.addJoint(PinJoint(body, Vector2()))
         assertFailsWith<ConcurrentModificationException> { joints[0] }
         assertFailsWith<ConcurrentModificationException> { joints.size }
+    }
+
+    @Test
+    fun protectedSortInvalidatesSavedWorldIteratorsAndSubLists() {
+        val world = ExtendedWorld()
+        val listener = StepListenerAdapter<Body>()
+        world.addStepListener(listener)
+        val publicView = world.getStepListeners()
+        val iterator = world.stepBackingIterator()
+        val protectedSublist = world.stepBackingSubList()
+        val publicSublist = publicView.subList(0, 1)
+        world.sortStepBacking()
+        assertSame(publicView, world.getStepListeners())
+        assertSame(listener, publicView[0])
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+    }
+
+    @Test
+    fun protectedReplaceAllInvalidatesSavedWorldIteratorsAndSubLists() {
+        val world = ExtendedWorld()
+        val listener = StepListenerAdapter<Body>()
+        world.addStepListener(listener)
+        val publicView = world.getStepListeners()
+        val iterator = world.stepBackingIterator()
+        val protectedSublist = world.stepBackingSubList()
+        val publicSublist = publicView.subList(0, 1)
+        world.replaceAllStepBacking()
+        assertSame(publicView, world.getStepListeners())
+        assertSame(listener, publicView[0])
+        assertFailsWith<ConcurrentModificationException> { iterator.next() }
+        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
+        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+    }
+
+    @Test
+    fun protectedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() {
+        val world = ExtendedWorld()
+        val first = StepListenerAdapter<Body>()
+        val second = StepListenerAdapter<Body>()
+        world.addStepListener(first)
+        world.addStepListener(second)
+        val publicView = world.getStepListeners()
+        val iterator = world.stepBackingIterator()
+        val protectedSublist = world.stepBackingSubList()
+        var visited = 0
+        assertFailsWith<IllegalStateException> {
+            world.removeIfStepBacking {
+                if (visited++ == 1) throw IllegalStateException()
+                true
+            }
+        }
+        assertSame(publicView, world.getStepListeners())
+        assertEquals(2, publicView.size)
+        assertSame(first, iterator.next())
+        assertSame(first, protectedSublist[0])
+        val beforeRemoval = world.stepBackingIterator()
+        assertTrue(world.removeIfStepBacking { it === first })
+        assertSame(second, publicView[0])
+        assertFailsWith<ConcurrentModificationException> { beforeRemoval.next() }
     }
 
     @Test

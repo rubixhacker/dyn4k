@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-internal class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMutableList<E>(), RandomAccess {
+internal open class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMutableList<E>(), RandomAccess {
     private val backing = ArrayList<E>(initialCapacity)
     private var structuralVersion = 0
 
@@ -58,6 +58,55 @@ internal class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMut
     override fun clear() {
         backing.clear()
         structuralVersion++
+    }
+
+    @kotlin.jvm.JvmSynthetic
+    fun sortElements(comparator: Comparator<in E>?) {
+        val expectedVersion = structuralVersion
+        if (comparator == null) {
+            @Suppress("UNCHECKED_CAST")
+            backing.sortWith(Comparator { left, right ->
+                (left as Comparable<Any?>).compareTo(right)
+            })
+        } else {
+            backing.sortWith(comparator)
+        }
+        if (structuralVersion != expectedVersion) throw ConcurrentModificationException()
+        structuralVersion++
+    }
+
+    @kotlin.jvm.JvmSynthetic
+    fun replaceAllElements(operator: (E) -> E) {
+        val expectedVersion = structuralVersion
+        for (index in backing.indices) {
+            if (structuralVersion != expectedVersion) throw ConcurrentModificationException()
+            backing[index] = operator(backing[index])
+        }
+        if (structuralVersion != expectedVersion) throw ConcurrentModificationException()
+        structuralVersion++
+    }
+
+    @kotlin.jvm.JvmSynthetic
+    fun removeIfElements(predicate: (E) -> Boolean): Boolean {
+        val expectedVersion = structuralVersion
+        val remove = BooleanArray(backing.size)
+        var removedCount = 0
+        for (index in backing.indices) {
+            if (structuralVersion != expectedVersion) throw ConcurrentModificationException()
+            if (predicate(backing[index])) {
+                remove[index] = true
+                removedCount++
+            }
+        }
+        if (structuralVersion != expectedVersion) throw ConcurrentModificationException()
+        if (removedCount == 0) return false
+        var destination = 0
+        for (index in remove.indices) {
+            if (!remove[index]) backing[destination++] = backing[index]
+        }
+        repeat(removedCount) { backing.removeAt(backing.lastIndex) }
+        structuralVersion++
+        return true
     }
 
     override fun subList(fromIndex: Int, toIndex: Int): MutableList<E> {

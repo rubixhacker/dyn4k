@@ -155,13 +155,13 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
             StaticValueAABBExpansionMethod(0.2), bodyCapacity
         )
         ccdBroadphase.setUpdateTrackingEnabled(true)
-        val jointList = WorldTrackedArrayList<Joint<T>>(jointCapacity)
+        val jointList = worldTrackedArrayList<Joint<T>>(jointCapacity)
         joints = jointList
         jointsUnmodifiable = jointList.liveView()
-        val contactListenerList = WorldTrackedArrayList<ContactListener<T>?>()
-        val destructionListenerList = WorldTrackedArrayList<DestructionListener<T>?>()
-        val timeOfImpactListenerList = WorldTrackedArrayList<TimeOfImpactListener<T>?>()
-        val stepListenerList = WorldTrackedArrayList<StepListener<T>?>()
+        val contactListenerList = worldTrackedArrayList<ContactListener<T>?>()
+        val destructionListenerList = worldTrackedArrayList<DestructionListener<T>?>()
+        val timeOfImpactListenerList = worldTrackedArrayList<TimeOfImpactListener<T>?>()
+        val stepListenerList = worldTrackedArrayList<StepListener<T>?>()
         contactListeners = contactListenerList
         destructionListeners = destructionListenerList
         timeOfImpactListeners = timeOfImpactListenerList

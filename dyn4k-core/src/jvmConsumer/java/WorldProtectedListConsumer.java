@@ -1,6 +1,7 @@
 package org.dyn4j.world;
 
 import java.util.ConcurrentModificationException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.RandomAccess;
 import org.dyn4j.collision.BasicCollisionItem;
@@ -61,8 +62,24 @@ public final class WorldProtectedListConsumer {
         }
     }
 
+    private static <T> void invalidatesAfterSortOrReplace(
+            List<T> backing, List<T> view, boolean replace, String label) {
+        Iterator<T> iterator = backing.iterator();
+        List<T> sublist = backing.subList(0, 1);
+        List<T> publicSublist = view.subList(0, 1);
+        T original = backing.get(0);
+        if (replace) backing.replaceAll(value -> value);
+        else backing.sort((left, right) -> 0);
+        if (backing.get(0) != original || view.get(0) != original) {
+            throw new AssertionError(label + " changed an element");
+        }
+        expectConcurrentModification(iterator::next, label + " iterator");
+        expectConcurrentModification(() -> sublist.get(0), label + " protected sublist");
+        expectConcurrentModification(() -> publicSublist.get(0), label + " public sublist");
+    }
+
     public static void main(String[] args) {
-        if (args.length != 1) throw new IllegalArgumentException("protected-sublist, reversed-range, random-access");
+        if (args.length != 1) throw new IllegalArgumentException("protected-sublist, reversed-range, random-access, sort, replace-all");
         String mode = args[0];
         InspectableWorld world = new InspectableWorld();
         StepListener<Body> step = new StepListenerAdapter<Body>();
@@ -96,6 +113,12 @@ public final class WorldProtectedListConsumer {
             randomAccess(world.jointBacking(), world.getJoints(), "World joint");
             randomAccess(node.contactConstraints, node.getContactConstraints(), "graph contact");
             randomAccess(node.joints, node.getJoints(), "graph joint");
+        } else if ("sort".equals(mode) || "replace-all".equals(mode)) {
+            boolean replace = "replace-all".equals(mode);
+            invalidatesAfterSortOrReplace(world.stepBacking(), world.getStepListeners(), replace, "World step");
+            invalidatesAfterSortOrReplace(world.jointBacking(), world.getJoints(), replace, "World joint");
+            invalidatesAfterSortOrReplace(node.contactConstraints, node.getContactConstraints(), replace, "graph contact");
+            invalidatesAfterSortOrReplace(node.joints, node.getJoints(), replace, "graph joint");
         } else throw new IllegalArgumentException(mode);
         System.out.println("WORLD_PROTECTED_LIST_OK," + mode);
     }

@@ -30,8 +30,8 @@ import org.dyn4j.dynamics.joint.Joint
 
 class ConstraintGraphNode<T : PhysicsBody>(@kotlin.jvm.JvmField protected val body: T) {
     @kotlin.jvm.JvmField protected val contactConstraints: MutableList<ContactConstraint<T>> =
-        WorldTrackedArrayList<ContactConstraint<T>>()
-    @kotlin.jvm.JvmField protected val joints: MutableList<Joint<T>> = WorldTrackedArrayList<Joint<T>>()
+        worldTrackedArrayList<ContactConstraint<T>>()
+    @kotlin.jvm.JvmField protected val joints: MutableList<Joint<T>> = worldTrackedArrayList<Joint<T>>()
     @kotlin.jvm.JvmField protected val contactConstraintsUnmodifiable: List<ContactConstraint<T>> =
         (contactConstraints as WorldTrackedArrayList<ContactConstraint<T>>).liveView()
     @kotlin.jvm.JvmField protected val jointsUnmodifiable: List<Joint<T>> =
