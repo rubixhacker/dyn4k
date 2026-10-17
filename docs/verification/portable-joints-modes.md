@@ -4,12 +4,12 @@ This bounded corpus covers the Wheel, Weld, Pin, Pulley, Angle, Motor, and Frict
 
 ## Identity and source
 
-- Owner: GPT-6-Sol. Raw `turn_context`: `/var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T14-44-11-01a14b64-ad1d-7ea0-aabb-56989ed2e742.jsonl:8`, with `payload.model=gpt-6-sol`.
+- Owner: GPT-6-Sol. Raw `turn_context`: `/var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T14-44-11-01a14b64-ad1d-7ea0-aabb-56989ed2e742.jsonl:8` and this review-fix turn at line 957, both with `payload.model=gpt-6-sol`.
 - Branch: `codex/port-coverage-joints-modes`. Starting source commit: `8203a21d0aa66fbbc75c5d0d80789327020b5e91`.
 - Pinned upstream source: `058bf6d982a0fb89b54050f929f6ea9dae53b714`. The pinned binary SHA-256 is `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`.
 - Identity inventory: `/tmp/dyn4k-joint-all-pinned-test-identities.txt`, SHA-256 `1bc94d6f191d19a4475073c9f5c934bab00f82627bb52b4726711c98daa5c62f`. Filtering the seven named classes gives exactly 172 identities: Wheel 46, Weld 35, Pin 27, Pulley 19, Angle 18, Motor 15, Friction 12.
 - Public test seam: common Kotlin constructors, mode setters/getters, wake state, `copy`, `shift`, and joint solver reaction. The three coefficient probes use subclass access to the protected update hook, matching the original extension seam.
-- The eight common test files have a sorted-byte concatenation SHA-256 of `8e928d67372a2e7549effa4d703f724a86dcb259be2c990b88e8518152894d80`.
+- The eight common test files have a sorted-byte concatenation SHA-256 of `240374b7632ec8b4b0989432ba324b2f76acdc34431416dccfe1212cd57175f0` at test source commit `e7a1ced278d87d76c07149f0ba236c727257bcbd`.
 
 | Pinned Java test file | Expanded cases | SHA-256 |
 | --- | ---: | --- |
@@ -23,9 +23,11 @@ This bounded corpus covers the Wheel, Weld, Pin, Pulley, Angle, Motor, and Frict
 
 ## Coverage and evidence
 
-The common corpus has 170 distinct cases. The direct translations retain every `TestCase.assert*` call in their corresponding original methods. The seven copy cases check public configuration, body replacement and identity, owner/user-data reset, and nonzero solver reaction impulses transferred into a copy. The three coefficient cases use the pinned original expected values: Pin 7937.606 and 2.839, Weld 1984.401 and 5.679, and Wheel 3968.803 and 4.015, each with the original `1e-3` tolerance. Direct Java package/protected field identity and matrix state assertions within the original copy methods remain covered by unchanged Java JUnit; common tests observe their public effects.
+The common corpus has 170 distinct cases. The direct translations retain every `TestCase.assert*` call in their corresponding original methods. The seven copy cases check public configuration, body replacement and identity, owner/user-data reset, and nonzero solver reaction impulses transferred into a copy. The three coefficient cases use the pinned original expected values: Pin 7937.606 and 2.839, Weld 1984.401 and 5.679, and Wheel 3968.803 and 4.015, each with the original `1e-3` tolerance. Each also checks that the damping ratio remains 0.5 after switching to stiffness mode and updating the coefficients, as in pinned Java. The copy and coefficient file begins with the exact pinned upstream BSD notice. Direct Java package/protected field identity and matrix state assertions within the original copy methods remain covered by unchanged Java JUnit; common tests observe their public effects.
 
 The two Pulley null-body identities are JVM-only source contracts. The common `PulleyJoint` constructor declares both body parameters non-null; Kotlin common cannot make the original Java call without a Kotlin cast failing before the constructor. The unchanged Java tests execute those exact calls against both artifacts and require `NullPointerException`.
+
+Across the disjoint joint branches, four identities use this JVM-only contract: `DistanceJointTest#createWithNullBody1`, `DistanceJointTest#createWithNullBody2`, `PulleyJointTest#createWithNullBody1`, and `PulleyJointTest#createWithNullBody2`. Each pinned source method passes null to the corresponding constructor argument and expects `NullPointerException`; both common constructors declare non-null body parameters. The Distance cases remain mapped in the core branch. Both unchanged Java suites execute all four under the registered joint test list.
 
 Run from this worktree with JDK 21, `ANDROID_HOME=/home/stewart/Android/Sdk`, `--offline --max-workers=1 --rerun-tasks --continue --console=plain`:
 
@@ -37,26 +39,30 @@ Run from this worktree with JDK 21, `ANDROID_HOME=/home/stewart/Android/Sdk`, `-
   :dyn4k-core:runStagedJointKotlinConsumer
 ```
 
-The final command passed. Both unchanged Java package suites ran **348/348** cases; the seven owned classes contribute 172 cases to each. Both staged joint consumers ran, including the ten-type Java trace and Kotlin consumer. The candidate JVM artifact `dyn4k-core-jvm-0.1.0-alpha.1.jar` has SHA-256 `6669dfed722cb77923899f6249a85397af9bbb0ab49bbe8b81743ab4f21a87bc`. Raw log: `/tmp/dyn4k-joint-modes-six-host-final.log`, SHA-256 `ebec762508b286190497f4bf4babeb11388c5f38f4be4a345fea68600aea8786`.
+The final command passed from test source commit `e7a1ced278d87d76c07149f0ba236c727257bcbd`. Both unchanged Java package suites ran **348/348** cases; the seven owned classes contribute 172 cases to each. Both staged joint consumers ran, including the ten-type Java trace and Kotlin consumer. The actual candidate JVM artifact `dyn4k-core-jvm-0.1.0-alpha.1.jar` has SHA-256 `944b4581beff66b5c1b7c233e54a759a18da312bd689325645cad764bcb0802a`. Raw final log: `/tmp/dyn4k-joint-modes-review-fix-six-host.log`, SHA-256 `6462f06840e007c93f169519d2289af28ffc00181d1cf7c0ef1afe8cf7abfd4b`.
 
-Each row hashes the sorted concatenation of the eight owned `TEST-*.xml` files for that task. All six tasks executed the same 170 distinct normalized class/method identities, SHA-256 `0866d3abbf819a074a521eb39994fe6918770e89c96a4b5e313e4d8e08fc9bd3`. Normalization removes host prefixes from class names and bracketed host suffixes from method names.
+Each row hashes the sorted concatenation of the eight owned `TEST-*.xml` files for that task. All 48 raw files are retained at `/tmp/dyn4k-joint-modes-xml/<task>/`; `/tmp/dyn4k-joint-modes-xml/manifest.json` lists every file hash, the source and inventory hashes, all 170 normalized identities, and each host digest. Its SHA-256 is `add982dc913dffe998841dcc3296296e027655402ae821e6126c9b0dd043d292`. Every archived file and combined digest was verified against the manifest. All six tasks executed the same 170 distinct normalized class/method identities, SHA-256 `39273e5579b5649e5391ce3db27cfe67aa954cde098cffcbc5708fa69a35032b`; each has zero duplicates, missing identities, or extra identities. Normalization removes host prefixes from class names and bracketed host suffixes from method names.
 
 | Host task | Cases | Failures | Errors | Skips | Raw XML SHA-256 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `jvmTest` | 170 | 0 | 0 | 0 | `69ce3ec496f4e7af548644a9667778ca5f04727bd3e9a1e5afabbf0c8f248054` |
-| `linuxX64Test` | 170 | 0 | 0 | 0 | `cf57ab61a0d431f8fadcf952d6c45c797d1bcfb4115ed3ab3201ddf63b78339b` |
-| `jsNodeTest` | 170 | 0 | 0 | 0 | `2082ed251ec080870acd2fd2ec7d07af376195ac03ed738e729792b898773214` |
-| `wasmJsNodeTest` | 170 | 0 | 0 | 0 | `9a513be655be30b91c3f4be2ab67aea97cfe088b35a5a482e07a5fa42ff5e283` |
-| `wasmWasiNodeTest` | 170 | 0 | 0 | 0 | `ec631b1101e5aa22d8dc59534b6def217cc59b0f1013ad49479e4896cae355db` |
-| `testAndroidHostTest` | 170 | 0 | 0 | 0 | `7f1b4efd97a0df03d89a49b0257c199cef9a74f3f963d6c34538bef28a1676fb` |
+| `jvmTest` | 170 | 0 | 0 | 0 | `37e046cd1ab950ad49aa5cfd8a4c999e52780f1af2d5499f3b92078a72045ad6` |
+| `linuxX64Test` | 170 | 0 | 0 | 0 | `038e970a9e96e9f29069932a40b10e402779adbf784ece72d0cade19a2b72227` |
+| `jsNodeTest` | 170 | 0 | 0 | 0 | `f7ac271802d80b095c666c4e7e9c8cec57aa188902a6954301c67dd387c39292` |
+| `wasmJsNodeTest` | 170 | 0 | 0 | 0 | `91c151cdbb14d9152d374a8f9b89bd2df32f71b82dc0c97df74b476955541c57` |
+| `wasmWasiNodeTest` | 170 | 0 | 0 | 0 | `5f4118c734ddc1284ca4717732aa870a2f4f5c4b6343d047675094a018f0b76e` |
+| `testAndroidHostTest` | 170 | 0 | 0 | 0 | `d21b91859a55d38fcacb88175f5201ae6c69281eeff744d866dbd5a94a6a7727` |
 
 This is six available host configurations, including an Android host test. It is not an Android device or full 21-target runtime pass.
 
-The controlled sensitivity test changed Pin's pinned stiffness expectation from 7937.606 to 7938.606. `pinComputeSpringStiffnessFrequency` failed on JVM. The original expectation was restored before the final six-host run. Negative log: `/tmp/dyn4k-joint-modes-negative.log`, SHA-256 `d213fc0b60a9389bbf36c73c4cf21fd2d477e0be9270f3cb5c8b7feffe302ebb`.
+The review-fix sensitivity test changed the new post-stiffness damping expectation from 0.5 to 0.25 in each of Pin, Weld, and Wheel. The targeted JVM run completed three tests with three failures: `pinComputeSpringStiffnessFrequency`, `weldComputeSpringStiffnessFrequency`, and `wheelComputeSpringStiffnessFrequency`. All three expectations were restored to 0.5 before the committed six-host run. Negative log: `/tmp/dyn4k-joint-modes-damping-negative.log`, SHA-256 `cf956b4b2d9be21f818a30d73f2100a1acb3145cf65042cbc64ad258537f7aa6`; negative XML: `/tmp/dyn4k-joint-modes-damping-negative.xml`, SHA-256 `d4a37f1c2f28beb735f67bbeea3e58cd62658ff4b2b2d0f8a7da12f1a6233b8c`.
 
 ## Separate world dependency
 
-The pinned baseline ran **32/32** world-driven joint simulation cases. Candidate compilation failed because `org.dyn4j.world.World` is absent; no candidate simulation case executed. Raw log: `/tmp/dyn4k-joint-modes-world.log`, SHA-256 `d212e3a4c2ee7f4d2092012414cc55b8e67779a8034b3d1cc83cc83fdff0f74a`. [Step interacting bodies with callbacks and continuous collision](https://github.com/rubixhacker/dyn4k/issues/39) owns that dependency. These 32 are separate from the 172 package identities and remain unpassed on the candidate.
+The 32 world-driven joint simulation identities are separate from the 172 package identities mapped here. They were not executed as part of this review fix and have no candidate pass claim from this branch. They require `org.dyn4j.world.World`, owned by [Step interacting bodies with callbacks and continuous collision](https://github.com/rubixhacker/dyn4k/issues/39).
+
+## Integration preflight
+
+The latest committed `codex/dyn4k-port` tip was `80ffe42ba427d6b34dcda6059774fd420b22441d`. `git merge-tree --write-tree HEAD codex/dyn4k-port` reported a content conflict in `dyn4k-core/build.gradle.kts`. The integration tip also omits joint JVM API entries and joint test and staged consumer task registrations present on this branch. Resolving that conflict would require editing outside this slice's owned paths, so no merge was made. The branch remains ready for an integration owner to reconcile those build registrations.
 
 ## Exact identity map
 
