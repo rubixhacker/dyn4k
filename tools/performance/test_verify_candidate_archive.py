@@ -28,7 +28,7 @@ class ArchiveVerificationTest(unittest.TestCase):
                     reader = csv.DictReader(stream)
                     fields = reader.fieldnames
                     rows = list(reader)
-                rows[2][channel] = "-1"
+                rows[2][channel] = "-2" if channel == "allocation_bytes" else "-1"
                 with raw.open("w", newline="") as stream:
                     writer = csv.DictWriter(stream, fieldnames=fields)
                     writer.writeheader()

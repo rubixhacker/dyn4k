@@ -3,6 +3,7 @@ import argparse
 import csv
 import hashlib
 import json
+import shutil
 import statistics
 import tempfile
 from pathlib import Path
@@ -102,6 +103,7 @@ def plateau(args, out, evidence, java, classes, jar):
         name = f"{family}.{variant}.{args.size}.{args.hz}hz.{api}.plateau"
         raw = out / f"{name}.csv"
         warmup = out / f"{name}.warmup.csv"
+        stderr_raw = out / f"{name}.stderr.raw"
         if api == "baseline":
             command = [java, "-Xms256m", "-Xmx2g", "-XX:+UseG1GC", "-cp",
                        f"{classes}:{jar}", "BaselinePilot", family, variant, args.size,
@@ -111,6 +113,7 @@ def plateau(args, out, evidence, java, classes, jar):
                        args.size, str(args.hz), "1", "plateau", str(args.warmup_seconds * args.hz), api]
         try:
             _, pid = run_capture(command, raw, warmup)
+            shutil.copyfile(warmup, stderr_raw)
             clean_warmup(warmup, api, pid)
             with raw.open(newline="") as stream:
                 cycles = list(csv.DictReader(stream))
@@ -125,6 +128,7 @@ def plateau(args, out, evidence, java, classes, jar):
                       "heap_drift_fraction": abs(late / early - 1.0) if early > 0 else None,
                       "warmup_status": warmup_status(list(csv.DictReader(warm)), args.hz),
                       "raw": raw.name, "raw_sha256": sha256(raw),
+                      "stderr_raw": stderr_raw.name, "stderr_sha256": sha256(stderr_raw),
                       "warmup_raw": warmup.name, "warmup_sha256": sha256(warmup)}
             evidence["results"].append(result)
             if status != "stable" or len(warm) - 1 != args.warmup_seconds * args.hz:

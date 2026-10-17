@@ -192,8 +192,7 @@ def verify_step_result(directory, item):
     require(any(case["family"] == family and case["variant"] == variant
                 for case in manifest()["scenarios"]), "workload is not frozen")
     raw = directory / item["raw"]
-    if item["mode"] == "memory" or "stderr_raw" in item:
-        verify_stderr(directory, item)
+    verify_stderr(directory, item)
     rows = validate_csv(raw, family, variant, size, hz, item["samples"], mode)
     require(all(int(row["rss_bytes"]) >= 0 and int(row["heap_used_bytes"]) >= 0 and
                 int(row["rss_delta_bytes"]) == int(row["rss_bytes"]) - item["rss_empty_harness_bytes"]
@@ -229,6 +228,29 @@ def verify_step_result(directory, item):
 def verify_plateau_result(directory, item):
     require(item["workload_id"] == f"lifecycle.replace.small.60hz.{item['api']}",
             "plateau workload differs")
+    require("stderr_raw" in item and "stderr_sha256" in item,
+            "plateau stderr raw input is unavailable")
+    name = item["stderr_raw"]
+    require(Path(name).name == name, "plateau stderr raw path differs")
+    stderr_raw = directory / name
+    require(stderr_raw.is_file() and sha256(stderr_raw) == item["stderr_sha256"],
+            "plateau stderr raw checksum differs")
+    markers = {}
+    warmup_lines = []
+    for line in stderr_raw.read_text().splitlines():
+        if line.startswith("#"):
+            key, separator, value = line[1:].partition("=")
+            require(separator and key not in markers, "plateau stderr marker differs")
+            markers[key] = int(value)
+        else:
+            warmup_lines.append(line)
+    require("\n".join(warmup_lines) + "\n" == (directory / item["warmup_raw"]).read_text(),
+            "plateau stderr warm-up stream differs")
+    expected = {} if item["api"] == "baseline" else {
+        "process_pid": item["process_pid"],
+        "route_marker": {"direct_kotlin": 1, "compatibility": 2}[item["api"]],
+    }
+    require(markers == expected, "plateau process identity marker differs")
     warmup_rows(directory, item, True)
     rows = rows_at(directory / item["raw"],
                    ["cycle", "heap_after_collection_bytes", "rss_after_collection_bytes",
@@ -276,7 +298,7 @@ def verify(root):
                 evidence["manifest_sha256"] == sha256(manifest_file) and
                 evidence["baseline_jar_sha256"] == manifest()["baseline_jar_sha256"],
                 f"{name} manifest or qualification differs")
-        if name == "memory":
+        if name not in OPTIONAL_GROUPS:
             verify_capture_tools(evidence)
         if name not in OPTIONAL_GROUPS:
             require(len(evidence["results"]) == evidence["expected_runs"] and
