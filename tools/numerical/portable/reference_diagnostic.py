@@ -74,8 +74,11 @@ def diagnostic(fixture_key, reference, portable):
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
     port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
-    ref_header = next(ref)
-    port_header = next(port)
+    try:
+        ref_header = next(ref)
+        port_header = next(port)
+    except StopIteration as error:
+        raise Rejected("reference or matching portable input is absent") from error
     header_exact = exact(ref_header, port_header)
     events = {"reference": 0, "portable": 0}
 

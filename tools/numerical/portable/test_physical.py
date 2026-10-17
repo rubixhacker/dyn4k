@@ -19,10 +19,11 @@ class PhysicalDiagnosticTest(unittest.TestCase):
                                             "linearMomentum": [0.25, -0.125],
                                             "angularMomentumCenter": 0.5}]}}
             trace.write_text(json.dumps(record) + "\n")
-            self.assertEqual(physical.nominal_free(trace)["status"], "PASSED")
+            self.assertEqual(physical.nominal_free(trace, expected_steps=1)["status"], "PASSED")
+            self.assertEqual(physical.nominal_free(trace)["status"], "FAILED")
             record["state"]["bodies"][0]["worldCenter"][1] += 2e-10
             trace.write_text(json.dumps(record) + "\n")
-            self.assertEqual(physical.nominal_free(trace)["status"], "FAILED")
+            self.assertEqual(physical.nominal_free(trace, expected_steps=1)["status"], "FAILED")
 
 
 if __name__ == "__main__":

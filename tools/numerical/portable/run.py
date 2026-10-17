@@ -179,7 +179,7 @@ def compare_frozen(trace, lane, reference_dirs):
         try:
             portable_case_id(key)
             result = diagnostic(key, source, trace)
-        except (Rejected, OSError, KeyError, TypeError, ValueError) as error:
+        except (Rejected, OSError, EOFError, StopIteration, KeyError, TypeError, ValueError) as error:
             result = {"fixture_key": key, "status": "FAILED",
                       "reason": str(error), "qualification": "UNPASSED"}
         results.append(result)

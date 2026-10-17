@@ -3,7 +3,7 @@ import math
 from receipt import Rejected, exact, records
 
 
-def nominal_free(trace):
+def nominal_free(trace, expected_steps=36000):
     checked = 0
     maxima = {"positionX_m": 0.0, "positionY_m": 0.0, "rotation_rad": 0.0,
               "energy": 0.0, "momentumX": 0.0, "momentumY": 0.0,
@@ -41,8 +41,8 @@ def nominal_free(trace):
                                      "rotation_rad": dr})
     except (Rejected, KeyError, TypeError, ValueError) as error:
         failures.append({"reason": str(error)})
-    if checked == 0:
-        failures.append({"reason": "no long-free state executed"})
+    if checked != expected_steps:
+        failures.append({"reason": f"expected {expected_steps} long-free states; executed {checked}"})
     return {"status": "FAILED" if failures else "PASSED", "checked": checked,
             "failed_samples": failure_count,
             "maxima": maxima, "first_failures": failures[:20],
