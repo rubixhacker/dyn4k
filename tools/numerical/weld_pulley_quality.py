@@ -5,6 +5,7 @@ import json
 import math
 from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
+from functools import lru_cache
 from math import isqrt
 from pathlib import Path
 
@@ -46,6 +47,59 @@ def shown(value):
     with localcontext() as context:
         context.prec = 80
         return str(Decimal(value.numerator) / Decimal(value.denominator))
+
+
+def atan_interval(value):
+    if value < 0:
+        lower, upper = atan_interval(-value)
+        return -upper, -lower
+    if value > Fraction(1, 2):
+        raise Rejected("atan argument exceeds the certified series range")
+    power = value
+    total = Fraction(0)
+    for index in range(256):
+        term = power / (2 * index + 1)
+        total += term if index % 2 == 0 else -term
+        power *= value * value
+        remainder = power / (2 * index + 3)
+        if remainder <= Fraction(1, ROOT_SCALE):
+            return ((total - remainder, total) if index % 2 == 0 else
+                    (total, total + remainder))
+    raise Rejected("atan enclosure did not converge")
+
+
+@lru_cache(maxsize=1)
+def pi_interval():
+    fifth = atan_interval(Fraction(1, 5))
+    two_hundred_thirty_ninth = atan_interval(Fraction(1, 239))
+    return (16 * fifth[0] - 4 * two_hundred_thirty_ninth[1],
+            16 * fifth[1] - 4 * two_hundred_thirty_ninth[0])
+
+
+def acute_orientation_interval(cosine, sine):
+    if cosine == 0:
+        lower, upper = pi_interval()
+        return lower / 2, upper / 2
+    ratio = sine / cosine
+    if ratio <= Fraction(1, 2):
+        return atan_interval(ratio)
+    if ratio <= 2:
+        lower, upper = atan_interval((ratio - 1) / (ratio + 1))
+        pi_lower, pi_upper = pi_interval()
+        return pi_lower / 4 + lower, pi_upper / 4 + upper
+    lower, upper = atan_interval(1 / ratio)
+    pi_lower, pi_upper = pi_interval()
+    return pi_lower / 2 - upper, pi_upper / 2 - lower
+
+
+def absolute_orientation_interval(cosine, sine):
+    if cosine == 0 and sine == 0:
+        raise Rejected("zero rotation coefficients")
+    if cosine >= 0:
+        return acute_orientation_interval(cosine, abs(sine))
+    lower, upper = acute_orientation_interval(-cosine, abs(sine))
+    pi_lower, pi_upper = pi_interval()
+    return pi_lower - upper, pi_upper - lower
 
 
 def limit(declaration, case, name):
@@ -90,6 +144,8 @@ def weld(state):
         raise Rejected("fixed weld body or anchor differs")
     center = vector(moving["center"])
     cosine, sine = number(moving["cost"]), number(moving["sint"])
+    if abs(cosine) > 1 or abs(sine) > 1:
+        raise Rejected("rotation coefficient exceeds the source range")
     anchor = vector(joint["anchor2"])
     expected = (center[0] - cosine / 2, center[1] - sine / 2)
     for observed, formula in zip(anchor, expected):
@@ -100,8 +156,10 @@ def weld(state):
     if abs(angle) > math.pi:
         raise Rejected("weld angle is outside the source normalized range")
     exact_angle = Fraction.from_float(abs(angle))
+    represented_lower, represented_upper = absolute_orientation_interval(Fraction(cosine), Fraction(sine))
     return {"anchor_gap_m": distance_interval(joint["anchor1"], joint["anchor2"]),
-            "angular_error_rad": (exact_angle, exact_angle)}
+            "angular_error_rad": (max(exact_angle, represented_lower),
+                                  max(exact_angle, represented_upper))}
 
 
 def pulley(state):

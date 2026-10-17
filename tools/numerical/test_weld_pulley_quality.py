@@ -2,6 +2,7 @@ import copy
 import gzip
 import hashlib
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +82,57 @@ class WeldPulleyQualitySeamTest(unittest.TestCase):
         rows = self.rows("weld-spring-equal")
         rows[-1]["state"]["bodies"][1]["angle"] = 0.02
         self.assertEqual("PHYSICAL_FAILED", self.audit("weld-spring-equal", rows)["status"])
+
+    def test_reported_zero_cannot_hide_over_limit_stored_rotation(self):
+        for radians in (0.04, -0.04):
+            with self.subTest(radians=radians):
+                rows = self.rows("weld-spring-equal")
+                cosine, sine = math.cos(radians), math.sin(radians)
+                moving = rows[-1]["state"]["bodies"][1]
+                moving.update(center=[-0.5 + 0.5 * cosine, 2 + 0.5 * sine],
+                              angle=0, cost=cosine, sint=sine)
+                result = self.audit("weld-spring-equal", rows)
+                self.assertEqual("PHYSICAL_FAILED", result["status"])
+                self.assertEqual(1, result["metrics"]["angular_error_rad"]["failed"])
+                self.assertEqual(0, result["metrics"]["anchor_gap_m"]["failed"])
+
+    def test_represented_rotation_uses_the_fixed_one_degree_limit(self):
+        for radians, expected in ((0.017, "PHYSICAL_PASSED"),
+                                  (-0.017, "PHYSICAL_PASSED"),
+                                  (0.018, "PHYSICAL_FAILED"),
+                                  (-0.018, "PHYSICAL_FAILED")):
+            with self.subTest(radians=radians):
+                rows = self.rows("weld-spring-equal")
+                cosine, sine = math.cos(radians), math.sin(radians)
+                rows[-1]["state"]["bodies"][1].update(
+                    center=[-0.5 + 0.5 * cosine, 2 + 0.5 * sine],
+                    angle=0, cost=cosine, sint=sine)
+                self.assertEqual(expected, self.audit("weld-spring-equal", rows)["status"])
+
+    def test_stored_rotation_quadrants_and_signed_zero(self):
+        for cosine, sine, expected in ((-1, 0, "PHYSICAL_FAILED"),
+                                        (-1, -0.0, "PHYSICAL_FAILED"),
+                                        (0, 1, "PHYSICAL_FAILED"),
+                                        (0, -1, "PHYSICAL_FAILED"),
+                                        (0.5, 0.5, "PHYSICAL_FAILED"),
+                                        (0.2, 0.5, "PHYSICAL_FAILED"),
+                                        (-0.2, 0.5, "PHYSICAL_FAILED"),
+                                        (1, -0.0, "PHYSICAL_PASSED")):
+            with self.subTest(cosine=cosine, sine=sine):
+                rows = self.rows("weld-spring-equal")
+                rows[-1]["state"]["bodies"][1].update(
+                    center=[-0.5 + 0.5 * cosine, 2 + 0.5 * sine],
+                    angle=0, cost=cosine, sint=sine)
+                self.assertEqual(expected, self.audit("weld-spring-equal", rows)["status"])
+
+    def test_bad_stored_rotation_rejects_even_with_matching_anchor(self):
+        for cosine, sine in ((0, 0), (1.001, 0), (1, 1.001),
+                             (float("nan"), 0), (1, float("inf"))):
+            with self.subTest(cosine=cosine, sine=sine):
+                rows = self.rows("weld-spring-equal")
+                rows[-1]["state"]["bodies"][1].update(
+                    center=[0, 2], angle=0, cost=cosine, sint=sine)
+                self.assertEqual("INVALID", self.audit("weld-spring-equal", rows)["status"])
 
     def test_out_of_bound_pulley_extension_and_compression_fail(self):
         for offset in (-0.02, 0.02):
