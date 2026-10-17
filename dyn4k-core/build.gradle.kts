@@ -495,6 +495,25 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                         }
                                     }
                                 }
+                                if (owner == "org/dyn4j/exception/CopyException" && name == "<init>" &&
+                                    descriptor == "(Ljava/lang/Class;Ljava/lang/Class;)V") {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitMethodInsn(
+                                            opcode: Int, methodOwner: String, methodName: String,
+                                            methodDescriptor: String, isInterface: Boolean
+                                        ) {
+                                            if (methodOwner == "kotlin/jvm/internal/Intrinsics" &&
+                                                methodName == "checkNotNullParameter") {
+                                                super.visitInsn(Opcodes.POP)
+                                                super.visitInsn(Opcodes.POP)
+                                            } else {
+                                                super.visitMethodInsn(
+                                                    opcode, methodOwner, methodName, methodDescriptor, isInterface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 if (owner == "org/dyn4j/geometry/simplify/AbstractSimplifier" &&
                                     name == "simplify" && descriptor == "([Lorg/dyn4j/geometry/Vector2;)[Lorg/dyn4j/geometry/Vector2;") {
                                     return object : MethodVisitor(Opcodes.ASM9, method) {

@@ -172,7 +172,13 @@ public final class CollisionModelConsumer {
                 "' returns an object of class '" + Fixture.class.getName() +
                 "'. You must override the copy method to return type '" + BadFixture.class.getName() + "'."));
         try { new CopyException(null, null); throw new AssertionError("missing null source failure"); }
-        catch (NullPointerException expected) { checks++; }
+        catch (NullPointerException expected) {
+            check(expected.getMessage() == null || expected.getMessage().contains("\"source\" is null"));
+        }
+        try { new CopyException(BadFixture.class, null); throw new AssertionError("missing null copy failure"); }
+        catch (NullPointerException expected) {
+            check(expected.getMessage() == null || expected.getMessage().contains("\"copy\" is null"));
+        }
 
         Body body = new Body();
         try { body.addFixture((Fixture) null); throw new AssertionError("null fixture accepted"); }
