@@ -2,9 +2,12 @@
 import argparse
 import hashlib
 import json
+import math
+import os
 import re
 import subprocess
 import sys
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -78,47 +81,140 @@ def check_providers(graph):
         raise ValueError("duplicate org.dyn4j provider: exclude org.dyn4j:dyn4j from the consumer dependency graph")
 
 
-def evaluate(case, evidence, candidate_sha=None, artifact_hashes_by_target=None):
+def target_binary_path(module, target):
+    publication = target_publication_name(module, target)
+    extension = ".aar" if target == "android" else ".jar" if target in (
+        "jvm", "js", "wasmJs", "wasmWasi") else ".klib"
+    return f'{GROUP.replace(".", "/")}/{publication}/{VERSION}/{publication}-{VERSION}{extension}'
+
+
+def full_suite_cases(suite_manifest):
+    if not isinstance(suite_manifest, dict) or suite_manifest.get("kind") != "complete-port":
+        raise ValueError("frozen complete suite manifest is unavailable")
+    if suite_manifest.get("schema") != 1 or not suite_manifest.get("id"):
+        raise ValueError("complete suite manifest identity is invalid")
+    cases = suite_manifest.get("cases")
+    areas = {"geometry", "collision", "dynamics", "joints", "compatibility"}
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("complete suite manifest has no cases")
+    declared_areas = suite_manifest.get("areas")
+    if not isinstance(declared_areas, list) or not all(isinstance(area, str) for area in declared_areas) or set(declared_areas) != areas:
+        raise ValueError("complete suite manifest omits a required area")
+    identities = []
+    covered = set()
+    for item in cases:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]:
+            raise ValueError("complete suite case identity is invalid")
+        if item.get("area") not in areas:
+            raise ValueError("complete suite case area is invalid")
+        identities.append(item["id"])
+        covered.add(item["area"])
+    if len(set(identities)) != len(identities) or covered != areas:
+        raise ValueError("complete suite cases are duplicate or incomplete")
+    return identities
+
+
+def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
+             suite_manifest=None, artifact_audit=None):
     result = {"id": case["id"], "status": "NOT_RUN"}
     if evidence is None:
         result["reason"] = "no evidence supplied"
         return result
+    if not isinstance(evidence, dict):
+        return {**result, "status": "FAILED", "reason": "evidence must be an object"}
     if evidence.get("unavailable_reason"):
         result.update(status="UNAVAILABLE", reason=evidence["unavailable_reason"])
         return result
-    required = ("candidate_sha", "artifact_sha256", "runtime_identity", "runtime_version",
-                "expected", "executed", "failures", "skipped", "consumer", "suite",
-                "target", "runtime", "version", "configuration")
+    required = ("candidate_sha", "runtime_identity", "runtime_version", "expected",
+                "executed", "failures", "skipped", "consumer", "suite_id",
+                "target", "runtime", "version", "configuration", "case_results",
+                "artifact_hashes", "invocation_id", "exit_code", "command",
+                "candidate_manifest_sha256", "suite_manifest_sha256", "audit_manifest_sha256")
     missing = [name for name in required if name not in evidence]
     problems = [f"missing {name}" for name in missing]
+    if not finite_json(evidence):
+        problems.append("non-finite observation is invalid")
     if not SHA40.fullmatch(str(evidence.get("candidate_sha", ""))):
         problems.append("candidate SHA must be a full commit hash")
     if candidate_sha and evidence.get("candidate_sha") != candidate_sha:
         problems.append("candidate SHA differs from report")
-    if not SHA64.fullmatch(str(evidence.get("artifact_sha256", ""))):
-        problems.append("artifact SHA-256 is missing or malformed")
-    if (artifact_hashes_by_target is not None and evidence.get("artifact_sha256") not in
-            artifact_hashes_by_target.get(case["target"], set())):
-        problems.append("artifact SHA-256 is not the staged dyn4k binary for this target")
-    if not evidence.get("runtime_identity"):
-        problems.append("runtime identity is empty")
-    if not evidence.get("runtime_version"):
-        problems.append("runtime version is empty")
     for key in ("target", "runtime", "version", "configuration"):
         if evidence.get(key) != case[key]:
             problems.append(f"{key} differs from lane")
+    if not re.fullmatch(r"[0-9a-f]{32}", str(evidence.get("invocation_id", ""))):
+        problems.append("fresh execution invocation ID is missing")
+    if evidence.get("exit_code") != 0 or not isinstance(evidence.get("command"), list):
+        problems.append("successful executable command is missing")
+    try:
+        cases = full_suite_cases(suite_manifest)
+    except ValueError as error:
+        problems.append(str(error))
+        cases = []
+    if not isinstance(candidate_manifest, dict) or not isinstance(artifact_audit, dict):
+        problems.append("candidate manifest and staged artifact audit are required")
+        lane = None
+    else:
+        if candidate_manifest.get("schema") != 1:
+            problems.append("candidate manifest schema is invalid")
+        if candidate_manifest.get("candidate_sha") != candidate_sha:
+            problems.append("candidate manifest SHA differs from report")
+        if artifact_audit.get("candidate_sha") != candidate_sha or artifact_audit.get("status") != "PASSED":
+            problems.append("staged artifact audit did not pass for this candidate")
+        if suite_manifest and candidate_manifest.get("suite_manifest_sha256") != manifest_digest(suite_manifest):
+            problems.append("candidate manifest does not bind frozen suite")
+        if candidate_manifest.get("audit_manifest_sha256") != manifest_digest(artifact_audit):
+            problems.append("candidate manifest does not bind staged audit")
+        for name, source in (("candidate_manifest_sha256", candidate_manifest),
+                             ("audit_manifest_sha256", artifact_audit)):
+            if evidence.get(name) != manifest_digest(source):
+                problems.append(f"{name} differs from frozen candidate evidence")
+        if suite_manifest and evidence.get("suite_manifest_sha256") != manifest_digest(suite_manifest):
+            problems.append("suite manifest SHA-256 differs from frozen suite")
+        lanes = candidate_manifest.get("lanes")
+        lane = lanes.get(case["id"]) if isinstance(lanes, dict) else None
+        if not isinstance(lane, dict):
+            problems.append("selected runtime lane is absent from candidate manifest")
+    if lane:
+        for key in ("runtime_identity", "runtime_version", "configuration"):
+            if not isinstance(lane.get(key), str) or not lane[key] or evidence.get(key) != lane[key]:
+                problems.append(f"{key} differs from selected candidate runtime")
+        if suite_manifest and (lane.get("suite_id") != suite_manifest.get("id")
+                               or evidence.get("suite_id") != suite_manifest.get("id")):
+            problems.append("complete suite identity differs from frozen manifest")
+        artifacts = artifact_audit.get("artifacts")
+        audited = target_binary_hashes(artifacts).get(case["target"], {}) if isinstance(artifacts, list) else {}
+        bound_hashes = lane.get("artifact_hashes")
+        if not isinstance(bound_hashes, dict) or set(bound_hashes) != set(MODULES):
+            problems.append("both target binary hashes are required")
+        else:
+            for module in MODULES:
+                expected_hash = bound_hashes[module]
+                if (not SHA64.fullmatch(str(expected_hash)) or audited.get(module) != expected_hash
+                        or not isinstance(evidence.get("artifact_hashes"), dict)
+                        or evidence["artifact_hashes"].get(module) != expected_hash):
+                    problems.append(f"{module} binary hash differs from target audit")
+    observations = evidence.get("case_results")
+    if not isinstance(observations, list):
+        problems.append("complete case results are missing")
+    else:
+        identities = [item.get("id") for item in observations if isinstance(item, dict)]
+        if (len(identities) != len(observations) or not all(isinstance(identity, str) for identity in identities)
+                or len(set(identity for identity in identities if isinstance(identity, str))) != len(identities)
+                or set(identity for identity in identities if isinstance(identity, str)) != set(cases)):
+            problems.append("complete case identities are missing, duplicate, or unexpected")
+        if any(not isinstance(item, dict) or item.get("status") != "PASSED"
+               for item in observations):
+            problems.append("a complete suite case did not pass")
     for key in ("expected", "executed", "failures", "skipped"):
         if type(evidence.get(key)) is not int or evidence[key] < 0:
             problems.append(f"{key} must be a nonnegative integer")
     if all(type(evidence.get(key)) is int for key in ("expected", "executed", "failures", "skipped")):
-        if evidence["expected"] == 0 or evidence["executed"] != evidence["expected"]:
-            problems.append("empty or incomplete suite")
+        if not cases or evidence["expected"] != len(cases) or evidence["executed"] != len(cases):
+            problems.append("suite counts differ from frozen expected cases")
         if evidence["failures"] or evidence["skipped"]:
             problems.append("failed or skipped tests")
     if evidence.get("consumer") != "PASSED":
         problems.append("staged external consumer did not pass")
-    if evidence.get("suite") != "complete":
-        problems.append("full portable correctness suite was not executed")
     result.update(status="FAILED" if problems else "PASSED",
                   reason="; ".join(problems) if problems else "all required evidence present")
     return result
@@ -132,19 +228,65 @@ def digest(path):
     return value.hexdigest()
 
 
+def manifest_digest(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def load_json_strict(path):
+    return json.loads(path.read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def finite_json(value):
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(finite_json(item) for item in value.values())
+    if isinstance(value, list):
+        return all(finite_json(item) for item in value)
+    return True
+
+
+def require_clean_checkout(repository, candidate_sha):
+    head = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+    if head != candidate_sha:
+        raise ValueError(f"candidate SHA differs from checkout {head}")
+    tracked = subprocess.check_output(
+        ["git", "-C", str(repository), "status", "--porcelain=v1", "--untracked-files=no"],
+        text=True)
+    if tracked.strip():
+        raise ValueError("dirty tracked checkout invalidates candidate evidence: " + tracked.strip())
+    untracked = subprocess.check_output(
+        ["git", "-C", str(repository), "ls-files", "--others", "-z"])
+    gradle_roots = (b"", b"dyn4k/", b"dyn4k-core/", b"consumers/qualification/",
+                    b"consumers/qualification/portable/")
+    generated_prefixes = tuple(root + directory + b"/" for root in gradle_roots
+                               for directory in (b"build", b".gradle", b".kotlin"))
+    generated_prefixes += (b"tools/qualification/__pycache__/",)
+    generated_files = {b"kotlin-js-store/yarn.lock",
+                       b"consumers/qualification/portable/kotlin-js-store/yarn.lock"}
+    relevant = [path for path in untracked.split(b"\0") if path
+                and path not in generated_files
+                and not path.startswith(generated_prefixes)]
+    if relevant:
+        names = ", ".join(os.fsdecode(path) for path in relevant[:5])
+        raise ValueError(f"untracked checkout inputs invalidate candidate evidence: {names}")
+
+
 def audit_staging(root, candidate_sha):
     errors, artifacts = [], []
     if not SHA40.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be a full commit hash")
     for module in MODULES:
+        expected = {target_publication_name(module, target)
+                    for target in {row["target"] for row in matrix()}}
         root_metadata = root / GROUP.replace(".", "/") / module / VERSION / f"{module}-{VERSION}.module"
         if root_metadata.is_file():
             root_data = json.loads(root_metadata.read_text())
             published = {item.get("available-at", {}).get("module")
                          for item in root_data.get("variants", [])}
             published.discard(None)
-            expected = {target_publication_name(module, target)
-                        for target in {row["target"] for row in matrix()}}
             if published != expected:
                 errors.append(f"{module}: root metadata target mapping differs: missing={sorted(expected - published)} extra={sorted(published - expected)}")
         else:
@@ -204,45 +346,144 @@ def audit_staging(root, candidate_sha):
             "status": "PASSED" if not errors else "FAILED", "errors": errors}
 
 
+def verify_audit_against_staging(audit_data, repository):
+    if not isinstance(audit_data, dict) or not SHA40.fullmatch(str(audit_data.get("candidate_sha", ""))):
+        raise ValueError("staged audit candidate identity is invalid")
+    staged = audit_staging(repository / "build/staging-repository", audit_data["candidate_sha"])
+    observed_files = {item["path"]: item["sha256"] for item in staged["artifacts"]}
+    recorded = audit_data.get("artifacts")
+    if not isinstance(recorded, list) or any(not isinstance(item, dict) for item in recorded):
+        raise ValueError("staged audit artifact list is invalid")
+    recorded_files = {item.get("path"): item.get("sha256") for item in recorded}
+    if (len(recorded_files) != len(recorded) or recorded_files != observed_files
+            or audit_data.get("status") != staged["status"]
+            or sorted(audit_data.get("errors", [])) != sorted(staged["errors"])):
+        raise ValueError("staged audit differs from current staged files")
+
+
 def target_binary_hashes(artifacts):
-    targets_by_publication = {
-        target_publication_name("dyn4k", row["target"]): row["target"]
-        for row in matrix()
-    }
-    result = {target: set() for target in targets_by_publication.values()}
-    for artifact in artifacts:
-        path = Path(artifact["path"])
-        module = path.parts[-3] if len(path.parts) >= 3 else ""
-        target = targets_by_publication.get(module)
-        if target is None or path.suffix.lower() not in (".jar", ".aar", ".klib"):
-            continue
-        if any(term in path.name.lower() for term in ("sources", "javadoc", "dokka", "license")):
-            continue
-        result[target].add(artifact["sha256"])
-    return result
+    audited = {item.get("path"): item.get("sha256") for item in artifacts
+               if isinstance(item, dict)}
+    return {row["target"]: {
+        module: audited.get(target_binary_path(module, row["target"])) for module in MODULES}
+        for row in matrix()}
 
 
-def run_probe(command, report_paths, candidate_sha, output):
-    for pattern in report_paths:
-        for path in Path().glob(pattern):
-            path.unlink()
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+def expected_probe_cases(manifest, group):
+    if "cases" in group:
+        cases = group["cases"]
+    else:
+        names = manifest.get("case_names", [])
+        cases = [{"classname": group.get("classname"),
+                  "name": name + group.get("name_suffix", "")} for name in names]
+        additional_names = group.get("additional_case_names", [])
+        if not isinstance(additional_names, list):
+            raise ValueError("additional probe case names must be a list")
+        cases.extend({"classname": group.get("additional_classname"),
+                      "name": name + group.get("name_suffix", "")}
+                     for name in additional_names)
+    if not isinstance(cases, list):
+        raise ValueError("probe cases must be a list")
+    identities = []
+    for case in cases:
+        if (not isinstance(case, dict) or not isinstance(case.get("classname"), str)
+                or not isinstance(case.get("name"), str) or not case["classname"] or not case["name"]):
+            raise ValueError("probe case identity is invalid")
+        identities.append((case["classname"], case["name"]))
+    if len(set(identities)) != len(identities):
+        raise ValueError("probe manifest has duplicate case identities")
+    return identities
+
+
+def run_probe(command, report_paths, candidate_sha, output, manifest=None):
+    problems = []
+    groups = manifest.get("groups") if isinstance(manifest, dict) else None
+    if not isinstance(groups, list) or not groups or manifest.get("kind") != "foundation-probe":
+        problems.append("frozen foundation probe manifest is required")
+        groups = []
+    patterns = [group.get("report_pattern") for group in groups if isinstance(group, dict)]
+    if len(patterns) != len(groups) or len(set(patterns)) != len(patterns):
+        problems.append("probe manifest has duplicate or invalid report groups")
+    if sorted(report_paths) != sorted(patterns):
+        problems.append("requested report groups differ from frozen manifest")
     expected = executed = failures = skipped = 0
-    for pattern in report_paths:
-        for path in Path().glob(pattern):
-            root = ET.parse(path).getroot()
-            expected += int(root.get("tests", 0))
-            skipped += int(root.get("skipped", 0))
-            failures += int(root.get("failures", 0)) + int(root.get("errors", 0))
-            executed += int(root.get("tests", 0)) - int(root.get("skipped", 0))
+    expected_by_group = {}
+    for group in groups:
+        try:
+            identities = expected_probe_cases(manifest, group)
+            expected_by_group[group["id"]] = identities
+            expected += len(identities)
+        except (KeyError, TypeError, ValueError) as error:
+            problems.append(str(error))
+    if not expected:
+        problems.append("probe manifest has no required cases")
+    completed = None
+    if not problems:
+        for pattern in patterns:
+            for path in Path().glob(pattern):
+                path.unlink()
+        completed = subprocess.run(command, text=True, capture_output=True, check=False)
+        if completed.returncode:
+            problems.append(f"probe command exited {completed.returncode}")
+        for group in groups:
+            expected_cases = expected_by_group[group["id"]]
+            paths = list(Path().glob(group["report_pattern"]))
+            if expected_cases and not paths:
+                problems.append(f'missing report group {group["id"]}')
+            if not expected_cases and paths:
+                problems.append(f'unexpected report for empty group {group["id"]}')
+            observed_cases = []
+            for path in paths:
+                try:
+                    root = ET.parse(path).getroot()
+                    if root.tag != "testsuite":
+                        raise ValueError("root element is not testsuite")
+                    suite_time = float(root.get("time", "0"))
+                    if not math.isfinite(suite_time) or suite_time < 0:
+                        raise ValueError("suite time is invalid")
+                    testcases = list(root.iter("testcase"))
+                    reported = {key: int(root.get(key, "-1")) for key in
+                                ("tests", "failures", "errors", "skipped")}
+                    if any(value < 0 for value in reported.values()):
+                        raise ValueError("suite counts are missing or negative")
+                    actual_failures = sum(bool(testcase.find("failure") is not None) for testcase in testcases)
+                    actual_errors = sum(bool(testcase.find("error") is not None) for testcase in testcases)
+                    actual_skips = sum(bool(testcase.find("skipped") is not None) for testcase in testcases)
+                    if (reported["tests"] != len(testcases) or reported["failures"] != actual_failures
+                            or reported["errors"] != actual_errors or reported["skipped"] != actual_skips):
+                        raise ValueError("suite counts differ from case elements")
+                    for testcase in testcases:
+                        duration = float(testcase.get("time", "nan"))
+                        if not math.isfinite(duration) or duration < 0:
+                            raise ValueError("case time is invalid")
+                        identity = (testcase.get("classname"), testcase.get("name"))
+                        if not all(identity):
+                            raise ValueError("case identity is missing")
+                        observed_cases.append(identity)
+                    executed += len(testcases) - actual_skips
+                    failures += actual_failures + actual_errors
+                    skipped += actual_skips
+                except (ET.ParseError, OSError, TypeError, ValueError) as error:
+                    problems.append(f"invalid report {path}: {error}")
+            if len(observed_cases) != len(set(observed_cases)):
+                problems.append(f'duplicate cases in group {group["id"]}')
+            if set(observed_cases) != set(expected_cases):
+                problems.append(f'partial or unexpected cases in group {group["id"]}')
+    if failures or skipped:
+        problems.append("probe has failed or skipped cases")
+    if executed != expected:
+        problems.append("probe executed count differs from frozen expected count")
     result = {"candidate_sha": candidate_sha, "command": command,
-              "exit_code": completed.returncode, "expected": expected,
-              "executed": executed, "failures": failures, "skipped": skipped,
-              "status": "FAILED" if completed.returncode or failures or skipped or not expected else "PASSED",
+              "exit_code": completed.returncode if completed else None,
+              "expected": expected, "executed": executed, "failures": failures,
+              "skipped": skipped, "manifest_sha256": manifest_digest(manifest) if manifest else None,
+              "status": "PROBE_FAILED" if problems else "PROBE_PASSED",
+              "reason": "; ".join(problems) if problems else "frozen foundation cases executed",
               "scope": "foundation probe only; not a complete lane"}
     output.write_text(json.dumps(result, indent=2) + "\n")
-    sys.stdout.write(completed.stdout)
-    sys.stderr.write(completed.stderr)
+    if completed:
+        sys.stdout.write(completed.stdout)
+        sys.stderr.write(completed.stderr)
     return result
 
 
@@ -259,14 +500,38 @@ def execute_plan(plan, candidate_sha, output):
         if not isinstance(command, list) or not command:
             evidence[case["id"]] = {"error": "no executable command"}
             continue
-        result = subprocess.run(command, text=True, capture_output=True, check=False)
-        result_file = Path(specification.get("result_file", ""))
-        if result.returncode or not result_file.is_file():
+        result_name = specification.get("result_file")
+        if not isinstance(result_name, str) or not result_name:
+            evidence[case["id"]] = {"error": "result file path is missing"}
+            continue
+        result_file = Path(result_name)
+        if result_file.is_dir():
+            evidence[case["id"]] = {"error": "result file path is a directory"}
+            continue
+        invocation_id = uuid.uuid4().hex
+        previous = None
+        if result_file.exists() or result_file.is_symlink():
+            previous = result_file.with_name(result_file.name + ".previous-" + invocation_id)
+            result_file.rename(previous)
+        environment = dict(os.environ, DYN4K_QUALIFICATION_INVOCATION=invocation_id)
+        result = subprocess.run(command, text=True, capture_output=True, check=False,
+                                env=environment)
+        if result.returncode or not result_file.is_file() or result_file.is_symlink():
             evidence[case["id"]] = {"error": "command failed or result file missing",
                                     "exit_code": result.returncode,
-                                    "stderr": result.stderr[-4000:]}
+                                    "stderr": result.stderr[-4000:],
+                                    "previous_result": str(previous) if previous else None}
             continue
-        observed = json.loads(result_file.read_text())
+        try:
+            observed = json.loads(result_file.read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+        except (ValueError, OSError) as error:
+            evidence[case["id"]] = {"error": f"invalid result JSON: {error}",
+                                    "exit_code": result.returncode}
+            continue
+        if not isinstance(observed, dict) or observed.get("invocation_id") != invocation_id:
+            evidence[case["id"]] = {"error": "result invocation ID differs from execution",
+                                    "exit_code": result.returncode}
+            continue
         observed["command"] = command
         observed["exit_code"] = result.returncode
         evidence[case["id"]] = observed
@@ -276,7 +541,9 @@ def execute_plan(plan, candidate_sha, output):
 
 def execution_succeeded(evidence):
     return bool(evidence) and all(
-        "error" not in result and result.get("exit_code", 0) == 0
+        "error" not in result and "unavailable_reason" not in result
+        and result.get("exit_code") == 0
+        and re.fullmatch(r"[0-9a-f]{32}", str(result.get("invocation_id", ""))) is not None
         for result in evidence.values()
     )
 
@@ -289,6 +556,7 @@ def main():
     record.add_argument("--candidate-sha", required=True)
     record.add_argument("--evidence", type=Path)
     record.add_argument("--audit", type=Path)
+    record.add_argument("--candidate-manifest", type=Path)
     record.add_argument("--availability", type=Path)
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
@@ -304,6 +572,8 @@ def main():
     probe = sub.add_parser("probe")
     probe.add_argument("--candidate-sha", required=True)
     probe.add_argument("--report", action="append", required=True)
+    probe.add_argument("--manifest", type=Path, required=True)
+    probe.add_argument("--group", action="append", required=True)
     probe.add_argument("--output", type=Path, required=True)
     probe.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -318,18 +588,29 @@ def main():
             return 1
         print("one org.dyn4j provider")
         return 0
-    checkout_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    if args.candidate_sha != checkout_sha:
-        parser.error(f"candidate SHA differs from checkout {checkout_sha}")
+    repository = Path(subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    try:
+        require_clean_checkout(repository, args.candidate_sha)
+    except (subprocess.CalledProcessError, ValueError) as error:
+        parser.error(str(error))
     if args.action == "probe":
         if not SHA40.fullmatch(args.candidate_sha):
             parser.error("candidate SHA must be a full commit hash")
         command = args.command[1:] if args.command[:1] == ["--"] else args.command
         if not command:
             parser.error("probe needs a command")
-        result = run_probe(command, args.report, args.candidate_sha, args.output)
+        frozen_path = repository / "tools/qualification/foundation-probes.json"
+        if args.manifest.resolve() != frozen_path.resolve():
+            parser.error("probe manifest must be the tracked frozen foundation manifest")
+        frozen = load_json_strict(frozen_path)
+        selected = [group for group in frozen.get("groups", []) if group.get("id") in args.group]
+        if len(selected) != len(args.group) or len(set(args.group)) != len(args.group):
+            parser.error("unknown or duplicate frozen probe group")
+        frozen["groups"] = selected
+        result = run_probe(command, args.report, args.candidate_sha, args.output, frozen)
         print(json.dumps(result))
-        return 0 if result["status"] == "PASSED" else 1
+        return 0 if result["status"] == "PROBE_PASSED" else 1
     if args.action == "audit-staging":
         result = audit_staging(args.repository, args.candidate_sha)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
@@ -338,22 +619,31 @@ def main():
     if not SHA40.fullmatch(args.candidate_sha):
         parser.error("candidate SHA must be a full commit hash")
     if args.action == "execute":
-        plan = json.loads(args.plan.read_text())
+        plan = load_json_strict(args.plan)
         valid_ids = {case["id"] for case in expand(matrix())}
         unknown = set(plan) - valid_ids
         if unknown:
             parser.error("unknown lane: " + ", ".join(sorted(unknown)))
         evidence = execute_plan(plan, args.candidate_sha, args.output)
         return 0 if execution_succeeded(evidence) else 1
-    evidence = json.loads(args.evidence.read_text()) if args.evidence else {}
-    if evidence and not args.audit:
-        parser.error("staged audit is required when lane evidence is supplied")
-    audit_data = json.loads(args.audit.read_text()) if args.audit else None
+    evidence = load_json_strict(args.evidence) if args.evidence else {}
+    audit_data = load_json_strict(args.audit) if args.audit else None
     if audit_data and audit_data.get("candidate_sha") != args.candidate_sha:
         parser.error("audit candidate SHA differs from report")
-    artifact_hashes_by_target = target_binary_hashes(audit_data["artifacts"]) if audit_data else None
+    if audit_data:
+        try:
+            verify_audit_against_staging(audit_data, repository)
+        except ValueError as error:
+            parser.error(str(error))
+    candidate_manifest = load_json_strict(args.candidate_manifest) if args.candidate_manifest else None
+    full_manifest_path = repository / "tools/qualification/full-suite-manifest.json"
+    tracked_manifest = subprocess.run(
+        ["git", "-C", str(repository), "ls-files", "--error-unmatch", "--",
+         str(full_manifest_path.relative_to(repository))],
+        capture_output=True, check=False).returncode == 0
+    suite_manifest = load_json_strict(full_manifest_path) if tracked_manifest and full_manifest_path.is_file() else None
     cases = expand(matrix())
-    availability = json.loads(args.availability.read_text()) if args.availability else {}
+    availability = load_json_strict(args.availability) if args.availability else {}
     valid_availability = {row["target"] for row in matrix()} | {
         f'{row["target"]}:{row["runtime"]}' for row in matrix()} | {
         f'{case["target"]}:{case["runtime"]}:{case["version"]}' for case in cases} | {
@@ -371,7 +661,8 @@ def main():
                         availability.get(case["target"]))))
             if reason:
                 evidence[case["id"]] = {"unavailable_reason": reason}
-    results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha, artifact_hashes_by_target)
+    results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha,
+                        candidate_manifest, suite_manifest, audit_data)
                for case in cases]
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
