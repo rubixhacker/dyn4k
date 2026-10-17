@@ -10,8 +10,8 @@ The user authorized implementation, recommended remaining choices, and GitHub pu
 
 - [Run the fixed baseline corpus and inventory its compatibility surface](https://github.com/rubixhacker/dyn4k/issues/45): Luna baseline and Sol verifier repair merged; acceptance verified and ticket closed.
 - [Resolve staged vector and transform consumers on the pinned toolchain](https://github.com/rubixhacker/dyn4k/issues/33): Sol foundation merged; independent review and staged consumers passed; ticket closed.
-- [Create and query every baseline shape through both APIs](https://github.com/rubixhacker/dyn4k/issues/34): Sol; ready after foundation.
-- [Traverse and mutate baseline tree data structures](https://github.com/rubixhacker/dyn4k/issues/46): Sol; ready after foundation.
+- [Create and query every baseline shape through both APIs](https://github.com/rubixhacker/dyn4k/issues/34): Sol; active on `codex/port-geometry`.
+- [Traverse and mutate baseline tree data structures](https://github.com/rubixhacker/dyn4k/issues/46): Sol; active on `codex/port-trees`.
 - [Use baseline filters, bounds, and collision objects from consumers](https://github.com/rubixhacker/dyn4k/issues/35): Sol; not started.
 - [Turn input polygons into usable convex shapes](https://github.com/rubixhacker/dyn4k/issues/36): Sol; not started.
 - [Run collision, distance, ray, and time-of-impact queries](https://github.com/rubixhacker/dyn4k/issues/37): Sol; not started.
@@ -20,7 +20,7 @@ The user authorized implementation, recommended remaining choices, and GitHub pu
 - [Simulate every baseline joint and supported joint mode](https://github.com/rubixhacker/dyn4k/issues/40): Sol; not started.
 - [Build and extend a simulation with the idiomatic Kotlin API](https://github.com/rubixhacker/dyn4k/issues/41): Sol; not started.
 - [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42): Sol; not started.
-- [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43): Sol; not started.
+- [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43): Sol; independent harness active on `codex/port-qualification-harness`; full acceptance remains blocked by compatibility and performance evidence.
 - [Guide consumers through migration and explain qualification results](https://github.com/rubixhacker/dyn4k/issues/44): Luna; not started.
 
 ## Evidence rules
