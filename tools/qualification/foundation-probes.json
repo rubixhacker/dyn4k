@@ -62,6 +62,6 @@
     {"id": "core-mingwX64", "report_pattern": "dyn4k-core/build/test-results/mingwX64Test/TEST-*.xml", "cases": []},
     {"id": "mingwX64", "report_pattern": "dyn4k/build/test-results/mingwX64Test/TEST-*.xml", "classname": "mingwX64Test.io.github.rubixhacker.dyn4k.FoundationTest", "name_suffix": "[mingwX64]", "additional_classname": "mingwX64Test.io.github.rubixhacker.dyn4k.TreeTest", "additional_case_names": ["insertsAndTraversesInSortedOrder", "searchAndRangeIteratorsFollowBaseline", "referenceAndVersionHaveBaselineValues", "removesAndKeepsTreeBalanced"], "extra_case_sets": [{"classname": "mingwX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest", "case_set": "geometry"}]},
     {"id": "consumer-mingwX64", "report_pattern": "consumers/qualification/portable/build/test-results/mingwX64Test/TEST-*.xml", "cases": [{"classname": "mingwX64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[mingwX64]"}]},
-    {"id": "consumer-jsSafari", "report_pattern": "consumers/qualification/portable/build/test-results/jsBrowserTest/TEST-*.xml", "cases": [{"classname": "jsBrowserTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser]"}]}
+    {"id": "consumer-jsSafari", "report_pattern": "consumers/qualification/portable/build/test-results/jsBrowserTest/TEST-*.xml", "cases": [{"classname": "jsBrowserTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser, Safari26.6.2, MacOS10.15.7]"}]}
   ]
 }

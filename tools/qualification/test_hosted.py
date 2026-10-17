@@ -3,6 +3,7 @@ import os
 import platform
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import hosted
@@ -27,8 +28,10 @@ class HostedQualificationTests(unittest.TestCase):
             self.assertEqual([], qualify.expected_probe_cases(manifest, groups[f"core-{target}"]))
             self.assertEqual(1, len(qualify.expected_probe_cases(
                 manifest, groups[f"consumer-{target}"])))
-        self.assertEqual(1, len(qualify.expected_probe_cases(
-            manifest, groups["consumer-jsSafari"])))
+        self.assertEqual(
+            [("jsBrowserTest.qualification.StagedGeometryTest",
+              "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser, Safari26.6.2, MacOS10.15.7]")],
+            qualify.expected_probe_cases(manifest, groups["consumer-jsSafari"]))
 
     def test_stale_or_partial_staged_consumer_xml_fails(self):
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
@@ -53,6 +56,32 @@ class HostedQualificationTests(unittest.TestCase):
                     ["report.xml"], "a" * 40, Path(root) / "partial.json", selected)
                 self.assertEqual("PROBE_FAILED", partial["status"])
                 self.assertIn("partial", partial["reason"])
+            finally:
+                os.chdir(previous)
+
+    def test_safari_report_requires_the_frozen_browser_case_identity(self):
+        manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
+        group = next(group for group in manifest["groups"] if group["id"] == "consumer-jsSafari")
+        classname, name = qualify.expected_probe_cases(manifest, group)[0]
+        with tempfile.TemporaryDirectory() as root:
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                selected = {**manifest, "groups": [dict(group, report_pattern="report.xml")]}
+                for observed, expected_status in ((name, "PROBE_PASSED"),
+                                                  (name.replace("Safari26.6.2", "Safari26.6.3"),
+                                                   "PROBE_FAILED")):
+                    suite = ET.Element("testsuite", tests="1", failures="0", errors="0",
+                                       skipped="0", time="0.1")
+                    ET.SubElement(suite, "testcase", classname=classname,
+                                  name=observed, time="0.1")
+                    xml = ET.tostring(suite, encoding="unicode")
+                    command = ["python3", "-c", "from pathlib import Path; "
+                               "Path('report.xml').write_text(" + repr(xml) + ")"]
+                    result = qualify.run_probe(command, ["report.xml"], "a" * 40,
+                                               Path(root) / "result.json", selected)
+                    self.assertEqual(expected_status, result["status"])
+                    self.assertEqual(1, result["executed"])
             finally:
                 os.chdir(previous)
 
