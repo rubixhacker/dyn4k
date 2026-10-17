@@ -2,6 +2,10 @@
 
 This report covers the hull, decomposition, and simplification tests in the pinned dyn4j 6.0.0 source. It is a bounded part of [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42). The issue and full 21-target qualification remain open.
 
+## Integrated result
+
+The later source repair and reviewed corpus were merged at `0fdb6d9002ba1d952ee6656fd2929a6278db841c`. At that exact tree, all 290 unchanged Java polygon cases passed. All 284 mapped common cases passed on each of six available hosts with zero failures or skips, including the repaired `SimplePolygonVertexTest.create` case. The 42 shared algorithm cases also passed on each host. The source, staged consumer, archive, XML, and fixture evidence is recorded in `/tmp/dyn4k-merge-issue36-final-result.md`. The diagnostic failure and pending statements below describe the earlier corpus branch before the source repair; they are retained as the regression record. The pinned `nsoft1.dat` area-conservation failure remains failed physical evidence on both baseline and candidate.
+
 ## Source and execution boundary
 
 - Active worker model: `gpt-6-sol`, verified in session `01a14b35-7b2c-7151-a65f-13949e02b0b7` from its `turn_context`.
