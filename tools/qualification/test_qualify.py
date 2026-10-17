@@ -212,7 +212,8 @@ class QualificationTests(unittest.TestCase):
                 ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
             for generated in ("build/generated/Unexpected.kt",
                               "tools/qualification/__pycache__/qualify.pyc",
-                              "kotlin-js-store/yarn.lock"):
+                              "kotlin-js-store/yarn.lock",
+                              "consumers/qualification/portable/kotlin-js-store/yarn.lock"):
                 path = repository / generated
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("generated\n")
