@@ -34,7 +34,7 @@ import org.dyn4j.geometry.Vector2
 
 interface PhysicsBody : CollisionBody<BodyFixture> {
     override fun copy(): PhysicsBody
-    fun addFixture(convex: Convex, density: Double): BodyFixture
+    fun addFixture(convex: Convex?, density: Double): BodyFixture
     fun addFixture(convex: Convex?, density: Double, friction: Double, restitution: Double): BodyFixture
     fun updateMass(): PhysicsBody
     fun setMass(type: MassType?): PhysicsBody

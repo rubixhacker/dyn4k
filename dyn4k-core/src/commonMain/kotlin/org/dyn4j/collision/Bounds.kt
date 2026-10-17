@@ -32,6 +32,9 @@ import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Translatable
 import org.dyn4j.geometry.Vector2
 
+@Suppress("UNCHECKED_CAST")
+private fun <T> passNullableBounds(value: T?): T = value as T
+
 interface Bounds : Translatable, Shiftable, Copyable<Bounds> {
     fun getTranslation(): Vector2
     fun isOutside(body: CollisionBody<*>): Boolean
@@ -44,7 +47,7 @@ abstract class AbstractBounds : Bounds, Translatable {
 
     constructor() { transform = Transform() }
     constructor(x: Double, y: Double) : this() { translate(x, y) }
-    constructor(translation: Vector2) : this() { translate(translation) }
+    constructor(translation: Vector2?) : this() { translate(passNullableBounds(translation)) }
     protected constructor(bounds: AbstractBounds) { transform = bounds.transform.copy() }
 
     override fun getTranslation() = transform.getTranslation()

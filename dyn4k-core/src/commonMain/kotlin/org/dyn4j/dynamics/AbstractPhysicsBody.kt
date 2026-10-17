@@ -77,16 +77,16 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
         for (item in body.torques) torques.add(item.copy())
     }
 
-    override fun addFixture(convex: Convex): BodyFixture =
+    override fun addFixture(convex: Convex?): BodyFixture =
         addFixture(convex, BodyFixture.DEFAULT_DENSITY, BodyFixture.DEFAULT_FRICTION, BodyFixture.DEFAULT_RESTITUTION)
-    override fun addFixture(convex: Convex, density: Double): BodyFixture =
+    override fun addFixture(convex: Convex?, density: Double): BodyFixture =
         addFixture(convex, density, BodyFixture.DEFAULT_FRICTION, BodyFixture.DEFAULT_RESTITUTION)
     override fun addFixture(convex: Convex?, density: Double, friction: Double, restitution: Double): BodyFixture {
         val fixture = BodyFixture(convex ?: throw ArgumentNullException("convex"))
         fixture.setDensity(density)
         fixture.setFriction(friction)
         fixture.setRestitution(restitution)
-        super.addFixture(fixture)
+        super<AbstractCollisionBody>.addFixture(fixture)
         setAtRest(false)
         return fixture
     }
@@ -261,8 +261,10 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
     override fun updateAtRestTime(timestep: TimeStep?, settings: Settings?): Double {
         if (atRestDetectionEnabled) {
             if (isStatic()) return -1.0
-            if (linearVelocity.getMagnitudeSquared() > settings!!.getMaximumAtRestLinearVelocitySquared() ||
-                abs(angularVelocity) > settings.getMaximumAtRestAngularVelocity()) atRestTime = 0.0
+            val maximumLinearVelocitySquared = settings!!.getMaximumAtRestLinearVelocitySquared()
+            val maximumAngularVelocity = settings.getMaximumAtRestAngularVelocity()
+            if (linearVelocity.getMagnitudeSquared() > maximumLinearVelocitySquared ||
+                abs(angularVelocity) > maximumAngularVelocity) atRestTime = 0.0
             else atRestTime += timestep!!.rawDeltaTime()
         } else atRestTime = 0.0
         return atRestTime
