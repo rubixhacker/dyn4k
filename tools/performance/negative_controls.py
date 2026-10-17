@@ -27,7 +27,7 @@ def mutate_csv(source, target, changes):
     for row in rows:
         row.update(changes)
     with target.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return rows

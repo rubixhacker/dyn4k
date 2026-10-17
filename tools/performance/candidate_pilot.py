@@ -32,6 +32,23 @@ def save(out, evidence):
     (out / "evidence.json").write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
 
 
+def clean_warmup(path, api, process_pid):
+    metadata = {}
+    lines = []
+    for line in path.read_text().splitlines():
+        if line.startswith("#"):
+            key, value = line[1:].split("=", 1)
+            metadata[key] = int(value)
+        else:
+            lines.append(line)
+    marker = {"direct_kotlin": 1, "compatibility": 2}.get(api)
+    if marker is not None and (metadata.get("process_pid") != process_pid or
+                               metadata.get("route_marker") != marker):
+        raise ValueError("plateau route or process identity differs from the launcher")
+    path.write_text("\n".join(lines) + "\n")
+    return metadata
+
+
 def select_scenarios(names):
     if not names:
         return PILOT
@@ -93,10 +110,11 @@ def plateau(args, out, evidence, java, classes, jar):
                        args.size, str(args.hz), "1", "plateau", str(args.warmup_seconds * args.hz), api]
         try:
             _, pid = run_capture(command, raw, warmup)
+            clean_warmup(warmup, api, pid)
             with raw.open(newline="") as stream:
                 cycles = list(csv.DictReader(stream))
             with warmup.open(newline="") as stream:
-                warm = [line for line in stream if not line.startswith("#")]
+                warm = list(stream)
             status = plateau_status(cycles)
             result = {"workload_id": f"{family}.{variant}.{args.size}.{args.hz}hz.{api}",
                       "api": api, "process_pid": pid, "cycles": len(cycles),

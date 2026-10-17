@@ -1,0 +1,36 @@
+{
+  "candidate_identity_sha256": "485e9e930595459129000144f4e2219c862479addaa8de035a089405a90672b6",
+  "controls": {
+    "crossed_compatibility_route": {
+      "reason": "Java compatibility route has a missing or crossed provider",
+      "status": "rejected_as_expected"
+    },
+    "empty_scene": {
+      "reason": "body count changed unexpectedly",
+      "status": "rejected_as_expected"
+    },
+    "inactive_scene": {
+      "reason": "activity invalid",
+      "status": "rejected_as_expected"
+    },
+    "missing_direct_route": {
+      "reason": "direct Kotlin route lacks its staged API and core artifacts",
+      "status": "rejected_as_expected"
+    },
+    "stale_artifact": {
+      "reason": "stale candidate path: /tmp/tmp2sz7kib9/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+      "status": "rejected_as_expected"
+    },
+    "upstream_provider": {
+      "reason": "upstream dyn4j artifact is on a candidate route",
+      "status": "rejected_as_expected"
+    }
+  },
+  "core_artifact_sha256": "b56d947ea183e6b8e7affddd1f24ad3ebd8e3276c6c56fa3e319e114793165f4",
+  "qualification": "unpassed",
+  "schema": 1,
+  "source_raw": "separated.default.small.60hz.direct_kotlin.timing.r1.csv",
+  "source_sha256": "87027f924c19b107b1cd0f3388b93febfa49ad34467f76702eacc1b95a1a9ac4",
+  "synthetic_empty_sha256": "bbab431ea2defe9bb54c39ab6d2c668015fc548a56796fd8c2ae3c0f4523827b",
+  "synthetic_inactive_sha256": "5f26aed715e9f1efb90180c713196aad24586c0ee753e6b8519facdfb06fffcf"
+}
