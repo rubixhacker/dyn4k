@@ -973,9 +973,29 @@ kotlin {
         withHostTest {}
         compilerOptions { jvmTarget.set(JvmTarget.JVM_1_8) }
     }
-    js { nodejs() }
-    wasmJs { nodejs() }
-    wasmWasi { nodejs() }
+    js {
+        nodejs()
+        browser {
+            testTask {
+                useKarma {
+                    if (System.getenv("DYN4K_BROWSER") == "firefox") useFirefoxHeadless()
+                    else useChromeHeadless()
+                }
+            }
+        }
+    }
+    wasmJs {
+        nodejs()
+        browser {
+            testTask {
+                useKarma {
+                    if (System.getenv("DYN4K_BROWSER") == "firefox") useFirefoxHeadless()
+                    else useChromeHeadless()
+                }
+            }
+        }
+    }
+    wasmWasi { nodejs(); wasmtime() }
     linuxX64()
     linuxArm64()
     mingwX64()
@@ -995,6 +1015,23 @@ kotlin {
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
+    }
+}
+
+if (providers.gradleProperty("qualificationProduction").orNull == "true") {
+    tasks.named<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>("jsBrowserTest") {
+        dependsOn("jsTestTestProductionExecutableCompileSync")
+        inputFileProperty.set(layout.buildDirectory.file(
+            "compileSync/js/test/testProductionExecutable/kotlin/${rootProject.name}-${project.name}-test.js"
+        ))
+        doFirst { logger.lifecycle("qualification test input: ${inputFileProperty.get().asFile}") }
+    }
+    tasks.named<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>("wasmJsBrowserTest") {
+        dependsOn("compileTestProductionExecutableKotlinWasmJsOptimize")
+        inputFileProperty.set(layout.buildDirectory.file(
+            "compileSync/wasmJs/test/testProductionExecutable/optimized/${rootProject.name}-${project.name}-test.mjs"
+        ))
+        doFirst { logger.lifecycle("qualification test input: ${inputFileProperty.get().asFile}") }
     }
 }
 
