@@ -84,7 +84,12 @@ public final class GeometryConsumer {
             if (!expected.getMessage().contains("minX must be less than or equal to maxX"))
                 throw new AssertionError("AABB range exception message", expected);
         }
+        for (double value : new double[] {Double.MIN_VALUE, 1.0e-7, 5.0e-7, 1.2345675, 1.0e20, Double.MAX_VALUE, -0.0}) {
+            String range = new org.dyn4j.exception.ValueOutOfRangeException("radius", value).getMessage();
+            if (!range.equals(String.format("radius cannot be %f", value)))
+                throw new AssertionError("Range exception number: " + range);
+        }
         org.dyn4j.geometry.GeometryPackageConsumer.run();
-        System.out.println("GeometryConsumer: 18 checks passed");
+        System.out.println("GeometryConsumer: 19 checks passed");
     }
 }

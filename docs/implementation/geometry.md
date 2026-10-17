@@ -19,7 +19,7 @@ compares baseline and candidate `javap -package` declarations for 26 geometry
 types and five supporting types owned here (585 declarations). The unchanged
 upstream geometry test suite has 20
 classes and 446 cases. The Java consumer uses identical source for baseline,
-candidate, and staged Maven JVM artifacts and has 18 checks. The Kotlin API
+candidate, and staged Maven JVM artifacts and has 19 checks. The Kotlin API
 consumer has 14 common tests. The checks cover construction, queries,
 transforms, copies, live arrays, Java package and protected access, factory
 overloads, mutable identity, and errors.

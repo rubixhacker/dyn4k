@@ -25,7 +25,6 @@
 package org.dyn4j.exception
 
 import kotlin.math.abs
-import kotlin.math.floor
 
 class EmptyCollectionException(argumentName: String) : IllegalArgumentException("$argumentName cannot be empty")
 
@@ -41,10 +40,36 @@ private fun fixedSix(value: Double): String {
     if (value == Double.POSITIVE_INFINITY) return "Infinity"
     if (value == Double.NEGATIVE_INFINITY) return "-Infinity"
     val negative = value.toBits() < 0
-    val magnitude = abs(value)
-    val rounded = floor(magnitude * 1_000_000.0 + 0.5).toLong()
+    val decimal = abs(value).toString()
+    val exponentStart = decimal.indexOf('E').let { if (it < 0) decimal.indexOf('e') else it }
+    val mantissa = if (exponentStart < 0) decimal else decimal.substring(0, exponentStart)
+    val exponent = if (exponentStart < 0) 0 else decimal.substring(exponentStart + 1).toInt()
+    val dot = mantissa.indexOf('.')
+    var decimalPosition = (if (dot < 0) mantissa.length else dot) + exponent
+    val digits = StringBuilder(mantissa.filter { it != '.' })
+    if (decimalPosition < 0) {
+        digits.insert(0, "0".repeat(-decimalPosition))
+        decimalPosition = 0
+    }
+    while (digits.length <= decimalPosition + 6) digits.append('0')
+    val roundUp = digits[decimalPosition + 6] >= '5'
+    digits.setLength(decimalPosition + 6)
+    if (roundUp) {
+        var index = digits.lastIndex
+        while (index >= 0 && digits[index] == '9') {
+            digits[index] = '0'
+            index--
+        }
+        if (index < 0) {
+            digits.insert(0, '1')
+            decimalPosition++
+        } else {
+            digits[index] = digits[index] + 1
+        }
+    }
     val sign = if (negative) "-" else ""
-    return "$sign${rounded / 1_000_000}.${(rounded % 1_000_000).toString().padStart(6, '0')}"
+    val integer = digits.substring(0, decimalPosition).trimStart('0').ifEmpty { "0" }
+    return "$sign$integer.${digits.substring(decimalPosition)}"
 }
 
 class ValueOutOfRangeException : IllegalArgumentException {
