@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from analyze import plateau_status, warmup_status
-from candidate_runner import IDENTITY, ROOT, STAGING
+from candidate_runner import IDENTITY, ROOT, STAGING, git
 from manifest import manifest
 from measure import (PILOT, compile_harness, host_identity, jar_path, run_capture,
                      run_scenario, sha256)
@@ -165,6 +165,11 @@ def main():
         run_capture([args.java, "-Xms256m", "-Xmx2g", "-XX:+UseG1GC", "-cp",
                      str(classes), "ProbeValidation"], probe_path)
         evidence = {"schema": 1, "qualification": "unpassed", "status": "bounded_pilot_only",
+                    "capture_tool_source_commit": git("rev-parse", "HEAD"),
+                    "capture_tool_sha256": {
+                        "tools/performance/measure.py": sha256(ROOT / "tools/performance/measure.py"),
+                        "tools/performance/candidate_pilot.py": sha256(ROOT / "tools/performance/candidate_pilot.py"),
+                    },
                     "manifest_sha256": sha256(ROOT / "docs/research/performance-manifest-v1.json"),
                     "baseline_jar_sha256": sha256(jar),
                     "candidate_identity": identity,

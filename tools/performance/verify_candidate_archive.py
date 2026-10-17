@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import hashlib
 import json
 import math
 import statistics
+import subprocess
 from pathlib import Path
 
 from analyze import activity_status, plateau_status, warmup_status
 from analyze_candidates import exploratory_intervals, summarize_pilot
 from candidate_pilot import state_checksum
+from candidate_runner import API, CORE, FLAGS, ROOT, STAGING, check_route, hash_path, read_paths
 from manifest import manifest
 from measure import PILOT, sha256, summary, validate_csv
 
@@ -23,11 +26,98 @@ SUMMARY_FIELDS = (
     "peak_broadphase_candidates", "peak_active_contact_pairs", "peak_active_contact_points",
     "peak_rss_delta_bytes", "event_only_full", "event_only_final_minute",
 )
+SOURCE_FILES = (
+    "consumers/performance/build.gradle.kts",
+    "consumers/performance/src/main/java/performance/ProviderIdentity.java",
+    "consumers/performance/src/main/kotlin/performance/DirectFixture.kt",
+    "consumers/performance/src/main/kotlin/performance/DirectPilot.kt",
+    "docs/research/performance-manifest-v1.json",
+    "tools/performance/BaselinePilot.java",
+    "tools/performance/candidate_runner.py",
+)
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def git(*args):
+    result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, check=True)
+    return result.stdout
+
+
+def verify_identity(identity):
+    commit = identity["source_commit"]
+    require(identity["schema"] == 1 and identity["qualification"] == "unpassed" and
+            identity["java_flags"] == FLAGS and
+            identity["entrypoints"] == {"direct_kotlin": "performance.DirectPilotKt",
+                                        "compatibility": "BaselinePilot"},
+            "candidate runtime or entrypoint identity differs")
+    require(len(commit) == 40 and all(char in "0123456789abcdef" for char in commit),
+            "source commit is not an exact SHA")
+    try:
+        require(git("rev-parse", "--verify", f"{commit}^{{commit}}").decode().strip() == commit,
+                "source commit differs")
+        trees = {name: git("rev-parse", f"{commit}:{name}").decode().strip()
+                 for name in ("dyn4k", "dyn4k-core")}
+        require(identity["source_trees"] == trees and
+                trees == {name: git("rev-parse", f"HEAD:{name}").decode().strip() for name in trees},
+                "source trees differ from the exact commit")
+        require(identity["staging_repository"] == str(STAGING.resolve()),
+                "staging repository differs")
+        routes = read_paths()
+        require(identity["paths"] == {name: [str(path) for path in values]
+                                      for name, values in routes.items()},
+                "resolved classpaths differ")
+        for name, paths in routes.items():
+            check_route(name, paths)
+        require((STAGING / CORE).is_file() and (STAGING / API).is_file(),
+                "staged JVM artifacts are unavailable")
+        java = Path(identity["java"])
+        require(java.is_file(), "recorded Java runtime is unavailable")
+        version = subprocess.run([str(java), "-version"], capture_output=True, check=True).stderr.decode().strip()
+        require(version == identity["java_version"], "recorded Java runtime differs")
+        all_paths = {str(path) for paths in routes.values() for path in paths}
+        missing = {path for path in all_paths if not Path(path).exists()}
+        require(set(identity["absent_classpath_paths"]) == missing and
+                not any(Path(path).suffix == ".jar" for path in missing),
+                "resolved classpath contains an unavailable artifact")
+        expected = (all_paths - missing) | {str(ROOT / path) for path in SOURCE_FILES}
+        require(set(identity["sha256"]) == expected,
+                "source or artifact hash path differs")
+        for relative in SOURCE_FILES:
+            path = ROOT / relative
+            recorded = identity["sha256"][str(path)]
+            committed = hashlib.sha256(git("show", f"{commit}:{relative}")).hexdigest()
+            require(recorded == committed and hash_path(path) == recorded,
+                    f"source hash differs: {relative}")
+        for path in all_paths - missing:
+            require(hash_path(path) == identity["sha256"][path],
+                    f"artifact or classpath hash differs: {path}")
+    except (OSError, subprocess.CalledProcessError, KeyError) as exc:
+        raise ValueError(f"source or artifact verification unavailable: {exc}") from exc
+
+
+def verify_capture_tools(evidence):
+    commit = evidence.get("capture_tool_source_commit")
+    files = evidence.get("capture_tool_sha256")
+    require(isinstance(commit, str) and len(commit) == 40 and
+            all(char in "0123456789abcdef" for char in commit),
+            "capture tool source commit is unavailable")
+    expected = ("tools/performance/measure.py", "tools/performance/candidate_pilot.py")
+    require(isinstance(files, dict) and set(files) == set(expected),
+            "capture tool source hashes are unavailable")
+    try:
+        require(git("rev-parse", "--verify", f"{commit}^{{commit}}").decode().strip() == commit,
+                "capture tool source commit differs")
+        for relative in expected:
+            recorded = files[relative]
+            committed = hashlib.sha256(git("show", f"{commit}:{relative}")).hexdigest()
+            require(recorded == committed and sha256(ROOT / relative) == recorded,
+                    f"capture tool source hash differs: {relative}")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"capture tool source verification unavailable: {exc}") from exc
 
 
 def rows_at(path, fields, label):
@@ -58,6 +148,42 @@ def warmup_rows(directory, item, plateau):
     return rows
 
 
+def verify_stderr(directory, item):
+    require("stderr_raw" in item and "stderr_sha256" in item,
+            "retained_heap_world_alive_bytes raw marker is unavailable")
+    name = item["stderr_raw"]
+    require(Path(name).name == name, "stderr raw path differs")
+    path = directory / name
+    require(path.is_file() and sha256(path) == item["stderr_sha256"],
+            "stderr raw checksum differs")
+    metadata = {}
+    warmup_lines = []
+    for line in path.read_text().splitlines():
+        if line.startswith("#"):
+            key, separator, value = line[1:].partition("=")
+            require(separator and key not in metadata, "stderr marker is invalid or repeated")
+            metadata[key] = int(value)
+        else:
+            warmup_lines.append(line)
+    require("\n".join(warmup_lines) + "\n" == (directory / item["warmup_raw"]).read_text(),
+            "stderr warm-up stream differs")
+    expected = {
+        "construction_ns": item["cold_construction_ns"],
+        "construction_allocated_bytes": item["cold_construction_allocated_bytes"],
+        "rss_empty_harness_bytes": item["rss_empty_harness_bytes"],
+        "rss_after_construction_bytes": item["rss_after_construction_bytes"],
+        "retained_heap_world_alive_bytes": item["retained_heap_world_alive_bytes"],
+        "retained_collection_count_delta": item["retained_collection_count_delta"],
+    }
+    if item["api"] != "baseline":
+        expected["process_pid"] = item["process_pid"]
+        expected["route_marker"] = {"direct_kotlin": 1, "compatibility": 2}[item["api"]]
+    require(metadata == expected, f"{name} retained_heap_world_alive_bytes or metadata differs")
+    require(metadata["construction_ns"] > 0 and metadata["construction_allocated_bytes"] >= 0 and
+            metadata["rss_empty_harness_bytes"] >= 0 and metadata["rss_after_construction_bytes"] >= 0,
+            "construction or process memory marker is invalid")
+
+
 def verify_step_result(directory, item):
     family, variant, size = item["family"], item["variant"], item["size"]
     hz, mode = item["hz"], item["mode"]
@@ -66,6 +192,8 @@ def verify_step_result(directory, item):
     require(any(case["family"] == family and case["variant"] == variant
                 for case in manifest()["scenarios"]), "workload is not frozen")
     raw = directory / item["raw"]
+    if item["mode"] == "memory" or "stderr_raw" in item:
+        verify_stderr(directory, item)
     rows = validate_csv(raw, family, variant, size, hz, item["samples"], mode)
     require(all(int(row["rss_bytes"]) >= 0 and int(row["heap_used_bytes"]) >= 0 and
                 int(row["rss_delta_bytes"]) == int(row["rss_bytes"]) - item["rss_empty_harness_bytes"]
@@ -108,8 +236,13 @@ def verify_plateau_result(directory, item):
     require(len(rows) == item["cycles"] == 100 and
             [int(row["cycle"]) for row in rows] == list(range(100)),
             "plateau cycles differ")
-    require(all(int(row["rss_after_collection_bytes"]) >= 0 for row in rows),
-            "plateau RSS channel differs")
+    require(all(int(row["heap_after_collection_bytes"]) >= 0 and
+                int(row["rss_after_collection_bytes"]) >= 0 for row in rows),
+            "plateau heap or RSS channel differs")
+    collections = [int(row["collection_count"]) for row in rows]
+    require(collections[0] >= 0 and
+            all(later > earlier for earlier, later in zip(collections, collections[1:])),
+            "plateau collection_count progression differs")
     early = statistics.median(int(row["heap_after_collection_bytes"]) for row in rows[20:40])
     late = statistics.median(int(row["heap_after_collection_bytes"]) for row in rows[80:100])
     drift = abs(late / early - 1.0) if early > 0 else math.inf
@@ -125,6 +258,7 @@ def verify(root):
     identity_file = root / "candidate-identity-at-pilot.json"
     identity = json.loads(identity_file.read_text())
     identity_hash = sha256(identity_file)
+    verify_identity(identity)
     counts = {}
     evidence_by_group = {}
     for name in REQUIRED_GROUPS + OPTIONAL_GROUPS:
@@ -139,8 +273,11 @@ def verify(root):
                 f"{name} embedded identity differs")
         manifest_file = Path(__file__).resolve().parents[2] / "docs/research/performance-manifest-v1.json"
         require(evidence["qualification"] == "unpassed" and
-                evidence["manifest_sha256"] == sha256(manifest_file),
+                evidence["manifest_sha256"] == sha256(manifest_file) and
+                evidence["baseline_jar_sha256"] == manifest()["baseline_jar_sha256"],
                 f"{name} manifest or qualification differs")
+        if name == "memory":
+            verify_capture_tools(evidence)
         if name not in OPTIONAL_GROUPS:
             require(len(evidence["results"]) == evidence["expected_runs"] and
                     not evidence["failures"], f"{name} has an incomplete or failed run")
@@ -209,7 +346,7 @@ def verify(root):
             analysis["pilot"] == summarize_pilot(evidence_by_group["pilot"]) and
             analysis["short_window_intervals"] == exploratory_intervals(root / "noise", evidence_by_group["noise"]),
             "analysis index differs from raw records")
-    return {"identity_sha256": identity_hash, "runs": counts,
+    return {"identity_sha256": identity_hash, "source_artifact_audit": "verified", "runs": counts,
             "negative_controls": len(controls["controls"]), "qualification": "unpassed"}
 
 
