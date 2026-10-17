@@ -192,16 +192,26 @@ def staged_files(root: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
     for module in MODULES:
         root_publication = staging / module / VERSION
-        for extension in ("module", "pom"):
+        for extension in ("jar", "module", "pom"):
             path = root_publication / f"{module}-{VERSION}.{extension}"
+            if not path.is_file():
+                raise ValueError(f"missing staged artifact: {path}")
+            hashes[str(path.relative_to(root))] = sha256(path)
+        for classifier in ("sources.jar", "license.md"):
+            path = root_publication / f"{module}-{VERSION}-{classifier}"
             if not path.is_file():
                 raise ValueError(f"missing staged artifact: {path}")
             hashes[str(path.relative_to(root))] = sha256(path)
         for target in TARGETS:
             publication = f"{module}-{target.lower().replace('wasmjs', 'wasm-js').replace('wasmwasi', 'wasm-wasi')}"
             directory = staging / publication / VERSION
-            for extension in ("jar", "module", "pom"):
+            for extension in ("klib", "module", "pom"):
                 path = directory / f"{publication}-{VERSION}.{extension}"
+                if not path.is_file():
+                    raise ValueError(f"missing staged artifact: {path}")
+                hashes[str(path.relative_to(root))] = sha256(path)
+            for classifier in ("sources.jar", "license.md"):
+                path = directory / f"{publication}-{VERSION}-{classifier}"
                 if not path.is_file():
                     raise ValueError(f"missing staged artifact: {path}")
                 hashes[str(path.relative_to(root))] = sha256(path)
