@@ -382,6 +382,20 @@ def expected_probe_cases(manifest, group):
         cases.extend({"classname": group.get("additional_classname"),
                       "name": name + group.get("name_suffix", "")}
                      for name in additional_names)
+        case_sets = manifest.get("case_sets", {})
+        extra_case_sets = group.get("extra_case_sets", [])
+        if not isinstance(case_sets, dict) or not isinstance(extra_case_sets, list):
+            raise ValueError("probe case sets are invalid")
+        for extra in extra_case_sets:
+            if not isinstance(extra, dict) or not isinstance(extra.get("case_set"), str):
+                raise ValueError("probe case set reference is invalid")
+            extra_names = case_sets.get(extra["case_set"])
+            if (not isinstance(extra_names, list) or not extra_names
+                    or any(not isinstance(name, str) or not name for name in extra_names)):
+                raise ValueError("probe case set is missing or invalid")
+            cases.extend({"classname": extra.get("classname"),
+                          "name": name + group.get("name_suffix", "")}
+                         for name in extra_names)
     if not isinstance(cases, list):
         raise ValueError("probe cases must be a list")
     identities = []
