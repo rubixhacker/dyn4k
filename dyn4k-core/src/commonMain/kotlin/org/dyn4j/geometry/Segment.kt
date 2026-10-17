@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2024 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2026 William Bittle  http://www.dyn4j.org/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -29,17 +29,12 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ArgumentNullException
 
 open class Segment : AbstractShape, Convex, Wound {
-    @get:kotlin.jvm.JvmName("getVerticesField")
-    @JvmFieldBridge protected val vertices: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getNormalsField")
-    @JvmFieldBridge protected val normals: Array<Vector2>
-    @get:kotlin.jvm.JvmName("getLengthField")
-    @set:kotlin.jvm.JvmName("setLengthField")
-    @JvmFieldBridge protected var length: Double
+    @kotlin.jvm.JvmField protected val vertices: Array<Vector2>
+    @kotlin.jvm.JvmField protected val normals: Array<Vector2>
+    @kotlin.jvm.JvmField protected var length: Double
 
     constructor(point1: Vector2?, point2: Vector2?) : super(averageCenter(point1, point2), point1!!.distance(point2!!) * 0.5) {
         vertices = arrayOf(point1, point2)
@@ -60,13 +55,13 @@ open class Segment : AbstractShape, Convex, Wound {
     override fun getVertexIterator(): MutableIterator<Vector2> = WoundIterator(vertices)
     override fun getNormalIterator(): MutableIterator<Vector2> = WoundIterator(normals)
     override fun getRadius(center: Vector2) = sqrt(max(center.distanceSquared(vertices[0]), center.distanceSquared(vertices[1])))
-    fun getPoint1() = vertices[0]
-    fun getPoint2() = vertices[1]
-    fun getLength() = length
-    fun getPointOnLineClosestToPoint(point: Vector2) = getPointOnLineClosestToPoint(point, vertices[0], vertices[1])
-    fun getPointOnSegmentClosestToPoint(point: Vector2) = getPointOnSegmentClosestToPoint(point, vertices[0], vertices[1])
-    fun getLineIntersection(segment: Segment) = getLineIntersection(vertices[0], vertices[1], segment.vertices[0], segment.vertices[1])
-    fun getSegmentIntersection(segment: Segment) = getSegmentIntersection(vertices[0], vertices[1], segment.vertices[0], segment.vertices[1], true)
+    open fun getPoint1() = vertices[0]
+    open fun getPoint2() = vertices[1]
+    open fun getLength() = length
+    open fun getPointOnLineClosestToPoint(point: Vector2) = getPointOnLineClosestToPoint(point, vertices[0], vertices[1])
+    open fun getPointOnSegmentClosestToPoint(point: Vector2) = getPointOnSegmentClosestToPoint(point, vertices[0], vertices[1])
+    open fun getLineIntersection(segment: Segment) = getLineIntersection(vertices[0], vertices[1], segment.vertices[0], segment.vertices[1])
+    open fun getSegmentIntersection(segment: Segment) = getSegmentIntersection(vertices[0], vertices[1], segment.vertices[0], segment.vertices[1], true)
 
     override fun getAxes(foci: Array<Vector2>?, transform: Transform): Array<Vector2> {
         val axes = Array(2 + (foci?.size ?: 0)) { Vector2() }
@@ -95,7 +90,7 @@ open class Segment : AbstractShape, Convex, Wound {
         }
         return false
     }
-    fun contains(point: Vector2, transform: Transform, radius: Double): Boolean {
+    open fun contains(point: Vector2, transform: Transform, radius: Double): Boolean {
         if (radius <= 0.0) return contains(point, transform)
         val local = transform.getInverseTransformed(point)
         val squaredRadius = radius * radius
@@ -145,7 +140,7 @@ open class Segment : AbstractShape, Convex, Wound {
         val p2 = transform.getTransformed(vertices[1])
         aabb.set(AABB(min(p1.x, p2.x), min(p1.y, p2.y), max(p1.x, p2.x), max(p1.y, p2.y)))
     }
-    fun getEdgeVector() = vertices[0].to(vertices[1]).also { it.normalize() }
+    open fun getEdgeVector() = vertices[0].to(vertices[1]).also { it.normalize() }
 
     companion object {
         private fun averageCenter(point1: Vector2?, point2: Vector2?): Vector2 {

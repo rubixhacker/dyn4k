@@ -28,16 +28,11 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import org.dyn4j.Copyable
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class Interval : Copyable<Interval> {
-    @get:kotlin.jvm.JvmName("getMinField")
-    @set:kotlin.jvm.JvmName("setMinField")
-    @JvmFieldBridge protected var min: Double
-    @get:kotlin.jvm.JvmName("getMaxField")
-    @set:kotlin.jvm.JvmName("setMaxField")
-    @JvmFieldBridge protected var max: Double
+    @kotlin.jvm.JvmField protected var min: Double
+    @kotlin.jvm.JvmField protected var max: Double
 
     constructor(min: Double, max: Double) {
         if (min > max) throw ValueOutOfRangeException("min", min, ValueOutOfRangeException.MUST_BE_LESS_THAN_OR_EQUAL_TO, "max", max)
@@ -48,40 +43,40 @@ open class Interval : Copyable<Interval> {
 
     override fun copy() = Interval(this)
     override fun toString() = "[$min, $max]"
-    fun getMin() = min
-    fun getMax() = max
-    fun setMin(min: Double) {
+    open fun getMin() = min
+    open fun getMax() = max
+    open fun setMin(min: Double) {
         if (min > max) throw ValueOutOfRangeException("min", min, ValueOutOfRangeException.MUST_BE_LESS_THAN_OR_EQUAL_TO, "max", max)
         this.min = min
     }
-    fun setMax(max: Double) {
+    open fun setMax(max: Double) {
         if (max < min) throw ValueOutOfRangeException("max", max, ValueOutOfRangeException.MUST_BE_GREATER_THAN_OR_EQUAL_TO, "min", min)
         this.max = max
     }
-    fun set(interval: Interval) {
+    open fun set(interval: Interval) {
         max = interval.max
         min = interval.min
     }
 
-    fun includesInclusive(value: Double) = value <= max && value >= min
-    fun includesExclusive(value: Double) = value < max && value > min
-    fun includesInclusiveMin(value: Double) = value < max && value >= min
-    fun includesInclusiveMax(value: Double) = value <= max && value > min
-    fun overlaps(interval: Interval) = !(min > interval.max || interval.min > max)
-    fun getOverlap(interval: Interval) = if (overlaps(interval)) min(max, interval.max) - max(min, interval.min) else 0.0
-    fun clamp(value: Double) = clamp(value, min, max)
-    fun isDegenerate() = min == max
-    fun isDegenerate(error: Double) = abs(max - min) <= error
-    fun containsExclusive(interval: Interval) = interval.min > min && interval.max < max
-    fun containsInclusive(interval: Interval) = interval.min >= min && interval.max <= max
-    fun containsInclusiveMax(interval: Interval) = interval.min > min && interval.max <= max
-    fun containsInclusiveMin(interval: Interval) = interval.min >= min && interval.max < max
-    fun union(interval: Interval) {
+    open fun includesInclusive(value: Double) = value <= max && value >= min
+    open fun includesExclusive(value: Double) = value < max && value > min
+    open fun includesInclusiveMin(value: Double) = value < max && value >= min
+    open fun includesInclusiveMax(value: Double) = value <= max && value > min
+    open fun overlaps(interval: Interval) = !(min > interval.max || interval.min > max)
+    open fun getOverlap(interval: Interval) = if (overlaps(interval)) min(max, interval.max) - max(min, interval.min) else 0.0
+    open fun clamp(value: Double) = clamp(value, min, max)
+    open fun isDegenerate() = min == max
+    open fun isDegenerate(error: Double) = abs(max - min) <= error
+    open fun containsExclusive(interval: Interval) = interval.min > min && interval.max < max
+    open fun containsInclusive(interval: Interval) = interval.min >= min && interval.max <= max
+    open fun containsInclusiveMax(interval: Interval) = interval.min > min && interval.max <= max
+    open fun containsInclusiveMin(interval: Interval) = interval.min >= min && interval.max < max
+    open fun union(interval: Interval) {
         min = min(interval.min, min)
         max = max(interval.max, max)
     }
-    fun getUnion(interval: Interval) = Interval(min(interval.min, min), max(interval.max, max))
-    fun intersection(interval: Interval) {
+    open fun getUnion(interval: Interval) = Interval(min(interval.min, min), max(interval.max, max))
+    open fun intersection(interval: Interval) {
         if (overlaps(interval)) {
             min = max(interval.min, min)
             max = min(interval.max, max)
@@ -90,11 +85,11 @@ open class Interval : Copyable<Interval> {
             max = 0.0
         }
     }
-    fun getIntersection(interval: Interval) = if (overlaps(interval))
+    open fun getIntersection(interval: Interval) = if (overlaps(interval))
         Interval(max(interval.min, min), min(interval.max, max)) else Interval(0.0, 0.0)
-    fun distance(interval: Interval) = if (overlaps(interval)) 0.0 else
+    open fun distance(interval: Interval) = if (overlaps(interval)) 0.0 else
         if (max < interval.min) interval.min - max else min - interval.max
-    fun expand(value: Double) {
+    open fun expand(value: Double) {
         val e = value * 0.5
         min -= e
         max += e
@@ -103,8 +98,8 @@ open class Interval : Copyable<Interval> {
             max = min
         }
     }
-    fun getExpanded(value: Double) = copy().also { it.expand(value) }
-    fun getLength() = max - min
+    open fun getExpanded(value: Double) = copy().also { it.expand(value) }
+    open fun getLength() = max - min
 
     companion object {
      fun clamp(value: Double, min: Double, max: Double) = when {
