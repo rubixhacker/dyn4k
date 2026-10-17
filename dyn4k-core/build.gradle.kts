@@ -323,6 +323,14 @@ val jvmApi = mapOf(
             "lowerLimitImpulse", "upperLimitImpulse", "springImpulse", "motorImpulse"
         )
     ),
+    "org/dyn4j/world/Island" to JvmApiSpec(
+        packageFields = setOf("bodies", "joints", "contactConstraints")
+    ),
+    "org/dyn4j/world/CollisionItemAdapter" to JvmApiSpec(packageType = true),
+    "org/dyn4j/world/AbstractPhysicsWorld" to JvmApiSpec(
+        protectedMethods = setOf("handleFixtureRemoved", "handleAllFixturesRemoved")
+    ),
+    "org/dyn4j/world/World" to JvmApiSpec(protectedMethods = setOf("createCollisionData")),
     "org/dyn4j/collision/broadphase/AABBBroadphaseProxy" to JvmApiSpec(
         packageType = true, packageFields = setOf("item", "aabb")
     ),
