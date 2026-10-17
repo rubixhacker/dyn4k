@@ -30,7 +30,7 @@ class QualificationTests(unittest.TestCase):
     def test_frozen_host_manifest_names_integrated_geometry_cases(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         groups = {group["id"]: group for group in manifest["groups"]}
-        self.assertEqual(12, len(groups))
+        self.assertEqual(31, len(groups))
         for group_id, prefix, suffix in (
             ("jvm", "", "[jvm]"),
             ("linuxX64", "linuxX64Test.", "[linuxX64]"),

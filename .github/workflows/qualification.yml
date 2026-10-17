@@ -129,3 +129,105 @@ jobs:
             ${{ runner.temp }}/runtime-matrix.json
             ${{ runner.temp }}/provider.log
           if-no-files-found: warn
+
+  hosted-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: macosArm64, runner: macos-26}
+          - {target: iosSimulatorArm64, runner: macos-26}
+          - {target: tvosSimulatorArm64, runner: macos-26}
+          - {target: watchosSimulatorArm64, runner: macos-26}
+          - {target: iosX64, runner: macos-26-intel}
+          - {target: mingwX64, runner: windows-2025}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - name: Select pinned Xcode
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Execute staged native host probe
+        run: >-
+          python tools/qualification/hosted.py run
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/hosted-${{ matrix.target }}.json"
+      - name: Record bounded observation and all full lanes
+        if: always()
+        run: >-
+          python tools/qualification/qualify.py record
+          --candidate-sha "${{ github.sha }}"
+          --hosted-probe "${{ runner.temp }}/hosted-${{ matrix.target }}.json"
+          --output "${{ runner.temp }}/matrix-${{ matrix.target }}.json"
+      - name: Upload native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ github.sha }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/hosted-${{ matrix.target }}*.json
+            ${{ runner.temp }}/matrix-${{ matrix.target }}.json
+            dyn4k/build/test-results/${{ matrix.target }}Test/TEST-*.xml
+            consumers/qualification/portable/build/test-results/${{ matrix.target }}Test/TEST-*.xml
+          if-no-files-found: warn
+
+  safari-browser:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - name: Select pinned Xcode
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Execute staged Safari browser probe
+        run: >-
+          python tools/qualification/hosted.py run
+          --candidate-sha "${{ github.sha }}"
+          --target jsSafari
+          --output "${{ runner.temp }}/hosted-jsSafari.json"
+      - name: Record bounded observation and all full lanes
+        if: always()
+        run: >-
+          python tools/qualification/qualify.py record
+          --candidate-sha "${{ github.sha }}"
+          --hosted-probe "${{ runner.temp }}/hosted-jsSafari.json"
+          --output "${{ runner.temp }}/matrix-jsSafari.json"
+      - name: Upload Safari evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ github.sha }}-jsSafari
+          path: |
+            ${{ runner.temp }}/hosted-jsSafari*.json
+            ${{ runner.temp }}/matrix-jsSafari.json
+            consumers/qualification/portable/build/test-results/jsBrowserTest/TEST-*.xml
+          if-no-files-found: warn

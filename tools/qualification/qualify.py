@@ -562,6 +562,54 @@ def execution_succeeded(evidence):
     )
 
 
+def validate_hosted_probe(probe, candidate_sha, repository=None):
+    import hosted
+
+    if not isinstance(probe, dict) or probe.get("candidate_sha") != candidate_sha:
+        raise ValueError("hosted probe candidate SHA differs from report")
+    target = probe.get("target")
+    if target not in hosted.TARGETS:
+        raise ValueError("hosted probe target is invalid")
+    status = probe.get("status")
+    if status not in ("PROBE_PASSED", "PROBE_FAILED", "UNAVAILABLE", "NOT_RUN"):
+        raise ValueError("hosted probe status is invalid")
+    if status != "PROBE_PASSED":
+        if not isinstance(probe.get("reason"), str) or not probe["reason"].strip():
+            raise ValueError("hosted probe failure or unavailability needs a reason")
+        return probe
+    if hosted.runtime_status(target, probe.get("runtime"))[0] != "READY":
+        raise ValueError("hosted probe runtime identity is invalid")
+    manifest = load_json_strict(Path(__file__).with_name("foundation-probes.json"))
+    groups = {group["id"]: group for group in manifest["groups"]}
+    selections = {"consumer_probe": (f"consumer-{target}",)}
+    if target != "jsSafari":
+        selections["source_probe"] = (f"core-{target}", target)
+    for key, ids in selections.items():
+        if any(group_id not in groups for group_id in ids):
+            raise ValueError("hosted probe frozen report group is missing")
+        selected = {**manifest, "groups": [group for group in manifest["groups"]
+                                             if group["id"] in ids]}
+        observed = probe.get(key)
+        expected = sum(len(expected_probe_cases(manifest, groups[group_id])) for group_id in ids)
+        if (not isinstance(observed, dict) or observed.get("candidate_sha") != candidate_sha
+                or observed.get("manifest_sha256") != manifest_digest(selected)
+                or observed.get("status") != "PROBE_PASSED"
+                or observed.get("expected") != expected or observed.get("executed") != expected
+                or observed.get("failures") != 0 or observed.get("skipped") != 0
+                or observed.get("exit_code") != 0):
+            raise ValueError(f"hosted {key} differs from frozen executed suite")
+    hashes = probe.get("artifact_hashes")
+    if (not isinstance(hashes, dict) or set(hashes) != set(MODULES)
+            or any(not SHA64.fullmatch(str(value)) for value in hashes.values())):
+        raise ValueError("hosted target needs both staged binary hashes")
+    if repository:
+        staging = repository / "build/staging-repository"
+        artifact_target = "js" if target == "jsSafari" else target
+        if hosted.target_hashes(staging, artifact_target) != hashes:
+            raise ValueError("hosted binary hashes differ from staged candidate")
+    return probe
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -572,6 +620,7 @@ def main():
     record.add_argument("--audit", type=Path)
     record.add_argument("--candidate-manifest", type=Path)
     record.add_argument("--availability", type=Path)
+    record.add_argument("--hosted-probe", action="append", type=Path, default=[])
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -678,10 +727,17 @@ def main():
     results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha,
                         candidate_manifest, suite_manifest, audit_data)
                for case in cases]
+    hosted_probes = []
+    for path in args.hosted_probe:
+        try:
+            hosted_probes.append(validate_hosted_probe(load_json_strict(path),
+                                                       args.candidate_sha, repository))
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
                          for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")},
-              "lanes": results}
+              "lanes": results, "bounded_hosted_probes": hosted_probes}
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["counts"]))
     return 0 if report["counts"]["PASSED"] == len(results) else 1
