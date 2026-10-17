@@ -104,9 +104,10 @@ def run(args):
                               "stdout_path": str(stdout_path), "stdout_sha256": sha256(stdout_path),
                               "stderr_path": str(stderr_path), "stderr_sha256": sha256(stderr_path)}
         receipt["assertion_count"] = sum(process.stdout.splitlines().count(f"ASSERT {label}") for label in ASSERTIONS)
-        receipt["assertion_count"] = validate_receipt(receipt, receipt["source_sha"])
         receipt["status"] = "DIAGNOSTIC_PASSED"
+        receipt["assertion_count"] = validate_receipt(receipt, receipt["source_sha"])
     except (OSError, ValueError, IndexError, KeyError) as error:
+        receipt["status"] = "UNPASSED"
         receipt["error"] = str(error)
     receipt["ended_at_utc"] = datetime.now(timezone.utc).isoformat()
     (output / "result.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")

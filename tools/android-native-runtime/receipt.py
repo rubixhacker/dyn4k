@@ -27,11 +27,23 @@ def elf_abi(path):
 
 
 def validate_receipt(receipt, expected_sha):
+    if receipt.get("schema") != 1 or receipt.get("status") != "DIAGNOSTIC_PASSED":
+        raise ValueError("receipt status or schema differs")
     if receipt.get("source_sha") != expected_sha or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
         raise ValueError("source SHA differs")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(receipt.get("source_tree", ""))):
+        raise ValueError("source tree is absent")
     variant = receipt.get("variant")
     if variant not in ("debug", "optimized"):
         raise ValueError("unknown native variant")
+    report = receipt.get("dependency_report") or {}
+    report_path = Path(report.get("path", ""))
+    if not report_path.is_file() or sha256(report_path) != report.get("sha256"):
+        raise ValueError("dependency report is absent or changed")
+    graph = report_path.read_text()
+    for module in ("dyn4k-core", "dyn4k"):
+        if f"io.github.rubixhacker:{module}-androidnativex64:0.1.0-alpha.1" not in graph:
+            raise ValueError(f"staged dependency is absent: {module}")
     artifacts = receipt.get("artifacts")
     if not isinstance(artifacts, dict) or set(artifacts) != {"dyn4k-core", "dyn4k"}:
         raise ValueError("both staged KLIBs are required")
@@ -51,9 +63,12 @@ def validate_receipt(receipt, expected_sha):
         raise ValueError("native executable ABI differs")
     guest = receipt.get("guest") or {}
     if (guest.get("serial") != "emulator-5558" or guest.get("primary_abi") != "x86_64"
-            or guest.get("boot_completed") != "1" or not str(guest.get("api", "")).isdigit()
+            or guest.get("boot_completed") != "1" or guest.get("api") != "37"
             or not guest.get("fingerprint") or guest.get("avd_name") != "dyn4k_api37_play_x64"):
         raise ValueError("guest identity is incomplete or wrong ABI")
+    deployment = receipt.get("deployment") or {}
+    if deployment.get("remote_sha256") != record.get("sha256") or deployment.get("chmod_exit_code") != 0:
+        raise ValueError("deployed executable differs")
     process = receipt.get("process") or {}
     command = process.get("command")
     remote = f"/data/local/tmp/dyn4k-native-{variant}"
@@ -65,6 +80,12 @@ def validate_receipt(receipt, expected_sha):
     stdout = process.get("stdout")
     if not isinstance(stdout, str) or not stdout:
         raise ValueError("native process produced no output")
+    for stream in ("stdout", "stderr"):
+        raw_path = Path(process.get(f"{stream}_path", ""))
+        if (not raw_path.is_file() or not isinstance(process.get(stream), str)
+                or raw_path.read_text() != process[stream]
+                or sha256(raw_path) != process.get(f"{stream}_sha256")):
+            raise ValueError(f"raw {stream} differs")
     lines = stdout.splitlines()
     expected = [f"ASSERT {name}" for name in ASSERTIONS] + [f"NATIVE_RESULT PASS {len(ASSERTIONS)}"]
     if lines != expected or receipt.get("assertion_count") != len(ASSERTIONS):
