@@ -276,6 +276,8 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             "maximumMotorForce" to value.getMaximumMotorForce(),
             "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
             "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "maximumSpringForceEnabled" to value.isMaximumSpringForceEnabled(),
+            "maximumSpringForce" to value.getMaximumSpringForce(),
             "lowerLimitEnabled" to value.isLowerLimitEnabled(), "lowerLimit" to value.getLowerLimit(),
             "upperLimitEnabled" to value.isUpperLimitEnabled(), "upperLimit" to value.getUpperLimit())
         is PulleyJoint<*> -> mapOf("type" to "Pulley", "ratio" to value.getRatio(),
@@ -304,6 +306,8 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             "maximumMotorTorque" to value.getMaximumMotorTorque(),
             "springEnabled" to value.isSpringEnabled(), "springDamperEnabled" to value.isSpringDamperEnabled(),
             "springFrequency" to value.getSpringFrequency(), "springDampingRatio" to value.getSpringDampingRatio(),
+            "maximumSpringForceEnabled" to value.isMaximumSpringForceEnabled(),
+            "maximumSpringForce" to value.getMaximumSpringForce(),
             "lowerLimitEnabled" to value.isLowerLimitEnabled(), "lowerLimit" to value.getLowerLimit(),
             "upperLimitEnabled" to value.isUpperLimitEnabled(), "upperLimit" to value.getUpperLimit())
         else -> error("unsupported joint type: ${value::class}")

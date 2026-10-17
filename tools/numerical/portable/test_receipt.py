@@ -70,6 +70,33 @@ class ReceiptContractTest(unittest.TestCase):
         header["setup"]["bodies"][1]["fixtures"][0]["shape"]["radius"] = 0.75
         self.assertRaises(receipt.Rejected, receipt.validate_setup, header, case)
 
+    def test_boolean_joint_mode_input_must_match_captured_mode(self):
+        settings = {key: 0 for key in ("gravity", "stepFrequency", "maximumTranslation",
+                    "maximumRotation", "atRestDetectionEnabled", "maximumAtRestLinearVelocity",
+                    "maximumAtRestAngularVelocity", "minimumAtRestTime", "velocityIterations",
+                    "positionIterations", "warmStartingEnabled", "maximumWarmStartDistance",
+                    "linearTolerance", "angularTolerance", "maximumLinearCorrection",
+                    "maximumAngularCorrection", "baumgarte", "continuousDetectionMode", "narrowphase")}
+        settings["gravity"] = [0.0, 0.0]
+        settings["timeOfImpact"] = {"distanceEpsilon": 4.806217383937352e-6}
+        def body(index):
+            return {"id": f"b{index}", "transform": {"getTranslation": [0.0, float(index)]},
+                    "massType": "NORMAL", "mass": 1.0, "inertia": 1.0,
+                    "massCenter": [0.0, 0.0], "linearDamping": 0.0,
+                    "angularDamping": 0.0, "initialVelocity": [0.0, 0.0],
+                    "initialAngularVelocity": 0.0, "atRestDetectionEnabled": True,
+                    "bullet": False, "fixtures": [{"id": f"b{index}f0", "density": 1.0,
+                    "friction": 0.2, "restitution": 0.0, "restitutionVelocity": 1.0,
+                    "sensor": False, "filter": "DEFAULT_FILTER", "shape": {"type": "Circle"}}]}
+        header = {"settings": settings, "setup": {"bodies": [body(0), body(1)],
+                  "joints": [{"id": "j0", "bodies": [0, 1],
+                              "mode": {"type": "Angle", "limitsEnabled": False}}]}}
+        case = {"id": "joint-Angle-LimitsEnabled-false", "family": "joints-limits-motors",
+                "input": {"jointType": "Angle", "field": "LimitsEnabled", "initialValue": False}}
+        receipt.validate_setup(header, case)
+        header["setup"]["joints"][0]["mode"]["limitsEnabled"] = True
+        self.assertRaises(receipt.Rejected, receipt.validate_setup, header, case)
+
     def test_input_signed_zero_and_event_order_are_exact(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

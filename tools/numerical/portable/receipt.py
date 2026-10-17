@@ -176,10 +176,20 @@ def validate_setup(header, case):
         require(len(joints) == 1 and joints[0]["mode"].get("type") == input_values["jointType"],
                 "joint type or mode is absent")
         if case["id"].startswith("joint-"):
-            active = input_values["mode"] == "active"
             mode = joints[0]["mode"]
             require(len(bodies) == 2 and joints[0]["bodies"] in ([0, 1], [1]) and
                     exact(settings["gravity"], [0.0, 0.0]), "joint body input differs")
+            if "field" in input_values:
+                field = input_values["field"]
+                value = input_values["initialValue"]
+                captured = ([mode.get("lowerLimitEnabled"), mode.get("upperLimitEnabled")]
+                            if field == "LimitsEnabled" and input_values["jointType"] in
+                            ("Distance", "Prismatic", "Wheel") else
+                            mode.get(field[0].lower() + field[1:]))
+                require(exact(captured, [value, value] if isinstance(captured, list) else value),
+                        "joint boolean mode input differs")
+                return
+            active = input_values["mode"] == "active"
             flag = {"Distance": "springEnabled",
                     "Prismatic": "motorEnabled", "Pulley": "slackEnabled",
                     "Revolute": "motorEnabled", "Weld": "springEnabled",

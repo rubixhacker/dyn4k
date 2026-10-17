@@ -275,6 +275,110 @@ class PortableMatrixTest {
         }
     }
 
+    private val booleanJointFields = mapOf(
+        "Angle" to listOf("LimitsEnabled"),
+        "Distance" to listOf("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+            "SpringEnabled", "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+        "Pin" to listOf("SpringEnabled", "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+        "Prismatic" to listOf("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+            "MotorEnabled", "MaximumMotorForceEnabled", "SpringEnabled",
+            "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+        "Pulley" to listOf("SlackEnabled"),
+        "Revolute" to listOf("LimitsEnabled", "MotorEnabled", "MaximumMotorTorqueEnabled"),
+        "Weld" to listOf("LimitsEnabled", "SpringEnabled", "SpringDamperEnabled",
+            "MaximumSpringTorqueEnabled"),
+        "Wheel" to listOf("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+            "MotorEnabled", "MaximumMotorTorqueEnabled", "SpringEnabled",
+            "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+    )
+
+    private fun setBooleanMode(joint: Joint<Body>, field: String, value: Boolean) {
+        when (field) {
+            "LimitsEnabled" -> when (joint) {
+                is AngleJoint<*> -> joint.setLimitsEnabled(value)
+                is DistanceJoint<*> -> joint.setLimitsEnabled(value)
+                is PrismaticJoint<*> -> joint.setLimitsEnabled(value)
+                is RevoluteJoint<*> -> joint.setLimitsEnabled(value)
+                is WeldJoint<*> -> joint.setLimitsEnabled(value)
+                is WheelJoint<*> -> joint.setLimitsEnabled(value)
+                else -> error("unsupported limits mode")
+            }
+            "LowerLimitEnabled" -> when (joint) {
+                is DistanceJoint<*> -> joint.setLowerLimitEnabled(value)
+                is PrismaticJoint<*> -> joint.setLowerLimitEnabled(value)
+                is WheelJoint<*> -> joint.setLowerLimitEnabled(value)
+                else -> error("unsupported lower limit mode")
+            }
+            "UpperLimitEnabled" -> when (joint) {
+                is DistanceJoint<*> -> joint.setUpperLimitEnabled(value)
+                is PrismaticJoint<*> -> joint.setUpperLimitEnabled(value)
+                is WheelJoint<*> -> joint.setUpperLimitEnabled(value)
+                else -> error("unsupported upper limit mode")
+            }
+            "MotorEnabled" -> when (joint) {
+                is PrismaticJoint<*> -> joint.setMotorEnabled(value)
+                is RevoluteJoint<*> -> joint.setMotorEnabled(value)
+                is WheelJoint<*> -> joint.setMotorEnabled(value)
+                else -> error("unsupported motor mode")
+            }
+            "MaximumMotorForceEnabled" -> (joint as PrismaticJoint<*>).setMaximumMotorForceEnabled(value)
+            "MaximumMotorTorqueEnabled" -> when (joint) {
+                is RevoluteJoint<*> -> joint.setMaximumMotorTorqueEnabled(value)
+                is WheelJoint<*> -> joint.setMaximumMotorTorqueEnabled(value)
+                else -> error("unsupported motor torque mode")
+            }
+            "SpringEnabled" -> when (joint) {
+                is DistanceJoint<*> -> joint.setSpringEnabled(value)
+                is PinJoint<*> -> joint.setSpringEnabled(value)
+                is PrismaticJoint<*> -> joint.setSpringEnabled(value)
+                is WeldJoint<*> -> joint.setSpringEnabled(value)
+                is WheelJoint<*> -> joint.setSpringEnabled(value)
+                else -> error("unsupported spring mode")
+            }
+            "SpringDamperEnabled" -> when (joint) {
+                is DistanceJoint<*> -> joint.setSpringDamperEnabled(value)
+                is PinJoint<*> -> joint.setSpringDamperEnabled(value)
+                is PrismaticJoint<*> -> joint.setSpringDamperEnabled(value)
+                is WeldJoint<*> -> joint.setSpringDamperEnabled(value)
+                is WheelJoint<*> -> joint.setSpringDamperEnabled(value)
+                else -> error("unsupported spring damper mode")
+            }
+            "MaximumSpringForceEnabled" -> when (joint) {
+                is DistanceJoint<*> -> joint.setMaximumSpringForceEnabled(value)
+                is PinJoint<*> -> joint.setMaximumSpringForceEnabled(value)
+                is PrismaticJoint<*> -> joint.setMaximumSpringForceEnabled(value)
+                is WheelJoint<*> -> joint.setMaximumSpringForceEnabled(value)
+                else -> error("unsupported spring force mode")
+            }
+            "MaximumSpringTorqueEnabled" -> (joint as WeldJoint<*>).setMaximumSpringTorqueEnabled(value)
+            "SlackEnabled" -> (joint as PulleyJoint<*>).setSlackEnabled(value)
+            else -> error("unknown joint mode $field")
+        }
+    }
+
+    @Test
+    fun independentJointBooleanModes() {
+        for ((type, fields) in booleanJointFields) for (field in fields)
+            for (variant in listOf("false", "true", "toggle")) {
+                val world = World<Body>()
+                world.setGravity(0.0, 0.0)
+                val ground = body(world, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true)
+                val moving = body(world, Geometry.createCircle(0.5), 0.0, 2.0, false)
+                val selected = joint(type, "active", ground, moving)
+                world.addJoint(selected)
+                val initialValue = variant == "true"
+                setBooleanMode(selected, field, initialValue)
+                recorder.capture(CaseSpec("joint-$type-$field-$variant", "joints-limits-motors",
+                    "default", 60, 600, mapOf("jointType" to type, "field" to field,
+                        "variant" to variant, "initialValue" to initialValue)), world) { step, _ ->
+                    if (variant == "toggle" && (step == 201 || step == 401)) {
+                        setBooleanMode(selected, field, step == 201)
+                        "set$field(${step == 201})"
+                    } else null
+                }
+            }
+    }
+
     @Test
     fun baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() {
         val world = World<Body>()

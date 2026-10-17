@@ -1,3 +1,21 @@
+BOOLEAN_JOINT_FIELDS = {
+    "Angle": ("LimitsEnabled",),
+    "Distance": ("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+                 "SpringEnabled", "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+    "Pin": ("SpringEnabled", "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+    "Prismatic": ("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+                   "MotorEnabled", "MaximumMotorForceEnabled", "SpringEnabled",
+                   "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+    "Pulley": ("SlackEnabled",),
+    "Revolute": ("LimitsEnabled", "MotorEnabled", "MaximumMotorTorqueEnabled"),
+    "Weld": ("LimitsEnabled", "SpringEnabled", "SpringDamperEnabled",
+             "MaximumSpringTorqueEnabled"),
+    "Wheel": ("LimitsEnabled", "LowerLimitEnabled", "UpperLimitEnabled",
+              "MotorEnabled", "MaximumMotorTorqueEnabled", "SpringEnabled",
+              "SpringDamperEnabled", "MaximumSpringForceEnabled"),
+}
+
+
 def declared_cases():
     cases = []
     for scale_index, scale in enumerate((0.01, 1.0, 100.0)):
@@ -35,6 +53,14 @@ def declared_cases():
             cases.append({"id": f"joint-{joint_type}-{mode}", "family": "joints-limits-motors",
                           "profile": "default", "hz": 60, "steps": 600,
                           "input": {"jointType": joint_type, "mode": mode, "durationSeconds": 10}})
+    for joint_type, fields in BOOLEAN_JOINT_FIELDS.items():
+        for field in fields:
+            for variant in ("false", "true", "toggle"):
+                cases.append({"id": f"joint-{joint_type}-{field}-{variant}",
+                              "family": "joints-limits-motors", "profile": "default",
+                              "hz": 60, "steps": 600,
+                              "input": {"jointType": joint_type, "field": field,
+                                        "variant": variant, "initialValue": variant == "true"}})
     cases.append({"id": "P-JINT-Weld-enabled-equal", "family": "joints-limits-motors",
                   "profile": "frozen-weld-pulley", "hz": 60, "steps": 600,
                   "input": {"jointType": "Weld", "limits": [0.0, 0.0], "offCenterForce": [0.0, -10.0]}})
@@ -68,7 +94,9 @@ def declared_cases():
             case["expected_actions"] = [case["input"]["actionStep"]]
         elif case["id"].startswith("contacts-configured-"):
             case["expected_actions"] = [36001]
-        elif case["id"].startswith("joint-") and case["input"]["mode"] == "active":
+        elif case["id"].startswith("joint-") and case["input"].get("mode") == "active":
+            case["expected_actions"] = [201, 401]
+        elif case["id"].startswith("joint-") and case["input"].get("variant") == "toggle":
             case["expected_actions"] = [201, 401]
         elif case["id"] == "P-JINT-Pulley-slack-transition-main":
             case["expected_actions"] = [201, 401]
