@@ -5,6 +5,7 @@ import org.dyn4j.geometry.Link
 import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Segment
+import org.dyn4j.geometry.Triangle
 import kotlin.reflect.KClass
 
 class PortableConvexClass<T : Any> internal constructor(val type: KClass<T>) {
@@ -18,12 +19,15 @@ internal object PortableConvexClasses {
 
     init {
         declare(Rectangle::class, Polygon::class)
+        declare(Triangle::class, Polygon::class)
         declare(Link::class, Segment::class)
     }
 
     fun <T : Convex> of(type: KClass<T>): PortableConvexClass<T> = PortableConvexClass(type)
 
     fun declare(type: KClass<out Convex>, directSupertype: KClass<out Convex>) {
+        require(type != directSupertype) { "A convex type cannot be its own supertype" }
+        require(!declaredAssignable(type, directSupertype)) { "A convex supertype declaration would create a cycle" }
         directSupertypes.getOrPut(type) { mutableSetOf() }.add(directSupertype)
     }
 

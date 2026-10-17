@@ -30,6 +30,9 @@ import kotlin.reflect.KClass
 /**
  * Declares a direct Convex supertype for type-only fallback queries on portable targets.
  * Call this before querying a custom type that has not had an instance observed.
+ * Self and cyclic declarations throw [IllegalArgumentException]. Other declarations are
+ * trusted: common [KClass] tokens cannot verify arbitrary user-defined subclass claims.
+ * Runtime-object queries use the actual instance type even when a declaration is incorrect.
  * JVM and Android continue to use the Java class hierarchy.
  */
 fun <T : Convex> declareConvexSupertype(type: KClass<T>, directSupertype: KClass<out Convex>): ConvexClass<T> {

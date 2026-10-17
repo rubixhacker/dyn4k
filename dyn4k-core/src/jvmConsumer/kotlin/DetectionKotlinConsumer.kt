@@ -14,6 +14,7 @@ import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Rectangle
+import org.dyn4j.geometry.Triangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
@@ -23,6 +24,12 @@ fun main() {
     val custom = declareConvexSupertype(CustomRectangle::class, Rectangle::class)
     check(SingleTypedFallbackCondition(convexClassOf(Polygon::class), false)
         .isMatch(custom, convexClassOf(Circle::class)))
+    check(SingleTypedFallbackCondition(convexClassOf(Polygon::class), false)
+        .isMatch(convexClassOf(Triangle::class), convexClassOf(Circle::class)))
+    val selfError = runCatching { declareConvexSupertype(Circle::class, Circle::class) }.exceptionOrNull()
+    check(selfError is IllegalArgumentException && selfError.message == "A convex type cannot be its own supertype")
+    val cycleError = runCatching { declareConvexSupertype(Polygon::class, Triangle::class) }.exceptionOrNull()
+    check(cycleError is IllegalArgumentException && cycleError.message == "A convex supertype declaration would create a cycle")
     val first = Circle(1.0)
     val second = Circle(1.0)
     val origin = Transform()

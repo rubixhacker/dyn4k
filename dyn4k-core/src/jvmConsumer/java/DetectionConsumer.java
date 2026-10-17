@@ -19,6 +19,7 @@ import org.dyn4j.geometry.Convex;
 import org.dyn4j.geometry.Transform;
 import org.dyn4j.geometry.Polygon;
 import org.dyn4j.geometry.Rectangle;
+import org.dyn4j.geometry.Triangle;
 import org.dyn4j.geometry.Vector2;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,6 +54,8 @@ public final class DetectionConsumer {
         require(new EpaExtension().maxIterationsField().equals("extension"), "Epa Java extension helper");
         require(new org.dyn4j.collision.narrowphase.SingleTypedFallbackCondition(Polygon.class, false)
             .isMatch(CustomRectangle.class, Circle.class), "type-only Java subclass fallback");
+        require(new org.dyn4j.collision.narrowphase.SingleTypedFallbackCondition(Polygon.class, false)
+            .isMatch(Triangle.class, Circle.class), "type-only Java Triangle fallback");
         Circle first = new Circle(1.0);
         Circle second = new Circle(1.0);
         Transform origin = new Transform();
