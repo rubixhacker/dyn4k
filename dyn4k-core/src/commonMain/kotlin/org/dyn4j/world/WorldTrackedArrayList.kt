@@ -161,6 +161,8 @@ internal class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMut
         override fun removeAll(elements: Collection<E>): Boolean = throw UnsupportedOperationException()
         override fun retainAll(elements: Collection<E>): Boolean = throw UnsupportedOperationException()
 
+        fun sort(comparator: Comparator<in E>?): Unit = throw UnsupportedOperationException()
+
         override fun iterator(): MutableIterator<E> = listIterator()
         override fun listIterator(): MutableListIterator<E> = listIterator(0)
 
