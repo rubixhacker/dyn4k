@@ -8,6 +8,19 @@ import run
 
 
 class ExtractionTest(unittest.TestCase):
+    def test_java_8_receipt_uses_executed_test_worker(self):
+        executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
+        if not executable.is_file():
+            self.skipTest("Java 8 test runtime is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "gradle.log"
+            log.write_text("Starting process 'Gradle Test Executor 1'. Command: " +
+                           str(executable) + " -cp worker.jar\n")
+            result = run.runtime("jvm8", log)
+        self.assertEqual(result["executable"], str(executable.resolve()))
+        self.assertEqual(result["executable_sha256"], run.digest(executable))
+        self.assertIn('version "1.8.', result["version"])
+
     def test_xml_extraction_retains_whole_trace_and_case_slice(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

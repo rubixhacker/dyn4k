@@ -130,6 +130,8 @@ def runtime(host, log_path):
     command = (str(resolved), "--version") if host.startswith("node-") else (str(resolved), "-version")
     probe = subprocess.run(command, capture_output=True, text=True, check=False)
     result["version"] = (probe.stdout + probe.stderr).strip().splitlines()[0] if probe.stdout or probe.stderr else "UNAVAILABLE"
+    if host == "jvm8" and 'version "1.8.' not in result["version"]:
+        raise Rejected("JVM 8 lane did not execute on Java 8")
     return result
 
 
