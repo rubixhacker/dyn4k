@@ -1669,7 +1669,9 @@ tasks.register<JavaExec>("runAndroidWorldTests") {
     mainClass.set("org.junit.runner.JUnitCore")
     args(worldTestClasses)
 }
-val worldConsumerSource = file("src/jvmConsumer/java/WorldConsumer.java")
+val worldConsumerSource = files(
+    "src/jvmConsumer/java/WorldConsumer.java", "src/jvmConsumer/java/WorldAdvancedConsumer.java"
+)
 val baselineWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
     source(worldConsumerSource)
@@ -1681,6 +1683,11 @@ tasks.register<JavaExec>("runBaselineWorldConsumer") {
     dependsOn(baselineWorldConsumer)
     classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
     mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runBaselineWorldAdvancedConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldAdvancedConsumer")
 }
 val candidateWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(tasks.named("jvmJar"))
@@ -1694,6 +1701,11 @@ tasks.register<JavaExec>("runCandidateWorldConsumer") {
     classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     mainClass.set("WorldConsumer")
 }
+tasks.register<JavaExec>("runCandidateWorldAdvancedConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldAdvancedConsumer")
+}
 val stagedWorldConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
     source(worldConsumerSource)
@@ -1705,6 +1717,11 @@ tasks.register<JavaExec>("runStagedWorldConsumer") {
     dependsOn(stagedWorldConsumer)
     classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
     mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runStagedWorldAdvancedConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldAdvancedConsumer")
 }
 val stagedWorldKotlinConsumer = tasks.register<JavaExec>("stagedWorldKotlinConsumer") {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
@@ -1736,6 +1753,35 @@ tasks.register<JavaExec>("runAndroidWorldConsumer") {
     dependsOn(androidWorldConsumer, androidRuntimeJar)
     classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runAndroidWorldAdvancedConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<Exec>("verifyWorldJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyWorldAndroidApi") {
+    dependsOn(verifyBaseline, androidCompileJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/compile_library_classes_jar/androidMain/bundleAndroidMainClassesToCompileJar/classes.jar").get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyWorldAndroidRuntimeApi") {
+    dependsOn(verifyBaseline, androidRuntimeJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/runtime_library_classes_jar/androidMain/bundleAndroidMainClassesToRuntimeJar/classes.jar").get().asFile.absolutePath)
+    }
 }
 val jointTestSourceNames = jointTestNames + listOf(
     "BaseJointTest", "TestAbstractJoint", "TestAbstractPairedBodyJoint", "TestAbstractSingleBodyJoint"

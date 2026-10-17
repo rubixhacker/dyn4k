@@ -93,6 +93,21 @@ public final class WorldConsumer {
             if (iterator.next() == box) iterator.remove();
         }
         if (view.size() != 1 || world.containsBody(box)) throw new AssertionError("iterator removal");
+        try {
+            world.addBody(null);
+            throw new AssertionError("null body accepted");
+        } catch (NullPointerException expected) {
+        }
+        try {
+            world.getBody(-1);
+            throw new AssertionError("negative body index accepted");
+        } catch (IndexOutOfBoundsException expected) {
+        }
+        try {
+            world.getBodyIterator().remove();
+            throw new AssertionError("iterator removal before next accepted");
+        } catch (IllegalStateException expected) {
+        }
 
         System.out.printf(Locale.ROOT, "WORLD_TRACE,%.17g,%.17g,%d,%d,%d,%d,%s%n",
                 box.getTransform().getTranslationY(), box.getLinearVelocity().y,
