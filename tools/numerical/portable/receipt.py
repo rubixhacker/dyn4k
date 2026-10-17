@@ -54,20 +54,20 @@ def _reject_nonfinite(value):
     raise Rejected(f"nonfinite JSON token: {value}")
 
 
-def _finite(value):
+def _finite(value, allow_tagged_nonfinite=False):
     if isinstance(value, float) and not math.isfinite(value):
         raise Rejected("nonfinite number")
     if isinstance(value, list):
         for child in value:
-            _finite(child)
+            _finite(child, allow_tagged_nonfinite)
     if isinstance(value, dict):
-        if "nonfinite" in value:
+        if "nonfinite" in value and not allow_tagged_nonfinite:
             raise Rejected(f"nonfinite recorded value: {value['nonfinite']}")
         for child in value.values():
-            _finite(child)
+            _finite(child, allow_tagged_nonfinite)
 
 
-def records(path):
+def records(path, allow_tagged_nonfinite=False):
     with Path(path).open("rb") as stream:
         for number, line in enumerate(stream, 1):
             if not line.endswith(b"\n"):
@@ -78,7 +78,7 @@ def records(path):
                 raise Rejected(f"line {number}: {error}") from error
             if not isinstance(value, dict):
                 raise Rejected(f"line {number} is not an object")
-            _finite(value)
+            _finite(value, allow_tagged_nonfinite)
             yield value
 
 

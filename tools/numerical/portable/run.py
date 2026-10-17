@@ -213,6 +213,13 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             raise Rejected("matrix XML is missing or stale")
         trace, attributes = extract_xml(host, lane)
         outcome["xml"] = attributes
+        comparisons = compare_frozen(trace, lane, reference_dirs)
+        outcome["frozen_comparison_results"] = {
+            "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
+            "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
+            "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}
+        physical = nominal_free(trace)
+        outcome["physical"] = physical
         if completed.returncode:
             raise Rejected("Gradle task failed")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
@@ -223,14 +230,9 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         identity = Identity(commit, source_sha256, artifact_sha256, runtime(host, lane / "gradle.log"))
         sealed = seal(trace, declared_cases(), identity, target_artifacts)
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
-        physical = nominal_free(trace)
-        comparisons = compare_frozen(trace, lane, reference_dirs)
         outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
-                        "artifact_sha256": identity.artifact_sha256, "physical": physical,
-                        "frozen_comparison": "UNPASSED", "frozen_comparison_results":
-                            {"available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
-                             "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
-                             "failed": sum(item["status"].startswith("FAILED") for item in comparisons)}})
+                        "artifact_sha256": identity.artifact_sha256,
+                        "frozen_comparison": "UNPASSED"})
         if physical["status"] != "PASSED":
             outcome["status"] = "FAILED"
             outcome["reason"] = "long-running physical diagnostic failed"

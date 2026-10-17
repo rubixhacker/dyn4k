@@ -12,7 +12,7 @@ def nominal_free(trace):
     failures = []
     failure_count = 0
     try:
-        for row in records(trace):
+        for row in records(trace, allow_tagged_nonfinite=True):
             if row.get("kind") != "state" or row.get("id") != "long-free-60":
                 continue
             checked += 1

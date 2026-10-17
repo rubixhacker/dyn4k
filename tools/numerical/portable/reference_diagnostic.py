@@ -73,7 +73,7 @@ def diagnostic(fixture_key, reference, portable):
         raise Rejected("frozen input line SHA-256 differs")
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
-    port = (row for row in records(portable) if row.get("id") == wanted)
+    port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
     ref_header = next(ref)
     port_header = next(port)
     header_exact = exact(ref_header, port_header)

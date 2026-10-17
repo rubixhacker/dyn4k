@@ -91,8 +91,10 @@ class ReceiptContractTest(unittest.TestCase):
             self.assertRaises(receipt.Rejected, receipt.inspect, path, CASES)
             tagged = copy.deepcopy(sample())
             tagged[1]["state"]["x"] = {"nonfinite": "-Infinity"}
-            self.assertRaises(receipt.Rejected, receipt.inspect,
-                              self.write(folder, "tagged.jsonl", tagged), CASES)
+            tagged_path = self.write(folder, "tagged.jsonl", tagged)
+            self.assertRaises(receipt.Rejected, receipt.inspect, tagged_path, CASES)
+            self.assertEqual(list(receipt.records(tagged_path, allow_tagged_nonfinite=True))[1]
+                             ["state"]["x"], {"nonfinite": "-Infinity"})
             self.assertRaises(receipt.Rejected, receipt.inspect, self.write(folder, "empty.jsonl", []), CASES)
 
     def test_configured_endpoints_do_not_advance_temporal_state(self):
