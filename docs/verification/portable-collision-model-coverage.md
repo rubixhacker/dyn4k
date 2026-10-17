@@ -183,7 +183,7 @@ The expected new common count is 123: 114 mapped counterparts and nine supplemen
 | `wasmWasiNodeTest` | 123/123 | 143 | 1 | 0 | FAIL |
 | `testAndroidHostTest` | 123/123 | 143 | 0 | 0 | PASS |
 
-The sole remaining failure on each non-JVM lane is `CollisionBodyCoverageTest.supplementalNullPointIsDeferredUntilShapeUse`. Linux x64 reports an unexpected process exit and an `Unknown` XML failure. JS Node throws a JavaScript `TypeError`. Wasm JS and Wasm WASI throw `ClassCastException` for a null-to-`Vector2` cast. JVM and Android host throw the expected `NullPointerException`. The engine owner must repair and rerun this behavior; production code is outside this coverage branch.
+The sole remaining failure on each non-JVM lane is `CollisionBodyCoverageTest.supplementalNullPointIsDeferredUntilShapeUse`. Linux x64 exits with code 139 (`SIGSEGV`) and an `Unknown` XML failure. An isolated native run under GDB traces the null point from `AbstractCollisionBody.getFixture` at `CollisionBody.kt:179` through `Circle.contains` to a null `Vector2.x` dereference at `Vector2.kt:40`. The raw backtrace is `/tmp/dyn4k-portable-collision-model-evidence/native-null-gdb.log`, SHA-256 `084242f2bcc51cd177c8a3a5007781e0f36e39eb3d80459ae0df027ca525fc5a`. JS Node throws a JavaScript `TypeError`. Wasm JS and Wasm WASI throw `ClassCastException` for a null-to-`Vector2` cast. JVM and Android host throw the expected `NullPointerException`. The engine owner must repair and rerun this behavior; production code is outside this coverage branch.
 
 All six requested local tasks were available. Android device, Apple, Windows, Linux ARM64, browser, and other qualification runtimes were not run for this slice. Their status is `NOT_RUN`, not pass or zero cases. The full support matrix remains open under the integration qualification work.
 
@@ -199,6 +199,13 @@ The unchanged Java consumer tasks used the same three environment variables:
 
 ```bash
 ./gradlew :dyn4k-core:runBaselineCollisionModelConsumer :dyn4k-core:runCandidateCollisionModelConsumer :dyn4k-core:runStagedCollisionModelConsumer :dyn4k-core:runAndroidCollisionModelConsumer --offline --rerun-tasks --continue --quiet
+```
+
+The isolated native failure used the compiled test executable from the same Gradle run:
+
+```bash
+dyn4k-core/build/bin/linuxX64/debugTest/test.kexe '--ktest_filter=*supplementalNullPointIsDeferredUntilShapeUse*' --ktest_logger=SIMPLE
+gdb --batch -ex run -ex 'bt 15' --args dyn4k-core/build/bin/linuxX64/debugTest/test.kexe '--ktest_filter=*supplementalNullPointIsDeferredUntilShapeUse*' --ktest_logger=SIMPLE
 ```
 
 For the baseline, `javac --release 8` compiled `src/test/java/org/dyn4j/collision/*.java`, `UnitConversionTest.java`, and `exception/ExceptionsTest.java` from the pinned checkout against `dyn4j-6.0.0.jar`, JUnit 4.13.2, and Hamcrest 1.3. The separate `CollisionJUnitXml` runner invoked these 16 test classes in the order used by `runUpstreamCollisionModelTests`. The candidate runner used the same 16 names with the Gradle-compiled original class files, candidate JVM JAR, Kotlin stdlib 2.4.20, JUnit 4.13.2, and Hamcrest 1.3. The exact baseline/candidate compilation and execution command is `bash /tmp/dyn4k-portable-collision-model-evidence/run-original.sh`. The runner source, same-source null probe, XML, and Gradle log are retained in that directory.
