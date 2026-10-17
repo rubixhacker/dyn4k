@@ -9,6 +9,13 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+private class KotlinDistance(a: Body, b: Body, first: Vector2, second: Vector2) :
+    DistanceJoint<Body>(a, b, first, second) {
+    fun rawRestDistance(): Double = restDistance
+    fun rawLocalAnchor(): Vector2 = localAnchor1
+    override fun getRestDistance(): Double = super.getRestDistance() + 1.0
+}
+
 object JointKotlinConsumer {
     @JvmStatic
     fun main(args: Array<String>) {
@@ -25,6 +32,11 @@ object JointKotlinConsumer {
         distance.setSpringDampingRatio(0.3)
         distance.setSpringEnabled(true)
         distance.setSpringDamperEnabled(true)
+        val extended = KotlinDistance(a, b, anchor, Vector2(1.0, 0.0))
+        val dispatched: DistanceJoint<Body> = extended
+        check(extended.rawRestDistance() == 1.0)
+        check(extended.rawLocalAnchor() == anchor)
+        check(dispatched.getRestDistance() == 2.0)
         val revolute = RevoluteJoint(body1 = a, body2 = b, anchor = anchor)
         revolute.setMotorEnabled(true)
         revolute.setMotorSpeed(1.0)

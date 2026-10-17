@@ -26,7 +26,6 @@ package org.dyn4j.dynamics.joint
 
 import kotlin.math.abs
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
 import org.dyn4j.dynamics.TimeStep
@@ -35,26 +34,18 @@ import org.dyn4j.exception.ValueOutOfRangeException
 import org.dyn4j.geometry.Vector2
 
 open class PulleyJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T> {
-    @get:kotlin.jvm.JvmName("readPulleyAnchor1")
-    @JvmFieldBridge protected val pulleyAnchor1: Vector2
-    @get:kotlin.jvm.JvmName("readPulleyAnchor2")
-    @JvmFieldBridge protected val pulleyAnchor2: Vector2
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @get:kotlin.jvm.JvmName("readRatio")
-    @set:kotlin.jvm.JvmName("writeRatio")
-    @JvmFieldBridge protected var ratio = 1.0
-    @get:kotlin.jvm.JvmName("readSlackEnabled")
-    @set:kotlin.jvm.JvmName("writeSlackEnabled")
-    @JvmFieldBridge protected var slackEnabled = false
-    @JvmFieldBridge internal var overLength = false
-    @get:kotlin.jvm.JvmName("readLength")
-    @set:kotlin.jvm.JvmName("writeLength")
-    @JvmFieldBridge internal var length: Double
-    @JvmFieldBridge internal val n1 = Vector2()
-    @JvmFieldBridge internal val n2 = Vector2()
-    @JvmFieldBridge internal var invK = 0.0
-    @JvmFieldBridge internal var impulse = 0.0
+    @kotlin.jvm.JvmField protected val pulleyAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val pulleyAnchor2: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected var ratio = 1.0
+    @kotlin.jvm.JvmField protected var slackEnabled = false
+    @kotlin.jvm.JvmField internal var overLength = false
+    @kotlin.jvm.JvmField internal var length: Double
+    @kotlin.jvm.JvmField internal val n1 = Vector2()
+    @kotlin.jvm.JvmField internal val n2 = Vector2()
+    @kotlin.jvm.JvmField internal var invK = 0.0
+    @kotlin.jvm.JvmField internal var impulse = 0.0
 
     constructor(body1: T, body2: T, pulleyAnchor1: Vector2?, pulleyAnchor2: Vector2?, bodyAnchor1: Vector2?, bodyAnchor2: Vector2?) : super(body1, body2) {
         if (pulleyAnchor1 == null) throw ArgumentNullException("pulleyAnchor1")

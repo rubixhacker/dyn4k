@@ -24,7 +24,6 @@
  */
 package org.dyn4j.dynamics.joint
 
-import org.dyn4j.JvmFieldBridge
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -41,68 +40,36 @@ import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.Vector3
 
 open class WeldJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, AngularLimitsJoint, AngularSpringJoint {
-    @get:kotlin.jvm.JvmName("getLocalAnchor1Field")
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @get:kotlin.jvm.JvmName("getLocalAnchor2Field")
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @get:kotlin.jvm.JvmName("getLimitsEnabledField")
-    @set:kotlin.jvm.JvmName("setLimitsEnabledField")
-    @JvmFieldBridge protected var limitsEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getLowerLimitField")
-    @set:kotlin.jvm.JvmName("setLowerLimitField")
-    @JvmFieldBridge protected var lowerLimit: Double
-    @get:kotlin.jvm.JvmName("getUpperLimitField")
-    @set:kotlin.jvm.JvmName("setUpperLimitField")
-    @JvmFieldBridge protected var upperLimit: Double
-    @get:kotlin.jvm.JvmName("getReferenceAngleField")
-    @set:kotlin.jvm.JvmName("setReferenceAngleField")
-    @JvmFieldBridge protected var referenceAngle: Double
-    @get:kotlin.jvm.JvmName("getLimitOffsetField")
-    @set:kotlin.jvm.JvmName("setLimitOffsetField")
-    @JvmFieldBridge protected var limitOffset: Double
-    @get:kotlin.jvm.JvmName("getAdjustedLowerLimitField")
-    @set:kotlin.jvm.JvmName("setAdjustedLowerLimitField")
-    @JvmFieldBridge protected var adjustedLowerLimit: Double
-    @get:kotlin.jvm.JvmName("getAdjustedUpperLimitField")
-    @set:kotlin.jvm.JvmName("setAdjustedUpperLimitField")
-    @JvmFieldBridge protected var adjustedUpperLimit: Double
-    @get:kotlin.jvm.JvmName("getSpringEnabledField")
-    @set:kotlin.jvm.JvmName("setSpringEnabledField")
-    @JvmFieldBridge protected var springEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getSpringDamperEnabledField")
-    @set:kotlin.jvm.JvmName("setSpringDamperEnabledField")
-    @JvmFieldBridge protected var springDamperEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getSpringModeField")
-    @set:kotlin.jvm.JvmName("setSpringModeField")
-    @JvmFieldBridge protected var springMode: Int
-    @get:kotlin.jvm.JvmName("getSpringFrequencyField")
-    @set:kotlin.jvm.JvmName("setSpringFrequencyField")
-    @JvmFieldBridge protected var springFrequency: Double
-    @get:kotlin.jvm.JvmName("getSpringStiffnessField")
-    @set:kotlin.jvm.JvmName("setSpringStiffnessField")
-    @JvmFieldBridge protected var springStiffness: Double
-    @get:kotlin.jvm.JvmName("getSpringDampingRatioField")
-    @set:kotlin.jvm.JvmName("setSpringDampingRatioField")
-    @JvmFieldBridge protected var springDampingRatio: Double
-    @get:kotlin.jvm.JvmName("getSpringMaximumTorqueEnabledField")
-    @set:kotlin.jvm.JvmName("setSpringMaximumTorqueEnabledField")
-    @JvmFieldBridge protected var springMaximumTorqueEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getSpringMaximumTorqueField")
-    @set:kotlin.jvm.JvmName("setSpringMaximumTorqueField")
-    @JvmFieldBridge protected var springMaximumTorque: Double
-    @JvmFieldBridge internal var angle: Double
-    @JvmFieldBridge internal val r1: Vector2
-    @JvmFieldBridge internal val r2: Vector2
-    @JvmFieldBridge internal val K: Matrix33
-    @JvmFieldBridge internal var axialMass: Double
-    @JvmFieldBridge internal var springMass: Double
-    @JvmFieldBridge internal var damping: Double
-    @JvmFieldBridge internal var bias: Double
-    @JvmFieldBridge internal var gamma: Double
-    @JvmFieldBridge internal val impulse: Vector3
-    @JvmFieldBridge internal var springImpulse: Double
-    @JvmFieldBridge internal var lowerLimitImpulse: Double
-    @JvmFieldBridge internal var upperLimitImpulse: Double
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected var limitsEnabled: Boolean
+    @kotlin.jvm.JvmField protected var lowerLimit: Double
+    @kotlin.jvm.JvmField protected var upperLimit: Double
+    @kotlin.jvm.JvmField protected var referenceAngle: Double
+    @kotlin.jvm.JvmField protected var limitOffset: Double
+    @kotlin.jvm.JvmField protected var adjustedLowerLimit: Double
+    @kotlin.jvm.JvmField protected var adjustedUpperLimit: Double
+    @kotlin.jvm.JvmField protected var springEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springDamperEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springMode: Int
+    @kotlin.jvm.JvmField protected var springFrequency: Double
+    @kotlin.jvm.JvmField protected var springStiffness: Double
+    @kotlin.jvm.JvmField protected var springDampingRatio: Double
+    @kotlin.jvm.JvmField protected var springMaximumTorqueEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springMaximumTorque: Double
+    @kotlin.jvm.JvmField internal var angle: Double
+    @kotlin.jvm.JvmField internal val r1: Vector2
+    @kotlin.jvm.JvmField internal val r2: Vector2
+    @kotlin.jvm.JvmField internal val K: Matrix33
+    @kotlin.jvm.JvmField internal var axialMass: Double
+    @kotlin.jvm.JvmField internal var springMass: Double
+    @kotlin.jvm.JvmField internal var damping: Double
+    @kotlin.jvm.JvmField internal var bias: Double
+    @kotlin.jvm.JvmField internal var gamma: Double
+    @kotlin.jvm.JvmField internal val impulse: Vector3
+    @kotlin.jvm.JvmField internal var springImpulse: Double
+    @kotlin.jvm.JvmField internal var lowerLimitImpulse: Double
+    @kotlin.jvm.JvmField internal var upperLimitImpulse: Double
 
     constructor(body1: T?, body2: T?, anchor: Vector2?) : super(body1, body2) {
         if (anchor == null) throw ArgumentNullException("anchor")

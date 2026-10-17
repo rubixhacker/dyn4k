@@ -29,7 +29,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
 import org.dyn4j.dynamics.TimeStep
@@ -44,73 +43,47 @@ import org.dyn4j.geometry.Vector3
 
 open class PrismaticJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimitsJoint,
     LinearMotorJoint, LinearSpringJoint {
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @JvmFieldBridge protected val xAxis: Vector2
-    @JvmFieldBridge protected val yAxis: Vector2
-    @get:kotlin.jvm.JvmName("getReferenceAngleField")
-    @set:kotlin.jvm.JvmName("setReferenceAngleField")
-    @JvmFieldBridge protected var referenceAngle: Double
-    @set:kotlin.jvm.JvmName("setUpperLimitEnabledField")
-    @JvmFieldBridge protected var upperLimitEnabled = false
-    @set:kotlin.jvm.JvmName("setLowerLimitEnabledField")
-    @JvmFieldBridge protected var lowerLimitEnabled = false
-    @get:kotlin.jvm.JvmName("getUpperLimitField")
-    @set:kotlin.jvm.JvmName("setUpperLimitField")
-    @JvmFieldBridge protected var upperLimit = 0.0
-    @get:kotlin.jvm.JvmName("getLowerLimitField")
-    @set:kotlin.jvm.JvmName("setLowerLimitField")
-    @JvmFieldBridge protected var lowerLimit = 0.0
-    @set:kotlin.jvm.JvmName("setMotorEnabledField")
-    @JvmFieldBridge protected var motorEnabled = false
-    @get:kotlin.jvm.JvmName("getMotorSpeedField")
-    @set:kotlin.jvm.JvmName("setMotorSpeedField")
-    @JvmFieldBridge protected var motorSpeed = 0.0
-    @set:kotlin.jvm.JvmName("setMaximumMotorForceEnabledField")
-    @JvmFieldBridge protected var maximumMotorForceEnabled = false
-    @get:kotlin.jvm.JvmName("getMaximumMotorForceField")
-    @set:kotlin.jvm.JvmName("setMaximumMotorForceField")
-    @JvmFieldBridge protected var maximumMotorForce = 1000.0
-    @set:kotlin.jvm.JvmName("setSpringEnabledField")
-    @JvmFieldBridge protected var springEnabled = false
-    @set:kotlin.jvm.JvmName("setSpringDamperEnabledField")
-    @JvmFieldBridge protected var springDamperEnabled = false
-    @get:kotlin.jvm.JvmName("getSpringModeField")
-    @JvmFieldBridge protected var springMode = Joint.SPRING_MODE_FREQUENCY
-    @get:kotlin.jvm.JvmName("getSpringFrequencyField")
-    @set:kotlin.jvm.JvmName("setSpringFrequencyField")
-    @JvmFieldBridge protected var springFrequency = 8.0
-    @get:kotlin.jvm.JvmName("getSpringStiffnessField")
-    @set:kotlin.jvm.JvmName("setSpringStiffnessField")
-    @JvmFieldBridge protected var springStiffness = 0.0
-    @get:kotlin.jvm.JvmName("getSpringDampingRatioField")
-    @set:kotlin.jvm.JvmName("setSpringDampingRatioField")
-    @JvmFieldBridge protected var springDampingRatio = 0.3
-    @JvmFieldBridge protected var springMaximumForceEnabled = false
-    @JvmFieldBridge protected var springMaximumForce = 1000.0
-    @get:kotlin.jvm.JvmName("getSpringRestOffsetField")
-    @set:kotlin.jvm.JvmName("setSpringRestOffsetField")
-    @JvmFieldBridge protected var springRestOffset = 0.0
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected val xAxis: Vector2
+    @kotlin.jvm.JvmField protected val yAxis: Vector2
+    @kotlin.jvm.JvmField protected var referenceAngle: Double
+    @kotlin.jvm.JvmField protected var upperLimitEnabled = false
+    @kotlin.jvm.JvmField protected var lowerLimitEnabled = false
+    @kotlin.jvm.JvmField protected var upperLimit = 0.0
+    @kotlin.jvm.JvmField protected var lowerLimit = 0.0
+    @kotlin.jvm.JvmField protected var motorEnabled = false
+    @kotlin.jvm.JvmField protected var motorSpeed = 0.0
+    @kotlin.jvm.JvmField protected var maximumMotorForceEnabled = false
+    @kotlin.jvm.JvmField protected var maximumMotorForce = 1000.0
+    @kotlin.jvm.JvmField protected var springEnabled = false
+    @kotlin.jvm.JvmField protected var springDamperEnabled = false
+    @kotlin.jvm.JvmField protected var springMode = Joint.SPRING_MODE_FREQUENCY
+    @kotlin.jvm.JvmField protected var springFrequency = 8.0
+    @kotlin.jvm.JvmField protected var springStiffness = 0.0
+    @kotlin.jvm.JvmField protected var springDampingRatio = 0.3
+    @kotlin.jvm.JvmField protected var springMaximumForceEnabled = false
+    @kotlin.jvm.JvmField protected var springMaximumForce = 1000.0
+    @kotlin.jvm.JvmField protected var springRestOffset = 0.0
 
-    @JvmFieldBridge internal var damping = 0.0
-    @JvmFieldBridge internal var bias = 0.0
-    @JvmFieldBridge internal var gamma = 0.0
-    @JvmFieldBridge internal val K: Matrix22
-    @JvmFieldBridge internal var axialMass = 0.0
-    @JvmFieldBridge internal var springMass = 0.0
-    @JvmFieldBridge internal val perp: Vector2
-    @get:kotlin.jvm.JvmName("getAxisField")
-    @JvmFieldBridge internal val axis: Vector2
-    @JvmFieldBridge internal var s1 = 0.0
-    @JvmFieldBridge internal var s2 = 0.0
-    @JvmFieldBridge internal var a1 = 0.0
-    @JvmFieldBridge internal var a2 = 0.0
-    @JvmFieldBridge internal var translation = 0.0
-    @JvmFieldBridge internal val impulse: Vector2
-    @JvmFieldBridge internal var springImpulse = 0.0
-    @JvmFieldBridge internal var motorImpulse = 0.0
-    @JvmFieldBridge internal var lowerLimitImpulse = 0.0
-    @JvmFieldBridge internal var upperLimitImpulse = 0.0
+    @kotlin.jvm.JvmField internal var damping = 0.0
+    @kotlin.jvm.JvmField internal var bias = 0.0
+    @kotlin.jvm.JvmField internal var gamma = 0.0
+    @kotlin.jvm.JvmField internal val K: Matrix22
+    @kotlin.jvm.JvmField internal var axialMass = 0.0
+    @kotlin.jvm.JvmField internal var springMass = 0.0
+    @kotlin.jvm.JvmField internal val perp: Vector2
+    @kotlin.jvm.JvmField internal val axis: Vector2
+    @kotlin.jvm.JvmField internal var s1 = 0.0
+    @kotlin.jvm.JvmField internal var s2 = 0.0
+    @kotlin.jvm.JvmField internal var a1 = 0.0
+    @kotlin.jvm.JvmField internal var a2 = 0.0
+    @kotlin.jvm.JvmField internal var translation = 0.0
+    @kotlin.jvm.JvmField internal val impulse: Vector2
+    @kotlin.jvm.JvmField internal var springImpulse = 0.0
+    @kotlin.jvm.JvmField internal var motorImpulse = 0.0
+    @kotlin.jvm.JvmField internal var lowerLimitImpulse = 0.0
+    @kotlin.jvm.JvmField internal var upperLimitImpulse = 0.0
 
     constructor(body1: T?, body2: T?, anchor: Vector2?, axis: Vector2?) : super(body1, body2) {
         val point = anchor ?: throw ArgumentNullException("anchor")

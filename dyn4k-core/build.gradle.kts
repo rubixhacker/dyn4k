@@ -323,6 +323,11 @@ val jvmApi = mapOf(
     )
 )
 
+val noOpJointShiftTypes = setOf(
+    "AngleJoint", "DistanceJoint", "FrictionJoint", "MotorJoint", "PrismaticJoint",
+    "RevoluteJoint", "WeldJoint", "WheelJoint"
+).map { "org/dyn4j/dynamics/joint/$it" }.toSet()
+
 val patchJvmArchive: (File) -> Unit = { jar ->
         val temporary = jar.resolveSibling(jar.name + ".patched")
         ZipFile(jar).use { input ->
@@ -417,9 +422,11 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                     "Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;"
                                 )
                                 val method = super.visitMethod(revised, name, descriptor, revisedSignature, exceptions)
-                                // The baseline permits a null center in this protected constructor.
-                                if (owner == "org/dyn4j/geometry/AbstractShape" && name == "<init>" &&
-                                    descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V") {
+                                val nullableShapeCenter = owner == "org/dyn4j/geometry/AbstractShape" &&
+                                    name == "<init>" && descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V"
+                                val noOpJointShift = owner in noOpJointShiftTypes && name == "shift" &&
+                                    descriptor == "(Lorg/dyn4j/geometry/Vector2;)V"
+                                if (nullableShapeCenter || noOpJointShift) {
                                     return object : MethodVisitor(Opcodes.ASM9, method) {
                                         override fun visitMethodInsn(
                                             opcode: Int, methodOwner: String, methodName: String,

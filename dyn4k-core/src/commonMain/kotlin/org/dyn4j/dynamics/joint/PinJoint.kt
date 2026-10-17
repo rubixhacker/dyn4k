@@ -26,7 +26,6 @@ package org.dyn4j.dynamics.joint
 
 import org.dyn4j.DataContainer
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.Ownable
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
@@ -38,38 +37,26 @@ import org.dyn4j.geometry.Shiftable
 import org.dyn4j.geometry.Vector2
 
 open class PinJoint<T : PhysicsBody> : AbstractSingleBodyJoint<T>, LinearSpringJoint, SingleBodyJoint<T>, Joint<T>, Shiftable, DataContainer, Ownable {
-    @get:kotlin.jvm.JvmName("getTargetField")
-    @JvmFieldBridge protected val target: Vector2
-    @JvmFieldBridge protected val localAnchor: Vector2
-    @set:kotlin.jvm.JvmName("setSpringEnabledField")
-    @JvmFieldBridge protected var springEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getSpringModeField")
-    @JvmFieldBridge protected var springMode: Int
-    @get:kotlin.jvm.JvmName("getSpringFrequencyField")
-    @set:kotlin.jvm.JvmName("setSpringFrequencyField")
-    @JvmFieldBridge protected var springFrequency: Double
-    @get:kotlin.jvm.JvmName("getSpringStiffnessField")
-    @set:kotlin.jvm.JvmName("setSpringStiffnessField")
-    @JvmFieldBridge protected var springStiffness: Double
-    @set:kotlin.jvm.JvmName("setSpringDamperEnabledField")
-    @JvmFieldBridge protected var springDamperEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getSpringDampingRatioField")
-    @set:kotlin.jvm.JvmName("setSpringDampingRatioField")
-    @JvmFieldBridge protected var springDampingRatio: Double
-    @JvmFieldBridge protected var springMaximumForceEnabled: Boolean
-    @JvmFieldBridge protected var springMaximumForce: Double
-    @get:kotlin.jvm.JvmName("getCorrectionFactorField")
-    @set:kotlin.jvm.JvmName("setCorrectionFactorField")
-    @JvmFieldBridge protected var correctionFactor: Double
-    @JvmFieldBridge protected var correctionMaximumForce: Double
+    @kotlin.jvm.JvmField protected val target: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor: Vector2
+    @kotlin.jvm.JvmField protected var springEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springMode: Int
+    @kotlin.jvm.JvmField protected var springFrequency: Double
+    @kotlin.jvm.JvmField protected var springStiffness: Double
+    @kotlin.jvm.JvmField protected var springDamperEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springDampingRatio: Double
+    @kotlin.jvm.JvmField protected var springMaximumForceEnabled: Boolean
+    @kotlin.jvm.JvmField protected var springMaximumForce: Double
+    @kotlin.jvm.JvmField protected var correctionFactor: Double
+    @kotlin.jvm.JvmField protected var correctionMaximumForce: Double
 
-    @JvmFieldBridge protected val r: Vector2
-    @JvmFieldBridge protected var damping: Double
-    @JvmFieldBridge protected val bias: Vector2
-    @JvmFieldBridge protected var gamma: Double
-    @JvmFieldBridge protected val K: Matrix22
-    @JvmFieldBridge protected val linearError: Vector2
-    @JvmFieldBridge protected val impulse: Vector2
+    @kotlin.jvm.JvmField protected val r: Vector2
+    @kotlin.jvm.JvmField protected var damping: Double
+    @kotlin.jvm.JvmField protected val bias: Vector2
+    @kotlin.jvm.JvmField protected var gamma: Double
+    @kotlin.jvm.JvmField protected val K: Matrix22
+    @kotlin.jvm.JvmField protected val linearError: Vector2
+    @kotlin.jvm.JvmField protected val impulse: Vector2
 
     constructor(body: T?, anchor: Vector2?) : super(body) {
         if (anchor == null) throw ArgumentNullException("anchor")

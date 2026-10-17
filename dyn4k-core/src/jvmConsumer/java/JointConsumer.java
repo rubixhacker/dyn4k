@@ -30,6 +30,18 @@ public class JointConsumer {
             return this.restDistance;
         }
 
+        public Vector2 getLocalAnchor1() {
+            return this.localAnchor1;
+        }
+
+        Vector2 localAnchorFromProtectedField() {
+            return this.localAnchor1;
+        }
+
+        public double readRestDistance() {
+            return this.restDistance;
+        }
+
         double unmodifiedRestDistance() {
             return super.getRestDistance();
         }
@@ -135,6 +147,18 @@ public class JointConsumer {
                 || dispatched.getRestDistance() != exposed.unmodifiedRestDistance() + 1.0) {
             throw new AssertionError("protected state");
         }
+        if (exposed.getLocalAnchor1() != exposed.localAnchorFromProtectedField()
+                || exposed.readRestDistance() != exposed.restDistanceFromProtectedField()) {
+            throw new AssertionError("subclass accessor names");
+        }
+        angle.shift(null);
+        distance.shift(null);
+        joints.get(2).shift(null);
+        joints.get(3).shift(null);
+        prismatic.shift(null);
+        revolute.shift(null);
+        weld.shift(null);
+        wheel.shift(null);
         try {
             distance.getBodies().clear();
             throw new AssertionError("mutable body view");

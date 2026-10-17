@@ -24,7 +24,6 @@
  */
 package org.dyn4j.dynamics.joint
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.Epsilon
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
@@ -36,20 +35,14 @@ import org.dyn4j.geometry.Matrix22
 import org.dyn4j.geometry.Vector2
 
 open class FrictionJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T> {
-    @get:kotlin.jvm.JvmName("getLocalAnchor1Field")
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @get:kotlin.jvm.JvmName("getLocalAnchor2Field")
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @get:kotlin.jvm.JvmName("getMaximumForceField")
-    @set:kotlin.jvm.JvmName("setMaximumForceField")
-    @JvmFieldBridge protected var maximumForce: Double
-    @get:kotlin.jvm.JvmName("getMaximumTorqueField")
-    @set:kotlin.jvm.JvmName("setMaximumTorqueField")
-    @JvmFieldBridge protected var maximumTorque: Double
-    @JvmFieldBridge internal val K: Matrix22
-    @JvmFieldBridge internal var angularMass: Double
-    @JvmFieldBridge internal val linearImpulse: Vector2
-    @JvmFieldBridge internal var angularImpulse: Double
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected var maximumForce: Double
+    @kotlin.jvm.JvmField protected var maximumTorque: Double
+    @kotlin.jvm.JvmField internal val K: Matrix22
+    @kotlin.jvm.JvmField internal var angularMass: Double
+    @kotlin.jvm.JvmField internal val linearImpulse: Vector2
+    @kotlin.jvm.JvmField internal var angularImpulse: Double
 
     constructor(body1: T?, body2: T?, anchor: Vector2?) : super(body1, body2) {
         if (anchor == null) throw ArgumentNullException("anchor")

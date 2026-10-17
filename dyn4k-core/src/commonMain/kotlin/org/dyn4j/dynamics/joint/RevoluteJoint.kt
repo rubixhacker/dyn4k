@@ -24,7 +24,6 @@
  */
 package org.dyn4j.dynamics.joint
 
-import org.dyn4j.JvmFieldBridge
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -40,53 +39,29 @@ import org.dyn4j.geometry.Rotation
 import org.dyn4j.geometry.Vector2
 
 open class RevoluteJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, AngularLimitsJoint, AngularMotorJoint {
-    @get:kotlin.jvm.JvmName("getLocalAnchor1Field")
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @get:kotlin.jvm.JvmName("getLocalAnchor2Field")
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @get:kotlin.jvm.JvmName("getLimitsEnabledField")
-    @set:kotlin.jvm.JvmName("setLimitsEnabledField")
-    @JvmFieldBridge protected var limitsEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getLowerLimitField")
-    @set:kotlin.jvm.JvmName("setLowerLimitField")
-    @JvmFieldBridge protected var lowerLimit: Double
-    @get:kotlin.jvm.JvmName("getUpperLimitField")
-    @set:kotlin.jvm.JvmName("setUpperLimitField")
-    @JvmFieldBridge protected var upperLimit: Double
-    @get:kotlin.jvm.JvmName("getReferenceAngleField")
-    @set:kotlin.jvm.JvmName("setReferenceAngleField")
-    @JvmFieldBridge protected var referenceAngle: Double
-    @get:kotlin.jvm.JvmName("getLimitOffsetField")
-    @set:kotlin.jvm.JvmName("setLimitOffsetField")
-    @JvmFieldBridge protected var limitOffset: Double
-    @get:kotlin.jvm.JvmName("getAdjustedLowerLimitField")
-    @set:kotlin.jvm.JvmName("setAdjustedLowerLimitField")
-    @JvmFieldBridge protected var adjustedLowerLimit: Double
-    @get:kotlin.jvm.JvmName("getAdjustedUpperLimitField")
-    @set:kotlin.jvm.JvmName("setAdjustedUpperLimitField")
-    @JvmFieldBridge protected var adjustedUpperLimit: Double
-    @get:kotlin.jvm.JvmName("getMotorEnabledField")
-    @set:kotlin.jvm.JvmName("setMotorEnabledField")
-    @JvmFieldBridge protected var motorEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getMotorSpeedField")
-    @set:kotlin.jvm.JvmName("setMotorSpeedField")
-    @JvmFieldBridge protected var motorSpeed: Double
-    @get:kotlin.jvm.JvmName("getMotorMaximumTorqueEnabledField")
-    @set:kotlin.jvm.JvmName("setMotorMaximumTorqueEnabledField")
-    @JvmFieldBridge protected var motorMaximumTorqueEnabled: Boolean
-    @get:kotlin.jvm.JvmName("getMotorMaximumTorqueField")
-    @set:kotlin.jvm.JvmName("setMotorMaximumTorqueField")
-    @JvmFieldBridge protected var motorMaximumTorque: Double
-    @JvmFieldBridge internal var angle: Double
-    @JvmFieldBridge internal var axialMass: Double
-    @JvmFieldBridge internal var fixedRotation: Boolean
-    @JvmFieldBridge internal val r1: Vector2
-    @JvmFieldBridge internal val r2: Vector2
-    @JvmFieldBridge internal val K: Matrix22
-    @JvmFieldBridge internal val impulse: Vector2
-    @JvmFieldBridge internal var motorImpulse: Double
-    @JvmFieldBridge internal var lowerLimitImpulse: Double
-    @JvmFieldBridge internal var upperLimitImpulse: Double
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected var limitsEnabled: Boolean
+    @kotlin.jvm.JvmField protected var lowerLimit: Double
+    @kotlin.jvm.JvmField protected var upperLimit: Double
+    @kotlin.jvm.JvmField protected var referenceAngle: Double
+    @kotlin.jvm.JvmField protected var limitOffset: Double
+    @kotlin.jvm.JvmField protected var adjustedLowerLimit: Double
+    @kotlin.jvm.JvmField protected var adjustedUpperLimit: Double
+    @kotlin.jvm.JvmField protected var motorEnabled: Boolean
+    @kotlin.jvm.JvmField protected var motorSpeed: Double
+    @kotlin.jvm.JvmField protected var motorMaximumTorqueEnabled: Boolean
+    @kotlin.jvm.JvmField protected var motorMaximumTorque: Double
+    @kotlin.jvm.JvmField internal var angle: Double
+    @kotlin.jvm.JvmField internal var axialMass: Double
+    @kotlin.jvm.JvmField internal var fixedRotation: Boolean
+    @kotlin.jvm.JvmField internal val r1: Vector2
+    @kotlin.jvm.JvmField internal val r2: Vector2
+    @kotlin.jvm.JvmField internal val K: Matrix22
+    @kotlin.jvm.JvmField internal val impulse: Vector2
+    @kotlin.jvm.JvmField internal var motorImpulse: Double
+    @kotlin.jvm.JvmField internal var lowerLimitImpulse: Double
+    @kotlin.jvm.JvmField internal var upperLimitImpulse: Double
 
     constructor(body1: T?, body2: T?, anchor: Vector2?) : super(body1, body2) {
         if (anchor == null) throw ArgumentNullException("anchor")

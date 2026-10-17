@@ -27,7 +27,6 @@ package org.dyn4j.dynamics.joint
 import kotlin.math.PI
 import org.dyn4j.DataContainer
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.Ownable
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
@@ -40,30 +39,20 @@ import org.dyn4j.geometry.Shiftable
 import org.dyn4j.geometry.Vector2
 
 open class MotorJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, PairedBodyJoint<T>, Joint<T>, Shiftable, DataContainer, Ownable {
-    @get:kotlin.jvm.JvmName("getLinearTargetField")
-    @JvmFieldBridge protected val linearTarget: Vector2
-    @get:kotlin.jvm.JvmName("getAngularTargetField")
-    @set:kotlin.jvm.JvmName("setAngularTargetField")
-    @JvmFieldBridge protected var angularTarget: Double
-    @get:kotlin.jvm.JvmName("getCorrectionFactorField")
-    @set:kotlin.jvm.JvmName("setCorrectionFactorField")
-    @JvmFieldBridge protected var correctionFactor: Double
-    @get:kotlin.jvm.JvmName("getMaximumForceField")
-    @set:kotlin.jvm.JvmName("setMaximumForceField")
-    @JvmFieldBridge protected var maximumForce: Double
-    @get:kotlin.jvm.JvmName("getMaximumTorqueField")
-    @set:kotlin.jvm.JvmName("setMaximumTorqueField")
-    @JvmFieldBridge protected var maximumTorque: Double
+    @kotlin.jvm.JvmField protected val linearTarget: Vector2
+    @kotlin.jvm.JvmField protected var angularTarget: Double
+    @kotlin.jvm.JvmField protected var correctionFactor: Double
+    @kotlin.jvm.JvmField protected var maximumForce: Double
+    @kotlin.jvm.JvmField protected var maximumTorque: Double
 
-    @JvmFieldBridge protected val r1: Vector2
-    @JvmFieldBridge protected val r2: Vector2
-    @JvmFieldBridge protected val K: Matrix22
-    @JvmFieldBridge protected var angularMass: Double
-    @JvmFieldBridge protected val linearError: Vector2
-    @get:kotlin.jvm.JvmName("getAngularErrorField")
-    @JvmFieldBridge protected var angularError: Double
-    @JvmFieldBridge protected val linearImpulse: Vector2
-    @JvmFieldBridge protected var angularImpulse: Double
+    @kotlin.jvm.JvmField protected val r1: Vector2
+    @kotlin.jvm.JvmField protected val r2: Vector2
+    @kotlin.jvm.JvmField protected val K: Matrix22
+    @kotlin.jvm.JvmField protected var angularMass: Double
+    @kotlin.jvm.JvmField protected val linearError: Vector2
+    @kotlin.jvm.JvmField protected var angularError: Double
+    @kotlin.jvm.JvmField protected val linearImpulse: Vector2
+    @kotlin.jvm.JvmField protected var angularImpulse: Double
 
     constructor(body1: T?, body2: T?) : super(body1, body2) {
         linearTarget = this.body1.getLocalPoint(this.body2.getWorldCenter())

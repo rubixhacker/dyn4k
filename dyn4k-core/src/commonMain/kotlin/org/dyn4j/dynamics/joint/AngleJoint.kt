@@ -29,7 +29,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sign
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
 import org.dyn4j.dynamics.TimeStep
@@ -39,28 +38,20 @@ import org.dyn4j.geometry.Rotation
 import org.dyn4j.geometry.Vector2
 
 open class AngleJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, AngularLimitsJoint {
-    @get:kotlin.jvm.JvmName("getRatioField")
-    @set:kotlin.jvm.JvmName("setRatioField")
-    @JvmFieldBridge protected var ratio = 1.0
-    @get:kotlin.jvm.JvmName("readLimitsEnabled")
-    @set:kotlin.jvm.JvmName("writeLimitsEnabled")
-    @JvmFieldBridge protected var limitsEnabled = true
-    @get:kotlin.jvm.JvmName("readLowerLimit")
-    @set:kotlin.jvm.JvmName("writeLowerLimit")
-    @JvmFieldBridge protected var lowerLimit: Double
-    @get:kotlin.jvm.JvmName("readUpperLimit")
-    @set:kotlin.jvm.JvmName("writeUpperLimit")
-    @JvmFieldBridge protected var upperLimit: Double
-    @JvmFieldBridge protected var referenceAngle: Double
-    @JvmFieldBridge internal var limitOffset = 0.0
-    @JvmFieldBridge internal var adjustedLowerLimit = 0.0
-    @JvmFieldBridge internal var adjustedUpperLimit = 0.0
-    @JvmFieldBridge internal var angle = 0.0
-    @JvmFieldBridge internal var axialMass = 0.0
-    @JvmFieldBridge internal var fixedRotation = false
-    @JvmFieldBridge internal var impulse = 0.0
-    @JvmFieldBridge internal var lowerLimitImpulse = 0.0
-    @JvmFieldBridge internal var upperLimitImpulse = 0.0
+    @kotlin.jvm.JvmField protected var ratio = 1.0
+    @kotlin.jvm.JvmField protected var limitsEnabled = true
+    @kotlin.jvm.JvmField protected var lowerLimit: Double
+    @kotlin.jvm.JvmField protected var upperLimit: Double
+    @kotlin.jvm.JvmField protected var referenceAngle: Double
+    @kotlin.jvm.JvmField internal var limitOffset = 0.0
+    @kotlin.jvm.JvmField internal var adjustedLowerLimit = 0.0
+    @kotlin.jvm.JvmField internal var adjustedUpperLimit = 0.0
+    @kotlin.jvm.JvmField internal var angle = 0.0
+    @kotlin.jvm.JvmField internal var axialMass = 0.0
+    @kotlin.jvm.JvmField internal var fixedRotation = false
+    @kotlin.jvm.JvmField internal var impulse = 0.0
+    @kotlin.jvm.JvmField internal var lowerLimitImpulse = 0.0
+    @kotlin.jvm.JvmField internal var upperLimitImpulse = 0.0
 
     constructor(body1: T, body2: T) : super(body1, body2) {
         referenceAngle = body2.getTransform().getRotationAngle() - body1.getTransform().getRotationAngle()

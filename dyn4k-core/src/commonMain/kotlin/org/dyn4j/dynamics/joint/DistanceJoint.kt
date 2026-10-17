@@ -27,7 +27,6 @@ package org.dyn4j.dynamics.joint
 import kotlin.math.abs
 import kotlin.math.max
 import org.dyn4j.Epsilon
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.dynamics.PhysicsBody
 import org.dyn4j.dynamics.Settings
 import org.dyn4j.dynamics.TimeStep
@@ -37,53 +36,31 @@ import org.dyn4j.geometry.Interval
 import org.dyn4j.geometry.Vector2
 
 open class DistanceJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimitsJoint, LinearSpringJoint {
-    @JvmFieldBridge protected val localAnchor1: Vector2
-    @JvmFieldBridge protected val localAnchor2: Vector2
-    @get:kotlin.jvm.JvmName("readRestDistance")
-    @set:kotlin.jvm.JvmName("writeRestDistance")
-    @JvmFieldBridge protected var restDistance: Double
-    @get:kotlin.jvm.JvmName("readSpringEnabled")
-    @set:kotlin.jvm.JvmName("writeSpringEnabled")
-    @JvmFieldBridge protected var springEnabled = false
-    @get:kotlin.jvm.JvmName("readSpringMode")
-    @set:kotlin.jvm.JvmName("writeSpringMode")
-    @JvmFieldBridge protected var springMode = Joint.SPRING_MODE_FREQUENCY
-    @get:kotlin.jvm.JvmName("readSpringFrequency")
-    @set:kotlin.jvm.JvmName("writeSpringFrequency")
-    @JvmFieldBridge protected var springFrequency = 8.0
-    @get:kotlin.jvm.JvmName("readSpringStiffness")
-    @set:kotlin.jvm.JvmName("writeSpringStiffness")
-    @JvmFieldBridge protected var springStiffness = 0.0
-    @get:kotlin.jvm.JvmName("readSpringDamperEnabled")
-    @set:kotlin.jvm.JvmName("writeSpringDamperEnabled")
-    @JvmFieldBridge protected var springDamperEnabled = false
-    @get:kotlin.jvm.JvmName("readSpringDampingRatio")
-    @set:kotlin.jvm.JvmName("writeSpringDampingRatio")
-    @JvmFieldBridge protected var springDampingRatio = 0.3
-    @JvmFieldBridge protected var springMaximumForceEnabled = false
-    @JvmFieldBridge protected var springMaximumForce = 1000.0
-    @get:kotlin.jvm.JvmName("readUpperLimit")
-    @set:kotlin.jvm.JvmName("writeUpperLimit")
-    @JvmFieldBridge protected var upperLimit: Double
-    @get:kotlin.jvm.JvmName("readLowerLimit")
-    @set:kotlin.jvm.JvmName("writeLowerLimit")
-    @JvmFieldBridge protected var lowerLimit: Double
-    @get:kotlin.jvm.JvmName("readUpperLimitEnabled")
-    @set:kotlin.jvm.JvmName("writeUpperLimitEnabled")
-    @JvmFieldBridge protected var upperLimitEnabled = false
-    @get:kotlin.jvm.JvmName("readLowerLimitEnabled")
-    @set:kotlin.jvm.JvmName("writeLowerLimitEnabled")
-    @JvmFieldBridge protected var lowerLimitEnabled = false
-    @JvmFieldBridge internal var currentDistance: Double
-    @JvmFieldBridge internal var damping = 0.0
-    @JvmFieldBridge internal val n = Vector2()
-    @JvmFieldBridge internal var gamma = 0.0
-    @JvmFieldBridge internal var bias = 0.0
-    @JvmFieldBridge internal var mass = 0.0
-    @JvmFieldBridge internal var softMass = 0.0
-    @JvmFieldBridge internal var impulse = 0.0
-    @JvmFieldBridge internal var upperLimitImpulse = 0.0
-    @JvmFieldBridge internal var lowerLimitImpulse = 0.0
+    @kotlin.jvm.JvmField protected val localAnchor1: Vector2
+    @kotlin.jvm.JvmField protected val localAnchor2: Vector2
+    @kotlin.jvm.JvmField protected var restDistance: Double
+    @kotlin.jvm.JvmField protected var springEnabled = false
+    @kotlin.jvm.JvmField protected var springMode = Joint.SPRING_MODE_FREQUENCY
+    @kotlin.jvm.JvmField protected var springFrequency = 8.0
+    @kotlin.jvm.JvmField protected var springStiffness = 0.0
+    @kotlin.jvm.JvmField protected var springDamperEnabled = false
+    @kotlin.jvm.JvmField protected var springDampingRatio = 0.3
+    @kotlin.jvm.JvmField protected var springMaximumForceEnabled = false
+    @kotlin.jvm.JvmField protected var springMaximumForce = 1000.0
+    @kotlin.jvm.JvmField protected var upperLimit: Double
+    @kotlin.jvm.JvmField protected var lowerLimit: Double
+    @kotlin.jvm.JvmField protected var upperLimitEnabled = false
+    @kotlin.jvm.JvmField protected var lowerLimitEnabled = false
+    @kotlin.jvm.JvmField internal var currentDistance: Double
+    @kotlin.jvm.JvmField internal var damping = 0.0
+    @kotlin.jvm.JvmField internal val n = Vector2()
+    @kotlin.jvm.JvmField internal var gamma = 0.0
+    @kotlin.jvm.JvmField internal var bias = 0.0
+    @kotlin.jvm.JvmField internal var mass = 0.0
+    @kotlin.jvm.JvmField internal var softMass = 0.0
+    @kotlin.jvm.JvmField internal var impulse = 0.0
+    @kotlin.jvm.JvmField internal var upperLimitImpulse = 0.0
+    @kotlin.jvm.JvmField internal var lowerLimitImpulse = 0.0
 
     constructor(body1: T, body2: T, anchor1: Vector2?, anchor2: Vector2?) : super(body1, body2) {
         if (anchor1 == null) throw ArgumentNullException("anchor1")
