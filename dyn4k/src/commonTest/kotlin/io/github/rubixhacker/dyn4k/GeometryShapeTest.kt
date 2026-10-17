@@ -6,8 +6,113 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import org.dyn4j.exception.ArgumentNullException
+import org.dyn4j.exception.EmptyCollectionException
+import org.dyn4j.exception.InvalidIndexException
+import org.dyn4j.exception.NullElementException
+import org.dyn4j.exception.ValueOutOfRangeException
 
 class GeometryShapeTest {
+    @Test
+    fun geometryExceptionsSupportCommonSubclasses() {
+        class Empty : EmptyCollectionException("points")
+        class Index : InvalidIndexException(2)
+        class Element : NullElementException("points", 2)
+        class Range : ValueOutOfRangeException("radius", 0.0)
+
+        assertEquals("points cannot be empty", Empty().message)
+        assertEquals("The index 2 is out of bounds", Index().message)
+        assertEquals("points contains a null element at index 2", Element().message)
+        assertEquals("radius cannot be 0.000000", Range().message)
+    }
+
+    @Test
+    fun curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState() {
+        val capsule = CopyAwareCapsule()
+        val capsuleCopy = capsule.duplicate()
+        assertTrue(capsuleCopy.firstFocus() is CopyTaggedVector)
+        assertEquals(11.0, capsuleCopy.firstFocus().x)
+        assertEquals(22.0, capsuleCopy.firstFocus().y)
+        assertFalse(capsuleCopy.firstFocus() === capsule.firstFocus())
+        capsule.firstFocus().x = 5.0
+        assertEquals(11.0, capsuleCopy.firstFocus().x)
+
+        val slice = CopyAwareSlice()
+        val sliceCopy = slice.duplicate()
+        assertTrue(sliceCopy.firstVertex() is CopyTaggedVector)
+        assertEquals(11.0, sliceCopy.firstVertex().x)
+        assertEquals(22.0, sliceCopy.firstVertex().y)
+        assertTrue(sliceCopy.firstNormal() is CopyTaggedVector)
+        assertEquals(13.0, sliceCopy.firstNormal().x)
+        assertEquals(24.0, sliceCopy.firstNormal().y)
+        assertFalse(sliceCopy.firstVertex() === slice.firstVertex())
+        slice.firstVertex().y = 7.0
+        assertEquals(22.0, sliceCopy.firstVertex().y)
+        assertEquals(0.7, sliceCopy.getTheta())
+    }
+
+    private class CopyTaggedVector(x: Double, y: Double) : Vector2(x, y) {
+        override fun copy(): Vector2 = CopyTaggedVector(x + 10.0, y + 20.0)
+    }
+
+    private class CopyAwareCapsule : Capsule {
+        constructor() : super(2.0, 4.0) { foci[0] = CopyTaggedVector(1.0, 2.0) }
+        private constructor(other: CopyAwareCapsule) : super(other)
+        fun duplicate() = CopyAwareCapsule(this)
+        fun firstFocus(): Vector2 = foci[0]
+    }
+
+    private class CopyAwareSlice : Slice {
+        constructor() : super(2.0, 0.7) {
+            vertices[0] = CopyTaggedVector(1.0, 2.0)
+            normals[0] = CopyTaggedVector(3.0, 4.0)
+        }
+        private constructor(other: CopyAwareSlice) : super(other)
+        fun duplicate() = CopyAwareSlice(this)
+        fun firstVertex(): Vector2 = vertices[0]
+        fun firstNormal(): Vector2 = normals[0]
+    }
+
+    @Test
+    fun cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() {
+        val immutable = emptyList<Vector2?>()
+        val mutable = mutableListOf<Vector2?>()
+        assertSame(immutable, Geometry.cleanse(immutable))
+        assertSame<Any>(mutable, Geometry.cleanse(mutable))
+
+        val input = emptyArray<Vector2?>()
+        val output = Geometry.cleanse(*input)
+        assertEquals(0, output.size)
+        assertFalse((input as Any) === output)
+    }
+
+    @Test
+    fun cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult() {
+        val first = Vector2(0.0, 0.0)
+        val second = Vector2(1.0, 0.0)
+        val third = Vector2(0.0, 1.0)
+        val input: List<Vector2?> = listOf(first, second, third)
+        val result: List<Vector2> = Geometry.cleanse(input)
+        assertFalse(input === result)
+        assertEquals(3, result.size)
+        assertSame(first, result[0])
+        (result as MutableList<Vector2>).add(Vector2(2.0, 2.0))
+        assertEquals(4, result.size)
+        assertEquals(3, input.size)
+
+        val array = arrayOf<Vector2?>(first, second, third)
+        val arrayResult = Geometry.cleanse(*array)
+        assertFalse((array as Any) === arrayResult)
+        assertSame(first, arrayResult[0])
+    }
+
+    @Test
+    fun cleanseKeepsTheBaselineNullInputErrors() {
+        assertFailsWith<ArgumentNullException> { Geometry.cleanse(null as List<Vector2?>?) }
+        assertFailsWith<NullElementException> { Geometry.cleanse(listOf(Vector2(), null, Vector2())) }
+        assertFailsWith<NullElementException> { Geometry.cleanse(Vector2(), null, Vector2()) }
+    }
+
     @Test
     fun boundsShareTheCompatibilityObjectAndCopyIndependently() {
         val bounds = AABB(-2.0, -1.0, 4.0, 3.0)

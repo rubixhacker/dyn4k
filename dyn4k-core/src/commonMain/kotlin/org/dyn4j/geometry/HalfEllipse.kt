@@ -32,10 +32,7 @@ import kotlin.math.sqrt
 import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
-open class HalfEllipse(width: Double, height: Double) : AbstractShape(
-    Vector2(0.0, (4.0 * height) / (3.0 * PI)),
-    Vector2(0.0, (4.0 * height) / (3.0 * PI)).distance(Vector2(width * 0.5, 0.0))
-), Convex {
+open class HalfEllipse : AbstractShape, Convex {
     @get:kotlin.jvm.JvmName("getHeightField")
     @JvmFieldBridge protected val height: Double
     @get:kotlin.jvm.JvmName("getHalfWidthField")
@@ -49,7 +46,10 @@ open class HalfEllipse(width: Double, height: Double) : AbstractShape(
     @get:kotlin.jvm.JvmName("getVertexRightField")
     @JvmFieldBridge protected val vertexRight: Vector2
 
-    init {
+    constructor(width: Double, height: Double) : super(
+        Vector2(0.0, (4.0 * height) / (3.0 * PI)),
+        Vector2(0.0, (4.0 * height) / (3.0 * PI)).distance(Vector2(width * 0.5, 0.0))
+    ) {
         if (width <= 0.0) throw ValueOutOfRangeException("width", width, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (height <= 0.0) throw ValueOutOfRangeException("height", height, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         this.height = height
@@ -60,13 +60,13 @@ open class HalfEllipse(width: Double, height: Double) : AbstractShape(
         vertexRight = Vector2(halfWidth, 0.0)
     }
 
-    protected constructor(other: HalfEllipse) : this(other.getWidth(), other.height) {
-        center.set(other.center)
-        radius = other.radius
-        rotation.set(other.rotation)
-        ellipseCenter.set(other.ellipseCenter)
-        vertexLeft.set(other.vertexLeft)
-        vertexRight.set(other.vertexRight)
+    protected constructor(other: HalfEllipse) : super(other) {
+        ellipseCenter = other.ellipseCenter.copy()
+        halfWidth = other.halfWidth
+        height = other.height
+        rotation = other.rotation.copy()
+        vertexLeft = other.vertexLeft.copy()
+        vertexRight = other.vertexRight.copy()
     }
 
     override fun copy() = HalfEllipse(this)
