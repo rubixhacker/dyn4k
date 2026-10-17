@@ -31,7 +31,7 @@ import kotlin.math.sqrt
 import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
-open class Ellipse(width: Double, height: Double) : AbstractShape(max(width, height) * 0.5), Convex {
+open class Ellipse : AbstractShape, Convex {
     @get:kotlin.jvm.JvmName("getHalfWidthField")
     @JvmFieldBridge protected val halfWidth: Double
     @get:kotlin.jvm.JvmName("getHalfHeightField")
@@ -39,7 +39,7 @@ open class Ellipse(width: Double, height: Double) : AbstractShape(max(width, hei
     @get:kotlin.jvm.JvmName("getRotationFieldValue")
     @JvmFieldBridge protected val rotation: Rotation
 
-    init {
+    constructor(width: Double, height: Double) : super(max(width, height) * 0.5) {
         if (width <= 0.0) throw ValueOutOfRangeException("width", width, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         if (height <= 0.0) throw ValueOutOfRangeException("height", height, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
         halfWidth = width * 0.5
@@ -47,10 +47,10 @@ open class Ellipse(width: Double, height: Double) : AbstractShape(max(width, hei
         rotation = Rotation()
     }
 
-    protected constructor(ellipse: Ellipse) : this(ellipse.getWidth(), ellipse.getHeight()) {
-        center.set(ellipse.center)
-        radius = ellipse.radius
-        rotation.set(ellipse.rotation)
+    protected constructor(ellipse: Ellipse) : super(ellipse) {
+        halfWidth = ellipse.halfWidth
+        halfHeight = ellipse.halfHeight
+        rotation = ellipse.rotation.copy()
     }
 
     override fun copy() = Ellipse(this)
