@@ -119,7 +119,7 @@ internal class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : AbstractMut
     }
 
     @kotlin.jvm.JvmSynthetic
-    fun liveView(): List<E> = ReadOnlyView(0, null, null)
+    fun liveView(): List<E> = worldPlatformUnmodifiableList(ReadOnlyView(0, null, null))
 
     private inner class ReadOnlyView(
         private val offset: Int,
