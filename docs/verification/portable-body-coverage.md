@@ -1,10 +1,10 @@
-# Portable body coverage at the provisional body source
+# Portable body coverage on the integrated candidate
 
 ## Reader and scope
 
-This report maps the seven root dynamics test files from pinned dyn4j 6.0.0 source revision `058bf6d982a0fb89b54050f929f6ea9dae53b714` to common Kotlin tests. The candidate started at `cb4492f20fc980445b7f5377234cadefc5426428` on `codex/port-coverage-body`. The candidate body and collision implementations are provisional. This report covers this body's test subtree only; it does not qualify the complete compatibility corpus or any full runtime lane.
+This report maps the seven root dynamics test files from pinned dyn4j 6.0.0 source revision `058bf6d982a0fb89b54050f929f6ea9dae53b714` to common Kotlin tests. The corpus began at body source `cb4492f20fc980445b7f5377234cadefc5426428` and now runs on a local merge of integration head `80ffe42ba427d6b34dcda6059774fd420b22441d`. This report covers the body test subtree only; it does not qualify the complete compatibility corpus or any full runtime lane.
 
-The pinned files contain 124 `@Test` annotations. JUnit 4 executes 124 cases for these files against the baseline and 124 against the provisional candidate. None of the seven files uses a parameterized runner or inherits test methods. Both unchanged Java runs completed with zero failures and zero ignored cases. The raw XML is archived with the CLI result in `/tmp/dyn4k-portable-body-coverage-result.md`.
+The pinned files contain 124 `@Test` annotations. JUnit 4 executes 124 cases for these files against the baseline and 124 against the integrated candidate. None of the seven files uses a parameterized runner or inherits test methods. Both unchanged Java runs completed with zero failures and zero ignored cases. The raw XML archive is `/tmp/dyn4k-portable-body-expanded-xml.tar.gz`.
 
 The common tests exercise `org.dyn4j` objects through public methods and a Kotlin `Body` subclass for protected copy state. A common test can cover several source methods when those methods check one behavior together. The table names every source method, including error cases. Names in the right column are methods under `dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/dynamics/body/`.
 
@@ -41,30 +41,39 @@ The seven source files have **124 mapped identities** and **zero whole-method JV
 
 ## Evidence and qualification boundary
 
-The unchanged Java sources compiled with `javac --release 8` against each provider. The pinned baseline JAR has SHA-256 `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e5af5162b2b3e`. The candidate JVM JAR has SHA-256 `85c95a51407b7249d502ab9cfdb8946b096de1961c246539f29740e9d304baea`. Both raw Java XML files contain 124 tests, zero failures, errors, or skips. Fresh baseline XML has SHA-256 `9f9b3832b6b449d85e300e240a612eb6bbacbb24056a917aa9b6de9185830b09`. Fresh candidate XML has SHA-256 `04bec87187751144521535631b656950b289ae75b2a28a3cef529edca19ca7ee`.
+The unchanged seven Java files compiled with `javac --release 8` against each provider. Both JUnit runs executed 124 tests with zero failures, errors, or skips. A direct class/method comparison found 124 distinct XML identities on each provider. The table maps those same 124 identities once each; its counterpart methods group several Java cases where they test one behavior. No whole Java method needs a JVM-only waiver.
 
-The six available local `dyn4k-core` host tasks each executed 56 common tests. Each host ran 29 tests in the body subtree, with zero failures, errors, or skips. The 29 include 27 mapped methods, one additional fixture-view test, and one supplemental wrong-getter control. These host tasks do not execute 124 separate portable cases. The map above relates source identities to behavioral counterparts.
+| Provider | JAR SHA-256 | Raw Java XML SHA-256 |
+| --- | --- | --- |
+| Pinned baseline | `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e` | `09da63e756d8d282ee537438da5777a3e79a0a55a4dbc082e528f2328c1e2cef` |
+| Integrated candidate | `57dff9184c7fc17a80611482ee4c8bf2e308719f351b34e50cbed99c1795057c` | `65ee7b47ebb6487c832c3f518a8d87700169c283456f8cbb03ef45baf6a9e16e` |
 
-| Host task | New body XML SHA-256: values / physics |
-| --- | --- |
-| `jvmTest` | `1e109c1f3ac5b6397dc70a763e4f94b3792181b828b0f728c5ce0e04a2bcf57d` / `ea847638a8596cbd3c602c1ecf3ec616805f1fa8294469e439b05a0bddb03b6a` |
-| `jsNodeTest` | `6ec22e8589bf82dacab0b8122d015dc94f7e07d003433396a7bee77916dc5bdf` / `dff9fc6a6cab540bbf188217e7832d6740ff047464a76a7ab3e26f47d27663c8` |
-| `wasmJsNodeTest` | `688b1da8abd6923824233a38fe43824ac3235c5dac3f16de04c747adbc845c40` / `96042c9b4f483eb9279c20630bbf51cab2650a55c5aae7117812a36a064952fc` |
-| `wasmWasiNodeTest` | `af0e07c88773704d9d4e60507960718b983520e809c41354f9a9c3507e48b395` / `e3e63fdf91194988ccd9c887a11c33ed94b92ee3228a83f03f5d0a422cc5fe48` |
-| `linuxX64Test` | `298d50c12b90e5cad0c16f7d3985c3b45683b415d0f0085bf55bae915dd7affc` / `55fcf4866a26584861d8a9db7c4b35a20808b1b1a3b7feccc767bbc2f99b87f2` |
-| `testAndroidHostTest` | `aa9b0eaef6b107962237b21428ca7a1803804100e0b4cac6ea946ec649021b3b` / `443d4cd7c26b8bd2891ca85a2a6d22d7117334e4af0a1fac722107185369c59c` |
+Each of the six available `dyn4k-core` host tasks ran 14 XML suites and 466 tests, with zero failures, errors, or skips. Each host executed 29 body subtree tests: 10 value tests and 19 physics tests. These are 29 common Kotlin tests, not 124 separate portable methods.
 
-The repaired XML archive is `/tmp/dyn4k-portable-body-fix-xml.tar.gz`, SHA-256 `df9ea2fdae63963a3dcf3bb79039d8514f40ea08f81b48ee09a206279a2fa3ad`. It contains 26 XML files: baseline and candidate Java results, plus four suites on each of six hosts. The Java, staged Kotlin, and Android host dynamics consumers ran unchanged. They reported `DYNAMICS_CONSUMER_OK` or `DYNAMICS_KOTLIN_CONSUMER_OK`. Both baseline and candidate null probes reported `ArgumentNullException: convex cannot be null`.
+| Host task | Body value XML SHA-256 (10) | Body physics XML SHA-256 (19) |
+| --- | --- | --- |
+| `jvmTest` | `1d2ef8eec202d3aa9459c28ad37123a5280c91cea900337ff508508ed1519629` | `674a7eb409ca27ca91e46b58b8d4d09ed0bad33cf29a13c7f910136515dd01a7` |
+| `jsNodeTest` | `d29272ef251765b4c7229f54913d9d82282a0d2394fec5f614722c9d9ca1f80a` | `6ec6aa1b9a536c26640b90b332429bc81e091e9559bb9b876096ae8c3b7dfdec` |
+| `wasmJsNodeTest` | `de8237175dbdb70638fd729c860d022f454fef6f3ce91546cf9b49fd07975cdc` | `d3b6afa6f4584382b1ca6979e57ad08dc884048e38502d1186f98cd99405139e` |
+| `wasmWasiNodeTest` | `e22b8bbb4370058109c8908c8a6df7e949c951a43e954fc98b550bc0e0f296b6` | `d126555bc74a063b1eec856086dbd1e60359a12d156357fec3cdaf2014f8f0d3` |
+| `linuxX64Test` | `596a81d59171da287f474c4bf395da39f8b3dcc654a8a36cf1559ab48cbcf410` | `057dedb0a304322e5298908223b8228784eb35d6f67a8997497ac61ddc3a0055` |
+| `testAndroidHostTest` | `a2384d0ff8710508dda8cb067ebeb178cac4a3b8b677d0c63ef1635e5f577a82` | `6b61a152db88b93d23431edc87078f0d6a8f57e905d305a283a5f26f582c3c35` |
+
+The raw archive `/tmp/dyn4k-portable-body-expanded-xml.tar.gz` has SHA-256 `35186fc4a0aa30098bf0889a1893bbf8f2bceae57fbf219f474297e9aca1a15c`. It contains both Java XML files and all 84 host XML files. The result report at `/tmp/dyn4k-portable-body-expanded-fix-result.md` records every suite hash and its path.
+
+The focused body class ran green after repair. Seven temporary wrong-value controls then made seven mapped tests fail: fixture count, force at center, zero-mass point impulse, explicit swept y bound, updated mass, static integration, and local-center y. After restoring those expectations, the focused class passed again. A candidate JAR mutant that omits copy-constructor damping and rest-time writes failed both copy tests (19 run, two failures). The pinned `SettingsTest.getSet` observation remains covered by individual setter/getter tests; `Settings.set(Settings)` is supplemental.
 
 Both modules were staged locally for the six available target publications. Artifact IDs and SHA-256 values are:
 
 | Target publication | `dyn4k-core` binary | `dyn4k` binary |
 | --- | --- | --- |
-| JVM JAR | `85c95a51407b7249d502ab9cfdb8946b096de1961c246539f29740e9d304baea` | `3ff180079fc36ff98e2217788099c4f4b67078b93c3df6dc330c216949d0f8a8` |
-| JS KLIB | `acef7e24033cd3126ad170197a124c9f697207d256714c363dee378c4da1b1ca` | `3fca1a4870129d03c3d95f8ea7f82d40fdabb944b009aa257772ae68d5c072b5` |
-| Wasm JS KLIB | `53b8bd0a3904b66f8d287bab389622da7b92db32a35578c4fbbfe6be38fdbbfe` | `759d8bbfe213b0f84a3558a6ca94f151ab45ac75e804bf0bdd69e3161900131e` |
-| Wasm WASI KLIB | `cff60eef6d6cc90e6ac2dac345e45e33cb2c6a30be6379186242f69e863ec75b` | `d59d259bcd5cbb2d0000094f34229cf4171d732dda3501f20f4829748daf3840` |
-| Linux x64 KLIB | `408db06000fa492a24d1bb18c0a3c6585130a0a1680e8791c80707a873129920` | `554227caa913c133b043034ca51e881abfce4f759028cbf8dc7b4e89408ac946` |
-| Android AAR | `d219fb5fa0d0f1a410f948d9b0eaad86ddb0e4ec53d06bc27a7d63ccd4855474` | `08efd78d6d1cbef44d335f1d96aa99cc6efd52124dc03d436df51ec801f8bb12` |
+| JVM JAR | `57dff9184c7fc17a80611482ee4c8bf2e308719f351b34e50cbed99c1795057c` | `3ff180079fc36ff98e2217788099c4f4b67078b93c3df6dc330c216949d0f8a8` |
+| JS KLIB | `8e02ba1c3df5dda2c7dae743a8f2e6b68be5778fd547c1f99a9ebb46f721e052` | `3fca1a4870129d03c3d95f8ea7f82d40fdabb944b009aa257772ae68d5c072b5` |
+| Wasm JS KLIB | `6ce2769ff186ffc24642ef86d95d7abf1f8c6ab855fa99bda70d7fe27a5b1d46` | `759d8bbfe213b0f84a3558a6ca94f151ab45ac75e804bf0bdd69e3161900131e` |
+| Wasm WASI KLIB | `41526e3333c9733eee278b08190686257322f53f08b550b5dd0854101e541c47` | `d59d259bcd5cbb2d0000094f34229cf4171d732dda3501f20f4829748daf3840` |
+| Linux x64 KLIB | `d92b2fbab47af3562dc519473e1356023ded0b0defc3350e0ed4d1950262b0f7` | `554227caa913c133b043034ca51e881abfce4f759028cbf8dc7b4e89408ac946` |
+| Android AAR | `9854f56378f53fb2439d36b8e3e155eb52c840bde1c991d09592182e2a879fb9` | `08efd78d6d1cbef44d335f1d96aa99cc6efd52124dc03d436df51ec801f8bb12` |
 
-The exact commands, source-file hashes, raw XML paths, and failure history are in `/tmp/dyn4k-portable-body-fix-result.md`. Source sync was attempted after the numerical merger finished at `5457e5212ca3b0f50fab3a30f410638397930f72`. The integration merge conflicted in `dyn4k-core/build.gradle.kts` and was aborted. A read-only merge preview found the same conflict with collision head `f97dab70e27693297bdfbd9b8383c0a7a8cc98eb`. The build registration conflict requires its owner to resolve it; this test branch retains the provisional source at `cb4492f20fc980445b7f5377234cadefc5426428`. The combined manifest still needs exact-head review. Local host execution does not establish device, Apple, Windows, full runtime, physical, numerical, or release qualification.
+The unchanged baseline, candidate, staged Java, staged Kotlin, and Android host dynamics consumers all completed. Java consumers reported `DYNAMICS_CONSUMER_OK`; the Kotlin consumer reported `DYNAMICS_KOTLIN_CONSUMER_OK`. Both null probes reported `ArgumentNullException: convex cannot be null`.
+
+The integration merge includes committed collision source at `80ffe42ba427d6b34dcda6059774fd420b22441d`. The local merge preserved dynamics and polygon build registrations. The combined frozen qualification manifest still needs exact-head review and hosted execution. Local host tests do not establish Android device, Apple, Windows, full runtime, physical, numerical, or release qualification.
