@@ -246,6 +246,12 @@ public final class CollisionModelConsumer {
         check(empty.removeFixture((Vector2)null) == null);
         check(empty.removeFixtures((Vector2)null).isEmpty());
         check(!empty.contains(null));
+        Body nullRejecting = new Body();
+        nullRejecting.addFixture(new Circle(1.0));
+        try { nullRejecting.getFixture((Vector2)null); throw new AssertionError("missing null point failure"); }
+        catch (NullPointerException expected) { checks++; }
+        try { nullRejecting.getFixtures((Vector2)null); throw new AssertionError("missing null point list failure"); }
+        catch (NullPointerException expected) { checks++; }
         Body nullGet = nullPointBody();
         check(nullGet.getFixture((Vector2)null) == nullGet.getFixture(0));
         Body nullGetMany = nullPointBody();

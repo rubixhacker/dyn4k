@@ -1380,7 +1380,6 @@ tasks.register<JavaExec>("runAndroidCollisionModelConsumer") {
     classpath(androidCollisionModelConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("CollisionModelConsumer")
 }
-
 val dynamicsTestNames = listOf(
     "AbstractPhysicsBodyTest", "BodyFixtureTest", "BodyTest", "ForceTest",
     "SettingsTest", "TimeStepTest", "TorqueTest"
