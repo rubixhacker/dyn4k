@@ -31,8 +31,9 @@ package visible tree nodes, fields, and helpers.
 The unchanged Java `AVLTreeTest`, `ReferenceTest`, and `VersionTest` execute
 36 cases against the candidate. Java consumers execute 19 public checks and
 five package extension checks against both the baseline and candidate. The
-common Kotlin tree suite executes four cases on JVM, Linux x64, JS Node, and
-Android host. The Java consumers also run from a separate Gradle build that
+common Kotlin tree suite executes four cases on JVM, Linux x64, JS Node,
+Wasm JS Node, Wasm WASI Node, and Android host. The Java consumers also run
+from a separate Gradle build that
 resolves staged `dyn4k-jvm` and its transitive `dyn4k-core-jvm` dependency.
 That separate build also executes three Kotlin alias and identity checks.
 
