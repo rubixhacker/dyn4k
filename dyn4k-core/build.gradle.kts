@@ -128,7 +128,7 @@ val jvmApi = mapOf(
         protectedFields = setOf("center", "radius", "userData")
     ),
     "org/dyn4j/geometry/Polygon" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals"),
+        protectedFields = setOf("vertices", "normals"),
         packageMethods = setOf("getFarthestVertexIndex"),
         packageConstructorDescriptors = setOf(
             "(Lorg/dyn4j/geometry/Vector2;D[Lorg/dyn4j/geometry/Vector2;[Lorg/dyn4j/geometry/Vector2;)V"
@@ -179,22 +179,24 @@ val jvmApi = mapOf(
         packageFields = setOf("width", "height")
     ),
     "org/dyn4j/geometry/Capsule" to JvmApiSpec(
-        packageFields = setOf("length", "capRadius", "foci", "localXAxis"),
-        protectedFields = setOf("EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR")
+        protectedFields = setOf(
+            "length", "capRadius", "foci", "localXAxis",
+            "EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR"
+        )
     ),
     "org/dyn4j/geometry/Ellipse" to JvmApiSpec(
-        packageFields = setOf("halfWidth", "halfHeight", "rotation"),
+        protectedFields = setOf("halfWidth", "halfHeight", "rotation"),
         staticMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse"),
         packageMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse")
     ),
     "org/dyn4j/geometry/HalfEllipse" to JvmApiSpec(
-        packageFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
+        protectedFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
     ),
     "org/dyn4j/geometry/Slice" to JvmApiSpec(
-        packageFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
+        protectedFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
     ),
     "org/dyn4j/geometry/Segment" to JvmApiSpec(
-        packageFields = setOf("vertices", "normals", "length"),
+        protectedFields = setOf("vertices", "normals", "length"),
         staticMethods = setOf(
             "getLocation", "getPointOnLineClosestToPoint", "getPointOnSegmentClosestToPoint",
             "getLineIntersection", "getSegmentIntersection", "getFarthestFeature", "getFarthestPoint"
@@ -322,6 +324,7 @@ val jvmApi = mapOf(
             "lowerLimitImpulse", "upperLimitImpulse", "springImpulse", "motorImpulse"
         )
     ),
+    "org/dyn4j/exception/CopyException" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/MonotoneChain" to JvmApiSpec(),
@@ -516,6 +519,10 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val isVararg = name in spec.varargMethods &&
                                     Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
                                 var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                if (owner == "org/dyn4j/exception/CopyException" && name == "<init>" &&
+                                    descriptor == "(Ljava/lang/String;Ljava/lang/String;)V") {
+                                    revised = revised or Opcodes.ACC_SYNTHETIC
+                                }
                                 if (name in spec.nonFinalStaticMethods && access and Opcodes.ACC_STATIC != 0) {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
@@ -531,8 +538,12 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
+                                val baselineFinalLinkMethod = owner == "org/dyn4j/geometry/Link" &&
+                                    ((name == "rotate" && descriptor == "(DDD)V") ||
+                                        (name == "translate" && descriptor == "(DD)V"))
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
-                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
+                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0 &&
+                                    !baselineFinalLinkMethod
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
                                 if (name in baselineFinalPolygonMethods[owner].orEmpty() &&
                                     !(owner == "org/dyn4j/geometry/decompose/DoubleEdgeList" &&
@@ -585,6 +596,25 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 val noOpJointShift = owner in noOpJointShiftTypes && name == "shift" &&
                                     descriptor == "(Lorg/dyn4j/geometry/Vector2;)V"
                                 if (nullableShapeCenter || noOpJointShift) {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitMethodInsn(
+                                            opcode: Int, methodOwner: String, methodName: String,
+                                            methodDescriptor: String, isInterface: Boolean
+                                        ) {
+                                            if (methodOwner == "kotlin/jvm/internal/Intrinsics" &&
+                                                methodName == "checkNotNullParameter") {
+                                                super.visitInsn(Opcodes.POP)
+                                                super.visitInsn(Opcodes.POP)
+                                            } else {
+                                                super.visitMethodInsn(
+                                                    opcode, methodOwner, methodName, methodDescriptor, isInterface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (owner == "org/dyn4j/exception/CopyException" && name == "<init>" &&
+                                    descriptor == "(Ljava/lang/Class;Ljava/lang/Class;)V") {
                                     return object : MethodVisitor(Opcodes.ASM9, method) {
                                         override fun visitMethodInsn(
                                             opcode: Int, methodOwner: String, methodName: String,
@@ -1105,9 +1135,10 @@ tasks.register<JavaExec>("runUpstreamCollisionModelTests") {
 
 val collisionModelConsumerSource = file("src/jvmConsumer/java/CollisionModelConsumer.java")
 val collisionModelStaticHideSource = file("src/jvmConsumer/java/Issue35StaticHideConsumer.java")
+val copyExceptionAmbiguitySource = file("src/jvmConsumer/java/CopyExceptionAmbiguity.java")
 val baselineCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(verifyBaseline)
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = baseline
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-baseline"))
     options.release.set(8)
@@ -1119,7 +1150,7 @@ tasks.register<JavaExec>("runBaselineCollisionModelConsumer") {
 }
 val candidateCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(tasks.named("jvmJar"))
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-candidate"))
     options.release.set(8)
@@ -1131,7 +1162,7 @@ tasks.register<JavaExec>("runCandidateCollisionModelConsumer") {
 }
 val stagedCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = stagedGeometryClasspath
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-staged"))
     options.release.set(8)
@@ -1143,7 +1174,7 @@ tasks.register<JavaExec>("runStagedCollisionModelConsumer") {
 }
 val androidCollisionModelConsumer by tasks.registering(JavaCompile::class) {
     dependsOn(androidCompileJar)
-    source(collisionModelConsumerSource, collisionModelStaticHideSource)
+    source(collisionModelConsumerSource, collisionModelStaticHideSource, copyExceptionAmbiguitySource)
     classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
     destinationDirectory.set(layout.buildDirectory.dir("consumer/collision-model-android"))
     options.release.set(8)
@@ -1153,7 +1184,6 @@ tasks.register<JavaExec>("runAndroidCollisionModelConsumer") {
     classpath(androidCollisionModelConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
     mainClass.set("CollisionModelConsumer")
 }
-
 val dynamicsTestNames = listOf(
     "AbstractPhysicsBodyTest", "BodyFixtureTest", "BodyTest", "ForceTest",
     "SettingsTest", "TimeStepTest", "TorqueTest"

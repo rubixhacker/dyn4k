@@ -28,6 +28,8 @@ import org.dyn4j.Copyable
 import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.geometry.Vector2
 import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
 
 open class Force : Copyable<Force> {
     @JvmField protected var force: Vector2
@@ -45,6 +47,8 @@ open class Force : Copyable<Force> {
     open fun set(force: Force?) { this.force.set((force ?: throw ArgumentNullException("force")).force) }
     open fun isComplete(elapsedTime: Double) = true
     open fun getForce(): Vector2 = force
-    internal fun rawForce(): Vector2 = force
+    @Suppress("INAPPLICABLE_JVM_NAME")
+    @JvmName("rawForce-dyn4k-internal")
+    @JvmSynthetic internal fun rawForce(): Vector2 = force
     override fun toString() = force.toString()
 }

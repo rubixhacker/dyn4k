@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2020 William Bittle  http://www.dyn4j.org/
+ * Copyright (c) 2010-2026 William Bittle  http://www.dyn4j.org/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted
@@ -37,35 +37,35 @@ open class AdaptiveDecimal private constructor(
     constructor(other: AdaptiveDecimal) : this(other.components.copyOf(), other.size)
     protected constructor(a0: Double, a1: Double) : this(doubleArrayOf(a0, a1), 2)
 
-    fun size(): Int = size
-    fun capacity(): Int = components.size
+    open fun size(): Int = size
+    open fun capacity(): Int = components.size
     override fun copy(): AdaptiveDecimal = AdaptiveDecimal(this)
 
     @Deprecated("Use set")
-    fun copyFrom(other: AdaptiveDecimal) = set(other)
+    open fun copyFrom(other: AdaptiveDecimal) = set(other)
 
-    fun set(other: AdaptiveDecimal) {
+    open fun set(other: AdaptiveDecimal) {
         other.components.copyInto(components, 0, 0, other.size)
         size = other.size
     }
 
-    fun get(index: Int): Double {
+    open fun get(index: Int): Double {
         if (index < 0 || index >= size) throw InvalidIndexException(index)
         return components[index]
     }
 
-    fun append(value: Double): AdaptiveDecimal {
+    open fun append(value: Double): AdaptiveDecimal {
         if (size >= capacity()) throw InvalidIndexException(size)
         components[size++] = value
         return this
     }
 
-    fun appendNonZero(value: Double): AdaptiveDecimal {
+    open fun appendNonZero(value: Double): AdaptiveDecimal {
         if (value != 0.0) append(value)
         return this
     }
 
-    fun checkInvariants(): Boolean {
+    open fun checkInvariants(): Boolean {
         if (size == 0) return true
         var last = components[0]
         for (i in 1 until size) {
@@ -84,24 +84,24 @@ open class AdaptiveDecimal private constructor(
         return true
     }
 
-    fun ensureInvariants() {
+    open fun ensureInvariants() {
         if (!checkInvariants()) throw IllegalStateException()
     }
 
-    fun clear(): AdaptiveDecimal { size = 0; return this }
-    fun removeZeros(): AdaptiveDecimal {
+    open fun clear(): AdaptiveDecimal { size = 0; return this }
+    open fun removeZeros(): AdaptiveDecimal {
         val oldSize = size
         size = 0
         for (i in 0 until oldSize) appendNonZero(components[i])
         return this
     }
-    fun normalize(): AdaptiveDecimal { if (size == 0) append(0.0); return this }
-    fun negate(): AdaptiveDecimal { for (i in 0 until size) components[i] = -components[i]; return this }
-    fun getEstimation(): Double { var value = 0.0; for (i in 0 until size) value += components[i]; return value }
+    open fun normalize(): AdaptiveDecimal { if (size == 0) append(0.0); return this }
+    open fun negate(): AdaptiveDecimal { for (i in 0 until size) components[i] = -components[i]; return this }
+    open fun getEstimation(): Double { var value = 0.0; for (i in 0 until size) value += components[i]; return value }
 
-    fun sum(other: AdaptiveDecimal): AdaptiveDecimal = sum(other, null)
+    open fun sum(other: AdaptiveDecimal): AdaptiveDecimal = sum(other, null)
 
-    fun sum(other: AdaptiveDecimal, output: AdaptiveDecimal?): AdaptiveDecimal {
+    open fun sum(other: AdaptiveDecimal, output: AdaptiveDecimal?): AdaptiveDecimal {
         val result = output?.clear() ?: AdaptiveDecimal(size + other.size)
         var left = 0
         var right = 0
@@ -122,7 +122,7 @@ open class AdaptiveDecimal private constructor(
         return result.normalize()
     }
 
-    fun sumEpilogue(carryValue: Double, other: AdaptiveDecimal, index: Int, result: AdaptiveDecimal): AdaptiveDecimal {
+    open fun sumEpilogue(carryValue: Double, other: AdaptiveDecimal, index: Int, result: AdaptiveDecimal): AdaptiveDecimal {
         var carry = carryValue
         for (i in index until other.size()) {
             val next = other.get(i)

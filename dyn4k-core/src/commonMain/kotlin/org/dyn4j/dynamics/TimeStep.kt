@@ -26,6 +26,8 @@ package org.dyn4j.dynamics
 
 import org.dyn4j.exception.ValueOutOfRangeException
 import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
 
 open class TimeStep(dt: Double) {
     @JvmField protected var dt0: Double
@@ -52,7 +54,9 @@ open class TimeStep(dt: Double) {
         dtRatio = invdt0 * dt
     }
     open fun getDeltaTime() = dt
-    internal fun rawDeltaTime() = dt
+    @Suppress("INAPPLICABLE_JVM_NAME")
+    @JvmName("rawDeltaTime-dyn4k-internal")
+    @JvmSynthetic internal fun rawDeltaTime() = dt
     open fun getInverseDeltaTime() = invdt
     open fun getDeltaTimeRatio() = dtRatio
     open fun getPrevousDeltaTime() = dt0

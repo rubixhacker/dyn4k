@@ -18,6 +18,10 @@ public final class GeometryPackageConsumer {
             throw new AssertionError("Ellipse package helper");
         if (new ExposedAABB(-1.0, -1.0, 1.0, 1.0).getWidth() != 7.0)
             throw new AssertionError("AABB virtual method");
+        ShapeAccessorExtension extension = new ShapeAccessorExtension();
+        if (!"consumer helper".equals(extension.getCenterField()) ||
+            !"consumer helper".equals(extension.getRadiusField()))
+            throw new AssertionError("Shape subclass helpers");
         verifyShapeCopyExtensions();
     }
 
@@ -103,5 +107,11 @@ public final class GeometryPackageConsumer {
             super(minX, minY, maxX, maxY);
         }
         @Override public double getWidth() { return 7.0; }
+    }
+
+    private static final class ShapeAccessorExtension extends Circle {
+        ShapeAccessorExtension() { super(1.0); }
+        public String getCenterField() { return "consumer helper"; }
+        public String getRadiusField() { return "consumer helper"; }
     }
 }

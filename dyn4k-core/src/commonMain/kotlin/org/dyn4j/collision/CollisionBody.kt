@@ -38,8 +38,7 @@ import org.dyn4j.geometry.Transformable
 import org.dyn4j.geometry.Vector2
 import kotlin.math.max
 
-@Suppress("UNCHECKED_CAST")
-private fun <T> passNullable(value: T?): T = value as T
+internal expect fun <T> passNullable(value: T?): T
 
 interface FixtureModificationHandler<T : Fixture> {
     fun onFixtureAdded(fixture: T)
