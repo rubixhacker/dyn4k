@@ -7,6 +7,7 @@ import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
+import org.objectweb.asm.AnnotationVisitor
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ClassWriter
@@ -33,7 +34,8 @@ data class JvmApiSpec(
     val packageType: Boolean = false,
     val packageNodeMethods: Boolean = false,
     val protectedMethods: Set<String> = emptySet(),
-    val appendIterable: Boolean = false
+    val appendIterable: Boolean = false,
+    val javaFieldSemantics: Boolean = false
 )
 
 val jvmApi = mapOf(
@@ -49,7 +51,7 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/BinarySearchTree" to JvmApiSpec(),
     "org/dyn4j/BinarySearchTreeSearchCriteria" to JvmApiSpec(),
-    "org/dyn4j/Reference" to JvmApiSpec(publicFields = setOf("value")),
+    "org/dyn4j/Reference" to JvmApiSpec(publicFields = setOf("value"), javaFieldSemantics = true),
     "org/dyn4j/BinarySearchTreeNode" to JvmApiSpec(
         packageType = true,
         packageFields = setOf("comparable", "parent", "left", "right"),
@@ -64,6 +66,7 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Vector2" to JvmApiSpec(
         publicFields = setOf("x", "y"),
+        javaFieldSemantics = true,
         packageFields = setOf("X_AXIS", "Y_AXIS", "INV_X_AXIS", "INV_Y_AXIS"),
         packageMethodSignatures = setOf(
             "rotate(DD)Lorg/dyn4j/geometry/Vector2;",
@@ -72,7 +75,8 @@ val jvmApi = mapOf(
         staticMethods = setOf("create", "tripleProduct")
     ),
     "org/dyn4j/geometry/Vector3" to JvmApiSpec(
-        publicFields = setOf("x", "y", "z"), staticMethods = setOf("tripleProduct")
+        publicFields = setOf("x", "y", "z"), staticMethods = setOf("tripleProduct"),
+        javaFieldSemantics = true
     ),
     "org/dyn4j/geometry/Rotation" to JvmApiSpec(
         protectedFields = setOf("cost", "sint"),
@@ -90,10 +94,11 @@ val jvmApi = mapOf(
         )
     ),
     "org/dyn4j/geometry/Matrix22" to JvmApiSpec(
-        publicFields = setOf("m00", "m01", "m10", "m11")
+        publicFields = setOf("m00", "m01", "m10", "m11"), javaFieldSemantics = true
     ),
     "org/dyn4j/geometry/Matrix33" to JvmApiSpec(
-        publicFields = setOf("m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22")
+        publicFields = setOf("m00", "m01", "m02", "m10", "m11", "m12", "m20", "m21", "m22"),
+        javaFieldSemantics = true
     ),
     "org/dyn4j/geometry/Transform" to JvmApiSpec(
         protectedFields = setOf("cost", "sint", "x", "y"),
@@ -249,6 +254,11 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                         val writer = ClassWriter(ClassWriter.COMPUTE_MAXS)
                         val visitor = object : ClassVisitor(Opcodes.ASM9, writer) {
                             val present = mutableSetOf<Pair<String, String>>()
+                            override fun visitAnnotation(descriptor: String, visible: Boolean): AnnotationVisitor? {
+                                // Java field resolution requires these JVM classes to appear as Java classes.
+                                if (spec.javaFieldSemantics && descriptor == "Lkotlin/Metadata;") return null
+                                return super.visitAnnotation(descriptor, visible)
+                            }
                             override fun visit(
                                 version: Int, access: Int, name: String, signature: String?,
                                 superName: String?, interfaces: Array<out String>?
