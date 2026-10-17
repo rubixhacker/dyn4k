@@ -24,11 +24,14 @@ plugins {
 data class JvmApiSpec(
     val publicFields: Set<String> = emptySet(),
     val protectedFields: Set<String> = emptySet(),
-    val staticMethods: Set<String> = emptySet(),
-    val packageType: Boolean = false,
     val packageFields: Set<String> = emptySet(),
-    val packageNodeMethods: Boolean = false,
+    val staticMethods: Set<String> = emptySet(),
+    val varargMethods: Set<String> = emptySet(),
     val packageMethods: Set<String> = emptySet(),
+    val packageMethodSignatures: Set<String> = emptySet(),
+    val packageConstructorDescriptors: Set<String> = emptySet(),
+    val packageType: Boolean = false,
+    val packageNodeMethods: Boolean = false,
     val protectedMethods: Set<String> = emptySet(),
     val appendIterable: Boolean = false
 )
@@ -82,6 +85,108 @@ val jvmApi = mapOf(
     ),
     "org/dyn4j/geometry/Transform" to JvmApiSpec(
         protectedFields = setOf("cost", "sint", "x", "y")
+    ),
+    "org/dyn4j/geometry/AABB" to JvmApiSpec(
+        protectedFields = setOf("minX", "minY", "maxX", "maxY"),
+        staticMethods = setOf("createFromPoints", "setFromPoints")
+    ),
+    "org/dyn4j/geometry/Interval" to JvmApiSpec(
+        protectedFields = setOf("min", "max"), staticMethods = setOf("clamp")
+    ),
+    "org/dyn4j/geometry/Ray" to JvmApiSpec(
+        protectedFields = setOf("start", "direction")
+    ),
+    "org/dyn4j/geometry/Mass" to JvmApiSpec(
+        packageFields = setOf("type", "center", "mass", "inertia", "invMass", "invInertia"),
+        staticMethods = setOf("create")
+    ),
+    "org/dyn4j/geometry/Feature" to JvmApiSpec(
+        packageFields = setOf("index")
+    ),
+    "org/dyn4j/geometry/PointFeature" to JvmApiSpec(
+        packageFields = setOf("point")
+    ),
+    "org/dyn4j/geometry/EdgeFeature" to JvmApiSpec(
+        packageFields = setOf("vertex1", "vertex2", "max", "edge")
+    ),
+    "org/dyn4j/geometry/AbstractShape" to JvmApiSpec(
+        protectedFields = setOf("center", "radius", "userData")
+    ),
+    "org/dyn4j/geometry/Polygon" to JvmApiSpec(
+        packageFields = setOf("vertices", "normals"),
+        packageMethods = setOf("getFarthestVertexIndex"),
+        packageConstructorDescriptors = setOf(
+            "(Lorg/dyn4j/geometry/Vector2;D[Lorg/dyn4j/geometry/Vector2;[Lorg/dyn4j/geometry/Vector2;)V"
+        )
+    ),
+    "org/dyn4j/geometry/AdaptiveDecimal" to JvmApiSpec(
+        packageType = true,
+        staticMethods = setOf(
+            "valueOf", "fromSum", "fromDiff", "fromProduct", "getErrorComponentFromSum",
+            "getErrorComponentFromDifference", "getErrorComponentFromProduct"
+        ),
+        packageMethods = setOf("sumEpilogue", "getErrorComponentFromSum", "getErrorComponentFromDifference"),
+        packageMethodSignatures = setOf(
+            "fromDiff(DDDDLorg/dyn4j/geometry/AdaptiveDecimal;)Lorg/dyn4j/geometry/AdaptiveDecimal;"
+        )
+    ),
+    "org/dyn4j/geometry/RobustGeometry" to JvmApiSpec(
+        packageFields = setOf("SPLITTER"),
+        packageMethods = setOf("cross"),
+        staticMethods = setOf("cross", "getLocation")
+    ),
+    "org/dyn4j/geometry/WoundIterator" to JvmApiSpec(
+        packageType = true,
+        packageFields = setOf("vectors", "index")
+    ),
+    "org/dyn4j/geometry/Geometry" to JvmApiSpec(
+        publicFields = setOf("INV_SQRT_3"),
+        varargMethods = setOf(
+            "getWinding", "reverseWinding", "getAverageCenter", "getAreaWeightedCenter",
+            "getRotationRadius", "getCounterClockwiseEdgeNormals", "cleanse",
+            "createPolygon", "createPolygonAtOrigin"
+        ),
+        staticMethods = setOf(
+            "getWinding", "reverseWinding", "getAverageCenter", "getAreaWeightedCenter",
+            "getRotationRadius", "getCounterClockwiseEdgeNormals", "createUnitCirclePolygon",
+            "createPolygonalCircle", "createPolygonalSlice", "createPolygonalSliceAtOrigin",
+            "createPolygonalEllipse", "createPolygonalHalfEllipse", "createPolygonalHalfEllipseAtOrigin",
+            "createPolygonalCapsule", "createSquare", "createRectangle", "createCircle", "createPolygon",
+            "createPolygonAtOrigin", "createTriangle", "createTriangleAtOrigin", "createRightTriangle",
+            "createIsoscelesTriangle", "createEquilateralTriangle", "createSegment", "createSegmentAtOrigin",
+            "createHorizontalSegment", "createVerticalSegment", "createCapsule", "createSlice",
+            "createSliceAtOrigin", "createEllipse", "createHalfEllipse", "createHalfEllipseAtOrigin",
+            "cleanse", "flipAlongTheXAxis", "flipAlongTheYAxis", "flip", "minkowskiSum", "scale",
+            "createLinks", "getIntersection"
+        )
+    ),
+    "org/dyn4j/geometry/Rectangle" to JvmApiSpec(
+        packageFields = setOf("width", "height")
+    ),
+    "org/dyn4j/geometry/Capsule" to JvmApiSpec(
+        packageFields = setOf("length", "capRadius", "foci", "localXAxis"),
+        protectedFields = setOf("EDGE_FEATURE_SELECTION_CRITERIA", "EDGE_FEATURE_EXPANSION_FACTOR")
+    ),
+    "org/dyn4j/geometry/Ellipse" to JvmApiSpec(
+        packageFields = setOf("halfWidth", "halfHeight", "rotation"),
+        staticMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse"),
+        packageMethods = setOf("getFarthestPointOnEllipse", "getFarthestPointOnBoundedEllipse")
+    ),
+    "org/dyn4j/geometry/HalfEllipse" to JvmApiSpec(
+        packageFields = setOf("height", "halfWidth", "rotation", "ellipseCenter", "vertexLeft", "vertexRight")
+    ),
+    "org/dyn4j/geometry/Slice" to JvmApiSpec(
+        packageFields = setOf("alpha", "cosAlpha", "sliceRadius", "vertices", "normals", "rotation")
+    ),
+    "org/dyn4j/geometry/Segment" to JvmApiSpec(
+        packageFields = setOf("vertices", "normals", "length"),
+        staticMethods = setOf(
+            "getLocation", "getPointOnLineClosestToPoint", "getPointOnSegmentClosestToPoint",
+            "getLineIntersection", "getSegmentIntersection", "getFarthestFeature", "getFarthestPoint"
+        )
+    ),
+    "org/dyn4j/geometry/Link" to JvmApiSpec(
+        packageFields = setOf("point0", "point3")
     )
 )
 
@@ -91,7 +196,7 @@ val patchJvmArchive: (File) -> Unit = { jar ->
             val companionMethods = jvmApi.mapValues { (owner, spec) ->
                 val entry = input.getEntry(owner + "\$Companion.class")
                 if (entry == null) emptyList() else {
-                    val methods = mutableListOf<Pair<String, String>>()
+                    val methods = mutableListOf<Triple<String, String, String?>>()
                     ClassReader(input.getInputStream(entry).use { it.readBytes() }).accept(
                         object : ClassVisitor(Opcodes.ASM9) {
                             override fun visitMethod(
@@ -99,7 +204,7 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 signature: String?, exceptions: Array<out String>?
                             ): MethodVisitor? {
                                 if (name in spec.staticMethods && access and Opcodes.ACC_PUBLIC != 0) {
-                                    methods += name to descriptor
+                                    methods += Triple(name, descriptor, signature)
                                 }
                                 return null
                             }
@@ -153,28 +258,63 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                             ): MethodVisitor {
                                 present += name to descriptor
                                 val visibility = Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED or Opcodes.ACC_PRIVATE
-                                val packageMethod = name in spec.packageMethods ||
-                                    (spec.packageNodeMethods && descriptor.startsWith("(Lorg/dyn4j/BinarySearchTreeNode;"))
-                                val revisedAccess = when {
-                                    packageMethod -> access and visibility.inv() and Opcodes.ACC_FINAL.inv()
-                                    name in spec.protectedMethods ->
-                                        ((access and visibility.inv()) or Opcodes.ACC_PROTECTED) and Opcodes.ACC_FINAL.inv()
-                                    owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable" ->
-                                        access and Opcodes.ACC_FINAL.inv()
-                                    else -> access
+                                val isVararg = name in spec.varargMethods &&
+                                    Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
+                                var revised = if (isVararg) access or Opcodes.ACC_VARARGS else access
+                                if (name in spec.packageMethods || name + descriptor in spec.packageMethodSignatures ||
+                                    (spec.packageNodeMethods && descriptor.startsWith("(Lorg/dyn4j/BinarySearchTreeNode;")) ||
+                                    (name == "<init>" && descriptor in spec.packageConstructorDescriptors)) {
+                                    revised = revised and visibility.inv() and Opcodes.ACC_FINAL.inv()
                                 }
+                                if (name in spec.protectedMethods) {
+                                    revised = ((revised and visibility.inv()) or Opcodes.ACC_PROTECTED) and Opcodes.ACC_FINAL.inv()
+                                }
+                                if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
+                                    revised = revised and Opcodes.ACC_FINAL.inv()
+                                }
+                                if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
+                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
+                                ) revised = revised and Opcodes.ACC_FINAL.inv()
                                 val revisedSignature = signature?.replace(
                                     "Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;"
                                 )
-                                return super.visitMethod(revisedAccess, name, descriptor, revisedSignature, exceptions)
+                                val method = super.visitMethod(revised, name, descriptor, revisedSignature, exceptions)
+                                // The baseline permits a null center in this protected constructor.
+                                if (owner == "org/dyn4j/geometry/AbstractShape" && name == "<init>" &&
+                                    descriptor == "(Lorg/dyn4j/geometry/Vector2;D)V") {
+                                    return object : MethodVisitor(Opcodes.ASM9, method) {
+                                        override fun visitMethodInsn(
+                                            opcode: Int, methodOwner: String, methodName: String,
+                                            methodDescriptor: String, isInterface: Boolean
+                                        ) {
+                                            if (methodOwner == "kotlin/jvm/internal/Intrinsics" &&
+                                                methodName == "checkNotNullParameter") {
+                                                super.visitInsn(Opcodes.POP)
+                                                super.visitInsn(Opcodes.POP)
+                                            } else {
+                                                super.visitMethodInsn(
+                                                    opcode, methodOwner, methodName, methodDescriptor, isInterface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                return method
                             }
                             override fun visitEnd() {
-                                for ((name, descriptor) in companionMethods[owner].orEmpty()) {
+                                for ((name, descriptor, signature) in companionMethods[owner].orEmpty()) {
                                     if ((name to descriptor) in present) continue
+                                    val visibility = if (name in spec.packageMethods ||
+                                        name + descriptor in spec.packageMethodSignatures) 0 else Opcodes.ACC_PUBLIC
                                     val method = super.visitMethod(
-                                        Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC or
-                                            (if (owner == "org/dyn4j/Version") Opcodes.ACC_FINAL else 0),
-                                        name, descriptor, null, null
+                                        visibility or Opcodes.ACC_STATIC or
+                                            (if (owner == "org/dyn4j/Version") Opcodes.ACC_FINAL else 0) or
+                                            (if (name in spec.varargMethods &&
+                                                Type.getArgumentTypes(descriptor).lastOrNull()?.sort == Type.ARRAY
+                                            ) Opcodes.ACC_VARARGS else 0),
+                                        name, descriptor,
+                                        signature?.replace("+Lorg/dyn4j/geometry/", "Lorg/dyn4j/geometry/"),
+                                        null
                                     )
                                     method.visitCode()
                                     method.visitFieldInsn(
@@ -349,6 +489,16 @@ tasks.register<Exec>("verifyJvmApi") {
         )
     }
 }
+tasks.register<Exec>("verifyGeometryJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        commandLine(
+            "python3", rootProject.file("scripts/verify-geometry-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath
+        )
+    }
+}
 tasks.register<Exec>("verifyTreeJvmApi") {
     dependsOn(verifyBaseline, tasks.named("jvmJar"))
     doFirst {
@@ -378,6 +528,54 @@ tasks.register<JavaExec>("runCandidateConsumer") {
     dependsOn(candidateConsumer)
     classpath(candidateConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
     mainClass.set("FoundationConsumer")
+}
+
+val geometryConsumerSource = fileTree("src/jvmConsumer/java") {
+    include("GeometryConsumer.java", "org/dyn4j/geometry/GeometryPackageConsumer.java")
+}
+val baselineGeometryConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(geometryConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("geometry-consumer/baseline"))
+    options.release.set(8)
+}
+val candidateGeometryConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(geometryConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("geometry-consumer/candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineGeometryConsumer") {
+    dependsOn(baselineGeometryConsumer)
+    classpath(baselineGeometryConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("GeometryConsumer")
+}
+tasks.register<JavaExec>("runCandidateGeometryConsumer") {
+    dependsOn(candidateGeometryConsumer)
+    classpath(candidateGeometryConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("GeometryConsumer")
+}
+
+repositories {
+    google()
+    mavenCentral()
+    maven { name = "stagedGeometryConsumer"; url = uri(rootProject.layout.buildDirectory.dir("staging-repository")) }
+}
+val stagedGeometryClasspath = configurations.create("stagedGeometryClasspath")
+dependencies { stagedGeometryClasspath("io.github.rubixhacker:dyn4k-jvm:${project.version}") }
+val stagedGeometryConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(geometryConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("geometry-consumer/staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedGeometryConsumer") {
+    dependsOn(stagedGeometryConsumer)
+    classpath(stagedGeometryConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("GeometryConsumer")
 }
 
 val androidCompileJar = tasks.matching { it.name == "bundleAndroidMainClassesToCompileJar" }
@@ -486,6 +684,32 @@ tasks.register<JavaExec>("runUpstreamFoundationTests") {
     args(foundationTestNames.map { "org.dyn4j.geometry.$it" })
 }
 
+val geometryTestNames = listOf(
+    "AABBTest", "AbstractShapeTest", "IntervalTest", "RayTest", "CircleTest", "FeatureTest",
+    "PolygonTest", "RectangleTest", "MassTest", "TriangleTest", "SegmentTest", "WoundTest", "LinkTest",
+    "AdaptiveDecimalTest", "RobustGeometryTest", "CapsuleTest", "EllipseTest", "HalfEllipseTest", "SliceTest",
+    "GeometryTest"
+)
+val compileUpstreamGeometryTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(geometryTestNames.map {
+        upstreamCheckout.map { dir -> dir.file("src/test/java/org/dyn4j/geometry/$it.java") }
+    })
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-geometry-tests/classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamGeometryTests") {
+    dependsOn(compileUpstreamGeometryTests)
+    classpath(
+        compileUpstreamGeometryTests.flatMap { it.destinationDirectory },
+        tasks.named("jvmJar"),
+        jvmMain.runtimeDependencyFiles,
+        upstreamTestRuntime
+    )
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(geometryTestNames.map { "org.dyn4j.geometry.$it" })
+}
 val treeTestNames = listOf("AVLTreeTest", "ReferenceTest", "VersionTest")
 val compileUpstreamTreeTests by tasks.registering(JavaCompile::class) {
     dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
