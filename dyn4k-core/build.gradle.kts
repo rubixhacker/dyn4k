@@ -272,8 +272,12 @@ val patchJvmArchive: (File) -> Unit = { jar ->
                                 if (owner == "org/dyn4j/BinarySearchTreeNode" && name == "getComparable") {
                                     revised = revised and Opcodes.ACC_FINAL.inv()
                                 }
+                                val baselineFinalLinkMethod = owner == "org/dyn4j/geometry/Link" &&
+                                    ((name == "rotate" && descriptor == "(DDD)V") ||
+                                        (name == "translate" && descriptor == "(DD)V"))
                                 if (owner.startsWith("org/dyn4j/geometry/") && name != "<init>" &&
-                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0
+                                    access and Opcodes.ACC_STATIC == 0 && access and Opcodes.ACC_PRIVATE == 0 &&
+                                    !baselineFinalLinkMethod
                                 ) revised = revised and Opcodes.ACC_FINAL.inv()
                                 val revisedSignature = signature?.replace(
                                     "Ljava/lang/Comparable<-TE;>;", "Ljava/lang/Comparable<TE;>;"

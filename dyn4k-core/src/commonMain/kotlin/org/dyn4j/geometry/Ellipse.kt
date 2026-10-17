@@ -28,16 +28,12 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class Ellipse : AbstractShape, Convex {
-    @get:kotlin.jvm.JvmName("getHalfWidthField")
-    @JvmFieldBridge protected val halfWidth: Double
-    @get:kotlin.jvm.JvmName("getHalfHeightField")
-    @JvmFieldBridge protected val halfHeight: Double
-    @get:kotlin.jvm.JvmName("getRotationFieldValue")
-    @JvmFieldBridge protected val rotation: Rotation
+    @kotlin.jvm.JvmField protected val halfWidth: Double
+    @kotlin.jvm.JvmField protected val halfHeight: Double
+    @kotlin.jvm.JvmField protected val rotation: Rotation
 
     constructor(width: Double, height: Double) : super(max(width, height) * 0.5) {
         if (width <= 0.0) throw ValueOutOfRangeException("width", width, ValueOutOfRangeException.MUST_BE_GREATER_THAN, 0.0)
@@ -128,12 +124,12 @@ open class Ellipse : AbstractShape, Convex {
         super.rotate(rotation, x, y)
         this.rotation.rotate(rotation)
     }
-    fun getRotationAngle(): Double = rotation.toRadians()
-    fun getRotation(): Rotation = rotation.copy()
-    fun getWidth(): Double = halfWidth * 2.0
-    fun getHeight(): Double = halfHeight * 2.0
-    fun getHalfWidth(): Double = halfWidth
-    fun getHalfHeight(): Double = halfHeight
+    open fun getRotationAngle(): Double = rotation.toRadians()
+    open fun getRotation(): Rotation = rotation.copy()
+    open fun getWidth(): Double = halfWidth * 2.0
+    open fun getHeight(): Double = halfHeight * 2.0
+    open fun getHalfWidth(): Double = halfWidth
+    open fun getHalfHeight(): Double = halfHeight
 
     companion object {
         private val INV_GOLDEN_RATIO = 1.0 / ((sqrt(5.0) + 1.0) * 0.5)
