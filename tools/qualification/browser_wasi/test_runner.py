@@ -100,6 +100,7 @@ class SourceCasesTest(unittest.TestCase):
 
     def test_missing_staged_publication_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "LICENSE.md").write_text("test license\n")
             with self.assertRaisesRegex(ValueError, "missing staged artifact"):
                 staged_files(Path(directory))
 

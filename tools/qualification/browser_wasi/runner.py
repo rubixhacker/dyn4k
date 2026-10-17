@@ -189,6 +189,7 @@ def candidate_identity(root: Path, expected_sha: str) -> None:
 
 def staged_files(root: Path) -> dict[str, str]:
     staging = root / "build/staging-repository/io/github/rubixhacker"
+    license_bytes = (root / "LICENSE.md").read_bytes()
     hashes: dict[str, str] = {}
     for module in MODULES:
         root_publication = staging / module / VERSION
@@ -201,6 +202,8 @@ def staged_files(root: Path) -> dict[str, str]:
             path = root_publication / f"{module}-{VERSION}-{classifier}"
             if not path.is_file():
                 raise ValueError(f"missing staged artifact: {path}")
+            if classifier == "license.md" and path.read_bytes() != license_bytes:
+                raise ValueError(f"staged license differs from source: {path}")
             hashes[str(path.relative_to(root))] = sha256(path)
         for target in TARGETS:
             publication = f"{module}-{target.lower().replace('wasmjs', 'wasm-js').replace('wasmwasi', 'wasm-wasi')}"
@@ -214,6 +217,8 @@ def staged_files(root: Path) -> dict[str, str]:
                 path = directory / f"{publication}-{VERSION}-{classifier}"
                 if not path.is_file():
                     raise ValueError(f"missing staged artifact: {path}")
+                if classifier == "license.md" and path.read_bytes() != license_bytes:
+                    raise ValueError(f"staged license differs from source: {path}")
                 hashes[str(path.relative_to(root))] = sha256(path)
     return hashes
 
@@ -325,6 +330,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
         if target not in TARGETS or configuration not in ("development", "production"):
             raise ValueError("unknown target or configuration")
         results: dict[str, object] = {}
+        lane["modules"] = results
         for module in (*MODULES, "consumer"):
             project = test_project(root, module)
             expected = source_cases(test_source(root, module))
@@ -356,6 +362,9 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             built = command(gradle, root, env)
             console = module_output / "gradle-console.log"
             console.write_text(built.stdout + built.stderr)
+            results[module] = {"status": "FAILED", "gradle_command": gradle,
+                               "gradle_exit_code": built.returncode,
+                               "gradle_console": str(console)}
             if built.returncode:
                 raise ValueError(f"{module} Gradle task failed: {console}")
             linked = linked_file(project, target, configuration, module)
@@ -393,13 +402,19 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             evidence["gradle_console"] = str(console)
             evidence["linked_executable"] = str(linked)
             evidence["linked_sha256"] = sha256(linked)
+            evidence["candidate_sha"] = sha
+            evidence["target"] = target
+            evidence["runtime"] = runtime
+            evidence["configuration"] = configuration
+            evidence["staging_receipt"] = str(receipt)
+            evidence["runtime_sha256"] = lane["runtime_sha256"]
+            evidence["status"] = "PASSED"
             if sha256(binary) != lane["runtime_sha256"]:
                 raise ValueError(f"runtime binary changed during {module} execution")
             runtime_version(binary, target, runtime, expected_version, role)
             results[module] = evidence
             write_json(module_output / "result.json", evidence)
         candidate_identity(root, sha)
-        lane["modules"] = results
         lane["status"] = "PASSED"
     except (OSError, ValueError, json.JSONDecodeError) as error:
         lane["reason"] = str(error)
