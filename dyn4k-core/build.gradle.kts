@@ -408,6 +408,109 @@ val jvmApi = mapOf(
             "lowerLimitImpulse", "upperLimitImpulse", "springImpulse", "motorImpulse"
         )
     ),
+    "org/dyn4j/world/Island" to JvmApiSpec(
+        packageFields = setOf("bodies", "joints", "contactConstraints")
+    ),
+    "org/dyn4j/world/CollisionItemAdapter" to JvmApiSpec(packageType = true),
+    "org/dyn4j/world/AbstractPhysicsWorld" to JvmApiSpec(
+        protectedFields = setOf(
+            "settings", "timeStep", "gravity", "valueMixer", "contactConstraintSolver",
+            "timeOfImpactSolver", "ccdBroadphase", "joints", "jointsUnmodifiable",
+            "contactListeners", "contactListenersUnmodifiable", "destructionListeners",
+            "destructionListenersUnmodifiable", "timeOfImpactListeners", "timeOfImpactListenersUnmodifiable",
+            "stepListeners", "stepListenersUnmodifiable", "time", "updateRequired",
+            "constraintGraph", "contactCollisions", "ccdCollisionData"
+        ),
+        protectedMethods = setOf("handleFixtureRemoved", "handleAllFixturesRemoved")
+    ),
+    "org/dyn4j/world/World" to JvmApiSpec(protectedMethods = setOf("createCollisionData")),
+    "org/dyn4j/world/result/DetectResult" to JvmApiSpec(protectedFields = setOf("body", "fixture")),
+    "org/dyn4j/world/result/ConvexDetectResult" to JvmApiSpec(protectedFields = setOf("penetration")),
+    "org/dyn4j/world/result/ConvexCastResult" to JvmApiSpec(protectedFields = setOf("timeOfImpact")),
+    "org/dyn4j/world/result/RaycastResult" to JvmApiSpec(protectedFields = setOf("raycast")),
+    "org/dyn4j/collision/broadphase/AABBBroadphaseProxy" to JvmApiSpec(
+        packageType = true, packageFields = setOf("item", "aabb")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphasePair" to JvmApiSpec(
+        packageType = true, packageFields = setOf("first", "second"),
+        packageConstructorDescriptors = setOf("()V")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphaseItem" to JvmApiSpec(
+        packageType = true, packageFields = setOf("body", "fixture"),
+        protectedConstructorDescriptors = setOf("(Lorg/dyn4j/collision/broadphase/BroadphaseItem;)V")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTreeNode" to JvmApiSpec(
+        packageType = true, packageFields = setOf("left", "right", "parent", "height", "aabb")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTreeLeaf" to JvmApiSpec(
+        packageType = true, packageFields = setOf("item")
+    ),
+    "org/dyn4j/collision/broadphase/DynamicAABBTree" to JvmApiSpec(
+        packageMethods = setOf("isValid")
+    ),
+    "org/dyn4j/collision/broadphase/Sap" to JvmApiSpec(
+        packageMethods = setOf("insert"),
+        packageMethodSignatures = setOf("update(Lorg/dyn4j/collision/broadphase/AABBBroadphaseProxy;Ljava/lang/Object;)V")
+    ),
+    "org/dyn4j/collision/broadphase/AbstractBroadphaseDetector" to JvmApiSpec(
+        protectedFields = setOf("AABB_REDUCTION_RATIO", "aabbProducer", "aabbExpansionMethod", "broadphaseFilter", "updateTrackingEnabled"),
+        staticMethods = setOf("raycast"),
+        packageMethodSignatures = setOf("raycast(Lorg/dyn4j/geometry/Vector2;DDDLorg/dyn4j/geometry/AABB;)Z")
+    ),
+    "org/dyn4j/collision/broadphase/BroadphaseDetectorDecoratorAdapter" to JvmApiSpec(
+        protectedFields = setOf("detector")
+    ),
+    "org/dyn4j/collision/narrowphase/ExpandingSimplexEdge" to JvmApiSpec(
+        packageType = true, packageFields = setOf("point1", "point2", "normal", "distance")
+    ),
+    "org/dyn4j/collision/narrowphase/ExpandingSimplex" to JvmApiSpec(packageType = true),
+    "org/dyn4j/collision/narrowphase/MinkowskiSumPoint" to JvmApiSpec(
+        packageFields = setOf("supportPoint1", "supportPoint2", "point")
+    ),
+    "org/dyn4j/collision/narrowphase/MinkowskiSum" to JvmApiSpec(
+        packageFields = setOf("convex1", "convex2", "transform1", "transform2")
+    ),
+    "org/dyn4j/collision/narrowphase/AbstractFallbackCondition" to JvmApiSpec(
+        packageFields = setOf("sortIndex")
+    ),
+    "org/dyn4j/collision/narrowphase/FallbackNarrowphaseDetector" to JvmApiSpec(
+        protectedFields = setOf("primaryNarrowphaseDetector", "fallbackNarrowphaseDetector", "fallbackConditions")
+    ),
+    "org/dyn4j/collision/narrowphase/Penetration" to JvmApiSpec(protectedFields = setOf("normal", "depth")),
+    "org/dyn4j/collision/narrowphase/Separation" to JvmApiSpec(
+        protectedFields = setOf("normal", "distance", "point1", "point2")
+    ),
+    "org/dyn4j/collision/narrowphase/Raycast" to JvmApiSpec(
+        protectedFields = setOf("point", "normal", "distance")
+    ),
+    "org/dyn4j/collision/narrowphase/Containment" to JvmApiSpec(
+        protectedFields = setOf("aContainedInB", "bContainedInA")
+    ),
+    "org/dyn4j/collision/narrowphase/CircleDetector" to JvmApiSpec(
+        staticMethods = setOf("detect", "distance", "contains", "raycast")
+    ),
+    "org/dyn4j/collision/narrowphase/SegmentDetector" to JvmApiSpec(staticMethods = setOf("raycast")),
+    "org/dyn4j/collision/narrowphase/Epa" to JvmApiSpec(
+        protectedFields = setOf("maxIterations", "distanceEpsilon")
+    ),
+    "org/dyn4j/collision/narrowphase/Gjk" to JvmApiSpec(
+        protectedFields = setOf(
+            "minkowskiPenetrationSolver", "maxDetectIterations", "maxDistanceIterations",
+            "maxRaycastIterations", "detectEpsilon", "distanceEpsilon", "raycastEpsilon"
+        )
+    ),
+    "org/dyn4j/collision/manifold/IndexedManifoldPointId" to JvmApiSpec(
+        protectedFields = setOf("referenceEdgeIndex", "incidentEdgeIndex", "incidentVertexIndex", "flipped")
+    ),
+    "org/dyn4j/collision/manifold/ManifoldPoint" to JvmApiSpec(
+        protectedFields = setOf("id", "point", "depth"),
+        protectedConstructorDescriptors = setOf("(Lorg/dyn4j/collision/manifold/ManifoldPointId;Lorg/dyn4j/geometry/Vector2;D)V")
+    ),
+    "org/dyn4j/collision/manifold/Manifold" to JvmApiSpec(protectedFields = setOf("points", "normal")),
+    "org/dyn4j/collision/continuous/TimeOfImpact" to JvmApiSpec(protectedFields = setOf("time", "separation")),
+    "org/dyn4j/collision/continuous/ConservativeAdvancement" to JvmApiSpec(
+        protectedFields = setOf("distanceDetector", "distanceEpsilon", "maxIterations")
+    ),
     "org/dyn4j/exception/CopyException" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/HullGenerator" to JvmApiSpec(),
     "org/dyn4j/geometry/hull/AbstractHullGenerator" to JvmApiSpec(),
@@ -1831,6 +1934,195 @@ val jointTestNames = listOf(
     "PinJointTest", "PrismaticJointTest", "PulleyJointTest", "RevoluteJointTest",
     "WeldJointTest", "WheelJointTest"
 )
+val worldTestNames = listOf(
+    "AbstractCollisionWorldTest", "AbstractPhysicsWorldTest", "BroadphaseFilterAdapterTest",
+    "CollisionBodyBroadphaseFilterTest", "CollisionItemAdapterTest", "ConstraintGraphTest",
+    "DetectFilterTest", "IslandTest", "PhysicsBodyBroadphaseFilterTest",
+    "PhysicsBodySweptAABBProducerTest", "ValueMixerTest", "WorldTest"
+)
+val worldTestClasses = worldTestNames.map { "org.dyn4j.world.$it" } + listOf(
+    "org.dyn4j.world.listener.ListenerAdaptersTest", "org.dyn4j.world.result.DetectResultTest"
+)
+val worldTestSources = worldTestNames.map { name ->
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/$name.java") }
+} + listOf(
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/listener/ListenerAdaptersTest.java") },
+    upstreamCheckout.map { it.file("src/test/java/org/dyn4j/world/result/DetectResultTest.java") }
+)
+val compileBaselineWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, verifyBaseline)
+    source(worldTestSources)
+    classpath = files(baseline, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/baseline-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineWorldTests") {
+    dependsOn(compileBaselineWorldTests)
+    classpath(compileBaselineWorldTests.flatMap { it.destinationDirectory }, baseline, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val compileUpstreamWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, tasks.named("jvmJar"))
+    source(worldTestSources)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/candidate-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runUpstreamWorldTests") {
+    dependsOn(compileUpstreamWorldTests)
+    classpath(compileUpstreamWorldTests.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val compileAndroidWorldTests by tasks.registering(JavaCompile::class) {
+    dependsOn(fetchUpstreamTests, androidCompileJar)
+    source(worldTestSources)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    destinationDirectory.set(layout.buildDirectory.dir("upstream-world-tests/android-classes"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidWorldTests") {
+    dependsOn(compileAndroidWorldTests, androidRuntimeJar)
+    classpath(compileAndroidWorldTests.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles, upstreamTestRuntime)
+    mainClass.set("org.junit.runner.JUnitCore")
+    args(worldTestClasses)
+}
+val worldConsumerSource = files(
+    "src/jvmConsumer/java/WorldConsumer.java", "src/jvmConsumer/java/WorldAdvancedConsumer.java",
+    "src/jvmConsumer/java/WorldQualityConsumer.java"
+)
+val baselineWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(verifyBaseline)
+    source(worldConsumerSource)
+    classpath = baseline
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-baseline"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runBaselineWorldConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runBaselineWorldAdvancedConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runBaselineWorldQualityConsumer") {
+    dependsOn(baselineWorldConsumer)
+    classpath(baselineWorldConsumer.flatMap { it.destinationDirectory }, baseline)
+    mainClass.set("WorldQualityConsumer")
+}
+val candidateWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(tasks.named("jvmJar"))
+    source(worldConsumerSource)
+    classpath = files(tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-candidate"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runCandidateWorldConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runCandidateWorldAdvancedConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runCandidateWorldQualityConsumer") {
+    dependsOn(candidateWorldConsumer)
+    classpath(candidateWorldConsumer.flatMap { it.destinationDirectory }, tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldQualityConsumer")
+}
+val stagedWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(worldConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-staged"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runStagedWorldConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runStagedWorldAdvancedConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runStagedWorldQualityConsumer") {
+    dependsOn(stagedWorldConsumer)
+    classpath(stagedWorldConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath)
+    mainClass.set("WorldQualityConsumer")
+}
+val stagedWorldKotlinConsumer = tasks.register<JavaExec>("stagedWorldKotlinConsumer") {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    classpath(configurations.getByName("kotlinCompilerClasspath"))
+    mainClass.set("org.jetbrains.kotlin.cli.jvm.K2JVMCompiler")
+    val output = layout.buildDirectory.dir("consumer/world-staged-kotlin")
+    inputs.file(file("src/jvmConsumer/kotlin/WorldKotlinConsumer.kt"))
+    inputs.files(stagedGeometryClasspath)
+    outputs.dir(output)
+    doFirst {
+        args("-no-stdlib", "-no-reflect", "-jvm-target", "1.8", "-classpath", stagedGeometryClasspath.asPath,
+            "-d", output.get().asFile.absolutePath,
+            file("src/jvmConsumer/kotlin/WorldKotlinConsumer.kt").absolutePath)
+    }
+}
+tasks.register<JavaExec>("runStagedWorldKotlinConsumer") {
+    dependsOn(stagedWorldKotlinConsumer)
+    classpath(layout.buildDirectory.dir("consumer/world-staged-kotlin"), stagedGeometryClasspath)
+    mainClass.set("WorldKotlinConsumer")
+}
+val androidWorldConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(androidCompileJar)
+    source(worldConsumerSource)
+    classpath = files(androidCompileJar, jvmMain.runtimeDependencyFiles)
+    destinationDirectory.set(layout.buildDirectory.dir("consumer/world-android"))
+    options.release.set(8)
+}
+tasks.register<JavaExec>("runAndroidWorldConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldConsumer")
+}
+tasks.register<JavaExec>("runAndroidWorldAdvancedConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldAdvancedConsumer")
+}
+tasks.register<JavaExec>("runAndroidWorldQualityConsumer") {
+    dependsOn(androidWorldConsumer, androidRuntimeJar)
+    classpath(androidWorldConsumer.flatMap { it.destinationDirectory }, androidRuntimeJar, jvmMain.runtimeDependencyFiles)
+    mainClass.set("WorldQualityConsumer")
+}
+tasks.register<Exec>("verifyWorldJvmApi") {
+    dependsOn(verifyBaseline, tasks.named("jvmJar"))
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            tasks.named<Jar>("jvmJar").get().archiveFile.get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyWorldAndroidApi") {
+    dependsOn(verifyBaseline, androidCompileJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/compile_library_classes_jar/androidMain/bundleAndroidMainClassesToCompileJar/classes.jar").get().asFile.absolutePath)
+    }
+}
+tasks.register<Exec>("verifyWorldAndroidRuntimeApi") {
+    dependsOn(verifyBaseline, androidRuntimeJar)
+    doFirst {
+        commandLine("python3", rootProject.file("scripts/verify-world-jvm-api.py").absolutePath,
+            baseline.singleFile.absolutePath,
+            layout.buildDirectory.file("intermediates/runtime_library_classes_jar/androidMain/bundleAndroidMainClassesToRuntimeJar/classes.jar").get().asFile.absolutePath)
+    }
+}
 val jointTestSourceNames = jointTestNames + listOf(
     "BaseJointTest", "TestAbstractJoint", "TestAbstractPairedBodyJoint", "TestAbstractSingleBodyJoint"
 )
