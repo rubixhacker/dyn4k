@@ -168,4 +168,14 @@ class QueryResultTest {
         assertEquals(true, pair.isMatch(polygon, circle))
         assertEquals(true, pair.isMatch(circle, polygon))
     }
+
+    @Test
+    fun gjkRaycastReportsDirectedSquareEntry() {
+        val result = Raycast()
+        val ray = Ray(Vector2(-3.0, 0.1), Vector2(1.0, 0.0))
+        assertEquals(true, Gjk().raycast(ray, 10.0, Geometry.createSquare(1.0), Transform(), result))
+        assertEquals(2.5, result.getDistance(), 1e-8)
+        assertEquals(-1.0, result.getNormal().x, 1e-8)
+        assertEquals(0.0, result.getNormal().y, 1e-8)
+    }
 }
