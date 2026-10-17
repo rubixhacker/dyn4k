@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from manifest import manifest, validate
+from analyze import activity_status
 
 
 HERE = Path(__file__).resolve().parent
@@ -103,12 +104,13 @@ def compile_harness(javac, jar, work):
 def run_capture(command, output, stderr_path=None, timeout=None, rss_ceiling_bytes=None):
     if timeout is None and rss_ceiling_bytes is None:
         with output.open("w") as stream:
-            process = subprocess.run(command, stdout=stream, stderr=subprocess.PIPE, text=True)
+            process = subprocess.Popen(command, stdout=stream, stderr=subprocess.PIPE, text=True)
+            _, error_output = process.communicate()
         if stderr_path is not None:
-            stderr_path.write_text(process.stderr)
+            stderr_path.write_text(error_output)
         if process.returncode:
-            raise RuntimeError(f"runner failed ({process.returncode}): {process.stderr}")
-        return process.stderr
+            raise RuntimeError(f"runner failed ({process.returncode}): {error_output}")
+        return error_output, process.pid
     stderr_file = stderr_path or output.with_suffix(".stderr")
     reason = "bounded_end"
     with output.open("w") as stdout, stderr_file.open("w") as stderr:
@@ -139,7 +141,7 @@ def run_capture(command, output, stderr_path=None, timeout=None, rss_ceiling_byt
     output.with_suffix(".termination.json").write_text(json.dumps({"reason": reason, "exit_code": returncode}) + "\n")
     if reason != "bounded_end" or returncode:
         raise RuntimeError(f"runner terminated: {reason}, exit {returncode}; raw files retained")
-    return stderr_file.read_text()
+    return stderr_file.read_text(), process.pid
 
 
 def validate_csv(path, family, variant, size, hz, steps, mode):
@@ -217,8 +219,8 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                    "BaselinePilot", family, variant, size, str(hz), str(steps), mode, str(warmup)]
     else:
         command = [str(runner), family, variant, size, str(hz), str(steps), mode, str(warmup), api]
-    run_capture(command, raw, warmup_raw, timeout=180 if stress else None,
-                rss_ceiling_bytes=3 * 1024 * 1024 * 1024 if stress else None)
+    _, process_pid = run_capture(command, raw, warmup_raw, timeout=180 if stress else None,
+                                 rss_ceiling_bytes=3 * 1024 * 1024 * 1024 if stress else None)
     warmup_lines = warmup_raw.read_text().splitlines()
     metadata = {}
     csv_lines = []
@@ -232,6 +234,9 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                          "rss_after_construction_bytes", "retained_heap_world_alive_bytes", "retained_collection_count_delta"}
     if not expected_metadata.issubset(metadata):
         raise ValueError("missing construction or retained-memory sample")
+    marker = {"direct_kotlin": 1, "compatibility": 2}.get(api)
+    if marker is not None and (metadata.get("process_pid") != process_pid or metadata.get("route_marker") != marker):
+        raise ValueError("candidate process or route identity differs from the launcher")
     warmup_raw.write_text("\n".join(csv_lines) + "\n")
     with warmup_raw.open(newline="") as stream:
         warmup_rows = list(csv.DictReader(stream))
@@ -241,6 +246,7 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
         raise ValueError("retained-memory collection probe unavailable")
     rows = validate_csv(raw, family, variant, size, hz, steps, mode)
     result = summary(rows, hz, mode)
+    result["activity_status"] = activity_status(rows, family, variant, manifest()["families"][family][size], hz)
     empty_rss = metadata["rss_empty_harness_bytes"]
     construction_rss = metadata["rss_after_construction_bytes"]
     warmup_rss = [int(row["rss_bytes"]) for row in warmup_rows if int(row["rss_bytes"]) >= 0]
@@ -259,7 +265,7 @@ def run_scenario(java, classes, jar, out, family, variant, size, hz, steps, mode
                    "retained_collection_count_delta": metadata["retained_collection_count_delta"],
                    "cold_first_step_ns": int(warmup_rows[0]["elapsed_ns"]) if warmup_rows else None,
                    "cold_process_initialization_ns": None,
-                   "raw": raw.name, "raw_sha256": sha256(raw),
+                   "raw": raw.name, "raw_sha256": sha256(raw), "process_pid": process_pid,
                    "status": "capacity_report" if stress else "pilot_only" if steps < 600 * hz else "raw_unqualified"})
     return result
 
