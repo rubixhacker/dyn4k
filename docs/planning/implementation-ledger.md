@@ -8,6 +8,7 @@ The user authorized implementation, recommended remaining choices, and GitHub pu
 
 ## Work graph
 
+- [Run the fixed baseline corpus and inventory its compatibility surface](https://github.com/rubixhacker/dyn4k/issues/45): Luna; implementation in progress.
 - [Resolve staged vector and transform consumers on the pinned toolchain](https://github.com/rubixhacker/dyn4k/issues/33): Sol; implementation in progress.
 - [Create and query every baseline shape through both APIs](https://github.com/rubixhacker/dyn4k/issues/34): Sol; not started.
 - [Use baseline trees, filters, bounds, and collision objects from consumers](https://github.com/rubixhacker/dyn4k/issues/35): Sol; not started.
