@@ -31,12 +31,12 @@ import org.dyn4j.geometry.RobustGeometry
 import org.dyn4j.geometry.Vector2
 
 interface HullGenerator {
-    fun generate(vararg points: Vector2?): Array<Vector2>
-    fun generate(points: List<Vector2?>): List<Vector2>
+    fun generate(vararg points: Vector2?): Array<out Vector2?>
+    fun generate(points: List<Vector2?>): List<Vector2?>
 }
 
 abstract class AbstractHullGenerator : HullGenerator {
-    override fun generate(points: List<Vector2?>): List<Vector2> = generate(*points.toTypedArray()).asList()
+    override fun generate(points: List<Vector2?>): List<Vector2?> = generate(*points.toTypedArray()).asList()
 }
 
 internal class MinXYPointComparator : Comparator<Vector2> {
@@ -56,8 +56,8 @@ internal class ReferencePointComparator(val reference: Vector2) : Comparator<Vec
 }
 
 open class MonotoneChain : AbstractHullGenerator() {
-    override fun generate(vararg points: Vector2?): Array<Vector2> {
-        if (points.size <= 2) return points.shortHull()
+    override fun generate(vararg points: Vector2?): Array<out Vector2?> {
+        if (points.size <= 2) return points
         val sorted = points.requirePoints()
         sorted.sortWith(MinXYPointComparator())
         writeSorted(points, sorted)
@@ -114,8 +114,8 @@ open class MonotoneChain : AbstractHullGenerator() {
 }
 
 open class GrahamScan : AbstractHullGenerator() {
-    override fun generate(vararg points: Vector2?): Array<Vector2> {
-        if (points.size <= 2) return points.shortHull()
+    override fun generate(vararg points: Vector2?): Array<out Vector2?> {
+        if (points.size <= 2) return points
         val sorted = points.requirePoints()
         var minY = sorted[0]
         for (i in 1 until sorted.size) {
@@ -139,8 +139,8 @@ open class GrahamScan : AbstractHullGenerator() {
 }
 
 open class GiftWrap : AbstractHullGenerator() {
-    override fun generate(vararg points: Vector2?): Array<Vector2> {
-        if (points.size <= 2) return points.shortHull()
+    override fun generate(vararg points: Vector2?): Array<out Vector2?> {
+        if (points.size <= 2) return points
         val cloud = points.requirePoints()
         val leftMost = cloud.minWith(MinXYPointComparator())
         val hull = LinkedHashSet<Vector2>()
@@ -248,8 +248,8 @@ class LinkedVertexHull() {
 }
 
 open class DivideAndConquer : AbstractHullGenerator() {
-    override fun generate(vararg points: Vector2?): Array<Vector2> {
-        if (points.size <= 2) return points.shortHull()
+    override fun generate(vararg points: Vector2?): Array<out Vector2?> {
+        if (points.size <= 2) return points
         val sorted = points.requirePoints()
         sorted.sortWith(MinXYPointComparator())
         writeSorted(points, sorted)
@@ -265,9 +265,6 @@ open class DivideAndConquer : AbstractHullGenerator() {
 
 private fun Array<out Vector2?>.requirePoints(): Array<Vector2> =
     Array(size) { i -> this[i] ?: throw NullElementException("points", i) }
-
-@Suppress("UNCHECKED_CAST")
-private fun Array<out Vector2?>.shortHull(): Array<Vector2> = this as Array<Vector2>
 
 @Suppress("UNCHECKED_CAST")
 private fun writeSorted(input: Array<out Vector2?>, sorted: Array<Vector2>) {
