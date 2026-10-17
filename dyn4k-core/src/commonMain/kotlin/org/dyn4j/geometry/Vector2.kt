@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.PI
@@ -37,8 +36,8 @@ import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
 
 open class Vector2 : Copyable<Vector2> {
-    @JvmFieldBridge var x: Double = 0.0
-    @JvmFieldBridge var y: Double = 0.0
+    @kotlin.jvm.JvmField var x: Double = 0.0
+    @kotlin.jvm.JvmField var y: Double = 0.0
 
     constructor()
     constructor(vector: Vector2) { x = vector.x; y = vector.y }
@@ -192,10 +191,10 @@ open class Vector2 : Copyable<Vector2> {
     }
 
     companion object {
-        @JvmFieldBridge val X_AXIS = Vector2(1.0, 0.0)
-        @JvmFieldBridge val Y_AXIS = Vector2(0.0, 1.0)
-        @JvmFieldBridge val INV_X_AXIS = Vector2(-1.0, 0.0)
-        @JvmFieldBridge val INV_Y_AXIS = Vector2(0.0, -1.0)
+        @kotlin.jvm.JvmField val X_AXIS = Vector2(1.0, 0.0)
+        @kotlin.jvm.JvmField val Y_AXIS = Vector2(0.0, 1.0)
+        @kotlin.jvm.JvmField val INV_X_AXIS = Vector2(-1.0, 0.0)
+        @kotlin.jvm.JvmField val INV_Y_AXIS = Vector2(0.0, -1.0)
 
         @JvmStaticBridge fun create(magnitude: Double, direction: Double) =
             Vector2(magnitude * cos(direction), magnitude * sin(direction))

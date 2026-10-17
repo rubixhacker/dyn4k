@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.abs
@@ -33,9 +32,9 @@ import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
 
 open class Vector3 : Copyable<Vector3> {
-    @JvmFieldBridge var x: Double = 0.0
-    @JvmFieldBridge var y: Double = 0.0
-    @JvmFieldBridge var z: Double = 0.0
+    @kotlin.jvm.JvmField var x: Double = 0.0
+    @kotlin.jvm.JvmField var y: Double = 0.0
+    @kotlin.jvm.JvmField var z: Double = 0.0
 
     constructor()
     constructor(vector: Vector3) { x = vector.x; y = vector.y; z = vector.z }

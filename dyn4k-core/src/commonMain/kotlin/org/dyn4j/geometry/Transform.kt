@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.PI
@@ -34,14 +33,10 @@ import kotlin.math.sin
 import org.dyn4j.Copyable
 
 open class Transform : Transformable, Copyable<Transform> {
-    @get:kotlin.jvm.JvmName("getCostField")
-    @set:kotlin.jvm.JvmName("setCostField")
-    @JvmFieldBridge protected var cost: Double = 1.0
-    @get:kotlin.jvm.JvmName("getSintField")
-    @set:kotlin.jvm.JvmName("setSintField")
-    @JvmFieldBridge protected var sint: Double = 0.0
-    @JvmFieldBridge protected var x: Double = 0.0
-    @JvmFieldBridge protected var y: Double = 0.0
+    @kotlin.jvm.JvmField protected var cost: Double = 1.0
+    @kotlin.jvm.JvmField protected var sint: Double = 0.0
+    @kotlin.jvm.JvmField protected var x: Double = 0.0
+    @kotlin.jvm.JvmField protected var y: Double = 0.0
 
     constructor()
     constructor(transform: Transform) {

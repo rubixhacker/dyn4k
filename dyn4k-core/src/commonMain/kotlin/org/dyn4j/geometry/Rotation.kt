@@ -24,7 +24,6 @@
  */
 package org.dyn4j.geometry
 
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.JvmStaticBridge
 
 import kotlin.math.PI
@@ -38,12 +37,8 @@ import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
 
 open class Rotation : Copyable<Rotation> {
-    @get:kotlin.jvm.JvmName("getCostField")
-    @set:kotlin.jvm.JvmName("setCostField")
-    @JvmFieldBridge protected var cost: Double = 1.0
-    @get:kotlin.jvm.JvmName("getSintField")
-    @set:kotlin.jvm.JvmName("setSintField")
-    @JvmFieldBridge protected var sint: Double = 0.0
+    @kotlin.jvm.JvmField protected var cost: Double = 1.0
+    @kotlin.jvm.JvmField protected var sint: Double = 0.0
 
     protected constructor(cost: Double, sint: Double) { this.cost = cost; this.sint = sint }
     constructor()
