@@ -27,13 +27,19 @@ package org.dyn4j.geometry.simplify
 
 import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Vector2
+import kotlin.jvm.JvmName
 import kotlin.math.max
 
 open class SegmentTreeNode {
+    @get:JvmName("getLeft-dyn4k") @set:JvmName("setLeft-dyn4k")
     var left: SegmentTreeNode? = null
+    @get:JvmName("getRight-dyn4k") @set:JvmName("setRight-dyn4k")
     var right: SegmentTreeNode? = null
+    @get:JvmName("getParent-dyn4k") @set:JvmName("setParent-dyn4k")
     var parent: SegmentTreeNode? = null
+    @get:JvmName("getHeight-dyn4k") @set:JvmName("setHeight-dyn4k")
     var height = 0
+    @get:JvmName("getAabb-dyn4k")
     val aabb = AABB(0.0, 0.0, 0.0, 0.0)
     fun isLeaf(): Boolean = left == null
     override fun toString(): String = "RTreeNode[AABB=$aabb|Height=$height]"
@@ -46,10 +52,17 @@ class SegmentTreeLeaf(
     override fun toString(): String = "RTreeLeaf[P1=$point1|P2=$point2|AABB=$aabb|Height=$height]"
 }
 
-open class SimplePolygonVertex(val index: Int, val point: Vector2) {
+open class SimplePolygonVertex(
+    @get:JvmName("getIndex-dyn4k") val index: Int,
+    @get:JvmName("getPoint-dyn4k") val point: Vector2
+) {
+    @get:JvmName("getPrev-dyn4k") @set:JvmName("setPrev-dyn4k")
     var prev: SimplePolygonVertex? = null
+    @get:JvmName("getNext-dyn4k") @set:JvmName("setNext-dyn4k")
     var next: SimplePolygonVertex? = null
+    @get:JvmName("getPrevSegment-dyn4k") @set:JvmName("setPrevSegment-dyn4k")
     var prevSegment: SegmentTreeLeaf? = null
+    @get:JvmName("getNextSegment-dyn4k") @set:JvmName("setNextSegment-dyn4k")
     var nextSegment: SegmentTreeLeaf? = null
     override fun toString(): String = point.toString()
 }
