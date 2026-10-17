@@ -1,0 +1,51 @@
+{
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "candidate_artifact_sha256": null,
+  "candidate_runner_sha256": null,
+  "harness_sha256": "9f72b854b387169b05fb87a0e538a795476279893af8553aa9ddf55264c53b36",
+  "host": {
+    "charging_state": null,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "hostname": "bazzite",
+    "java_version": "openjdk version \"25.0.3\" 2026-04-21\nOpenJDK Runtime Environment (build 25.0.3+-15898627-b508.16)\nOpenJDK 64-Bit Server VM (build 25.0.3+-15898627-b508.16, mixed mode)",
+    "machine": "x86_64",
+    "os_version": "NAME=\"Bazzite\"\nVERSION=\"44.20261012.0 (Silverblue)\"\nRELEASE_TYPE=stable\nID=bazzite\nID_LIKE=\"fedora\"\nVERSION_ID=44\nVERSION_CODENAME=\"Silverblue\"\nPRETTY_NAME=\"Bazzite\"\nANSI_COLOR=\"0;38;2;138;43;226\"\nLOGO=bazzite-logo\nCPE_NAME=\"cpe:/o:universal-blue:bazzite:44\"\nDEFAULT_HOSTNAME=\"bazzite\"\nHOME_URL=\"https://bazzite.gg\"\nDOCUMENTATION_URL=\"https://docs.bazzite.gg\"\nSUPPORT_URL=\"https://discord.bazzite.gg\"\nBUG_REPORT_URL=\"https://github.com/ublue-os/bazzite/issues/\"\nSUPPORT_END=2027-05-19\nVARIANT=\"Silverblue\"\nVARIANT_ID=bazzite-gnome\nOSTREE_VERSION='44.20261012.0'\nBUILD_ID=\"Stable (F44.20261012)\"\nBOOTLOADER_NAME=\"Bazzite Stable (F44.20261012)\"\nIMAGE_ID=\"bazzite-gnome-44.20261012\"",
+    "power_mode": null,
+    "product_name": "Desktop (AMD Ryzen AI Max 300 Series)",
+    "product_version": "A6",
+    "ram_kib": 131147088,
+    "release": "7.2.9-ogc3.1.fc44.x86_64",
+    "system": "Linux",
+    "temperature_c": null,
+    "throttling": null
+  },
+  "java_flags": [
+    "-Xms256m",
+    "-Xmx2g",
+    "-XX:+UseG1GC"
+  ],
+  "manifest_sha256": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+  "plateau": {
+    "cycles": 100,
+    "raw": "lifecycle.replace.small.60hz.baseline.plateau.csv",
+    "sha256": "716d30c5b071ec5427f2f202e0b70771dde45089e909058ee0d560746a0f7ea0",
+    "warmup_raw": "lifecycle.replace.small.60hz.baseline.plateau.warmup.csv",
+    "warmup_sha256": "5bb331551fff80597d4dc872cb591ec52063005d75838341ca32c20c7a99d6c4"
+  },
+  "probe": {
+    "allocation_supported": true,
+    "collection_count_delta": 1,
+    "controlled_allocated_bytes": 1164520,
+    "controlled_payload_bytes": 1048576,
+    "heap_after_collection_bytes": 807224,
+    "heap_live_bytes": 3145728,
+    "rss_after_collection_bytes": 61362176,
+    "rss_live_bytes": 47685632,
+    "timer_median_pair_ns": 30,
+    "timer_min_positive_ns": 20,
+    "timer_p99_pair_ns": 31
+  },
+  "qualification": "unpassed",
+  "results": [],
+  "schema": 1
+}

@@ -1,0 +1,10 @@
+{
+  "memory_attribution": "unvalidated",
+  "plateau": {
+    "status": "stable",
+    "warmup": "not_converged"
+  },
+  "qualification": "unpassed",
+  "scenarios": [],
+  "validated_probe": true
+}
