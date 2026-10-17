@@ -24,14 +24,13 @@
  */
 package org.dyn4j.dynamics
 
-import org.dyn4j.DataContainer
 import org.dyn4j.collision.Fixture
 import org.dyn4j.exception.ValueOutOfRangeException
 import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Mass
 import kotlin.jvm.JvmField
 
-open class BodyFixture : Fixture, DataContainer {
+open class BodyFixture : Fixture {
     @JvmField protected var density = DEFAULT_DENSITY
     @JvmField protected var friction = DEFAULT_FRICTION
     @JvmField protected var restitution = DEFAULT_RESTITUTION

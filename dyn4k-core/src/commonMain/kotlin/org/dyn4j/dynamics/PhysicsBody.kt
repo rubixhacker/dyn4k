@@ -24,19 +24,15 @@
  */
 package org.dyn4j.dynamics
 
-import org.dyn4j.DataContainer
-import org.dyn4j.Ownable
 import org.dyn4j.collision.CollisionBody
 import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Mass
 import org.dyn4j.geometry.MassType
-import org.dyn4j.geometry.Shiftable
 import org.dyn4j.geometry.Transform
-import org.dyn4j.geometry.Transformable
 import org.dyn4j.geometry.Vector2
 
-interface PhysicsBody : CollisionBody<BodyFixture>, Transformable, Shiftable, DataContainer, Ownable {
+interface PhysicsBody : CollisionBody<BodyFixture> {
     override fun copy(): PhysicsBody
     fun addFixture(convex: Convex, density: Double): BodyFixture
     fun addFixture(convex: Convex?, density: Double, friction: Double, restitution: Double): BodyFixture
