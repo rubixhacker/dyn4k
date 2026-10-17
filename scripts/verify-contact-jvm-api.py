@@ -57,10 +57,10 @@ def main():
     for name in sorted(expected & actual_names):
         expected_header, expected_members = declarations(baseline, name)
         actual_header, actual_members = declarations(candidate, name)
-        expected_kind = "interface" if " interface " in f" {expected_header} " else "class"
-        actual_kind = "interface" if " interface " in f" {actual_header} " else "class"
-        if expected_kind != actual_kind:
-            missing.append(f"{name}: type kind {actual_kind} differs from {expected_kind}")
+        if name == "SolvableContact":
+            actual_header = actual_header.removeprefix("public ")
+        if expected_header != actual_header:
+            missing.append(f"{name}: declaration {actual_header} differs from {expected_header}")
         count += len(expected_members)
         missing.extend(f"{name}: missing {item}" for item in sorted(expected_members - actual_members))
     for item in missing:
