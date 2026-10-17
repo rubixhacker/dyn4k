@@ -1,0 +1,22 @@
+{
+  "declaration_sha256": "9794a4ef64c93f6ff76afb03d98784b27be68fe413256362abf1a3f84cf96368",
+  "capture_sha256": "8318db8632f0d7261c11ad7e5406ca6bb04a020074b6aa509531e403f622fcbf",
+  "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "cases": {
+    "weld-spring-equal": {
+      "file": "weld-spring-equal.jsonl.gz",
+      "gzip_sha256": "dc0dd885d8ae3fe47ebda3e929a325a2c2dc49f940ed7a148f8e1bf4810e69a3",
+      "stream_sha256": "da4166db3469c1232ffc3f59f7a026a8f3eaca0bd3144cee542b9924a4aa99dc",
+      "input_sha256": "e13d7f7d81a436704a52e75e0d56ad52d0cfbfa862a768cc60b040ec82c68a90",
+      "counts": {"inputs": 1, "event": 108000, "state": 36000}
+    },
+    "pulley-taut": {
+      "file": "pulley-taut.jsonl.gz",
+      "gzip_sha256": "e4196c000b26fa7ae3ffe7fd5e7f2e995ed94a89d25a1d33264870438edf6fb6",
+      "stream_sha256": "10c1f904f5d66531bd52e86fe8ab52319a8896ccdbf2fd6f46f6244891fb6cf7",
+      "input_sha256": "ad630ebee35adbd812e1efbf694a2704f0a307784f0fb96ebdc9c5460b539290",
+      "counts": {"inputs": 1, "event": 108000, "state": 36000}
+    }
+  }
+}
