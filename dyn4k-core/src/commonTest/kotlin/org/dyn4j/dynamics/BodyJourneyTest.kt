@@ -94,4 +94,26 @@ class BodyJourneyTest {
         assertFailsWith<ValueOutOfRangeException> { step.update(0.0) }
         assertEquals(0.25, step.getDeltaTime())
     }
+
+    @Test
+    fun restThresholdsCallBothOverriddenGetters() {
+        val body = Body()
+        body.addFixture(Circle(1.0))
+        body.setMass(MassType.NORMAL)
+        body.setLinearVelocity(10.0, 0.0)
+        val calls = StringBuilder()
+        val settings = object : Settings() {
+            override fun getMaximumAtRestLinearVelocitySquared(): Double {
+                calls.append('L')
+                return super.getMaximumAtRestLinearVelocitySquared()
+            }
+
+            override fun getMaximumAtRestAngularVelocity(): Double {
+                calls.append('A')
+                return super.getMaximumAtRestAngularVelocity()
+            }
+        }
+        assertEquals(0.0, body.updateAtRestTime(TimeStep(0.1), settings))
+        assertEquals("LA", calls.toString())
+    }
 }
