@@ -1,0 +1,467 @@
+{
+  "memory_attribution": "unvalidated",
+  "noise_failures": [],
+  "noise_runs": 3,
+  "pilot": {
+    "ccd.default.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 264281,
+        "p99_step_ns": 1475747,
+        "peak_rss_delta_bytes_diagnostic": 28094464,
+        "process_pid": 3178923,
+        "state_checksum_sha256": "9de95cfe24d760948232472dd8180389dce60786ab321d967abc739f8c5b7b12",
+        "total_allocation_bytes": 3926632,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 241608,
+        "p99_step_ns": 1655026,
+        "peak_rss_delta_bytes_diagnostic": 39911424,
+        "process_pid": 3180051,
+        "state_checksum_sha256": "5241e7941fd6503922124906dc796051ba973c1a9846d585891f5fbee8d5f948",
+        "total_allocation_bytes": 5486736,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 296061,
+        "p99_step_ns": 1640379,
+        "peak_rss_delta_bytes_diagnostic": 34770944,
+        "process_pid": 3179546,
+        "state_checksum_sha256": "9ae6edd6dbab4299e5860d32ad270aca3009a4fd700bd4213aa5266ad1394918",
+        "total_allocation_bytes": 4842120,
+        "warmup": "unvalidated"
+      }
+    },
+    "ccd.default.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 324715,
+        "p99_step_ns": 1388451,
+        "peak_rss_delta_bytes_diagnostic": 27758592,
+        "process_pid": 3178019,
+        "state_checksum_sha256": "9de95cfe24d760948232472dd8180389dce60786ab321d967abc739f8c5b7b12",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 242460,
+        "p99_step_ns": 1718356,
+        "peak_rss_delta_bytes_diagnostic": 38621184,
+        "process_pid": 3178526,
+        "state_checksum_sha256": "5241e7941fd6503922124906dc796051ba973c1a9846d585891f5fbee8d5f948",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 369701,
+        "p99_step_ns": 1707656,
+        "peak_rss_delta_bytes_diagnostic": 34947072,
+        "process_pid": 3178262,
+        "state_checksum_sha256": "9ae6edd6dbab4299e5860d32ad270aca3009a4fd700bd4213aa5266ad1394918",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    },
+    "joint.mixed_all_types.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 535415,
+        "p99_step_ns": 2185722,
+        "peak_rss_delta_bytes_diagnostic": 40890368,
+        "process_pid": 3176138,
+        "state_checksum_sha256": "d319c24a2e3c0650a59e029fbdac00140bc3c0c4ff82ad5448abe61847a589a0",
+        "total_allocation_bytes": 15090560,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 604776,
+        "p99_step_ns": 2578086,
+        "peak_rss_delta_bytes_diagnostic": 46854144,
+        "process_pid": 3177569,
+        "state_checksum_sha256": "7c9c5f06c61825f9f948ebb428337088edf7f3ceabc3cec6137745ab31ab9413",
+        "total_allocation_bytes": 17333392,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 568858,
+        "p99_step_ns": 2825615,
+        "peak_rss_delta_bytes_diagnostic": 46092288,
+        "process_pid": 3176446,
+        "state_checksum_sha256": "7c9c5f06c61825f9f948ebb428337088edf7f3ceabc3cec6137745ab31ab9413",
+        "total_allocation_bytes": 17328800,
+        "warmup": "unvalidated"
+      }
+    },
+    "joint.mixed_all_types.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 471754,
+        "p99_step_ns": 2255836,
+        "peak_rss_delta_bytes_diagnostic": 41893888,
+        "process_pid": 3173776,
+        "state_checksum_sha256": "d319c24a2e3c0650a59e029fbdac00140bc3c0c4ff82ad5448abe61847a589a0",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 553269,
+        "p99_step_ns": 3611315,
+        "peak_rss_delta_bytes_diagnostic": 50192384,
+        "process_pid": 3174959,
+        "state_checksum_sha256": "7c9c5f06c61825f9f948ebb428337088edf7f3ceabc3cec6137745ab31ab9413",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 545363,
+        "p99_step_ns": 2488296,
+        "peak_rss_delta_bytes_diagnostic": 47235072,
+        "process_pid": 3174611,
+        "state_checksum_sha256": "7c9c5f06c61825f9f948ebb428337088edf7f3ceabc3cec6137745ab31ab9413",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    },
+    "lifecycle.replace.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 634052,
+        "p99_step_ns": 1164797,
+        "peak_rss_delta_bytes_diagnostic": 71368704,
+        "process_pid": 3185963,
+        "state_checksum_sha256": "b3e4d497e64be72fbc2dae3de12041d58ccc90ebb148bffbd0dc1cae1ef58176",
+        "total_allocation_bytes": 20042000,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 689346,
+        "p99_step_ns": 1296748,
+        "peak_rss_delta_bytes_diagnostic": 85536768,
+        "process_pid": 3186888,
+        "state_checksum_sha256": "94ef191270268bfa51f20bc23ea3b070f8317c5b2190e4d96b47cee80f8a513f",
+        "total_allocation_bytes": 22014720,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 653208,
+        "p99_step_ns": 1204032,
+        "peak_rss_delta_bytes_diagnostic": 82628608,
+        "process_pid": 3186562,
+        "state_checksum_sha256": "94ef191270268bfa51f20bc23ea3b070f8317c5b2190e4d96b47cee80f8a513f",
+        "total_allocation_bytes": 21527872,
+        "warmup": "unvalidated"
+      }
+    },
+    "lifecycle.replace.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 671493,
+        "p99_step_ns": 1320833,
+        "peak_rss_delta_bytes_diagnostic": 75091968,
+        "process_pid": 3184331,
+        "state_checksum_sha256": "b3e4d497e64be72fbc2dae3de12041d58ccc90ebb148bffbd0dc1cae1ef58176",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 714034,
+        "p99_step_ns": 1170338,
+        "peak_rss_delta_bytes_diagnostic": 84942848,
+        "process_pid": 3185743,
+        "state_checksum_sha256": "94ef191270268bfa51f20bc23ea3b070f8317c5b2190e4d96b47cee80f8a513f",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 777333,
+        "p99_step_ns": 1287881,
+        "peak_rss_delta_bytes_diagnostic": 78897152,
+        "process_pid": 3185431,
+        "state_checksum_sha256": "94ef191270268bfa51f20bc23ea3b070f8317c5b2190e4d96b47cee80f8a513f",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    },
+    "lifecycle.wake.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "unvalidated",
+        "median_step_ns": 679417,
+        "p99_step_ns": 1193893,
+        "peak_rss_delta_bytes_diagnostic": 79044608,
+        "process_pid": 3182918,
+        "state_checksum_sha256": "1c0b082661351c832996b7fa591f46d369fc86f8e5691e53273039c101104910",
+        "total_allocation_bytes": 20030536,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "unvalidated",
+        "median_step_ns": 686250,
+        "p99_step_ns": 1186869,
+        "peak_rss_delta_bytes_diagnostic": 85233664,
+        "process_pid": 3183617,
+        "state_checksum_sha256": "ba3b68d8873fb95db74a5042b59923c88b1a83baa2fa934501ae3641cacbf421",
+        "total_allocation_bytes": 20926552,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "unvalidated",
+        "median_step_ns": 654851,
+        "p99_step_ns": 1193552,
+        "peak_rss_delta_bytes_diagnostic": 74063872,
+        "process_pid": 3183182,
+        "state_checksum_sha256": "ba3b68d8873fb95db74a5042b59923c88b1a83baa2fa934501ae3641cacbf421",
+        "total_allocation_bytes": 21409672,
+        "warmup": "unvalidated"
+      }
+    },
+    "lifecycle.wake.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "unvalidated",
+        "median_step_ns": 672685,
+        "p99_step_ns": 1170629,
+        "peak_rss_delta_bytes_diagnostic": 75808768,
+        "process_pid": 3181305,
+        "state_checksum_sha256": "1c0b082661351c832996b7fa591f46d369fc86f8e5691e53273039c101104910",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "unvalidated",
+        "median_step_ns": 743298,
+        "p99_step_ns": 1272241,
+        "peak_rss_delta_bytes_diagnostic": 85639168,
+        "process_pid": 3182183,
+        "state_checksum_sha256": "ba3b68d8873fb95db74a5042b59923c88b1a83baa2fa934501ae3641cacbf421",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "unvalidated",
+        "median_step_ns": 684818,
+        "p99_step_ns": 1362904,
+        "peak_rss_delta_bytes_diagnostic": 76455936,
+        "process_pid": 3181928,
+        "state_checksum_sha256": "ba3b68d8873fb95db74a5042b59923c88b1a83baa2fa934501ae3641cacbf421",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    },
+    "pile.default.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 558278,
+        "p99_step_ns": 1218279,
+        "peak_rss_delta_bytes_diagnostic": 73211904,
+        "process_pid": 3172548,
+        "state_checksum_sha256": "8bec4249746d9691f5990324480e153bb30d87ed9a57c02dbf76e8259b70bd79",
+        "total_allocation_bytes": 27077424,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 663407,
+        "p99_step_ns": 1440129,
+        "peak_rss_delta_bytes_diagnostic": 87990272,
+        "process_pid": 3173210,
+        "state_checksum_sha256": "28e8f794f2e4296ba943475d765817abb73856c4e7f13556d10edb73dbbef270",
+        "total_allocation_bytes": 27683896,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 628371,
+        "p99_step_ns": 1330241,
+        "peak_rss_delta_bytes_diagnostic": 80674816,
+        "process_pid": 3172903,
+        "state_checksum_sha256": "28e8f794f2e4296ba943475d765817abb73856c4e7f13556d10edb73dbbef270",
+        "total_allocation_bytes": 27008552,
+        "warmup": "unvalidated"
+      }
+    },
+    "pile.default.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 694907,
+        "p99_step_ns": 1302198,
+        "peak_rss_delta_bytes_diagnostic": 72339456,
+        "process_pid": 3170491,
+        "state_checksum_sha256": "8bec4249746d9691f5990324480e153bb30d87ed9a57c02dbf76e8259b70bd79",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 700838,
+        "p99_step_ns": 1474554,
+        "peak_rss_delta_bytes_diagnostic": 89812992,
+        "process_pid": 3171761,
+        "state_checksum_sha256": "28e8f794f2e4296ba943475d765817abb73856c4e7f13556d10edb73dbbef270",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 677003,
+        "p99_step_ns": 1373994,
+        "peak_rss_delta_bytes_diagnostic": 81584128,
+        "process_pid": 3170699,
+        "state_checksum_sha256": "28e8f794f2e4296ba943475d765817abb73856c4e7f13556d10edb73dbbef270",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    },
+    "separated.default.small.60hz.allocation.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 146748,
+        "p99_step_ns": 280101,
+        "peak_rss_delta_bytes_diagnostic": 21577728,
+        "process_pid": 3169293,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": 1015584,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 159863,
+        "p99_step_ns": 501551,
+        "peak_rss_delta_bytes_diagnostic": 30838784,
+        "process_pid": 3170250,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": 1792184,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 132711,
+        "p99_step_ns": 427921,
+        "peak_rss_delta_bytes_diagnostic": 30834688,
+        "process_pid": 3169800,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": 1808088,
+        "warmup": "unvalidated"
+      }
+    },
+    "separated.default.small.60hz.timing.repeat1": {
+      "baseline": {
+        "activity": "valid",
+        "median_step_ns": 133623,
+        "p99_step_ns": 312231,
+        "peak_rss_delta_bytes_diagnostic": 22224896,
+        "process_pid": 3166931,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "compatibility": {
+        "activity": "valid",
+        "median_step_ns": 153871,
+        "p99_step_ns": 447368,
+        "peak_rss_delta_bytes_diagnostic": 32743424,
+        "process_pid": 3167793,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median_step_ns": 124276,
+        "p99_step_ns": 333382,
+        "peak_rss_delta_bytes_diagnostic": 28180480,
+        "process_pid": 3167480,
+        "state_checksum_sha256": "c81950b9467ba29a0452ebe27e409f497312c988311685a83c78f6f454bf165a",
+        "total_allocation_bytes": null,
+        "warmup": "unvalidated"
+      }
+    }
+  },
+  "pilot_failures": [],
+  "pilot_runs": 36,
+  "qualification": "unpassed",
+  "reference_environment": "unavailable",
+  "schema": 1,
+  "short_window_intervals": {
+    "separated.default.small.60hz": {
+      "compatibility": {
+        "activity": "valid",
+        "median": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.6697017822481031,
+          "upper_95": 0.7749645088357464
+        },
+        "p99": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.7588559713157907,
+          "upper_95": 1.071136018147305
+        },
+        "qualification": "unpassed_short_warmup_and_uncalibrated_host",
+        "total": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.680779120382563,
+          "upper_95": 0.7995299770705631
+        },
+        "warmup": "unvalidated"
+      },
+      "compatibility_vs_direct": {
+        "median": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.7815034462291038,
+          "upper_95": 0.9105290600281781
+        },
+        "p99": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.6869356292563378,
+          "upper_95": 0.9536807741113205
+        },
+        "qualification": "unpassed_short_warmup_and_uncalibrated_host",
+        "total": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.770597281835556,
+          "upper_95": 0.8813462213227552
+        }
+      },
+      "direct_kotlin": {
+        "activity": "valid",
+        "median": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.7986562150055991,
+          "upper_95": 0.9203118050516164
+        },
+        "p99": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.8884146406854913,
+          "upper_95": 1.4184961225249728
+        },
+        "qualification": "unpassed_short_warmup_and_uncalibrated_host",
+        "total": {
+          "block_seconds": 1,
+          "draws": 2000,
+          "lower_95": 0.8458754769838178,
+          "upper_95": 0.9498018033858102
+        },
+        "warmup": "unvalidated"
+      }
+    }
+  }
+}

@@ -64,6 +64,8 @@ def verify_identity(identity):
         require(identity["source_trees"] == trees and
                 trees == {name: git("rev-parse", f"HEAD:{name}").decode().strip() for name in trees},
                 "source trees differ from the exact commit")
+        require(not git("status", "--porcelain", "--", "dyn4k", "dyn4k-core").strip(),
+                "engine source worktree differs from the exact commit")
         require(identity["staging_repository"] == str(STAGING.resolve()),
                 "staging repository differs")
         routes = read_paths()
@@ -376,7 +378,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("archive")
     args = parser.parse_args()
-    print(json.dumps(verify(args.archive), sort_keys=True))
+    try:
+        report = verify(args.archive)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration, csv.Error) as exc:
+        print(json.dumps({"archive_audit": "unavailable", "qualification": "unpassed",
+                          "reason": str(exc)}, sort_keys=True))
+        raise SystemExit(1) from None
+    print(json.dumps(report, sort_keys=True))
 
 
 if __name__ == "__main__":

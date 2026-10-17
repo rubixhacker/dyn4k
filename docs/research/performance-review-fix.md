@@ -1,5 +1,7 @@
 # Corrected staged JVM performance pilots
 
+**Superseded audit notice (2026-10-17):** The version 2 observations below retain the one-world runner repair, but their archive lacks the raw stderr marker stream and capture-tool source record required by the later audit. The current verifier reports `archive_audit: unavailable` for this historical archive. Use the [version 3 audit report](performance-audit-review-fix.md) for current bounded observations. Neither archive qualifies performance.
+
 The [performance manifest task](https://github.com/rubixhacker/dyn4k/issues/17) remains open. This report replaces the bounded timing, allocation, noise, and retained-memory observations in [the first candidate report](performance-candidate.md). The [version 1 raw archive](performance-candidate-v1/) remains available and is marked superseded for those observations. No approved budget, fixture geometry, target, or runtime row changed.
 
 ## What changed

@@ -1,6 +1,8 @@
 import csv
 import json
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +12,37 @@ from verify_candidate_archive import verify
 
 
 ARCHIVE = Path(__file__).resolve().parents[2] / "docs/research/performance-candidate-v3"
+SUPERSEDED = ARCHIVE.with_name("performance-candidate-v2")
+
+
+def write_identity(copied, identity):
+    identity_file = copied / "candidate-identity-at-pilot.json"
+    identity_file.write_text(json.dumps(identity))
+    digest = sha256(identity_file)
+    for name in ("pilot", "noise", "memory", "plateau"):
+        path = copied / name / "evidence.json"
+        evidence = json.loads(path.read_text())
+        evidence["candidate_identity"] = identity
+        evidence["candidate_identity_sha256"] = digest
+        path.write_text(json.dumps(evidence))
+    for name in ("provider-identity.json", "negative-controls/negative-controls.json"):
+        path = copied / name
+        data = json.loads(path.read_text())
+        data["candidate_identity_sha256"] = digest
+        path.write_text(json.dumps(data))
 
 
 class ArchiveVerificationTest(unittest.TestCase):
+    def test_unverifiable_old_archive_reports_unavailable(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(Path(__file__).with_name("verify_candidate_archive.py")),
+             str(SUPERSEDED)], capture_output=True, text=True,
+        )
+        self.assertEqual(1, result.returncode)
+        report = json.loads(result.stdout)
+        self.assertEqual("unavailable", report["archive_audit"])
+        self.assertEqual("unpassed", report["qualification"])
+
     def test_negative_timing_channels_are_rejected(self):
         for channel in ("mutation_ns", "lateness_ns", "allocation_bytes"):
             with self.subTest(channel=channel), tempfile.TemporaryDirectory() as folder:
@@ -108,30 +138,26 @@ class ArchiveVerificationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "retained_heap_world_alive_bytes"):
                 verify(copied)
 
-    def test_forged_source_identity_is_rejected(self):
-        with tempfile.TemporaryDirectory() as folder:
-            copied = Path(folder) / "archive"
-            shutil.copytree(ARCHIVE, copied)
-            identity_file = copied / "candidate-identity-at-pilot.json"
-            identity = json.loads(identity_file.read_text())
-            identity["source_commit"] = "0" * 40
-            original = next(path for path in identity["sha256"] if path.endswith("/BaselinePilot.java"))
-            identity["sha256"]["/tmp/dyn4k-review-missing/BaselinePilot.java"] = identity["sha256"].pop(original)
-            identity_file.write_text(json.dumps(identity))
-            digest = sha256(identity_file)
-            for name in ("pilot", "noise", "memory", "plateau"):
-                path = copied / name / "evidence.json"
-                evidence = json.loads(path.read_text())
-                evidence["candidate_identity"] = identity
-                evidence["candidate_identity_sha256"] = digest
-                path.write_text(json.dumps(evidence))
-            for name in ("provider-identity.json", "negative-controls/negative-controls.json"):
-                path = copied / name
-                data = json.loads(path.read_text())
-                data["candidate_identity_sha256"] = digest
-                path.write_text(json.dumps(data))
-            with self.assertRaisesRegex(ValueError, "source|commit|missing"):
-                verify(copied)
+    def test_forged_source_and_artifact_identity_is_rejected(self):
+        for case in ("missing_commit", "missing_source", "altered_artifact"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                copied = Path(folder) / "archive"
+                shutil.copytree(ARCHIVE, copied)
+                identity = json.loads((copied / "candidate-identity-at-pilot.json").read_text())
+                if case == "missing_commit":
+                    identity["source_commit"] = "0" * 40
+                elif case == "missing_source":
+                    original = next(path for path in identity["sha256"]
+                                    if path.endswith("/BaselinePilot.java"))
+                    identity["sha256"]["/tmp/dyn4k-review-missing/BaselinePilot.java"] = (
+                        identity["sha256"].pop(original))
+                else:
+                    artifact = next(path for path in identity["sha256"]
+                                    if path.endswith("/dyn4k-core-jvm-0.1.0-alpha.1.jar"))
+                    identity["sha256"][artifact] = "0" * 64
+                write_identity(copied, identity)
+                with self.assertRaisesRegex(ValueError, "source|commit|artifact"):
+                    verify(copied)
 
     def test_altered_indexed_median_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
