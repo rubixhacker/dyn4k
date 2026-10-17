@@ -1,5 +1,7 @@
 # Staged JVM candidate performance pilots
 
+**Superseded measurement notice (2026-10-17):** The timing, allocation, noise, and retained-memory readings below used a runner that kept the warm fixture reachable during measurement. Preserve this version 1 archive as historical raw evidence. Use the [corrected runner and version 2 archive](performance-review-fix.md) for current bounded observations. Neither archive qualifies performance.
+
 The [performance manifest task](https://github.com/rubixhacker/dyn4k/issues/17) remains open. These runs exercise the two public candidate routes on one available JVM host. They do not qualify performance against the [approved policy](https://github.com/rubixhacker/dyn4k/issues/8#issuecomment-5674480273).
 
 ## What ran
