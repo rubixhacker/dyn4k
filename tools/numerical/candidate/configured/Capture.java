@@ -33,6 +33,7 @@ public final class Capture {
     public static void open(Path path, String selected) throws IOException {
         directory=path; filter=selected;
         Files.createDirectories(path);
+        RuntimeStamp.write(path, World.class, Capture.class);
         queries=Files.newBufferedWriter(path.resolve("queries.jsonl"), StandardOpenOption.CREATE_NEW);
         summary=Files.newBufferedWriter(path.resolve("summary.jsonl"), StandardOpenOption.CREATE_NEW);
     }

@@ -1,11 +1,11 @@
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import compare
@@ -70,12 +70,32 @@ def clean_commit():
     return commit
 
 
-def runtime_identity():
-    version = subprocess.run(("java", "-version"), check=True, capture_output=True).stderr.decode().splitlines()[0]
-    system = os.uname()
-    return {"java_version": version, "os": system.sysname,
-            "os_release": system.release, "architecture": system.machine,
-            "build_configuration": "staged JVM release; Gradle Java consumer"}
+RUNTIME_FIELDS = {"process_command", "process_id", "process_start", "java_home",
+                  "java_version", "java_vm_name", "java_vm_version", "os_name",
+                  "os_arch", "engine_location", "recorder_location"}
+
+
+def runtime_identity(trace):
+    stamp = Path(trace).parent / "runtime.json"
+    if not stamp.is_file():
+        raise compare.Rejected("recorder process runtime stamp is missing")
+    runtime = compare.parse(stamp.read_bytes())
+    if not isinstance(runtime, dict) or set(runtime) != RUNTIME_FIELDS:
+        raise compare.Rejected("recorder process runtime stamp has missing or extra fields")
+    if any(not isinstance(value, str) or not value for value in runtime.values()):
+        raise compare.Rejected("recorder process runtime stamp has an empty or invalid value")
+    location = urlparse(runtime["engine_location"])
+    if location.scheme != "file" or location.netloc not in ("", "localhost"):
+        raise compare.Rejected("loaded engine has no local code source")
+    loaded = Path(unquote(location.path))
+    if not loaded.is_file() or sha256(loaded.read_bytes()) != sha256(ARTIFACT.read_bytes()):
+        raise compare.Rejected("loaded engine differs from staged candidate artifact")
+    command = Path(runtime["process_command"])
+    if not command.is_file():
+        raise compare.Rejected("recorder process executable is missing")
+    runtime["process_command_sha256"] = sha256(command.read_bytes())
+    runtime["runtime_stamp_sha256"] = sha256(stamp.read_bytes())
+    return runtime
 
 
 def seal(args, fixture, counts):
@@ -102,7 +122,7 @@ def seal(args, fixture, counts):
         "executed_counts": counts,
         "skipped": 0,
         "build_config_sha256": build_config_hash(),
-        "runtime": runtime_identity(),
+        "runtime": runtime_identity(args.trace),
     }
     output = Path(args.output)
     with output.open("x", encoding="utf-8") as stream:
@@ -131,7 +151,7 @@ def verify(args, fixture, counts):
         raise compare.Rejected("receipt trace hash differs")
     if receipt["build_config_sha256"] != build_config_hash():
         raise compare.Rejected("receipt build configuration differs")
-    if receipt["runtime"] != runtime_identity():
+    if receipt["runtime"] != runtime_identity(args.trace):
         raise compare.Rejected("receipt runtime differs")
     compare.load_receipt(args.receipt, args.trace, fixture, receipt["source_sha256"],
                          receipt["artifact_sha256"], receipt["candidate_commit"], counts)

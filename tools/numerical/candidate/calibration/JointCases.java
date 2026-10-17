@@ -106,15 +106,20 @@ public final class JointCases {
         String id="P-JCP-"+type+"-"+point+"-"+variant;
         if(!Capture.accepts(id))return;
         preparationId=id+"-preparation";
-        Checkpoint cp=checkpoint(type,point);Seed s=cp.seed;configure.accept(s);
-        Capture.record(id,"checkpoint-provenance","058bf6d982a0fb89b54050f929f6ea9dae53b714",cp.method,cp.actions,"variant="+variant,"600 continuation steps at 1/60; step201/401 are continuation-relative");
-        IntConsumer actions=schedule==null?step->{}:schedule.bind(s);
-        Capture.run(id,s.world,600,1.0/60,1,0,0,step->{
-            if(step==1)Capture.record(id,"checkpoint-input-binding",cp.method,cp.actions,variant);
-            actions.accept(step);
-        });
+        try {
+            Checkpoint cp=checkpoint(type,point);Seed s=cp.seed;configure.accept(s);
+            Capture.record(id,"checkpoint-provenance","058bf6d982a0fb89b54050f929f6ea9dae53b714",cp.method,cp.actions,"variant="+variant,"600 continuation steps at 1/60; step201/401 are continuation-relative");
+            IntConsumer actions=schedule==null?step->{}:schedule.bind(s);
+            Capture.run(id,s.world,600,1.0/60,1,0,0,step->{
+                if(step==1)Capture.record(id,"checkpoint-input-binding",cp.method,cp.actions,variant);
+                actions.accept(step);
+            });
+        } catch(RuntimeException failure) { Capture.failedSetup(id,failure); }
     }
-    private static void advance(Seed s,int count){Capture.run(preparationId,s.world,count,1.0/60,1,0,0,step->{});}
+    private static void advance(Seed s,int count){
+        if(!Capture.run(preparationId,s.world,count,1.0/60,1,0,0,step->{}))
+            throw new IllegalStateException("checkpoint preparation rejected: " + preparationId);
+    }
     private static Checkpoint checkpoint(String type,String point){
         Seed s;
         if(type.equals("Motor")){s=seed(type);advance(s,25);MotorJoint<?> m=(MotorJoint<?>)s.joint;m.setMaximumForce(100);m.setMaximumTorque(10);return new Checkpoint(s,"MotorJointSimulationTest.simple","initial; step25; setMaximumForce(100); setMaximumTorque(10); before source step26");}
@@ -142,12 +147,16 @@ public final class JointCases {
     private interface Schedule { IntConsumer bind(Seed s); }
     private static void row(String type,String name,Consumer<Seed> configure,Schedule schedule) {
         attempted++;
-        Seed s=compatibleSeed(type,name);
         String id="P-J-"+type+"-"+name;
-        try { configure.accept(s); }
-        catch (IllegalArgumentException e) { rejected++; Capture.rejected(id,e.toString()); return; }
-        Capture.run(id,s.world,600,1.0/60,1,0,0,schedule == null ? step -> {} : schedule.bind(s));
-        completed++;
+        if (!Capture.accepts(id)) return;
+        try {
+            Seed s=compatibleSeed(type,name);
+            configure.accept(s);
+            if (Capture.run(id,s.world,600,1.0/60,1,0,0,schedule == null ? step -> {} : schedule.bind(s))) completed++;
+        } catch (RuntimeException failure) {
+            rejected++;
+            Capture.failedSetup(id,failure);
+        }
     }
     private static void grid(String type,String field,double[] values) {
         if (!has(type,"set"+field,double.class)) return;

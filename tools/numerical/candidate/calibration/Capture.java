@@ -26,6 +26,7 @@ public final class Capture {
     static final IdentityHashMap<Body,double[]> initial = new IdentityHashMap<>();
     static final IdentityHashMap<Body,double[]> rotations = new IdentityHashMap<>();
     static int sleepingSteps;
+    static int failedCases;
     static String filter = "";
     static final class NonFinite extends IllegalStateException {
         NonFinite(String message) {super(message);}
@@ -33,12 +34,19 @@ public final class Capture {
     public static void open(Path path, String selected) throws IOException {
         directory=path; filter=selected;
         Files.createDirectories(path);
+        RuntimeStamp.write(path, World.class, Capture.class);
         queries=Files.newBufferedWriter(path.resolve("queries.jsonl"), StandardOpenOption.CREATE_NEW);
         summary=Files.newBufferedWriter(path.resolve("summary.jsonl"), StandardOpenOption.CREATE_NEW);
     }
     public static void close() throws IOException { queries.close(); summary.close(); }
     public static boolean accepts(String id) {return filter.isEmpty() || id.contains(filter);}
     public static void rejected(String id, String reason) { query(id, Map.of("rejected",reason)); }
+    public static void failedSetup(String id, RuntimeException failure) {
+        failedCases++;
+        line(summary, Map.of("id", id, "status", "REJECTED_SETUP", "reason", failure.toString()));
+        try { summary.flush(); } catch(IOException e) { throw new UncheckedIOException(e); }
+        System.out.println("REJECTED " + id + " setup " + failure);
+    }
     public static void query(String id,Object value) {
         if (!filter.isEmpty() && !id.contains(filter)) return;
         line(queries, Map.of("id",id,"payload",value));
@@ -52,8 +60,8 @@ public final class Capture {
         line(trace == null ? queries : trace, Map.of("kind","action","id",current,"step",step,"order",order++,"description",description));
     }
     @SuppressWarnings("unchecked")
-    public static void run(String id,World<Body> world,int n,double dt,double scale,double ox,double oy,IntConsumer before) {
-        if (!filter.isEmpty() && !id.contains(filter)) return;
+    public static boolean run(String id,World<Body> world,int n,double dt,double scale,double ox,double oy,IntConsumer before) {
+        if (!filter.isEmpty() && !id.contains(filter)) return false;
         current=id; originX=ox;originY=oy; step=counts.getOrDefault(id,0); order=0;
         events=solved=toi=0; maxReaction=maxTorque=0; sleepingSteps=0; maxima.clear(); ids.clear(); initial.clear();rotations.clear();
         for(int i=0;i<world.getBodyCount();i++) {
@@ -96,11 +104,13 @@ public final class Capture {
             result.put("diagnosticMaxima",new TreeMap<>(maxima));
             line(summary,result);summary.flush();
             System.out.println("CASE "+id+" steps="+n+" contacts="+solved+" toi="+toi);
+            return true;
         } catch(NonFinite e) {
+            failedCases++;
             line(summary,Map.of("id",id,"file",file,"status","REJECTED_NONFINITE","firstFailureStep",step,"expectedSteps",n,"reason",e.getMessage()));
             try {summary.flush();}catch(IOException io){throw new UncheckedIOException(io);}
             System.out.println("REJECTED "+id+" step="+step+" "+e.getMessage());
-            throw e;
+            return false;
         } catch(IOException e) {throw new UncheckedIOException(e);}
         finally {try {if(trace!=null)trace.close();}catch(IOException e){throw new UncheckedIOException(e);}trace=null;}
     }

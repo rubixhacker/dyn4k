@@ -30,8 +30,9 @@ public final class CandidateCases {
             Capture.close();
         }
         if ((family.equals("geometry") && Files.size(Path.of(args[0], "queries.jsonl")) == 0) ||
-            (!family.equals("geometry") && Capture.counts.isEmpty())) {
+            (!family.equals("geometry") && Capture.counts.isEmpty() && Capture.failedCases == 0)) {
             throw new IllegalStateException("no fixture matched the filter");
         }
+        if (Capture.failedCases != 0) throw new IllegalStateException(Capture.failedCases + " case(s) rejected; see summary.jsonl");
     }
 }

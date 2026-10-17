@@ -12,7 +12,7 @@ subprojects {
 
     extensions.configure<org.gradle.api.plugins.JavaPluginExtension> {
         sourceSets.named("main") {
-            java.setSrcDirs(listOf(projectDir))
+            java.setSrcDirs(listOf(projectDir, rootProject.file("runtime")))
         }
     }
 

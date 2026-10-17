@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare
+import receipt
 import same_run
 
 
@@ -83,6 +84,26 @@ class ReceiptConsumerTest(unittest.TestCase):
              patch.object(compare, "check_snapshot"):
             with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
                 same_run.inspect(fixture, self.root / "unused")
+
+    def test_receipt_uses_recorder_process_and_loaded_engine(self):
+        trace = self.root / "trace.jsonl.gz"
+        artifact = self.root / "candidate.jar"
+        loaded = self.root / "loaded.jar"
+        command = self.root / "java"
+        artifact.write_bytes(b"candidate")
+        loaded.write_bytes(b"candidate")
+        command.write_bytes(b"actual launcher")
+        stamp = {key: "known" for key in receipt.RUNTIME_FIELDS}
+        stamp.update(process_command=str(command), engine_location=loaded.as_uri())
+        with patch.object(receipt, "ARTIFACT", artifact):
+            with self.assertRaisesRegex(compare.Rejected, "stamp is missing"):
+                receipt.runtime_identity(trace)
+            (self.root / "runtime.json").write_text(json.dumps(stamp))
+            bound = receipt.runtime_identity(trace)
+            self.assertEqual(bound["process_command_sha256"], receipt.sha256(command.read_bytes()))
+            loaded.write_bytes(b"different provider")
+            with self.assertRaisesRegex(compare.Rejected, "loaded engine differs"):
+                receipt.runtime_identity(trace)
 
 
 if __name__ == "__main__":
