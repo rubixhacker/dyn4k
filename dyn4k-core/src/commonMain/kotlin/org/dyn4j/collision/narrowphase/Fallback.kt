@@ -34,7 +34,7 @@ interface FallbackCondition : Comparable<FallbackCondition> {
     fun getSortIndex(): Int
 }
 
-abstract class AbstractFallbackCondition(@get:kotlin.jvm.JvmName("sortIndexField") val sortIndex: Int) : FallbackCondition {
+abstract class AbstractFallbackCondition(private val sortIndex: Int) : FallbackCondition {
     override fun compareTo(other: FallbackCondition): Int = getSortIndex() - other.getSortIndex()
     override fun getSortIndex() = sortIndex
 }
@@ -108,12 +108,9 @@ open class PairwiseTypedFallbackCondition : TypedFallbackCondition {
 }
 
 open class FallbackNarrowphaseDetector : NarrowphaseDetector {
-    @get:kotlin.jvm.JvmName("primaryDetectorField")
-    @JvmFieldBridge protected val primaryNarrowphaseDetector: NarrowphaseDetector
-    @get:kotlin.jvm.JvmName("fallbackDetectorField")
-    @JvmFieldBridge protected val fallbackNarrowphaseDetector: NarrowphaseDetector
-    @get:kotlin.jvm.JvmName("fallbackConditionsField")
-    @JvmFieldBridge protected val fallbackConditions: MutableList<FallbackCondition?>
+    @kotlin.jvm.JvmField protected val primaryNarrowphaseDetector: NarrowphaseDetector
+    @kotlin.jvm.JvmField protected val fallbackNarrowphaseDetector: NarrowphaseDetector
+    @kotlin.jvm.JvmField protected val fallbackConditions: MutableList<FallbackCondition?>
 
     constructor(primary: NarrowphaseDetector?, fallback: NarrowphaseDetector?) : this(primary, fallback, null)
     constructor(primary: NarrowphaseDetector?, fallback: NarrowphaseDetector?, conditions: MutableList<FallbackCondition?>?) {

@@ -44,7 +44,11 @@ internal class ExpandingSimplexEdge(val point1: Vector2, val point2: Vector2, wi
         it.normalize()
     }
     val distance = abs(point1.x * normal.x + point1.y * normal.y)
-    override fun compareTo(other: ExpandingSimplexEdge): Int = distance.compareTo(other.distance)
+    override fun compareTo(other: ExpandingSimplexEdge): Int = when {
+        distance < other.distance -> -1
+        distance > other.distance -> 1
+        else -> 0
+    }
     override fun toString() = "ExpandingSimplexEdge[Point1=$point1|Point2=$point2|Normal=$normal|Distance=$distance]"
 }
 
@@ -59,27 +63,51 @@ internal class ExpandingSimplex(simplex: List<@kotlin.jvm.JvmSuppressWildcards V
             if (cross < 0.0) { direction = -1; break }
         }
         winding = direction
-        for (i in simplex.indices) edges.add(ExpandingSimplexEdge(simplex[i], simplex[(i + 1) % simplex.size], winding))
+        for (i in simplex.indices) add(ExpandingSimplexEdge(simplex[i], simplex[(i + 1) % simplex.size], winding))
     }
     fun getWinding() = winding
-    fun getClosestEdge(): ExpandingSimplexEdge = edges.minOrNull()!!
+    fun getClosestEdge(): ExpandingSimplexEdge = edges.firstOrNull()!!
     fun expand(point: Vector2) {
-        val edge = getClosestEdge()
-        edges.remove(edge)
-        edges.add(ExpandingSimplexEdge(edge.point1, point, winding))
-        edges.add(ExpandingSimplexEdge(point, edge.point2, winding))
+        val edge = poll()
+        add(ExpandingSimplexEdge(edge.point1, point, winding))
+        add(ExpandingSimplexEdge(point, edge.point2, winding))
     }
     fun size() = edges.size
     override fun toString() = edges.joinToString(",", "[", "]") { "${it.point1}=${it.distance}" }
+
+    private fun add(edge: ExpandingSimplexEdge) {
+        var index = edges.size
+        edges.add(edge)
+        while (index > 0) {
+            val parent = (index - 1) ushr 1
+            if (edge >= edges[parent]) break
+            edges[index] = edges[parent]
+            index = parent
+        }
+        edges[index] = edge
+    }
+
+    private fun poll(): ExpandingSimplexEdge {
+        val result = getClosestEdge()
+        val last = edges.removeAt(edges.lastIndex)
+        if (edges.isEmpty()) return result
+        var index = 0
+        val half = edges.size ushr 1
+        while (index < half) {
+            var child = (index shl 1) + 1
+            if (child + 1 < edges.size && edges[child + 1] < edges[child]) child++
+            if (last <= edges[child]) break
+            edges[index] = edges[child]
+            index = child
+        }
+        edges[index] = last
+        return result
+    }
 }
 
 open class Epa : MinkowskiPenetrationSolver {
-    @get:kotlin.jvm.JvmName("maxIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxIterationsField")
-    @JvmFieldBridge protected var maxIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("distanceEpsilonField")
-    @set:kotlin.jvm.JvmName("setDistanceEpsilonField")
-    @JvmFieldBridge protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
+    @kotlin.jvm.JvmField protected var maxIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
 
     override fun getPenetration(simplex: List<@kotlin.jvm.JvmSuppressWildcards Vector2>, minkowskiSum: MinkowskiSum, penetration: Penetration) {
         val expanding = ExpandingSimplex(simplex)
@@ -115,27 +143,13 @@ open class Epa : MinkowskiPenetrationSolver {
 }
 
 open class Gjk : NarrowphaseDetector, DistanceDetector, RaycastDetector {
-    @get:kotlin.jvm.JvmName("solverField")
-    @set:kotlin.jvm.JvmName("setSolverField")
-    @JvmFieldBridge protected var minkowskiPenetrationSolver: MinkowskiPenetrationSolver = Epa()
-    @get:kotlin.jvm.JvmName("maxDetectIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxDetectIterationsField")
-    @JvmFieldBridge protected var maxDetectIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("maxDistanceIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxDistanceIterationsField")
-    @JvmFieldBridge protected var maxDistanceIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("maxRaycastIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxRaycastIterationsField")
-    @JvmFieldBridge protected var maxRaycastIterations = DEFAULT_MAX_ITERATIONS
-    @get:kotlin.jvm.JvmName("detectEpsilonField")
-    @set:kotlin.jvm.JvmName("setDetectEpsilonField")
-    @JvmFieldBridge protected var detectEpsilon = DEFAULT_DETECT_EPSILON
-    @get:kotlin.jvm.JvmName("distanceEpsilonField")
-    @set:kotlin.jvm.JvmName("setDistanceEpsilonField")
-    @JvmFieldBridge protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
-    @get:kotlin.jvm.JvmName("raycastEpsilonField")
-    @set:kotlin.jvm.JvmName("setRaycastEpsilonField")
-    @JvmFieldBridge protected var raycastEpsilon = DEFAULT_RAYCAST_EPSILON
+    @kotlin.jvm.JvmField protected var minkowskiPenetrationSolver: MinkowskiPenetrationSolver = Epa()
+    @kotlin.jvm.JvmField protected var maxDetectIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var maxDistanceIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var maxRaycastIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var detectEpsilon = DEFAULT_DETECT_EPSILON
+    @kotlin.jvm.JvmField protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
+    @kotlin.jvm.JvmField protected var raycastEpsilon = DEFAULT_RAYCAST_EPSILON
 
     constructor()
     constructor(solver: MinkowskiPenetrationSolver?) {

@@ -37,7 +37,7 @@ def declarations(archive, name):
         descriptor = output[index + 1].strip()
         if not descriptor.startswith("descriptor: "):
             raise ValueError(f"missing descriptor: {name}: {line}")
-        if " final class " in f" {header} ":
+        if " final class " in f" {header} " and "(" in line:
             line = line.replace(" final ", " ")
         members.add(f"{line} {descriptor}")
     return header, members

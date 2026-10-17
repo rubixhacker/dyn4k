@@ -39,11 +39,8 @@ import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
 open class TimeOfImpact : Copyable<TimeOfImpact> {
-    @get:kotlin.jvm.JvmName("timeField")
-    @set:kotlin.jvm.JvmName("setTimeField")
-    @JvmFieldBridge protected var time: Double = 0.0
-    @get:kotlin.jvm.JvmName("separationField")
-    @JvmFieldBridge protected val separation: Separation
+    @kotlin.jvm.JvmField protected var time: Double = 0.0
+    @kotlin.jvm.JvmField protected val separation: Separation
 
     constructor() { separation = Separation() }
     protected constructor(time: Double, separation: Separation) {
@@ -58,6 +55,7 @@ open class TimeOfImpact : Copyable<TimeOfImpact> {
     open fun set(other: TimeOfImpact) { time = other.time; separation.set(other.separation) }
     override fun copy(): TimeOfImpact = TimeOfImpact(time, separation)
     override fun toString() = "TimeOfImpact[Time=$time|Separation=$separation]"
+    @kotlin.jvm.JvmName("setDirect-dyn4k")
     internal fun setDirect(time: Double, separation: Separation) {
         this.time = time
         this.separation.set(separation)
@@ -78,15 +76,9 @@ interface TimeOfImpactDetector {
 }
 
 open class ConservativeAdvancement : TimeOfImpactDetector {
-    @get:kotlin.jvm.JvmName("distanceDetectorField")
-    @set:kotlin.jvm.JvmName("setDistanceDetectorField")
-    @JvmFieldBridge protected var distanceDetector: DistanceDetector = Gjk()
-    @get:kotlin.jvm.JvmName("distanceEpsilonField")
-    @set:kotlin.jvm.JvmName("setDistanceEpsilonField")
-    @JvmFieldBridge protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
-    @get:kotlin.jvm.JvmName("maxIterationsField")
-    @set:kotlin.jvm.JvmName("setMaxIterationsField")
-    @JvmFieldBridge protected var maxIterations = DEFAULT_MAX_ITERATIONS
+    @kotlin.jvm.JvmField protected var distanceDetector: DistanceDetector = Gjk()
+    @kotlin.jvm.JvmField protected var distanceEpsilon = DEFAULT_DISTANCE_EPSILON
+    @kotlin.jvm.JvmField protected var maxIterations = DEFAULT_MAX_ITERATIONS
 
     constructor()
     constructor(distanceDetector: DistanceDetector?) {
@@ -156,7 +148,7 @@ open class ConservativeAdvancement : TimeOfImpactDetector {
         maxIterations = value
     }
     companion object {
-        @kotlin.jvm.JvmField val DEFAULT_DISTANCE_EPSILON = Epsilon.E.pow(1.0 / 3.0)
+        @kotlin.jvm.JvmField val DEFAULT_DISTANCE_EPSILON = 4.806217383937352e-6
         const val DEFAULT_MAX_ITERATIONS = 30
     }
 }

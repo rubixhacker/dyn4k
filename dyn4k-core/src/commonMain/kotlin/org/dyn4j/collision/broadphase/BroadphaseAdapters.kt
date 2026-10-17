@@ -66,7 +66,7 @@ interface BroadphaseDetectorDecorator<T> : BroadphaseDetector<T> {
     fun getDecoratedBroadphaseDetector(): BroadphaseDetector<T>
 }
 
-open class BroadphaseDetectorDecoratorAdapter<T>(protected val detector: BroadphaseDetector<T>) : BroadphaseDetectorDecorator<T> {
+open class BroadphaseDetectorDecoratorAdapter<T>(@kotlin.jvm.JvmField protected val detector: BroadphaseDetector<T>) : BroadphaseDetectorDecorator<T> {
     override fun getDecoratedBroadphaseDetector() = detector
     override fun shift(shift: Vector2) = detector.shift(shift)
     override fun add(item: T) = detector.add(item)

@@ -4,13 +4,115 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
+import kotlin.test.assertFailsWith
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.Circle
+import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Ray
+import org.dyn4j.geometry.Rectangle
+import org.dyn4j.geometry.Triangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Geometry
 
 class QueryResultTest {
+    private class CustomRectangle : Rectangle(2.0, 1.0)
+    private class RuntimeRectangle : Rectangle(2.0, 1.0)
+    private class CycleRectangle : Rectangle(2.0, 1.0)
+    private class MisdeclaredCircle : Circle(1.0)
+
+    @Test
+    fun typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance() {
+        val polygon = convexClassOf(Polygon::class)
+        val rectangle = convexClassOf(Rectangle::class)
+        val circle = convexClassOf(Circle::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(true, condition.isMatch(rectangle, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, true).isMatch(rectangle, circle))
+        assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(rectangle, circle))
+    }
+
+    @Test
+    fun typeOnlyFallbackMatchesTriangleBeforeObservingInstance() {
+        val polygon = convexClassOf(Polygon::class)
+        val triangle = convexClassOf(Triangle::class)
+        val circle = convexClassOf(Circle::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(true, condition.isMatch(triangle, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, true).isMatch(triangle, circle))
+        assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(triangle, circle))
+
+        val instance = Triangle(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0))
+        assertEquals(true, condition.isMatch(instance, Circle(1.0)))
+    }
+
+    @Test
+    fun declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance() {
+        val custom = declareConvexSupertype(CustomRectangle::class, Rectangle::class)
+        val polygon = convexClassOf(Polygon::class)
+        val circle = convexClassOf(Circle::class)
+        assertEquals(true, SingleTypedFallbackCondition(polygon, false).isMatch(custom, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, true).isMatch(custom, circle))
+        assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(custom, circle))
+    }
+
+    @Test
+    fun selfSupertypeDeclarationIsRejectedWithoutChangingFallbackMatches() {
+        val error = assertFailsWith<IllegalArgumentException> {
+            declareConvexSupertype(Circle::class, Circle::class)
+        }
+        assertEquals("A convex type cannot be its own supertype", error.message)
+        val circle = convexClassOf(Circle::class)
+        val polygon = convexClassOf(Polygon::class)
+        assertEquals(false, SingleTypedFallbackCondition(polygon, false).isMatch(circle, circle))
+        assertEquals(false, SingleTypedFallbackCondition(polygon, false).isMatch(Circle(1.0), Circle(1.0)))
+    }
+
+    @Test
+    fun falseBuiltInReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
+        val error = assertFailsWith<IllegalArgumentException> {
+            declareConvexSupertype(Polygon::class, Rectangle::class)
+        }
+        assertEquals("A convex supertype declaration would create a cycle", error.message)
+        val triangleError = assertFailsWith<IllegalArgumentException> {
+            declareConvexSupertype(Polygon::class, Triangle::class)
+        }
+        assertEquals("A convex supertype declaration would create a cycle", triangleError.message)
+        val rectangle = convexClassOf(Rectangle::class)
+        val polygon = convexClassOf(Polygon::class)
+        assertEquals(false, SingleTypedFallbackCondition(rectangle, false).isMatch(polygon, convexClassOf(Circle::class)))
+        val polygonInstance = Polygon(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0))
+        assertEquals(false, SingleTypedFallbackCondition(rectangle, false).isMatch(polygonInstance, Circle(1.0)))
+    }
+
+    @Test
+    fun falseCustomReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
+        val custom = declareConvexSupertype(CycleRectangle::class, Rectangle::class)
+        val error = assertFailsWith<IllegalArgumentException> {
+            declareConvexSupertype(Rectangle::class, CycleRectangle::class)
+        }
+        assertEquals("A convex supertype declaration would create a cycle", error.message)
+        val rectangle = convexClassOf(Rectangle::class)
+        val condition = SingleTypedFallbackCondition(custom, false)
+        assertEquals(false, condition.isMatch(rectangle, convexClassOf(Circle::class)))
+        assertEquals(false, condition.isMatch(Rectangle(2.0, 1.0), Circle(1.0)))
+        assertEquals(true, SingleTypedFallbackCondition(rectangle, false).isMatch(custom, convexClassOf(Circle::class)))
+    }
+
+    @Test
+    fun nonCyclicCustomClaimIsTrustedWhileRuntimeMatchUsesActualInstance() {
+        declareConvexSupertype(MisdeclaredCircle::class, Polygon::class)
+        val polygon = convexClassOf(Polygon::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(false, condition.isMatch(MisdeclaredCircle(), Circle(1.0)))
+    }
+
+    @Test
+    fun runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration() {
+        val polygon = convexClassOf(Polygon::class)
+        val condition = SingleTypedFallbackCondition(polygon, false)
+        assertEquals(true, condition.isMatch(RuntimeRectangle(), Circle(1.0)))
+    }
+
     @Test
     fun resultSetAndShiftKeepExposedVectorIdentity() {
         val penetration = Penetration()
