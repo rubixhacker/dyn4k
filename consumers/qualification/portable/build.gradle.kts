@@ -22,7 +22,14 @@ kotlin {
         minSdk = 21
         withHostTest {}
     }
-    js { nodejs(); browser() }
+    js {
+        nodejs()
+        browser {
+            if (providers.gradleProperty("qualificationSafari").orNull == "true") {
+                testTask { useKarma { useSafari() } }
+            }
+        }
+    }
     wasmJs { nodejs(); browser() }
     wasmWasi { nodejs() }
     linuxX64()

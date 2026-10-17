@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -83,8 +84,7 @@ def check_providers(graph):
 
 def target_binary_path(module, target):
     publication = target_publication_name(module, target)
-    extension = ".aar" if target == "android" else ".jar" if target in (
-        "jvm", "js", "wasmJs", "wasmWasi") else ".klib"
+    extension = ".aar" if target == "android" else ".jar" if target == "jvm" else ".klib"
     return f'{GROUP.replace(".", "/")}/{publication}/{VERSION}/{publication}-{VERSION}{extension}'
 
 
@@ -373,7 +373,14 @@ def expected_probe_cases(manifest, group):
     if "cases" in group:
         cases = group["cases"]
     else:
-        names = manifest.get("case_names", [])
+        case_sets = manifest.get("case_sets", {})
+        if not isinstance(case_sets, dict):
+            raise ValueError("probe case sets are invalid")
+        names = (case_sets.get(group["case_set"])
+                 if "case_set" in group else manifest.get("case_names", []))
+        if (not isinstance(names, list) or any(not isinstance(name, str) or not name
+                                               for name in names)):
+            raise ValueError("probe case names are invalid")
         cases = [{"classname": group.get("classname"),
                   "name": name + group.get("name_suffix", "")} for name in names]
         additional_names = group.get("additional_case_names", [])
@@ -382,9 +389,8 @@ def expected_probe_cases(manifest, group):
         cases.extend({"classname": group.get("additional_classname"),
                       "name": name + group.get("name_suffix", "")}
                      for name in additional_names)
-        case_sets = manifest.get("case_sets", {})
         extra_case_sets = group.get("extra_case_sets", [])
-        if not isinstance(case_sets, dict) or not isinstance(extra_case_sets, list):
+        if not isinstance(extra_case_sets, list):
             raise ValueError("probe case sets are invalid")
         for extra in extra_case_sets:
             if not isinstance(extra, dict) or not isinstance(extra.get("case_set"), str):
@@ -432,7 +438,9 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
     if not expected:
         problems.append("probe manifest has no required cases")
     completed = None
+    started_at_ns = finished_at_ns = None
     if not problems:
+        started_at_ns = time.time_ns()
         for pattern in patterns:
             for path in Path().glob(pattern):
                 path.unlink()
@@ -483,12 +491,14 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
                 problems.append(f'duplicate cases in group {group["id"]}')
             if set(observed_cases) != set(expected_cases):
                 problems.append(f'partial or unexpected cases in group {group["id"]}')
+        finished_at_ns = time.time_ns()
     if failures or skipped:
         problems.append("probe has failed or skipped cases")
     if executed != expected:
         problems.append("probe executed count differs from frozen expected count")
     result = {"candidate_sha": candidate_sha, "command": command,
               "exit_code": completed.returncode if completed else None,
+              "started_at_ns": started_at_ns, "finished_at_ns": finished_at_ns,
               "expected": expected, "executed": executed, "failures": failures,
               "skipped": skipped, "manifest_sha256": manifest_digest(manifest) if manifest else None,
               "status": "PROBE_FAILED" if problems else "PROBE_PASSED",
@@ -562,6 +572,54 @@ def execution_succeeded(evidence):
     )
 
 
+def validate_hosted_probe(probe, candidate_sha, repository=None):
+    import hosted
+
+    if not isinstance(probe, dict) or probe.get("candidate_sha") != candidate_sha:
+        raise ValueError("hosted probe candidate SHA differs from report")
+    target = probe.get("target")
+    if target not in hosted.TARGETS:
+        raise ValueError("hosted probe target is invalid")
+    status = probe.get("status")
+    if status not in ("PROBE_PASSED", "PROBE_FAILED", "UNAVAILABLE", "NOT_RUN"):
+        raise ValueError("hosted probe status is invalid")
+    if status != "PROBE_PASSED":
+        if not isinstance(probe.get("reason"), str) or not probe["reason"].strip():
+            raise ValueError("hosted probe failure or unavailability needs a reason")
+        return probe
+    if hosted.runtime_status(target, probe.get("runtime"))[0] != "READY":
+        raise ValueError("hosted probe runtime identity is invalid")
+    manifest = load_json_strict(Path(__file__).with_name("foundation-probes.json"))
+    groups = {group["id"]: group for group in manifest["groups"]}
+    selections = {"consumer_probe": (f"consumer-{target}",)}
+    if target != "jsSafari":
+        selections["source_probe"] = (f"core-{target}", target)
+    for key, ids in selections.items():
+        if any(group_id not in groups for group_id in ids):
+            raise ValueError("hosted probe frozen report group is missing")
+        selected = {**manifest, "groups": [group for group in manifest["groups"]
+                                             if group["id"] in ids]}
+        observed = probe.get(key)
+        expected = sum(len(expected_probe_cases(manifest, groups[group_id])) for group_id in ids)
+        if (not isinstance(observed, dict) or observed.get("candidate_sha") != candidate_sha
+                or observed.get("manifest_sha256") != manifest_digest(selected)
+                or observed.get("status") != "PROBE_PASSED"
+                or observed.get("expected") != expected or observed.get("executed") != expected
+                or observed.get("failures") != 0 or observed.get("skipped") != 0
+                or observed.get("exit_code") != 0):
+            raise ValueError(f"hosted {key} differs from frozen executed suite")
+    hashes = probe.get("artifact_hashes")
+    if (not isinstance(hashes, dict) or set(hashes) != set(MODULES)
+            or any(not SHA64.fullmatch(str(value)) for value in hashes.values())):
+        raise ValueError("hosted target needs both staged binary hashes")
+    if repository:
+        staging = repository / "build/staging-repository"
+        artifact_target = "js" if target == "jsSafari" else target
+        if hosted.target_hashes(staging, artifact_target) != hashes:
+            raise ValueError("hosted binary hashes differ from staged candidate")
+    return probe
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -572,6 +630,8 @@ def main():
     record.add_argument("--audit", type=Path)
     record.add_argument("--candidate-manifest", type=Path)
     record.add_argument("--availability", type=Path)
+    record.add_argument("--hosted-probe", action="append", type=Path, default=[])
+    record.add_argument("--raw-bundle", action="append", type=Path, default=[])
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -678,10 +738,31 @@ def main():
     results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha,
                         candidate_manifest, suite_manifest, audit_data)
                for case in cases]
+    hosted_probes = []
+    if len(args.raw_bundle) != len(args.hosted_probe):
+        parser.error("each hosted probe needs its matching raw XML bundle")
+    for path, bundle in zip(args.hosted_probe, args.raw_bundle):
+        try:
+            observed = validate_hosted_probe(load_json_strict(path),
+                                             args.candidate_sha, repository)
+            if observed["status"] == "PROBE_PASSED":
+                import artifact
+                try:
+                    verified = artifact.verify_bundle(
+                        bundle, load_json_strict(repository / "tools/qualification/foundation-probes.json"),
+                        args.candidate_sha, require_matrix=False)
+                    if verified["route"] != observed["target"]:
+                        raise ValueError("raw bundle target differs from hosted probe")
+                except (OSError, TypeError, ValueError, ET.ParseError) as error:
+                    observed = {**observed, "status": "PROBE_FAILED",
+                                "reason": f"raw XML bundle failed: {error}"}
+            hosted_probes.append(observed)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
                          for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")},
-              "lanes": results}
+              "lanes": results, "bounded_hosted_probes": hosted_probes}
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["counts"]))
     return 0 if report["counts"]["PASSED"] == len(results) else 1
