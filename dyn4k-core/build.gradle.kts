@@ -912,6 +912,13 @@ val candidatePolygonConsumer by tasks.registering(JavaCompile::class) {
     destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/candidate"))
     options.release.set(8)
 }
+val stagedPolygonConsumer by tasks.registering(JavaCompile::class) {
+    dependsOn(":dyn4k-core:publishJvmPublicationToStagingRepository", ":dyn4k:publishJvmPublicationToStagingRepository")
+    source(polygonConsumerSource)
+    classpath = stagedGeometryClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("polygon-consumer/staged"))
+    options.release.set(8)
+}
 tasks.register<JavaExec>("runBaselinePolygonConsumer") {
     dependsOn(baselinePolygonConsumer)
     classpath(
@@ -925,6 +932,14 @@ tasks.register<JavaExec>("runCandidatePolygonConsumer") {
     classpath(
         candidatePolygonConsumer.flatMap { it.destinationDirectory },
         tasks.named("jvmJar"), jvmMain.runtimeDependencyFiles,
+        file("src/upstreamPolygonTest/resources")
+    )
+    mainClass.set("PolygonAlgorithmConsumer")
+}
+tasks.register<JavaExec>("runStagedPolygonConsumer") {
+    dependsOn(stagedPolygonConsumer)
+    classpath(
+        stagedPolygonConsumer.flatMap { it.destinationDirectory }, stagedGeometryClasspath,
         file("src/upstreamPolygonTest/resources")
     )
     mainClass.set("PolygonAlgorithmConsumer")
