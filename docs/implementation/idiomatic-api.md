@@ -61,7 +61,7 @@ ball.setMass(MassType.NORMAL);
 ball.getLinearVelocity().x = 2.0;
 ```
 
-The Kotlin API can add this same `Body` to `World<Body>`. A Java listener receives the same reference, and a change through either API is visible through the other. The executable direct, Java, and mixed examples are in `dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt`, `dyn4k/src/jvmTest/java/IdiomaticJavaExample.java`, and `dyn4k/src/jvmTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticMixedExampleTest.kt`.
+The Kotlin API can add this same `Body` to `World<Body>`. The Java step listener in the mixed example receives that body through the same world reference. A change through either API is visible through the other. The executable direct, Java, and mixed examples are in `dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt`, `dyn4k/src/jvmTest/java/IdiomaticJavaExample.java`, and `dyn4k/src/jvmTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticMixedExampleTest.kt`.
 
 ## Choose units consistently
 
