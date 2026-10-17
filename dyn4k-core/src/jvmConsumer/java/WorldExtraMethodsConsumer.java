@@ -1,8 +1,12 @@
 import org.dyn4j.collision.broadphase.BroadphaseDetector;
 import org.dyn4j.dynamics.Body;
 import org.dyn4j.dynamics.BodyFixture;
+import org.dyn4j.dynamics.Settings;
 import org.dyn4j.dynamics.contact.ContactConstraintSolver;
 import org.dyn4j.dynamics.contact.TimeOfImpactSolver;
+import org.dyn4j.collision.continuous.TimeOfImpact;
+import org.dyn4j.collision.narrowphase.Penetration;
+import org.dyn4j.collision.narrowphase.Raycast;
 import org.dyn4j.world.ValueMixer;
 import org.dyn4j.world.World;
 import org.dyn4j.world.result.ConvexCastResult;
@@ -48,6 +52,22 @@ public final class WorldExtraMethodsConsumer {
         boolean baselineFieldVisible() { return timeOfImpact == getTimeOfImpact(); }
     }
 
+    private static final class SameDescriptorSimulation extends World<Body> {
+        public Settings settingsField() { return getSettings(); }
+    }
+
+    private static final class SameDescriptorCast extends ConvexCastResult<Body, BodyFixture> {
+        public TimeOfImpact timeOfImpactField() { return getTimeOfImpact(); }
+    }
+
+    private static final class SameDescriptorDetect extends ConvexDetectResult<Body, BodyFixture> {
+        public Penetration penetrationField() { return getPenetration(); }
+    }
+
+    private static final class SameDescriptorRay extends RaycastResult<Body, BodyFixture> {
+        public Raycast raycastField() { return getRaycast(); }
+    }
+
     private static final class Detect extends ConvexDetectResult<Body, BodyFixture> {
         public String penetrationField() { return "detect"; }
         boolean baselineFieldVisible() { return penetration == getPenetration(); }
@@ -70,6 +90,16 @@ public final class WorldExtraMethodsConsumer {
         if (!"settings".equals(world.settingsField()) || !"cast".equals(cast.timeOfImpactField())
                 || !"detect".equals(detect.penetrationField()) || !"ray".equals(ray.raycastField())) {
             throw new AssertionError("extension helper dispatch failed");
+        }
+        SameDescriptorSimulation sameWorld = new SameDescriptorSimulation();
+        SameDescriptorCast sameCast = new SameDescriptorCast();
+        SameDescriptorDetect sameDetect = new SameDescriptorDetect();
+        SameDescriptorRay sameRay = new SameDescriptorRay();
+        if (sameWorld.settingsField() != sameWorld.getSettings()
+                || sameCast.timeOfImpactField() != sameCast.getTimeOfImpact()
+                || sameDetect.penetrationField() != sameDetect.getPenetration()
+                || sameRay.raycastField() != sameRay.getRaycast()) {
+            throw new AssertionError("same-descriptor helper dispatch failed");
         }
         System.out.println("World extra methods extension passed");
     }

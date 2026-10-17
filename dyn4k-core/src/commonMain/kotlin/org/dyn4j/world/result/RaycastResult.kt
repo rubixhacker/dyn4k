@@ -30,7 +30,7 @@ import org.dyn4j.collision.Fixture
 import org.dyn4j.collision.narrowphase.Raycast
 
 open class RaycastResult<T : CollisionBody<E>, E : Fixture> : DetectResult<T, E>, Comparable<RaycastResult<T, E>> {
-    @get:kotlin.jvm.JvmName("raycastField")
+    @get:kotlin.jvm.JvmName("raycastField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val raycast: Raycast
 

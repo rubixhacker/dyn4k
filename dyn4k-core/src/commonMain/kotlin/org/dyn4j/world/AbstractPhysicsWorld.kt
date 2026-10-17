@@ -59,82 +59,82 @@ import org.dyn4j.JvmFieldBridge
 abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>> :
     AbstractCollisionWorld<T, BodyFixture, V>, PhysicsWorld<T, V>, Shiftable, DataContainer {
 
-    @get:kotlin.jvm.JvmName("settingsField")
+    @get:kotlin.jvm.JvmName("settingsField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val settings: Settings
-    @get:kotlin.jvm.JvmName("timeStepField")
+    @get:kotlin.jvm.JvmName("timeStepField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeStep: TimeStep
-    @get:kotlin.jvm.JvmName("gravityField")
+    @get:kotlin.jvm.JvmName("gravityField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val gravity: Vector2
-    @get:kotlin.jvm.JvmName("valueMixerField")
+    @get:kotlin.jvm.JvmName("valueMixerField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setValueMixerField")
+    @set:kotlin.jvm.JvmName("setValueMixerField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var valueMixer: ValueMixer
-    @get:kotlin.jvm.JvmName("contactConstraintSolverField")
+    @get:kotlin.jvm.JvmName("contactConstraintSolverField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setContactConstraintSolverField")
+    @set:kotlin.jvm.JvmName("setContactConstraintSolverField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var contactConstraintSolver: ContactConstraintSolver<T>
-    @get:kotlin.jvm.JvmName("timeOfImpactSolverField")
+    @get:kotlin.jvm.JvmName("timeOfImpactSolverField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setTimeOfImpactSolverField")
+    @set:kotlin.jvm.JvmName("setTimeOfImpactSolverField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var timeOfImpactSolver: TimeOfImpactSolver<T>
-    @get:kotlin.jvm.JvmName("ccdBroadphaseField")
+    @get:kotlin.jvm.JvmName("ccdBroadphaseField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setCcdBroadphaseField")
+    @set:kotlin.jvm.JvmName("setCcdBroadphaseField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var ccdBroadphase: BroadphaseDetector<T>
-    @get:kotlin.jvm.JvmName("jointsField")
+    @get:kotlin.jvm.JvmName("jointsField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val joints: MutableList<Joint<T>>
-    @get:kotlin.jvm.JvmName("jointsUnmodifiableField")
+    @get:kotlin.jvm.JvmName("jointsUnmodifiableField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val jointsUnmodifiable: List<Joint<T>>
-    @get:kotlin.jvm.JvmName("contactListenersField")
+    @get:kotlin.jvm.JvmName("contactListenersField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactListeners: MutableList<ContactListener<T>?>
-    @get:kotlin.jvm.JvmName("contactListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmName("contactListenersUnmodifiableField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactListenersUnmodifiable: List<ContactListener<T>?>
-    @get:kotlin.jvm.JvmName("destructionListenersField")
+    @get:kotlin.jvm.JvmName("destructionListenersField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val destructionListeners: MutableList<DestructionListener<T>?>
-    @get:kotlin.jvm.JvmName("destructionListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmName("destructionListenersUnmodifiableField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val destructionListenersUnmodifiable: List<DestructionListener<T>?>
-    @get:kotlin.jvm.JvmName("timeOfImpactListenersField")
+    @get:kotlin.jvm.JvmName("timeOfImpactListenersField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeOfImpactListeners: MutableList<TimeOfImpactListener<T>?>
-    @get:kotlin.jvm.JvmName("timeOfImpactListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmName("timeOfImpactListenersUnmodifiableField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val timeOfImpactListenersUnmodifiable: List<TimeOfImpactListener<T>?>
-    @get:kotlin.jvm.JvmName("stepListenersField")
+    @get:kotlin.jvm.JvmName("stepListenersField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val stepListeners: MutableList<StepListener<T>?>
-    @get:kotlin.jvm.JvmName("stepListenersUnmodifiableField")
+    @get:kotlin.jvm.JvmName("stepListenersUnmodifiableField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val stepListenersUnmodifiable: List<StepListener<T>?>
-    @get:kotlin.jvm.JvmName("timeField")
+    @get:kotlin.jvm.JvmName("timeField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setTimeField")
+    @set:kotlin.jvm.JvmName("setTimeField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var time: Double = 0.0
-    @get:kotlin.jvm.JvmName("updateRequiredField")
+    @get:kotlin.jvm.JvmName("updateRequiredField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
-    @set:kotlin.jvm.JvmName("setUpdateRequiredField")
+    @set:kotlin.jvm.JvmName("setUpdateRequiredField-dyn4k")
     @set:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected var updateRequired: Boolean = true
-    @get:kotlin.jvm.JvmName("constraintGraphField")
+    @get:kotlin.jvm.JvmName("constraintGraphField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val constraintGraph: ConstraintGraph<T>
-    @get:kotlin.jvm.JvmName("contactCollisionsField")
+    @get:kotlin.jvm.JvmName("contactCollisionsField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val contactCollisions: MutableList<V>
-    @get:kotlin.jvm.JvmName("ccdCollisionDataField")
+    @get:kotlin.jvm.JvmName("ccdCollisionDataField-dyn4k")
     @get:kotlin.jvm.JvmSynthetic
     @JvmFieldBridge protected val ccdCollisionData: MutableSet<CollisionPair<T>>
 
