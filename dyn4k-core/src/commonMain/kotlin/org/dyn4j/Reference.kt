@@ -24,7 +24,7 @@
  */
 package org.dyn4j
 
-open class Reference<T>(var value: T?) {
+open class Reference<T>(@kotlin.jvm.JvmField var value: T?) {
     constructor() : this(null)
     override fun toString(): String = value?.toString() ?: "null"
     override fun equals(other: Any?): Boolean = other is Reference<*> && other.value == value
