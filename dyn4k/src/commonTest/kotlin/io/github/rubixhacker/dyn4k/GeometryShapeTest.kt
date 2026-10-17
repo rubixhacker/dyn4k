@@ -6,8 +6,50 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
+import org.dyn4j.exception.ArgumentNullException
+import org.dyn4j.exception.NullElementException
 
 class GeometryShapeTest {
+    @Test
+    fun cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() {
+        val immutable = emptyList<Vector2?>()
+        val mutable = mutableListOf<Vector2?>()
+        assertSame(immutable, Geometry.cleanse(immutable))
+        assertSame<Any>(mutable, Geometry.cleanse(mutable))
+
+        val input = emptyArray<Vector2?>()
+        val output = Geometry.cleanse(*input)
+        assertEquals(0, output.size)
+        assertFalse((input as Any) === output)
+    }
+
+    @Test
+    fun cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult() {
+        val first = Vector2(0.0, 0.0)
+        val second = Vector2(1.0, 0.0)
+        val third = Vector2(0.0, 1.0)
+        val input: List<Vector2?> = listOf(first, second, third)
+        val result: List<Vector2> = Geometry.cleanse(input)
+        assertFalse(input === result)
+        assertEquals(3, result.size)
+        assertSame(first, result[0])
+        (result as MutableList<Vector2>).add(Vector2(2.0, 2.0))
+        assertEquals(4, result.size)
+        assertEquals(3, input.size)
+
+        val array = arrayOf<Vector2?>(first, second, third)
+        val arrayResult = Geometry.cleanse(*array)
+        assertFalse((array as Any) === arrayResult)
+        assertSame(first, arrayResult[0])
+    }
+
+    @Test
+    fun cleanseKeepsTheBaselineNullInputErrors() {
+        assertFailsWith<ArgumentNullException> { Geometry.cleanse(null as List<Vector2?>?) }
+        assertFailsWith<NullElementException> { Geometry.cleanse(listOf(Vector2(), null, Vector2())) }
+        assertFailsWith<NullElementException> { Geometry.cleanse(Vector2(), null, Vector2()) }
+    }
+
     @Test
     fun boundsShareTheCompatibilityObjectAndCopyIndependently() {
         val bounds = AABB(-2.0, -1.0, 4.0, 3.0)
