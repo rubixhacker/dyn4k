@@ -29,22 +29,15 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sqrt
-import org.dyn4j.JvmFieldBridge
 import org.dyn4j.exception.ValueOutOfRangeException
 
 open class HalfEllipse : AbstractShape, Convex {
-    @get:kotlin.jvm.JvmName("getHeightField")
-    @JvmFieldBridge protected val height: Double
-    @get:kotlin.jvm.JvmName("getHalfWidthField")
-    @JvmFieldBridge protected val halfWidth: Double
-    @get:kotlin.jvm.JvmName("getRotationFieldValue")
-    @JvmFieldBridge protected val rotation: Rotation
-    @get:kotlin.jvm.JvmName("getEllipseCenterField")
-    @JvmFieldBridge protected val ellipseCenter: Vector2
-    @get:kotlin.jvm.JvmName("getVertexLeftField")
-    @JvmFieldBridge protected val vertexLeft: Vector2
-    @get:kotlin.jvm.JvmName("getVertexRightField")
-    @JvmFieldBridge protected val vertexRight: Vector2
+    @kotlin.jvm.JvmField protected val height: Double
+    @kotlin.jvm.JvmField protected val halfWidth: Double
+    @kotlin.jvm.JvmField protected val rotation: Rotation
+    @kotlin.jvm.JvmField protected val ellipseCenter: Vector2
+    @kotlin.jvm.JvmField protected val vertexLeft: Vector2
+    @kotlin.jvm.JvmField protected val vertexRight: Vector2
 
     constructor(width: Double, height: Double) : super(
         Vector2(0.0, (4.0 * height) / (3.0 * PI)),
@@ -229,12 +222,12 @@ open class HalfEllipse : AbstractShape, Convex {
         vertexRight.add(x, y)
         ellipseCenter.add(x, y)
     }
-    fun getRotationAngle(): Double = rotation.toRadians()
-    fun getRotation(): Rotation = rotation.copy()
-    fun getWidth(): Double = halfWidth * 2.0
-    fun getHeight(): Double = height
-    fun getHalfWidth(): Double = halfWidth
-    fun getEllipseCenter(): Vector2 = ellipseCenter
+    open fun getRotationAngle(): Double = rotation.toRadians()
+    open fun getRotation(): Rotation = rotation.copy()
+    open fun getWidth(): Double = halfWidth * 2.0
+    open fun getHeight(): Double = height
+    open fun getHalfWidth(): Double = halfWidth
+    open fun getEllipseCenter(): Vector2 = ellipseCenter
 
     companion object { private val INERTIA_CONSTANT = PI / 8.0 - 8.0 / (9.0 * PI) }
 }
