@@ -3,10 +3,12 @@ import hashlib
 import io
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -45,6 +47,12 @@ class SafariYarnLockTests(unittest.TestCase):
             "distributionUrl=gradle-9.5-bin.zip\n")
         (self.repository / "tools/qualification").mkdir(parents=True)
         (self.repository / "tools/qualification/full_hosted.py").write_text("# hosted source\n")
+        qualification = Path(__file__).parent
+        for name in ("safari-karma-reporter.js", "safari-launch.sh"):
+            shutil.copyfile(qualification / name, self.repository / "tools/qualification" / name)
+        (self.repository / ".github/workflows").mkdir(parents=True)
+        shutil.copyfile(qualification.parents[1] / ".github/workflows/safari-yarn-lock-diagnostic.yml",
+                        self.repository / ".github/workflows/safari-yarn-lock-diagnostic.yml")
         for module in ("dyn4k-core", "dyn4k"):
             (self.repository / module).mkdir()
             (self.repository / module / "build.gradle.kts").write_text("plugins {}\n")
@@ -475,6 +483,132 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("OTHER_GRADLE_RESULT", receipt["status"])
         self.assertFalse(receipt["qualified"])
 
+    def test_full_hosted_teamcity_overflow_has_explicit_failure_status(self):
+        def overflow(repository, output, command):
+            self.generated(b"tracked lock\n", safari=True)
+            stdout = ("> Task :dyn4k-core:jsTestPackageJson\n"
+                      "> Task :dyn4k:jsTestPackageJson\n"
+                      "> Task :kotlinNpmInstall\n"
+                      "> Task :kotlinStoreYarnLock\n"
+                      "> Task :dyn4k-core:jsBrowserTest FAILED\n")
+            stderr = ("##teamcity[testFailed name='overflow-message' message='"
+                      "Cannot process output: too long teamcity service message "
+                      "(more than 1Mb). Event was lost.\n")
+            (output / "stdout.txt").write_text(stdout)
+            (output / "stderr.txt").write_text(stderr)
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2,
+                    "stdout_bytes_seen": len(stdout), "stderr_bytes_seen": len(stderr),
+                    "stdout_truncated": False, "stderr_truncated": False,
+                    "timed_out": False, "stream_incomplete": False}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=overflow):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("SAFARI_TEST_OUTPUT_OVERFLOW", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+
+    def test_quoted_overflow_phrase_does_not_mask_other_gradle_failure(self):
+        def other_failure(repository, output, command):
+            self.generated(b"tracked lock\n", safari=True)
+            stdout = ("> Task :dyn4k-core:jsTestPackageJson\n"
+                      "> Task :dyn4k:jsTestPackageJson\n"
+                      "> Task :kotlinNpmInstall\n"
+                      "> Task :kotlinStoreYarnLock\n"
+                      "> Task :dyn4k-core:jsBrowserTest FAILED\n")
+            (output / "stdout.txt").write_text(stdout)
+            (output / "stderr.txt").write_text(
+                "Another failure quoted: Cannot process output: too long teamcity "
+                "service message (more than 1Mb). Event was lost.\n")
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=other_failure):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("OTHER_GRADLE_RESULT", receipt["status"])
+
+    def test_safari_reporter_splits_service_messages_without_dropping_them(self):
+        source = Path(__file__).with_name("safari-karma-reporter.js")
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const fs = require('node:fs');",
+            "const vm = require('node:vm');",
+            "const output = [];",
+            "function OriginalReporter(decorate) {",
+            "  decorate(this);",
+            "  this.emit = message => this.write(message);",
+            "}",
+            "OriginalReporter.$inject = ['baseReporterDecorator'];",
+            "const plugin = {'reporter:karma-kotlin-reporter': ['type', OriginalReporter]};",
+            "const config = {plugins: [plugin]};",
+            "vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {config, Buffer});",
+            "const Reporter = plugin['reporter:karma-kotlin-reporter'][1];",
+            "assert.deepEqual(Reporter.$inject, OriginalReporter.$inject);",
+            "const reporter = new Reporter(instance => {",
+            "  instance.write = message => output.push(message);",
+            "});",
+            "reporter.emit(\"##teamcity[testStarted name='one']\");",
+            "reporter.emit(\"##teamcity[testFinished name='one']\\n\");",
+            "assert.deepEqual(output, [\"##teamcity[testStarted name='one']\\n\",",
+            "                          \"##teamcity[testFinished name='one']\\n\"]);",
+            "assert.throws(() => reporter.emit('x'.repeat(262145)), /service message exceeds/);",
+            "assert.equal(output.length, 2);",
+            "for (let i = 0; i < 12000; i++) reporter.emit(",
+            "  `##teamcity[testStarted name='case-${i}' payload='${'x'.repeat(80)}']`);",
+            "assert.equal(output.length, 12002);",
+            "assert.ok(output.every(line => line.endsWith('\\n')));",
+            "assert.ok(Buffer.byteLength(output.join(''), 'utf8') > 1048576);",
+        ))
+        result = subprocess.run(["node", "-e", script, str(source)],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_hosted_capture_stages_and_binds_reporter_source(self):
+        source = Path(__file__).with_name("safari-karma-reporter.js")
+        def failure(repository, output, command):
+            for module in ("dyn4k-core", "dyn4k"):
+                staged = repository / module / "karma.config.d/qualification-safari-reporter.js"
+                self.assertEqual(source.read_bytes(), staged.read_bytes())
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
+        self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                         receipt["source_input_sha256"]["tools/qualification/safari-karma-reporter.js"])
+        self.assertEqual(source.read_bytes(),
+                         (self.output / "inputs/tools/qualification/safari-karma-reporter.js").read_bytes())
+        for relative in ("tools/qualification/safari-launch.sh",
+                         ".github/workflows/safari-yarn-lock-diagnostic.yml"):
+            data = (self.repository / relative).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(),
+                             receipt["source_input_sha256"][relative])
+            self.assertEqual(data, (self.output / "inputs" / relative).read_bytes())
+        for module in ("dyn4k-core", "dyn4k"):
+            self.assertFalse((self.repository / module / "karma.config.d").exists())
+
+    def test_hosted_capture_rejects_reporter_source_changed_during_task(self):
+        def changed(repository, output, command):
+            self.generated(safari=True)
+            self.write_logs()
+            (repository / "tools/qualification/safari-karma-reporter.js").write_text(
+                "config.plugins = [];\n")
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("SOURCE_CHANGED", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        for module in ("dyn4k-core", "dyn4k"):
+            self.assertFalse((self.repository / module / "karma.config.d").exists())
+
     def test_full_hosted_production_uses_exact_flag_and_script(self):
         def failure(repository, output, command):
             self.assertEqual("-PqualificationProduction=true", command[-1])
@@ -666,12 +800,15 @@ class SafariYarnLockTests(unittest.TestCase):
         context, package = self.context_fixture()
         source = package / "karma.conf.js"
         source.write_bytes(b"module.exports = {};\n")
+        (self.repository / safari_yarn_lock.CONTEXT_ROOTS[1] / "karma.conf.js").write_text(
+            "module.exports = {};\n")
         (package / "node_modules").symlink_to(self.root, target_is_directory=True)
         inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_COMPLETE", inventory["status"])
         self.assertFalse(inventory["qualified"])
         self.assertEqual(source.read_bytes(),
-                         (context / "config/build/js/packages/karma.conf.js").read_bytes())
+                         (context / "config" / safari_yarn_lock.CONTEXT_ROOTS[0]
+                          / "karma.conf.js").read_bytes())
         self.assertTrue(any(item["status"] == "copied" for item in inventory["inputs"]))
         self.assertTrue(any(item["reason"] == "excluded_node_modules"
                             for item in inventory["inputs"]))
@@ -683,6 +820,31 @@ class SafariYarnLockTests(unittest.TestCase):
                             for item in inventory["inputs"]))
         self.assertEqual(inventory, json.loads((context / "inventory.json").read_text()))
         self.assert_context_upload_bound(context)
+
+    def test_context_scanner_ignores_irrelevant_klib_cache(self):
+        context, _ = self.context_fixture()
+        for module in ("dyn4k-dyn4k-core-test", "dyn4k-dyn4k-test"):
+            package = self.repository / "build/js/packages" / module
+            package.mkdir(parents=True, exist_ok=True)
+            (package / "karma.conf.js").write_text(f"// {module}\n")
+        cache = self.repository / "dyn4k-core/build/klib/cache/js/testDevelopmentExecutable"
+        cache.mkdir(parents=True)
+        for number in range(2050):
+            (cache / f"entry-{number}.bin").write_bytes(b"x")
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_COMPLETE", inventory["status"])
+        self.assertEqual(2, inventory["copied_files"])
+        self.assertLess(inventory["entries_seen"], safari_yarn_lock.CONTEXT_MAX_ENTRIES)
+
+    def test_context_scanner_requires_both_module_configs(self):
+        context, _ = self.context_fixture()
+        package = self.repository / "build/js/packages/dyn4k-dyn4k-core-test"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "karma.conf.js").write_text("// core\n")
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "missing_module_karma_config"
+                            for item in inventory["inputs"]))
 
     def test_context_scanner_marks_per_file_byte_truncation(self):
         context, package = self.context_fixture()
@@ -730,7 +892,8 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertTrue(any(item["reason"] == "symlink" for item in inventory["inputs"]))
         self.assertTrue(any(item["reason"] == "file_count_limit"
                             for item in inventory["inputs"]))
-        self.assertFalse((context / "config/build/js/packages/linked/outside-karma.js").exists())
+        self.assertFalse((context / "config" / safari_yarn_lock.CONTEXT_ROOTS[0]
+                          / "linked/outside-karma.js").exists())
         self.assertLessEqual(inventory["copied_files"], 1)
 
     def test_context_scanner_rejects_symlink_root(self):
@@ -768,6 +931,17 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "sampler_incomplete"
                             for item in inventory["inputs"]))
+
+    def test_context_scanner_records_pending_open_as_incomplete(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "launch-outcome-123.txt").write_text("open_state=pending\n")
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "open_pending"
+                            for item in inventory["inputs"]))
+        self.assertEqual("open_state=pending\n",
+                         (context / "launch-outcome-123.txt").read_text())
 
     def test_context_scanner_rejects_missing_process_samples(self):
         context, package = self.context_fixture()
@@ -924,6 +1098,36 @@ class SafariYarnLockTests(unittest.TestCase):
                                 text=True, timeout=5)
         self.assertEqual(23, normal.returncode)
         self.assertEqual(1, len(list(context.glob("sample-state-*.txt"))))
+
+    def test_wrapper_records_pending_open_and_completed_samples(self):
+        root = Path(__file__).resolve().parents[2]
+        launcher = (root / "tools/qualification/safari-launch.sh").read_text()
+        fake_open = self.root / "fake-open"
+        fake_open.write_text("#!/bin/bash\nexec /bin/sleep 5\n")
+        fake_open.chmod(0o755)
+        controlled = self.root / "controlled-pending-launch.sh"
+        controlled.write_text(launcher.replace("/usr/bin/open", str(fake_open))
+                              .replace("/bin/sleep 2", "/bin/sleep 0.01"))
+        redirect = self.root / "redirect.html"
+        redirect.write_text("redirect\n")
+        context = self.root / "pending-launch-context"
+        process = subprocess.Popen(["bash", str(controlled), str(redirect)],
+                                   env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT":
+                                        str(context)}, start_new_session=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not list(context.glob("sample-state-*.txt")):
+                time.sleep(0.01)
+            state = list(context.glob("sample-state-*.txt"))
+            outcome = list(context.glob("launch-outcome-*.txt"))
+            self.assertEqual(1, len(state))
+            self.assertIn("samples_completed=5", state[0].read_text())
+            self.assertEqual(1, len(outcome))
+            self.assertEqual("open_state=pending\n", outcome[0].read_text())
+        finally:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.communicate(timeout=3)
 
 
 if __name__ == "__main__":

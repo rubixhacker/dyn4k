@@ -13,6 +13,7 @@ import stat
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import full_hosted
@@ -25,7 +26,12 @@ SOURCE_INPUTS = (Path("build.gradle.kts"), Path("settings.gradle.kts"),
                  Path("gradle/wrapper/gradle-wrapper.properties"))
 HOSTED_SOURCE_INPUTS = (Path("tools/qualification/full_hosted.py"),
                         Path("dyn4k-core/build.gradle.kts"),
-                        Path("dyn4k/build.gradle.kts"))
+                        Path("dyn4k/build.gradle.kts"),
+                        Path("tools/qualification/safari-launch.sh"),
+                        Path(".github/workflows/safari-yarn-lock-diagnostic.yml"),
+                        Path("tools/qualification/safari-karma-reporter.js"))
+REPORTER_SOURCE = Path("tools/qualification/safari-karma-reporter.js")
+REPORTER_NAME = "qualification-safari-reporter.js"
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PACKAGES = 128
 MAX_PROCESS_SECONDS = 600
@@ -34,8 +40,8 @@ REQUIRED_PACKAGES = ("dyn4k-dyn4k-core", "dyn4k-dyn4k-core-test",
                      "dyn4k-dyn4k", "dyn4k-dyn4k-test")
 REQUIRED_PACKAGE_INPUTS = (Path("build/js/package.json"),) + tuple(
     Path("build/js/packages") / name / "package.json" for name in REQUIRED_PACKAGES)
-CONTEXT_ROOTS = (Path("build/js/packages"), Path("dyn4k-core/build"),
-                 Path("dyn4k/build"))
+CONTEXT_ROOTS = (Path("build/js/packages/dyn4k-dyn4k-core-test"),
+                 Path("build/js/packages/dyn4k-dyn4k-test"))
 CONTEXT_MAX_FILES = 16
 CONTEXT_MAX_FILE_BYTES = 256 * 1024
 CONTEXT_MAX_TOTAL_BYTES = 1024 * 1024
@@ -66,6 +72,38 @@ def safari_capture_timeout(stdout, stderr):
             and re.search(rb"Safari failed \d+ times \(timeout\)\. Giving up\.",
                           stderr) is not None
             and b"Errors occurred during launch of browser for testing." in stderr)
+
+
+def safari_output_overflow(stdout, stderr):
+    return (re.search(rb"(?m)^> Task :(?:dyn4k-core|dyn4k):jsBrowserTest FAILED\r?$",
+                      stdout) is not None
+            and b"##teamcity[testFailed name='overflow-message'" in stderr
+            and b"Cannot process output: too long teamcity service message "
+            b"(more than 1Mb). Event was lost." in stderr)
+
+
+@contextmanager
+def staged_safari_reporter(repository):
+    content = source_bytes(repository, REPORTER_SOURCE)
+    staged = []
+    try:
+        for module in ("dyn4k-core", "dyn4k"):
+            directory = repository / module / "karma.config.d"
+            if directory.exists() or directory.is_symlink():
+                raise ValueError(f"preexisting Safari Karma configuration: {directory}")
+            directory.mkdir()
+            destination = directory / REPORTER_NAME
+            staged.append((directory, destination))
+            destination.write_bytes(content)
+        yield
+    finally:
+        for directory, destination in reversed(staged):
+            if destination.is_file() and not destination.is_symlink() \
+                    and destination.read_bytes() == content:
+                destination.unlink()
+            if directory.is_dir() and not directory.is_symlink() \
+                    and not any(directory.iterdir()):
+                directory.rmdir()
 
 
 def digest(path):
@@ -103,6 +141,7 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
     incomplete = False
     config = context / "config"
     seen_files = set()
+    copied_configs = set()
 
     def record(path, status, reason, **details):
         nonlocal incomplete
@@ -201,6 +240,8 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                     inventory["copied_bytes"] += size
                     inventory["upload_data_bytes"] += size
                     status = "truncated" if size < before.st_size else "copied"
+                    if status == "copied":
+                        copied_configs.add(path)
                     reason = ("per_file_byte_limit" if status == "truncated"
                               and CONTEXT_MAX_FILE_BYTES <= remaining
                               else "total_byte_limit" if status == "truncated" else "copied")
@@ -299,6 +340,10 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                 os.close(directory_fd)
         if inventory["copied_files"] == 0:
             record("config", "failed", "no_karma_config")
+        for root in CONTEXT_ROOTS:
+            required_config = root / "karma.conf.js"
+            if required_config not in copied_configs:
+                record(required_config, "failed", "missing_module_karma_config")
         require_candidate(repository, candidate_sha)
     except (OSError, ValueError, TimeoutError) as error:
         record("config", "failed", "scan_failed", error=str(error))
@@ -342,12 +387,15 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
             state = context / f"sample-state-{pid}.txt"
             process = context / f"process-{pid}.txt"
             outcome = context / f"launch-outcome-{pid}.txt"
+            outcome_text = outcome.read_text(errors="replace") if outcome.is_file() else ""
+            if outcome_text == "open_state=pending\n":
+                record(launch, "failed", "open_pending")
             if (not state.is_file() or not process.is_file() or not outcome.is_file()
                     or [line for line in process.read_text(errors="replace").splitlines()
                         if line.startswith("sample=")]
                     != [f"sample={number}" for number in range(1, 6)]
-                    or not re.fullmatch(r"open_exit=\d+\n",
-                                        outcome.read_text(errors="replace"))
+                    or (outcome_text != "open_state=pending\n" and not re.fullmatch(
+                        r"(?:open_state=finished\n)?open_exit=\d+\n", outcome_text))
                     or state.read_text(errors="replace").splitlines()
                     != ["samples_completed=5", "sampler_exit=0"]):
                 record(launch, "failed", "sampler_incomplete")
@@ -630,8 +678,11 @@ def capture(repository, candidate_sha, output, configuration=None):
         expected_command = full_hosted_command(repository, init, configuration,
                                                receipt["invocation_id"])
         receipt["init_script_sha256"] = digest(init)
-    process = (run_lock_task(repository, output, expected_command) if configuration
-               else run_lock_task(repository, output))
+    if configuration:
+        with staged_safari_reporter(repository):
+            process = run_lock_task(repository, output, expected_command)
+    else:
+        process = run_lock_task(repository, output)
     receipt["process"] = process
     for name in ("stdout.txt", "stderr.txt"):
         path = output / name
@@ -699,6 +750,10 @@ def capture(repository, candidate_sha, output, configuration=None):
               and receipt["generated_sha256"] == receipt["tracked_sha256"]
               and safari_capture_timeout(stdout, (output / "stderr.txt").read_bytes())):
             receipt["status"] = "SAFARI_CAPTURE_TIMEOUT"
+        elif (configuration and process["exit_code"] != 0 and lock_succeeded
+              and receipt["generated_sha256"] == receipt["tracked_sha256"]
+              and safari_output_overflow(stdout, (output / "stderr.txt").read_bytes())):
+            receipt["status"] = "SAFARI_TEST_OUTPUT_OVERFLOW"
         else:
             receipt["status"] = "OTHER_GRADLE_RESULT"
     except (OSError, ValueError) as error:

@@ -11,12 +11,21 @@ if [[ -n "${DYN4K_SAFARI_LAUNCH_CONTEXT:-}" ]]; then
     /usr/bin/printf 'command=/usr/bin/open -W -a /Applications/Safari.app\n'
     /bin/launchctl managername || true
   } > "$context/launch-$$.txt" 2>&1
+  /usr/bin/printf 'open_state=pending\n' > "$context/launch-outcome-$$.txt"
   (
+    set +e
+    sampler_status=0
     for sample in 1 2 3 4 5; do
-      /bin/sleep 2
-      /usr/bin/printf 'sample=%s\n' "$sample"
+      if ! /bin/sleep 2 || ! /usr/bin/printf 'sample=%s\n' "$sample"; then
+        sampler_status=1
+        break
+      fi
       /bin/ps -axo pid,ppid,state,comm | /usr/bin/grep -E '[S]afari|[o]pen|[n]ode' || true
     done
+    samples_completed=$(/usr/bin/grep -c '^sample=' "$context/process-$$.txt" || true)
+    /usr/bin/printf 'samples_completed=%s\nsampler_exit=%s\n' \
+      "$samples_completed" "$sampler_status" > "$context/sample-state-$$.txt"
+    exit "$sampler_status"
   ) > "$context/process-$$.txt" 2>&1 &
   sampler_pid=$!
   if /usr/bin/open -W -a /Applications/Safari.app "$1" \
@@ -25,15 +34,10 @@ if [[ -n "${DYN4K_SAFARI_LAUNCH_CONTEXT:-}" ]]; then
   else
     open_status=$?
   fi
-  if wait "$sampler_pid"; then
-    sampler_status=0
-  else
-    sampler_status=$?
-  fi
-  samples_completed=$(/usr/bin/grep -c '^sample=' "$context/process-$$.txt" || true)
-  /usr/bin/printf 'samples_completed=%s\nsampler_exit=%s\n' \
-    "$samples_completed" "$sampler_status" > "$context/sample-state-$$.txt"
-  /usr/bin/printf 'open_exit=%s\n' "$open_status" > "$context/launch-outcome-$$.txt"
+  wait "$sampler_pid" || true
+  /usr/bin/printf 'open_state=finished\nopen_exit=%s\n' "$open_status" \
+    > "$context/launch-outcome-$$.tmp"
+  /bin/mv "$context/launch-outcome-$$.tmp" "$context/launch-outcome-$$.txt"
   exit "$open_status"
 fi
 
