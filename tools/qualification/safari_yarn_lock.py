@@ -1014,7 +1014,7 @@ def capture(repository, candidate_sha, output, configuration=None):
     if configuration:
         init = output / configuration / "qualification.init.gradle"
         init.parent.mkdir()
-        init.write_text(full_hosted.init_script("jsSafari", configuration))
+        init.write_bytes(full_hosted.init_script("jsSafari", configuration).encode())
         files.append({"path": init.relative_to(output).as_posix(),
                       "sha256": digest(init), "size": init.stat().st_size})
         receipt["invocation_id"] = uuid.uuid4().hex

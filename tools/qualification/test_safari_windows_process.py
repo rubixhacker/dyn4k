@@ -13,7 +13,26 @@ from unittest import mock
 import safari_yarn_lock
 
 
+def stop_fixture_process(process):
+    if process.poll() is None:
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+
+
 class SafariWindowsProcessTests(unittest.TestCase):
+    def test_fixture_cleanup_uses_process_kill_without_posix_groups(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        with mock.patch.object(os, "name", "nt"), \
+                mock.patch.object(os, "killpg", side_effect=AssertionError(
+                    "POSIX groups are unavailable on Windows"), create=True):
+            stop_fixture_process(process)
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+
     def test_job_limit_setup_exception_closes_handle_before_launch(self):
         kernel = mock.Mock()
         kernel.CreateJobObjectW.return_value = 789
@@ -42,8 +61,10 @@ class SafariWindowsProcessTests(unittest.TestCase):
 
         def launch(_command, **kwargs):
             kwargs.pop("creationflags")
+            if os.name != "nt":
+                kwargs["start_new_session"] = True
             process = real_popen([sys.executable, "-c", "import time; time.sleep(30)"],
-                                 start_new_session=True, **kwargs)
+                                 **kwargs)
             launched.append(process)
             return mock.Mock(pid=process.pid, _handle=process.pid,
                              stdout=process.stdout, stderr=process.stderr,
@@ -58,8 +79,8 @@ class SafariWindowsProcessTests(unittest.TestCase):
 
         def terminate(job, code):
             calls.append(("terminate", job, code))
-            if launched and launched[0].poll() is None:
-                os.killpg(launched[0].pid, signal.SIGKILL)
+            if launched:
+                stop_fixture_process(launched[0])
             return 1
 
         kernel = mock.Mock()
@@ -93,9 +114,7 @@ class SafariWindowsProcessTests(unittest.TestCase):
                 self.assertTrue(launched[0].stdout.closed and launched[0].stderr.closed)
         finally:
             for process in launched:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
+                stop_fixture_process(process)
 
     def test_log_open_failure_never_launches_windows_process_or_leaves_job(self):
         for failed_name in ("stdout.txt", "stderr.txt"):

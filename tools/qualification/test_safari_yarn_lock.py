@@ -53,6 +53,15 @@ def bash_path(path):
     return str(path)
 
 
+def stop_fixture_process(process):
+    if process.poll() is None:
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+
+
 LOCK_FAILURE = ("FAILURE: Build failed with an exception.\n\n"
                 "* What went wrong:\n"
                 "Execution failed for task ':kotlinStoreYarnLock' "
@@ -94,6 +103,8 @@ class SafariYarnLockTests(unittest.TestCase):
             (self.repository / module).mkdir()
             (self.repository / module / "build.gradle.kts").write_text("plugins {}\n")
         subprocess.run(["git", "init", "-q", str(self.repository)], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "config", "--local",
+                        "core.autocrlf", "false"], check=True)
         subprocess.run(["git", "-C", str(self.repository), "add", "."], check=True)
         subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
                         "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"],
@@ -101,6 +112,37 @@ class SafariYarnLockTests(unittest.TestCase):
         self.candidate = subprocess.check_output(
             ["git", "-C", str(self.repository), "rev-parse", "HEAD"], text=True).strip()
         self.output = self.root / "capture"
+
+    def test_fixture_commits_exact_crlf_bytes(self):
+        self.assertEqual("false", subprocess.check_output(
+            ["git", "-C", str(self.repository), "config", "--local", "--get",
+             "core.autocrlf"], text=True).strip())
+        source = self.repository / "tools/qualification/safari-karma-reporter.js"
+        windows_bytes = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        source.write_bytes(windows_bytes)
+        subprocess.run(["git", "-C", str(self.repository), "add",
+                        "tools/qualification/safari-karma-reporter.js"], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "CRLF fixture"], check=True)
+        candidate = git_oid(self.repository, "HEAD")
+        self.assertEqual(windows_bytes, safari_reporter.committed_bytes(
+            self.repository, candidate,
+            Path("tools/qualification/safari-karma-reporter.js")))
+
+    def test_unprotected_fixture_normalizes_crlf_with_autocrlf_true(self):
+        subprocess.run(["git", "-C", str(self.repository), "config", "--local",
+                        "core.autocrlf", "true"], check=True)
+        source = self.repository / "tools/qualification/safari-karma-reporter.js"
+        windows_bytes = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        source.write_bytes(windows_bytes)
+        subprocess.run(["git", "-C", str(self.repository), "add",
+                        "tools/qualification/safari-karma-reporter.js"], check=True)
+        committed = safari_reporter.committed_bytes(
+            self.repository, self.candidate,
+            Path("tools/qualification/safari-karma-reporter.js"))
+        self.assertNotEqual(windows_bytes, committed)
+        self.assertEqual(windows_bytes.replace(b"\r\n", b"\n"), committed)
 
     def generated(self, data=b"host generated lock\n", safari=False):
         path = self.repository / "build/js/yarn.lock"
@@ -889,7 +931,8 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertFalse(receipt["qualified"])
         self.assertEqual("CHANGED", stage["status"])
         self.assertEqual("LEFTOVER", stage["projects"]["dyn4k-core"])
-        self.assertEqual("dyn4k-core/karma.config.d", stage["forensic"][0]["path"])
+        self.assertEqual(str(Path("dyn4k-core/karma.config.d")),
+                         stage["forensic"][0]["path"])
         self.assertTrue((self.repository / "dyn4k-core/karma.config.d").is_dir())
 
     def test_public_capture_log_open_failure_records_clean_stage_without_launch(self):
@@ -918,7 +961,7 @@ class SafariYarnLockTests(unittest.TestCase):
                         return real_open(path, mode, *args, **kwargs)
 
                     def launch(*args, **kwargs):
-                        if not str(args[0][0]).endswith("/gradlew"):
+                        if Path(args[0][0]).name not in ("gradlew", "gradlew.bat"):
                             return real_popen(*args, **kwargs)
                         launched.append(True)
                         process = mock.Mock(pid=345, _handle=456, returncode=0)
@@ -971,7 +1014,7 @@ class SafariYarnLockTests(unittest.TestCase):
         real_start = threading.Thread.start
         outside = self.root / "outside.txt"
         outside.write_bytes(b"outside sentinel")
-        for platform_name in ("posix", "nt"):
+        for platform_name in (("nt",) if os.name == "nt" else ("posix", "nt")):
             with self.subTest(platform=platform_name):
                 output = self.root / f"capture-{platform_name}-postlaunch"
                 launched = []
@@ -986,17 +1029,18 @@ class SafariYarnLockTests(unittest.TestCase):
 
                 def terminate(job, code):
                     calls.append(("terminate", job, code))
-                    if launched and launched[0].poll() is None:
-                        os.killpg(launched[0].pid, signal.SIGKILL)
+                    if launched:
+                        stop_fixture_process(launched[0])
                     return 1
 
                 kernel.TerminateJobObject.side_effect = terminate
 
                 def launch(command, **kwargs):
-                    if not str(command[0]).endswith("/gradlew"):
+                    if Path(command[0]).name not in ("gradlew", "gradlew.bat"):
                         return real_popen(command, **kwargs)
                     kwargs.pop("creationflags", None)
-                    kwargs["start_new_session"] = True
+                    if os.name != "nt":
+                        kwargs["start_new_session"] = True
                     process = real_popen(
                         [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
                     launched.append(process)
@@ -1060,9 +1104,7 @@ class SafariYarnLockTests(unittest.TestCase):
                         safari_yarn_lock.audit_capture(self.repository, self.candidate, output)
                 finally:
                     for process in launched:
-                        if process.poll() is None:
-                            os.killpg(process.pid, signal.SIGKILL)
-                            process.wait(timeout=5)
+                        stop_fixture_process(process)
 
     def test_public_hosted_capture_rejects_detached_job_child_with_closed_pipes(self):
         class Process:
@@ -1172,7 +1214,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("FAILED", lane["status"])
         self.assertEqual("LEFTOVER", lane["safari_reporter_stage"]["source"]
                          ["projects"]["dyn4k-core"])
-        self.assertEqual("dyn4k-core/karma.config.d", lane["safari_reporter_stage"]
+        self.assertEqual(str(Path("dyn4k-core/karma.config.d")), lane["safari_reporter_stage"]
                          ["source"]["forensic"][0]["path"])
         self.assertEqual(receipt, json.loads((output / "receipt.json").read_text()))
         self.assertEqual(1, runner.call_count)
@@ -1392,6 +1434,28 @@ class SafariYarnLockTests(unittest.TestCase):
                                                self.output, "production")
         self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
 
+    def test_init_script_keeps_exact_bytes_under_windows_text_writes(self):
+        real_write_text = Path.write_text
+
+        def windows_write(path, data, *args, **kwargs):
+            if path.name == "qualification.init.gradle":
+                return path.write_bytes(data.replace("\n", "\r\n").encode())
+            return real_write_text(path, data, *args, **kwargs)
+
+        def failure(repository, output, command):
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(Path, "write_text", windows_write), \
+                mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            safari_yarn_lock.capture(self.repository, self.candidate,
+                                     self.output, "production")
+        init = self.output / "production/qualification.init.gradle"
+        self.assertEqual(safari_yarn_lock.full_hosted.init_script(
+            "jsSafari", "production").encode(), init.read_bytes())
+
     def test_full_hosted_wrong_command_or_process_is_rejected(self):
         def wrong(repository, output, command):
             self.generated(safari=True)
@@ -1575,11 +1639,25 @@ class SafariYarnLockTests(unittest.TestCase):
                             runner: ["webpack", "sourcemap"],
                             source: ["webpack", "sourcemap"]},
                         "proxies": {}, "webpackCopy": []}
-            (package_root / "karma.conf.js").write_text(
-                "\nmodule.exports = function(config) {\n\nconfig.set("
-                + json.dumps(settings) + ");"
-                + safari_yarn_lock.safari_reporter.APPROVED_GENERATOR_TAIL
-                + reporter + "\n}\n")
+            config = ("\nmodule.exports = function(config) {\n\nconfig.set("
+                      + json.dumps(settings) + ");"
+                      + safari_yarn_lock.safari_reporter.APPROVED_GENERATOR_TAIL
+                      + reporter + "\n}\n")
+            (package_root / "karma.conf.js").write_bytes(config.encode())
+
+    def test_context_fixture_retains_exact_reporter_under_windows_text_writes(self):
+        real_write_text = Path.write_text
+
+        def windows_write(path, data, *args, **kwargs):
+            return real_write_text(path, data.replace("\n", "\r\n"), *args, **kwargs)
+
+        with mock.patch.object(Path, "write_text", windows_write):
+            self.write_valid_karma_configs()
+        fragment = (self.repository /
+                    "tools/qualification/safari-karma-reporter.js").read_bytes()
+        config = (self.repository / safari_yarn_lock.CONTEXT_ROOTS[0]
+                  / "karma.conf.js").read_bytes()
+        self.assertIn(fragment, config)
 
     def test_public_capture_rejects_generated_config_symlinked_package_ancestor(self):
         self.write_valid_karma_configs()
