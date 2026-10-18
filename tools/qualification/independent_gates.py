@@ -66,9 +66,11 @@ PROSPECTIVE_BRIDGE_METHODS = (
     "captureAngleFailure", "captureCcd", "captureLongMotion")
 JOINT_PHYSICAL_CASES = ("weld-spring-equal", "pulley-taut")
 JOINT_PHYSICAL_STEPS = 36000
-PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
+PROSPECTIVE_HISTORICAL_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
+PROSPECTIVE_HISTORICAL_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
+PROSPECTIVE_POLICY_REVISION = "e038c334caa07a1547b86839f5d467c5f73ec708"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
-PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
+PROSPECTIVE_POLICY_SHA256 = "1b80b7c198d510ab16784348661053a4bde6507548f5ec12d4a460287ec7b484"
 PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
@@ -357,7 +359,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         approved = APPROVED_PROSPECTIVE_CHECKERS
     elif descends_from(PROSPECTIVE_ASSEMBLED_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS
-    elif descends_from(PROSPECTIVE_POLICY_REVISION):
+    elif descends_from(PROSPECTIVE_HISTORICAL_POLICY_REVISION):
         approved = APPROVED_PROSPECTIVE_POLICY_CHECKERS
     else:
         raise ValueError("prospective checker candidate predates approved revisions")
@@ -374,12 +376,14 @@ def _prospective_checker_binding(repository, candidate_sha):
     committed = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:{catalog}"], stderr=subprocess.PIPE)
-    if (hashlib.sha256(committed).hexdigest() != PROSPECTIVE_POLICY_SHA256
+    catalog_sha256 = (PROSPECTIVE_POLICY_SHA256 if descends_from(PROSPECTIVE_POLICY_REVISION)
+                      else PROSPECTIVE_HISTORICAL_POLICY_SHA256)
+    if (hashlib.sha256(committed).hexdigest() != catalog_sha256
             or hashlib.sha256((Path(__file__).resolve().parents[2] / catalog).read_bytes()).hexdigest()
             != PROSPECTIVE_POLICY_SHA256):
         raise ValueError(f"prospective policy/checker blob differs: {catalog}")
     return {f"{source_dir}/{name}": value for name, value in approved.items()} | {
-        catalog: PROSPECTIVE_POLICY_SHA256}
+        catalog: catalog_sha256}
 
 
 def _missing_numerical_subgates(repository):

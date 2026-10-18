@@ -619,7 +619,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                           cwd=ROOT, text=True).strip()
         windows = (
-            (independent_gates.PROSPECTIVE_POLICY_REVISION,
+            (independent_gates.PROSPECTIVE_HISTORICAL_POLICY_REVISION,
              independent_gates.APPROVED_PROSPECTIVE_POLICY_CHECKERS),
             (independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION,
              independent_gates.APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS),
@@ -628,6 +628,8 @@ class IndependentGateSeamTests(unittest.TestCase):
             (independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION,
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
             (independent_gates.PROSPECTIVE_CHECKER_REVISION,
+             independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+            (independent_gates.PROSPECTIVE_POLICY_REVISION,
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
             (current, independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
         )
@@ -666,7 +668,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"cases.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(
-                    ROOT, independent_gates.PROSPECTIVE_POLICY_REVISION)
+                    ROOT, independent_gates.PROSPECTIVE_HISTORICAL_POLICY_REVISION)
             if checkout_bound:
                 independent_gates._prospective_checker_binding(
                     ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
@@ -674,6 +676,66 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"prospective_compare.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(ROOT, current)
+
+    def test_prospective_catalog_binding_keeps_historical_and_current_windows(self):
+        path = independent_gates.PROSPECTIVE_POLICY_PATH
+        historical_revision = "7213238591db1611da86cdec075978190ca6d52f"
+        current_revision = "e038c334caa07a1547b86839f5d467c5f73ec708"
+        historical_sha = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
+        current_sha = "1b80b7c198d510ab16784348661053a4bde6507548f5ec12d4a460287ec7b484"
+        self.assertEqual(current_revision, independent_gates.PROSPECTIVE_POLICY_REVISION)
+        self.assertEqual(current_sha, independent_gates.PROSPECTIVE_POLICY_SHA256)
+        self.assertEqual(current_sha, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+        current_catalog = independent_gates.approved_prospective_catalog(str(ROOT))
+        self.assertEqual(318, len(current_catalog["cases"]))
+        self.assertEqual(566, len(current_catalog["paths"]))
+        self.assertEqual(92, len(current_catalog["path_sets"]))
+        self.assertEqual("UNPASSED", current_catalog["qualification"])
+        historical_bytes = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{historical_revision}:{path}"], cwd=ROOT)
+        historical_catalog = json.loads(historical_bytes)
+        changed_fields = {key for key in current_catalog
+                          if current_catalog[key] != historical_catalog[key]}
+        self.assertEqual({"baseline_trace_sha256", "baseline_fixture_source_sha256"},
+                         changed_fields)
+        for revision, expected in ((historical_revision, historical_sha),
+                                   (current_revision, current_sha)):
+            with self.subTest(revision=revision):
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{path}"], cwd=ROOT)
+                self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
+                self.assertEqual(expected,
+                                 independent_gates._prospective_checker_binding(ROOT, revision)[path])
+        with mock.patch.object(independent_gates, "PROSPECTIVE_POLICY_SHA256", historical_sha):
+            with self.assertRaisesRegex(ValueError, "adopted prospective policy catalog differs"):
+                independent_gates.approved_prospective_catalog.cache_clear()
+                independent_gates.approved_prospective_catalog(str(ROOT))
+        independent_gates.approved_prospective_catalog.cache_clear()
+        with mock.patch.object(independent_gates, "PROSPECTIVE_HISTORICAL_POLICY_SHA256", current_sha):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, historical_revision)
+        with mock.patch.object(independent_gates, "PROSPECTIVE_POLICY_SHA256", historical_sha):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current_revision)
+        original_check_output = subprocess.check_output
+
+        def stale_reference(command, *args, **kwargs):
+            if "show" in command and f"{current_revision}:{path}" in command:
+                return historical_bytes
+            return original_check_output(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", stale_reference):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current_revision)
+        original_read_bytes = Path.read_bytes
+
+        def altered_catalog(file):
+            raw = original_read_bytes(file)
+            return raw + b" " if file == ROOT / path else raw
+
+        with mock.patch.object(Path, "read_bytes", altered_catalog):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current_revision)
 
     def test_reviewed_p2_source_blobs_are_pinned_to_approved_revision(self):
         historical = independent_gates.PROSPECTIVE_CHECKER_REVISION
