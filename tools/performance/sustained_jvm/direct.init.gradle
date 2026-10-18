@@ -1,0 +1,10 @@
+gradle.beforeProject { project ->
+    if (project.name != "dyn4k-performance-consumer") return
+    project.pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        def harness = project.providers.gradleProperty("sustainedHarnessJar").get()
+        project.dependencies.add("implementation", project.files(harness))
+        project.tasks.named("compileKotlin").configure {
+            source(project.file("../../tools/performance/sustained_jvm/SustainedDirectPilot.kt"))
+        }
+    }
+}
