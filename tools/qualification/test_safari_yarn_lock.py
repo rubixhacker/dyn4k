@@ -32,7 +32,8 @@ def write_loose_object(repository, advertised, raw, kind):
     slot.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt" and slot.exists():
         slot.chmod(0o666)
-    slot.unlink(missing_ok=True)
+    elif slot.exists():
+        slot.unlink()
     slot.write_bytes(zlib.compress(kind.encode() + b" " + str(len(raw)).encode()
                                    + b"\0" + raw))
 
@@ -497,8 +498,7 @@ class SafariYarnLockTests(unittest.TestCase):
     def test_lock_task_keeps_gradle_mismatch_enforcement(self):
         wrapper = self.repository / ("gradlew.bat" if os.name == "nt" else "gradlew")
         if os.name == "nt":
-            wrapper.write_text("@echo off\r\necho :kotlinStoreYarnLock FAILED\r\n"
-                               "echo Lock file was changed 1>&2\r\nexit /b 1\r\n")
+            wrapper.write_text("# Python fixture dispatched by the test below\n")
         else:
             wrapper.write_text("#!/bin/sh\n"
                                "printf ':kotlinStoreYarnLock FAILED\\n'\n"
@@ -506,7 +506,22 @@ class SafariYarnLockTests(unittest.TestCase):
                                "exit 1\n")
         wrapper.chmod(0o755)
         self.output.mkdir()
-        result = safari_yarn_lock.run_lock_task(self.repository, self.output)
+        if os.name == "nt":
+            expected = [str(wrapper), "--no-daemon", "--console=plain",
+                        "--rerun-tasks", ":kotlinStoreYarnLock"]
+            script = ("import sys; ")
+            script += ("sys.stdout.write(':kotlinStoreYarnLock FAILED\\n'); "
+                       "sys.stderr.write('Lock file was changed\\n'); sys.exit(1)")
+            real_popen = subprocess.Popen
+
+            def launch(command, **kwargs):
+                self.assertEqual(expected, command)
+                return real_popen([sys.executable, "-c", script], **kwargs)
+
+            with mock.patch.object(subprocess, "Popen", side_effect=launch):
+                result = safari_yarn_lock.run_lock_task(self.repository, self.output)
+        else:
+            result = safari_yarn_lock.run_lock_task(self.repository, self.output)
         command = result["command"]
         self.assertEqual([str(wrapper), "--no-daemon",
                           "--console=plain", "--rerun-tasks", ":kotlinStoreYarnLock"],
@@ -539,6 +554,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertTrue(result["timed_out"])
         self.assertLess(result["finished_ns"] - result["started_ns"], 3_000_000_000)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX selector process-group behavior")
     def test_posix_selector_setup_failure_stops_launched_process_group(self):
         self.output.mkdir()
         launched = []
@@ -566,6 +582,7 @@ class SafariYarnLockTests(unittest.TestCase):
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=5)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX selector process-group behavior")
     def test_posix_selector_registration_failure_stops_launched_process_group(self):
         self.output.mkdir()
         launched = []
@@ -2065,6 +2082,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("CONTEXT_INCOMPLETE", json.loads(output.getvalue())["status"])
         self.assertFalse(json.loads((context / "inventory.json").read_text())["qualified"])
 
+    @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_joins_early_failed_launch_before_return(self):
         root = Path(__file__).resolve().parents[2]
         launcher = (root / "tools/qualification/safari-launch.sh").read_text()
@@ -2097,6 +2115,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(23, normal.returncode)
         self.assertEqual(1, len(list(context.glob("sample-state-*.txt"))))
 
+    @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_records_pending_open_and_completed_samples(self):
         root = Path(__file__).resolve().parents[2]
         launcher = (root / "tools/qualification/safari-launch.sh").read_text()
