@@ -57,7 +57,7 @@ def run_capture(method, output):
     if stage.returncode or not STAGED_JAR.is_file():
         raise CaptureRejected("pinned source publication failed")
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
-    command = ["strace", "-f", "-s", "16384", "-v", "-e", "trace=execve",
+    command = ["strace", "-f", "-s", "16384", "-e", "trace=execve",
                "-o", str(output / "execve.log"), str(ROOT / "gradlew"),
                "jvmTest", "--tests", f"portable.ProspectiveArithmeticTest.{method}",
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
