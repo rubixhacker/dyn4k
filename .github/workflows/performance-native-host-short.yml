@@ -1,0 +1,192 @@
+name: Native host short performance producer
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Matching Native host target
+        type: choice
+        required: true
+        options:
+          - macosArm64
+          - mingwX64
+      build:
+        description: Consumer link mode
+        type: choice
+        required: true
+        options:
+          - development
+          - optimized
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ${{ inputs.target == 'macosArm64' && 'macos-26' || 'windows-2025' }}
+    timeout-minutes: 150
+    env:
+      DEVELOPER_DIR: ${{ inputs.target == 'macosArm64' && '/Applications/Xcode_26.4.1.app/Contents/Developer' || '' }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      TARGET: ${{ inputs.target }}
+      BUILD: ${{ inputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Stage and capture on selected host
+        shell: bash
+        run: |
+          python -B - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import re
+          import shutil
+          import subprocess
+          import sys
+
+          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          evidence = (Path(os.environ["RUNNER_TEMP"]) / "performance-native-host-short").resolve()
+          evidence.mkdir(parents=True, exist_ok=True)
+          target = os.environ["TARGET"]
+          build = os.environ["BUILD"]
+          sha = os.environ["GITHUB_SHA"]
+          route = {"source_sha": sha, "target": target, "build": build,
+                   "runner_os": os.environ["RUNNER_OS"], "host": platform.uname()._asdict(),
+                   "run_id": os.environ["GITHUB_RUN_ID"],
+                   "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                   "qualification": "unpassed", "commands": {}, "scenarios": {}}
+
+          def execute(label, argv, timeout=300):
+              output = evidence / label
+              output.parent.mkdir(parents=True, exist_ok=True)
+              record = {"argv": [str(part) for part in argv], "timeout_seconds": timeout}
+              try:
+                  result = subprocess.run(record["argv"], cwd=root, capture_output=True,
+                                          timeout=timeout, check=False)
+                  stdout, stderr = result.stdout, result.stderr
+                  record["exit_code"] = result.returncode
+              except subprocess.TimeoutExpired as error:
+                  stdout, stderr = error.stdout or b"", error.stderr or b""
+                  record.update(exit_code=None, error="timeout")
+              except OSError as error:
+                  stdout, stderr = b"", str(error).encode()
+                  record.update(exit_code=None, error="launch failed")
+              output.with_suffix(".stdout.bin").write_bytes(stdout)
+              output.with_suffix(".stderr.bin").write_bytes(stderr)
+              output.with_suffix(".json").write_text(json.dumps(record, indent=2) + "\n")
+              route["commands"][label] = record
+              return record["exit_code"] == 0, stdout, stderr
+
+          def require(label, argv, timeout=300):
+              passed, stdout, stderr = execute(label, argv, timeout)
+              if not passed:
+                  raise RuntimeError(label + " failed; see retained command output")
+              return stdout + stderr
+
+          try:
+              actual_sha = require("setup/checkout", ["git", "rev-parse", "HEAD"]).decode().strip()
+              if actual_sha != sha:
+                  raise RuntimeError("checkout differs from GITHUB_SHA")
+              if require("setup/status", ["git", "status", "--porcelain", "--untracked-files=all"]).strip():
+                  raise RuntimeError("checkout is not clean")
+              host = platform.system()
+              machine = platform.machine().lower()
+              expected = {"macosArm64": ("Darwin", "arm64"),
+                          "mingwX64": ("Windows", "amd64")}
+              if (host, machine) != expected[target]:
+                  raise RuntimeError(f"selected target and host differ: {target}, {host}, {machine}")
+              java = require("setup/java", ["java", "-version"]).decode(errors="replace")
+              if not re.search(r'\bversion "21(?:\.|\")', java):
+                  raise RuntimeError("selected JDK is not 21")
+              wrapper = root / ("gradlew.bat" if host == "Windows" else "gradlew")
+              gradle = require("setup/gradle", [wrapper, "--version"]).decode(errors="replace")
+              if not re.search(r"(?m)^Gradle 9\.5\.0$", gradle):
+                  raise RuntimeError("selected Gradle is not 9.5.0")
+              require("setup/python", [sys.executable, "--version"])
+              if host == "Darwin":
+                  if not Path(os.environ["DEVELOPER_DIR"]).is_dir():
+                      raise RuntimeError("selected Xcode directory is missing")
+                  xcode = require("setup/xcode", ["xcodebuild", "-version"]).decode(errors="replace")
+                  if "Xcode 26.4.1" not in xcode.splitlines():
+                      raise RuntimeError("selected Xcode is not 26.4.1")
+
+              staging = (root / "build/staging-repository").resolve()
+              stage_root = staging / ".qualification/native-host-short"
+              stage_receipt = stage_root / "receipt.json"
+              stage_log = stage_root / "stage.log"
+              require("stage/command", [sys.executable, "-B", root / "tools/qualification/stage.py",
+                                        "--candidate-sha", sha, "--target", target,
+                                        "--output", stage_receipt, "--console", stage_log], 2400)
+              repository_uri = staging.as_uri()
+              require("build/consumer", [wrapper, "-p", root / "consumers/performance/portable",
+                                         "--no-daemon", "--console=plain", "--rerun-tasks",
+                                         f"-PperformanceRepository={repository_uri}",
+                                         f"-PportableNativeHostTarget={target}",
+                                         f"-PportableNativeHostBuild={build}",
+                                         "portableNativeHostBuildInventory"], 2400)
+              inventory = (root / "consumers/performance/portable/build/portable-inventory" /
+                           f"{target}-{build}.json").resolve()
+              selected = json.loads(inventory.read_text())
+              if (selected.get("source_sha"), selected.get("target"), selected.get("build"),
+                  selected.get("gradle"), selected.get("kgp")) != (sha, target, build, "9.5.0", "2.4.20"):
+                  raise RuntimeError("consumer inventory identity differs from dispatch")
+              harness = Path(selected["harness"])
+              if not harness.is_absolute() or not harness.is_file():
+                  raise RuntimeError("selected executable is missing")
+              (evidence / "build").mkdir(exist_ok=True)
+              shutil.copy2(inventory, evidence / "build/inventory.json")
+              (evidence / "build/selected.json").write_text(json.dumps({
+                  "source_sha": sha, "target": target, "build": build,
+                  "harness": str(harness), "bundle_sha256": selected["bundle_sha256"],
+                  "resolved_artifacts": selected["resolved_artifacts"],
+                  "staging_repository": str(staging), "staging_uri": repository_uri,
+              }, indent=2) + "\n")
+
+              image_control, _, _ = execute("setup/path-swap-command", [sys.executable, "-B",
+                  root / "tools/performance/sustained_portable/host_image_adverse.py",
+                  "--output", evidence / "setup/path-swap.json"], 45)
+              route["path_swap_control_passed"] = image_control
+              for api in ("direct_kotlin", "compatibility"):
+                  archive = (evidence / "captures" / api).resolve()
+                  passed, _, _ = execute(f"captures/{api}-command", [sys.executable, "-B",
+                      root / "tools/performance/sustained_portable/native_host_capture.py",
+                      "--inventory", inventory, "--publication-root", staging,
+                      "--target", target, "--build", build,
+                      "--scenario", f"separated.default.small.30hz.{api}",
+                      "--archive", archive, "--steps", "30", "--warmup", "3"], 120)
+                  route["scenarios"][api] = {"exit_zero": passed,
+                      "capture_receipt": (archive / "capture.json").is_file()}
+              if not image_control or not all(row["exit_zero"] for row in route["scenarios"].values()):
+                  raise RuntimeError("one or more Native host controls failed")
+          except (KeyError, ValueError, OSError, RuntimeError) as error:
+              route["error"] = str(error)
+          finally:
+              if "stage_receipt" in locals() and stage_receipt.is_file():
+                  (evidence / "stage").mkdir(exist_ok=True)
+                  shutil.copy2(stage_receipt, evidence / "stage/receipt.json")
+              if "stage_log" in locals() and stage_log.is_file():
+                  (evidence / "stage").mkdir(exist_ok=True)
+                  shutil.copy2(stage_log, evidence / "stage/stage.log")
+              (evidence / "route-result.json").write_text(json.dumps(route, indent=2) + "\n")
+          if "error" in route:
+              sys.exit(1)
+          PY
+      - name: Upload raw Native host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-native-host-short-${{ github.sha }}-${{ inputs.target }}-${{ inputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/performance-native-host-short/
+            ${{ github.workspace }}/build/staging-repository/
+          include-hidden-files: true
+          if-no-files-found: warn
