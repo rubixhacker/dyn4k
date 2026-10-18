@@ -710,6 +710,13 @@ def validate_v2_sidecars(root, item, scenario, source_commit, fixture_sha256,
                       "managed_provenance", "buffer_provenance", "qualification"},
         "plateau_v2": {"cycle", "clock_ns", "heap_after_collection_bytes",
                        "rss_after_collection_bytes", "collection_count",
+                       "collection_count_before", "collection_count_after",
+                       "collection_count_delta", "collection_count_unit",
+                       "collection_probe", "collection_count_status",
+                       "cycle_disposed_ns", "collection_before_sample_ns",
+                       "gc_requested_ns", "collection_after_sample_ns",
+                       "heap_sample_begin_ns", "heap_sample_end_ns",
+                       "rss_sample_begin_ns", "rss_sample_end_ns",
                        "managed_heap_delta_bytes", "buffer_pool_used_bytes",
                        "native_workload_bytes", "attributed_workload_bytes",
                        "reserved_runtime_bytes", "native_attribution", "qualification"}}
@@ -847,10 +854,38 @@ def validate_v2_sidecars(root, item, scenario, source_commit, fixture_sha256,
         require(not memory, "version 2 memory stream in wrong mode")
     if mode == "plateau":
         previous_count = None
+        stamp_names = ("cycle_disposed_ns", "collection_before_sample_ns",
+                       "gc_requested_ns", "collection_after_sample_ns",
+                       "heap_sample_begin_ns", "heap_sample_end_ns",
+                       "rss_sample_begin_ns", "rss_sample_end_ns", "clock_ns")
         for cycle, (record, allocated, raw) in enumerate(zip(plateau, allocation, raw_rows)):
             count = record.get("collection_count")
+            before = record.get("collection_count_before")
+            after = record.get("collection_count_after")
+            delta = record.get("collection_count_delta")
+            stamps = [record.get(name) for name in stamp_names]
+            require(all(type(stamp) is int and stamp >= origin["runtime_ns"]
+                        for stamp in stamps) and
+                    all(first <= second for first, second in zip(stamps, stamps[1:])) and
+                    stamps[0] > (plateau[cycle - 1]["clock_ns"] if cycle else
+                                 int(warm_clock[-1]["end_ns"])) and
+                    stamps[0] <= allocated["clock_ns"] <= stamps[1],
+                    "version 2 plateau disposal, collection, or sample order differs")
+            for stamp in stamps:
+                low = max(low, item["started_ns"] - stamp)
+                high = min(high, item["ended_ns"] - stamp)
+                require(low <= high,
+                        "version 2 plateau sample lies outside observed process interval")
             require(type(count) is int and count > 0 and
                     (previous_count is None or count > previous_count) and
+                    type(before) is int and before >= 0 and
+                    (previous_count is None or before >= previous_count) and
+                    type(after) is int and after == count and after > before and
+                    type(delta) is int and delta == after - before and
+                    record.get("collection_count_unit") == "collections" and
+                    record.get("collection_probe") ==
+                    "sum of GarbageCollectorMXBean.getCollectionCount" and
+                    record.get("collection_count_status") == "observed" and
                     type(record.get("heap_after_collection_bytes")) is int and
                     record["heap_after_collection_bytes"] >= 0 and
                     type(record.get("rss_after_collection_bytes")) is int and
@@ -870,6 +905,7 @@ def validate_v2_sidecars(root, item, scenario, source_commit, fixture_sha256,
                     all(int(raw[field]) == -1 for field in
                         ("managed_bytes", "native_bytes", "attributed_workload_bytes",
                          "reserved_runtime_bytes")) and
+                    int(raw["wasm_linear_bytes"]) == 0 and
                     record.get("native_workload_bytes") is None and
                     record.get("attributed_workload_bytes") is None and
                     record.get("reserved_runtime_bytes") is None and

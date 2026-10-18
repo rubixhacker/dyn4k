@@ -25,10 +25,11 @@ class SignedV2ArchivePublicTest(unittest.TestCase):
         cls.archives = {mode: Path(base) / folder for mode, folder in
                         (("allocation", "v2-archive-owner-allocation-711"),
                          ("memory", "v2-archive-owner-memory-711-attempt4"),
-                         ("plateau", "v2-archive-owner-plateau-711"))}
+                         ("plateau", "v2-archive-owner-plateau-4e"))}
+        cls.old_plateau = Path(base) / "v2-archive-owner-plateau-711"
         cls.key = Path(key)
         if not cls.key.is_file() or not all((path / "archive.json").is_file()
-                                            for path in cls.archives.values()):
+                                            for path in (*cls.archives.values(), cls.old_plateau)):
             raise unittest.SkipTest("retained signed version 2 archive input unavailable")
 
     def verify(self, archive, key=None):
@@ -153,6 +154,69 @@ class SignedV2ArchivePublicTest(unittest.TestCase):
             status, result = self.verify(archive)
             self.assertNotEqual(0, status, result)
             self.assertIn("version 2 warm-up memory clock", result["reason"])
+
+    def test_signed_4e_plateau_requires_each_collection_and_sample_stamp(self):
+        changes = ("zero_delta", "early_disposal", "early_heap", "early_rss", "missing_before",
+                   "wrong_pid", "wrong_provider", "wrong_probe")
+        for label in changes:
+            with self.subTest(label=label):
+                with tempfile.TemporaryDirectory(dir=Path.home()) as folder:
+                    archive, index = self.copy("plateau", folder)
+                    record = index["captures"][0]
+                    path = archive / record["plateau_v2_path"]
+                    rows = [json.loads(line) for line in path.read_text().splitlines()]
+                    row = rows[37]
+                    if label == "zero_delta":
+                        row["collection_count_before"] = row["collection_count_after"]
+                        row["collection_count_delta"] = 0
+                        self.assertGreater(rows[38]["collection_count"], row["collection_count"])
+                    elif label == "early_disposal":
+                        row["cycle_disposed_ns"] = rows[36]["clock_ns"] - 1
+                    elif label == "early_heap":
+                        row["heap_sample_begin_ns"] = row["collection_after_sample_ns"] - 1
+                    elif label == "early_rss":
+                        row["rss_sample_begin_ns"] = row["heap_sample_end_ns"] - 1
+                    elif label == "missing_before":
+                        del row["collection_count_before"]
+                    elif label == "wrong_pid":
+                        row["pid"] = record["pid"] + 1
+                    elif label == "wrong_provider":
+                        row["provider_sha256"] = "0" * 64
+                    else:
+                        row["collection_probe"] = "unobserved"
+                    path.write_text("\n".join(json.dumps(value) for value in rows) + "\n")
+                    self.reseal(archive, index, "plateau_v2")
+                    status, result = self.verify(archive)
+                    self.assertNotEqual(0, status, result)
+                    self.assertEqual("unpassed", result["qualification"])
+                    self.assertIn("version 2", result["reason"])
+
+    def test_signed_4e_plateau_rejects_legacy_csv_disagreement(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as folder:
+            archive, index = self.copy("plateau", folder)
+            record = index["captures"][0]
+            path = archive / record["raw_path"]
+            with path.open(newline="") as stream:
+                reader = csv.DictReader(stream)
+                fields = reader.fieldnames
+                rows = list(reader)
+            rows[37]["collection_count"] = str(int(rows[37]["collection_count"]) + 1)
+            with path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+            record["raw_sha256"] = sha256(path)
+            index["signature"] = signature(index, self.key.read_bytes())
+            (archive / "archive.json").write_text(json.dumps(index))
+            status, result = self.verify(archive)
+            self.assertNotEqual(0, status, result)
+            self.assertIn("version 2 plateau", result["reason"])
+
+    def test_old_plateau_schema_is_historical_not_current_v2_proof(self):
+        status, result = self.verify(self.old_plateau)
+        self.assertNotEqual(0, status, result)
+        self.assertEqual("unpassed", result["qualification"])
+        self.assertIn("version 2", result["reason"])
 
 
 if __name__ == "__main__":
