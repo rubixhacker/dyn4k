@@ -2,7 +2,7 @@
 
 Spec: [Complete the dyn4j 6.0.0 Kotlin Multiplatform port](https://github.com/rubixhacker/dyn4k/issues/32).
 
-Integration branch: `codex/dyn4k-port`. Starting main revision: `2925a86d2b9bcdbc512f71b476ec00f02509e8b0`.
+Initial integration branch: `codex/dyn4k-port`. Starting main revision: `2925a86d2b9bcdbc512f71b476ec00f02509e8b0`. [The user's later decision](https://github.com/rubixhacker/dyn4k/issues/32#issuecomment-6245441655) directs reviewed changes to `main`.
 
 The user authorized implementation, recommended remaining choices, and GitHub publication on 2026-10-17. Use ISO 24495-1 and ISO 24495-3 for human-readable text and ASD-STE100 for new code comments.
 
