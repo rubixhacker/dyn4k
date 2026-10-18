@@ -14,7 +14,7 @@ import types
 import unittest
 import zlib
 from contextlib import redirect_stdout
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 import safari_yarn_lock
@@ -877,6 +877,15 @@ class SafariYarnLockTests(unittest.TestCase):
             def __init__(self, source, relative):
                 self.path = source / relative
 
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                self.close()
+
+            def open_file(self, name):
+                return os.open(self.path / name, os.O_RDONLY)
+
             def child(self, name, removable=False):
                 raise OSError("injected Win32 stage handle failure")
 
@@ -890,6 +899,7 @@ class SafariYarnLockTests(unittest.TestCase):
         fake_module = types.SimpleNamespace(LockedDirectory=Directory)
         with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}), \
                 mock.patch.object(safari_reporter, "os", proxy), \
+                mock.patch.object(safari_yarn_lock, "os", proxy), \
                 mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
                 mock.patch.object(safari_yarn_lock, "run_lock_task") as runner, \
                 mock.patch.object(sys, "argv", arguments), \
@@ -1332,22 +1342,45 @@ class SafariYarnLockTests(unittest.TestCase):
                 mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed), \
                 mock.patch.object(sys, "argv", arguments), \
                 redirect_stdout(io.StringIO()):
-            if os.name == "nt":
-                with self.assertRaises(OSError):
-                    safari_yarn_lock.main()
-            else:
-                self.assertEqual(1, safari_yarn_lock.main())
+            self.assertEqual(1, safari_yarn_lock.main())
+        receipt = json.loads((self.output / "receipt.json").read_text())
         if os.name == "nt":
+            self.assertEqual("STAGED_REPORTER_CHANGED", receipt["status"])
+            self.assertEqual("CHANGED", receipt["reporter_stage"]["status"])
+            self.assertNotIn("process", receipt)
+            self.assertFalse(receipt["qualified"])
             self.assertEqual(b"outside bytes\n",
                              (outside / "qualification-safari-reporter.js").read_bytes())
-            self.assertFalse((self.output / "receipt.json").exists())
+            self.assertFalse(directory.is_symlink())
             return
-        receipt = json.loads((self.output / "receipt.json").read_text())
         self.assertEqual("STAGED_REPORTER_CHANGED", receipt["status"])
         self.assertEqual("DIRECTORY_CHANGED", receipt["reporter_stage"]["projects"]["dyn4k-core"])
         self.assertEqual(b"outside bytes\n",
                          (outside / "qualification-safari-reporter.js").read_bytes())
         self.assertTrue(directory.is_symlink())
+
+    def test_public_hosted_capture_records_blocked_windows_stage_rename(self):
+        outside = self.root / "outside-reporter"
+        outside.mkdir()
+        sentinel = outside / "qualification-safari-reporter.js"
+        sentinel.write_bytes(b"outside sentinel\n")
+
+        def blocked(repository, destination, command):
+            directory = repository / "dyn4k-core/karma.config.d"
+            with mock.patch.object(Path, "rename", side_effect=PermissionError(
+                    "injected Windows sharing violation")):
+                directory.rename(outside)
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=blocked):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("PROCESS_CAPTURE_FAILED", receipt["status"])
+        self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+        self.assertFalse(receipt["qualified"])
+        self.assertNotIn("process", receipt)
+        self.assertEqual(b"outside sentinel\n", sentinel.read_bytes())
+        self.assertFalse((self.repository / "dyn4k-core/karma.config.d").exists())
+        self.assertTrue((self.output / "receipt.json").is_file())
 
     def test_public_hosted_capture_rejects_project_ancestor_swap_without_outside_access(self):
         project = self.repository / "dyn4k-core"
@@ -1375,16 +1408,16 @@ class SafariYarnLockTests(unittest.TestCase):
                 mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed), \
                 mock.patch.object(sys, "argv", arguments), \
                 redirect_stdout(io.StringIO()):
-            if os.name == "nt":
-                with self.assertRaises(OSError):
-                    safari_yarn_lock.main()
-            else:
-                self.assertEqual(1, safari_yarn_lock.main())
-        if os.name == "nt":
-            self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
-            self.assertFalse((self.output / "receipt.json").exists())
-            return
+            self.assertEqual(1, safari_yarn_lock.main())
         receipt = json.loads((self.output / "receipt.json").read_text())
+        if os.name == "nt":
+            self.assertEqual("PROCESS_CAPTURE_FAILED", receipt["status"])
+            self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+            self.assertNotIn("process", receipt)
+            self.assertFalse(receipt["qualified"])
+            self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
+            self.assertFalse(project.is_symlink())
+            return
         self.assertEqual("CHANGED", receipt["reporter_stage"]["status"])
         self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
         self.assertFalse((self.output / "forensic/safari-reporter/dyn4k-core"
@@ -1496,6 +1529,18 @@ class SafariYarnLockTests(unittest.TestCase):
                                                    self.output)
                 (self.output / "receipt.json").write_bytes(saved)
                 raw.write_bytes(raw_saved)
+
+    def test_hosted_inventory_uses_archive_separators_for_windows_paths(self):
+        expected = safari_yarn_lock.hosted_expected_files(
+            "development", PureWindowsPath("kotlin-js-store/yarn.lock"),
+            PureWindowsPath("build/js/yarn.lock"),
+            (PureWindowsPath("kotlin-js-store/yarn.lock"),
+             PureWindowsPath("tools/qualification/safari-launch.sh")),
+            (PureWindowsPath("build/js/package.json"),))
+        self.assertIn("tracked/kotlin-js-store/yarn.lock", expected)
+        self.assertIn("inputs/tools/qualification/safari-launch.sh", expected)
+        self.assertIn("generated/build/js/package.json", expected)
+        self.assertTrue(all("\\" not in path for path in expected))
 
     def test_full_hosted_public_audit_rejects_resealed_chrome_only_package(self):
         self.hosted_capture()

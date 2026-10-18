@@ -1145,6 +1145,18 @@ def capture(repository, candidate_sha, output, configuration=None):
     return receipt
 
 
+def hosted_expected_files(configuration, tracked_lock, generated_lock,
+                          source_inputs, package_inputs):
+    init_relative = Path(configuration) / "qualification.init.gradle"
+    expected = {init_relative.as_posix(), "stdout.txt", "stderr.txt",
+                f"tracked/{tracked_lock.as_posix()}",
+                f"tracked-after/{tracked_lock.as_posix()}",
+                f"generated/{generated_lock.as_posix()}"}
+    expected.update(f"inputs/{path.as_posix()}" for path in source_inputs[1:])
+    expected.update(f"generated/{path.as_posix()}" for path in package_inputs)
+    return expected
+
+
 def audit_capture(repository, candidate_sha, output):
     repository = repository.resolve()
     output = output.resolve()
@@ -1164,11 +1176,8 @@ def audit_capture(repository, candidate_sha, output):
         raise ValueError("hosted diagnostic identity differs")
     source_inputs = (TRACKED_LOCK, *SOURCE_INPUTS, *HOSTED_SOURCE_INPUTS)
     init_relative = Path(configuration) / "qualification.init.gradle"
-    expected = {init_relative.as_posix(), "stdout.txt", "stderr.txt",
-                f"tracked/{TRACKED_LOCK}", f"tracked-after/{TRACKED_LOCK}",
-                f"generated/{GENERATED_LOCK}"}
-    expected.update(f"inputs/{path}" for path in source_inputs[1:])
-    expected.update(f"generated/{path}" for path in REQUIRED_PACKAGE_INPUTS)
+    expected = hosted_expected_files(configuration, TRACKED_LOCK, GENERATED_LOCK,
+                                     source_inputs, REQUIRED_PACKAGE_INPUTS)
     if (receipt.get("package_inputs_expected") != [path.as_posix() for path in REQUIRED_PACKAGE_INPUTS]
             or set(receipt.get("package_inputs_observed", []))
             != {path.as_posix() for path in REQUIRED_PACKAGE_INPUTS}
