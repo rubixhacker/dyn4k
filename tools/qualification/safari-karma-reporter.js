@@ -68,6 +68,94 @@ function SafariLineReporter(baseReporterDecorator, karmaConfig, emitter) {
             }
         }
     };
+    const traceDirectory = typeof process === 'object' && process.env &&
+        process.env.DYN4K_SAFARI_EVENT_TRACE_DIR;
+    if (traceDirectory) {
+        const invocation = process.env.DYN4K_QUALIFICATION_INVOCATION;
+        const packageName = String(karmaConfig.basePath || '').split(/[\\/]/).pop();
+        const modules = Object.assign(Object.create(null), {
+            'dyn4k-dyn4k-core-test': 'dyn4k-core',
+            'dyn4k-dyn4k-test': 'dyn4k',
+            'dyn4k-staged-portable-consumer-test': 'consumer'
+        });
+        const moduleName = modules[packageName];
+        const directory = safariFs.lstatSync(traceDirectory);
+        if (!moduleName || !/^[0-9a-f]{32}$/.test(invocation || '') ||
+                directory.isSymbolicLink() || !directory.isDirectory() ||
+                safariFs.realpathSync(traceDirectory) !== traceDirectory ||
+                !safariFs.constants.O_NOFOLLOW) {
+            throw new Error('Safari event trace source or destination is unsafe');
+        }
+        const tracePath = traceDirectory + '/' + moduleName + '-' + invocation + '-' +
+            process.pid + '.jsonl';
+        const descriptor = safariFs.openSync(tracePath,
+            safariFs.constants.O_WRONLY | safariFs.constants.O_CREAT |
+            safariFs.constants.O_EXCL | safariFs.constants.O_NOFOLLOW, 0o600);
+        let records = 0;
+        let bytes = 0;
+        const counts = new Map();
+        const trace = (event, browser, count) => {
+            const record = {event, invocation, module: moduleName, node_pid: process.pid,
+                time_ms: Date.now()};
+            if (browser) {
+                record.browser = String(browser.id).slice(0, 64);
+                record.name = String(browser.name).slice(0, 128);
+            }
+            if (count !== undefined) record.spec_count = count;
+            const raw = Buffer.from(JSON.stringify(record) + '\n', 'utf8');
+            if (++records > 512 || bytes + raw.length > 65536) {
+                throw new Error('Safari event trace exceeds bound');
+            }
+            for (let offset = 0; offset < raw.length;) {
+                const written = safariFs.writeSync(descriptor, raw, offset,
+                    raw.length - offset);
+                if (!Number.isInteger(written) || written <= 0 ||
+                        written > raw.length - offset) {
+                    throw new Error('Safari event trace write failed');
+                }
+                offset += written;
+            }
+            bytes += raw.length;
+        };
+        trace('reporter_init');
+        const onRunStart = this.onRunStart;
+        this.onRunStart = function(browsers) {
+            trace('run_start');
+            return onRunStart.apply(this, arguments);
+        };
+        const onBrowserStart = this.onBrowserStart;
+        this.onBrowserStart = function(browser) {
+            trace('browser_start', browser);
+            return onBrowserStart.apply(this, arguments);
+        };
+        const specSuccess = this.specSuccess;
+        this.specSuccess = function(browser) {
+            const result = specSuccess.apply(this, arguments);
+            const count = (counts.get(browser.id) || 0) + 1;
+            counts.set(browser.id, count);
+            if (count === 1 || count % 128 === 0) {
+                trace('spec_checkpoint', browser, count);
+            }
+            return result;
+        };
+        const onBrowserComplete = this.onBrowserComplete;
+        this.onBrowserComplete = function(browser) {
+            trace('browser_complete', browser, counts.get(browser.id) || 0);
+            if (onBrowserComplete) return onBrowserComplete.apply(this, arguments);
+        };
+        const onBrowserError = this.onBrowserError;
+        this.onBrowserError = function(browser) {
+            trace('browser_error', browser, counts.get(browser.id) || 0);
+            if (onBrowserError) return onBrowserError.apply(this, arguments);
+        };
+        const onRunComplete = this.onRunComplete;
+        this.onRunComplete = function() {
+            const result = onRunComplete.apply(this, arguments);
+            trace('run_complete');
+            safariFs.closeSync(descriptor);
+            return result;
+        };
+    }
 }
 SafariLineReporter.$inject = OriginalReporter.$inject;
 plugin[reporterKey] = ['type', SafariLineReporter];

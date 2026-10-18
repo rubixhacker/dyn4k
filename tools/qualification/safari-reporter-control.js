@@ -9,24 +9,55 @@ const loadedPinned = '51b54a948f46db31ed64a1fd13f7d7cfe5aa8eabd6dc9886141f05c538
 function OriginalReporter(decorate) {
     decorate(this);
     this.emit = message => this.write(message);
+    this.onRunStart = () => {};
+    this.onBrowserStart = () => {};
+    this.onBrowserComplete = () => {};
+    this.specSuccess = () => {};
+    this.onRunComplete = () => {};
 }
 OriginalReporter.$inject = ['baseReporterDecorator'];
 
 function load(options = {}) {
     const output = [];
+    const traceOutput = [];
     const asynchronous = [];
     const calls = [];
     const producer = {[key]: ['type', OriginalReporter]};
     const plugin = options.wrongReporter
         ? {[key]: ['type', function WrongReporter() {}]} : producer;
-    const config = {plugins: options.missingReporter ? []
-        : options.duplicateReporter ? [plugin, producer] : [plugin]};
+    const config = {basePath: '/fixture/build/js/packages/dyn4k-dyn4k-core-test',
+        plugins: options.missingReporter ? []
+            : options.duplicateReporter ? [plugin, producer] : [plugin]};
     const fakeFs = {
+        constants: realFs.constants,
         readFileSync(path) {
             assert.equal(path, '/fixture/karma-kotlin-reporter.js');
             return Buffer.from('producer fixture');
         },
+        lstatSync(path) {
+            assert.equal(path, '/fixture/events');
+            return {isDirectory: () => !options.linkedDirectory,
+                isSymbolicLink: () => !!options.linkedDirectory};
+        },
+        realpathSync(path) {
+            assert.equal(path, '/fixture/events');
+            return path;
+        },
+        openSync(path, flags, mode) {
+            assert.equal(path, '/fixture/events/dyn4k-core-' + '1'.repeat(32) + '-1234.jsonl');
+            assert.equal(mode, 0o600);
+            assert.ok(flags & realFs.constants.O_EXCL);
+            assert.ok(flags & realFs.constants.O_NOFOLLOW);
+            return 3;
+        },
+        closeSync(fd) {
+            assert.equal(fd, 3);
+        },
         writeSync(fd, buffer, offset, length) {
+            if (fd === 3) {
+                traceOutput.push(buffer.subarray(offset, offset + length));
+                return length;
+            }
             assert.equal(fd, 1);
             if (options.realWriter) {
                 return realFs.writeSync(fd, buffer, offset, length);
@@ -64,13 +95,17 @@ function load(options = {}) {
         assert.equal(name, 'kotlin-web-helpers/dist/karma-kotlin-reporter');
         return '/fixture/karma-kotlin-reporter.js';
     };
+    const fakeProcess = {pid: 1234, env: options.trace ? {
+        DYN4K_SAFARI_EVENT_TRACE_DIR: '/fixture/events',
+        DYN4K_QUALIFICATION_INVOCATION: '1'.repeat(32)
+    } : {}};
     vm.runInNewContext(fragment, {config, Buffer, require: fakeRequire,
-        Atomics, SharedArrayBuffer, Int32Array});
+        process: fakeProcess, Atomics, SharedArrayBuffer, Int32Array});
     const Reporter = plugin[key][1];
     const reporter = new Reporter(instance => {
         instance.write = message => asynchronous.push(message);
-    });
-    return {reporter, output, asynchronous, calls, Reporter};
+    }, config, {});
+    return {reporter, output, traceOutput, asynchronous, calls, Reporter};
 }
 
 if (process.argv[3] === '--real-stdout') {
@@ -79,6 +114,37 @@ if (process.argv[3] === '--real-stdout') {
         actual.reporter.emit(`##teamcity[testStdOut out='DYN4K_COLLISION_DIAGNOSTIC row=${i}']`);
     }
     assert.equal(actual.asynchronous.length, 0);
+    process.exit(0);
+}
+
+if (process.argv[3] === '--trace-control') {
+    const actual = load({trace: true});
+    const old = {id: 'old-tab', name: 'Safari'};
+    const launched = {id: 'new-tab', name: 'Safari'};
+    actual.reporter.onRunStart([]);
+    actual.reporter.onBrowserStart(old);
+    actual.reporter.specSuccess(old, {description: 'capsuleSlice'});
+    actual.reporter.onBrowserStart(launched);
+    actual.reporter.specSuccess(launched, {description: 'capsuleSlice'});
+    actual.reporter.onBrowserComplete(old);
+    actual.reporter.onBrowserComplete(launched);
+    actual.reporter.onRunComplete();
+    assert.ok(actual.traceOutput.length > 0, 'no Safari browser lifecycle trace');
+    const records = Buffer.concat(actual.traceOutput).toString('utf8').trim()
+        .split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(records.filter(row => row.event === 'browser_start')
+        .map(row => row.browser), ['old-tab', 'new-tab']);
+    assert.deepEqual(records.filter(row => row.event === 'spec_checkpoint')
+        .map(row => row.browser), ['old-tab', 'new-tab']);
+    assert.ok(records.every(row => row.invocation === '1'.repeat(32)));
+    assert.equal(records.at(-1).event, 'run_complete');
+    assert.throws(() => load({trace: true, linkedDirectory: true}), /unsafe/);
+    const bounded = load({trace: true});
+    assert.throws(() => {
+        for (let i = 0; i < 600; i++) {
+            bounded.reporter.onBrowserStart({id: `browser-${i}`, name: 'Safari'});
+        }
+    }, /trace exceeds bound/);
     process.exit(0);
 }
 

@@ -142,6 +142,39 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.read_reports([self.path], self.expected, "jsSafari", 0, end,
                                      "26.6.3")
 
+    def test_safari_reporter_trace_distinguishes_browser_executions(self):
+        source = Path(__file__).with_name("safari-karma-reporter.js")
+        control = Path(__file__).with_name("safari-reporter-control.js")
+        result = subprocess.run(["node", str(control), str(source), "--trace-control"],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_safari_replayed_prefix_cannot_satisfy_source_case_contract(self):
+        classname = full_hosted.SAFARI_DIAGNOSTIC_CLASS
+        suite = ET.Element("testsuite", tests="12", failures="0", errors="0",
+                           skipped="0", time="1")
+        for _ in range(2):
+            for method in full_hosted.SAFARI_DIAGNOSTIC_CASES:
+                ET.SubElement(suite, "testcase", classname=f"jsBrowserTest.{classname}",
+                              name=f"{method}[js, browser, Safari26.6.2, MacOS10.15.7]",
+                              time="0.1")
+        ET.SubElement(suite, "system-out").text = "".join(
+            self.safari_diagnostic_rows() * 2)
+        with self.assertRaisesRegex(ValueError, "Safari diagnostic case identities differ"):
+            full_hosted.check_safari_diagnostic_suite(suite)
+        other = "jsBrowserTest.org.dyn4j.collision.CollisionModelTest"
+        suite = ET.Element("testsuite", tests="2", failures="0", errors="0",
+                           skipped="0", time="1")
+        for _ in range(2):
+            ET.SubElement(suite, "testcase", classname=other,
+                          name="works[js, browser, Safari26.6.2, MacOS10.15.7]",
+                          time="0.1")
+        self.path.write_bytes(ET.tostring(suite))
+        with self.assertRaisesRegex(ValueError,
+                                    r"missing, extra, or duplicate cases: missing=\[\]; extra=\[\]"):
+            full_hosted.read_reports([self.path], {(other.removeprefix("jsBrowserTest."),
+                                                     "works")}, "jsSafari", 0, time.time_ns())
+
     def failed_safari_source_reports(self, repository):
         started = time.time_ns()
         expected = {}

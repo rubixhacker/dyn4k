@@ -46,8 +46,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare Safari lifecycle trace
+        run: mkdir -m 700 "$RUNNER_TEMP/safari-event-trace"
+
       - name: Run full hosted Safari product diagnostic
         id: safari_product_diagnostic
+        env:
+          DYN4K_SAFARI_EVENT_TRACE_DIR: ${{ runner.temp }}/safari-event-trace
         run: >-
           python -B tools/qualification/full_hosted.py
           --candidate-sha "$GITHUB_SHA"
@@ -81,4 +86,5 @@ jobs:
           path: |
             ${{ runner.temp }}/full-hosted-jsSafari.tar
             ${{ runner.temp }}/full-hosted-jsSafari-job-receipt.json
+            ${{ runner.temp }}/safari-event-trace/
           if-no-files-found: warn
