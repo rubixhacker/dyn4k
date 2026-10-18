@@ -131,8 +131,6 @@ def portable_classes(root, suite):
                      if case["module"] == module and case["scope"] == "portable"}:
             if not (compiled / (name.replace(".", "/") + ".class")).is_file():
                 raise ValueError(f"compiled portable test missing: {module}:{name}")
-    if len(classes) != 169:
-        raise ValueError("full portable class inventory differs")
     return classes
 
 

@@ -120,6 +120,19 @@ class FullCorpusEvidenceTest(unittest.TestCase):
         with zipfile.ZipFile(jar) as archive:
             self.assertIn("org/dyn4j/AbstractShapeTest.class", archive.namelist())
 
+    def test_portable_class_inventory_follows_manifest_and_rejects_missing_class(self):
+        core = self.root / "dyn4k-core/build/classes/kotlin/jvm/test/org/dyn4j/CoreTest.class"
+        facade = self.root / "dyn4k/build/classes/kotlin/jvm/test/io/github/FacadeTest.class"
+        core.parent.mkdir(parents=True)
+        facade.parent.mkdir(parents=True)
+        core.write_bytes(b"core")
+        facade.write_bytes(b"facade")
+        self.assertEqual(prepare.portable_classes(self.root, self.manifest),
+                         ["io.github.FacadeTest", "org.dyn4j.CoreTest"])
+        facade.unlink()
+        with self.assertRaisesRegex(ValueError, "compiled portable test missing"):
+            prepare.portable_classes(self.root, self.manifest)
+
     def test_installed_runner_selects_only_frozen_test_classes(self):
         prepared = {"portable_classes": ["org.dyn4j.CoreTest", "io.github.FacadeTest"]}
         candidate = run.instrumentation_classes(prepared, "candidate")
