@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 import qualify
 
@@ -557,6 +558,9 @@ class QualificationTests(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(Path(__file__).with_name("qualify.py")), "audit-staging",
                  "--candidate-sha", sha, "--repository", str(repository / "empty-staging"),
+                 *(item for target in sorted(qualify.matrix_targets()) for item in ("--target", target)),
+                 "--stage-receipt", str(repository / "empty-staging/.qualification/receipt.json"),
+                 "--stage-console", str(repository / "empty-staging/.qualification/stage.log"),
                  "--output", str(output)], cwd=repository, text=True,
                 capture_output=True, check=False)
             self.assertEqual(1, result.returncode, result.stderr)
@@ -570,7 +574,10 @@ class QualificationTests(unittest.TestCase):
                 for target in {row["target"] for row in qualify.matrix()}
             }
             self.assertTrue(expected_publications.issubset(set(audit["errors"])))
-            self.assertEqual(46, len(audit["errors"]))
+            self.assertEqual(51, len(audit["errors"]))
+            self.assertTrue(any("candidate source tree invalid" in error for error in audit["errors"]))
+            self.assertTrue(all(f"{module}: root API documentation artifact missing" in audit["errors"]
+                                for module in qualify.MODULES))
 
     def test_report_refuses_sha_other_than_checkout(self):
         with tempfile.TemporaryDirectory() as root:
@@ -580,6 +587,215 @@ class QualificationTests(unittest.TestCase):
                 text=True, capture_output=True, check=False)
             self.assertNotEqual(0, result.returncode)
             self.assertIn("checkout", result.stderr)
+
+    def test_record_rejects_unverified_full_hosted_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            (repository / "README.md").write_text("fixture\n")
+            subprocess.run(["git", "-C", str(repository), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"], check=True)
+            sha = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
+                                          text=True).strip()
+            bundle = repository / "build/full"
+            bundle.mkdir(parents=True)
+            (bundle / "receipt.json").write_text(json.dumps({
+                "schema": 1, "kind": "hosted-full-common-corpus",
+                "candidate_sha": sha, "target": "macosArm64",
+                "status": "FULL_COMMON_PASSED", "configurations": [],
+            }))
+            result = subprocess.run([
+                "python3", str(Path(__file__).with_name("qualify.py")), "record",
+                "--candidate-sha", sha, "--full-hosted-bundle", str(bundle),
+                "--output", str(repository / "build/matrix.json"),
+            ], cwd=repository, text=True, capture_output=True, check=False)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("full hosted", result.stderr.lower())
+
+    def test_full_hosted_mapping_keeps_server_and_simulator_on_current_lanes(self):
+        def receipt(target, runtime):
+            return {"target": target, "runtime": runtime,
+                    "runner_os": "Windows" if target == "mingwX64" else "macOS",
+                    "runner_arch": "ARM64", "runner_name": "fixture-runner",
+                    "artifact_hashes": {module: "a" * 64 for module in qualify.MODULES},
+                    "manifest_sha256": "b" * 64,
+                    "source_tree_sha256": "c" * 64,
+                    "map_sha256": "d" * 64,
+                    "reviewed_pairs_sha256": "e" * 64,
+                    "configurations": [{"configuration": config,
+                                        "source": [{"module": "dyn4k-core",
+                                                    "case_ids": [str(n) for n in range(2454)]},
+                                                   {"module": "dyn4k",
+                                                    "case_ids": [str(n) for n in range(58)]}],
+                                        "consumer": {"case_ids": ["one", "two", "three"]}}
+                                       for config in ("debug-g", "optimized-opt")]}
+
+        server = receipt("mingwX64", {"os_version": "10.0.26100.1"})
+        mapped = qualify.full_hosted_lane(server, "f" * 64)
+        self.assertEqual("Windows x64", mapped["runtime"])
+        self.assertEqual("10.0.26100.1", mapped["runtime_version"])
+        self.assertTrue(all(":current:" in lane for lane in mapped["configuration_lanes"]))
+        self.assertTrue(all(":minimum:" not in lane for lane in mapped["configuration_lanes"]))
+        self.assertTrue(all(item["complete_lane_status"] == "NOT_RUN"
+                            for item in mapped["observed_cases"]))
+
+        selected = {"udid": "simulator-1", "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-0"}
+        simulator = receipt("iosSimulatorArm64", {"simulators": {"iOS": [selected]}})
+        simulator["selected_simulator"] = selected
+        for config in simulator["configurations"]:
+            config["simulator_udid"] = selected["udid"]
+        mapped = qualify.full_hosted_lane(simulator, "f" * 64)
+        self.assertTrue(all(lane.startswith("iosSimulatorArm64:iOS simulator ARM64:")
+                            for lane in mapped["configuration_lanes"]))
+        self.assertFalse(any("iOS physical" in lane for lane in mapped["configuration_lanes"]))
+        simulator["configurations"][0]["simulator_udid"] = "another-device"
+        with self.assertRaisesRegex(ValueError, "simulator"):
+            qualify.full_hosted_lane(simulator, "f" * 64)
+
+    def test_complete_suite_selects_portable_and_jvm_only_cases_per_lane(self):
+        native = next(case for case in qualify.expand(qualify.matrix())
+                      if case["target"] == "macosArm64")
+        jvm = next(case for case in qualify.expand(qualify.matrix())
+                   if case["target"] == "jvm")
+        suite = {"schema": 1, "kind": "complete-port", "id": "fixture-scopes",
+                 "areas": ["geometry", "collision", "dynamics", "joints", "compatibility"],
+                 "cases": [{"id": area, "area": area, "scope": "portable"}
+                           for area in ("geometry", "collision", "dynamics", "joints", "compatibility")]
+                          + [{"id": "jvm-only", "area": "compatibility", "scope": "jvm-only"}],
+                 "lanes": {native["id"]: {"case_scopes": ["portable"],
+                                          "required_gates": ["staged-consumer"]},
+                           jvm["id"]: {"case_scopes": ["portable", "jvm-only"],
+                                       "required_gates": ["java-source-compatibility"]}},
+                 "global_gates": ["publication-contract"]}
+        self.assertEqual(5, len(qualify.full_suite_cases(suite, native["id"])))
+        self.assertEqual(6, len(qualify.full_suite_cases(suite, jvm["id"])))
+        with self.assertRaisesRegex(ValueError, "lane"):
+            qualify.full_suite_cases(suite, "unlisted")
+
+    def test_complete_suite_rejects_wrong_reviewed_corpus_binding(self):
+        repository = Path(__file__).resolve().parents[2]
+        suite = {"schema": 1, "kind": "complete-port", "id": "wrong-corpus",
+                 "bindings": {"corpus_sha256": "0" * 64}, "cases": [], "lanes": {}}
+        with self.assertRaisesRegex(ValueError, "corpus"):
+            qualify.validate_complete_suite_bindings(suite, repository)
+
+    def test_complete_suite_matches_entire_approved_manifest(self):
+        repository = Path(__file__).resolve().parents[2]
+        relative = "tools/qualification/full-suite-manifest.json"
+        approved = repository / relative
+        raw = (approved.read_bytes() if approved.is_file() else subprocess.check_output(
+            ["git", "-C", str(repository), "show",
+             f"6f983ad3a36bdc549c32f5d0883b0a47b28e1963:{relative}"]))
+        suite = json.loads(raw)
+        qualify.validate_complete_suite_bindings(suite, repository)
+
+        import copy
+        changes = (
+            lambda changed: changed["cases"][0].update(area="geometry" if
+                changed["cases"][0]["area"] != "geometry" else "dynamics"),
+            lambda changed: changed["lanes"][next(iter(changed["lanes"]))].update(
+                required_gates=["staged-consumer"]),
+            lambda changed: changed["independent_gates"]["staged-consumer"].update(
+                requirement="weakened"),
+            lambda changed: changed.update(global_gates=["publication-contract"]),
+        )
+        for change in changes:
+            altered = copy.deepcopy(suite)
+            change(altered)
+            with self.assertRaisesRegex(ValueError, "complete suite"):
+                qualify.validate_complete_suite_bindings(altered, repository)
+
+    def test_complete_suite_seal_binds_originals_and_world_runtime_helper(self):
+        import full_suite_manifest
+
+        repository = Path(__file__).resolve().parents[2]
+        suite = json.loads((repository / full_suite_manifest.MANIFEST_PATH).read_text())
+        corpus = json.loads((repository / full_suite_manifest.CORPUS_PATH).read_text())
+        self.assertEqual(2515, len(suite["cases"]))
+        self.assertEqual(2515, len({case["id"] for case in suite["cases"]}))
+        self.assertEqual(2515, len(corpus["cases"]))
+        self.assertEqual(2385, len(corpus["original_mappings"]))
+        self.assertEqual(2385, len({row["original"] for row in corpus["original_mappings"]}))
+        self.assertEqual(199, len(corpus["source_files"]))
+        self.assertEqual("bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240",
+                         qualify.manifest_digest(suite))
+        full_suite_manifest.validate_manifest(suite, repository)
+        qualify.validate_complete_suite_bindings(suite, repository)
+
+        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
+                               "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"):
+            with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
+                qualify.validate_complete_suite_bindings(suite, repository)
+
+        helper = "dyn4k-core/src/jsTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt"
+        self.assertIn(helper, {item["path"] for item in corpus["source_files"]})
+        copied = [full_suite_manifest.CORPUS_PATH,
+                  "tools/qualification/full-common-original-map.tsv",
+                  "tools/qualification/full-common-reviewed-pairs.tsv"]
+        copied += [item["path"] for item in corpus["source_files"]]
+        copied += [path for paths in full_suite_manifest.GATE_SOURCES.values()
+                   for path in paths]
+        with tempfile.TemporaryDirectory() as scratch:
+            clone = Path(scratch)
+            for relative in set(copied):
+                target = clone / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((repository / relative).read_bytes())
+            full_suite_manifest.validate_manifest(suite, clone)
+            changed = clone / helper
+            changed.write_bytes(changed.read_bytes() + b"\n")
+            with self.assertRaisesRegex(ValueError, "source"):
+                full_suite_manifest.validate_manifest(suite, clone)
+
+    def test_full_lane_requires_each_independent_gate_receipt(self):
+        case = next(row for row in qualify.expand(qualify.matrix())
+                    if row["target"] == "macosArm64")
+        sha = "a" * 40
+        suite = {"schema": 1, "kind": "complete-port", "id": "fixture-gates",
+                 "areas": ["geometry", "collision", "dynamics", "joints", "compatibility"],
+                 "cases": [{"id": area, "area": area, "scope": "portable"} for area in
+                           ("geometry", "collision", "dynamics", "joints", "compatibility")],
+                 "lanes": {case["id"]: {"case_scopes": ["portable"],
+                                        "required_gates": ["staged-consumer"]}},
+                 "global_gates": ["publication-contract"]}
+        hashes = {module: "b" * 64 for module in qualify.MODULES}
+        audit = {"candidate_sha": sha, "status": "PASSED", "artifacts": [
+            {"path": qualify.target_binary_path(module, case["target"]), "sha256": value}
+            for module, value in hashes.items()]}
+        candidate = {"schema": 1, "candidate_sha": sha,
+                     "suite_manifest_sha256": qualify.manifest_digest(suite),
+                     "audit_manifest_sha256": qualify.manifest_digest(audit),
+                     "lanes": {case["id"]: {"runtime_identity": "fixture-runner",
+                                                 "runtime_version": "26.6.2",
+                                                 "configuration": case["configuration"],
+                                                 "suite_id": suite["id"],
+                                                 "artifact_hashes": hashes}}}
+        evidence = {**case, "candidate_sha": sha, "runtime_identity": "fixture-runner",
+                    "runtime_version": "26.6.2", "expected": 5, "executed": 5,
+                    "failures": 0, "skipped": 0, "consumer": "PASSED",
+                    "suite_id": suite["id"], "artifact_hashes": hashes,
+                    "invocation_id": "d" * 32, "exit_code": 0, "command": ["fixture"],
+                    "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                    "suite_manifest_sha256": qualify.manifest_digest(suite),
+                    "audit_manifest_sha256": qualify.manifest_digest(audit),
+                    "case_results": [{"id": area, "status": "PASSED"} for area in
+                                     ("geometry", "collision", "dynamics", "joints", "compatibility")]}
+        self.assertEqual("FAILED", qualify.evaluate(
+            case, evidence, sha, candidate, suite, audit)["status"])
+        gates = {name: {"status": "PASSED", "receipt_sha256": "e" * 64}
+                 for name in ("staged-consumer", "publication-contract")}
+        self.assertEqual("PASSED", qualify.evaluate(
+            case, {**evidence, "gate_results": gates}, sha, candidate, suite, audit)["status"])
+        gates["publication-contract"] = {"status": "NOT_RUN"}
+        self.assertEqual("FAILED", qualify.evaluate(
+            case, {**evidence, "gate_results": gates}, sha, candidate, suite, audit)["status"])
+
+    def test_production_manifest_cannot_use_self_reported_gate_receipts(self):
+        results = [{"id": "macosArm64:macOS ARM64:current:debug-g", "status": "PASSED"}]
+        qualify.reject_unverified_production_gates(results, {"bindings": {"corpus_sha256": "a" * 64}})
+        self.assertEqual("FAILED", results[0]["status"])
+        self.assertIn("separate verification", results[0]["reason"])
 
 
 if __name__ == "__main__":

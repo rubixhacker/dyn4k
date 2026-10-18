@@ -1,11 +1,13 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
 plugins {
     kotlin("multiplatform")
     id("com.android.kotlin.multiplatform.library")
     `maven-publish`
+    id("org.jetbrains.dokka")
 }
 
 kotlin {
@@ -56,7 +58,9 @@ kotlin {
     androidNativeArm32()
     androidNativeArm64()
     androidNativeX86()
-    androidNativeX64()
+    androidNativeX64 {
+        binaries { test(setOf(NativeBuildType.RELEASE)) }
+    }
 
     sourceSets {
         commonMain.dependencies { api(project(":dyn4k-core")) }
@@ -81,8 +85,14 @@ if (providers.gradleProperty("qualificationProduction").orNull == "true") {
     }
 }
 
+val dokkaApiJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    from(tasks.named("dokkaGeneratePublicationHtml"))
+}
+
 publishing {
     publications.withType<MavenPublication>().configureEach {
+        artifact(dokkaApiJar)
         artifact(rootProject.file("LICENSE.md")) {
             classifier = "license"
             extension = "md"

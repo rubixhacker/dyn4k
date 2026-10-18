@@ -1,0 +1,36 @@
+{
+  "corpus_sha256": "cc3b5e7a987f2dad790ccf3525212f25657544651131d0d4ed1a249ba72af227",
+  "executables": {
+    "consumer-debug": "ee77444c8a0a4c05b54c15d3f80b4b648b8f774b53ba2261aaeec8030e7ada0e",
+    "consumer-optimized": "a0826603d07441338574d38494bd31ed6ff7b99dfa1dad32b32347cccb90b792",
+    "core-debug": "b958d11b25a9995d0312309698fbbd00bfec5192ccf3fafabfb5d838cc9faffa",
+    "core-optimized": "f879bdd71b10389d40ea08fe025ec8e18d4df7699cec401c3a835ac329f2a27c",
+    "facade-debug": "256911ff7549d03a45499020860a1d6a4c74de5c80b855ffeac2fa1aabdcaaac",
+    "facade-optimized": "82be7ec9473e3d34b715ec396d26aab2d66864d30acd2855c83e38ae2a54b491"
+  },
+  "graphs": {
+    "consumer": "e14ad6f11395fbbb32301e22c2da89e02548a9007bfa8c05ba2c2417c48a6611",
+    "core": "32eb2d1d04e019f28a9ca572cf308324d7a3952ffb878560be0f6d1a84cfd674",
+    "facade": "ca095f1d168bfc1353f771838640aee44e21460883b2b36c6aed78f60e24b04e"
+  },
+  "guest_fingerprint": "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys",
+  "klibs": {
+    "dyn4k": "b0dc78bc1c4fc77bce58267858b49550b64d159e58d5733b3aa84ad055bfac48",
+    "dyn4k-core": "83756aabcb13098bc09bed0b44afb5d6b23295bf3d9094e23f8bf3b2064e9979"
+  },
+  "schema": 2,
+  "tools": {
+    "adb": "a902be8f45c6c62e76c9efaf6947a0fa747c9cabd89a2ac8e0d16ecb30b3ed01",
+    "emulator": "d430b26ab9806894b06d6a1d3750d8c8a5125300967b2bd87d76245541bc4ce1",
+    "gradle_core": "88b1059ab40d97e15918606017ed4c3157c02118091a5415acc9a0e0f0c6578f",
+    "gradle_wrapper": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7",
+    "image": "8b2145488a8fa68b712e4ed17244ea2a570e9a6864bbbf668ac3f1cf222c3917",
+    "java": "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d",
+    "kgp": "6f49688f2c6715d60f5dc52d4c1ada992ce4bed6053d1bd6e579c9392d7ba0ed",
+    "konan": "a0bfd2162d8f9cad8cfc6493813b4a1aa42dd2912fe6683e60b94adcb08c9c7a",
+    "native_compiler": "ce62ed5d14eb456a6dfe841201da57e0b6b11492aad41c19c4caa2046dd62c24",
+    "ndk": "c00aa236fdb205e9be9edd9e2169763e48aca52735efff4e16f34205d49783b5",
+    "ramdisk": "652ade17d334c4f1bda0eaa8050167df62995f8432f292acb557bae11e8f53d3",
+    "system_image": "3937d97e147d42f3c6cd219ee960696f858046219b9dbc2980cf13bcd7daa1d7"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "reference_jvm_sha256": "74865d87dfaa23296a85d06966c7854cc53475357a2ff506f100467d2885a1d6",
+  "reference_android_classes_sha256": "c73883e73c341fc30e3fcb724eba9b08687d3c54ab142f260c41f98c1a6c7458",
+  "tool": "Java 21 javap -public",
+  "types": {
+    "org.dyn4j.exception.ArgumentNullException": "50b180cbc0b3058e1450a0676d3c86a336866a55e34968bd90faa7b78123c2b4",
+    "org.dyn4j.exception.CopyException": "fb1476ca8a8da91bae0c4f65a13ae9a53ef5e47544b15e169f046a84ec43f749",
+    "org.dyn4j.exception.EmptyCollectionException": "3b999556fc6fede4e8d86794d26e74b3224f6c8d536e3e69829111c28a5b9aa4",
+    "org.dyn4j.exception.InvalidIndexException": "2999e237dca4561291894a4f19603c71f8b0d0cf5ac895337ac2b705de66c841",
+    "org.dyn4j.exception.NullElementException": "f8b091427f82bc5e927b5528405bfb5be8d0e32ffff13330f618f99980043f7f",
+    "org.dyn4j.exception.ObjectAlreadyExistsException": "d0bc01d8d2ea5be832c996cd09d809124cdffa7e5d19190d669063d718db5609",
+    "org.dyn4j.exception.ObjectAlreadyOwnedException": "eb7ba7ea05f21cdc8b7124415b07eb02ac8e430daea9bf74249ff92ea017d18f",
+    "org.dyn4j.exception.SameObjectException": "ce710fffc3efd1a9b0313d7cf30266b789f0166cb34db81047f8148b3e8884ed",
+    "org.dyn4j.exception.ValueOutOfRangeException": "ca94ccd45a19aaf5eeda45aed0e805a59f4f7009b0c0cfee4d141a123a755425"
+  }
+}

@@ -53456,13 +53456,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 149,
+      "line": 162,
       "method": "boundsListenerChildCreatedAfterAddKeepsStaleVersion",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53476,13 +53476,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 166,
+      "line": 180,
       "method": "boundsListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53496,13 +53496,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 184,
+      "line": 199,
       "method": "collisionListenerChildCreatedAfterAddKeepsStaleVersion",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53516,13 +53516,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 201,
+      "line": 217,
       "method": "collisionListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53536,13 +53536,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 17,
+      "line": 27,
       "method": "emptyBodyViewRejectsEveryListMutation",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53556,13 +53556,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 133,
+      "line": 145,
       "method": "sameSizeBodyChangesStillInvalidateSavedSubLists",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53576,13 +53576,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 43,
+      "line": 53,
       "method": "savedBodyViewStaysLiveWithoutExposingMutation",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53596,13 +53596,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 120,
+      "line": 132,
       "method": "staleBodySubListChecksInvalidRangesBeforeFailFastRead",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53616,13 +53616,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 101,
+      "line": 111,
       "method": "staleBodySubListsCannotCreateReadableNestedViews",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -53636,13 +53636,13 @@
         "androidHost"
       ],
       "kind": "supplemental",
-      "line": 80,
+      "line": 90,
       "method": "staleBodySubListsRejectAddBeforeReadingTheirSize",
       "module": "dyn4k-core",
       "originals": [],
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
       "related_original": null,
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486",
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
       "source_set": "commonTest"
     },
     {
@@ -83916,6 +83916,10 @@
   "schema": 1,
   "source_files": [
     {
+      "path": "dyn4k-core/src/androidHostTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "620689ce22d4cbe2a55c5eb145560361087ea713f70128d7df82f56186e72399"
+    },
+    {
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/CollisionModelTest.kt",
       "sha256": "ca27f08d199ced990afd3f9d1757b6fe2db63ef25d7f55f21d94f864d51e3a24"
     },
@@ -84601,7 +84605,7 @@
     },
     {
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-      "sha256": "a8d9ee210ceb3a97bc0760ee3d1ace3a89bf5b08b3dece09de17f1a701dc4486"
+      "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2"
     },
     {
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
@@ -84626,6 +84630,26 @@
     {
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/result/WorldResultTest.kt",
       "sha256": "82a7bc371fdec453b8097acb38b2a53b4bad94bdde97120ae1323c16e0b55405"
+    },
+    {
+      "path": "dyn4k-core/src/jsTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "9d6d62c0462eb630b69737ecf84c93898be734e61496379c504b0414d4a6c54e"
+    },
+    {
+      "path": "dyn4k-core/src/jvmTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "620689ce22d4cbe2a55c5eb145560361087ea713f70128d7df82f56186e72399"
+    },
+    {
+      "path": "dyn4k-core/src/nativeTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "9d6d62c0462eb630b69737ecf84c93898be734e61496379c504b0414d4a6c54e"
+    },
+    {
+      "path": "dyn4k-core/src/wasmJsTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "9d6d62c0462eb630b69737ecf84c93898be734e61496379c504b0414d4a6c54e"
+    },
+    {
+      "path": "dyn4k-core/src/wasmWasiTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt",
+      "sha256": "9d6d62c0462eb630b69737ecf84c93898be734e61496379c504b0414d4a6c54e"
     },
     {
       "path": "dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/DynamicsTest.kt",
@@ -84688,6 +84712,6 @@
       "sha256": "818b0df9cd86106c9dd9bb1255dc1e1bb29ca490ad6af0d1833f1d1172077ad6"
     }
   ],
-  "source_tree_sha256": "9abc9cc73c1c90fe0f5b22cb76f3596fe6ce920c937b1066deb23c0a53a0fb80",
+  "source_tree_sha256": "3d53d642e253335d9c4048402469dbf0d4b9900766ac1338e4851ee1ca5978e9",
   "unresolved": []
 }

@@ -28,6 +28,19 @@ def same_value(left, right):
     return left == right
 
 
+def same_run_alias(left, right):
+    if type(left) in (int, float) or type(right) in (int, float):
+        return (type(left) in (int, float) and type(right) in (int, float) and
+                math.isfinite(left) and math.isfinite(right) and left == right)
+    if isinstance(left, list) or isinstance(right, list):
+        return (type(left) is list and type(right) is list and len(left) == len(right) and
+                all(same_run_alias(a, b) for a, b in zip(left, right)))
+    if isinstance(left, dict) or isinstance(right, dict):
+        return (type(left) is dict and type(right) is dict and left.keys() == right.keys() and
+                all(same_run_alias(left[key], right[key]) for key in left))
+    return type(left) is type(right) and left == right
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -105,23 +118,23 @@ def check_translation_aliases(state):
                 continue
             transform = body[name]
             translation = transform["getTranslation"]
-            if (len(translation) != 2 or not same_value(transform["getTranslationX"], translation[0]) or
-                not same_value(transform["getTranslationY"], translation[1])):
+            if (len(translation) != 2 or not same_run_alias(transform["getTranslationX"], translation[0]) or
+                not same_run_alias(transform["getTranslationY"], translation[1])):
                 raise Rejected("translation getter alias differs")
             if "getValues" in transform:
                 values = transform["getValues"]
-                if (len(values) != 6 or not same_value(values[2], translation[0]) or
-                    not same_value(values[5], translation[1]) or
-                    not same_value(values[0], transform["getCost"]) or
-                    not same_value(values[1], -transform["getSint"]) or
-                    not same_value(values[3], transform["getSint"]) or
-                    not same_value(values[4], transform["getCost"])):
+                if (len(values) != 6 or not same_run_alias(values[2], translation[0]) or
+                    not same_run_alias(values[5], translation[1]) or
+                    not same_run_alias(values[0], transform["getCost"]) or
+                    not same_run_alias(values[1], -transform["getSint"]) or
+                    not same_run_alias(values[3], transform["getSint"]) or
+                    not same_run_alias(values[4], transform["getCost"])):
                     raise Rejected("matrix getter alias differs")
-        if "fixedOriginPosition" in body and not same_value(
+        if "fixedOriginPosition" in body and not same_run_alias(
             body["fixedOriginPosition"], body["transform"]["getTranslation"]
         ):
             raise Rejected("fixed origin position alias differs")
-        if "worldCenter" in body and not same_value(
+        if "worldCenter" in body and not same_run_alias(
             body["worldCenter"], body["transform"]["getTranslation"]
         ):
             raise Rejected("world center alias differs")
@@ -169,7 +182,7 @@ def check_body_getters(body):
                           ("getTorque", "torque"),
                           ("getAccumulatedForce", "accumulatedForce"),
                           ("getAccumulatedTorque", "accumulatedTorque")):
-        if getter in properties and field in body and not same_value(properties[getter], body[field]):
+        if getter in properties and field in body and not same_run_alias(properties[getter], body[field]):
             raise Rejected(f"body getter alias differs: {getter}")
     if "getChangeInPosition" in properties:
         current = body["transform"]["getTranslation"]
@@ -207,9 +220,23 @@ def check_fixed_body_callback_velocities(event, fixture):
                 raise Rejected(f"fixed callback body velocity is not zero: {name}")
 
 
+def endpoint_index_matches(row, fixture, state_count, endpoint_count):
+    group = fixture.get("inner_per_outer")
+    start_step = fixture.get("start_step", 0)
+    return (type(group) is int and group > 0 and
+            type(start_step) is int and start_step >= 0 and
+            type(state_count) is int and state_count > 0 and state_count % group == 0 and
+            type(endpoint_count) is int and endpoint_count == state_count // group and
+            type(row.get("step")) is int and row["step"] == start_step + state_count and
+            type(row.get("outerStep")) is int and row["outerStep"] == state_count // group)
+
+
 def check_counts(rows, fixture, *, reference):
     counts = Counter()
-    state_step = fixture.get("start_step", 0)
+    start_step = fixture.get("start_step", 0)
+    if type(start_step) is not int or start_step < 0:
+        raise Rejected("invalid fixture start step")
+    state_step = start_step
     event_step = 0
     event_order = -1
     input_seen = False
@@ -231,16 +258,14 @@ def check_counts(rows, fixture, *, reference):
             raise Rejected("record precedes input")
         if kind == "state":
             state_step += 1
-            if row.get("step") != state_step:
+            if type(row.get("step")) is not int or row["step"] != state_step:
                 raise Rejected("missing or reordered state")
             last_state = row.get("state")
             if fixture.get("check_translation_aliases"):
                 check_snapshot(last_state)
         if kind == "outer-endpoint":
-            group = fixture.get("inner_per_outer")
-            if (type(group) is not int or group <= 0 or state_step % group or
-                row.get("step") != state_step or row.get("outerStep") != state_step // group or
-                row.get("state") != last_state):
+            if (not endpoint_index_matches(row, fixture, counts["state"], counts["outer-endpoint"]) or
+                not same_run_alias(row.get("state"), last_state)):
                 raise Rejected("outer endpoint does not copy the matching inner state")
         if kind == "instrumented-callback" and fixture.get("check_translation_aliases"):
             for snapshot in row.get("values", []):

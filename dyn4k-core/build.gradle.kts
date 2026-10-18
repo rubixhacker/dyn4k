@@ -1,6 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.security.MessageDigest
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -20,6 +21,7 @@ plugins {
     kotlin("multiplatform")
     id("com.android.kotlin.multiplatform.library")
     `maven-publish`
+    id("org.jetbrains.dokka")
 }
 
 data class JvmApiSpec(
@@ -1053,7 +1055,9 @@ kotlin {
     androidNativeArm32()
     androidNativeArm64()
     androidNativeX86()
-    androidNativeX64()
+    androidNativeX64 {
+        binaries { test(setOf(NativeBuildType.RELEASE)) }
+    }
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
@@ -1081,8 +1085,14 @@ tasks.named<org.gradle.jvm.tasks.Jar>("jvmSourcesJar") {
     from(file("src/jvmModule/java/module-info.java")) { into("jvmModule") }
 }
 
+val dokkaApiJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    from(tasks.named("dokkaGeneratePublicationHtml"))
+}
+
 publishing {
     publications.withType<MavenPublication>().configureEach {
+        artifact(dokkaApiJar)
         artifact(rootProject.file("LICENSE.md")) {
             classifier = "license"
             extension = "md"

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compare import audit_reference, compare, load_fixture
+from compare import Rejected, audit_reference, check_counts, check_snapshot, compare, load_fixture, records
 from inventory import classify_reference
 from physical import audit_physical
 
@@ -188,6 +188,86 @@ class ComparatorSeamTest(unittest.TestCase):
         rows[-1]["state"]["position"][0] = 999.0
         self.write_reference(rows)
         self.assertEqual("FAILED", audit_reference(self.fixture, self.root / "reference.jsonl.gz")["status"])
+
+    def test_endpoint_copy_rejects_boolean_numeric_aliases_and_indices(self):
+        self.fixture["counts"] = {"inputs": 1, "state": 1, "outer-endpoint": 1}
+        self.fixture["inner_per_outer"] = 1
+        rows = [self.rows[0], {"kind": "state", "step": 1, "state": {"x": 0.0}},
+                {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                 "state": {"x": -0.0}}]
+
+        def audit():
+            path = self.root / "endpoint.jsonl"
+            path.write_bytes(encoded(rows))
+            return check_counts(records(path), self.fixture, reference=False)
+
+        self.assertEqual(audit()["outer-endpoint"], 1)
+        for field, value in (("state", {"x": False}), ("state", {"x": 0.001}),
+                             ("step", 2), ("step", True), ("outerStep", 2),
+                             ("outerStep", True)):
+            changed = json.loads(json.dumps(rows[-1]))
+            changed[field] = value
+            rows[-1] = changed
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                    Rejected, "outer endpoint does not copy"):
+                audit()
+            rows[-1] = {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                        "state": {"x": -0.0}}
+        for field in ("step", "outerStep"):
+            del rows[-1][field]
+            with self.subTest(missing_endpoint=field), self.assertRaisesRegex(
+                    Rejected, "outer endpoint does not copy"):
+                audit()
+            rows[-1][field] = 1
+        for value in (2, True, None):
+            original = rows[1].get("step")
+            if value is None:
+                rows[1].pop("step")
+            else:
+                rows[1]["step"] = value
+            with self.subTest(state_step=value), self.assertRaisesRegex(
+                    Rejected, "missing or reordered state"):
+                audit()
+            rows[1]["step"] = original
+        for group in (None, 0, True, -1):
+            original = self.fixture.get("inner_per_outer")
+            if group is None:
+                self.fixture.pop("inner_per_outer")
+            else:
+                self.fixture["inner_per_outer"] = group
+            with self.subTest(group=group), self.assertRaisesRegex(
+                    Rejected, "outer endpoint does not copy"):
+                audit()
+            self.fixture["inner_per_outer"] = original
+
+    def test_endpoint_indices_are_relative_to_start_step(self):
+        self.fixture["counts"] = {"inputs": 1, "state": 2, "outer-endpoint": 1}
+        self.fixture["start_step"] = 10
+        self.fixture["inner_per_outer"] = 2
+        rows = [self.rows[0], {"kind": "state", "step": 11, "state": {"x": 0.0}},
+                {"kind": "state", "step": 12, "state": {"x": 0.0}},
+                {"kind": "outer-endpoint", "step": 12, "outerStep": 1,
+                 "state": {"x": -0.0}}]
+        path = self.root / "offset-endpoint.jsonl"
+        path.write_bytes(encoded(rows))
+        self.assertEqual(check_counts(records(path), self.fixture, reference=False)["outer-endpoint"], 1)
+        rows[2], rows[3] = rows[3], rows[2]
+        path.write_bytes(encoded(rows))
+        with self.assertRaisesRegex(Rejected, "outer endpoint does not copy"):
+            check_counts(records(path), self.fixture, reference=False)
+
+    def test_duplicate_endpoint_cannot_claim_the_next_outer_step(self):
+        self.fixture["counts"] = {"inputs": 1, "state": 2, "outer-endpoint": 2}
+        self.fixture["inner_per_outer"] = 1
+        first = {"kind": "state", "step": 1, "state": {"x": 0.0}}
+        endpoint = {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                    "state": {"x": -0.0}}
+        rows = [self.rows[0], first, endpoint, dict(endpoint),
+                {"kind": "state", "step": 2, "state": {"x": 0.0}}]
+        path = self.root / "duplicate-endpoint.jsonl"
+        path.write_bytes(encoded(rows))
+        with self.assertRaisesRegex(Rejected, "outer endpoint does not copy"):
+            check_counts(records(path), self.fixture, reference=False)
 
     def test_exact_represented_geometry_uses_phase_ceiling(self):
         self.fixture["physical_phase_ceilings_m"] = {"rest-before": 0.001}
@@ -533,7 +613,7 @@ class ComparatorSeamTest(unittest.TestCase):
         self.assertEqual("FAILED", self.result()["status"])
         self.assertIn("matrix getter alias", self.result()["reason"])
 
-    def test_matrix_alias_preserves_signed_zero(self):
+    def test_same_run_matrix_alias_accepts_zero_sign_and_rejects_nonzero(self):
         selected = load_fixture("configured-30-r1")
         self.fixture["rules"] = selected["rules"]
         self.fixture["derived_rules"] = selected["derived_rules"]
@@ -553,8 +633,23 @@ class ComparatorSeamTest(unittest.TestCase):
         altered = json.loads(json.dumps(rows))
         altered[2]["state"]["bodies"][0]["transform"]["getValues"][1] = 0.0
         self.write_candidate(altered)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered[2]["state"]["bodies"][0]["transform"]["getValues"][1] = 0.001
+        self.write_candidate(altered)
         self.assertEqual("FAILED", self.result()["status"])
         self.assertIn("matrix getter alias", self.result()["reason"])
+
+    def test_snapshot_duplicate_getters_compare_finite_numeric_values(self):
+        state = {"bodies": [{"id": "b1", "force": [-0.0, 0.0],
+                             "properties": {"getForce": [0.0, -0.0]},
+                             "transform": {"getTranslation": [0.0, 0.0],
+                                           "getTranslationX": -0.0, "getTranslationY": 0.0,
+                                           "getCost": 1.0, "getSint": 0.0,
+                                           "getValues": [1.0, 0.0, 0.0, -0.0, 1.0, 0.0]}}]}
+        check_snapshot(state)
+        state["bodies"][0]["properties"]["getForce"][0] = 0.01
+        with self.assertRaisesRegex(Rejected, "body getter alias differs: getForce"):
+            check_snapshot(state)
 
     def test_explicit_nominal_cosine_cap_keeps_precedence(self):
         self.fixture["rules"] = [
