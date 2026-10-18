@@ -1,11 +1,14 @@
 import hashlib
+import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -281,6 +284,10 @@ class ExtractionTest(unittest.TestCase):
             log.write_text("".join(self.compiler_proof(task, resolved) for task in tasks))
             proof = run._compiled_dependency_proof("linux-x64", log, staged)
             self.assertEqual([item["task"] for item in proof["tasks"]], list(tasks))
+            log.write_text("".join(self.compiler_proof(task, resolved) for task in
+                                   (*tasks, tasks[-1])))
+            with self.assertRaisesRegex(run.Rejected, "task sequence differs"):
+                run._compiled_dependency_proof("linux-x64", log, staged)
             unrelated = root / "unrelated.klib"
             unrelated.write_bytes(staged.read_bytes())
             log.write_text("".join(self.compiler_proof(task, unrelated) for task in tasks))
@@ -625,6 +632,204 @@ class ExtractionTest(unittest.TestCase):
             self.assertTrue((output / "xml/longRunningFreeMotionInvariantScene.xml").is_file())
             self.assertTrue((output / "cases/P-J-Angle-ratio-limits-off--1.0.jsonl").is_file())
             self.assertTrue((output / "cases/long-free-60.jsonl").is_file())
+
+
+class DetachedNativeBundleTest(unittest.TestCase):
+    def test_copied_archive_replays_without_producer_build_or_cache(self):
+        if run.shutil.which("strace") is None:
+            self.skipTest("strace is unavailable")
+        method = "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure"
+        case_id = "detached-case"
+        name = f"portable.PortableMatrixTest.{method}"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            producer = root / "producer"
+            verifier = root / "verifier"
+            subprocess.run(("git", "init", "-q", str(producer)), check=True)
+            (producer / ".gitignore").write_text("build/\n**/build/\n")
+            subprocess.run(("git", "-C", str(producer), "add", ".gitignore"), check=True)
+            subprocess.run(("git", "-C", str(producer), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm", "source"),
+                           check=True)
+            subprocess.run(("git", "clone", "-q", "--local", str(producer), str(verifier)),
+                           check=True)
+            portable = producer / "tools/numerical/portable"
+            staged = producer / "build/staging-repository/io/github/rubixhacker"
+            output = root / "producer-archive"
+            lane = output / "linux-x64"
+            lane.mkdir(parents=True)
+            cache = root / "producer-cache/.gradle/caches/modules-2/files-2.1" / \
+                "io.github.rubixhacker/dyn4k-core-linuxx64" / run.VERSION / ("a" * 40) / \
+                f"dyn4k-core-linuxX64Main-{run.VERSION}.klib"
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"staged native klib")
+            target_name = run.artifact_relative_paths("linux-x64")["target"]
+            staged_files = {}
+            for filename in run._publication_names():
+                path = staged / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(cache.read_bytes() if filename == target_name else
+                                 filename.encode())
+                staged_files[filename] = run.digest(path)
+            publication_log = output / "publication.log"
+            publication_log.write_text("published\n")
+            binary = portable / "build/bin/linuxX64/debugTest/test.kexe"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n" +
+                f"printf '[ RUN      ] {name}\\n'\n" +
+                f"printf 'NUMERICAL_JSON {{\"kind\":\"inputs\",\"id\":\"{case_id}\"}}\\n'\n" +
+                f"printf 'NUMERICAL_JSON {{\"kind\":\"state\",\"id\":\"{case_id}\",\"step\":1}}\\n'\n" +
+                f"printf 'NUMERICAL_JSON {{\"kind\":\"case-end\",\"id\":\"{case_id}\"}}\\n'\n" +
+                f"printf '[       OK ] {name} (1 ms)\\n'\n" +
+                "printf '[  PASSED  ] 1 tests.\\n'\n")
+            binary.chmod(0o755)
+            with patch.multiple(run, ROOT=producer, PORTABLE=portable, STAGED=staged,
+                                MATRIX_METHODS=(method,), MATRIX_METHOD_CASE_COUNTS=(1,)), \
+                    patch.object(run, "declared_cases", return_value=[{"id": case_id}]):
+                commit, source_sha256 = run.clean_identity()
+                publication = {"candidate_commit": commit, "source_sha256": source_sha256,
+                               "artifact_sha256": staged_files,
+                               "publication_log_sha256": run.digest(publication_log)}
+                (output / "publication.json").write_text(json.dumps(publication))
+                manifest = run.start_native_bundle(output, lane, commit, source_sha256)
+                started = time.time_ns() - 1_000_000_000
+                log = lane / f"gradle-{method}.log"
+                log.write_text(f"NUMERICAL_BUILD_STARTED_NS {started}\n" +
+                    "".join("NUMERICAL_PROOF_INPUT " + json.dumps({
+                        "task": task, "path": str(cache.resolve()),
+                        "sha256": run.digest(cache), "bytes": cache.stat().st_size}) + "\n"
+                        for task in (":compileKotlinLinuxX64", ":compileTestKotlinLinuxX64",
+                                     ":linkDebugTestLinuxX64")))
+                execution = run.run_native_method(method, lane, binary, os.environ.copy())
+                trace, _, counts = run.extract_xml("linux-x64", lane, method,
+                                                  lane / "xml" / f"{method}.xml")
+                process = run.runtime("linux-x64", log, execution, staged / target_name)
+                run.retain_native_method(lane / "producer-bundle", manifest, method, process)
+                bundle_hash = run.finish_native_bundle(lane, manifest)
+                artifact_sha = {role: run.digest(staged / filename) for role, filename in
+                                run.artifact_relative_paths("linux-x64").items()}
+                identity = {**run.runtime_identity(process), "method_executions": 1,
+                            "dependency_sha256": artifact_sha["target"],
+                            "method_process_sha256": hashlib.sha256(json.dumps(
+                                [process], sort_keys=True).encode()).hexdigest()}
+                method_result = {"method": method, "gradle_exit": 0, "cases": 1,
+                                 "log_sha256": run.digest(log),
+                                 "execution_log_sha256": run.digest(execution),
+                                 "xml_sha256": run.digest(lane / "xml" / f"{method}.xml"),
+                                 "process": process}
+                result = {"methods": [method_result], "artifact_sha256": artifact_sha,
+                          "runtime": identity, "raw_counts": counts,
+                          "native_bundle_sha256": bundle_hash}
+                receipt = {"runtime": identity, "artifact_sha256": artifact_sha,
+                           "artifact_paths": {role: str(staged / filename) for role, filename in
+                                              run.artifact_relative_paths("linux-x64").items()},
+                           "trace_sha256": run.digest(trace),
+                           "counts": {"executed_cases": 1}}
+                (lane / "result.json").write_text(json.dumps(result))
+                (lane / "receipt.json").write_text(json.dumps(receipt))
+            detached = root / "detached-archive"
+            shutil.copytree(output, detached)
+            (producer / "build").rename(root / "hidden-producer-build")
+            (portable / "build").rename(root / "hidden-producer-native-build")
+            (root / "producer-cache").rename(root / "hidden-producer-cache")
+            self.assertFalse(binary.exists())
+            self.assertFalse(cache.exists())
+            self.assertFalse((verifier / "build").exists())
+
+            def check_receipt(sealed, captured_trace, cases, captured_identity, artifacts):
+                self.assertEqual(sealed["trace_sha256"], run.digest(captured_trace))
+                self.assertEqual(captured_identity.runtime, sealed["runtime"])
+                self.assertEqual(captured_identity.artifact_sha256, sealed["artifact_sha256"])
+                self.assertEqual(sealed["artifact_paths"],
+                                 {role: str(path) for role, path in artifacts.items()})
+                self.assertEqual(len(cases), 1)
+
+            with patch.multiple(run, ROOT=verifier,
+                                PORTABLE=verifier / "tools/numerical/portable",
+                                STAGED=verifier / "build/staging-repository/io/github/rubixhacker",
+                                MATRIX_METHODS=(method,), MATRIX_METHOD_CASE_COUNTS=(1,)), \
+                    patch.object(run, "declared_cases", return_value=[{"id": case_id}]), \
+                    patch.object(run, "verify_receipt", side_effect=check_receipt):
+                with patch("sys.argv", ["run.py", "--verify-linux-native-existing",
+                                        "--output", str(detached)]), redirect_stdout(io.StringIO()) as printed:
+                    self.assertEqual(run.main(), 0)
+                self.assertEqual(json.loads(printed.getvalue())["status"],
+                                 "PASSED_PRODUCER_REPLAY")
+
+                def mutated(label, action, reason):
+                    copy = root / label
+                    shutil.copytree(detached, copy)
+                    action(copy)
+                    with self.assertRaisesRegex(run.Rejected, reason):
+                        run.verify_linux_native_archive(copy)
+
+                def change_manifest(copy, action):
+                    path = copy / "linux-x64/producer-bundle/manifest.json"
+                    data = json.loads(path.read_text())
+                    action(data)
+                    path.write_text(json.dumps(data))
+                    result_path = copy / "linux-x64/result.json"
+                    recorded = json.loads(result_path.read_text())
+                    recorded["native_bundle_sha256"] = run.digest(path)
+                    result_path.write_text(json.dumps(recorded))
+
+                mutated("changed-binary", lambda copy: (copy / "linux-x64/producer-bundle/methods" /
+                        method / "test.kexe").write_bytes(b"replaced"), "executable bytes differ")
+                mutated("changed-klib", lambda copy: (copy / "linux-x64/producer-bundle/inputs" /
+                        f"{artifact_sha['target']}.klib").write_bytes(b"replaced"), "compiler input bytes differ")
+                mutated("changed-publication", lambda copy: (copy /
+                        "linux-x64/producer-bundle/publications" / target_name).write_bytes(b"replaced"),
+                        "staged publication bytes differ")
+
+                def change_command(copy):
+                    log_path = copy / "linux-x64" / f"native-exec-{method}.log"
+                    log_path.write_text(log_path.read_text().replace(name, "portable.PortableMatrixTest.other"))
+                    result_path = copy / "linux-x64/result.json"
+                    recorded = json.loads(result_path.read_text())
+                    recorded["methods"][0]["execution_log_sha256"] = run.digest(log_path)
+                    result_path.write_text(json.dumps(recorded))
+
+                mutated("changed-command", change_command, "method command differs")
+                def replace_with_symlink(copy):
+                    path = copy / "linux-x64/producer-bundle/inputs" / \
+                        f"{artifact_sha['target']}.klib"
+                    path.unlink()
+                    path.symlink_to(root / "hidden-producer-cache")
+
+                mutated("linked-klib", replace_with_symlink, "bundle path is a symlink")
+                def link_raw_stream(copy):
+                    path = copy / "linux-x64" / f"native-output-{method}.log"
+                    path.unlink()
+                    path.symlink_to(root / "hidden-producer-cache")
+
+                mutated("linked-raw-stream", link_raw_stream, "bundle path is a symlink")
+                mutated("unsafe-manifest-path", lambda copy: change_manifest(copy, lambda data:
+                    data["methods"][method]["binary"].update(bundle_path="../escape")),
+                    "executable bundle identity differs")
+                mutated("wrong-producer-binary", lambda copy: change_manifest(copy, lambda data:
+                    data["methods"][method]["binary"].update(original_path="/tmp/other.kexe")),
+                    "executable bundle identity differs")
+                mutated("wrong-producer-platform", lambda copy: change_manifest(copy, lambda data:
+                    data["platform"].update(machine="other")), "bundled process hash differs")
+                mutated("wrong-binary-mtime", lambda copy: change_manifest(copy, lambda data:
+                    data["methods"][method]["binary"].update(mtime_ns=time.time_ns())),
+                    "bundled process hash differs")
+                mutated("unsafe-cache-origin", lambda copy: change_manifest(copy, lambda data:
+                    data["methods"][method]["compiler_inputs"].update({
+                        "/etc/passwd": next(iter(data["methods"][method]["compiler_inputs"].values()))})),
+                    "compiler input origin differs")
+                mutated("missing-test-event", lambda copy: (copy / "linux-x64" /
+                        f"native-output-{method}.log").write_text(
+                            (copy / "linux-x64" / f"native-output-{method}.log").read_text().replace(
+                                "[  PASSED  ] 1 tests.\n", "")), "event stream is incomplete")
+                without_execution = root / "missing-execution"
+                shutil.copytree(detached, without_execution)
+                (without_execution / "linux-x64" / f"native-exec-{method}.log").unlink()
+                with patch("sys.argv", ["run.py", "--verify-linux-native-existing",
+                                        "--output", str(without_execution)]), \
+                        redirect_stdout(io.StringIO()) as printed:
+                    self.assertEqual(run.main(), 1)
+                self.assertEqual(json.loads(printed.getvalue())["status"], "FAILED")
 
 
 if __name__ == "__main__":

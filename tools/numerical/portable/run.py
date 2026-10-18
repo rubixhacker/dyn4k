@@ -130,13 +130,18 @@ def clean_identity():
 
 
 def artifacts(host):
-    suffix, extension = ARTIFACT_NAME[host]
-    main = STAGED / f"dyn4k-core-{suffix}" / VERSION / f"dyn4k-core-{suffix}-{VERSION}.{extension}"
-    metadata = STAGED / "dyn4k-core" / VERSION / f"dyn4k-core-{VERSION}.jar"
-    for path in (main, metadata):
+    paths = artifact_relative_paths(host)
+    result = {role: STAGED / name for role, name in paths.items()}
+    for path in result.values():
         if not path.is_file():
             raise Rejected(f"staged publication is absent: {path}")
-    return {"target": main, "metadata": metadata}
+    return result
+
+
+def artifact_relative_paths(host):
+    suffix, extension = ARTIFACT_NAME[host]
+    return {"target": f"dyn4k-core-{suffix}/{VERSION}/dyn4k-core-{suffix}-{VERSION}.{extension}",
+            "metadata": f"dyn4k-core/{VERSION}/dyn4k-core-{VERSION}.jar"}
 
 
 def stage(output, commit, source_sha256):
@@ -309,10 +314,20 @@ def _java_dependency_proof(host, command, dependency, log_path, proof_dir=None,
     return result
 
 
-def _compiled_dependency_proof(host, log_path, dependency):
+def _native_cache_input(path):
+    return (path.is_absolute() and len(path.parts) >= 9 and
+            path.parts[-9:-5] == (".gradle", "caches", "modules-2", "files-2.1") and
+            path.parts[-5:-2] == ("io.github.rubixhacker", "dyn4k-core-linuxx64", VERSION) and
+            re.fullmatch(r"[0-9a-f]{40}", path.parts[-2]) is not None and
+            path.name == f"dyn4k-core-linuxX64Main-{VERSION}.klib")
+
+
+def _compiled_dependency_proof(host, log_path, dependency, input_files=None,
+                               original_dependency=None):
     if not dependency.is_file():
         raise Rejected("staged dependency artifact is absent")
     expected_sha = digest(dependency)
+    artifact_path = Path(original_dependency) if original_dependency is not None else dependency.resolve()
     required = {
         "linux-x64": (":compileKotlinLinuxX64", ":compileTestKotlinLinuxX64",
                       ":linkDebugTestLinuxX64"),
@@ -331,19 +346,29 @@ def _compiled_dependency_proof(host, log_path, dependency):
             item = json.loads(line.split(" ", 1)[1])
             if item["task"] not in required:
                 continue
-            path = Path(item["path"]).resolve()
-            if path != dependency.resolve() and not (
-                    "io.github.rubixhacker" in path.parts and
+            path = Path(item["path"])
+            if not path.is_absolute() or ".." in path.parts or str(path) != item["path"]:
+                raise Rejected("executed compiler input path is unsafe")
+            if input_files is None:
+                path = path.resolve()
+            if path != artifact_path and not (
+                    _native_cache_input(path) if input_files is not None and
+                    host == "linux-x64" else "io.github.rubixhacker" in path.parts and
                     any(part.startswith("dyn4k-core-") for part in path.parts)):
                 raise Rejected("executed compiler input is outside staged publication resolution")
-            if not path.is_file() or digest(path) != expected_sha or \
+            source = input_files.get(str(path)) if input_files is not None else path
+            if source is None or not source.is_file() or digest(source) != expected_sha or \
                     item["sha256"] != expected_sha or \
                     item["bytes"] != dependency.stat().st_size:
                 raise Rejected("executed compiler input differs from staged dependency")
             found.append(item)
     if not set(required) <= {item["task"] for item in found}:
         raise Rejected("executed compiler staged dependency proof is incomplete")
-    return {"artifact": str(dependency.resolve()), "artifact_sha256": expected_sha,
+    if host == "linux-x64" and [item["task"] for item in found] != list(required):
+        raise Rejected("native compiler proof task sequence differs")
+    if input_files is not None and set(input_files) != {item["path"] for item in found}:
+        raise Rejected("retained compiler input set differs from execution")
+    return {"artifact": str(artifact_path), "artifact_sha256": expected_sha,
             "tasks": found, "provenance_script_sha256": digest(PROVENANCE_SCRIPT)}
 
 
@@ -435,12 +460,24 @@ def _java_version_line(probe):
 
 
 def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
-            require_loaded=False):
+            require_loaded=False, native_bundle=None):
     if host == "linux-x64":
-        binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
-        if len(binaries) != 1:
-            raise Rejected(f"expected one Linux x64 test binary, found {len(binaries)}")
-        binary = binaries[0].resolve()
+        if native_bundle is None:
+            binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
+            if len(binaries) != 1:
+                raise Rejected(f"expected one Linux x64 test binary, found {len(binaries)}")
+            binary = binaries[0].resolve()
+            binary_bytes = binary
+            binary_mtime_ns = binary.stat().st_mtime_ns
+            producer_platform = {"os": platform.platform(), "machine": platform.machine(),
+                                 "version": platform.platform()}
+        else:
+            binary = Path(native_bundle["binary"]["original_path"])
+            binary_bytes = native_bundle["binary_file"]
+            binary_mtime_ns = native_bundle["binary"]["mtime_ns"]
+            producer_platform = native_bundle["platform"]
+            if digest(binary_bytes) != native_bundle["binary"]["sha256"]:
+                raise Rejected("retained native executable differs")
         if execution_log is None or not Path(execution_log).is_file():
             raise Rejected("executed native test binary log is absent")
         executed = []
@@ -448,7 +485,8 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
             for line in stream:
                 found = re.search(r'\bexecve\("([^"]+\.kexe)", \[(.*?)\], .*\)\s+=\s+0$', line)
                 if found:
-                    executed.append((Path(found.group(1)).resolve(),
+                    executed.append((Path(found.group(1)).resolve() if native_bundle is None
+                                     else Path(found.group(1)),
                                      re.findall(r'"([^"\n]*)"', found.group(2))))
         if len(executed) != 1:
             raise Rejected(f"expected one executed native test binary, found {len(executed)}")
@@ -467,7 +505,7 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
                     if build_started is not None:
                         raise Rejected("native build start is ambiguous")
                     build_started = int(line.split()[1])
-        if build_started is None or binary.stat().st_mtime_ns < build_started:
+        if build_started is None or binary_mtime_ns < build_started:
             raise Rejected("native test binary is stale")
         if dependency is None:
             raise Rejected("staged dependency proof is absent")
@@ -475,15 +513,19 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
         stream = lane / f"native-output-{method}.log"
         xml = lane / "xml" / f"{method}.xml"
         native_stream_xml(method, stream, xml)
-        return {"host": host, "os": platform.platform(), "machine": platform.machine(),
-                "device": False, "executable": str(binary), "executable_sha256": digest(binary),
-                "version": platform.platform(), "process_executions": len(executed),
+        return {"host": host, **producer_platform,
+                "device": False, "executable": str(binary), "executable_sha256": digest(binary_bytes),
+                "binary_mtime_ns": binary_mtime_ns,
+                "process_executions": len(executed),
                 "worker_command": command,
                 "worker_command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
                 "build_log_sha256": digest(log_path),
                 "execution_log_sha256": digest(execution_log),
                 "native_output_sha256": digest(stream), "xml_sha256": digest(xml),
-                "dependency": _compiled_dependency_proof(host, log_path, Path(dependency))}
+                "dependency": _compiled_dependency_proof(
+                    host, log_path, Path(dependency),
+                    native_bundle["input_files"] if native_bundle is not None else None,
+                    native_bundle["target_original_path"] if native_bundle is not None else None)}
     needle = "Starting process 'command '" if host.startswith("node-") else "Starting process 'Gradle Test Executor"
     commands = []
     node_marker = ("dyn4k-portable-numerical-consumer-test.js" if host == "node-js"
@@ -537,7 +579,7 @@ def runtime_identity(row):
     return {key: value for key, value in row.items()
             if key not in ("worker_command", "worker_command_sha256", "dependency", "bundle",
                            "process_executions", "build_log_sha256", "execution_log_sha256",
-                           "native_output_sha256", "xml_sha256")}
+                           "native_output_sha256", "xml_sha256", "binary_mtime_ns")}
 
 
 def extract_xml(host, output, method=None, source=None):
@@ -771,7 +813,9 @@ def method_command(host, method, lane):
 def native_command(method, binary):
     if method not in MATRIX_METHODS:
         raise Rejected(f"unknown numerical matrix method: {method}")
-    return [str(Path(binary).resolve()),
+    if not Path(binary).is_absolute() or ".." in Path(binary).parts:
+        raise Rejected("native executable path is unsafe")
+    return [str(binary),
             f"--ktest_filter=portable.PortableMatrixTest.{method}",
             "--ktest_logger=GTEST"]
 
@@ -847,6 +891,214 @@ def run_native_method(method, lane, binary, env):
     return execution_log
 
 
+def _bundle_file(bundle, relative):
+    if not isinstance(relative, str) or not relative or len(relative) > 512 or \
+            Path(relative).is_absolute() or \
+            any(part in ("", ".", "..") for part in relative.split("/")) or \
+            any(len(part) > 255 for part in relative.split("/")) or "\\" in relative:
+        raise Rejected("native bundle path is unsafe")
+    bundle = Path(bundle)
+    candidate = bundle / relative
+    if bundle.is_symlink() or any(path.is_symlink() for path in (candidate, *candidate.parents)
+                                  if path == bundle or bundle in path.parents):
+        raise Rejected("native bundle path is a symlink")
+    if not candidate.resolve().is_relative_to(bundle.resolve()):
+        raise Rejected("native bundle path escapes archive")
+    if candidate.is_file() and candidate.stat().st_nlink != 1:
+        raise Rejected("native bundle file has an external hard link")
+    return candidate
+
+
+def _native_archive_file(output, relative):
+    return _bundle_file(output, f"linux-x64/{relative}")
+
+
+def _copy_bundle_file(source, bundle, relative):
+    source = Path(source)
+    if not source.is_file() or source.is_symlink():
+        raise Rejected("native bundle source is absent or linked")
+    target = _bundle_file(bundle, relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as stream, target.open("xb") as output:
+        shutil.copyfileobj(stream, output, 1024 * 1024)
+    return target
+
+
+def _publication_names():
+    return {name for host in HOST_TASKS for name in artifact_relative_paths(host).values()}
+
+
+def start_native_bundle(output, lane, commit, source_sha256):
+    publication = json.loads((output / "publication.json").read_text())
+    names = _publication_names()
+    if publication.get("candidate_commit") != commit or \
+            publication.get("source_sha256") != source_sha256 or \
+            set(publication.get("artifact_sha256", {})) != names:
+        raise Rejected("native publication manifest differs")
+    bundle = lane / "producer-bundle"
+    bundle.mkdir()
+    files = {}
+    for name in sorted(names):
+        original = STAGED / name
+        archived = _copy_bundle_file(original, bundle, f"publications/{name}")
+        sha = digest(archived)
+        if sha != publication["artifact_sha256"][name]:
+            raise Rejected("retained staged publication differs")
+        files[name] = {"original_path": str(original.resolve()),
+                       "bundle_path": f"publications/{name}",
+                       "sha256": sha, "bytes": archived.stat().st_size}
+    return {"schema": "portable-native-producer-bundle/1",
+            "candidate_commit": commit, "source_sha256": source_sha256,
+            "producer_root": str(ROOT.resolve()), "stage_root": str(STAGED.resolve()),
+            "platform": {"os": platform.platform(), "machine": platform.machine(),
+                         "version": platform.platform()},
+            "publication_sha256": digest(output / "publication.json"),
+            "publications": files, "methods": {}}
+
+
+def retain_native_method(bundle, manifest, method, process):
+    if method in manifest["methods"]:
+        raise Rejected("native bundle method is duplicated")
+    binary = Path(process["executable"])
+    expected = PORTABLE / "build/bin/linuxX64/debugTest/test.kexe"
+    if binary != expected.resolve() or digest(binary) != process["executable_sha256"] or \
+            binary.stat().st_mtime_ns != process["binary_mtime_ns"]:
+        raise Rejected("executed native binary differs before retention")
+    binary_relative = f"methods/{method}/test.kexe"
+    binary_copy = _copy_bundle_file(binary, bundle, binary_relative)
+    inputs = {}
+    for item in process["dependency"]["tasks"]:
+        original = Path(item["path"])
+        if str(original) in inputs:
+            continue
+        if not _native_cache_input(original) and original != STAGED / \
+                artifact_relative_paths("linux-x64")["target"]:
+            raise Rejected("native compiler input path differs")
+        relative = f"inputs/{item['sha256']}.klib"
+        archived = _bundle_file(bundle, relative)
+        if not archived.exists():
+            _copy_bundle_file(original, bundle, relative)
+        if digest(archived) != item["sha256"] or archived.stat().st_size != item["bytes"]:
+            raise Rejected("retained native compiler input differs")
+        inputs[str(original)] = {"bundle_path": relative, "sha256": item["sha256"],
+                                 "bytes": item["bytes"]}
+    if not inputs:
+        raise Rejected("native compiler input bundle is empty")
+    manifest["methods"][method] = {
+        "binary": {"original_path": str(binary), "bundle_path": binary_relative,
+                   "sha256": digest(binary_copy), "bytes": binary_copy.stat().st_size,
+                   "mtime_ns": binary.stat().st_mtime_ns},
+        "compiler_inputs": inputs,
+        "process_sha256": hashlib.sha256(json.dumps(process, sort_keys=True).encode()).hexdigest()}
+
+
+def finish_native_bundle(lane, manifest):
+    if set(manifest["methods"]) != set(MATRIX_METHODS):
+        raise Rejected("native producer bundle method set is incomplete")
+    path = lane / "producer-bundle/manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return digest(path)
+
+
+def _recorded_absolute_path(value):
+    if not isinstance(value, str) or len(value) > 4096 or not Path(value).is_absolute() or \
+            ".." in Path(value).parts or str(Path(value)) != value:
+        raise Rejected("native producer path is unsafe")
+    return Path(value)
+
+
+def load_native_bundle(output, publication, commit, source_sha256, result):
+    manifest_path = _native_archive_file(output, "producer-bundle/manifest.json")
+    if manifest_path.stat().st_size > 1_000_000:
+        raise Rejected("native bundle manifest is too large")
+    if digest(manifest_path) != result.get("native_bundle_sha256"):
+        raise Rejected("native bundle manifest hash differs")
+    manifest = json.loads(manifest_path.read_text())
+    if set(manifest) != {"schema", "candidate_commit", "source_sha256", "producer_root",
+                         "stage_root", "platform", "publication_sha256", "publications",
+                         "methods"} or manifest["schema"] != "portable-native-producer-bundle/1" or \
+            manifest["candidate_commit"] != commit or manifest["source_sha256"] != source_sha256 or \
+            manifest["publication_sha256"] != digest(output / "publication.json"):
+        raise Rejected("native bundle identity differs")
+    producer_root = _recorded_absolute_path(manifest["producer_root"])
+    stage_root = _recorded_absolute_path(manifest["stage_root"])
+    if stage_root != producer_root / "build/staging-repository/io/github/rubixhacker":
+        raise Rejected("native bundle staged root differs")
+    producer_platform = manifest["platform"]
+    if not isinstance(producer_platform, dict) or set(producer_platform) != \
+            {"os", "machine", "version"} or any(not isinstance(value, str) or not value
+                                               for value in producer_platform.values()):
+        raise Rejected("native producer platform identity differs")
+    names = _publication_names()
+    if set(publication.get("artifact_sha256", {})) != names or \
+            set(manifest["publications"]) != names:
+        raise Rejected("native publication file set differs")
+    publications = {}
+    for name in sorted(names):
+        item = manifest["publications"][name]
+        if not isinstance(item, dict) or set(item) != \
+                {"original_path", "bundle_path", "sha256", "bytes"} or \
+                _recorded_absolute_path(item["original_path"]) != stage_root / name or \
+                item["bundle_path"] != f"publications/{name}" or \
+                item["sha256"] != publication["artifact_sha256"][name] or \
+                type(item["bytes"]) is not int or item["bytes"] <= 0:
+            raise Rejected("native staged publication entry differs")
+        path = _native_archive_file(output, f"producer-bundle/{item['bundle_path']}")
+        if not path.is_file() or path.stat().st_size != item["bytes"] or \
+                digest(path) != item["sha256"]:
+            raise Rejected("retained staged publication bytes differ")
+        publications[name] = path
+    if set(manifest["methods"]) != set(MATRIX_METHODS):
+        raise Rejected("native bundle method set differs")
+    methods = {}
+    target_name = artifact_relative_paths("linux-x64")["target"]
+    for method in MATRIX_METHODS:
+        item = manifest["methods"][method]
+        if not isinstance(item, dict) or set(item) != \
+                {"binary", "compiler_inputs", "process_sha256"}:
+            raise Rejected("native method bundle entry differs")
+        binary = item["binary"]
+        if not isinstance(binary, dict) or set(binary) != \
+                {"original_path", "bundle_path", "sha256", "bytes", "mtime_ns"} or \
+                _recorded_absolute_path(binary["original_path"]) != producer_root / \
+                "tools/numerical/portable/build/bin/linuxX64/debugTest/test.kexe" or \
+                binary["bundle_path"] != f"methods/{method}/test.kexe" or \
+                type(binary["bytes"]) is not int or binary["bytes"] <= 0 or \
+                type(binary["mtime_ns"]) is not int or binary["mtime_ns"] <= 0:
+            raise Rejected("native executable bundle identity differs")
+        binary_file = _native_archive_file(output, f"producer-bundle/{binary['bundle_path']}")
+        if not binary_file.is_file() or binary_file.stat().st_size != binary["bytes"] or \
+                digest(binary_file) != binary["sha256"]:
+            raise Rejected("retained native executable bytes differ")
+        inputs = item["compiler_inputs"]
+        if not isinstance(inputs, dict) or not inputs:
+            raise Rejected("native compiler input bundle is empty")
+        input_files = {}
+        for original, entry in inputs.items():
+            path = _recorded_absolute_path(original)
+            if path != stage_root / target_name and not _native_cache_input(path):
+                raise Rejected("native compiler input origin differs")
+            if not isinstance(entry, dict) or set(entry) != {"bundle_path", "sha256", "bytes"} or \
+                    not isinstance(entry["sha256"], str) or \
+                    re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]) is None or \
+                    entry["bundle_path"] != f"inputs/{entry['sha256']}.klib" or \
+                    type(entry["bytes"]) is not int or entry["bytes"] <= 0:
+                raise Rejected("native compiler input bundle path differs")
+            archived = _native_archive_file(output, f"producer-bundle/{entry['bundle_path']}")
+            if not archived.is_file() or archived.stat().st_size != entry["bytes"] or \
+                    digest(archived) != entry["sha256"]:
+                raise Rejected("retained native compiler input bytes differ")
+            input_files[original] = archived
+        if not isinstance(item["process_sha256"], str) or \
+                re.fullmatch(r"[0-9a-f]{64}", item["process_sha256"]) is None:
+            raise Rejected("native process bundle hash differs")
+        methods[method] = {"binary": binary, "binary_file": binary_file,
+                           "input_files": input_files, "platform": producer_platform,
+                           "target_original_path": str(stage_root / target_name),
+                           "process_sha256": item["process_sha256"]}
+    return publications, methods, manifest
+
+
 def execute(host, output, commit, source_sha256, reference_dirs,
             prospective_baseline=None, frozen_baseline=None,
             frozen_attestation=None, prospective_attestation=None,
@@ -877,6 +1129,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         raw_counts = {"expected_cases": len(declared_cases()), "input_records": 0,
                       "observed_cases": 0, "completed_cases": 0, "states": 0,
                       "tagged_nonfinite_values": 0, "per_case": {}}
+        bundle_manifest = (start_native_bundle(output, lane, commit, source_sha256)
+                           if host == "linux-x64" else None)
         methods = []
         runtimes = []
         for method in MATRIX_METHODS:
@@ -934,6 +1188,9 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                                    target_artifacts["target"],
                                    lane / "process-proof" / method)
                 method_result["process"] = executed
+                if bundle_manifest is not None:
+                    retain_native_method(lane / "producer-bundle", bundle_manifest,
+                                         method, executed)
                 runtimes.append(runtime_identity(executed))
             except Rejected as error:
                 method_result["reason"] = str(error)
@@ -949,6 +1206,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         executed_runtime["dependency_sha256"] = artifact_sha256["target"]
         executed_runtime["method_process_sha256"] = hashlib.sha256(json.dumps(
             [item["process"] for item in methods], sort_keys=True).encode()).hexdigest()
+        if bundle_manifest is not None:
+            outcome["native_bundle_sha256"] = finish_native_bundle(lane, bundle_manifest)
         outcome["xml"] = attributes
         outcome["raw_counts"] = raw_counts
         outcome["started_cases"] = raw_counts["observed_cases"]
@@ -1031,20 +1290,22 @@ def verify_linux_native_archive(output):
     from baseline_capture import verify_case_slices, verify_xml_trace
 
     commit, source_sha256 = clean_identity()
-    publication = json.loads((output / "publication.json").read_text())
+    publication_path = _bundle_file(output, "publication.json")
+    publication_log = _bundle_file(output, "publication.log")
+    publication = json.loads(publication_path.read_text())
     if publication["candidate_commit"] != commit or publication["source_sha256"] != source_sha256 or \
-            digest(output / "publication.log") != publication["publication_log_sha256"]:
+            digest(publication_log) != publication["publication_log_sha256"]:
         raise Rejected("native publication identity differs")
-    for name, expected in publication["artifact_sha256"].items():
-        if digest(STAGED / name) != expected:
-            raise Rejected("native staged publication differs")
     lane = output / "linux-x64"
-    result = json.loads((lane / "result.json").read_text())
-    receipt = json.loads((lane / "receipt.json").read_text())
+    result = json.loads(_native_archive_file(output, "result.json").read_text())
+    receipt = json.loads(_native_archive_file(output, "receipt.json").read_text())
+    publications, bundled_methods, manifest = load_native_bundle(
+        output, publication, commit, source_sha256, result)
     methods = result["methods"]
     if [item["method"] for item in methods] != list(MATRIX_METHODS):
         raise Rejected("native method inventory differs")
-    target_artifacts = artifacts("linux-x64")
+    target_artifacts = {role: publications[name] for role, name in
+                        artifact_relative_paths("linux-x64").items()}
     artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
     if receipt["artifact_sha256"] != artifact_sha256 or \
             result["artifact_sha256"] != artifact_sha256:
@@ -1054,13 +1315,20 @@ def verify_linux_native_archive(output):
         method = item["method"]
         if item["gradle_exit"] or item.get("cases") != len(method_case_ids(method)):
             raise Rejected(f"native method did not complete: {method}")
-        for path, field in ((lane / f"gradle-{method}.log", "log_sha256"),
-                            (lane / f"native-exec-{method}.log", "execution_log_sha256"),
-                            (lane / "xml" / f"{method}.xml", "xml_sha256")):
+        build_log = _native_archive_file(output, f"gradle-{method}.log")
+        execution_log = _native_archive_file(output, f"native-exec-{method}.log")
+        _native_archive_file(output, f"native-output-{method}.log")
+        xml = _native_archive_file(output, f"xml/{method}.xml")
+        for path, field in ((build_log, "log_sha256"),
+                            (execution_log, "execution_log_sha256"),
+                            (xml, "xml_sha256")):
             if digest(path) != item[field]:
                 raise Rejected(f"native method file differs: {method}: {field}")
-        proof = runtime("linux-x64", lane / f"gradle-{method}.log",
-                        lane / f"native-exec-{method}.log", target_artifacts["target"])
+        proof = runtime("linux-x64", build_log, execution_log, target_artifacts["target"],
+                        native_bundle=bundled_methods[method])
+        if hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest() != \
+                bundled_methods[method]["process_sha256"]:
+            raise Rejected(f"native bundled process hash differs: {method}")
         if item.get("process") != proof:
             raise Rejected(f"native method process proof differs: {method}")
         proofs.append(proof)
@@ -1073,11 +1341,21 @@ def verify_linux_native_archive(output):
                          proofs, sort_keys=True).encode()).hexdigest()}
     if receipt["runtime"] != runtime_proof or result["runtime"] != runtime_proof:
         raise Rejected("native runtime inventory differs")
+    trace = _native_archive_file(output, "trace.jsonl")
+    for case in declared_cases():
+        _native_archive_file(output, f"cases/{case['id']}.jsonl")
     verify_xml_trace(lane, [{**item, "completed_cases": item["cases"]} for item in methods],
                      result["raw_counts"], receipt["trace_sha256"])
     verify_case_slices(lane, result["raw_counts"]["per_case"])
     identity = Identity(commit, source_sha256, artifact_sha256, runtime_proof)
-    verify_receipt(receipt, lane / "trace.jsonl", declared_cases(), identity, target_artifacts)
+    expected_paths = {role: str(Path(manifest["stage_root"]) / name) for role, name in
+                      artifact_relative_paths("linux-x64").items()}
+    if receipt.get("artifact_paths") != expected_paths:
+        raise Rejected("native original staged artifact paths differ")
+    archived_receipt = {**receipt, "artifact_paths": {role: str(path) for role, path in
+                                                   target_artifacts.items()}}
+    verify_receipt(archived_receipt, trace, declared_cases(),
+                   identity, target_artifacts)
     return {"status": "PASSED_PRODUCER_REPLAY", "qualification": "UNPASSED",
             "candidate_commit": commit, "methods": len(methods),
             "cases": receipt["counts"]["executed_cases"]}
