@@ -2173,6 +2173,81 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(23, normal.returncode)
         self.assertEqual(1, len(list(context.glob("sample-state-*.txt"))))
 
+    def test_wrapper_rejects_failed_sample_write_and_rename(self):
+        root = Path(__file__).resolve().parents[2]
+        launcher = (root / "tools/qualification/safari-launch.sh").read_text()
+        fake_open = self.root / "fake-open"
+        fake_open.write_bytes(b"#!/bin/bash\nexit 23\n")
+        fake_open.chmod(0o755)
+        redirect = self.root / "redirect.html"
+        redirect.write_bytes(b"redirect\n")
+        for failure, function, original, replacement, marker in (
+                ("write_error", "record_sample() { /usr/bin/printf 'partial'; return 17; }",
+                 "/usr/bin/printf 'samples_completed=%s",
+                 "record_sample 'samples_completed=%s", "sample_state_write_failed"),
+                ("short_write", "record_sample() { /usr/bin/printf 'partial'; }",
+                 "/usr/bin/printf 'samples_completed=%s",
+                 "record_sample 'samples_completed=%s", "sample_state_verify_failed"),
+                ("rename_error", "rename_sample() { return 19; }",
+                 '/bin/mv "$context/sample-state-$$.tmp" "$context/sample-state-$$.txt"',
+                 'rename_sample "$context/sample-state-$$.tmp" '
+                 '"$context/sample-state-$$.txt"', "sample_state_rename_failed")):
+            with self.subTest(failure=failure):
+                context = self.root / failure
+                controlled = self.root / f"controlled-{failure}.sh"
+                script = launcher.replace("/usr/bin/open", bash_path(fake_open)) \
+                    .replace("/bin/sleep 2", "/bin/sleep 0.01")
+                self.assertIn(original, script)
+                script = script.replace(original, replacement).replace(
+                    "set -euo pipefail\n", "set -euo pipefail\n" + function + "\n")
+                controlled.write_bytes(script.encode())
+                result = subprocess.run(
+                    ["bash", bash_path(controlled), bash_path(redirect)],
+                    env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(23, result.returncode)
+                self.assertEqual([], list(context.glob("sample-state-*.txt")))
+                self.assertEqual([], list(context.glob("sample-state-*.tmp")))
+                process = list(context.glob("process-*.txt"))
+                self.assertEqual(1, len(process))
+                self.assertIn(marker, process[0].read_text())
+                self.assertEqual(5, process[0].read_text().count("sample="))
+                outcome = list(context.glob("launch-outcome-*.txt"))
+                self.assertEqual(1, len(outcome))
+                self.assertEqual("open_state=finished\nopen_exit=23\n",
+                                 outcome[0].read_text())
+
+    def test_wrapper_reports_sampler_failure_after_successful_open(self):
+        root = Path(__file__).resolve().parents[2]
+        launcher = (root / "tools/qualification/safari-launch.sh").read_text()
+        fake_open = self.root / "fake-open"
+        fake_open.write_bytes(b"#!/bin/bash\nexit 0\n")
+        fake_open.chmod(0o755)
+        controlled = self.root / "controlled-failed-sampler.sh"
+        controlled.write_bytes((launcher.replace("/usr/bin/open", bash_path(fake_open))
+                              .replace("/bin/sleep 2", "/bin/sleep 0.01")
+                              .replace("/usr/bin/printf 'samples_completed=%s",
+                                       "record_sample 'samples_completed=%s")
+                              .replace("set -euo pipefail\n",
+                                       "set -euo pipefail\n"
+                                       "record_sample() { return 17; }\n")).encode())
+        redirect = self.root / "redirect.html"
+        redirect.write_bytes(b"redirect\n")
+        context = self.root / "failed-sampler"
+        result = subprocess.run(
+            ["bash", bash_path(controlled), bash_path(redirect)],
+            env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual([], list(context.glob("sample-state-*.txt")))
+        self.assertEqual([], list(context.glob("sample-state-*.tmp")))
+        outcome = list(context.glob("launch-outcome-*.txt"))
+        self.assertEqual(1, len(outcome))
+        self.assertEqual("open_state=finished\nopen_exit=0\n", outcome[0].read_text())
+        process = list(context.glob("process-*.txt"))
+        self.assertEqual(1, len(process))
+        self.assertIn("sample_state_write_failed", process[0].read_text())
+
     @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_records_pending_open_and_completed_samples(self):
         root = Path(__file__).resolve().parents[2]
