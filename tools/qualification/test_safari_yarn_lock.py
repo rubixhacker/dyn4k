@@ -610,14 +610,17 @@ class SafariYarnLockTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         workflow = (root /
                     ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
-        self.assertIn("DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context",
+        self.assertIn("DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context-raw",
                       workflow)
         self.assertIn("- name: Capture source Kotlin/JS lock generation\n        env:\n"
                       "          DYN4K_SAFARI_LAUNCH_CONTEXT:", workflow)
         self.assertIn("name: safari-launch-context-${{ inputs.candidate_sha }}-", workflow)
         self.assertIn("path: ${{ runner.temp }}/safari-launch-context/", workflow)
+        self.assertNotIn("path: ${{ runner.temp }}/safari-launch-context-raw/", workflow)
         self.assertIn("if: always()", workflow)
         self.assertIn("--capture-context", workflow)
+        self.assertIn('--input-context "$raw" --output "$context"', workflow)
+        self.assertIn('printf \'session_exit=%s\\nprocess_exit=%s\\n\'', workflow)
         self.assertNotIn("find \"$source\"", workflow)
         launcher = (root / "tools/qualification/safari-launch.sh").read_text()
         self.assertIn('DYN4K_SAFARI_LAUNCH_CONTEXT:-', launcher)
@@ -625,28 +628,46 @@ class SafariYarnLockTests(unittest.TestCase):
 
     def context_fixture(self):
         context = self.root / "context"
-        context.mkdir()
-        (context / "launch-123.txt").write_text("pid=123\n")
-        (context / "sample-state-123.txt").write_text(
+        self.raw_context = self.root / "raw-context"
+        self.raw_context.mkdir()
+        (self.raw_context / "launch-123.txt").write_text("pid=123\n")
+        (self.raw_context / "sample-state-123.txt").write_text(
             "samples_completed=5\nsampler_exit=0\n")
-        (context / "process-123.txt").write_text(
+        (self.raw_context / "process-123.txt").write_text(
             "sample=1\nsample=2\nsample=3\nsample=4\nsample=5\n")
-        (context / "launch-outcome-123.txt").write_text("open_exit=23\n")
-        (context / "redirect-123.html").write_text("redirect\n")
-        (context / "open-123.stdout").write_text("")
-        (context / "open-123.stderr").write_text("early failure\n")
+        (self.raw_context / "launch-outcome-123.txt").write_text("open_exit=23\n")
+        (self.raw_context / "redirect-123.html").write_text("redirect\n")
+        (self.raw_context / "open-123.stdout").write_text("")
+        (self.raw_context / "open-123.stderr").write_text("early failure\n")
+        (self.raw_context / "session-after.txt").write_text("Aqua\n")
+        (self.raw_context / "process-after.txt").write_text("process\n")
+        (self.raw_context / "host-outcome.txt").write_text(
+            "session_exit=0\nprocess_exit=0\n")
         for relative in safari_yarn_lock.CONTEXT_ROOTS:
             (self.repository / relative).mkdir(parents=True, exist_ok=True)
         package = self.repository / safari_yarn_lock.CONTEXT_ROOTS[0]
         return context, package
+
+    def capture_context(self, context):
+        return safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context, self.raw_context)
+
+    def assert_context_upload_bound(self, context):
+        files = [path for path in context.rglob("*") if path.is_file()]
+        self.assertFalse(any(path.is_symlink() for path in context.rglob("*")))
+        self.assertTrue(all(path.stat().st_size <= safari_yarn_lock.CONTEXT_MAX_FILE_BYTES
+                            for path in files if path.name != "inventory.json"))
+        self.assertLessEqual(sum(path.stat().st_size for path in files),
+                             safari_yarn_lock.CONTEXT_MAX_UPLOAD_BYTES)
+        self.assertLessEqual((context / "inventory.json").stat().st_size,
+                             safari_yarn_lock.CONTEXT_MAX_INVENTORY_BYTES)
 
     def test_context_scanner_copies_regular_unique_config_with_inventory(self):
         context, package = self.context_fixture()
         source = package / "karma.conf.js"
         source.write_bytes(b"module.exports = {};\n")
         (package / "node_modules").symlink_to(self.root, target_is_directory=True)
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_COMPLETE", inventory["status"])
         self.assertFalse(inventory["qualified"])
         self.assertEqual(source.read_bytes(),
@@ -654,15 +675,21 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertTrue(any(item["status"] == "copied" for item in inventory["inputs"]))
         self.assertTrue(any(item["reason"] == "excluded_node_modules"
                             for item in inventory["inputs"]))
+        self.assertTrue(any(item["path"] == "process-after.txt"
+                            and item["original_size"] == item["retained_size"]
+                            for item in inventory["inputs"]))
+        self.assertTrue(any(item["path"] == "launch-123.txt"
+                            and item["original_size"] == item["retained_size"]
+                            for item in inventory["inputs"]))
         self.assertEqual(inventory, json.loads((context / "inventory.json").read_text()))
+        self.assert_context_upload_bound(context)
 
     def test_context_scanner_marks_per_file_byte_truncation(self):
         context, package = self.context_fixture()
         (package / "a-karma.js").write_bytes(b"12345")
         with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILE_BYTES", 4), \
                 mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_TOTAL_BYTES", 10):
-            inventory = safari_yarn_lock.capture_karma_context(
-                self.repository, self.candidate, context)
+            inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertEqual(4, inventory["copied_bytes"])
         self.assertEqual("per_file_byte_limit", inventory["inputs"][0]["reason"])
@@ -672,8 +699,7 @@ class SafariYarnLockTests(unittest.TestCase):
         (package / "a-karma.js").write_bytes(b"12345")
         with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILE_BYTES", 10), \
                 mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_TOTAL_BYTES", 3):
-            inventory = safari_yarn_lock.capture_karma_context(
-                self.repository, self.candidate, context)
+            inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertEqual(3, inventory["copied_bytes"])
         self.assertEqual("total_byte_limit", inventory["inputs"][0]["reason"])
@@ -683,8 +709,7 @@ class SafariYarnLockTests(unittest.TestCase):
         source = package / "a-karma.js"
         source.write_text("config\n")
         os.link(source, package / "b-karma.js")
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertEqual(1, inventory["copied_files"])
         self.assertTrue(any(item["reason"] == "duplicate_inode"
@@ -700,8 +725,7 @@ class SafariYarnLockTests(unittest.TestCase):
         (package / "a-karma.js").write_text("a\n")
         (package / "b-karma.js").write_text("b\n")
         with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILES", 1):
-            inventory = safari_yarn_lock.capture_karma_context(
-                self.repository, self.candidate, context)
+            inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "symlink" for item in inventory["inputs"]))
         self.assertTrue(any(item["reason"] == "file_count_limit"
@@ -716,8 +740,7 @@ class SafariYarnLockTests(unittest.TestCase):
         (outside / "karma.conf.js").write_text("outside\n")
         package.rmdir()
         package.symlink_to(outside, target_is_directory=True)
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertEqual(0, inventory["copied_files"])
         self.assertTrue(any(item["reason"] == "missing_or_unsafe_root"
@@ -727,24 +750,21 @@ class SafariYarnLockTests(unittest.TestCase):
         context, package = self.context_fixture()
         (package / "karma.conf.js").write_text("config\n")
         with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_SECONDS", 0):
-            inventory = safari_yarn_lock.capture_karma_context(
-                self.repository, self.candidate, context)
+            inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "traversal_deadline"
                             for item in inventory["inputs"]))
-        shutil.rmtree(context / "config", ignore_errors=True)
+        second_context = self.root / "second-context"
         with mock.patch.object(safari_yarn_lock.os, "scandir", side_effect=OSError("scan failed")):
-            inventory = safari_yarn_lock.capture_karma_context(
-                self.repository, self.candidate, context)
+            inventory = self.capture_context(second_context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["status"] == "failed" for item in inventory["inputs"]))
 
     def test_context_scanner_rejects_unfinished_sampler(self):
         context, package = self.context_fixture()
         (package / "karma.conf.js").write_text("config\n")
-        (context / "sample-state-123.txt").unlink()
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        (self.raw_context / "sample-state-123.txt").unlink()
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "sampler_incomplete"
                             for item in inventory["inputs"]))
@@ -752,9 +772,8 @@ class SafariYarnLockTests(unittest.TestCase):
     def test_context_scanner_rejects_missing_process_samples(self):
         context, package = self.context_fixture()
         (package / "karma.conf.js").write_text("config\n")
-        (context / "process-123.txt").unlink()
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        (self.raw_context / "process-123.txt").unlink()
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "sampler_incomplete"
                             for item in inventory["inputs"]))
@@ -762,21 +781,112 @@ class SafariYarnLockTests(unittest.TestCase):
     def test_context_scanner_rejects_missing_launch_output(self):
         context, package = self.context_fixture()
         (package / "karma.conf.js").write_text("config\n")
-        (context / "open-123.stderr").unlink()
-        inventory = safari_yarn_lock.capture_karma_context(
-            self.repository, self.candidate, context)
+        (self.raw_context / "open-123.stderr").unlink()
+        inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
-        self.assertTrue(any(item["reason"] == "launch_capture_incomplete"
+        self.assertTrue(any(item["reason"] == "missing_or_unreadable_sidecar"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_and_bounds_oversized_process_snapshot(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "process-after.txt").write_bytes(b"P" * 1_572_864)
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertLessEqual((context / "process-after.txt").stat().st_size, 256 * 1024)
+        self.assertTrue(any(item["path"] == "process-after.txt"
+                            and item["original_size"] == 1_572_864
+                            and item["retained_size"] <= 256 * 1024
+                            and item["status"] == "truncated"
+                            for item in inventory["inputs"]))
+        self.assert_context_upload_bound(context)
+
+    def test_context_scanner_rejects_and_bounds_large_launch_and_session(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "session-after.txt").write_bytes(b"S" * 614_400)
+        (self.raw_context / "launch-123.txt").write_bytes(b"L" * 614_400)
+        output = io.StringIO()
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", ["safari_yarn_lock.py", "--candidate-sha",
+                                                self.candidate, "--input-context",
+                                                str(self.raw_context), "--output", str(context),
+                                                "--capture-context"]), \
+                redirect_stdout(output):
+            self.assertEqual(1, safari_yarn_lock.main())
+        self.assertEqual("CONTEXT_INCOMPLETE", json.loads(output.getvalue())["status"])
+        inventory = json.loads((context / "inventory.json").read_text())
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        for name in ("session-after.txt", "launch-123.txt"):
+            self.assertLessEqual((context / name).stat().st_size, 256 * 1024)
+            self.assertTrue(any(item["path"] == name
+                                and item["original_size"] == 614_400
+                                and item["retained_size"] <= 256 * 1024
+                                and item["status"] == "truncated"
+                                for item in inventory["inputs"]))
+        self.assert_context_upload_bound(context)
+
+    def test_context_cli_rejects_reviewers_oversized_snapshot(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "process-after.txt").write_bytes(b"P" * 1_572_864)
+        output = io.StringIO()
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", ["safari_yarn_lock.py", "--candidate-sha",
+                                                self.candidate, "--input-context",
+                                                str(self.raw_context), "--output", str(context),
+                                                "--capture-context"]), \
+                redirect_stdout(output):
+            self.assertEqual(1, safari_yarn_lock.main())
+        self.assertEqual("CONTEXT_INCOMPLETE", json.loads(output.getvalue())["status"])
+        self.assert_context_upload_bound(context)
+
+    def test_context_scanner_caps_aggregate_uploaded_bytes(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "process-after.txt").write_bytes(b"P" * 614_400)
+        with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_UPLOAD_BYTES",
+                               safari_yarn_lock.CONTEXT_MAX_INVENTORY_BYTES + 100):
+            inventory = self.capture_context(context)
+            self.assert_context_upload_bound(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "upload_byte_limit"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_symlink_host_snapshot(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        outside = self.root / "outside.txt"
+        outside.write_text("outside\n")
+        (self.raw_context / "session-after.txt").unlink()
+        (self.raw_context / "session-after.txt").symlink_to(outside)
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertFalse((context / "session-after.txt").exists())
+        self.assertTrue(any(item["path"] == "session-after.txt"
+                            and item["status"] == "failed"
+                            for item in inventory["inputs"]))
+        self.assert_context_upload_bound(context)
+
+    def test_context_scanner_rejects_missing_or_unsafe_host_snapshot(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (self.raw_context / "session-after.txt").unlink()
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["path"] == "session-after.txt"
+                            and item["status"] == "failed"
                             for item in inventory["inputs"]))
 
     def test_context_cli_reports_incomplete_with_nonzero_exit(self):
         context, package = self.context_fixture()
         (package / "karma.conf.js").write_text("config\n")
-        (context / "sample-state-123.txt").unlink()
+        (self.raw_context / "sample-state-123.txt").unlink()
         output = io.StringIO()
         with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
                 mock.patch.object(sys, "argv", ["safari_yarn_lock.py", "--candidate-sha",
-                                                self.candidate, "--output", str(context),
+                                                self.candidate, "--input-context",
+                                                str(self.raw_context), "--output", str(context),
                                                 "--capture-context"]), \
                 redirect_stdout(output):
             result = safari_yarn_lock.main()

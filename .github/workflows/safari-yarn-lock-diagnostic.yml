@@ -48,7 +48,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Capture source Kotlin/JS lock generation
         env:
-          DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context
+          DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context-raw
         run: >-
           python tools/qualification/safari_yarn_lock.py
           --candidate-sha "${{ inputs.candidate_sha }}"
@@ -66,13 +66,17 @@ jobs:
         if: always()
         shell: bash
         run: |
+          raw="$RUNNER_TEMP/safari-launch-context-raw"
           context="$RUNNER_TEMP/safari-launch-context"
-          mkdir -p "$context"
-          /bin/launchctl managername > "$context/session-after.txt" 2>&1 || true
-          /bin/ps -axo pid,ppid,state,comm > "$context/process-after.txt" 2>&1 || true
+          mkdir -p "$raw"
+          session_exit=0
+          process_exit=0
+          /bin/launchctl managername > "$raw/session-after.txt" 2>&1 || session_exit=$?
+          /bin/ps -axo pid,ppid,state,comm > "$raw/process-after.txt" 2>&1 || process_exit=$?
+          printf 'session_exit=%s\nprocess_exit=%s\n' "$session_exit" "$process_exit" > "$raw/host-outcome.txt"
           python tools/qualification/safari_yarn_lock.py \
             --candidate-sha "${{ inputs.candidate_sha }}" \
-            --output "$context" --capture-context
+            --input-context "$raw" --output "$context" --capture-context
       - name: Retain raw lock diagnosis
         if: always()
         uses: actions/upload-artifact@v4

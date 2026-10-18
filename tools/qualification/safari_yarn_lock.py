@@ -43,6 +43,9 @@ CONTEXT_MAX_ENTRIES = 2048
 CONTEXT_MAX_DEPTH = 16
 CONTEXT_MAX_SECONDS = 15
 CONTEXT_MAX_LAUNCHES = 8
+CONTEXT_MAX_RAW_ENTRIES = 128
+CONTEXT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+CONTEXT_MAX_INVENTORY_BYTES = 256 * 1024
 LOCK_ERROR_LINE = ("> Lock file was changed. Run the `kotlinUpgradeYarnLock` task "
                    "to actualize lock file")
 HOSTED_TASK_MARKERS = (b"> Task :dyn4k-core:jsTestPackageJson",
@@ -69,26 +72,37 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def capture_karma_context(repository, candidate_sha, context):
+def capture_karma_context(repository, candidate_sha, context, raw_context):
     repository = repository.resolve()
-    if context.is_symlink() or context.resolve().is_relative_to(repository):
-        raise ValueError("Safari context must be an external non-symlink directory")
-    context.mkdir(parents=True, exist_ok=True)
+    if re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is None:
+        raise ValueError("invalid Safari context candidate SHA")
+    if (context.is_symlink() or context.resolve().is_relative_to(repository)
+            or raw_context.resolve() == context.resolve()
+            or raw_context.resolve().is_relative_to(context.resolve())
+            or context.resolve().is_relative_to(raw_context.resolve())
+            or raw_context.resolve().is_relative_to(repository)):
+        raise ValueError("Safari upload context must be a separate external directory")
+    context.mkdir(parents=True)
     inventory = {"schema": 1, "candidate_sha": candidate_sha, "qualified": False,
                  "status": "CONTEXT_INCOMPLETE", "inputs": [],
                  "limits": {"files": CONTEXT_MAX_FILES,
                             "file_bytes": CONTEXT_MAX_FILE_BYTES,
                             "total_bytes": CONTEXT_MAX_TOTAL_BYTES,
+                            "upload_bytes": CONTEXT_MAX_UPLOAD_BYTES,
+                            "inventory_bytes": CONTEXT_MAX_INVENTORY_BYTES,
+                            "raw_entries": CONTEXT_MAX_RAW_ENTRIES,
                             "entries": CONTEXT_MAX_ENTRIES,
                             "depth": CONTEXT_MAX_DEPTH,
                             "seconds": CONTEXT_MAX_SECONDS,
                             "launches": CONTEXT_MAX_LAUNCHES},
                  "entries_seen": 0, "matched_files": 0,
-                 "copied_files": 0, "copied_bytes": 0}
+                 "copied_files": 0, "copied_bytes": 0,
+                 "upload_data_bytes": 0}
     started = time.monotonic()
     deadline = started + CONTEXT_MAX_SECONDS
     incomplete = False
     config = context / "config"
+    seen_files = set()
 
     def record(path, status, reason, **details):
         nonlocal incomplete
@@ -147,9 +161,12 @@ def capture_karma_context(repository, candidate_sha, context):
                         record(path, "skipped", "duplicate_inode")
                         continue
                     seen_files.add(identity)
-                    remaining = CONTEXT_MAX_TOTAL_BYTES - inventory["copied_bytes"]
+                    remaining = min(CONTEXT_MAX_TOTAL_BYTES - inventory["copied_bytes"],
+                                    CONTEXT_MAX_UPLOAD_BYTES - CONTEXT_MAX_INVENTORY_BYTES
+                                    - inventory["upload_data_bytes"])
                     if remaining <= 0:
-                        record(path, "skipped", "total_byte_limit", source_size=before.st_size)
+                        record(path, "skipped", "total_byte_limit",
+                               original_size=before.st_size, retained_size=0)
                         continue
                     limit = min(before.st_size, CONTEXT_MAX_FILE_BYTES, remaining)
                     chunks = []
@@ -182,21 +199,88 @@ def capture_karma_context(repository, candidate_sha, context):
                         raise
                     inventory["copied_files"] += 1
                     inventory["copied_bytes"] += size
+                    inventory["upload_data_bytes"] += size
                     status = "truncated" if size < before.st_size else "copied"
                     reason = ("per_file_byte_limit" if status == "truncated"
                               and CONTEXT_MAX_FILE_BYTES <= remaining
                               else "total_byte_limit" if status == "truncated" else "copied")
-                    record(path, status, reason, source_size=before.st_size,
-                           copied_size=size, sha256=hashlib.sha256(data).hexdigest())
+                    record(path, status, reason, original_size=before.st_size,
+                           retained_size=size, sha256=hashlib.sha256(data).hexdigest())
                 finally:
                     os.close(source_fd)
+
+    def copy_sidecar(directory_fd, name, seen_files):
+        check_deadline(name)
+        try:
+            source_fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                                dir_fd=directory_fd)
+        except OSError as error:
+            record(name, "failed", "missing_or_unreadable_sidecar",
+                   original_size=None, retained_size=0, error=str(error))
+            return
+        original_size = None
+        try:
+            before = os.fstat(source_fd)
+            original_size = before.st_size
+            if not stat.S_ISREG(before.st_mode):
+                record(name, "failed", "non_regular_sidecar",
+                       original_size=before.st_size, retained_size=0)
+                return
+            identity = (before.st_dev, before.st_ino)
+            if identity in seen_files:
+                record(name, "failed", "duplicate_sidecar_inode",
+                       original_size=before.st_size, retained_size=0)
+                return
+            seen_files.add(identity)
+            remaining = max(0, CONTEXT_MAX_UPLOAD_BYTES - CONTEXT_MAX_INVENTORY_BYTES
+                            - inventory["upload_data_bytes"])
+            limit = min(before.st_size, CONTEXT_MAX_FILE_BYTES, remaining)
+            chunks = []
+            size = 0
+            while size < limit:
+                check_deadline(name)
+                chunk = os.read(source_fd, min(64 * 1024, limit - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            after = os.fstat(source_fd)
+            if (size != limit or (before.st_dev, before.st_ino, before.st_size,
+                                  before.st_mtime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns)):
+                record(name, "failed", "sidecar_changed_during_copy",
+                       original_size=before.st_size, retained_size=0)
+                return
+            data = b"".join(chunks)
+            destination = context / name
+            destination_fd = os.open(destination,
+                                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                     0o600)
+            try:
+                with os.fdopen(destination_fd, "wb") as stream:
+                    stream.write(data)
+            except BaseException:
+                destination.unlink(missing_ok=True)
+                raise
+            inventory["upload_data_bytes"] += size
+            status = "truncated" if size < before.st_size else "copied"
+            reason = ("per_file_byte_limit" if status == "truncated"
+                      and CONTEXT_MAX_FILE_BYTES <= remaining
+                      else "upload_byte_limit" if status == "truncated" else "copied")
+            record(name, status, reason, original_size=before.st_size,
+                   retained_size=size, sha256=hashlib.sha256(data).hexdigest())
+        except OSError as error:
+            record(name, "failed", "sidecar_copy_failed",
+                   original_size=original_size, retained_size=0, error=str(error))
+        finally:
+            os.close(source_fd)
 
     try:
         require_candidate(repository, candidate_sha)
         if config.exists() or config.is_symlink():
             raise ValueError("Safari context config destination already exists")
         config.mkdir()
-        seen_files = set()
         for root in CONTEXT_ROOTS:
             check_deadline(root)
             directory_fd = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -215,46 +299,75 @@ def capture_karma_context(repository, candidate_sha, context):
                 os.close(directory_fd)
         if inventory["copied_files"] == 0:
             record("config", "failed", "no_karma_config")
-        launches = list(itertools.islice((path for path in context.glob("launch-*.txt")
-                                         if not path.name.startswith("launch-outcome-")),
-                                        CONTEXT_MAX_LAUNCHES + 1))
-        if len(launches) > CONTEXT_MAX_LAUNCHES:
-            record("launch", "failed", "launch_count_limit")
-            launches = launches[:CONTEXT_MAX_LAUNCHES]
-        if not launches:
-            record("launch", "failed", "launcher_not_invoked")
+        require_candidate(repository, candidate_sha)
+    except (OSError, ValueError, TimeoutError) as error:
+        record("config", "failed", "scan_failed", error=str(error))
+    try:
+        if raw_context.is_symlink():
+            raise ValueError("symlink Safari raw context")
+        directory_fd = os.open(raw_context, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            with os.scandir(directory_fd) as entries:
+                names = [entry.name for entry in itertools.islice(
+                    entries, CONTEXT_MAX_RAW_ENTRIES + 1)]
+            if len(names) > CONTEXT_MAX_RAW_ENTRIES:
+                record("raw_context", "failed", "raw_entry_count_limit")
+                names = names[:CONTEXT_MAX_RAW_ENTRIES]
+            launches = [name for name in names
+                        if re.fullmatch(r"launch-[0-9]+\.txt", name)]
+            if len(launches) > CONTEXT_MAX_LAUNCHES:
+                record("launch", "failed", "launch_count_limit")
+                launches = launches[:CONTEXT_MAX_LAUNCHES]
+            if not launches:
+                record("launch", "failed", "launcher_not_invoked")
+            required = ["session-after.txt", "process-after.txt", "host-outcome.txt"]
+            for launch in launches:
+                pid = launch.removeprefix("launch-").removesuffix(".txt")
+                required.extend((launch, f"process-{pid}.txt", f"redirect-{pid}.html",
+                                 f"open-{pid}.stdout", f"open-{pid}.stderr",
+                                 f"sample-state-{pid}.txt", f"launch-outcome-{pid}.txt"))
+            for name in names:
+                if name not in required:
+                    record(name, "skipped", "unexpected_sidecar")
+            for name in required:
+                copy_sidecar(directory_fd, name, seen_files)
+        finally:
+            os.close(directory_fd)
+        host_outcome = context / "host-outcome.txt"
+        if (not host_outcome.is_file() or host_outcome.read_text(errors="replace").splitlines()
+                != ["session_exit=0", "process_exit=0"]):
+            record("host-outcome.txt", "failed", "host_capture_incomplete")
         for launch in launches:
-            pid = launch.name.removeprefix("launch-").removesuffix(".txt")
+            pid = launch.removeprefix("launch-").removesuffix(".txt")
             state = context / f"sample-state-{pid}.txt"
             process = context / f"process-{pid}.txt"
             outcome = context / f"launch-outcome-{pid}.txt"
-            if (not pid.isdigit() or launch.is_symlink() or not launch.is_file()
-                    or state.is_symlink() or not state.is_file()
-                    or process.is_symlink() or not process.is_file()
-                    or process.stat().st_size > CONTEXT_MAX_FILE_BYTES
-                    or sum(line.startswith("sample=") for line in process.read_text().splitlines()) != 5
-                    or outcome.is_symlink() or not outcome.is_file()
-                    or re.fullmatch(r"open_exit=\d+\n", outcome.read_text()) is None
-                    or state.read_text().splitlines()
+            if (not state.is_file() or not process.is_file() or not outcome.is_file()
+                    or [line for line in process.read_text(errors="replace").splitlines()
+                        if line.startswith("sample=")]
+                    != [f"sample={number}" for number in range(1, 6)]
+                    or not re.fullmatch(r"open_exit=\d+\n",
+                                        outcome.read_text(errors="replace"))
+                    or state.read_text(errors="replace").splitlines()
                     != ["samples_completed=5", "sampler_exit=0"]):
-                record(launch.name, "failed", "sampler_incomplete")
-            for name in (f"redirect-{pid}.html", f"open-{pid}.stdout",
-                         f"open-{pid}.stderr"):
-                raw = context / name
-                if (raw.is_symlink() or not raw.is_file()
-                        or raw.stat().st_size > CONTEXT_MAX_FILE_BYTES):
-                    record(name, "failed", "launch_capture_incomplete")
+                record(launch, "failed", "sampler_incomplete")
         require_candidate(repository, candidate_sha)
     except (OSError, ValueError, TimeoutError) as error:
-        record("scan", "failed", "scan_failed", error=str(error))
+        record("raw_context", "failed", "sidecar_scan_failed", error=str(error))
     inventory["elapsed_seconds"] = time.monotonic() - started
     if not incomplete:
         inventory["status"] = "CONTEXT_COMPLETE"
-    temporary = context / "inventory.tmp"
-    if temporary.exists() or temporary.is_symlink():
-        raise ValueError("Safari context inventory temporary file already exists")
-    temporary.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n")
-    temporary.replace(context / "inventory.json")
+    encoded = (json.dumps(inventory, indent=2, sort_keys=True) + "\n").encode()
+    omitted = 0
+    while len(encoded) > CONTEXT_MAX_INVENTORY_BYTES and inventory["inputs"]:
+        inventory["inputs"].pop()
+        omitted += 1
+        inventory["status"] = "CONTEXT_INCOMPLETE"
+        inventory["inventory_entries_omitted"] = omitted
+        encoded = (json.dumps(inventory, indent=2, sort_keys=True) + "\n").encode()
+    if len(encoded) > CONTEXT_MAX_INVENTORY_BYTES:
+        raise ValueError("Safari context inventory exceeds its byte bound")
+    (context / "inventory.json").write_bytes(encoded)
     return inventory
 
 
@@ -697,16 +810,20 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--configuration", choices=("development", "production"))
     parser.add_argument("--audit", action="store_true")
+    parser.add_argument("--input-context", type=Path)
     parser.add_argument("--capture-context", action="store_true")
     args = parser.parse_args()
     if args.capture_context:
-        if args.audit or args.configuration:
-            parser.error("context scan cannot audit or run a Gradle configuration")
-        inventory = capture_karma_context(ROOT, args.candidate_sha, args.output)
+        if args.audit or args.configuration or args.input_context is None:
+            parser.error("context scan requires input context and cannot audit or run Gradle")
+        inventory = capture_karma_context(ROOT, args.candidate_sha,
+                                          args.output, args.input_context)
         print(json.dumps({"candidate_sha": inventory["candidate_sha"],
                           "status": inventory["status"], "qualified": False,
                           "output": str(args.output)}))
         return 0 if inventory["status"] == "CONTEXT_COMPLETE" else 1
+    if args.input_context is not None:
+        parser.error("input context requires --capture-context")
     receipt = (audit_capture(ROOT, args.candidate_sha, args.output) if args.audit
                else capture(ROOT, args.candidate_sha, args.output, args.configuration))
     print(json.dumps({"candidate_sha": receipt["candidate_sha"],

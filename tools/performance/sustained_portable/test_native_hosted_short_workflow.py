@@ -21,7 +21,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
     "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
     "qualification.yml": "3f6fdd560b92f9252f2123b15aa35f60a92a1769a6022b96fed4ca0ee97545b4",
-    "safari-yarn-lock-diagnostic.yml": "b4890238ff71d71bb91cac0c53f4ece95a4353a259655a61fca38e3be99ae5b2",
+    "safari-yarn-lock-diagnostic.yml": "60789e5d019be7109d9d16c39d5803f2cf50c57d99ca2ddb69602803234a8401",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
