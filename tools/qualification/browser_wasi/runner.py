@@ -28,9 +28,12 @@ MODULES = ("dyn4k-core", "dyn4k")
 TARGETS = ("js", "wasmJs", "wasmWasi")
 VERSION = "0.1.0-alpha.1"
 COMMON_CORPUS_CANDIDATE = "0681a8cd2e3f12327296a58da68bc8338224ea73"
+CORPUS_GENERATOR_SHA256 = "e3037978145fcbaf063398b471a4e3a998d19ff31a9e84dbe13669ad159fffee"
 CONSUMER = Path("consumers/qualification/browser-wasi")
 PHYSICS_CONSUMER_SOURCE = CONSUMER / "src/commonTest/kotlin/qualification/StagedWorldTest.kt"
 PHYSICS_CONSUMER_SHA256 = "e5a5a5f1a8e1e7cf3286d0f7be92795e14ad153ea4b1b5117fb7f560ee7a0189"
+CONSUMER_BUILD_SHA256 = "ff37cf87e35a9346f0d25fcb85d9e3db0747f15561c3d985552dd4512ddfbbb7"
+CONSUMER_SETTINGS_SHA256 = "842383eb0023b5edd4ca9d2394ed3d81b1fcf0ced275ff24842aa9844f9d8a63"
 RUNTIME_VERSIONS = {
     "chromium": {"minimum": "119.0.6045.105", "current": "155.0.8059.84"},
     "firefox": {"minimum": "120.0.1", "current": "158.0"},
@@ -61,6 +64,8 @@ def common_corpus_cases(root: Path, candidate_sha: str, module: str) -> set[tupl
     if ((manifest.get("schema"), manifest.get("kind"), manifest.get("policy")) !=
             (1, "full-common-corpus", "production")):
         raise ValueError("full common corpus manifest is invalid")
+    if full_corpus.digest((root / full_corpus.MAP_PATH).read_bytes()) != full_corpus.REVIEWED_MAP_SHA256:
+        raise ValueError("reviewed original map hash differs")
     if full_corpus.digest((root / full_corpus.PAIR_PATH).read_bytes()) != full_corpus.REVIEWED_PAIRS_SHA256:
         raise ValueError("reviewed pair map hash differs")
     if full_corpus.paired_bytes(mapping) != (root / full_corpus.PAIR_PATH).read_bytes():
@@ -238,30 +243,59 @@ def command(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
 
 
 def candidate_identity(root: Path, expected_sha: str) -> None:
+    if not full_corpus.SHA40.fullmatch(expected_sha):
+        raise ValueError("candidate SHA is invalid")
     head = command(["git", "rev-parse", "HEAD"], root)
     if head.returncode or head.stdout.strip() != expected_sha:
         raise ValueError(f"source SHA differs: {head.stdout.strip()}")
-    status = command(["git", "status", "--porcelain", "--untracked-files=all"], root)
-    if status.returncode:
-        raise ValueError(status.stderr)
-    generated = ("kotlin-js-store/", ".gradle/", ".kotlin/", "build/",
-                 "dyn4k-core/build/", "dyn4k/build/", f"{CONSUMER}/build/",
-                 f"{CONSUMER}/.gradle/", f"{CONSUMER}/.kotlin/")
-    dirty = [line for line in status.stdout.splitlines()
-             if not line[3:].startswith(generated)]
-    if dirty:
-        raise ValueError(f"source checkout is dirty: {dirty[:5]}")
     ancestor = command(["git", "merge-base", "--is-ancestor", COMMON_CORPUS_CANDIDATE,
                         expected_sha], root)
     if ancestor.returncode:
         raise ValueError("candidate does not descend from committed full corpus")
-    changed = command(["git", "diff", "--name-only", COMMON_CORPUS_CANDIDATE,
-                       expected_sha], root)
-    if changed.returncode:
-        raise ValueError(changed.stderr)
-    owned = ("tools/qualification/browser_wasi/", f"{CONSUMER}/")
-    if any(not path.startswith(owned) for path in changed.stdout.splitlines()):
-        raise ValueError("candidate changed files outside browser and WASI ownership")
+    consumer_generated = tuple(
+        f"untracked candidate input: {CONSUMER}/{directory}/"
+        for directory in ("build", ".gradle", ".kotlin")
+    )
+    problems = [problem for problem in full_corpus.candidate_checkout_problems(root, expected_sha)
+                if not problem.startswith(consumer_generated)]
+    if problems:
+        raise ValueError(f"source checkout is dirty: {problems[:5]}")
+    object_format = command(["git", "rev-parse", "--show-object-format"], root)
+    if object_format.returncode or object_format.stdout.strip() not in ("sha1", "sha256"):
+        raise ValueError("candidate Git object format is unavailable")
+    sources = command(["git", "ls-tree", "-r", "-z", expected_sha, "--",
+                       "dyn4k-core/src", "dyn4k/src", f"{CONSUMER}/src"], root)
+    if sources.returncode or not sources.stdout:
+        raise ValueError("candidate committed source inventory is unavailable")
+    for record in sources.stdout.rstrip("\0").split("\0"):
+        metadata, relative = record.split("\t", 1)
+        mode, kind, committed_digest = metadata.split()
+        if mode not in ("100644", "100755") or kind != "blob":
+            raise ValueError(f"candidate source file is not regular: {relative}")
+        raw = (root / relative).read_bytes()
+        blob = b"blob " + str(len(raw)).encode() + b"\0" + raw
+        if hashlib.new(object_format.stdout.strip(), blob).hexdigest() != committed_digest:
+            raise ValueError(f"committed source bytes differ: {relative}")
+    if sha256(root / "tools/qualification/full_corpus.py") != CORPUS_GENERATOR_SHA256:
+        raise ValueError("reviewed corpus generator differs")
+    core = common_corpus_cases(root, expected_sha, "dyn4k-core")
+    facade = common_corpus_cases(root, expected_sha, "dyn4k")
+    manifest = json.loads((root / full_corpus.MANIFEST_PATH).read_bytes())
+    counts = manifest["counts"]
+    if (counts["total_methods"] != 2521 or counts["unresolved_mappings"] != 0
+            or len(manifest["cases"]) != 2521
+            or len([case for case in manifest["cases"] if case["source_set"] == "jvmTest"]) != 3
+            or core != source_cases(root / "dyn4k-core/src/commonTest/kotlin")
+            or facade != source_cases(root / "dyn4k/src/commonTest/kotlin")):
+        raise ValueError("candidate corpus suite or source inventory differs")
+    if (sha256(root / CONSUMER / "build.gradle.kts") != CONSUMER_BUILD_SHA256
+            or sha256(root / CONSUMER / "settings.gradle.kts") != CONSUMER_SETTINGS_SHA256):
+        raise ValueError("staged consumer dependency pins differ")
+    verify_consumer_physics_contract(root / PHYSICS_CONSUMER_SOURCE)
+    if source_cases(root / CONSUMER / "src/commonTest/kotlin") != {
+        ("qualification.StagedWorldTest", "stagedModulesShareBodiesAndDeliverCollisionCallbacks")
+    }:
+        raise ValueError("staged consumer test inventory differs")
 
 
 def staged_files(root: Path) -> dict[str, str]:
@@ -914,7 +948,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("stage", "run", "audit"))
+    parser.add_argument("action", choices=("candidate", "stage", "run", "audit"))
     parser.add_argument("--root", type=Path)
     parser.add_argument("--candidate-sha")
     parser.add_argument("--output", type=Path)
@@ -934,6 +968,22 @@ def main() -> int:
         except (OSError, ValueError, json.JSONDecodeError) as error:
             print(error, file=sys.stderr)
             return 1
+        return 0
+    if arguments.action == "candidate":
+        if arguments.root is None or arguments.candidate_sha is None:
+            parser.error("candidate requires root and candidate-sha")
+        try:
+            root = arguments.root.resolve()
+            candidate_identity(root, arguments.candidate_sha)
+            manifest = json.loads((root / full_corpus.MANIFEST_PATH).read_bytes())
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as error:
+            print(error, file=sys.stderr)
+            return 1
+        print(json.dumps({"candidate_sha": arguments.candidate_sha,
+                          "manifest_sha256": sha256(root / full_corpus.MANIFEST_PATH),
+                          "source_tree_sha256": manifest["source_tree_sha256"],
+                          "suite_methods": manifest["counts"]["total_methods"],
+                          "status": "VERIFIED"}, sort_keys=True))
         return 0
     if any(value is None for value in (arguments.root, arguments.candidate_sha, arguments.output)):
         parser.error("stage and run require root, candidate-sha, and output")

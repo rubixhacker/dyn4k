@@ -15,6 +15,102 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class SourceCasesTest(unittest.TestCase):
+    REVIEWED_SUCCESSOR = "8b0071563a31f7866f9fe8c3549ed284c9e7a092"
+
+    @staticmethod
+    def public_candidate(root: Path, sha: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("runner.py")), "candidate",
+             "--root", str(root), "--candidate-sha", sha],
+            capture_output=True, text=True, check=False,
+        )
+
+    def test_public_candidate_accepts_exact_reviewed_source_and_rejects_mutants(self):
+        source_root = Path(__file__).resolve().parents[3]
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "reviewed-candidate"
+            subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+                            str(source_root), str(checkout)], check=True)
+            subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet",
+                            "--detach", self.REVIEWED_SUCCESSOR], check=True)
+            exact = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(0, exact.returncode, exact.stderr)
+            verified = json.loads(exact.stdout)
+            self.assertEqual("VERIFIED", verified["status"])
+            self.assertEqual(self.REVIEWED_SUCCESSOR, verified["candidate_sha"])
+            self.assertEqual(2521, verified["suite_methods"])
+
+            generated = checkout / "consumers/qualification/browser-wasi/build/generated.txt"
+            generated.parent.mkdir(parents=True)
+            generated.write_text("generated output")
+            with_output = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(0, with_output.returncode, with_output.stderr)
+
+            stale = self.public_candidate(checkout, "0" * 40)
+            self.assertEqual(1, stale.returncode)
+            self.assertIn("source SHA differs", stale.stderr)
+
+            production = next((checkout / "dyn4k-core/src/commonMain/kotlin").rglob("*.kt"))
+            production.write_bytes(production.read_bytes() + b"\n// source mutation\n")
+            changed = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(1, changed.returncode)
+            self.assertIn("dirty", changed.stderr)
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--assume-unchanged", str(production)], check=True)
+            hidden_change = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(1, hidden_change.returncode, hidden_change.stderr)
+            self.assertIn("committed source bytes differ", hidden_change.stderr)
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--no-assume-unchanged", str(production)], check=True)
+            subprocess.run(["git", "-C", str(checkout), "restore", str(production)],
+                           check=True)
+
+            ignored = production.parent / "UntrackedCandidateInput.kt"
+            ignored.write_text("package ignored\nclass UntrackedCandidateInput\n")
+            (checkout / ".git/info/exclude").write_text(
+                "/dyn4k-core/src/commonMain/kotlin/**/UntrackedCandidateInput.kt\n")
+            untracked = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(1, untracked.returncode)
+            self.assertIn("untracked candidate input", untracked.stderr)
+            ignored.unlink()
+
+            old = subprocess.check_output(
+                ["git", "-C", str(checkout), "show",
+                 "5f02826703f799fee0bd185b335e5cba36a08900:tools/qualification/full-common-corpus.json"])
+            old_manifest = json.loads(old)
+            current_manifest = json.loads(
+                (checkout / "tools/qualification/full-common-corpus.json").read_text())
+            old_manifest["source_tree_sha256"] = current_manifest["source_tree_sha256"]
+            old_manifest["counts"]["total_methods"] = current_manifest["counts"]["total_methods"]
+            (checkout / "tools/qualification/full-common-corpus.json").write_text(
+                json.dumps(old_manifest, sort_keys=True))
+            old_corpus = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(1, old_corpus.returncode)
+            self.assertTrue(
+                "dirty" in old_corpus.stderr or "corpus" in old_corpus.stderr,
+                old_corpus.stderr,
+            )
+
+            from runner import candidate_identity
+
+            with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
+                with self.assertRaisesRegex(ValueError, "candidate commit bytes differ"):
+                    candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+                with mock.patch("runner.full_corpus.committed_bytes",
+                                side_effect=lambda root, sha, path: (root / path).read_bytes()):
+                    with self.assertRaisesRegex(ValueError, "corpus differs from source tree"):
+                        candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+
+            subprocess.run(["git", "-C", str(checkout), "restore",
+                            "tools/qualification/full-common-corpus.json"], check=True)
+            consumer_build = checkout / "consumers/qualification/browser-wasi/build.gradle.kts"
+            consumer_build.write_bytes(consumer_build.read_bytes().replace(
+                b"io.github.rubixhacker:dyn4k-core:0.1.0-alpha.1",
+                b"io.github.rubixhacker:dyn4k-core:0.1.0-alpha.0"))
+            with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
+                with self.assertRaisesRegex(ValueError, "consumer dependency pins differ"):
+                    candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+
     @staticmethod
     def copy_lane(source: Path, directory: str) -> tuple[dict, Path]:
         copied = Path(directory) / source.name
