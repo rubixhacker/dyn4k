@@ -65,7 +65,7 @@ def git_bash_from_git(git_command):
     if git_executable.name.lower() != "git.exe":
         raise ValueError("Git Bash fixture requires Git for Windows")
     if directory.name.lower() == "bin" and directory.parent.name.lower() in (
-            "mingw64", "mingw32"):
+            "mingw64", "mingw32", "ucrt64"):
         installation = directory.parent.parent
     elif directory.name.lower() == "cmd" or (
             directory.name.lower() == "bin"
@@ -2652,7 +2652,7 @@ class SafariYarnLockTests(unittest.TestCase):
         other.mkdir(parents=True)
         (other / "bash.exe").write_bytes(b"unrelated Bash")
 
-        for architecture in ("mingw64", "mingw32"):
+        for architecture in ("mingw64", "mingw32", "ucrt64"):
             with self.subTest(architecture=architecture):
                 git = installation / architecture / "bin/git.exe"
                 git.parent.mkdir(parents=True)
