@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest import mock
 
 
 INSPECTION_TIMEOUT_SECONDS = 90
@@ -122,6 +123,18 @@ def receipt_exit(receipt: dict[str, object]) -> int:
     return 0 if receipt["childExitCode"] == 0 else 1
 
 
+def descendant_status(pid: int, proc_root: Path = Path("/proc")) -> str:
+    if os.name != "posix" or not proc_root.is_dir():
+        return "UNVERIFIED"
+    try:
+        stat = (proc_root / str(pid) / "stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "STOPPED"
+    except OSError:
+        return "UNVERIFIED"
+    return "STOPPED" if stat.rsplit(") ", 1)[-1].split()[0] == "Z" else "RUNNING"
+
+
 def inspect(tool: list[str] | None, flag: str, executable: Path, output: Path, label: str,
             timeout_seconds: float = INSPECTION_TIMEOUT_SECONDS, deadline_epoch: float | None = None) -> bool:
     if tool is None:
@@ -138,8 +151,15 @@ def inspect(tool: list[str] | None, flag: str, executable: Path, output: Path, l
     write(output.with_name(f"{label}-exit-code.txt"),
           str(receipt["childExitCode"]) if state == "EXITED" else state)
     if state != "EXITED":
+        cleanup = str(receipt["cleanup"])
+        if state == "TIMEOUT" and cleanup == "deadline_elapsed_before_start":
+            detail = "child not started after deadline"
+        elif state == "TIMEOUT":
+            detail = f"cleanup={cleanup}; childExitCode={receipt['childExitCode']}; descendant liveness unverified"
+        else:
+            detail = f"cleanup={cleanup}; childExitCode={receipt['childExitCode']}"
         write(output.with_name(f"{label}-status.txt"),
-              f"{state}: child stopped or not started; see {label}-receipt.json")
+              f"{state}: {detail}; see {label}-receipt.json")
         return False
     if receipt["childExitCode"] != 0:
         write(output.with_name(f"{label}-status.txt"), f"FAILED: tool exit {receipt['childExitCode']}")
@@ -263,12 +283,15 @@ def self_test() -> int:
               "print('partial stderr', file=sys.stderr, flush=True)\n"
               "time.sleep(60)")
 
+        timeout_children: list[str] = []
+
         def check_stopped(stdout_path: Path) -> None:
             child_pid = int(stdout_path.read_text(encoding="utf-8").split("child_pid=", 1)[1].splitlines()[0])
             time.sleep(0.1)
-            proc_stat = Path(f"/proc/{child_pid}/stat")
-            if proc_stat.exists() and proc_stat.read_text().split()[2] != "Z":
+            status = descendant_status(child_pid)
+            if status == "RUNNING":
                 raise AssertionError(f"timed-out child is still running: {child_pid}")
+            timeout_children.append(status)
 
         executable.write_bytes(b"MZtest")
         timed = root / "timed-inspector"
@@ -298,7 +321,37 @@ def self_test() -> int:
                                    mode / "skipped-receipt.json", timeout_seconds=1, deadline_epoch=time.time() - 1)
         if deadline["state"] != "TIMEOUT" or deadline["cleanup"] != "deadline_elapsed_before_start":
             raise AssertionError("elapsed deadline started a child process")
-    print("TEST_PE_COLLECTION_SELF_TEST_OK positive=2 adverse=8 timeout_children_stopped=2")
+        if descendant_status(12345, root / "no-proc") != "UNVERIFIED":
+            raise AssertionError("absence of /proc was reported as a stopped descendant")
+        simulated = [descendant_status(12345, root / "no-proc") for _ in range(2)]
+        if simulated.count("STOPPED") != 0 or simulated.count("UNVERIFIED") != 2:
+            raise AssertionError("unverified descendants were counted as stopped")
+
+        uncertain = ("taskkill_exit_1+direct_kill_failed_OSError+direct_wait_timeout",
+                     "taskkill_failed_TimeoutExpired+direct_process_killed",
+                     "process_group_kill_failed_PermissionError+direct_wait_timeout")
+        for index, cleanup in enumerate(uncertain):
+            receipt = {"state": "TIMEOUT", "cleanup": cleanup, "childExitCode": None}
+
+            def simulated_timeout(_command: list[str], _stdout: Path, _stderr: Path, receipt_path: Path,
+                                  _timeout: float, _deadline: float | None) -> dict[str, object]:
+                receipt_path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+                return receipt
+
+            destination = root / f"uncertain-{index}"
+            destination.mkdir()
+            with mock.patch.object(sys.modules[__name__], "bounded_process", side_effect=simulated_timeout):
+                if inspect(tool, "-p", executable, destination / "test-imports.txt", "imports"):
+                    raise AssertionError("uncertain cleanup was accepted")
+            status = (destination / "imports-status.txt").read_text(encoding="utf-8")
+            if cleanup not in status or "liveness unverified" not in status or "child stopped" in status:
+                raise AssertionError("uncertain cleanup was overstated or omitted")
+            if json.loads((destination / "imports-receipt.json").read_text())["cleanup"] != cleanup:
+                raise AssertionError("raw cleanup uncertainty was not retained")
+
+    print("TEST_PE_COLLECTION_SELF_TEST_OK positive=2 adverse=12 "
+          f"timeout_children_stopped={timeout_children.count('STOPPED')} "
+          f"timeout_children_unverified={timeout_children.count('UNVERIFIED')}")
     return 0
 
 
