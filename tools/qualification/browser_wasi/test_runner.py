@@ -347,6 +347,42 @@ class SourceCasesTest(unittest.TestCase):
                         with mock.patch("runner.candidate_identity"):
                             audit_lane_receipt(copied / "lane.json")
 
+    def test_resealed_relabel_with_forged_command_and_output_is_rejected(self):
+        from runner import (audit_lane_receipt, gradle_command, linked_file, sha256,
+                            test_project)
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for original, claimed in (("development", "production"),
+                                  ("production", "development")):
+            source = Path(evidence_root) / f"js-chromium-minimum-{original}"
+            self.assertTrue((source / "lane.json").is_file(), source)
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                lane["configuration"] = claimed
+                root = Path(lane["candidate_root"])
+                for name, module in lane["modules"].items():
+                    module["configuration"] = claimed
+                    module["gradle_command"] = gradle_command(root, name, "js", claimed)
+                    linked = linked_file(test_project(root, name), "js", claimed, name)
+                    module["linked_source"] = str(linked)
+                    stdout = Path(module["gradle_stdout"])
+                    output = "".join(line for line in stdout.read_text().splitlines(True)
+                                     if not line.startswith("qualification test input:"))
+                    if claimed == "production":
+                        output += f"qualification test input: {linked}\n"
+                    stdout.write_text(output)
+                    console = Path(module["gradle_console"])
+                    console.write_text(output + Path(module["gradle_stderr"]).read_text())
+                    module["gradle_stdout_sha256"] = sha256(stdout)
+                    module["gradle_console_sha256"] = sha256(console)
+                self.save_copied_lane(lane, copied)
+                with self.subTest(original=original, claimed=claimed):
+                    with self.assertRaisesRegex(ValueError, "linked source digest"):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
+
     def test_browser_port_configuration_is_isolated_and_removed(self):
         from runner import isolated_karma_port
 

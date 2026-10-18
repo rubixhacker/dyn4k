@@ -476,8 +476,9 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             linked = Path(module["linked_executable"]).resolve()
             if linked != (lane_dir / name / f"linked-executable{source.suffix}"):
                 raise ValueError(f"passing {name} retained linked executable differs")
-            if (module.get("linked_source_sha256") is not None and
-                    module["linked_source_sha256"] != module.get("linked_sha256")):
+            if (module.get("linked_source_sha256") != module.get("linked_sha256")
+                    or not source.is_file()
+                    or sha256(source) != module["linked_source_sha256"]):
                 raise ValueError(f"passing {name} linked source digest differs")
             if target == "wasmWasi":
                 if not all(key in module for key in ("raw_stdout", "raw_stderr")):
