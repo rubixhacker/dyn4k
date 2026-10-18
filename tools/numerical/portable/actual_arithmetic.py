@@ -435,9 +435,11 @@ _PINNED_JAVA = "/tmp/dyn4k-tools/jdk21/bin/java"
 _AUDITED_ENGINE_CLASSES = {
     "org/dyn4j/geometry/Transform.class",
     "org/dyn4j/geometry/RotationOperationTap.class",
+    "org/dyn4j/geometry/RotationCaptureSlot.class",
     "org/dyn4j/world/AbstractPhysicsWorld.class",
     "org/dyn4j/world/ToiAcceptedResetTap.class",
 }
+_TOI_RESET_CLASS = "org/dyn4j/world/ToiAcceptedResetTap.class"
 
 
 def _sha(value):
@@ -535,13 +537,15 @@ def _inspect_worker_classpath(value, staged_jar, class_root):
     return evidence
 
 
-def _verify_worker_class_load(raw, worker_pid):
+def _verify_worker_class_load(raw, worker_pid, require_toi_reset):
     try:
         lines = raw.decode("utf-8").splitlines()
     except UnicodeError as error:
         raise CaptureRejected("worker class-load encoding differs") from error
-    expected = {name.removesuffix(".class").replace("/", ".")
-                for name in _AUDITED_ENGINE_CLASSES}
+    audited = {name.removesuffix(".class").replace("/", ".")
+               for name in _AUDITED_ENGINE_CLASSES}
+    required = audited if require_toi_reset else audited - {
+        _TOI_RESET_CLASS.removesuffix(".class").replace("/", ".")}
     observed = {}
     for line in lines:
         record = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] "
@@ -549,7 +553,7 @@ def _verify_worker_class_load(raw, worker_pid):
         if record is None or record.group(1) != worker_pid:
             raise CaptureRejected("worker class-load PID or format differs")
         name, location = record.group(2, 3)
-        if name not in expected:
+        if name not in audited:
             continue
         if name in observed:
             raise CaptureRejected("duplicate audited worker class-load record")
@@ -559,7 +563,7 @@ def _verify_worker_class_load(raw, worker_pid):
                 _STAGED_JAR.resolve():
             raise CaptureRejected("audited worker class loaded outside staged JAR")
         observed[name] = location
-    if set(observed) != expected:
+    if not required <= set(observed):
         raise CaptureRejected("audited worker class-load inventory differs")
     return observed
 
@@ -639,10 +643,11 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     _check_local_binaries(files, runtime_executable)
     classpath_evidence, worker_pid, log_path = _check_process(files,
                                                                runtime_executable, method)
-    worker_sources = _verify_worker_class_load(files["worker_class_load"], worker_pid)
     reset_order = ("pre" if commit == "fe4d63cb7f08cea304e5691f2f2ebc23379db6b0"
                    else "post")
     summary = verify_capture(files["xml"], method, expected_ids, reset_order)
+    worker_sources = _verify_worker_class_load(
+        files["worker_class_load"], worker_pid, summary["selected_resets"] > 0)
     return {"schema": "portable-arithmetic-capture-receipt/3",
             "candidate_commit": commit, "method": method, "exit_code": 0,
             "runtime_executable": runtime_executable,
