@@ -695,8 +695,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 built = command(gradle, root, env)
                 karma_port = None
             else:
-                karma_root = root if module in MODULES else project
-                with isolated_karma_port(karma_root) as karma_port:
+                with isolated_karma_port(project) as karma_port:
                     built = command(gradle, root, env)
             finished_ns = time.time_ns()
             console = module_output / "gradle-console.log"
@@ -727,7 +726,8 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                     raise ValueError(f"missing linked test executable: {linked}")
                 if target != "wasmWasi":
                     package = linked.stem
-                    karma_generated = (karma_root / "build" /
+                    package_root = root if module in MODULES else project
+                    karma_generated = (package_root / "build" /
                                        ("js" if target == "js" else "wasm") /
                                        "packages" / package / "karma.conf.js")
                     if (not karma_generated.is_file() or
