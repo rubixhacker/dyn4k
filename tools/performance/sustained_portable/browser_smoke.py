@@ -619,7 +619,7 @@ def run(args):
             "resource_validation_error": str(error),
             **origin_state,
             "rejected_completions": rejected_completions,
-            "stream_origin": "unpassed_shared_tcp_socket_possible",
+            "http_origin_observation_scope": "socket_owner_consistency_at_sampled_points",
         }
         if process_error is not None:
             failure["process_validation_error"] = process_error
@@ -656,7 +656,7 @@ def run(args):
         "browser_process_image": process_image,
         **origin_state,
         "rejected_completions": rejected_completions,
-        "stream_origin": "unpassed_shared_tcp_socket_possible",
+        "http_origin_observation_scope": "socket_owner_consistency_at_sampled_points",
         **({"origin_validation_error": origin_error} if origin_error is not None else {}),
         "memory_attribution": "missing", "allocation": "missing", "plateau": "missing",
         "required_non_jvm_gates": {

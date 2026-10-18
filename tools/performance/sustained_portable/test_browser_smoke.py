@@ -602,6 +602,9 @@ class BrowserQuiescenceTest(unittest.TestCase):
             self.assertEqual((archive / "producer.raw").read_bytes(), raw)
             receipt = json.loads((archive / "capture.json").read_text())
             self.assertEqual(receipt["qualification"], "unpassed")
+            self.assertEqual(receipt["http_origin_observation_scope"],
+                             "socket_owner_consistency_at_sampled_points")
+            self.assertNotIn("stream_origin", receipt)
             self.assertIn("changed after completion", receipt["origin_validation_error"])
             self.assertIn(JS_FILES[0], receipt["loaded_resources_sha256"])
             destination = os.environ.get("DYN4K_BROWSER_CONTROL_ARCHIVE")
@@ -720,6 +723,9 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
                 self.assertEqual((archive / "producer.raw").read_bytes(), raw)
                 self.assertEqual((archive / "completion.raw").read_bytes(), raw)
                 receipt = json.loads((archive / "capture.json").read_text())
+                self.assertEqual(receipt["http_origin_observation_scope"],
+                                 "socket_owner_consistency_at_sampled_points")
+                self.assertNotIn("stream_origin", receipt)
                 self.assertEqual(receipt["qualification"], "unpassed")
                 self.assertEqual(receipt["source_sha"], source)
                 self.assertEqual(receipt["producer_sha256"], hashlib.sha256(raw).hexdigest())
