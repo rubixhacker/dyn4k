@@ -1,0 +1,61 @@
+import copy
+import unittest
+
+from actual_arithmetic import CaptureRejected, make_capture_receipt, verify_capture_receipt
+from test_actual_arithmetic import fixture, xml_for
+
+
+class CaptureReceiptTest(unittest.TestCase):
+    def fixture(self):
+        xml = xml_for(fixture())
+        runtime = "/tmp/dyn4k-tools/jdk21/bin/java"
+        log = (f"Starting process 'Gradle Test Executor 1'. Command: {runtime} "
+               "worker.org.gradle.process.internal.worker.GradleWorkerMain\n"
+               "BUILD SUCCESSFUL\n").encode()
+        execve = (f'123 execve("{runtime}", ["{runtime}", '
+                  '"worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n').encode()
+        files = {"xml": xml, "stage_log": b"BUILD SUCCESSFUL\n",
+                 "gradle_log": log, "execve_log": execve,
+                 "artifact": b"artifact", "runtime": b"runtime", "source": b"source"}
+        receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        return receipt, files, runtime
+
+    def test_sealed_capture_still_unpassed_without_body_bridge(self):
+        receipt, files, runtime = self.fixture()
+        result = verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                        ["geometry-boundary-s0-o0-d0"], runtime)
+        self.assertEqual(result["status"], "UNPASSED_TARGET_BINDING")
+        self.assertEqual(result["operations_verified"], 1)
+
+    def test_stale_bytes_source_artifact_trace_and_runtime_fail(self):
+        for key in ("xml", "stage_log", "gradle_log", "execve_log",
+                    "artifact", "runtime", "source"):
+            receipt, files, runtime = self.fixture()
+            files[key] += b"tamper"
+            with self.subTest(key=key), self.assertRaises(CaptureRejected):
+                verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        receipt, files, runtime = self.fixture()
+        receipt["summary"]["trace_sha256"] = "0" * 64
+        with self.assertRaises(CaptureRejected):
+            verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                   ["geometry-boundary-s0-o0-d0"], runtime)
+
+    def test_wrong_method_process_and_receipt_fields_fail(self):
+        receipt, files, runtime = self.fixture()
+        for field, value in (("method", "captureJoints"), ("candidate_commit", "b" * 40),
+                             ("exit_code", 1), ("runtime_executable", "/other/java")):
+            changed = copy.deepcopy(receipt)
+            changed[field] = value
+            with self.subTest(field=field), self.assertRaises(CaptureRejected):
+                verify_capture_receipt(changed, files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        files["execve_log"] = files["execve_log"].replace(b" = 0", b" = -1")
+        with self.assertRaises(CaptureRejected):
+            verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                   ["geometry-boundary-s0-o0-d0"], runtime)
+
+
+if __name__ == "__main__":
+    unittest.main()
