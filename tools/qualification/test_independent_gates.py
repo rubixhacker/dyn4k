@@ -1384,10 +1384,19 @@ class IndependentGateSeamTests(unittest.TestCase):
                     "java-source-compatibility", BASE, ROOT,
                     {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64})
 
-    @unittest.skipUnless(Path("/tmp/dyn4k-archive-relocation-copy-7032/lane-manifest.json").is_file(),
-                         "reviewed local full_ci archive is absent")
+    @unittest.skipUnless(
+        Path("/tmp/dyn4k-archive-relocation-copy-7032-partial-provenance/lane-manifest.json").is_file(),
+        "reviewed local full_ci archive is absent")
     def test_reviewed_full_ci_archive_replays_unchanged_and_strict_java_gates(self):
-        source = Path("/tmp/dyn4k-archive-relocation-copy-7032")
+        source = Path("/tmp/dyn4k-archive-relocation-copy-7032-partial-provenance")
+        altered_source = Path("/tmp/dyn4k-archive-relocation-copy-7032")
+        manifest_sha256 = "e2b2cffdb961213b73a706842af1446586c03f23ed5566c186d0bc8c77ca6269"
+        manifest = source / "lane-manifest.json"
+        self.assertEqual(manifest_sha256, hashlib.sha256(manifest.read_bytes()).hexdigest())
+        archive_files = json.loads(manifest.read_text())["archive_files"]
+        self.assertEqual(3593, len(archive_files))
+        index = "baseline-cache/dyn4j-source/.git/index"
+        self.assertEqual(archive_files[index], hashlib.sha256((source / index).read_bytes()).hexdigest())
         candidate = "7032b41c780a08c850226eb2c984fb15af444a23"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1398,8 +1407,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                       "dyn4k": hashlib.sha256((root / "facade.bin").read_bytes()).hexdigest()}
             scope = {"candidate_sha": candidate, "target": "jvm", "runtime": "Java",
                      "runtime_identity": "reviewed local archive", "artifact_hashes": hashes,
-                     "producer_manifest_hashes": {"full-ci/lane-manifest.json":
-                         hashlib.sha256((root / "full-ci/lane-manifest.json").read_bytes()).hexdigest()}}
+                     "producer_manifest_hashes": {"full-ci/lane-manifest.json": manifest_sha256}}
             started = time.time_ns() - 1_000_000_000
             finished = time.time_ns() + 1_000_000_000
             receipt = {"schema": 1, "status": "PASSED", "candidate_sha": candidate,
@@ -1412,8 +1420,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                        "process": {"command": ["python3", "tools/compatibility/full_ci.py", "verify"],
                                    "exit_code": 0, "started_ns": started, "finished_ns": finished},
                        "producer": "reviewed-full-ci", "full_ci_archive": "full-ci",
-                       "full_ci_manifest_sha256": hashlib.sha256(
-                           (root / "full-ci/lane-manifest.json").read_bytes()).hexdigest(),
+                       "full_ci_manifest_sha256": manifest_sha256,
                        "resolved_artifacts": {
                            "dyn4k-core": "full-ci/archives/dyn4k-core-jvm-0.1.0-alpha.1.jar",
                            "dyn4k": "facade.bin"}}
@@ -1465,6 +1472,33 @@ class IndependentGateSeamTests(unittest.TestCase):
                 hashes, "reviewed local archive", {"unchanged-java-corpus": pin},
                 expected_producer_scopes={"unchanged-java-corpus": scope})
             self.assertEqual("FAILED", result["gates"]["unchanged-java-corpus"]["status"])
+            if altered_source.is_dir():
+                with tempfile.TemporaryDirectory() as adverse_temporary:
+                    adverse = Path(adverse_temporary)
+                    shutil.copytree(altered_source, adverse / "full-ci")
+                    self.assertEqual(manifest_sha256, hashlib.sha256(
+                        (adverse / "full-ci/lane-manifest.json").read_bytes()).hexdigest())
+                    self.assertNotEqual(archive_files[index], hashlib.sha256(
+                        (adverse / "full-ci" / index).read_bytes()).hexdigest())
+                    (adverse / "facade.bin").write_bytes(b"separate facade fixture")
+                    adverse_receipt = {**receipt}
+                    adverse_files = [path for path in adverse.rglob("*") if path.is_file()]
+                    for path in adverse_files:
+                        os.utime(path, ns=(started + 1, started + 1))
+                    adverse_receipt["files"] = [
+                        {"path": path.relative_to(adverse).as_posix(),
+                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                         "mtime_ns": started + 1} for path in adverse_files]
+                    (adverse / "receipt.json").write_text(json.dumps(adverse_receipt))
+                    altered_pin = independent_gates.archive_digest(adverse)
+                    rejected = independent_gates.evaluate(
+                        self.manifest, candidate, LANE,
+                        {"unchanged-java-corpus": adverse}, ROOT, hashes,
+                        "reviewed local archive", {"unchanged-java-corpus": altered_pin},
+                        expected_producer_scopes={"unchanged-java-corpus": scope})
+                    gate = rejected["gates"]["unchanged-java-corpus"]
+                    self.assertEqual("FAILED", gate["status"])
+                    self.assertIn("reviewed full_ci/strict raw verifier rejected archive", gate["reason"])
 
     @unittest.skipUnless(
         Path("/tmp/dyn4k-merge-complete-corpus-rotation-migration-journeys-0681a8cd/summary.json").is_file()
