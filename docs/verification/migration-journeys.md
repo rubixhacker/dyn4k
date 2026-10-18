@@ -2,7 +2,17 @@
 
 This report covers the sample application subset of [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42). It follows the pinned [migration application research](https://github.com/rubixhacker/dyn4k/blob/4a0b829a66e8d4b49e652682590006df2ff6ed98/docs/research/migration-application.md). It does not qualify the full compatibility corpus or the 21 Kotlin targets.
 
-## Result
+## Combined-source run
+
+At harness candidate `95b164ddc9b8c658c4d93b33a28026278459e7c6`, the worktree was clean before and after the run. Its application sources were the committed combined integration source tree at `edea0c4723e0d092fe8614860937ad9c6f4001ec`; the tooling and documentation commits in this wave did not change engine sources. Both providers passed all five selected headful Java2D scenes. All 10 cases passed, with zero failed or unavailable. Both providers compiled all 42 pinned Java sources with `javac --release 8` and produced 66 class files each. The run recorded 96/96 plain checks, 180/180 observer checks, 1,387 snapshots, and 58 PNG captures.
+
+The staged `dyn4k-core-jvm:0.1.0-alpha.1` JAR and resolved candidate copy matched at SHA-256 `63cd3852e2727306ae0dc2abe5fb5a0faae49d5d7c704f8397643c3ffcad3560`. Its staged POM and Gradle module metadata hashes were `8f3363ee47e5db5d076f7e933ccf4e69c2046c6283d9b653adce7085747be6ae` and `5d12aa5cb4bb05010ad2fd9ba584f43ef505b0c6a5687045bd0d467bfa3e5c6a`. The sample checkout remained at pinned revision `2c6b318e929baab77e9753ae78a4965eee74a30a`; its 42-source manifest SHA-256 is `15ce636ac8eec34b24e73bc96270b49a44c94318850050b1e9bc0d930a9c8d58`, and the final `sample-check.json` is `PASSED`.
+
+The evidence root is `/tmp/dyn4k-merge-reviewed-tooling-docs-wave-migration-current`. `summary.json` SHA-256 is `143bbe45d0c4da8ef990068db8ad5645de1d83c1493b886d960ef8567b84e444`. `verify-evidence` passed for 516 manifest entries; the sorted `evidence.sha256` file SHA-256 is `9ce0a255b0c960a413aba63d1a5a6487592f31790b378f39d4db6c4cd8abe1e8`. The host used OpenJDK `21.0.12.1`, Podman, and the pinned headful image `1900e9e724693fe838b4fe16b27d313d340485690f4ae7a75cf208356b314641`.
+
+The historical Billiards detector-hit difference of 69 versus 67 was not reproduced: both providers recorded 63 detector hits and 63 listener hits in their final observed snapshots. The baseline recorded 34,060 TOI calls at step 784; the candidate recorded 38,105 calls at step 783. These separately timed runs have different step counts and are not a fixed-input comparison. Billiards numerical and behavioral parity therefore remains open; the full compatibility corpus and target/runtime qualification also remain open.
+
+## Prior run (historical)
 
 At committed harness revision `9bdcb2b5c1e250156f186215946deac32b0d053d`, the worktree was clean before and after execution. The branch includes committed integration revision `713cfa1e018a4203734fa9e7a81c9830fa400c77` through merge `30f0bf48705099f302f5cfda57deeeb893b868f1`. Both providers passed the five selected headful Java2D scenes on a real X11 display served by Xvfb. All 10 journey cases passed; none failed or were unavailable. Both providers compiled all 42 tracked Java sources with `javac --release 8` and produced 66 class files each. The original scene main methods exited with code 0 after a requested window close. Separate instrumented runs also exited with code 0.
 
@@ -45,4 +55,4 @@ The harness now rejects a dirty candidate worktree before a run and checks the s
 
 This is a bounded JVM migration result. The wall-clock scene scripts do not provide fixed-input numerical parity. The full declaration ledger, unchanged baseline test inventory, complete portable corpus, physical checks and all required target/runtime cases remain separate open requirements.
 
-At handoff, the integration branch had advanced to `9802ebed0ef7a0ca081209d10e347af39b8f86d2`. A dry-run merge reported a content conflict in the unowned `dyn4k-core/build.gradle.kts`. This branch retains the clean committed integration revision named above. The newer integration changes require their owner to resolve that file before this journey evidence can be refreshed against that tip.
+The prior handoff recorded a dry-run conflict in unowned `dyn4k-core/build.gradle.kts` against integration state `9802ebed0ef7a0ca081209d10e347af39b8f86d2`. That check predates the combined-source run above. This tooling and documentation wave did not merge or edit engine/build paths; any future source change still requires a fresh staged artifact and current-head journey run.
