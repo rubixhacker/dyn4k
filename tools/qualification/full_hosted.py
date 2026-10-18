@@ -222,7 +222,7 @@ def candidate_checkout():
 
 def committed_input(repository, candidate_sha, relative):
     path = repository / relative
-    raw = subprocess.check_output(["git", "-C", str(repository), "show",
+    raw = subprocess.check_output(["git", "--no-replace-objects", "-C", str(repository), "show",
                                    f"{candidate_sha}:{relative}"])
     if path.read_bytes() != raw:
         raise ValueError(f"candidate source differs: {relative}")
@@ -343,16 +343,25 @@ def capture_safari_config(repository, candidate_sha, project, configuration,
                           process, output, archive_name):
     relative = safari_reporter.config_relative(project)
     source = repository / relative
-    if (source.is_symlink() or not source.is_file()
-            or source.stat().st_size > safari_reporter.MAX_FRAGMENT_BYTES
-            or not process["started_ns"] <= source.stat().st_mtime_ns <= process["finished_ns"]):
-        raise ValueError(f"Safari generated Karma config is absent, unsafe, stale, or oversized: {relative}")
-    record = archive_copy(source, output, archive_name)
+    try:
+        data, identity = safari_reporter.read_generated_config(repository, relative)
+    except OSError as error:
+        raise ValueError(f"Safari generated Karma config is absent or unsafe: {relative}") from error
+    if not process["started_ns"] <= identity.st_mtime_ns <= process["finished_ns"]:
+        raise ValueError(f"Safari generated Karma config is stale: {relative}")
+    destination = output / relative_path(archive_name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("xb") as stream:
+        stream.write(data)
+    os.utime(destination, ns=(identity.st_mtime_ns, identity.st_mtime_ns))
+    record = {"path": archive_name, "sha256": sha256(destination),
+              "size": len(data), "modified_ns": destination.stat().st_mtime_ns}
     fragment = safari_reporter.committed_fragment(repository, candidate_sha)
-    safari_reporter.validate_config((output / archive_name).read_bytes(), fragment,
+    safari_reporter.validate_config(data, fragment,
                                     repository, project, configuration)
     return {**record, "source_path": str(source), "project": project.as_posix(),
-            "configuration": configuration}
+            "configuration": configuration, "source_device": identity.st_dev,
+            "source_inode": identity.st_ino}
 
 
 def verify_safari_reporter_archive(output, receipt, lane, candidate_repository, repository_root):
@@ -384,7 +393,11 @@ def verify_safari_reporter_archive(output, receipt, lane, candidate_repository, 
         if (not isinstance(record, dict) or record.get("path") != expected_path
                 or record.get("source_path") != str(expected_source)
                 or record.get("project") != project.as_posix()
-                or record.get("configuration") != lane["configuration"]):
+                or record.get("configuration") != lane["configuration"]
+                or not isinstance(record.get("source_device"), int)
+                or record["source_device"] < 0
+                or not isinstance(record.get("source_inode"), int)
+                or record["source_inode"] <= 0):
             raise ValueError("Safari generated config identity differs")
         raw = archived_file(output, expected_path)
         modified = raw.stat().st_mtime_ns

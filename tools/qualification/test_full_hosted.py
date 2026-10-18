@@ -96,7 +96,7 @@ class FullHostedTests(unittest.TestCase):
 
     def test_public_safari_route_stages_and_archives_source_and_consumer_reporters(self):
         source_tree = Path(__file__).resolve().parents[2]
-        for configuration in ("development", "production", "missing"):
+        for configuration in ("development", "production", "missing", "symlink"):
             with self.subTest(configuration=configuration):
                 repository = self.root / f"source-{configuration}"
                 consumer = repository / "consumers/qualification/portable"
@@ -135,15 +135,26 @@ class FullHostedTests(unittest.TestCase):
                     selected = (str(root / "build/compileSync/js/test/testProductionExecutable"
                                     / "kotlin" / f"{package}.js") if mode == "production"
                                 else str(folder / "kotlin" / f"{package}.js"))
-                    settings = {"basePath": str(folder), "files": [runner, selected],
-                                "browsers": ["Safari"],
+                    settings = {"singleRun": True, "autoWatch": False,
+                                "basePath": str(folder), "files": [runner, selected],
+                                "frameworks": ["webpack-output", "mocha", "webpack"],
+                                "client": {"args": []}, "browsers": ["Safari"],
+                                "customLaunchers": {}, "failOnFailingTestSuite": False,
+                                "failOnEmptyTestSuite": False,
                                 "reporters": ["karma-kotlin-reporter"],
                                 "preprocessors": {runner: ["webpack", "sourcemap"],
-                                                  selected: ["webpack", "sourcemap"]}}
+                                                  selected: ["webpack", "sourcemap"]},
+                                "proxies": {}, "webpackCopy": []}
                     (folder / "karma.conf.js").write_text(
-                        "module.exports = function(config) {\nconfig.set(" + json.dumps(settings) +
-                        ");\nconfig.plugins.push(require('kotlin-web-helpers/dist/"
-                        "karma-kotlin-reporter'));\n" + fragment + "\n}\n")
+                        "\nmodule.exports = function(config) {\n\nconfig.set("
+                        + json.dumps(settings) + ");"
+                        + full_hosted.safari_reporter.APPROVED_GENERATOR_TAIL
+                        + fragment + "\n}\n")
+                    if (configuration == "symlink" and project == "dyn4k-core"
+                            and not folder.is_symlink()):
+                        outside = self.root / "outside-symlink-generated"
+                        folder.rename(outside)
+                        folder.symlink_to(outside, target_is_directory=True)
 
                 calls = []
 
@@ -221,16 +232,18 @@ class FullHostedTests(unittest.TestCase):
                         mock.patch.object(full_hosted, "require_test_tasks", side_effect=tasks):
                     receipt = full_hosted.run("jsSafari", candidate, output)
                 self.assertEqual((["stage", "source", "source"] if configuration == "missing"
+                                  else ["stage", "source", "source"] if configuration == "symlink"
                                   else ["stage", "source", "consumer", "source", "consumer"]),
                                  calls)
                 self.assertEqual("FAILED", receipt["status"])
                 for lane in receipt["configurations"]:
                     self.assertIn(("Safari generated Karma config is absent"
-                                   if configuration == "missing" else
+                                   if configuration in ("missing", "symlink") else
                                    "staged Safari consumer reporter changed"
                                    if configuration == "production" else
                                    "fixture stops after Safari consumer capture"), lane["reason"])
-                    for module in (("dyn4k-core",) if configuration == "missing" else
+                    for module in (() if configuration == "symlink" else
+                                   ("dyn4k-core",) if configuration == "missing" else
                                    ("dyn4k-core", "dyn4k") if configuration == "production"
                                    else ("dyn4k-core", "dyn4k", "consumer")):
                         self.assertIn(fragment.encode(),
@@ -1496,22 +1509,29 @@ class FullHostedTests(unittest.TestCase):
                                  else "testDevelopmentExecutable") / "kotlin" / f"{package}.js"
                                 if config == "production" else
                                 package_root / "kotlin" / f"{package}.js")
-                    settings = {"basePath": str(package_root),
+                    settings = {"singleRun": True, "autoWatch": False,
+                                "basePath": str(package_root),
                                 "files": [runner, str(selected)],
-                                "browsers": ["Safari"],
+                                "frameworks": ["webpack-output", "mocha", "webpack"],
+                                "client": {"args": []}, "browsers": ["Safari"],
+                                "customLaunchers": {}, "failOnFailingTestSuite": False,
+                                "failOnEmptyTestSuite": False,
                                 "reporters": ["karma-kotlin-reporter"],
                                 "preprocessors": {runner: ["webpack", "sourcemap"],
-                                                  str(selected): ["webpack", "sourcemap"]}}
-                    generated = ("module.exports = function(config) {\nconfig.set(" +
-                                 json.dumps(settings) + ");\n"
-                                 "config.plugins.push(require('kotlin-web-helpers/dist/"
-                                 "karma-kotlin-reporter'));\n" + fragment + "\n}\n")
+                                                  str(selected): ["webpack", "sourcemap"]},
+                                "proxies": {}, "webpackCopy": []}
+                    generated = ("\nmodule.exports = function(config) {\n\nconfig.set("
+                                 + json.dumps(settings) + ");"
+                                 + full_hosted.safari_reporter.APPROVED_GENERATOR_TAIL
+                                 + fragment + "\n}\n")
                     archived = write(folder / "karma-config" / name / "karma.conf.js", generated)
                     lane["safari_karma_configs"][name] = {
                         "path": archived.relative_to(self.root).as_posix(),
                         "sha256": full_hosted.sha256(archived),
                         "size": archived.stat().st_size,
                         "modified_ns": archived.stat().st_mtime_ns,
+                        "source_device": archived.stat().st_dev,
+                        "source_inode": archived.stat().st_ino,
                         "source_path": str(original_root /
                                            full_hosted.safari_reporter.config_relative(project)),
                         "project": project.as_posix(), "configuration": config}
@@ -1549,13 +1569,21 @@ class FullHostedTests(unittest.TestCase):
             config = self.root / "development/karma-config" / name / "karma.conf.js"
             original = config.read_bytes()
             timestamp = config.stat().st_mtime_ns
-            for mutation in ("missing", "altered", "wrong-module"):
+            for mutation in ("missing", "altered", "wrong-module",
+                             "provider-clear", "bracket-chrome"):
                 with self.subTest(module=name, mutation=mutation):
                     changed = json.loads(json.dumps(receipt))
                     if mutation == "missing":
                         config.unlink()
                     elif mutation == "altered":
                         config.write_bytes(original.replace(fragment, b"// absent reporter\n"))
+                    elif mutation == "provider-clear":
+                        config.write_bytes(original.replace(
+                            fragment, b"config.plugins = [];\n" + fragment))
+                    elif mutation == "bracket-chrome":
+                        config.write_bytes(original.replace(
+                            fragment, b"config['set']({browsers: ['ChromeHeadless']});\n"
+                            + fragment))
                     else:
                         config.write_bytes(original.replace(
                             b"/build/js/packages/dyn4k-", b"/build/js/packages/other-", 1))
@@ -1565,21 +1593,25 @@ class FullHostedTests(unittest.TestCase):
                         record["sha256"] = full_hosted.sha256(config)
                         record["size"] = config.stat().st_size
                     changed["files"] = full_hosted.archive_inventory(self.root)
-                    with self.assertRaises(ValueError):
-                        full_hosted.verify_raw_files(
-                            self.root, changed, manifest, consumer,
-                            candidate_repository=self.candidate_repository)
-                    if name == "dyn4k-core" and mutation == "altered":
-                        (self.root / "receipt.json").write_text(json.dumps(changed))
-                        full_hosted.package_archive(self.root, archive)
-                        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
-                            with self.assertRaises(ValueError):
-                                full_hosted.verify_transport_archive(
-                                    archive, changed["candidate_sha"], "jsSafari",
-                                    candidate_repository=self.candidate_repository)
-                    config.write_bytes(original)
-                    os.utime(config, ns=(timestamp, timestamp))
-                    (self.root / "receipt.json").write_text(json.dumps(receipt))
+                    try:
+                        with self.assertRaises(ValueError):
+                            full_hosted.verify_raw_files(
+                                self.root, changed, manifest, consumer,
+                                candidate_repository=self.candidate_repository)
+                        if ((name == "dyn4k-core" and mutation == "altered")
+                                or (name == "dyn4k" and mutation in (
+                                    "provider-clear", "bracket-chrome"))):
+                            (self.root / "receipt.json").write_text(json.dumps(changed))
+                            full_hosted.package_archive(self.root, archive)
+                            with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                                with self.assertRaises(ValueError):
+                                    full_hosted.verify_transport_archive(
+                                        archive, changed["candidate_sha"], "jsSafari",
+                                        candidate_repository=self.candidate_repository)
+                    finally:
+                        config.write_bytes(original)
+                        os.utime(config, ns=(timestamp, timestamp))
+                        (self.root / "receipt.json").write_text(json.dumps(receipt))
             for mutation in ("stage-sha", "stage-missing"):
                 with self.subTest(module=name, mutation=mutation):
                     changed = json.loads(json.dumps(receipt))

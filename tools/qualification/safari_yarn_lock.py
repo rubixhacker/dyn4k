@@ -413,7 +413,8 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
 
 
 def git(repository, *args):
-    return subprocess.check_output(["git", "-C", str(repository), *args], text=True).strip()
+    return subprocess.check_output(["git", "--no-replace-objects", "-C", str(repository),
+                                    *args], text=True).strip()
 
 
 def source_path(repository, relative):
@@ -467,7 +468,8 @@ def require_candidate(repository, candidate_sha):
     if git(repository, "status", "--porcelain=v1", "--untracked-files=all"):
         raise ValueError("dirty tracked or untracked source checkout")
     committed = subprocess.check_output(
-        ["git", "-C", str(repository), "show", f"{candidate_sha}:{TRACKED_LOCK}"])
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{TRACKED_LOCK}"])
     if source_bytes(repository, TRACKED_LOCK) != committed:
         raise ValueError("tracked lock differs from candidate")
 
@@ -644,7 +646,8 @@ def capture(repository, candidate_sha, output, configuration=None):
                      *(HOSTED_SOURCE_INPUTS if configuration else ()))
     files += [copy_file(repository, path, output, "inputs") for path in source_inputs[1:]]
     committed_hashes = {path.as_posix(): hashlib.sha256(subprocess.check_output(
-        ["git", "-C", str(repository), "show", f"{candidate_sha}:{path}"])).hexdigest()
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{path}"])).hexdigest()
                         for path in source_inputs}
     captured_hashes = {Path(item["source_path"]).relative_to(repository).as_posix():
                        item["sha256"] for item in files}
@@ -807,7 +810,8 @@ def audit_capture(repository, candidate_sha, output):
                 or len(data) != item.get("size")):
             raise ValueError(f"hosted diagnostic raw file differs: {relative}")
     committed = {path.as_posix(): hashlib.sha256(subprocess.check_output(
-        ["git", "-C", str(repository), "show", f"{candidate_sha}:{path}"])).hexdigest()
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{path}"])).hexdigest()
                  for path in source_inputs}
     if (receipt.get("source_input_sha256") != committed
             or receipt.get("source_input_after_sha256") != committed):

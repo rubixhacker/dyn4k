@@ -18,6 +18,87 @@ PACKAGES = {Path("dyn4k-core"): "dyn4k-dyn4k-core-test",
             Path("dyn4k"): "dyn4k-dyn4k-test",
             Path("consumers/qualification/portable"): "dyn4k-staged-portable-consumer-test"}
 
+APPROVED_GENERATOR_TAIL = (
+    '\n'
+    'config.plugins = config.plugins || [];\n'
+    "config.plugins.push(require('kotlin-web-helpers/dist/karma-kotlin-reporter'));\n"
+    '\n'
+    'config.loggers = [\n'
+    '    {\n'
+    "        type: require('kotlin-web-helpers/dist/tc-log-appender'),\n"
+    '        //default layout\n'
+    "        layout: { type: 'pattern', pattern: '%[%d{DATETIME}:%p [%c]: %]%m' }\n"
+    '    }\n'
+    ']\n'
+    'config.plugins = config.plugins || [];\n'
+    "config.plugins.push(require('kotlin-web-helpers/dist/karma-webpack-output'));\n"
+    '\n'
+    '// webpack config\n'
+    'function createWebpackConfig() {\n'
+    'let config = {\n'
+    "  mode: 'development',\n"
+    '  resolve: {\n'
+    '    modules: [\n'
+    '      "node_modules"\n'
+    '    ]\n'
+    '  },\n'
+    '  plugins: [],\n'
+    '  module: {\n'
+    '    rules: []\n'
+    '  },\n'
+    '  \n'
+    '};\n'
+    '\n'
+    '// source maps\n'
+    'config.module.rules.push({\n'
+    '        test: /\\.m?js$/,\n'
+    '        use: ["source-map-loader"],\n'
+    '        enforce: "pre"\n'
+    '});\n'
+    'config.devtool = false;\n'
+    'config.ignoreWarnings = [\n'
+    '    /Failed to parse source map/,\n'
+    '    /Accessing import\\.meta directly is unsupported \\(only property access or destructuring is supported\\)/\n'
+    '];  \n'
+    '                // optimization\n'
+    '                config.optimization = config.optimization || {\n'
+    '  "splitChunks": false\n'
+    '};\n'
+    '// noinspection JSUnnecessarySemicolon\n'
+    ';(function(config) {\n'
+    "    const tcErrorPlugin = require('kotlin-web-helpers/dist/tc-log-error-webpack');\n"
+    '    config.plugins.push(new tcErrorPlugin())\n'
+    '    config.stats = config.stats || {}\n'
+    '    Object.assign(config.stats, config.stats, {\n'
+    '        warnings: false,\n'
+    '        errors: false\n'
+    '    })\n'
+    '})(config);\n'
+    'config.experiments = {\n'
+    '    topLevelAwait: true,\n'
+    '}\n'
+    '// section: Extra JS code from KotlinWebpackConfig.extraJs\n'
+    '// section end\n'
+    '// noinspection JSUnnecessarySemicolon\n'
+    ';(function(config) {\n'
+    "    const webpack = require('webpack');\n"
+    '\n'
+    '    // https://github.com/webpack/webpack/issues/12951\n'
+    "    const PatchSourceMapSource = require('kotlin-web-helpers/dist/webpack-5-debug');\n"
+    '    config.plugins.push(new PatchSourceMapSource())\n'
+    '    \n'
+    '    config.plugins.push(new webpack.SourceMapDevToolPlugin({\n'
+    '        moduleFilenameTemplate: "[absolute-resource-path]"\n'
+    '    }))\n'
+    '})(config);\n'
+    '   return config;\n'
+    '}\n'
+    '\n'
+    'config.set({webpack: createWebpackConfig()});\n'
+    '\n'
+    '\n'
+)
+
 
 class ConfigBindingError(ValueError):
     pass
@@ -39,29 +120,26 @@ def validate_config(data, fragment, repository, project, configuration=None):
         raise ConfigBindingError("karma_config_invalid_encoding") from error
     if source.count(expected) != 1:
         raise ConfigBindingError("reporter_fragment_missing")
-    position = source.index(expected)
-    line_start = source.rfind("\n", 0, position) + 1
-    if (source[:position].rfind("/*") > source[:position].rfind("*/")
-            or source[line_start:position].strip()
-            or not re.fullmatch(r"\s*}\s*", source[position + len(expected):])):
-        raise ConfigBindingError("reporter_fragment_in_comment")
-    provider = "config.plugins.push(require('kotlin-web-helpers/dist/karma-kotlin-reporter'));"
-    if source.count(provider) != 1 or source.index(provider) > position:
-        raise ConfigBindingError("reporter_provider_missing")
-    match = re.match(r"\s*module\.exports\s*=\s*function\s*\(config\)\s*\{\s*config\.set\(",
-                     source)
-    if match is None:
+    prefix = "\nmodule.exports = function(config) {\n\nconfig.set("
+    if not source.startswith(prefix):
         raise ConfigBindingError("karma_config_shape_mismatch")
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ConfigBindingError("karma_config_duplicate_setting")
+            result[key] = value
+        return result
     try:
-        settings, end = json.JSONDecoder().raw_decode(source, match.end())
+        settings, end = json.JSONDecoder(object_pairs_hook=unique_pairs).raw_decode(
+            source, len(prefix))
     except (ValueError, TypeError) as error:
         raise ConfigBindingError("karma_config_shape_mismatch") from error
     if not isinstance(settings, dict) or not source[end:].startswith(");"):
         raise ConfigBindingError("karma_config_shape_mismatch")
-    extra_sets = re.findall(r"config\.set\s*\([^;]*;", source[end + 2:])
-    if extra_sets not in ([], ["config.set({webpack: createWebpackConfig()});"]):
-        raise ConfigBindingError("karma_config_shape_mismatch")
-    if extra_sets and source.index(extra_sets[0]) > position:
+    position = source.index(expected)
+    if (source[end + 2:position] != APPROVED_GENERATOR_TAIL
+            or not re.fullmatch(r"\s*}\s*", source[position + len(expected):])):
         raise ConfigBindingError("karma_config_shape_mismatch")
     root = repository / project
     package = PACKAGES[project]
@@ -82,12 +160,18 @@ def validate_config(data, fragment, repository, project, configuration=None):
                      if files == [runner, path]), None)
     if observed is None or (configuration is not None and configuration != observed):
         raise ConfigBindingError("karma_config_source_mismatch")
-    if (settings.get("browsers") != ["Safari"]
-            or settings.get("reporters") != ["karma-kotlin-reporter"]
-            or settings.get("customLaunchers", {}) != {}
-            or settings.get("exclude", []) != []
-            or settings.get("preprocessors") != {
-                runner: ["webpack", "sourcemap"], files[1]: ["webpack", "sourcemap"]}):
+    approved = {
+        "singleRun": True, "autoWatch": False, "basePath": str(package_root),
+        "files": [runner, files[1]],
+        "frameworks": ["webpack-output", "mocha", "webpack"],
+        "client": {"args": []}, "browsers": ["Safari"], "customLaunchers": {},
+        "failOnFailingTestSuite": False, "failOnEmptyTestSuite": False,
+        "reporters": ["karma-kotlin-reporter"],
+        "preprocessors": {runner: ["webpack", "sourcemap"],
+                          files[1]: ["webpack", "sourcemap"]},
+        "proxies": {}, "webpackCopy": [],
+    }
+    if settings != approved:
         raise ConfigBindingError("karma_config_source_mismatch")
     return observed
 
@@ -98,16 +182,79 @@ def committed_fragment(repository, candidate_sha):
         raise ValueError("committed Safari reporter source is unsafe or oversized")
     current = path.read_bytes()
     committed = subprocess.check_output(
-        ["git", "-C", str(repository), "show", f"{candidate_sha}:{SOURCE}"])
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{SOURCE}"])
     if current != committed:
         raise ValueError("Safari reporter source differs from candidate")
     return committed
 
 
-def _forensic(path, output, relative):
+def open_directory_no_follow(repository, relative):
+    if relative.is_absolute() or any(part in ("", ".", "..") for part in relative.parts):
+        raise ValueError(f"unsafe Safari path: {relative}")
+    directory = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in relative.parts:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=directory)
+            os.close(directory)
+            directory = child
+        return directory
+    except BaseException:
+        os.close(directory)
+        raise
+
+
+def same_directory(repository, relative, descriptor):
+    try:
+        current = open_directory_no_follow(repository, relative)
+    except OSError:
+        return False
+    try:
+        before, after = os.fstat(descriptor), os.fstat(current)
+        return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+    finally:
+        os.close(current)
+
+
+def read_generated_config(repository, relative):
+    directory = open_directory_no_follow(repository, relative.parent)
+    try:
+        descriptor = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+        try:
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_FRAGMENT_BYTES:
+                raise ValueError(f"unsafe or oversized Safari generated config: {relative}")
+            data = os.read(descriptor, MAX_FRAGMENT_BYTES + 1)
+            after = os.fstat(descriptor)
+            identity = lambda item: (item.st_dev, item.st_ino, item.st_size,
+                                     item.st_mtime_ns, item.st_ctime_ns)
+            if len(data) != before.st_size or identity(before) != identity(after):
+                raise ValueError(f"Safari generated config changed while reading: {relative}")
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(directory)
+    current_dir = open_directory_no_follow(repository, relative.parent)
+    try:
+        current = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                          dir_fd=current_dir)
+        try:
+            if identity(before) != identity(os.fstat(current)):
+                raise ValueError(f"Safari generated config path identity changed: {relative}")
+        finally:
+            os.close(current)
+    finally:
+        os.close(current_dir)
+    return data, before
+
+
+def _forensic(directory, name, output, relative):
     record = {"path": str(relative), "original_size": None, "retained_size": 0}
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
         try:
             observed = os.fstat(descriptor)
             if not stat.S_ISREG(observed.st_mode):
@@ -150,54 +297,98 @@ def stage(repository, candidate_sha, projects, output):
     try:
         for project in projects:
             relative = Path(project)
-            root = repository / relative
-            if root.is_symlink() or not root.is_dir() or root.resolve() != root:
-                raise ValueError(f"unsafe Safari reporter project: {relative}")
-            directory = root / "karma.config.d"
-            if directory.exists() or directory.is_symlink():
-                raise ValueError(f"preexisting Safari Karma configuration: {directory}")
-            directory.mkdir()
-            staged = directory / STAGED_NAME
-            created.append((relative, directory, staged))
-            staged.write_bytes(content)
+            root = open_directory_no_follow(repository, relative)
+            try:
+                os.mkdir("karma.config.d", dir_fd=root)
+                directory = os.open("karma.config.d", os.O_RDONLY | os.O_DIRECTORY |
+                                    os.O_NOFOLLOW, dir_fd=root)
+            except BaseException:
+                os.close(root)
+                raise
+            created.append((relative, root, directory))
+            descriptor = os.open(STAGED_NAME, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                 os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            with os.fdopen(descriptor, "wb") as staged:
+                staged.write(content)
             result["projects"][relative.as_posix()] = "STAGED"
         yield result
     finally:
-        for relative, directory, staged in reversed(created):
+        for relative, root, directory in reversed(created):
             key = relative.as_posix()
-            if directory.is_symlink() or not directory.is_dir():
-                result["status"] = "CHANGED"
-                result["projects"][key] = "DIRECTORY_CHANGED"
-                result["forensic"].append({"path": str(relative / "karma.config.d"),
-                                           "error": "staging directory changed"})
-                continue
-            if staged.is_symlink() or not staged.is_file() \
-                    or staged.stat().st_size != len(content) \
-                    or staged.read_bytes() != content:
-                result["status"] = "CHANGED"
-                result["projects"][key] = "CHANGED"
-                result["forensic"].append(_forensic(staged, output, relative / STAGED_NAME))
-            else:
-                result["projects"][key] = "CLEAN"
-            if staged.is_file() or staged.is_symlink():
-                staged.unlink()
-            if directory.is_dir() and not directory.is_symlink():
-                with os.scandir(directory) as entries:
-                    leftovers = sorted(item.name for item in itertools.islice(entries, 17))
-                if leftovers:
+            try:
+                root_same = same_directory(repository, relative, root)
+                try:
+                    linked = os.stat("karma.config.d", dir_fd=root, follow_symlinks=False)
+                    held = os.fstat(directory)
+                    directory_same = (linked.st_dev, linked.st_ino) == (held.st_dev, held.st_ino)
+                except OSError:
+                    directory_same = False
+                if not root_same or not directory_same:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "DIRECTORY_CHANGED"
+                    result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                               "error": "staging ancestor identity changed"})
+                try:
+                    staged = os.open(STAGED_NAME, os.O_RDONLY | os.O_NOFOLLOW |
+                                     os.O_NONBLOCK, dir_fd=directory)
+                    try:
+                        observed = os.fstat(staged)
+                        unchanged = (stat.S_ISREG(observed.st_mode)
+                                     and observed.st_size == len(content)
+                                     and os.read(staged, len(content) + 1) == content)
+                    finally:
+                        os.close(staged)
+                except OSError:
+                    unchanged = False
+                if not unchanged:
+                    result["status"] = "CHANGED"
+                    if root_same and directory_same:
+                        result["projects"][key] = "CHANGED"
+                    result["forensic"].append(_forensic(
+                        directory, STAGED_NAME, output, relative / STAGED_NAME))
+                elif root_same and directory_same:
+                    result["projects"][key] = "CLEAN"
+                try:
+                    os.unlink(STAGED_NAME, dir_fd=directory)
+                except FileNotFoundError:
+                    pass
+                except OSError as error:
                     result["status"] = "CHANGED"
                     result["projects"][key] = "LEFTOVER"
+                    result["forensic"].append({"path": str(relative / STAGED_NAME),
+                                               "error": str(error)})
+                try:
+                    scan = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                   dir_fd=directory)
+                    try:
+                        with os.scandir(scan) as entries:
+                            leftovers = sorted(item.name for item in itertools.islice(entries, 17))
+                    finally:
+                        os.close(scan)
+                except OSError as error:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "LEFTOVER"
+                    result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                               "error": str(error)})
+                    continue
+                if leftovers:
+                    result["status"] = "CHANGED"
+                    if root_same and directory_same:
+                        result["projects"][key] = "LEFTOVER"
                     result.setdefault("leftovers", {})[key] = leftovers[:16]
                     if len(leftovers) > 16:
                         result.setdefault("leftovers_truncated", []).append(key)
                     for name in leftovers[:16]:
-                        result["forensic"].append(
-                            _forensic(directory / name, output, relative / name))
-                else:
+                        result["forensic"].append(_forensic(
+                            directory, name, output, relative / name))
+                elif directory_same:
                     try:
-                        directory.rmdir()
+                        os.rmdir("karma.config.d", dir_fd=root)
                     except OSError as error:
                         result["status"] = "CHANGED"
                         result["projects"][key] = "LEFTOVER"
                         result["forensic"].append({"path": str(relative / "karma.config.d"),
                                                    "error": str(error)})
+            finally:
+                os.close(directory)
+                os.close(root)

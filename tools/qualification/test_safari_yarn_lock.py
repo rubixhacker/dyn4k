@@ -742,6 +742,39 @@ class SafariYarnLockTests(unittest.TestCase):
                          (outside / "qualification-safari-reporter.js").read_bytes())
         self.assertTrue(directory.is_symlink())
 
+    def test_public_hosted_capture_rejects_project_ancestor_swap_without_outside_access(self):
+        project = self.repository / "dyn4k-core"
+        moved = self.repository / "moved-core"
+        outside = self.root / "outside-core"
+        sentinel = outside / "karma.config.d/qualification-safari-reporter.js"
+        sentinel.parent.mkdir(parents=True)
+        sentinel.write_bytes(b"OUTSIDE SENTINEL\n")
+
+        def changed(repository, destination, command):
+            self.generated(b"tracked lock\n", safari=True)
+            (destination / "stdout.txt").write_text("> Task :kotlinStoreYarnLock\n")
+            (destination / "stderr.txt").write_text("")
+            project.rename(moved)
+            project.symlink_to(outside, target_is_directory=True)
+            return {"command": command, "pid": 123, "exit_code": 0,
+                    "started_ns": 1, "finished_ns": 2,
+                    "stdout_bytes_seen": 33, "stderr_bytes_seen": 0,
+                    "stdout_truncated": False, "stderr_truncated": False,
+                    "timed_out": False, "stream_incomplete": False}
+
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--output", str(self.output), "--configuration", "development"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed), \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        receipt = json.loads((self.output / "receipt.json").read_text())
+        self.assertEqual("CHANGED", receipt["reporter_stage"]["status"])
+        self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
+        self.assertFalse((self.output / "forensic/safari-reporter/dyn4k-core"
+                          / "qualification-safari-reporter.js").exists())
+
     def test_full_hosted_production_uses_exact_flag_and_script(self):
         def failure(repository, output, command):
             self.assertEqual("-PqualificationProduction=true", command[-1])
@@ -929,16 +962,35 @@ class SafariYarnLockTests(unittest.TestCase):
                              / "testProductionExecutable/kotlin" / f"{package}.js")
             else:
                 source = str(package_root / "kotlin" / f"{package}.js")
-            settings = {"basePath": str(package_root), "files": [runner, source],
-                        "browsers": ["Safari"], "reporters": ["karma-kotlin-reporter"],
-                        "customLaunchers": {}, "preprocessors": {
+            settings = {"singleRun": True, "autoWatch": False,
+                        "basePath": str(package_root), "files": [runner, source],
+                        "frameworks": ["webpack-output", "mocha", "webpack"],
+                        "client": {"args": []}, "browsers": ["Safari"],
+                        "customLaunchers": {}, "failOnFailingTestSuite": False,
+                        "failOnEmptyTestSuite": False,
+                        "reporters": ["karma-kotlin-reporter"], "preprocessors": {
                             runner: ["webpack", "sourcemap"],
-                            source: ["webpack", "sourcemap"]}}
+                            source: ["webpack", "sourcemap"]},
+                        "proxies": {}, "webpackCopy": []}
             (package_root / "karma.conf.js").write_text(
-                "module.exports = function(config) {\nconfig.set(" + json.dumps(settings) + ");\n"
-                "config.plugins = config.plugins || [];\n"
-                "config.plugins.push(require('kotlin-web-helpers/dist/karma-kotlin-reporter'));\n"
+                "\nmodule.exports = function(config) {\n\nconfig.set("
+                + json.dumps(settings) + ");"
+                + safari_yarn_lock.safari_reporter.APPROVED_GENERATOR_TAIL
                 + reporter + "\n}\n")
+
+    def test_public_capture_rejects_generated_config_symlinked_package_ancestor(self):
+        self.write_valid_karma_configs()
+        package = self.repository / "build/js/packages/dyn4k-dyn4k-core-test"
+        outside = self.root / "outside-generated-package"
+        package.rename(outside)
+        package.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "unsafe|symlink|identity"):
+            safari_yarn_lock.full_hosted.capture_safari_config(
+                self.repository, self.candidate, Path("dyn4k-core"), "development",
+                {"started_ns": 0, "finished_ns": time.time_ns() + 1_000_000_000},
+                self.output, "development/karma-config/dyn4k-core/karma.conf.js")
+        self.assertEqual((outside / "karma.conf.js").read_bytes(),
+                         (package / "karma.conf.js").read_bytes())
 
     def capture_context(self, context):
         return safari_yarn_lock.capture_karma_context(
@@ -991,7 +1043,8 @@ class SafariYarnLockTests(unittest.TestCase):
 
     def test_public_context_binds_exact_reporter_and_module_source(self):
         for mutation in ("none", "altered_fragment", "other_module", "mixed_mode",
-                         "later_override", "commented_fragment"):
+                         "later_override", "commented_fragment", "provider_clear",
+                         "bracket_chrome"):
             with self.subTest(mutation=mutation):
                 context, _ = self.context_fixture(mutation)
                 self.write_valid_karma_configs()
@@ -1012,6 +1065,16 @@ class SafariYarnLockTests(unittest.TestCase):
                 elif mutation == "commented_fragment":
                     facade.write_text(facade.read_text().replace(
                         "const DYN4K_SAFARI_REPORTER_NEWLINES", "// const DYN4K_SAFARI_REPORTER_NEWLINES"))
+                elif mutation == "provider_clear":
+                    fragment = (self.repository /
+                                "tools/qualification/safari-karma-reporter.js").read_text()
+                    facade.write_text(facade.read_text().replace(
+                        fragment, "config.plugins = [];\n" + fragment))
+                elif mutation == "bracket_chrome":
+                    fragment = (self.repository /
+                                "tools/qualification/safari-karma-reporter.js").read_text()
+                    facade.write_text(facade.read_text().replace(
+                        fragment, "config['set']({browsers: ['ChromeHeadless']});\n" + fragment))
                 arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
                              "--input-context", str(self.raw_context), "--output", str(context),
                              "--capture-context"]
@@ -1029,6 +1092,37 @@ class SafariYarnLockTests(unittest.TestCase):
                         "reporter_fragment_missing", "karma_config_module_mismatch",
                         "karma_config_source_mismatch", "karma_config_shape_mismatch",
                         "reporter_fragment_in_comment") for item in inventory["inputs"]))
+
+    def test_public_context_rejects_same_type_replacement_commit(self):
+        context, _ = self.context_fixture()
+        self.write_valid_karma_configs()
+        lock = self.repository / "kotlin-js-store/yarn.lock"
+        substituted = b"replacement lock bytes\n"
+        lock.write_bytes(substituted)
+        subprocess.run(["git", "-C", str(self.repository), "add", "kotlin-js-store/yarn.lock"],
+                       check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "replacement source"], check=True)
+        replacement = subprocess.check_output(
+            ["git", "-C", str(self.repository), "rev-parse", "HEAD"], text=True).strip()
+        subprocess.run(["git", "-C", str(self.repository), "checkout", "-q", "--detach",
+                        self.candidate], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "read-tree", replacement + "^{tree}"],
+                       check=True)
+        lock.write_bytes(substituted)
+        subprocess.run(["git", "-C", str(self.repository), "replace", self.candidate,
+                        replacement], check=True)
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--input-context", str(self.raw_context), "--output", str(context),
+                     "--capture-context"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        inventory = json.loads((context / "inventory.json").read_text())
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "scan_failed" for item in inventory["inputs"]))
 
     def test_context_scanner_requires_both_module_configs(self):
         context, _ = self.context_fixture()
