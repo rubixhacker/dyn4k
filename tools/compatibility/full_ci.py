@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
+import exception_ci
+import world_ci
 from exception_ci import seal_exception, validate_exception_report
 from world_ci import seal_world
 
@@ -45,6 +48,467 @@ LANES = {f"{provider}-javac{compiler}-java{runtime}"
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_json_unique(contents: str):
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+    return json.loads(contents, object_pairs_hook=unique_pairs)
+
+
+def snapshot_archive(output: Path) -> dict[str, str]:
+    if output.is_symlink() or not output.is_dir():
+        raise ValueError("archive root is missing or a symlink")
+    files = {}
+    for directory, names, filenames in os.walk(output, followlinks=False):
+        for name in names:
+            if (Path(directory) / name).is_symlink():
+                raise ValueError(f"archive symlink directory: {name}")
+        for name in filenames:
+            path = Path(directory) / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"archive symlink or non-file: {path}")
+            relative = path.relative_to(output).as_posix()
+            if relative != "lane-manifest.json":
+                files[relative] = digest(path)
+    return dict(sorted(files.items()))
+
+
+def verify_archive_files(output: Path, recorded: dict[str, str]) -> dict[str, str]:
+    if not isinstance(recorded, dict) or not recorded:
+        raise ValueError("archive file inventory is empty")
+    normalized = set()
+    for name, sha in recorded.items():
+        if not isinstance(name, str) or not isinstance(sha, str):
+            raise ValueError("archive path or hash is unsafe")
+        path = Path(name)
+        if (path.is_absolute() or "\\" in name or
+                not path.parts or any(part in (".", "..") for part in name.split("/")) or
+                path.as_posix() != name or not re.fullmatch(r"[0-9a-f]{64}", sha)):
+            raise ValueError(f"archive path or hash is unsafe: {name}")
+        if path.as_posix() in normalized:
+            raise ValueError(f"duplicate archive path: {name}")
+        normalized.add(path.as_posix())
+    actual = snapshot_archive(output)
+    if set(actual) != set(recorded):
+        raise ValueError("archive file set differs")
+    for name, sha in recorded.items():
+        if actual[name] != sha:
+            raise ValueError(f"archive file hash differs: {name}")
+    return actual
+
+
+def relocate_exception_runs(rows: list[dict], original: Path, output: Path,
+                            jdks: dict[str, Path], area: str = "fixture") -> list[dict]:
+    if area not in ("fixture", "uid-adverse"):
+        raise ValueError("exception process area is unsafe")
+    fixture = original / "exception-serialization" / area
+    copied_fixture = output / "exception-serialization" / area
+    mapped = copy.deepcopy(rows)
+    for row in mapped:
+        operation = row.get("operation")
+        runtime = row.get("runtime")
+        provider = row.get("provider")
+        command = row.get("command")
+        if (operation not in ("ids", "write", "read") or
+                runtime not in jdks or provider not in ("baseline", "jvm", "android") or
+                not isinstance(command, list)):
+            raise ValueError("exception process command is malformed")
+        classpath = os.pathsep.join((str(fixture / "classes" / provider),
+                                     str(fixture / f"{provider}.jar"),
+                                     str(original / "deps/kotlin-stdlib-2.4.20.jar")))
+        expected = [str(jdks[runtime] / "bin/java"), "-cp", classpath,
+                    "ExceptionSerializationProbe", operation]
+        if operation in ("write", "read"):
+            writer_runtime = row.get("writer_runtime")
+            writer_provider = row.get("writer_provider")
+            case = row.get("case")
+            if (writer_runtime not in jdks or writer_provider not in
+                    ("baseline", "jvm", "android") or not isinstance(case, str)):
+                raise ValueError("exception process command is malformed")
+            expected.extend((str(fixture / f"{writer_runtime}-{writer_provider}-{case}.ser"),
+                             case))
+        if command != expected:
+            raise ValueError("exception process command differs from declared archive root")
+        row["command"][2] = os.pathsep.join((str(copied_fixture / "classes" / provider),
+                                              str(copied_fixture / f"{provider}.jar"),
+                                              str(output / "deps/kotlin-stdlib-2.4.20.jar")))
+        if operation in ("write", "read"):
+            row["command"][-2] = str(copied_fixture /
+                                     f"{writer_runtime}-{writer_provider}-{case}.ser")
+    return mapped
+
+
+def declared_archive_root(value: str) -> Path:
+    if not isinstance(value, str):
+        raise ValueError("declared archive root is missing")
+    path = Path(value)
+    if not path.is_absolute() or str(path) != value or any(part == ".." for part in path.parts):
+        raise ValueError("declared archive root is unsafe")
+    return path
+
+
+def archived_json(output: Path, relative: str, expected_sha: str | None = None):
+    path = output / relative
+    if not path.is_file() or path.is_symlink() or (expected_sha and digest(path) != expected_sha):
+        raise ValueError(f"archive JSON is missing or changed: {relative}")
+    return load_json_unique(path.read_text())
+
+
+def verify_portable_corpus(output: Path, evidence: dict, candidate_sha: str,
+                           manifest: dict, hashes: dict[str, str]) -> None:
+    if seal_lanes(output, evidence, candidate_sha) != manifest["files"]:
+        raise ValueError("corpus manifest differs")
+    corpus = evidence["corpus"]
+    if set(corpus) != LANES | {f"{provider}-javac{compiler}" for provider in
+                                   ("baseline", "candidate", "android") for compiler in (8, 21)}:
+        raise ValueError("corpus compile and runtime inventory differs")
+    expected_identities = None
+    for lane in sorted(LANES):
+        row = corpus[lane]
+        report = archived_json(output, row["report"], row["report_sha256"])
+        validate_corpus(report)
+        provider, compiler, runtime = re.fullmatch(
+            r"(baseline|candidate|android)-javac(8|21)-java(8|21)", lane).groups()
+        archive_hash = hashes["baseline"] if provider == "baseline" else hashes[
+            "jvm" if provider == "candidate" else "android"]
+        if (report.get("provider") != provider or report.get("compiler") != int(compiler) or
+                report.get("runtime") != int(runtime) or
+                report.get("archive_sha256") != archive_hash or
+                report.get("xml_sha256") != row["xml_sha256"] or
+                report.get("run_log_sha256") != digest(output / "logs" / f"run-{lane}.log")):
+            raise ValueError(f"corpus process or staged provider differs: {lane}")
+        identities = normalized_cases(validate_xml(output / row["xml"]))
+        identity_hash = hashlib.sha256(json.dumps(sorted(
+            (class_name, name, count) for (class_name, name), count in identities.items()
+        )).encode()).hexdigest()
+        if (identity_hash != row.get("case_id_sha256") or
+                identity_hash != report.get("case_id_sha256") or
+                (expected_identities is not None and identities != expected_identities)):
+            raise ValueError(f"corpus case identities differ: {lane}")
+        expected_identities = identities
+    for provider in ("baseline", "candidate", "android"):
+        for compiler in (8, 21):
+            key = f"{provider}-javac{compiler}"
+            row = corpus[key]
+            if (row.get("compile_exit_code") != 0 or
+                    row.get("compile_log_sha256") != digest(output / "logs" / f"compile-{key}.log")):
+                raise ValueError(f"corpus Java compilation differs: {key}")
+
+
+def verify_portable_inputs(output: Path, evidence: dict) -> dict[str, str]:
+    archives = evidence.get("archives", {})
+    baseline = evidence.get("baseline", {})
+    baseline_report = archived_json(output, "baseline-run.json", baseline.get("run_sha256"))
+    validate_corpus(baseline_report)
+    if (baseline.get("verify_exit_code") != 0 or baseline.get("final_source_check_exit_code") != 0 or
+            baseline.get("source_revision") != "058bf6d982a0fb89b54050f929f6ea9dae53b714" or
+            baseline_report.get("commit") != baseline["source_revision"] or
+            baseline.get("executed_cases") != 2385 or
+            digest(output / "baseline-inventory.json") != baseline.get("inventory_sha256")):
+        raise ValueError("pinned baseline source or execution differs")
+    source = output / "baseline-cache/dyn4j-source"
+    validate_source_inputs(source, baseline_report["test_input_sha256"])
+    if digest(output / "baseline-cache/dyn4j-6.0.0-sources.jar") != (
+            "83b47be47bdce27681139dab84937e0f586b70ab800dc494fbebed4b58893223"):
+        raise ValueError("pinned baseline source archive differs")
+    baseline_jar = output / "baseline-cache/dyn4j-6.0.0.jar"
+    if digest(baseline_jar) != BASELINE_SHA:
+        raise ValueError("pinned baseline binary differs")
+    files = {
+        "jvm": output / "archives" / f"dyn4k-core-jvm-{VERSION}.jar",
+        "android_aar": output / "archives" / f"dyn4k-core-android-{VERSION}.aar",
+        "android": output / "android-classes.jar",
+        "stdlib": output / "deps/kotlin-stdlib-2.4.20.jar",
+        "annotations": output / "deps/annotations-13.0.jar",
+        "junit": output / "baseline-cache/deps/junit-4.13.1.jar",
+        "hamcrest": output / "baseline-cache/deps/hamcrest-core-1.3.jar",
+    }
+    fields = {"jvm": "staged_jvm_jar", "android_aar": "staged_android_aar",
+              "android": "staged_android_classes_jar", "stdlib": "kotlin_stdlib",
+              "annotations": "annotations", "junit": "junit-4.13.1.jar",
+              "hamcrest": "hamcrest-core-1.3.jar"}
+    for name, path in files.items():
+        if not path.is_file() or digest(path) != archives.get(fields[name]):
+            raise ValueError(f"staged or dependency archive differs: {name}")
+    if archives["kotlin_stdlib"] != STDLIB_SHA or archives["annotations"] != ANNOTATIONS_SHA:
+        raise ValueError("Kotlin dependency archive differs")
+    for name in ("jvm", "android_aar"):
+        sidecar = files[name].with_name(files[name].name + ".sha256")
+        if sidecar.read_text().strip().lower() != digest(files[name]):
+            raise ValueError(f"staged archive sidecar differs: {name}")
+    with zipfile.ZipFile(files["android_aar"]) as aar:
+        if aar.namelist().count("classes.jar") != 1 or aar.read("classes.jar") != files[
+                "android"].read_bytes():
+            raise ValueError("Android classes.jar differs from staged AAR")
+    if digest(ROOT / "tools/compatibility/PinnedCorpusReport.java") != archives.get(
+            "corpus_harness_source"):
+        raise ValueError("corpus harness source differs")
+    return {"baseline": BASELINE_SHA, "jvm": archives["staged_jvm_jar"],
+            "android": archives["staged_android_classes_jar"]}
+
+
+def verify_portable_audits(output: Path, evidence: dict, hashes: dict[str, str]) -> None:
+    if set(evidence.get("audits", {})) != {"jvm", "android"}:
+        raise ValueError("strict audit inventory differs")
+    for name in ("jvm", "android"):
+        row = evidence["audits"][name]
+        if row.get("status") != "PASSED" or row.get("report") != f"audit-{name}.json":
+            raise ValueError(f"strict audit status differs: {name}")
+        validate_audit(archived_json(output, row["report"], row["report_sha256"]), hashes[name])
+    projection = evidence.get("source_projection", {})
+    if projection.get("exit_code") != 0 or projection.get("observations") != 12:
+        raise ValueError("source projection status differs")
+    report = archived_json(output, "projection/result.json", projection.get("report_sha256"))
+    if digest(PROJECTION / "frozen-adverse-audit.json") != ADVERSE_AUDIT_SHA:
+        raise ValueError("frozen adverse audit source differs")
+    validate_projection(report, output / "projection", PROJECTION, hashes, ADVERSE_AUDIT_SHA)
+
+
+def verify_exception_process_metadata(report: dict, original: Path, output: Path,
+                                      source_root: Path, jdks: dict[str, Path],
+                                      hashes: dict[str, str], area: str) -> list[dict]:
+    original_work = original / "exception-serialization" / area
+    work = output / "exception-serialization" / area
+    providers = report.get("providers")
+    if not isinstance(providers, dict) or set(providers) != set(exception_ci.PROVIDERS):
+        raise ValueError("exception provider inventory differs")
+    source_files = {"baseline": original / "baseline-cache/dyn4j-6.0.0.jar",
+                    "jvm": original / "archives" / f"dyn4k-core-jvm-{VERSION}.jar",
+                    "android": original / "android-classes.jar"}
+    if area == "uid-adverse":
+        source_files["jvm"] = original / "exception-serialization/uid-mutant.jar"
+    for provider in exception_ci.PROVIDERS:
+        row = providers[provider]
+        if (row != {"source": str(source_files[provider]),
+                    "path": str(original_work / f"{provider}.jar"),
+                    "sha256": hashes[provider]} or
+                digest(work / f"{provider}.jar") != hashes[provider]):
+            raise ValueError(f"exception provider archive differs: {area} {provider}")
+        compile_row = report["compiles"][provider]
+        command = [str(jdks["jdk8"] / "bin/javac"), "-cp",
+                   str(original_work / f"{provider}.jar"), "-d",
+                   str(original_work / "classes" / provider),
+                   str(source_root / "tools/compatibility/fixtures/exception_serialization/"
+                       "ExceptionSerializationProbe.java")]
+        if compile_row.get("exit") != 0 or compile_row.get("command") != command:
+            raise ValueError(f"exception Java 8 compile command differs: {area} {provider}")
+    if set(report.get("versions", {})) != set(jdks):
+        raise ValueError("exception runtime inventory differs")
+    for runtime, row in report["versions"].items():
+        if (row.get("exit") != 0 or row.get("command") !=
+                [str(jdks[runtime] / "bin/java"), "-version"]):
+            raise ValueError("exception runtime command differs")
+    identities = report.get("identities")
+    if not isinstance(identities, list) or len(identities) != 27:
+        raise ValueError("exception UID process inventory differs")
+    for row in identities:
+        provider = row.get("provider")
+        name = row.get("type")
+        if provider not in hashes or not isinstance(name, str):
+            raise ValueError("exception UID process identity differs")
+        command = [str(jdks["jdk21"] / "bin/javap"), "-p", "-constants",
+                   "-classpath", str(original_work / f"{provider}.jar"), name]
+        if row.get("exit") != 0 or row.get("command") != command:
+            raise ValueError("exception UID process command differs")
+    return relocate_exception_runs(report["runs"], original, output, jdks, area)
+
+
+def verify_portable_exception(output: Path, original: Path, evidence: dict,
+                              manifest: dict, hashes: dict[str, str],
+                              jdks: dict[str, Path]) -> None:
+    root = output / "exception-serialization"
+    summary_row = evidence.get("exception_serialization", {})
+    if summary_row.get("exit_code") != 0:
+        raise ValueError("exception gate did not pass")
+    summary = archived_json(output, "exception-serialization/result.json",
+                            summary_row.get("report_sha256"))
+    if (summary.get("status") != "PASSED" or summary.get("errors") != [] or
+            summary.get("providers") != hashes or
+            set(summary.get("adverse", {})) != {"uid", "payload"}):
+        raise ValueError("exception summary or provider identity differs")
+    fixture_sha = summary["fixture"]["report_sha256"]
+    fixture = archived_json(output, "exception-serialization/fixture/result.json", fixture_sha)
+    if (summary["fixture"].get("processes") != 636 or
+            summary["fixture"].get("identities") != 27 or
+            summary["fixture"].get("stream_count") != 90 or
+            summary["public_api"].get("observations") != 18):
+        raise ValueError("exception fixture inventory differs")
+    source_root = declared_archive_root(manifest.get("source_root"))
+    normalized = copy.deepcopy(fixture)
+    normalized["runs"] = verify_exception_process_metadata(
+        fixture, original, output, source_root, jdks, hashes, "fixture")
+    validate_exception_report(normalized, root / "fixture", hashes,
+                              exception_ci.PROBE_SHA, exception_ci.DRIVER_SHA, STDLIB_SHA)
+
+    paths = {"result.json", "fixture/result.json"}
+    for provider, expected in hashes.items():
+        relative = f"fixture/{provider}.jar"
+        if digest(root / relative) != expected:
+            raise ValueError(f"exception frozen provider archive differs: {provider}")
+        paths.add(relative)
+    paths.update(f"fixture/{path.name}" for path in (root / "fixture").glob("*.ser"))
+
+    public = archived_json(output, "exception-serialization/public-api/result.json",
+                           summary["public_api"]["report_sha256"])
+    golden = load_json_unique(exception_ci.GOLDEN.read_text())
+    expected_public = {f"{provider}:{name}" for provider in ("jvm", "android")
+                       for name in golden["types"]}
+    if (public.get("reference_sha256") != digest(exception_ci.GOLDEN) or
+            set(public.get("observations", {})) != expected_public or
+            len(expected_public) != 18):
+        raise ValueError("exception public API projection differs")
+    paths.add("public-api/result.json")
+    for key, expected in public["observations"].items():
+        provider, name = key.split(":", 1)
+        relative = f"public-api/{provider}-{name.rsplit('.', 1)[-1]}.txt"
+        if digest(root / relative) != expected:
+            raise ValueError(f"exception public API output differs: {key}")
+        paths.add(relative)
+
+    uid = summary["adverse"]["uid"]
+    uid_report = archived_json(output, "exception-serialization/uid-adverse/result.json",
+                               uid["report_sha256"])
+    mutant = root / "uid-mutant.jar"
+    if (uid_report.get("passed") is not False or uid_report.get("failure_count") != 19 or
+            uid.get("failure_count") != 19 or len(uid_report.get("runs", [])) != 636 or
+            digest(mutant) != uid.get("mutant_sha256") or
+            uid_report.get("providers", {}).get("jvm", {}).get("sha256") != digest(mutant)):
+        raise ValueError("exception UID adverse control differs")
+    adverse_hashes = {**hashes, "jvm": digest(mutant)}
+    adverse_runs = verify_exception_process_metadata(
+        uid_report, original, output, source_root, jdks, adverse_hashes, "uid-adverse")
+    identity_keys = {(row.get("provider"), row.get("type"))
+                     for row in uid_report["identities"]}
+    nominal_keys = {(row.get("provider"), row.get("type"))
+                    for row in fixture["identities"]}
+    if (uid_report.get("cases") != fixture.get("cases") or
+            len(identity_keys) != 27 or identity_keys != nominal_keys or
+            sum(row.get("matches") is False for row in uid_report["identities"]) != 1 or
+            sum(row.get("matches") is False for row in adverse_runs) != 18):
+        raise ValueError("exception UID adverse process inventory differs")
+    def run_key(row):
+        return tuple(row.get(name) for name in ("operation", "runtime", "provider",
+                                                "writer_runtime", "writer_provider", "case"))
+    if ({run_key(row) for row in adverse_runs} != {run_key(row) for row in normalized["runs"]} or
+            len({run_key(row) for row in adverse_runs}) != 636):
+        raise ValueError("exception UID adverse process keys differ")
+    for row in adverse_runs:
+        if row["operation"] == "write":
+            stream = Path(row["command"][-2])
+            if digest(stream) != row.get("stream_sha256"):
+                raise ValueError("exception UID adverse stream differs")
+    paths.update(("uid-adverse/result.json", "uid-mutant.jar"))
+    payload = summary["adverse"]["payload"]
+    if (digest(root / "payload-mutant.ser") != payload.get("mutant_sha256") or
+            digest(root / "payload-adverse.log") != payload.get("read_log_sha256") or
+            payload.get("validator_rejection") != "exception payload differs from pinned baseline" or
+            "CAUSE=java.lang.IllegalStateException:cauze" not in
+            (root / "payload-adverse.log").read_text()):
+        raise ValueError("exception payload adverse control differs")
+    paths.update(("payload-mutant.ser", "payload-adverse.log"))
+    actual_files = {path.relative_to(root).as_posix(): digest(path) for path in root.rglob("*")
+                    if path.is_file() and path.relative_to(root).as_posix() in paths}
+    if len(paths) != 118 or actual_files != manifest["exception_files"]:
+        raise ValueError("exception raw file set or hashes differ")
+
+
+def verify_portable_world(output: Path, original: Path, evidence: dict,
+                          manifest: dict, hashes: dict[str, str]) -> dict[str, Path]:
+    work = output / "logs/world-fixtures"
+    original_work = original / "logs/world-fixtures"
+    row = evidence.get("world_fixtures", {})
+    if (row.get("exit_code") != 0 or row.get("executions") != 138 or
+            row.get("modes") != 23 or row.get("sources") != 12 or row.get("files") != 299):
+        raise ValueError("World fixture summary differs")
+    report = archived_json(output, "logs/world-fixtures/result.json", row.get("report_sha256"))
+    if (report.get("status") != "PASSED" or
+            report.get("candidate_sha") != evidence["candidate_sha"] or
+            report.get("frozen_commit") != world_ci.FROZEN_COMMIT or
+            report.get("source_sha256") != world_ci.SOURCE_SHA or
+            report.get("artifacts") != hashes or
+            report.get("bad_archive_sha256") != world_ci.BAD_ARCHIVE_SHA):
+        raise ValueError("World source, artifact, or candidate identity differs")
+    world_ci.validate_sources(world_ci.SOURCE_ROOT, world_ci.SOURCE_SHA)
+    world_ci.validate_sources(work / "sources", world_ci.SOURCE_SHA)
+    for provider, sha in hashes.items():
+        if digest(work / "archives" / f"{provider}.jar") != sha:
+            raise ValueError(f"World frozen provider archive differs: {provider}")
+    bad = work / "archives/bad-body-view-bc71.jar"
+    if digest(bad) != world_ci.BAD_ARCHIVE_SHA:
+        raise ValueError("World adverse archive differs")
+    tools = report.get("tools", {})
+    for name, prefix in (("javac8", "javac 1.8"), ("java8", 'openjdk version "1.8'),
+                         ("java21", 'openjdk version "21')):
+        if not isinstance(tools.get(name), str) or not tools[name].startswith(prefix):
+            raise ValueError(f"World recorded JDK version differs: {name}")
+    jdks = report.get("jdks")
+    if not isinstance(jdks, dict) or set(jdks) != {"jdk8", "jdk21"}:
+        raise ValueError("World recorded JDK paths differ")
+    jdks = {name: declared_archive_root(path) for name, path in jdks.items()}
+    if report.get("stdlib") != {"path": str(original / "deps/kotlin-stdlib-2.4.20.jar"),
+                                 "sha256": STDLIB_SHA}:
+        raise ValueError("World recorded Kotlin standard library differs")
+    if not isinstance(report.get("compiles"), dict) or set(report["compiles"]) != set(
+            world_ci.PROVIDERS):
+        raise ValueError("World Java 8 compile inventory differs")
+    sources = [str(original_work / "sources" / name) for name in world_ci.SOURCE_SHA]
+    for provider in world_ci.PROVIDERS:
+        compile_row = report["compiles"][provider]
+        relative = f"compiles/{provider}.json"
+        raw = archived_json(work, relative, compile_row.get("log_sha256"))
+        expected = [str(jdks["jdk8"] / "bin/javac"), "-cp",
+                    str(original_work / "archives" / f"{provider}.jar"), "-d",
+                    str(original_work / "classes" / provider), *sources]
+        if (compile_row.get("log") != relative or compile_row.get("exit") != 0 or
+                raw.get("exit") != 0 or raw.get("command") != expected):
+            raise ValueError(f"World Java 8 compile command differs: {provider}")
+    baseline_outputs = world_ci.validate_runs(report.get("runs"), work)
+    for run_row in report["runs"]:
+        provider, runtime, main, mode = (run_row[key] for key in
+                                         ("provider", "runtime", "main", "mode"))
+        raw = archived_json(work, run_row["log"], run_row["log_sha256"])
+        classpath = os.pathsep.join((str(original_work / "classes" / provider),
+                                     str(original_work / "archives" / f"{provider}.jar"),
+                                     str(original / "deps/kotlin-stdlib-2.4.20.jar")))
+        expected = [str(jdks[runtime] / "bin/java"), "-cp", classpath, main]
+        if mode is not None:
+            expected.append(mode)
+        if raw.get("command") != expected or raw.get("stderr") != "":
+            raise ValueError("World process command or stderr differs")
+    adverse_compile = archived_json(work, "compiles/bad-body-view.json")
+    bad_source = original_work / "sources/org/dyn4j/world/WorldSerializableViewsConsumer.java"
+    expected_compile = [str(jdks["jdk8"] / "bin/javac"), "-cp",
+                        str(original_work / "archives/bad-body-view-bc71.jar"), "-d",
+                        str(original_work / "classes/bad-body-view"), str(bad_source)]
+    if adverse_compile.get("exit") != 0 or adverse_compile.get("command") != expected_compile:
+        raise ValueError("World adverse compile command differs")
+    adverse = report.get("adverse")
+    if not isinstance(adverse, dict) or set(adverse) != {"jdk8", "jdk21"}:
+        raise ValueError("World adverse runtime inventory differs")
+    for runtime, adverse_row in adverse.items():
+        relative = f"adverse/{runtime}.json"
+        raw = archived_json(work, relative, adverse_row.get("log_sha256"))
+        classpath = os.pathsep.join((str(original_work / "classes/bad-body-view"),
+                                     str(original_work / "archives/bad-body-view-bc71.jar"),
+                                     str(original / "deps/kotlin-stdlib-2.4.20.jar")))
+        expected = [str(jdks[runtime] / "bin/java"), "-cp", classpath,
+                    "org.dyn4j.world.WorldSerializableViewsConsumer"]
+        if (adverse_row.get("log") != relative or adverse_row.get("exit") != 0 or
+                raw.get("exit") != 0 or raw.get("command") != expected or
+                raw.get("stderr") != ""):
+            raise ValueError(f"World adverse process differs: {runtime}")
+        world_ci.validate_adverse_output(baseline_outputs[(
+            runtime, "org.dyn4j.world.WorldSerializableViewsConsumer", None)], raw["stdout"])
+    files = world_ci.seal_files(work, report.get("files"))
+    if {"result.json": row["report_sha256"], **files} != manifest["world_files"]:
+        raise ValueError("World raw file set or hashes differ")
+    return jdks
 
 
 def validate_corpus(report: dict) -> None:
@@ -559,7 +1023,9 @@ def seal_main() -> int:
     args = parser.parse_args(sys.argv[2:])
     output = args.output.resolve()
     manifest = {"candidate_sha": args.candidate_sha, "status": "FAILED",
-                "files": {}, "exception_files": {}, "world_files": {}, "error": None}
+                "files": {}, "exception_files": {}, "world_files": {},
+                "archive_root": str(output), "source_root": str(ROOT),
+                "archive_files": {}, "error": None}
     try:
         evidence = json.loads((output / "result.json").read_text())
         manifest["files"] = seal_lanes(output, evidence, args.candidate_sha)
@@ -575,6 +1041,7 @@ def seal_main() -> int:
              "jvm": evidence["archives"]["staged_jvm_jar"],
              "android": evidence["archives"]["staged_android_classes_jar"]},
             evidence["world_fixtures"]["report_sha256"])
+        manifest["archive_files"] = snapshot_archive(output)
         manifest["status"] = "PASSED"
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         manifest["error"] = str(error)
@@ -592,5 +1059,57 @@ def seal_main() -> int:
     return 0 if manifest["status"] == "PASSED" else 1
 
 
+def verify_archive(output: Path, candidate_sha: str,
+                   manifest_sha: str | None = None) -> dict[str, int]:
+    manifest_path = output / "lane-manifest.json"
+    if manifest_sha is not None and digest(manifest_path) != manifest_sha:
+        raise ValueError("archive manifest SHA-256 differs")
+    manifest = load_json_unique(manifest_path.read_text())
+    if (manifest.get("status") != "PASSED" or manifest.get("error") is not None or
+            manifest.get("candidate_sha") != candidate_sha):
+        raise ValueError("archive manifest is not passing at candidate SHA")
+    original = declared_archive_root(manifest.get("archive_root"))
+    inventory = verify_archive_files(output, manifest.get("archive_files"))
+    for name in inventory:
+        if name.endswith(".json"):
+            archived_json(output, name)
+    evidence = archived_json(output, "result.json")
+    if (evidence.get("status") != "PASSED" or evidence.get("errors") != [] or
+            evidence.get("candidate_sha") != candidate_sha):
+        raise ValueError("full compatibility result is not passing at candidate SHA")
+    for field, expected, prefix in (("files", 24, ""),
+                                    ("exception_files", 118, "exception-serialization/"),
+                                    ("world_files", 299, "logs/world-fixtures/")):
+        recorded = manifest.get(field)
+        if not isinstance(recorded, dict) or len(recorded) != expected or any(
+                inventory.get(prefix + name) != sha for name, sha in recorded.items()):
+            raise ValueError(f"archive {field} files differ")
+    hashes = verify_portable_inputs(output, evidence)
+    verify_portable_audits(output, evidence, hashes)
+    verify_portable_corpus(output, evidence, candidate_sha, manifest, hashes)
+    jdks = verify_portable_world(output, original, evidence, manifest, hashes)
+    verify_portable_exception(output, original, evidence, manifest, hashes, jdks)
+    return {"files": len(inventory), "corpus_files": 24,
+            "exception_files": 118, "world_files": 299}
+
+
+def verify_main() -> int:
+    parser = argparse.ArgumentParser(description="Verify a relocated full compatibility archive.")
+    parser.add_argument("--candidate-sha", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--manifest-sha256")
+    args = parser.parse_args(sys.argv[2:])
+    try:
+        result = verify_archive(args.output.absolute(), args.candidate_sha,
+                                args.manifest_sha256)
+        print(json.dumps({"status": "PASSED", **result}, indent=2))
+        return 0
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError,
+            ET.ParseError, zipfile.BadZipFile, json.JSONDecodeError) as error:
+        print(json.dumps({"status": "FAILED", "error": str(error)}, indent=2))
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(seal_main() if sys.argv[1:2] == ["seal"] else main())
+    raise SystemExit(seal_main() if sys.argv[1:2] == ["seal"] else
+                     verify_main() if sys.argv[1:2] == ["verify"] else main())

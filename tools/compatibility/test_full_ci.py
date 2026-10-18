@@ -3,6 +3,7 @@ import tempfile
 import json
 import hashlib
 import io
+import shutil
 import xml.etree.ElementTree as ET
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -14,6 +15,88 @@ from test_world_ci import WorldCiTest
 
 
 class FullCiEvidenceTest(unittest.TestCase):
+    def test_archive_file_inventory_survives_copy_and_rejects_changed_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / 'original'
+            original.mkdir()
+            (original / 'fixture').mkdir()
+            (original / 'fixture/stream.ser').write_bytes(b'pinned stream')
+            (original / 'result.json').write_text('{"status":"PASSED"}')
+            recorded = full_ci.snapshot_archive(original)
+            copied = Path(directory) / 'copied'
+            shutil.copytree(original, copied)
+            full_ci.verify_archive_files(copied, recorded)
+            stream = copied / 'fixture/stream.ser'
+            stream.write_bytes(b'changed stream')
+            with self.assertRaisesRegex(ValueError, 'archive file hash'):
+                full_ci.verify_archive_files(copied, recorded)
+            stream.write_bytes(b'pinned stream')
+            (copied / 'extra').write_bytes(b'extra')
+            with self.assertRaisesRegex(ValueError, 'archive file set'):
+                full_ci.verify_archive_files(copied, recorded)
+            (copied / 'extra').unlink()
+            stream.unlink()
+            stream.symlink_to(original / 'fixture/stream.ser')
+            with self.assertRaisesRegex(ValueError, 'symlink'):
+                full_ci.verify_archive_files(copied, recorded)
+
+    def test_archive_manifest_rejects_duplicate_and_traversal_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / 'result.json').write_text('{}')
+            sha = hashlib.sha256(b'{}').hexdigest()
+            for inventory in ({'../result.json': sha}, {'/tmp/result.json': sha},
+                              {'folder\\..\\result.json': sha},
+                              {'result.json': sha, './result.json': sha}):
+                with self.subTest(inventory=inventory), self.assertRaisesRegex(
+                        ValueError, 'archive path or hash is unsafe'):
+                    full_ci.verify_archive_files(output, inventory)
+            duplicate = '{"files":{"result.json":"a","result.json":"b"}}'
+            with self.assertRaisesRegex(ValueError, 'duplicate JSON key'):
+                full_ci.load_json_unique(duplicate)
+
+    def test_exception_process_paths_map_only_declared_output_root(self):
+        original = Path('/frozen/output')
+        copied = Path('/downloaded/output')
+        row = {'operation': 'write', 'runtime': 'jdk8', 'provider': 'jvm',
+               'writer_runtime': 'jdk8', 'writer_provider': 'jvm',
+               'case': 'ArgumentNullException',
+               'command': ['/jdk8/bin/java', '-cp',
+                           '/frozen/output/exception-serialization/fixture/classes/jvm:'
+                           '/frozen/output/exception-serialization/fixture/jvm.jar:'
+                           '/frozen/output/deps/kotlin-stdlib-2.4.20.jar',
+                           'ExceptionSerializationProbe', 'write',
+                           '/frozen/output/exception-serialization/fixture/'
+                           'jdk8-jvm-ArgumentNullException.ser', 'ArgumentNullException']}
+        mapped = full_ci.relocate_exception_runs([row], original, copied,
+                                                 {'jdk8': Path('/jdk8')})
+        self.assertEqual(mapped[0]['command'][-2],
+                         '/downloaded/output/exception-serialization/fixture/'
+                         'jdk8-jvm-ArgumentNullException.ser')
+        self.assertEqual(row['command'][-2],
+                         '/frozen/output/exception-serialization/fixture/'
+                         'jdk8-jvm-ArgumentNullException.ser')
+        changed = {**row, 'command': [*row['command'][:-2],
+                                     '/elsewhere/jdk8-jvm-ArgumentNullException.ser',
+                                     'ArgumentNullException']}
+        with self.assertRaisesRegex(ValueError, 'exception process command'):
+            full_ci.relocate_exception_runs([changed], original, copied,
+                                            {'jdk8': Path('/jdk8')})
+        swapped = {**row, 'command': [row['command'][0], '-cp',
+                                      row['command'][2].replace('/classes/jvm:', '/classes/android:'),
+                                      *row['command'][3:]]}
+        with self.assertRaisesRegex(ValueError, 'exception process command'):
+            full_ci.relocate_exception_runs([swapped], original, copied,
+                                            {'jdk8': Path('/jdk8')})
+        adverse = {**row, 'command': [part.replace(
+            '/exception-serialization/fixture/', '/exception-serialization/uid-adverse/')
+            for part in row['command']]}
+        adverse_mapped = full_ci.relocate_exception_runs(
+            [adverse], original, copied, {'jdk8': Path('/jdk8')}, 'uid-adverse')
+        self.assertEqual(adverse_mapped[0]['command'][-2],
+                         '/downloaded/output/exception-serialization/uid-adverse/'
+                         'jdk8-jvm-ArgumentNullException.ser')
+
     def test_parameter_groups_keep_types_indices_and_complete_methods(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'corpus.xml'
