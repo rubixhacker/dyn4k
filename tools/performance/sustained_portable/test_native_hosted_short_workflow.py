@@ -19,6 +19,7 @@ RUN_EXPRESSION_LIMIT = 21000
 # After a workflow edit, independently parse every run value before updating its digest.
 AUDITED_WORKFLOW_SHA256 = {
     "full-hosted-mac-product-diagnostic.yml": "cef244e7f6ee8864313754dbd030e20fa34ec6d43dc3742b66b1b9f3a4191405",
+    "full-hosted-safari-product-diagnostic.yml": "08036865fe9c8cccedda7faab46900482ef6b949c67cb79df8754ea5f97adf58",
     "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
     "performance-host-capacity-control.yml": "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6",
     "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
