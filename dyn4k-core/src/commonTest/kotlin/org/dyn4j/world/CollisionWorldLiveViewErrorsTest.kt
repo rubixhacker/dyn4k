@@ -12,7 +12,17 @@ import org.dyn4j.world.listener.BoundsListenerAdapter
 import org.dyn4j.world.listener.CollisionListener
 import org.dyn4j.world.listener.CollisionListenerAdapter
 
+internal expect fun worldNestedViewAllowsReadAfterChange(): Boolean
+
 class CollisionWorldLiveViewErrorsTest {
+    private fun <T> assertNestedViewMatchesRuntime(view: List<T>, readableElement: T) {
+        if (worldNestedViewAllowsReadAfterChange()) {
+            assertSame(readableElement, view[0])
+        } else {
+            assertFailsWith<ConcurrentModificationException> { view[0] }
+        }
+    }
+
     @Test
     fun emptyBodyViewRejectsEveryListMutation() {
         val world = World<Body>()
@@ -111,8 +121,10 @@ class CollisionWorldLiveViewErrorsTest {
 
         val child = subList.subList(0, 1)
         val grandchild = nestedSubList.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
-        assertFailsWith<ConcurrentModificationException> { grandchild[0] }
+        assertFailsWith<ConcurrentModificationException> { subList.size }
+        assertFailsWith<ConcurrentModificationException> { nestedSubList.size }
+        assertNestedViewMatchesRuntime(child, first)
+        assertNestedViewMatchesRuntime(grandchild, first)
         assertSame(first, view.subList(0, 1).subList(0, 1)[0])
     }
 
@@ -142,7 +154,8 @@ class CollisionWorldLiveViewErrorsTest {
 
         assertEquals(1, view.size)
         val child = subList.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
+        assertFailsWith<ConcurrentModificationException> { subList.size }
+        assertNestedViewMatchesRuntime(child, view[0])
     }
 
     @Test
@@ -156,7 +169,8 @@ class CollisionWorldLiveViewErrorsTest {
         world.addBoundsListener(BoundsListenerAdapter())
 
         val child = stale.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
+        assertFailsWith<ConcurrentModificationException> { stale.size }
+        assertNestedViewMatchesRuntime(child, first)
         assertFailsWith<UnsupportedOperationException> { child.add(first) }
         assertSame(view, world.getBoundsListeners())
         assertSame(first, view[0])
@@ -175,7 +189,8 @@ class CollisionWorldLiveViewErrorsTest {
         world.addBoundsListener(second)
 
         val child = stale.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
+        assertFailsWith<ConcurrentModificationException> { stale.size }
+        assertNestedViewMatchesRuntime(child, second)
         assertFailsWith<UnsupportedOperationException> { child.add(first) }
         assertSame(second, view[0])
     }
@@ -191,7 +206,8 @@ class CollisionWorldLiveViewErrorsTest {
         world.addCollisionListener(CollisionListenerAdapter())
 
         val child = stale.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
+        assertFailsWith<ConcurrentModificationException> { stale.size }
+        assertNestedViewMatchesRuntime(child, first)
         assertFailsWith<UnsupportedOperationException> { child.add(first) }
         assertSame(view, world.getCollisionListeners())
         assertSame(first, view[0])
@@ -210,7 +226,8 @@ class CollisionWorldLiveViewErrorsTest {
         world.addCollisionListener(second)
 
         val child = stale.subList(0, 1)
-        assertFailsWith<ConcurrentModificationException> { child[0] }
+        assertFailsWith<ConcurrentModificationException> { stale.size }
+        assertNestedViewMatchesRuntime(child, second)
         assertFailsWith<UnsupportedOperationException> { child.add(first) }
         assertSame(second, view[0])
     }

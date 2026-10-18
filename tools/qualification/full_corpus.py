@@ -376,7 +376,8 @@ def scan_test_tree(repository):
     repository = Path(repository)
     files = []
     for module in ("dyn4k-core", "dyn4k"):
-        for source_set in ("commonTest", "jvmTest"):
+        for source_set in ("commonTest", "jvmTest", "androidHostTest", "jsTest",
+                           "nativeTest", "wasmJsTest", "wasmWasiTest"):
             root = repository / module / "src" / source_set
             for path in sorted(root.rglob("*")):
                 if path.is_file():

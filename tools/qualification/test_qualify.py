@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 import qualify
 
@@ -704,6 +705,48 @@ class QualificationTests(unittest.TestCase):
             change(altered)
             with self.assertRaisesRegex(ValueError, "complete suite"):
                 qualify.validate_complete_suite_bindings(altered, repository)
+
+    def test_complete_suite_seal_binds_originals_and_world_runtime_helper(self):
+        import full_suite_manifest
+
+        repository = Path(__file__).resolve().parents[2]
+        suite = json.loads((repository / full_suite_manifest.MANIFEST_PATH).read_text())
+        corpus = json.loads((repository / full_suite_manifest.CORPUS_PATH).read_text())
+        self.assertEqual(2515, len(suite["cases"]))
+        self.assertEqual(2515, len({case["id"] for case in suite["cases"]}))
+        self.assertEqual(2515, len(corpus["cases"]))
+        self.assertEqual(2385, len(corpus["original_mappings"]))
+        self.assertEqual(2385, len({row["original"] for row in corpus["original_mappings"]}))
+        self.assertEqual(199, len(corpus["source_files"]))
+        self.assertEqual("bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240",
+                         qualify.manifest_digest(suite))
+        full_suite_manifest.validate_manifest(suite, repository)
+        qualify.validate_complete_suite_bindings(suite, repository)
+
+        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
+                               "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"):
+            with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
+                qualify.validate_complete_suite_bindings(suite, repository)
+
+        helper = "dyn4k-core/src/jsTest/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt"
+        self.assertIn(helper, {item["path"] for item in corpus["source_files"]})
+        copied = [full_suite_manifest.CORPUS_PATH,
+                  "tools/qualification/full-common-original-map.tsv",
+                  "tools/qualification/full-common-reviewed-pairs.tsv"]
+        copied += [item["path"] for item in corpus["source_files"]]
+        copied += [path for paths in full_suite_manifest.GATE_SOURCES.values()
+                   for path in paths]
+        with tempfile.TemporaryDirectory() as scratch:
+            clone = Path(scratch)
+            for relative in set(copied):
+                target = clone / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((repository / relative).read_bytes())
+            full_suite_manifest.validate_manifest(suite, clone)
+            changed = clone / helper
+            changed.write_bytes(changed.read_bytes() + b"\n")
+            with self.assertRaisesRegex(ValueError, "source"):
+                full_suite_manifest.validate_manifest(suite, clone)
 
     def test_full_lane_requires_each_independent_gate_receipt(self):
         case = next(row for row in qualify.expand(qualify.matrix())
