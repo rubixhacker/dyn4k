@@ -1,8 +1,11 @@
 import copy
+import io
 import unittest
+import zipfile
 from unittest.mock import patch
 
-from actual_arithmetic import CaptureRejected, make_capture_receipt, verify_capture_receipt
+from actual_arithmetic import (CaptureRejected, _ROOT, _STAGED_JAR, make_capture_receipt,
+                               verify_capture_receipt)
 from test_actual_arithmetic import fixture, xml_for
 
 
@@ -20,11 +23,21 @@ class CaptureReceiptTest(unittest.TestCase):
                "worker.org.gradle.process.internal.worker.GradleWorkerMain\n"
                "BUILD SUCCESSFUL\n").encode()
         execve = (f'123 execve("{runtime}", ["{runtime}", '
+                  '"@/tmp/gradle-worker-classpath1txt", '
                   '"worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n').encode()
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as classes:
+            for name in ("main/portable/NumericalRecorder.class",
+                         "test/portable/ProspectiveArithmeticTest.class",
+                         "test/portable/PortableMatrixTest.class"):
+                classes.writestr(name, b"class")
+        class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
         files = {"xml": xml, "stage_log": b"BUILD SUCCESSFUL\n",
                  "gradle_log": log, "execve_log": execve,
                  "artifact": b"artifact", "runtime": b"runtime", "source": b"source",
-                 "worker_classpath": b"-cp /tmp/dyn4k-core-jvm-0.1.jar\n"}
+                 "worker_classpath": (f"-cp\n{_STAGED_JAR}:{class_root / 'main'}:"
+                                      f"{class_root / 'test'}\n").encode(),
+                 "portable_classes": payload.getvalue()}
         receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
                                        ["geometry-boundary-s0-o0-d0"], runtime)
         return receipt, files, runtime
@@ -39,7 +52,8 @@ class CaptureReceiptTest(unittest.TestCase):
 
     def test_stale_bytes_source_artifact_trace_and_runtime_fail(self):
         for key in ("xml", "stage_log", "gradle_log", "execve_log",
-                    "artifact", "runtime", "source", "worker_classpath"):
+                    "artifact", "runtime", "source", "worker_classpath",
+                    "portable_classes"):
             receipt, files, runtime = self.fixture()
             files[key] += b"tamper"
             with self.subTest(key=key), self.assertRaises(CaptureRejected):

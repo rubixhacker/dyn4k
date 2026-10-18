@@ -1,8 +1,10 @@
 import hashlib
+import io
 import json
 import re
 import struct
 import subprocess
+import zipfile
 from pathlib import Path
 from xml.parsers import expat
 
@@ -377,8 +379,10 @@ def verify_capture(xml, method, expected_ids=None):
 
 
 _RECEIPT_FILES = {"xml", "stage_log", "gradle_log", "execve_log", "artifact", "runtime",
-                  "source", "worker_classpath"}
+                  "source", "worker_classpath", "portable_classes"}
 _ROOT = Path(__file__).resolve().parents[3]
+_STAGED_JAR = (_ROOT / "build/staging-repository/io/github/rubixhacker/"
+               "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
 
 
 def _sha(value):
@@ -414,11 +418,31 @@ def _check_process(files, runtime_executable):
                          r'",.*GradleWorkerMain.*\)\s+=\s+0$')
     if sum(bool(pattern.search(line)) for line in executions.splitlines()) != 1:
         raise CaptureRejected("executed JVM worker identity differs")
-    if not re.search(r"-cp\s+\S*dyn4k-core-jvm[^\s]*\.jar", worker_classpath) and \
-            "dyn4k-core-jvm" not in worker_classpath:
+    arguments = worker_classpath.splitlines()
+    if len(arguments) < 2 or arguments[0] != "-cp" or \
+            str(_STAGED_JAR) not in arguments[1].split(":"):
         raise CaptureRejected("executed worker classpath omits staged engine")
-    if "-cp " not in worker_classpath or \
-            not re.search(r"@/[^\s]+gradle-worker-classpath[^\s]+txt", log):
+    classpath = arguments[1].split(":")
+    class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
+    if any(str(class_root / source_set) not in classpath
+           for source_set in ("main", "test")):
+        raise CaptureRejected("executed worker classpath omits portable classes")
+    try:
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
+            entries = classes.namelist()
+            names = set(entries)
+            if not {"main/portable/NumericalRecorder.class",
+                    "test/portable/ProspectiveArithmeticTest.class",
+                    "test/portable/PortableMatrixTest.class"} <= names or \
+                    len(entries) != len(names) or \
+                    any(not name.startswith(("main/", "test/")) or
+                        not name.endswith(".class") for name in entries) or \
+                    classes.testzip() is not None:
+                raise CaptureRejected("portable test payload differs")
+    except (zipfile.BadZipFile, OSError) as error:
+        raise CaptureRejected("portable test payload differs") from error
+    response_file = re.search(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)", log)
+    if response_file is None or f'"@{response_file.group(1)}"' not in executions:
         raise CaptureRejected("executed worker classpath evidence differs")
 
 
@@ -442,6 +466,7 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             "gradle_log_sha256": _sha(files["gradle_log"]),
             "execve_log_sha256": _sha(files["execve_log"]),
             "worker_classpath_sha256": _sha(files["worker_classpath"]),
+            "portable_classes_sha256": _sha(files["portable_classes"]),
             "summary": summary}
 
 
