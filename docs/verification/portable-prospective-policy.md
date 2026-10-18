@@ -13,14 +13,29 @@ been qualified by this policy.
 
 ## Reference and inventory
 
-The reference is the verified dyn4j 6.0.0 capture at
-`/var/tmp/dyn4k-portable-baseline-247e15eb/verified.json`. It records source
+The current reference is the complete dyn4j 6.0.0 capture at
+`/var/home/stewart/dyn4k-evidence/session-control/final-numerical/baseline-2c9-full/verified.json`.
+Its external current-verifier attestation is
+`/var/home/stewart/dyn4k-evidence/session-control/final-numerical/baseline-d7a-current-verifier-attestation.json`.
+The [delegated rebind decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6254671817)
+changed only the catalog's whole-trace and fixture-source identities. The
+current capture records source
 `058bf6d982a0fb89b54050f929f6ea9dae53b714`, JAR SHA-256
 `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`,
 fixture source SHA-256
-`70d7c4105224f570d5e4cef1cf9f488c4007aeb68a536dda76f9836bdfdd2b4f`,
+`6c12edda1bde1f1f8556ea7c8dadc4543d69a1c4f4e6f9c64ffe38d47cbf7d3d`,
 and trace SHA-256
-`f31dc4a0a63e96a7212a58df02c7f1be539756532603e5f5b51e528dd7b84d07`.
+`5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801`.
+The historical complete capture at
+`/var/tmp/dyn4k-portable-baseline-247e15eb/verified.json` has trace
+`f31dc4a0a63e96a7212a58df02c7f1be539756532603e5f5b51e528dd7b84d07`
+and fixture source
+`70d7c4105224f570d5e4cef1cf9f488c4007aeb68a536dda76f9836bdfdd2b4f`.
+Both verified manifests list 332 cases and identical trace counts. Their
+case-slice hashes agree for all 318 prospective cases. Four frozen Weld and
+Pulley slices differ and remain under their separate policy. No prospective
+per-case SHA-256, path assignment, rule, or tolerance changed. This rebind
+does not establish candidate parity or target qualification.
 The catalog was made by reading every record of each of the 318 case slices,
 not by sampling the first state. It contains 566 distinct leaf paths, 92
 distinct case path sets, and 67,667 case-path memberships. Array positions are

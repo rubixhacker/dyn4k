@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import struct
 import tempfile
 import unittest
@@ -131,9 +132,54 @@ class ProspectiveComparisonTest(unittest.TestCase):
                           (3000, 21215), (4200, 29700), (5400, 38186),
                           (6000, 42428), (6600, 46671)])
         self.assertEqual(catalog["baseline_trace_sha256"],
-                         "f31dc4a0a63e96a7212a58df02c7f1be539756532603e5f5b51e528dd7b84d07")
+                         "5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801")
         self.assertTrue(all(catalog["paths"][index]["rule"]
                             for schema in catalog["path_sets"] for index in schema))
+
+    def test_complete_manifest_rebind_accepts_current_and_rejects_stale_bindings(self):
+        from cases import declared_cases
+        current_path = os.environ.get("DYN4K_PROSPECTIVE_CURRENT_MANIFEST")
+        historical_path = os.environ.get("DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST")
+        if current_path is None and historical_path is None:
+            self.skipTest("set both verified-manifest paths for the archive control")
+        self.assertIsNotNone(current_path)
+        self.assertIsNotNone(historical_path)
+        current = json.loads(Path(current_path).read_text())
+        historical = json.loads(Path(historical_path).read_text())
+        catalog = load_policy_catalog()
+        cases = declared_cases()
+        frozen = {case["id"] for case in cases if case["require_frozen_projection"]}
+
+        self.assertEqual(len(current["case_sha256"]), 332)
+        self.assertEqual(set(current["case_sha256"]), set(historical["case_sha256"]))
+        changed = {case_id for case_id in current["case_sha256"]
+                   if current["case_sha256"][case_id] != historical["case_sha256"][case_id]}
+        self.assertEqual(changed, {
+            "P-JINT-Weld-enabled-equal",
+            "P-JINT-Pulley-slack-transition-preparation-0",
+            "P-JINT-Pulley-slack-transition-preparation-1",
+            "P-JINT-Pulley-slack-transition-main",
+        })
+        self.assertEqual(changed & set(catalog["cases"]), set())
+        self.assertEqual({case_id: current["case_sha256"][case_id]
+                          for case_id in catalog["cases"]},
+                         {case_id: historical["case_sha256"][case_id]
+                          for case_id in catalog["cases"]})
+        verify_policy_catalog(catalog, current, cases, frozen)
+
+        with self.assertRaisesRegex(Exception, "baseline trace"):
+            verify_policy_catalog(catalog, historical, cases, frozen)
+        changed_case = deepcopy(current)
+        case_id = next(iter(catalog["cases"]))
+        changed_case["case_sha256"][case_id] = "0" * 64
+        with self.assertRaisesRegex(Exception, "case binding"):
+            verify_policy_catalog(catalog, changed_case, cases, frozen)
+        for field, reason in (("trace_sha256", "baseline trace"),
+                              ("fixture_source_sha256", "baseline identity")):
+            stale = deepcopy(current)
+            stale[field] = "0" * 64
+            with self.assertRaisesRegex(Exception, reason):
+                verify_policy_catalog(catalog, stale, cases, frozen)
 
     def test_policy_catalog_rejects_missing_case_path_and_stale_baseline(self):
         from cases import declared_cases
