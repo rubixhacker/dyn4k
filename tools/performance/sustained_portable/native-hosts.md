@@ -66,7 +66,8 @@ not exist. Run the traced builder from that checkout with the pinned offline
 toolchain. Keep the trace archive and checkout together. The builder records
 each exact Gradle command, JDK and tracer hash, raw syscall trace, Gradle log,
 Kotlin source digests, freshly built and staged KLIB hashes, resolved link
-inputs, and both executable hashes.
+inputs, writable temporary executable mappings, rename installs, and both
+executable hashes.
 
 ```sh
 git worktree add --detach /home/stewart/native-source-link-checkout COMMIT

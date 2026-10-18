@@ -49,6 +49,37 @@ def trace_events(path, watched):
     return {key: sorted(value) for key, value in observed.items()}
 
 
+def executable_install(path, executable):
+    predecessor = None
+    rename_pattern = re.compile(r'rename\("([^"\\]+)", "' +
+                                re.escape(executable) + r'"\) = 0(?:\s|$)')
+    with path.open(errors="replace") as stream:
+        for line in stream:
+            match = rename_pattern.search(line)
+            if match:
+                predecessor = match.group(1)
+                break
+    if predecessor is None or not predecessor.startswith(executable + ".tmp"):
+        raise ValueError("linked executable lacks traced temporary-file install")
+    created = False
+    mapped_write = False
+    with path.open(errors="replace") as stream:
+        for line in stream:
+            if predecessor not in line:
+                continue
+            if "openat(" in line and f'"{predecessor}"' in line and "O_CREAT" in line and \
+                    f"<{predecessor}>" in line:
+                created = True
+            if "mmap(" in line and f"<{predecessor}>" in line and \
+                    "PROT_WRITE" in line and "MAP_SHARED" in line and \
+                    re.search(r"= 0x[0-9a-f]+(?:\s|$)", line):
+                mapped_write = True
+    if not created or not mapped_write:
+        raise ValueError("linked executable lacks traced writable output mapping")
+    return {"temporary": predecessor, "created": True,
+            "shared_writable_mapping": True, "renamed_to_executable": True}
+
+
 def run_traced(command, archive, name, environment):
     trace = archive / f"{name}.strace"
     output = archive / f"{name}.gradle.log"
@@ -161,6 +192,8 @@ def build(args):
                                    "resolved_klibs": {label: selected[label] for label in LABELS}}
         link_events[build_name] = trace_events(Path(actions[build_name]["trace"]),
             [selected[label]["path"] for label in LABELS] + [str(executable)])
+        link_events[build_name]["executable_install"] = executable_install(
+            Path(actions[build_name]["trace"]), str(executable))
     if source_files() != sources or git_value("status", "--porcelain", "--untracked-files=all"):
         raise ValueError("source checkout changed during traced build")
     receipt = {"format": "linux-x64-native-source-link-v1", "qualification": "unpassed",
@@ -253,6 +286,7 @@ def verify_receipt(path, inventory=None, build_name=None):
         trace = Path(receipt["actions"][mode]["trace"])
         paths = [selected[label]["path"] for label in LABELS]
         events = trace_events(trace, paths + [item["executable"]])
+        events["executable_install"] = executable_install(trace, item["executable"])
         if events != receipt["observed_syscalls"][mode]:
             raise ValueError(f"{mode} syscall observations differ from raw trace")
         reads = events["read"]

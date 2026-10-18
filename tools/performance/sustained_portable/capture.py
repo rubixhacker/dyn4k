@@ -567,6 +567,7 @@ def capture(args):
                                "build": args.build,
                                "publication_writes": source_link["observed_syscalls"]["publication"]["write"],
                                "link_writes": source_link["observed_syscalls"][args.build]["write"],
+                               "executable_install": source_link["observed_syscalls"][args.build]["executable_install"],
                                "scope": "observed source reads, fresh KLIB equality, resolved KLIB reads, executable bytes"}
                               if source_link is not None else None),
         "command": command, "inputs": {

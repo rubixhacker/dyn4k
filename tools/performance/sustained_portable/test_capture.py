@@ -205,6 +205,21 @@ class PortableCaptureTest(unittest.TestCase):
                 receipt, "development", "/fresh/inventory.json", "c" * 64,
                 {"dyn4k-core": "d" * 64, "dyn4k": "b" * 64})
 
+    def test_link_output_requires_writable_mapping_and_rename(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = str(Path(temporary) / "program.kexe")
+            staged = executable + ".tmp123"
+            trace = Path(temporary) / "link.strace"
+            trace.write_text(
+                f'1 openat(AT_FDCWD, "{staged}", O_RDWR|O_CREAT) = 3<{staged}>\n'
+                f'1 mmap(NULL, 100, PROT_READ|PROT_WRITE, MAP_SHARED, 3<{staged}>, 0) = 0x1234\n'
+                f'1 rename("{staged}", "{executable}") = 0\n')
+            self.assertTrue(native_source_link.executable_install(trace, executable)
+                            ["renamed_to_executable"])
+            trace.write_text(trace.read_text().replace("MAP_SHARED", "MAP_PRIVATE"))
+            with self.assertRaisesRegex(ValueError, "writable output mapping"):
+                native_source_link.executable_install(trace, executable)
+
     def test_host_deadline_retains_raw_and_process_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
