@@ -18,8 +18,23 @@ if [[ -n "${DYN4K_SAFARI_LAUNCH_CONTEXT:-}" ]]; then
       /bin/ps -axo pid,ppid,state,comm | /usr/bin/grep -E '[S]afari|[o]pen|[n]ode' || true
     done
   ) > "$context/process-$$.txt" 2>&1 &
-  exec /usr/bin/open -W -a /Applications/Safari.app "$1" \
-    > "$context/open-$$.stdout" 2> "$context/open-$$.stderr"
+  sampler_pid=$!
+  if /usr/bin/open -W -a /Applications/Safari.app "$1" \
+      > "$context/open-$$.stdout" 2> "$context/open-$$.stderr"; then
+    open_status=0
+  else
+    open_status=$?
+  fi
+  if wait "$sampler_pid"; then
+    sampler_status=0
+  else
+    sampler_status=$?
+  fi
+  samples_completed=$(/usr/bin/grep -c '^sample=' "$context/process-$$.txt" || true)
+  /usr/bin/printf 'samples_completed=%s\nsampler_exit=%s\n' \
+    "$samples_completed" "$sampler_status" > "$context/sample-state-$$.txt"
+  /usr/bin/printf 'open_exit=%s\n' "$open_status" > "$context/launch-outcome-$$.txt"
+  exit "$open_status"
 fi
 
 exec /usr/bin/open -W -a /Applications/Safari.app "$1"

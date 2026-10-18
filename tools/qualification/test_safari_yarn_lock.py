@@ -1,6 +1,7 @@
 import json
 import hashlib
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -616,11 +617,203 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertIn("name: safari-launch-context-${{ inputs.candidate_sha }}-", workflow)
         self.assertIn("path: ${{ runner.temp }}/safari-launch-context/", workflow)
         self.assertIn("if: always()", workflow)
+        self.assertIn("--capture-context", workflow)
+        self.assertNotIn("find \"$source\"", workflow)
         launcher = (root / "tools/qualification/safari-launch.sh").read_text()
         self.assertIn('DYN4K_SAFARI_LAUNCH_CONTEXT:-', launcher)
-        self.assertIn('exec /usr/bin/open -W -a /Applications/Safari.app "$1" \\\n'
-                      '    > "$context/open-$$.stdout" 2> "$context/open-$$.stderr"',
-                      launcher)
+        self.assertIn('exec /usr/bin/open -W -a /Applications/Safari.app "$1"', launcher)
+
+    def context_fixture(self):
+        context = self.root / "context"
+        context.mkdir()
+        (context / "launch-123.txt").write_text("pid=123\n")
+        (context / "sample-state-123.txt").write_text(
+            "samples_completed=5\nsampler_exit=0\n")
+        (context / "process-123.txt").write_text(
+            "sample=1\nsample=2\nsample=3\nsample=4\nsample=5\n")
+        (context / "launch-outcome-123.txt").write_text("open_exit=23\n")
+        (context / "redirect-123.html").write_text("redirect\n")
+        (context / "open-123.stdout").write_text("")
+        (context / "open-123.stderr").write_text("early failure\n")
+        for relative in safari_yarn_lock.CONTEXT_ROOTS:
+            (self.repository / relative).mkdir(parents=True, exist_ok=True)
+        package = self.repository / safari_yarn_lock.CONTEXT_ROOTS[0]
+        return context, package
+
+    def test_context_scanner_copies_regular_unique_config_with_inventory(self):
+        context, package = self.context_fixture()
+        source = package / "karma.conf.js"
+        source.write_bytes(b"module.exports = {};\n")
+        (package / "node_modules").symlink_to(self.root, target_is_directory=True)
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_COMPLETE", inventory["status"])
+        self.assertFalse(inventory["qualified"])
+        self.assertEqual(source.read_bytes(),
+                         (context / "config/build/js/packages/karma.conf.js").read_bytes())
+        self.assertTrue(any(item["status"] == "copied" for item in inventory["inputs"]))
+        self.assertTrue(any(item["reason"] == "excluded_node_modules"
+                            for item in inventory["inputs"]))
+        self.assertEqual(inventory, json.loads((context / "inventory.json").read_text()))
+
+    def test_context_scanner_marks_per_file_byte_truncation(self):
+        context, package = self.context_fixture()
+        (package / "a-karma.js").write_bytes(b"12345")
+        with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILE_BYTES", 4), \
+                mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_TOTAL_BYTES", 10):
+            inventory = safari_yarn_lock.capture_karma_context(
+                self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertEqual(4, inventory["copied_bytes"])
+        self.assertEqual("per_file_byte_limit", inventory["inputs"][0]["reason"])
+
+    def test_context_scanner_marks_total_byte_truncation(self):
+        context, package = self.context_fixture()
+        (package / "a-karma.js").write_bytes(b"12345")
+        with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILE_BYTES", 10), \
+                mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_TOTAL_BYTES", 3):
+            inventory = safari_yarn_lock.capture_karma_context(
+                self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertEqual(3, inventory["copied_bytes"])
+        self.assertEqual("total_byte_limit", inventory["inputs"][0]["reason"])
+
+    def test_context_scanner_skips_duplicate_inode(self):
+        context, package = self.context_fixture()
+        source = package / "a-karma.js"
+        source.write_text("config\n")
+        os.link(source, package / "b-karma.js")
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertEqual(1, inventory["copied_files"])
+        self.assertTrue(any(item["reason"] == "duplicate_inode"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_file_count_and_symlink_traversal(self):
+        context, package = self.context_fixture()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "outside-karma.js").write_text("outside\n")
+        (package / "linked").symlink_to(outside, target_is_directory=True)
+        (package / "linked-karma.js").symlink_to(outside / "outside-karma.js")
+        (package / "a-karma.js").write_text("a\n")
+        (package / "b-karma.js").write_text("b\n")
+        with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILES", 1):
+            inventory = safari_yarn_lock.capture_karma_context(
+                self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "symlink" for item in inventory["inputs"]))
+        self.assertTrue(any(item["reason"] == "file_count_limit"
+                            for item in inventory["inputs"]))
+        self.assertFalse((context / "config/build/js/packages/linked/outside-karma.js").exists())
+        self.assertLessEqual(inventory["copied_files"], 1)
+
+    def test_context_scanner_rejects_symlink_root(self):
+        context, package = self.context_fixture()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "karma.conf.js").write_text("outside\n")
+        package.rmdir()
+        package.symlink_to(outside, target_is_directory=True)
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertEqual(0, inventory["copied_files"])
+        self.assertTrue(any(item["reason"] == "missing_or_unsafe_root"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_retains_deadline_and_failed_scan(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_SECONDS", 0):
+            inventory = safari_yarn_lock.capture_karma_context(
+                self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "traversal_deadline"
+                            for item in inventory["inputs"]))
+        shutil.rmtree(context / "config", ignore_errors=True)
+        with mock.patch.object(safari_yarn_lock.os, "scandir", side_effect=OSError("scan failed")):
+            inventory = safari_yarn_lock.capture_karma_context(
+                self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["status"] == "failed" for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_unfinished_sampler(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (context / "sample-state-123.txt").unlink()
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "sampler_incomplete"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_missing_process_samples(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (context / "process-123.txt").unlink()
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "sampler_incomplete"
+                            for item in inventory["inputs"]))
+
+    def test_context_scanner_rejects_missing_launch_output(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (context / "open-123.stderr").unlink()
+        inventory = safari_yarn_lock.capture_karma_context(
+            self.repository, self.candidate, context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "launch_capture_incomplete"
+                            for item in inventory["inputs"]))
+
+    def test_context_cli_reports_incomplete_with_nonzero_exit(self):
+        context, package = self.context_fixture()
+        (package / "karma.conf.js").write_text("config\n")
+        (context / "sample-state-123.txt").unlink()
+        output = io.StringIO()
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", ["safari_yarn_lock.py", "--candidate-sha",
+                                                self.candidate, "--output", str(context),
+                                                "--capture-context"]), \
+                redirect_stdout(output):
+            result = safari_yarn_lock.main()
+        self.assertEqual(1, result)
+        self.assertEqual("CONTEXT_INCOMPLETE", json.loads(output.getvalue())["status"])
+        self.assertFalse(json.loads((context / "inventory.json").read_text())["qualified"])
+
+    def test_wrapper_joins_early_failed_launch_before_return(self):
+        root = Path(__file__).resolve().parents[2]
+        launcher = (root / "tools/qualification/safari-launch.sh").read_text()
+        fake_open = self.root / "fake-open"
+        fake_open.write_text("#!/bin/bash\nexit 23\n")
+        fake_open.chmod(0o755)
+        controlled = self.root / "controlled-launch.sh"
+        controlled.write_text(launcher.replace("/usr/bin/open", str(fake_open))
+                              .replace("/bin/sleep 2", "/bin/sleep 0.01"))
+        redirect = self.root / "redirect.html"
+        redirect.write_text("redirect\n")
+        context = self.root / "launch-context"
+        result = subprocess.run(["bash", str(controlled), str(redirect)],
+                                env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": str(context)},
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(23, result.returncode)
+        state = list(context.glob("sample-state-*.txt"))
+        self.assertEqual(1, len(state))
+        self.assertIn("samples_completed=5", state[0].read_text())
+        self.assertIn("sampler_exit=0", state[0].read_text())
+        process = list(context.glob("process-*.txt"))
+        self.assertEqual(1, len(process))
+        self.assertEqual(5, process[0].read_text().count("sample="))
+        normal_environment = dict(os.environ)
+        normal_environment.pop("DYN4K_SAFARI_LAUNCH_CONTEXT", None)
+        normal = subprocess.run(["bash", str(controlled), str(redirect)],
+                                env=normal_environment, capture_output=True,
+                                text=True, timeout=5)
+        self.assertEqual(23, normal.returncode)
+        self.assertEqual(1, len(list(context.glob("sample-state-*.txt"))))
 
 
 if __name__ == "__main__":

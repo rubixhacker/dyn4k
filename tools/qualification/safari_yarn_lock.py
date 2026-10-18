@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fnmatch
 import hashlib
 import itertools
 import json
@@ -33,6 +34,15 @@ REQUIRED_PACKAGES = ("dyn4k-dyn4k-core", "dyn4k-dyn4k-core-test",
                      "dyn4k-dyn4k", "dyn4k-dyn4k-test")
 REQUIRED_PACKAGE_INPUTS = (Path("build/js/package.json"),) + tuple(
     Path("build/js/packages") / name / "package.json" for name in REQUIRED_PACKAGES)
+CONTEXT_ROOTS = (Path("build/js/packages"), Path("dyn4k-core/build"),
+                 Path("dyn4k/build"))
+CONTEXT_MAX_FILES = 16
+CONTEXT_MAX_FILE_BYTES = 256 * 1024
+CONTEXT_MAX_TOTAL_BYTES = 1024 * 1024
+CONTEXT_MAX_ENTRIES = 2048
+CONTEXT_MAX_DEPTH = 16
+CONTEXT_MAX_SECONDS = 15
+CONTEXT_MAX_LAUNCHES = 8
 LOCK_ERROR_LINE = ("> Lock file was changed. Run the `kotlinUpgradeYarnLock` task "
                    "to actualize lock file")
 HOSTED_TASK_MARKERS = (b"> Task :dyn4k-core:jsTestPackageJson",
@@ -57,6 +67,195 @@ def safari_capture_timeout(stdout, stderr):
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def capture_karma_context(repository, candidate_sha, context):
+    repository = repository.resolve()
+    if context.is_symlink() or context.resolve().is_relative_to(repository):
+        raise ValueError("Safari context must be an external non-symlink directory")
+    context.mkdir(parents=True, exist_ok=True)
+    inventory = {"schema": 1, "candidate_sha": candidate_sha, "qualified": False,
+                 "status": "CONTEXT_INCOMPLETE", "inputs": [],
+                 "limits": {"files": CONTEXT_MAX_FILES,
+                            "file_bytes": CONTEXT_MAX_FILE_BYTES,
+                            "total_bytes": CONTEXT_MAX_TOTAL_BYTES,
+                            "entries": CONTEXT_MAX_ENTRIES,
+                            "depth": CONTEXT_MAX_DEPTH,
+                            "seconds": CONTEXT_MAX_SECONDS,
+                            "launches": CONTEXT_MAX_LAUNCHES},
+                 "entries_seen": 0, "matched_files": 0,
+                 "copied_files": 0, "copied_bytes": 0}
+    started = time.monotonic()
+    deadline = started + CONTEXT_MAX_SECONDS
+    incomplete = False
+    config = context / "config"
+
+    def record(path, status, reason, **details):
+        nonlocal incomplete
+        inventory["inputs"].append({"path": str(path), "status": status,
+                                    "reason": reason, **details})
+        if status in ("failed", "truncated") or reason not in ("copied", "excluded_node_modules"):
+            incomplete = True
+
+    def check_deadline(path):
+        if time.monotonic() >= deadline:
+            record(path, "failed", "traversal_deadline")
+            raise TimeoutError("Safari context traversal deadline")
+
+    def visit(directory_fd, relative, depth, seen_files):
+        check_deadline(relative)
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                path = relative / entry.name
+                inventory["entries_seen"] += 1
+                if inventory["entries_seen"] > CONTEXT_MAX_ENTRIES:
+                    record(path, "failed", "entry_count_limit")
+                    raise ValueError("Safari context entry count limit")
+                check_deadline(path)
+                if entry.name == "node_modules":
+                    record(path, "skipped", "excluded_node_modules")
+                    continue
+                if entry.is_symlink():
+                    record(path, "skipped", "symlink")
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if depth >= CONTEXT_MAX_DEPTH:
+                        record(path, "failed", "depth_limit")
+                        raise ValueError("Safari context depth limit")
+                    child_fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                       dir_fd=directory_fd)
+                    try:
+                        visit(child_fd, path, depth + 1, seen_files)
+                    finally:
+                        os.close(child_fd)
+                    continue
+                if not fnmatch.fnmatchcase(entry.name, "*karma*.js"):
+                    continue
+                inventory["matched_files"] += 1
+                if inventory["matched_files"] > CONTEXT_MAX_FILES:
+                    record(path, "failed", "file_count_limit")
+                    raise ValueError("Safari context file count limit")
+                source_fd = os.open(entry.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                                    dir_fd=directory_fd)
+                try:
+                    before = os.fstat(source_fd)
+                    if not stat.S_ISREG(before.st_mode):
+                        record(path, "skipped", "non_regular")
+                        continue
+                    identity = (before.st_dev, before.st_ino)
+                    if identity in seen_files:
+                        record(path, "skipped", "duplicate_inode")
+                        continue
+                    seen_files.add(identity)
+                    remaining = CONTEXT_MAX_TOTAL_BYTES - inventory["copied_bytes"]
+                    if remaining <= 0:
+                        record(path, "skipped", "total_byte_limit", source_size=before.st_size)
+                        continue
+                    limit = min(before.st_size, CONTEXT_MAX_FILE_BYTES, remaining)
+                    chunks = []
+                    size = 0
+                    while size < limit:
+                        check_deadline(path)
+                        chunk = os.read(source_fd, min(64 * 1024, limit - size))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        size += len(chunk)
+                    after = os.fstat(source_fd)
+                    if (size != limit or (before.st_dev, before.st_ino, before.st_size,
+                                          before.st_mtime_ns)
+                            != (after.st_dev, after.st_ino, after.st_size,
+                                after.st_mtime_ns)):
+                        record(path, "failed", "source_changed_during_copy")
+                        continue
+                    data = b"".join(chunks)
+                    destination = config / path
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination_fd = os.open(destination,
+                                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                             0o600)
+                    try:
+                        with os.fdopen(destination_fd, "wb") as stream:
+                            stream.write(data)
+                    except BaseException:
+                        destination.unlink(missing_ok=True)
+                        raise
+                    inventory["copied_files"] += 1
+                    inventory["copied_bytes"] += size
+                    status = "truncated" if size < before.st_size else "copied"
+                    reason = ("per_file_byte_limit" if status == "truncated"
+                              and CONTEXT_MAX_FILE_BYTES <= remaining
+                              else "total_byte_limit" if status == "truncated" else "copied")
+                    record(path, status, reason, source_size=before.st_size,
+                           copied_size=size, sha256=hashlib.sha256(data).hexdigest())
+                finally:
+                    os.close(source_fd)
+
+    try:
+        require_candidate(repository, candidate_sha)
+        if config.exists() or config.is_symlink():
+            raise ValueError("Safari context config destination already exists")
+        config.mkdir()
+        seen_files = set()
+        for root in CONTEXT_ROOTS:
+            check_deadline(root)
+            directory_fd = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                try:
+                    for part in root.parts:
+                        child_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                           dir_fd=directory_fd)
+                        os.close(directory_fd)
+                        directory_fd = child_fd
+                except OSError as error:
+                    record(root, "skipped", "missing_or_unsafe_root", error=str(error))
+                    continue
+                visit(directory_fd, root, len(root.parts), seen_files)
+            finally:
+                os.close(directory_fd)
+        if inventory["copied_files"] == 0:
+            record("config", "failed", "no_karma_config")
+        launches = list(itertools.islice((path for path in context.glob("launch-*.txt")
+                                         if not path.name.startswith("launch-outcome-")),
+                                        CONTEXT_MAX_LAUNCHES + 1))
+        if len(launches) > CONTEXT_MAX_LAUNCHES:
+            record("launch", "failed", "launch_count_limit")
+            launches = launches[:CONTEXT_MAX_LAUNCHES]
+        if not launches:
+            record("launch", "failed", "launcher_not_invoked")
+        for launch in launches:
+            pid = launch.name.removeprefix("launch-").removesuffix(".txt")
+            state = context / f"sample-state-{pid}.txt"
+            process = context / f"process-{pid}.txt"
+            outcome = context / f"launch-outcome-{pid}.txt"
+            if (not pid.isdigit() or launch.is_symlink() or not launch.is_file()
+                    or state.is_symlink() or not state.is_file()
+                    or process.is_symlink() or not process.is_file()
+                    or process.stat().st_size > CONTEXT_MAX_FILE_BYTES
+                    or sum(line.startswith("sample=") for line in process.read_text().splitlines()) != 5
+                    or outcome.is_symlink() or not outcome.is_file()
+                    or re.fullmatch(r"open_exit=\d+\n", outcome.read_text()) is None
+                    or state.read_text().splitlines()
+                    != ["samples_completed=5", "sampler_exit=0"]):
+                record(launch.name, "failed", "sampler_incomplete")
+            for name in (f"redirect-{pid}.html", f"open-{pid}.stdout",
+                         f"open-{pid}.stderr"):
+                raw = context / name
+                if (raw.is_symlink() or not raw.is_file()
+                        or raw.stat().st_size > CONTEXT_MAX_FILE_BYTES):
+                    record(name, "failed", "launch_capture_incomplete")
+        require_candidate(repository, candidate_sha)
+    except (OSError, ValueError, TimeoutError) as error:
+        record("scan", "failed", "scan_failed", error=str(error))
+    inventory["elapsed_seconds"] = time.monotonic() - started
+    if not incomplete:
+        inventory["status"] = "CONTEXT_COMPLETE"
+    temporary = context / "inventory.tmp"
+    if temporary.exists() or temporary.is_symlink():
+        raise ValueError("Safari context inventory temporary file already exists")
+    temporary.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n")
+    temporary.replace(context / "inventory.json")
+    return inventory
 
 
 def git(repository, *args):
@@ -498,7 +697,16 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--configuration", choices=("development", "production"))
     parser.add_argument("--audit", action="store_true")
+    parser.add_argument("--capture-context", action="store_true")
     args = parser.parse_args()
+    if args.capture_context:
+        if args.audit or args.configuration:
+            parser.error("context scan cannot audit or run a Gradle configuration")
+        inventory = capture_karma_context(ROOT, args.candidate_sha, args.output)
+        print(json.dumps({"candidate_sha": inventory["candidate_sha"],
+                          "status": inventory["status"], "qualified": False,
+                          "output": str(args.output)}))
+        return 0 if inventory["status"] == "CONTEXT_COMPLETE" else 1
     receipt = (audit_capture(ROOT, args.candidate_sha, args.output) if args.audit
                else capture(ROOT, args.candidate_sha, args.output, args.configuration))
     print(json.dumps({"candidate_sha": receipt["candidate_sha"],
