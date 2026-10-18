@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import compare
 
 import receipt
+import nominal_zero
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -53,9 +54,14 @@ def capture(args):
     seal_args = argparse.Namespace(fixture=args.fixture, trace=str(trace), reference=args.reference,
                                    artifact=None, output=str(output / "receipt.json"))
     evidence = receipt.seal(seal_args, fixture, counts)
-    outcome = compare.compare(fixture, args.reference, trace, output / "receipt.json",
-                              evidence["source_sha256"], evidence["artifact_sha256"],
-                              evidence["candidate_commit"])
+    if key == "nominal-free-motion":
+        outcome = nominal_zero.compare_pair(fixture, args.reference, trace, output / "receipt.json",
+                                            evidence["source_sha256"], evidence["artifact_sha256"],
+                                            evidence["candidate_commit"])
+    else:
+        outcome = compare.compare(fixture, args.reference, trace, output / "receipt.json",
+                                  evidence["source_sha256"], evidence["artifact_sha256"],
+                                  evidence["candidate_commit"])
     with (output / "comparison.json").open("x", encoding="utf-8") as stream:
         json.dump(outcome, stream, sort_keys=True, indent=2)
         stream.write("\n")

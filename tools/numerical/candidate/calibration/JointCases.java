@@ -1,7 +1,9 @@
 import java.lang.reflect.InvocationTargetException;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 import org.dyn4j.dynamics.Body;
+import org.dyn4j.dynamics.BodyFixture;
 import org.dyn4j.dynamics.joint.*;
 import org.dyn4j.geometry.*;
 import org.dyn4j.world.World;
@@ -36,6 +38,13 @@ public final class JointCases {
                 double limit = type.equals("Angle") || type.equals("Revolute") || type.equals("Weld") ? Math.PI/6 : 1;
                 row(type,"limits-range",s -> limits(s.joint,-limit,limit),null);
                 row(type,"limits-equal",s -> limits(s.joint,0,0),null);
+                if (type.equals("Distance")) row(type,"limits-enabled-range-v2",
+                    JointCases::portableDistanceSeed,s -> {},s -> step -> {
+                        if (step == 1) {
+                            s.world.getBody(1).setLinearVelocity(0,100);
+                            Capture.action("moving body linear velocity=(0,100) before step 1");
+                        }
+                    });
             }
             if (has(type,"setSpringStiffness",double.class)) {
                 for (double frequency : new double[]{2,8}) {
@@ -146,11 +155,14 @@ public final class JointCases {
     }
     private interface Schedule { IntConsumer bind(Seed s); }
     private static void row(String type,String name,Consumer<Seed> configure,Schedule schedule) {
+        row(type,name,() -> compatibleSeed(type,name),configure,schedule);
+    }
+    private static void row(String type,String name,Supplier<Seed> source,Consumer<Seed> configure,Schedule schedule) {
         attempted++;
         String id="P-J-"+type+"-"+name;
         if (!Capture.accepts(id)) return;
         try {
-            Seed s=compatibleSeed(type,name);
+            Seed s=source.get();
             configure.accept(s);
             if (Capture.run(id,s.world,600,1.0/60,1,0,0,schedule == null ? step -> {} : schedule.bind(s))) completed++;
         } catch (RuntimeException failure) {
@@ -176,6 +188,20 @@ public final class JointCases {
     private static double number(Object j,String method) { return ((Number)invoke(j,method,new Class<?>[0])).doubleValue(); }
     private static Body body(World<Body> w,Convex shape,MassType mass,double x,double y) {
         Body b=new Body(); b.addFixture(shape).setFriction(0); b.setMass(mass); b.setLinearDamping(0); b.setAngularDamping(0); b.translate(x,y); w.addBody(b); return b;
+    }
+    private static Seed portableDistanceSeed() {
+        World<Body> w=new World<>(); w.setGravity(0,0);
+        Body a=new Body(); BodyFixture af=a.addFixture(Geometry.createRectangle(10,0.5));
+        af.setDensity(1); af.setFriction(0.2); af.setRestitution(0);
+        a.setMass(MassType.INFINITE); a.setLinearDamping(0); a.setAngularDamping(0);
+        a.translate(0,0); w.addBody(a);
+        Body b=new Body(); BodyFixture bf=b.addFixture(Geometry.createCircle(0.5));
+        bf.setDensity(1); bf.setFriction(0.2); bf.setRestitution(0);
+        b.setMass(MassType.NORMAL); b.setLinearDamping(0); b.setAngularDamping(0);
+        b.translate(0,2); w.addBody(b);
+        DistanceJoint<Body> d=new DistanceJoint<>(a,b,a.getWorldCenter(),b.getWorldCenter());
+        d.setSpringEnabled(true); d.setSpringFrequency(8); d.setLimitsEnabled(1,3); w.addJoint(d);
+        return new Seed(w,d);
     }
     private static Seed pinNoSpring() {
         World<Body> w=new World<>(); Body b=new Body(); b.addFixture(Geometry.createCircle(1)); b.setMass(MassType.NORMAL); w.addBody(b);

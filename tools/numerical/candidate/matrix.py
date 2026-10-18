@@ -19,7 +19,7 @@ FAMILIES = (
     ("geometry", "geometry", "", 585),
     ("motion", "motion", "F-", 30),
     ("contacts", "contacts", "C-", 195),
-    ("joints", "joints", "P-J-", 232),
+    ("joints", "joints", "P-J-", 233),
     ("joint_checkpoints", "joints", "P-JCP-", 92),
     ("joint_interactions", "joints", "P-JINT-", 25),
     ("ccd", "ccd", "CCD-world-", 180),
