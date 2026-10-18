@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -165,6 +166,82 @@ class BrowserResourceBindingTest(unittest.TestCase):
                         self.get(server, name)
                 with self.assertRaisesRegex(ValueError, omitted.replace(".", "\\.")):
                     browser_smoke.validate_loaded_resources(server)
+
+
+class BrowserResourceRecordTest(unittest.TestCase):
+    def server(self):
+        bundle = {name: hashlib.sha256(name.encode()).hexdigest() for name in WASM_FILES}
+        responses = [{"name": name, "sha256": digest, "bytes": len(name)}
+                     for name, digest in bundle.items()]
+        return SimpleNamespace(
+            resource_lock=threading.Lock(), resource_errors=[],
+            resource_responses=responses, served=dict(bundle),
+            expected_bundle=bundle, required_resources=frozenset(WASM_FILES),
+        )
+
+    def test_zero_bytes_are_rejected(self):
+        server = self.server()
+        for response in server.resource_responses:
+            response["bytes"] = 0
+        with self.assertRaisesRegex(ValueError, "bytes"):
+            browser_smoke.validate_loaded_resources(server)
+
+    def test_empty_served_map_is_rejected(self):
+        server = self.server()
+        server.served = {}
+        with self.assertRaisesRegex(ValueError, "served"):
+            browser_smoke.validate_loaded_resources(server)
+
+    def test_missing_fields_raise_value_error(self):
+        for field in ("bytes", "sha256", "name"):
+            with self.subTest(field=field):
+                server = self.server()
+                del server.resource_responses[0][field]
+                with self.assertRaisesRegex(ValueError, "record"):
+                    browser_smoke.validate_loaded_resources(server)
+
+    def test_record_schema_types_and_digest_shape_are_strict(self):
+        invalid = (
+            ("extra", "unexpected", "record"),
+            ("bytes", True, "bytes"),
+            ("bytes", -1, "bytes"),
+            ("bytes", 1.5, "bytes"),
+            ("name", 42, "name"),
+            ("sha256", "not-a-digest", "sha256"),
+            ("sha256", "A" * 64, "sha256"),
+        )
+        for field, value, message in invalid:
+            with self.subTest(field=field, value=value):
+                server = self.server()
+                server.resource_responses[0][field] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    browser_smoke.validate_loaded_resources(server)
+        server = self.server()
+        server.resource_responses[0] = None
+        with self.assertRaisesRegex(ValueError, "record"):
+            browser_smoke.validate_loaded_resources(server)
+
+    def test_duplicate_fetch_must_keep_digest_and_length(self):
+        server = self.server()
+        first = server.resource_responses[0]
+        server.resource_responses.append(dict(first))
+        browser_smoke.validate_loaded_resources(server)
+        for field, value in (("sha256", "0" * 64), ("bytes", first["bytes"] + 1)):
+            with self.subTest(field=field):
+                server.resource_responses[-1][field] = value
+                with self.assertRaises(ValueError):
+                    browser_smoke.validate_loaded_resources(server)
+                server.resource_responses[-1][field] = first[field]
+
+    def test_served_map_must_match_all_response_records(self):
+        server = self.server()
+        server.served[next(iter(server.served))] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "served"):
+            browser_smoke.validate_loaded_resources(server)
+        server = self.server()
+        server.served["unknown.mjs"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "served"):
+            browser_smoke.validate_loaded_resources(server)
 
 
 if __name__ == "__main__":

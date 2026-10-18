@@ -6,6 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import subprocess
@@ -130,18 +131,57 @@ def browser_server(directory, page, bundle, target, handler=Handler):
 
 
 def validate_loaded_resources(server):
-    with server.resource_lock:
-        errors = list(server.resource_errors)
-        responses = list(server.resource_responses)
+    try:
+        with server.resource_lock:
+            errors = server.resource_errors
+            responses = server.resource_responses
+            served = server.served
+            if type(errors) is not list or not all(type(error) is str for error in errors):
+                raise ValueError("browser resource errors must be a list of strings")
+            if type(responses) is not list:
+                raise ValueError("browser resource responses must be a list")
+            if type(served) is not dict:
+                raise ValueError("browser served map must be an object")
+            errors = list(errors)
+            responses = [dict(item) if type(item) is dict else item for item in responses]
+            served = dict(served)
+        bundle = server.expected_bundle
+        required = server.required_resources
+    except AttributeError as error:
+        raise ValueError("browser resource state is incomplete") from error
+    if type(bundle) is not dict or not all(
+        type(name) is str and name and type(digest) is str and
+        re.fullmatch(r"[0-9a-f]{64}", digest)
+        for name, digest in bundle.items()
+    ):
+        raise ValueError("browser frozen build inventory is malformed")
+    if type(required) not in (set, frozenset) or not all(
+        type(name) is str and name in bundle for name in required
+    ):
+        raise ValueError("browser required resource set is malformed")
     if errors:
         raise ValueError("browser resource rejection: " + "; ".join(errors))
-    loaded = {item["name"] for item in responses}
-    missing = server.required_resources - loaded
+    loaded = {}
+    for index, item in enumerate(responses):
+        if type(item) is not dict or item.keys() != {"name", "sha256", "bytes"}:
+            raise ValueError(f"browser response record {index} has invalid keys or type")
+        name, digest, size = item["name"], item["sha256"], item["bytes"]
+        if type(name) is not str or not name:
+            raise ValueError(f"browser response record {index} has invalid name")
+        if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"browser response record {index} has invalid sha256")
+        if type(size) is not int or size <= 0:
+            raise ValueError(f"browser response record {index} has invalid bytes")
+        if name not in bundle or digest != bundle[name]:
+            raise ValueError("browser resource differs from frozen build inventory")
+        if name in loaded and loaded[name] != (digest, size):
+            raise ValueError(f"browser repeated resource response differs: {name}")
+        loaded[name] = (digest, size)
+    if served != {name: digest for name, (digest, _) in loaded.items()}:
+        raise ValueError("browser served map differs from resource responses")
+    missing = required - loaded.keys()
     if missing:
         raise ValueError("browser missing required dependencies: " + ", ".join(sorted(missing)))
-    if any(item["sha256"] != server.expected_bundle.get(item["name"])
-           for item in responses):
-        raise ValueError("browser resource differs from frozen build inventory")
 
 
 def browser_page(target, args):
