@@ -271,6 +271,129 @@ class PublicationAuditTests(unittest.TestCase):
                             with self.assertRaisesRegex(ValueError, "source bytes differ"):
                                 qualify.validate_source_archive(archive_path, expected)
 
+    def test_candidate_source_contract_ignores_blob_and_commit_replacements(self):
+        original = b"package api\nclass Original\n"
+        altered = b"package api\nclass Altered\n"
+        for replacement in ("blob", "commit"):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source_paths = []
+                for module in qualify.MODULES:
+                    path = root / module / "src/commonMain/kotlin/api/Type.kt"
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(original)
+                    source_paths.append(path)
+                (root / ".gitattributes").write_bytes(b"*.kt -text\n")
+                subprocess.run(["git", "init", "-q", str(root)], check=True)
+                subprocess.run(["git", "-C", str(root), "add", ".gitattributes",
+                                *qualify.MODULES], check=True)
+                subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
+                                "-c", "user.email=fixture@example.invalid", "commit", "-qm",
+                                "original"], check=True)
+                candidate = subprocess.check_output(["git", "-C", str(root), "rev-parse",
+                                                     "HEAD"], text=True).strip()
+                core_path = "dyn4k-core/src/commonMain/kotlin/api/Type.kt"
+                if replacement == "blob":
+                    original_oid = subprocess.check_output([
+                        "git", "-C", str(root), "rev-parse", f"{candidate}:{core_path}"],
+                        text=True).strip()
+                    altered_oid = subprocess.check_output([
+                        "git", "-C", str(root), "hash-object", "-w", "--stdin"],
+                        input=altered).decode().strip()
+                    replaced_oid = original_oid
+                else:
+                    for path in source_paths:
+                        path.write_bytes(altered)
+                    subprocess.run(["git", "-C", str(root), "add", *qualify.MODULES], check=True)
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
+                                    "-c", "user.email=fixture@example.invalid", "commit", "-qm",
+                                    "altered"], check=True)
+                    altered_oid = subprocess.check_output([
+                        "git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+                    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach",
+                                    candidate], check=True)
+                    replaced_oid = candidate
+                subprocess.run(["git", "-C", str(root), "replace", replaced_oid,
+                                altered_oid], check=True)
+                self.assertEqual(altered, subprocess.check_output([
+                    "git", "-C", str(root), "show", f"{candidate}:{core_path}"]))
+                self.assertEqual(original, subprocess.check_output([
+                    "git", "--no-replace-objects", "-C", str(root), "show",
+                    f"{candidate}:{core_path}"]))
+                if replacement == "blob":
+                    self.assertEqual(b"", subprocess.check_output([
+                        "git", "-C", str(root), "status", "--porcelain"]))
+                contract = qualify.candidate_source_contract(root, candidate)
+                expected = {"commonMain/api/Type.kt": hashlib.sha256(original).hexdigest()}
+                for module in qualify.MODULES:
+                    self.assertEqual(expected, qualify.expected_source_entries(
+                        contract, module, "jvm"))
+                archive_path = root / "sources.jar"
+                for source in (original, altered):
+                    with zipfile.ZipFile(archive_path, "w") as jar:
+                        jar.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
+                        jar.writestr("commonMain/api/Type.kt", source)
+                    if source == original:
+                        qualify.validate_source_archive(archive_path, expected)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "source bytes differ"):
+                            qualify.validate_source_archive(archive_path, expected)
+
+    def test_candidate_source_contract_rejects_malformed_git_output(self):
+        root = self.REPOSITORY
+        candidate = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                            text=True).strip()
+        self.assertEqual(set(qualify.MODULES),
+                         set(qualify.candidate_source_contract(root, candidate)))
+        original_check_output = subprocess.check_output
+        cases = (("plus_size", "candidate source blob is invalid"),
+                 ("zero_padded_size", "candidate source blob is invalid"),
+                 ("leading_space_size", "candidate source blob is invalid"),
+                 ("trailing_space_size", "candidate source blob is invalid"),
+                 ("wrong_oid", "candidate source blob is invalid"),
+                 ("wrong_type", "candidate source blob is invalid"),
+                 ("truncated", "candidate source blob is incomplete"),
+                 ("trailing_data", "candidate source blob response has unexpected data"),
+                 ("nonregular_source", "candidate source is not a regular file"))
+        for mutation, reason in cases:
+            with self.subTest(mutation=mutation):
+                def changed_output(command, *args, **kwargs):
+                    output = original_check_output(command, *args, **kwargs)
+                    if mutation == "nonregular_source" and "ls-tree" in command:
+                        entries = output.split(b"\0")
+                        for index, entry in enumerate(entries):
+                            if entry.endswith((b".kt", b".java")):
+                                _, separator, details = entry.partition(b" ")
+                                entries[index] = b"120000" + separator + details
+                                return b"\0".join(entries)
+                        self.fail("source tree has no Kotlin or Java entry")
+                    if command[-2:] != ["cat-file", "--batch"]:
+                        return output
+                    if mutation == "truncated":
+                        return output[:-1]
+                    if mutation == "trailing_data":
+                        return output + b"x"
+                    header, separator, body = output.partition(b"\n")
+                    oid, kind, size = header.split(b" ", 2)
+                    if mutation == "plus_size":
+                        size = b"+" + size
+                    elif mutation == "zero_padded_size":
+                        size = b"0" + size
+                    elif mutation == "leading_space_size":
+                        size = b" " + size
+                    elif mutation == "trailing_space_size":
+                        size += b" "
+                    elif mutation == "wrong_oid":
+                        oid = b"0" * len(oid)
+                    elif mutation == "wrong_type":
+                        kind = b"tree"
+                    return b" ".join((oid, kind, size)) + separator + body
+
+                with mock.patch.object(qualify.subprocess, "check_output",
+                                       side_effect=changed_output):
+                    with self.assertRaisesRegex(ValueError, reason):
+                        qualify.candidate_source_contract(root, candidate)
+
     def test_jvm_module_descriptor_matches_only_committed_core_jvm_source(self):
         descriptor = b"module org.dyn4j { exports org.dyn4j; }\n"
         source = b"package api\nclass Type\n"

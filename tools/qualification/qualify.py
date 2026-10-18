@@ -221,7 +221,7 @@ def candidate_source_contract(repository, candidate_sha):
     if (repository / ".git").exists():
         # Read Git blobs directly; archive substitutions and line endings can change source bytes.
         tree = subprocess.check_output(
-            ["git", "-C", str(repository), "ls-tree", "-r", "-z", "--full-tree",
+            ["git", "--no-replace-objects", "-C", str(repository), "ls-tree", "-r", "-z", "--full-tree",
              candidate_sha, "--", "dyn4k-core/src", "dyn4k/src"], stderr=subprocess.PIPE)
         blobs = []
         for entry in tree.split(b"\0"):
@@ -235,15 +235,17 @@ def candidate_source_contract(repository, candidate_sha):
                     raise ValueError(f"candidate source is not a regular file: {path}")
                 blobs.append((path, oid))
         contents = subprocess.check_output(
-            ["git", "-C", str(repository), "cat-file", "--batch"],
+            ["git", "--no-replace-objects", "-C", str(repository), "cat-file", "--batch"],
             input=b"".join(oid + b"\n" for _, oid in blobs), stderr=subprocess.PIPE)
         stream = io.BytesIO(contents)
         for path, oid in blobs:
             header = stream.readline().rstrip(b"\n")
             prefix = oid + b" blob "
-            if not header.startswith(prefix):
+            size_field = header[len(prefix):]
+            if (not header.startswith(prefix)
+                    or re.fullmatch(rb"0|[1-9][0-9]*", size_field) is None):
                 raise ValueError(f"candidate source blob is invalid: {path}")
-            size = int(header[len(prefix):])
+            size = int(size_field)
             source = stream.read(size)
             if len(source) != size or stream.read(1) != b"\n":
                 raise ValueError(f"candidate source blob is incomplete: {path}")
