@@ -29,7 +29,8 @@ def fixture():
                                         "initial": {"bodies": [state_body]}}),
         "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation),
         "NUMERICAL_JSON " + json.dumps({"kind": "state", "id": case_id,
-                                        "step": 1, "state": {"bodies": [state_body]}}),
+                                        "step": 1, "order": 0,
+                                        "state": {"bodies": [state_body]}}),
         "PROSPECTIVE_BINDING_JSON " + json.dumps({
             "kind": "body-step", "case_id": case_id, "step": 1,
             "bodies": [{"body_id": "b0", "calls": 1,
@@ -79,13 +80,16 @@ class ActualArithmeticTest(unittest.TestCase):
     def test_listener_callback_alone_cannot_select_reset(self):
         rows = fixture()
         callback = {"kind": "event", "id": "geometry-boundary-s0-o0-d0",
-                    "step": 1, "name": "toi.payload.bodies",
+                    "step": 1, "order": 0, "name": "toi.payload.bodies",
                     "payload": {"bodies": [0, 0], "time": 0.5}}
         selection = {"kind": "toi-accepted", "case_id": "geometry-boundary-s0-o0-d0",
                      "step": 1, "body_ids": ["b0", "b0"],
                      "reset_body_ids": ["b0"], "time_bits": "3fe0000000000000"}
         rows.insert(1, "NUMERICAL_JSON " + json.dumps(callback))
         rows.insert(2, "PROSPECTIVE_BINDING_JSON " + json.dumps(selection))
+        state = json.loads(rows[4].split(" ", 1)[1])
+        state["order"] = 1
+        rows[4] = "NUMERICAL_JSON " + json.dumps(state)
         with self.assertRaises(CaptureRejected):
             verify_capture(xml_for(rows), "captureGeometry",
                            ["geometry-boundary-s0-o0-d0"])
@@ -173,6 +177,22 @@ class ActualArithmeticTest(unittest.TestCase):
             verify_capture(xml_for(original, "captureJoints"), "captureGeometry", expected)
         changed = copy.deepcopy(original)
         changed[1] = changed[1].replace('"sequence": 0', '"sequence": 1')
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(changed), "captureGeometry", expected)
+        changed = copy.deepcopy(original)
+        changed[1] = changed[1].replace('"body_id": "b0"',
+                                        '"body_id": "b0", "body_id": "b0"')
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(changed), "captureGeometry", expected)
+        changed = copy.deepcopy(original)
+        state = json.loads(changed[2].split(" ", 1)[1])
+        state["order"] = 2
+        changed[2] = "NUMERICAL_JSON " + json.dumps(state)
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(changed), "captureGeometry", expected)
+        changed = copy.deepcopy(original)
+        changed.insert(2, "NUMERICAL_JSON " + json.dumps({
+            "kind": "unknown", "id": expected[0], "step": 1, "order": 0}))
         with self.assertRaises(CaptureRejected):
             verify_capture(xml_for(changed), "captureGeometry", expected)
 

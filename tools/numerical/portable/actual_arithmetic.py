@@ -16,6 +16,15 @@ class CaptureRejected(ValueError):
     pass
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise CaptureRejected("duplicate target JSON field")
+        result[key] = value
+    return result
+
+
 _WRAPPERS = {
     "captureGeometry": "geometryCollisionBoundaryAndScale",
     "captureFreeMotion": "freeMotionForcesDampingAndRestitution",
@@ -109,6 +118,7 @@ def verify_capture(xml, method, expected_ids=None):
     body_step_receipts = 0
     temporary_operations = 0
     selected_resets = 0
+    trace_order = {}
 
     def pair_from_trace(body):
         transform = body["transform"]
@@ -134,7 +144,8 @@ def verify_capture(xml, method, expected_ids=None):
             raw = line.removeprefix("NUMERICAL_JSON ")
             trace_hash.update((raw + "\n").encode())
             try:
-                row = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(
+                row = json.loads(raw, object_pairs_hook=_unique_object,
+                                 parse_constant=lambda value: (_ for _ in ()).throw(
                     CaptureRejected(f"nonfinite trace token: {value}")))
             except (TypeError, ValueError) as error:
                 raise CaptureRejected("invalid numerical trace row") from error
@@ -150,6 +161,7 @@ def verify_capture(xml, method, expected_ids=None):
                 state_count = 0
                 last_main.clear()
                 target_bodies.clear()
+                trace_order.clear()
                 step_operations.clear()
                 toi_events.clear()
                 used_toi_events.clear()
@@ -162,7 +174,18 @@ def verify_capture(xml, method, expected_ids=None):
                 ids.append(row["id"])
             elif active is None or row["id"] != active["id"]:
                 raise CaptureRejected("trace row outside declared case")
-            elif row.get("kind") == "state":
+            elif row.get("kind") not in {"event", "action", "instrumented-callback",
+                                         "state", "endpoint", "case-end"}:
+                raise CaptureRejected("unexpected candidate trace kind")
+            elif row.get("kind") != "case-end":
+                expected_step = active.get("startStep", 0) + state_count + \
+                    (0 if row["kind"] == "endpoint" else 1)
+                if type(row.get("step")) is not int or row["step"] != expected_step or \
+                        type(row.get("order")) is not int or \
+                        row["order"] != trace_order.get(expected_step, -1) + 1:
+                    raise CaptureRejected("candidate trace step or order differs")
+                trace_order[expected_step] = row["order"]
+            if row.get("kind") == "state":
                 if state_count and last_receipt_step != state_count:
                     raise CaptureRejected("missing prior body-step receipt")
                 state_count += 1
@@ -189,7 +212,8 @@ def verify_capture(xml, method, expected_ids=None):
             raw = line.removeprefix("PROSPECTIVE_BINDING_JSON ")
             binding_hash.update((raw + "\n").encode())
             try:
-                binding = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(
+                binding = json.loads(raw, object_pairs_hook=_unique_object,
+                                     parse_constant=lambda value: (_ for _ in ()).throw(
                     CaptureRejected(f"nonfinite binding token: {value}")))
             except (TypeError, ValueError) as error:
                 raise CaptureRejected("invalid binding JSON") from error
@@ -265,7 +289,8 @@ def verify_capture(xml, method, expected_ids=None):
         raw = line.removeprefix("PROSPECTIVE_ROTATION_JSON ")
         operation_hash.update((raw + "\n").encode())
         try:
-            marker = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(
+            marker = json.loads(raw, object_pairs_hook=_unique_object,
+                                parse_constant=lambda value: (_ for _ in ()).throw(
                 CaptureRejected(f"nonfinite operation token: {value}")))
         except (TypeError, ValueError) as error:
             raise CaptureRejected("invalid operation JSON") from error
@@ -354,6 +379,8 @@ def verify_capture(xml, method, expected_ids=None):
             raise CaptureRejected("invalid XML source")
     except expat.ExpatError as error:
         raise CaptureRejected("invalid target XML") from error
+    except (KeyError, IndexError, TypeError, OverflowError, struct.error) as error:
+        raise CaptureRejected("malformed target trace or marker") from error
     if suite is None or any(suite.get(key) != value for key, value in
                             (("tests", "1"), ("skipped", "0"),
                              ("failures", "0"), ("errors", "0"))) or \
