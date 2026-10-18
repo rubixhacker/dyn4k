@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import compare
 
 import exact_consistency
+import default_policy
 import nominal_zero
 import receipt
 
@@ -58,6 +59,10 @@ def diagnostic(args):
         outcome = nominal_zero.compare_pair(fixture, args.reference, args.trace, receipt_path,
                                             observed["source_archive_sha256"], observed["artifact_sha256"],
                                             args.source_commit)
+    elif args.fixture.startswith("default-sleep-"):
+        outcome = default_policy.compare_pair(fixture, args.reference, args.trace, receipt_path,
+                                              observed["source_archive_sha256"],
+                                              observed["artifact_sha256"], args.source_commit)
     else:
         outcome = compare.compare(fixture, args.reference, args.trace, receipt_path,
                                   observed["source_archive_sha256"], observed["artifact_sha256"],

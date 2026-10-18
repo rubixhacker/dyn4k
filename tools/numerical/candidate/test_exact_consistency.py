@@ -154,6 +154,16 @@ class ExactConsistencyAdverseTest(unittest.TestCase):
         with self.assertRaisesRegex(compare.Rejected, "record order"):
             self.audit_rows([self.input_line, event, event])
 
+    def test_misordered_default_callback_fails_closed(self):
+        event = copy.deepcopy(self.first_event)
+        event["step"] = 2
+        with self.assertRaisesRegex(compare.Rejected, "record step"):
+            self.audit_rows([self.input_line, (json.dumps(event) + "\n").encode()])
+        event = copy.deepcopy(self.first_event)
+        event["order"] = 1
+        with self.assertRaisesRegex(compare.Rejected, "record order"):
+            self.audit_rows([self.input_line, (json.dumps(event) + "\n").encode()])
+
     def test_endpoint_does_not_advance_temporal_prior(self):
         rows = []
         with gzip.open(TRACE, "rb") as stream:

@@ -9,6 +9,7 @@ import compare
 
 import receipt
 import nominal_zero
+import default_policy
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -54,10 +55,14 @@ def capture(args):
     seal_args = argparse.Namespace(fixture=args.fixture, trace=str(trace), reference=args.reference,
                                    artifact=None, output=str(output / "receipt.json"))
     evidence = receipt.seal(seal_args, fixture, counts)
-    if key == "nominal-free-motion":
+    if args.fixture == "nominal-free-motion":
         outcome = nominal_zero.compare_pair(fixture, args.reference, trace, output / "receipt.json",
                                             evidence["source_sha256"], evidence["artifact_sha256"],
                                             evidence["candidate_commit"])
+    elif args.fixture.startswith("default-sleep-"):
+        outcome = default_policy.compare_pair(fixture, args.reference, trace, output / "receipt.json",
+                                              evidence["source_sha256"], evidence["artifact_sha256"],
+                                              evidence["candidate_commit"])
     else:
         outcome = compare.compare(fixture, args.reference, trace, output / "receipt.json",
                                   evidence["source_sha256"], evidence["artifact_sha256"],
