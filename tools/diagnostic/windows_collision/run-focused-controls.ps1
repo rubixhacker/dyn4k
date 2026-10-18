@@ -445,6 +445,23 @@ if ($route -eq 'corrected-production') {
 }
 
 try {
+  @(
+    "candidate=$(git rev-parse HEAD)"
+    "runner_os=$env:RUNNER_OS"
+    "runner_arch=$env:RUNNER_ARCH"
+    "image_os=$env:ImageOS"
+    "image_version=$env:ImageVersion"
+    "java_home=$env:JAVA_HOME"
+    "java_version=$(& java -version 2>&1 | Select-Object -First 1)"
+    "gradle_version=$(& .\gradlew.bat --version --console=plain | Select-String '^Gradle ' | Select-Object -First 1)"
+    "powershell=$($PSVersionTable.PSVersion)"
+  ) | Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')
+} catch {
+  $collectionErrors.Add("Runner identity collection failed: $($_.ToString())")
+  $collectionStatus = 1
+}
+
+try {
   $javaTsv = Join-Path $java 'dyn4j-6.0.0-windows-control.tsv'
   $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
   $validationLog = Join-Path $evidence 'trace-validation.log'
@@ -508,23 +525,6 @@ try {
   Set-Content -Path (Join-Path $evidence 'validation-status.txt') -Value $validationStatus
 } catch {
   $collectionErrors.Add("Validation status record failed: $($_.ToString())")
-  $collectionStatus = 1
-}
-
-try {
-  @(
-    "candidate=$(git rev-parse HEAD)"
-    "runner_os=$env:RUNNER_OS"
-    "runner_arch=$env:RUNNER_ARCH"
-    "image_os=$env:ImageOS"
-    "image_version=$env:ImageVersion"
-    "java_home=$env:JAVA_HOME"
-    "java_version=$(& java -version 2>&1 | Select-Object -First 1)"
-    "gradle_version=$(& .\gradlew.bat --version --console=plain | Select-String '^Gradle ' | Select-Object -First 1)"
-    "powershell=$($PSVersionTable.PSVersion)"
-  ) | Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')
-} catch {
-  $collectionErrors.Add("Runner identity collection failed: $($_.ToString())")
   $collectionStatus = 1
 }
 

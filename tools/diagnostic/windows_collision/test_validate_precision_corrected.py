@@ -570,6 +570,34 @@ class CorrectedControlTest(unittest.TestCase):
         subprocess.check_call(["git", "-C", str(REPO), "ls-files", "--error-unmatch", FOCUSED_SCRIPT],
                               stdout=subprocess.DEVNULL)
 
+    def test_runner_identity_is_recorded_before_corrected_validation(self):
+        script = (REPO / FOCUSED_SCRIPT).read_text(encoding="utf-8")
+        start_marker = 'try {\n  @(\n    "candidate=$(git rev-parse HEAD)"'
+        end_marker = '  $collectionStatus = 1\n}'
+        validation_marker = ('& python tools/diagnostic/windows_collision/'
+                             'validate-precision-control.py validate-corrected')
+
+        def check(text):
+            if text.count(start_marker) != 1 or text.count(validation_marker) != 1:
+                raise ValueError("runner identity producer or corrected validator is missing")
+            start = text.index(start_marker)
+            end = text.index(end_marker, start) + len(end_marker)
+            block = text[start:end]
+            fields = ("candidate", "runner_os", "runner_arch", "image_os", "image_version",
+                      "java_home", "java_version", "gradle_version", "powershell")
+            if any(block.count(f'"{field}=') != 1 for field in fields) or \
+                    block.count("Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')") != 1 or \
+                    'Runner identity collection failed:' not in block or \
+                    end >= text.index(validation_marker):
+                raise ValueError("runner identity is incomplete or unavailable at corrected validation")
+            return start, end
+
+        start, end = check(script)
+        self.reject(lambda: check(script[:start] + script[end:] + script[start:end]))
+        self.reject(lambda: check(script.replace('"java_home=$env:JAVA_HOME"', '"missing=$env:JAVA_HOME"')))
+        self.reject(lambda: check(script.replace('Runner identity collection failed:', 'BROKEN')))
+        self.reject(lambda: check(script + script[start:end]))
+
 
 if __name__ == "__main__":
     unittest.main()
