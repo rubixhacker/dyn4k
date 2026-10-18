@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import qualify
 import stage
@@ -82,10 +83,12 @@ class PublicationAuditTests(unittest.TestCase):
                     jar.writestr("commonMain/api/Type.kt", "// Fixture notice\npackage api\nclass Type\n")
                 self.write(base / f"{name}-{qualify.VERSION}-sources.jar", archive.read_bytes())
                 with zipfile.ZipFile(archive, "w") as jar:
-                    jar.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
-                    jar.writestr("META-INF/LICENSE.md", license_bytes)
-                    jar.writestr("index.html", "<html><body>Type API</body></html>")
-                    jar.writestr("api/Type/index.html", "<html><body>Type members</body></html>")
+                    for member, contents in (
+                            ("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n"),
+                            ("META-INF/LICENSE.md", license_bytes),
+                            ("index.html", "<html><body>Type API</body></html>"),
+                            ("api/Type/index.html", "<html><body>Type members</body></html>")):
+                        jar.writestr(zipfile.ZipInfo(member, (1980, 1, 1, 0, 0, 0)), contents)
                 self.write(base / f"{name}-{qualify.VERSION}-javadoc.jar", archive.read_bytes())
             source_tree = root / module / "src/commonMain/kotlin/api/Type.kt"
             source_tree.parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +186,35 @@ class PublicationAuditTests(unittest.TestCase):
             staging = self.stage(root)
             audit = qualify.audit_staging(staging, "a" * 40, targets=("jvm", "js"), license_file=root / "LICENSE.md")
             self.assertEqual("PASSED", audit["status"], audit["errors"])
+
+    def test_documentation_fixture_survives_zip_entry_clock_changes(self):
+        ticks = iter(range(1000))
+
+        def advancing_localtime(*_args):
+            tick = next(ticks)
+            return (2026, 10, 18, 12, tick // 60, tick % 60, 0, 0, -1)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(zipfile.time, "localtime", side_effect=advancing_localtime):
+                staging = self.stage(root)
+            audit = qualify.audit_staging(staging, "a" * 40, targets=("jvm", "js"),
+                                          license_file=root / "LICENSE.md")
+            self.assertEqual("PASSED", audit["status"], audit["errors"])
+
+    def test_workflow_harness_requests_full_history_without_bytecode(self):
+        workflow = (self.REPOSITORY / ".github/workflows/qualification.yml").read_text()
+        ubuntu = workflow.split("  staged-jvm-and-linux:\n", 1)[1].split(
+            "  hosted-publications:\n", 1)[0]
+        hosted = workflow.split("  hosted-publications:\n", 1)[1].split(
+            "  hosted-native:\n", 1)[0]
+        for name, job in (("ubuntu", ubuntu), ("hosted-publications", hosted)):
+            with self.subTest(job=name):
+                checkout = job.split("      - uses: actions/checkout@v4\n", 1)[1].split(
+                    "      - uses:", 1)[0]
+                self.assertIn("        with:\n          fetch-depth: 0\n", checkout)
+                self.assertIn("unittest discover -s tools/qualification", job)
+        self.assertIn("    env:\n      PYTHONDONTWRITEBYTECODE: '1'\n", hosted)
 
     def test_source_archive_rejects_crlf_changed_from_candidate(self):
         source = b"// Fixture notice\npackage api\nclass Type\n"

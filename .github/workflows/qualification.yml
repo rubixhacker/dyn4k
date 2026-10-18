@@ -25,6 +25,8 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -322,11 +324,15 @@ jobs:
       matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}' || '{"include":[{"host":"macos","runner":"macos-26","targets":"--target macosArm64 --target iosArm64 --target iosSimulatorArm64 --target iosX64 --target tvosArm64 --target tvosSimulatorArm64 --target watchosArm64 --target watchosDeviceArm64 --target watchosSimulatorArm64"},{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
