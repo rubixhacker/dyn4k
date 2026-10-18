@@ -266,6 +266,85 @@ class FullHostedTests(unittest.TestCase):
                 self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
                 self.assertFalse((folder / "diagnostic/source-xml").exists())
 
+    def test_failed_safari_identity_rejects_linked_diagnostic_destination(self):
+        for configuration in full_hosted.CONFIGS["jsSafari"]:
+            with self.subTest(configuration=configuration):
+                repository = self.root / f"linked-source-{configuration}"
+                expected, _, process = self.failed_safari_source_reports(repository)
+                output = self.root / f"linked-output-{configuration}"
+                folder = output / configuration
+                folder.mkdir(parents=True)
+                outside = self.root / f"outside-destination-{configuration}"
+                outside.mkdir()
+                (folder / "diagnostic").symlink_to(outside, target_is_directory=True)
+                lane = {"configuration": configuration, "source_process": process}
+                with mock.patch.object(full_hosted, "expected_cases",
+                                       side_effect=lambda unused, module: expected[module]):
+                    with self.assertRaisesRegex(ValueError,
+                                                "Safari diagnostic case identities differ"):
+                        full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
+                                                 "26.6.2", diagnostic=lane)
+                self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
+                self.assertEqual([], list(outside.iterdir()))
+                self.assertFalse((folder / "diagnostic").is_symlink())
+                lane.update(status="FAILED", reason="Safari diagnostic case identities differ")
+                receipt = {"schema": 2, "kind": "hosted-full-common-corpus",
+                           "candidate_sha": "a" * 40, "target": "jsSafari", "status": "FAILED",
+                           "configurations": [lane]}
+                receipt["files"] = full_hosted.archive_inventory(output)
+                (output / "receipt.json").write_text(json.dumps(receipt))
+                archive = self.root / f"linked-failed-{configuration}.tar"
+                full_hosted.package_archive(output, archive)
+                with tarfile.open(archive, "r") as packed:
+                    archived = json.load(packed.extractfile("receipt.json"))
+                    self.assertEqual("FAILED", archived["status"])
+                    self.assertEqual("UNAVAILABLE", archived["configurations"][0]
+                                     ["source_xml_diagnostic"]["status"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory exchange control")
+    def test_failed_safari_identity_rejects_exchanged_diagnostic_parent(self):
+        repository = self.root / "exchanged-source"
+        expected, _, process = self.failed_safari_source_reports(repository)
+        output = self.root / "exchanged-output"
+        folder = output / "development"
+        folder.mkdir(parents=True)
+        diagnostic = folder / "diagnostic"
+        outside = self.root / "exchanged-outside"
+        lane = {"configuration": "development", "source_process": process}
+        rename = os.rename
+        exchanged = []
+
+        def exchange_before_publish(source, target, *args, **kwargs):
+            if (not exchanged and isinstance(source, str)
+                    and source.startswith(".source-xml-") and target == "source-xml"
+                    and "src_dir_fd" in kwargs):
+                exchanged.append(True)
+                diagnostic.rename(outside)
+                diagnostic.symlink_to(outside, target_is_directory=True)
+            return rename(source, target, *args, **kwargs)
+
+        with mock.patch.object(full_hosted, "expected_cases",
+                               side_effect=lambda unused, module: expected[module]), \
+                mock.patch.object(full_hosted.os, "rename",
+                                  side_effect=exchange_before_publish):
+            with self.assertRaisesRegex(ValueError,
+                                        "Safari diagnostic case identities differ"):
+                full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
+                                         "26.6.2", diagnostic=lane)
+        self.assertTrue(exchanged)
+        self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
+        self.assertEqual([], list(outside.rglob("*.xml")))
+        self.assertFalse(diagnostic.is_symlink())
+        receipt = {"schema": 2, "kind": "hosted-full-common-corpus",
+                   "candidate_sha": "a" * 40, "target": "jsSafari", "status": "FAILED",
+                   "configurations": [lane]}
+        receipt["files"] = full_hosted.archive_inventory(output)
+        (output / "receipt.json").write_text(json.dumps(receipt))
+        archive = self.root / "exchanged-failed.tar"
+        full_hosted.package_archive(output, archive)
+        with tarfile.open(archive, "r") as packed:
+            self.assertEqual("FAILED", json.load(packed.extractfile("receipt.json"))["status"])
+
     def test_public_safari_route_stages_and_archives_source_and_consumer_reporters(self):
         source_tree = Path(__file__).resolve().parents[2]
         alias = self.root / "temporary-path-alias"

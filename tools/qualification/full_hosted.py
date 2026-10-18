@@ -1371,28 +1371,145 @@ def retain_failed_safari_source_xml(repository, destination, process, validation
             finally:
                 os.close(directory)
 
-    root = destination / "diagnostic/source-xml"
-    if root.exists() or root.is_symlink():
-        raise ValueError("failed Safari source XML diagnostic path already exists")
-    root.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=".source-xml-", dir=root.parent))
-    reports = []
-    try:
-        for module, name, raw, before in snapshots:
-            retained = temporary / module / name
-            retained.parent.mkdir(parents=True, exist_ok=True)
-            retained.write_bytes(raw)
-            os.utime(retained, ns=(before.st_mtime_ns, before.st_mtime_ns))
-            reports.append({"module": module,
-                            "path": f"diagnostic/source-xml/{module}/{name}",
-                            "source_path": str(repository / module / "build/test-results"
-                                               / "jsBrowserTest" / name),
-                            "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
-                            "modified_ns": before.st_mtime_ns,
-                            "source_device": before.st_dev, "source_inode": before.st_ino})
-        os.replace(temporary, root)
-    finally:
-        shutil.rmtree(temporary, ignore_errors=True)
+    reports = [{"module": module, "path": f"diagnostic/source-xml/{module}/{name}",
+                "source_path": str(repository / module / "build/test-results"
+                                   / "jsBrowserTest" / name),
+                "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
+                "modified_ns": before.st_mtime_ns,
+                "source_device": before.st_dev, "source_inode": before.st_ino}
+               for module, name, raw, before in snapshots]
+    if os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        with LockedDirectory(destination, resolve_root=False) as config:
+            parent_path = config.path / "diagnostic"
+            try:
+                try:
+                    os.mkdir(parent_path)
+                except FileExistsError:
+                    pass
+                with config.child("diagnostic") as parent:
+                    final = parent.path / "source-xml"
+                    if os.path.lexists(final):
+                        raise ValueError("failed Safari source XML diagnostic path already exists")
+                    temporary = parent.path / f".source-xml-{uuid.uuid4().hex}"
+                    os.mkdir(temporary)
+                    try:
+                        with parent.child(temporary.name) as held:
+                            for module, name, raw, before in snapshots:
+                                module_path = held.path / module
+                                try:
+                                    os.mkdir(module_path)
+                                except FileExistsError:
+                                    pass
+                                with held.child(module) as module_dir:
+                                    retained = module_dir.path / name
+                                    with retained.open("xb") as stream:
+                                        stream.write(raw)
+                                    os.utime(retained, ns=(before.st_mtime_ns,
+                                                            before.st_mtime_ns))
+                        os.replace(temporary, final)
+                    finally:
+                        if temporary.is_symlink():
+                            temporary.unlink()
+                        elif temporary.exists():
+                            shutil.rmtree(temporary)
+            except (OSError, ValueError):
+                if parent_path.is_symlink():
+                    parent_path.unlink()
+                raise
+    else:
+        if not destination.is_absolute():
+            raise ValueError("failed Safari source XML destination is not absolute")
+        anchor = Path(destination.anchor)
+        relative = destination.relative_to(anchor)
+        config = safari_reporter.open_directory_no_follow(anchor, relative)
+        parent = None
+        temporary = None
+        created = {}
+        try:
+            try:
+                os.mkdir("diagnostic", dir_fd=config)
+            except FileExistsError:
+                pass
+            parent = os.open("diagnostic", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=config)
+            parent_relative = relative / "diagnostic"
+
+            def attached():
+                return safari_reporter.same_directory(anchor, parent_relative, parent)
+
+            if not attached():
+                raise ValueError("failed Safari source XML diagnostic parent changed")
+            try:
+                os.stat("source-xml", dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise ValueError("failed Safari source XML diagnostic path already exists")
+            name = f".source-xml-{uuid.uuid4().hex}"
+            os.mkdir(name, dir_fd=parent)
+            temporary = name
+            if not attached():
+                raise ValueError("failed Safari source XML diagnostic parent changed")
+            held = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                           dir_fd=parent)
+            try:
+                for module, name, raw, before in snapshots:
+                    if not attached():
+                        raise ValueError("failed Safari source XML diagnostic parent changed")
+                    if module not in created:
+                        os.mkdir(module, dir_fd=held)
+                        created[module] = []
+                    module_dir = os.open(module, os.O_RDONLY | os.O_DIRECTORY |
+                                         os.O_NOFOLLOW, dir_fd=held)
+                    try:
+                        descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                             os.O_NOFOLLOW, 0o600, dir_fd=module_dir)
+                        created[module].append(name)
+                        with os.fdopen(descriptor, "wb") as stream:
+                            stream.write(raw)
+                        os.utime(name, ns=(before.st_mtime_ns, before.st_mtime_ns),
+                                 dir_fd=module_dir, follow_symlinks=False)
+                    finally:
+                        os.close(module_dir)
+                    if not attached():
+                        raise ValueError("failed Safari source XML diagnostic parent changed")
+            finally:
+                os.close(held)
+            os.rename(temporary, "source-xml", src_dir_fd=parent, dst_dir_fd=parent)
+            temporary = "source-xml"
+            if not attached():
+                raise ValueError("failed Safari source XML diagnostic parent changed")
+            temporary = None
+        finally:
+            if parent is not None:
+                if temporary is not None:
+                    try:
+                        held = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY |
+                                       os.O_NOFOLLOW, dir_fd=parent)
+                        try:
+                            for module, names in created.items():
+                                module_dir = os.open(module, os.O_RDONLY | os.O_DIRECTORY |
+                                                     os.O_NOFOLLOW, dir_fd=held)
+                                try:
+                                    for name in names:
+                                        os.unlink(name, dir_fd=module_dir)
+                                finally:
+                                    os.close(module_dir)
+                                os.rmdir(module, dir_fd=held)
+                        finally:
+                            os.close(held)
+                        os.rmdir(temporary, dir_fd=parent)
+                    except FileNotFoundError:
+                        pass
+                os.close(parent)
+            try:
+                linked = os.stat("diagnostic", dir_fd=config, follow_symlinks=False)
+                if stat.S_ISLNK(linked.st_mode):
+                    os.unlink("diagnostic", dir_fd=config)
+            except FileNotFoundError:
+                pass
+            os.close(config)
     return {"status": "UNVERIFIED", "validation_error": str(validation_error),
             "source_pid": process["pid"], "invocation_id": process["invocation_id"],
             "source_started_ns": started, "source_finished_ns": finished,
