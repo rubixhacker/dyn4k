@@ -49,6 +49,7 @@ import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.ObjectAlreadyExistsException
 import org.dyn4j.exception.ObjectAlreadyOwnedException
 import org.dyn4j.geometry.Shiftable
+import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.listener.ContactListener
 import org.dyn4j.world.listener.DestructionListener
@@ -468,39 +469,45 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
     override fun addTimeOfImpactListener(listener: TimeOfImpactListener<T>?): Boolean = timeOfImpactListeners.add(listener)
 
     protected open fun step() {
-        val stepListenerCount = stepListeners.size
-        for (i in 0 until stepListenerCount) stepListeners[i]!!.begin(timeStep, this)
-        if (updateRequired) {
+        val diagnostic = RotationOperationTap.currentCapture()
+        diagnostic?.beginWorldStep(this)
+        try {
+            val stepListenerCount = stepListeners.size
+            for (i in 0 until stepListenerCount) stepListeners[i]!!.begin(timeStep, this)
+            if (updateRequired) {
+                detect()
+                for (i in 0 until stepListenerCount) stepListeners[i]!!.updatePerformed(timeStep, this)
+                updateRequired = false
+            }
+            if (contactListeners.isNotEmpty()) {
+                for (data in contactCollisions) {
+                    for (contact in data.getContactConstraint().getContacts()) {
+                        for (listener in contactListeners) listener!!.preSolve(data, contact)
+                    }
+                }
+            }
+            val mode = settings.getContinuousDetectionMode()
+            for (body in bodies) body.getPreviousTransform().set(body.getTransform())
+            constraintGraph.solve(contactConstraintSolver, gravity, timeStep, settings)
+            if (contactListeners.isNotEmpty()) {
+                for (data in contactCollisions) {
+                    for (contact in data.getContactConstraint().getContacts()) {
+                        for (listener in contactListeners) listener!!.postSolve(data, contact)
+                    }
+                }
+            }
+            for (i in 0 until stepListenerCount) stepListeners[i]!!.postSolve(timeStep, this)
+            if (mode != ContinuousDetectionMode.NONE) {
+                ccdBroadphase.update()
+                solveTOI(mode)
+                ccdBroadphase.clearUpdates()
+            }
             detect()
-            for (i in 0 until stepListenerCount) stepListeners[i]!!.updatePerformed(timeStep, this)
             updateRequired = false
+            for (i in 0 until stepListenerCount) stepListeners[i]!!.end(timeStep, this)
+        } finally {
+            diagnostic?.endWorldStep()
         }
-        if (contactListeners.isNotEmpty()) {
-            for (data in contactCollisions) {
-                for (contact in data.getContactConstraint().getContacts()) {
-                    for (listener in contactListeners) listener!!.preSolve(data, contact)
-                }
-            }
-        }
-        val mode = settings.getContinuousDetectionMode()
-        for (body in bodies) body.getPreviousTransform().set(body.getTransform())
-        constraintGraph.solve(contactConstraintSolver, gravity, timeStep, settings)
-        if (contactListeners.isNotEmpty()) {
-            for (data in contactCollisions) {
-                for (contact in data.getContactConstraint().getContacts()) {
-                    for (listener in contactListeners) listener!!.postSolve(data, contact)
-                }
-            }
-        }
-        for (i in 0 until stepListenerCount) stepListeners[i]!!.postSolve(timeStep, this)
-        if (mode != ContinuousDetectionMode.NONE) {
-            ccdBroadphase.update()
-            solveTOI(mode)
-            ccdBroadphase.clearUpdates()
-        }
-        detect()
-        updateRequired = false
-        for (i in 0 until stepListenerCount) stepListeners[i]!!.end(timeStep, this)
     }
 
     protected override fun processCollisions(iterator: MutableIterator<@kotlin.jvm.JvmSuppressWildcards V>) {
@@ -637,7 +644,7 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         body1.getPreviousTransform().lerp(body1.getTransform(), impactTime, body1.getTransform())
         val otherDynamic = other.isDynamic()
         if (otherDynamic) other.getPreviousTransform().lerp(other.getTransform(), impactTime, other.getTransform())
-        ToiAcceptedResetTap.listener?.invoke(body1, other, impactTime, otherDynamic)
+        ToiAcceptedResetTap.record(body1, other, impactTime, otherDynamic)
         if (impact.getSeparation().getDistance() <= 0.0) return true
         timeOfImpactSolver.solve(body1, other, impact, settings)
         return true

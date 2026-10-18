@@ -2,11 +2,12 @@ package portable
 
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.ContinuousDetectionMode
+import org.dyn4j.dynamics.TimeStep
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.world.listener.StepListener
-import org.dyn4j.world.ToiAcceptedResetTap
+import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -15,6 +16,99 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 
 class RecorderTest {
+    @Test
+    fun throwingOutputDuringStepWaitsUntilEngineCompletes() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val body = Body()
+        body.addFixture(Geometry.createCircle(0.5))
+        body.setMass(MassType.NORMAL)
+        body.setAngularVelocity(1.0)
+        world.addBody(body)
+        var completed = 0
+        world.addStepListener(object : StepListener<Body> {
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) {
+                completed++
+            }
+        })
+        assertFailsWith<IllegalStateException> {
+            RotationOperationTap.capture("throwing-step-output") {
+                NumericalRecorder { line ->
+                    if (line.contains("\"name\":\"step.postSolve\""))
+                        throw IllegalStateException("event output failed")
+                }.capture(CaseSpec("throwing-step-output", "free-motion", "default",
+                    60, 1, emptyMap()), world)
+            }
+        }
+        assertEquals(1, completed)
+        assertEquals(null, RotationOperationTap.currentCapture())
+    }
+    @Test
+    fun recorderConsumesScopedRotationAfterCompletedStep() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val body = Body()
+        body.addFixture(Geometry.createCircle(0.5))
+        body.setMass(MassType.NORMAL)
+        body.setAngularVelocity(1.0)
+        world.addBody(body)
+        RotationOperationTap.capture("recorder-probe") { scope ->
+            NumericalRecorder { }.capture(
+                CaseSpec("recorded-rotation", "free-motion", "default", 60, 1,
+                    emptyMap()), world)
+            assertTrue(scope.drain().isEmpty())
+        }
+    }
+
+    @Test
+    fun failingOutputAfterStepLeavesCompletedEngineState() {
+        fun scene(): Pair<World<Body>, Body> {
+            val world = World<Body>()
+            world.setGravity(0.0, 0.0)
+            val body = Body()
+            body.addFixture(Geometry.createCircle(0.5))
+            body.setMass(MassType.NORMAL)
+            body.setAngularVelocity(1.0)
+            world.addBody(body)
+            return world to body
+        }
+        val (controlWorld, controlBody) = scene()
+        controlWorld.step(1, 1.0 / 60.0)
+        val (observedWorld, observedBody) = scene()
+        assertFailsWith<IllegalStateException> {
+            RotationOperationTap.capture("throwing-state-output") {
+                NumericalRecorder { line ->
+                    if (line.contains("\"kind\":\"state\""))
+                        throw IllegalStateException("state output failed")
+                }.capture(CaseSpec("throwing-state-output", "free-motion", "default",
+                    60, 1, emptyMap()), observedWorld)
+            }
+        }
+        assertEquals(controlBody.getTransform().getValues().toList(),
+            observedBody.getTransform().getValues().toList())
+        assertEquals(null, RotationOperationTap.currentCapture())
+        assertTrue(observedWorld.getStepListeners().isEmpty())
+    }
+    @Test
+    fun scopedWorldStepRecordsOnlyItsOwnWorld() {
+        val owned = World<Body>()
+        val foreign = World<Body>()
+        RotationOperationTap.capture("world-probe") { scope ->
+            scope.captureStep(owned) { owned.step(1, 1.0 / 60.0) }
+            assertTrue(scope.drain().isEmpty())
+        }
+        assertFailsWith<IllegalStateException> {
+            RotationOperationTap.capture("foreign-world-probe") { scope ->
+                scope.captureStep(owned) {
+                    owned.step(1, 1.0 / 60.0)
+                    foreign.step(1, 1.0 / 60.0)
+                }
+            }
+        }
+    }
     @Test
     fun throwingWorldRegistrationRestoresTapsAndListeners() {
         val world = object : World<Body>() {
@@ -27,27 +121,18 @@ class RecorderTest {
         body.addFixture(Geometry.createCircle(0.5))
         body.setMass(MassType.NORMAL)
         world.addBody(body)
-        val previousRotation = RotationOperationTap.listener
-        val previousReset = ToiAcceptedResetTap.listener
-        val rotation: (RotationOperationTap.Call) -> Unit = {}
-        val reset: (Any, Any, Double, Boolean) -> Unit = { _, _, _, _ -> }
-        RotationOperationTap.listener = rotation
-        ToiAcceptedResetTap.listener = reset
-        try {
+        RotationOperationTap.capture("throwing-registration") { scope ->
             assertFailsWith<IllegalStateException> {
                 NumericalRecorder { }.capture(
                     CaseSpec("throwing-registration", "free-motion", "default", 60, 1,
                         emptyMap()), world)
             }
-            assertSame(rotation, RotationOperationTap.listener)
-            assertSame(reset, ToiAcceptedResetTap.listener)
+            assertSame(scope, RotationOperationTap.currentCapture())
             assertTrue(world.getContactListeners().isEmpty())
             assertTrue(world.getTimeOfImpactListeners().isEmpty())
             assertTrue(world.getStepListeners().isEmpty())
-        } finally {
-            RotationOperationTap.listener = previousRotation
-            ToiAcceptedResetTap.listener = previousReset
         }
+        assertEquals(null, RotationOperationTap.currentCapture())
     }
 
     @Test
@@ -57,27 +142,18 @@ class RecorderTest {
         body.addFixture(Geometry.createCircle(0.5))
         body.setMass(MassType.NORMAL)
         world.addBody(body)
-        val previousRotation = RotationOperationTap.listener
-        val previousReset = ToiAcceptedResetTap.listener
-        val rotation: (RotationOperationTap.Call) -> Unit = {}
-        val reset: (Any, Any, Double, Boolean) -> Unit = { _, _, _, _ -> }
-        RotationOperationTap.listener = rotation
-        ToiAcceptedResetTap.listener = reset
-        try {
+        RotationOperationTap.capture("throwing-output") { scope ->
             assertFailsWith<IllegalStateException> {
                 NumericalRecorder { throw IllegalStateException("emit failed") }.capture(
                     CaseSpec("throwing-output", "free-motion", "default", 60, 1,
                         emptyMap()), world)
             }
-            assertSame(rotation, RotationOperationTap.listener)
-            assertSame(reset, ToiAcceptedResetTap.listener)
+            assertSame(scope, RotationOperationTap.currentCapture())
             assertTrue(world.getContactListeners().isEmpty())
             assertTrue(world.getTimeOfImpactListeners().isEmpty())
             assertTrue(world.getStepListeners().isEmpty())
-        } finally {
-            RotationOperationTap.listener = previousRotation
-            ToiAcceptedResetTap.listener = previousReset
         }
+        assertEquals(null, RotationOperationTap.currentCapture())
     }
 
     @Test
@@ -107,17 +183,18 @@ class RecorderTest {
             bullet.setBullet(true)
             world.addBody(bullet)
             var accepted = 0
-            val previous = ToiAcceptedResetTap.listener
-            if (observe) ToiAcceptedResetTap.listener = { _, _, _, _ -> accepted++ }
-            try {
+            if (observe) RotationOperationTap.capture("accepted-toi") { scope ->
+                scope.captureStep(world) { world.step(1, 1.0 / 30.0) }
+                accepted = scope.drain().count {
+                    it is RotationOperationTap.Observation.ToiAccepted
+                }
+            } else {
                 world.step(1, 1.0 / 30.0)
-                return Result(ground.checks, bullet.checks, accepted,
-                    ground.getTransform().getValues().toList() +
-                    bullet.getTransform().getValues().toList() +
-                    listOf(bullet.getLinearVelocity().x, bullet.getLinearVelocity().y))
-            } finally {
-                ToiAcceptedResetTap.listener = previous
             }
+            return Result(ground.checks, bullet.checks, accepted,
+                ground.getTransform().getValues().toList() +
+                bullet.getTransform().getValues().toList() +
+                listOf(bullet.getLinearVelocity().x, bullet.getLinearVelocity().y))
         }
         val default = run(false)
         val observed = run(true)
