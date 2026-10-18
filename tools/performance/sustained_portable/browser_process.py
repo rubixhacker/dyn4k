@@ -89,25 +89,26 @@ class ClientOriginGuard:
     def _owner(self, inode):
         owners = {}
         target = f"socket:[{inode}]"
-        for proc in self.proc_root.iterdir():
-            if not proc.name.isdecimal():
-                continue
-            try:
-                descriptors = list((proc / "fd").iterdir())
-            except OSError:
-                continue
-            for descriptor in descriptors:
+        try:
+            for proc in self.proc_root.iterdir():
+                if not proc.name.isdecimal():
+                    continue
                 try:
-                    link = os.readlink(descriptor)
+                    descriptors = list((proc / "fd").iterdir())
                 except OSError:
                     continue
-                if link != target:
-                    continue
-                try:
-                    pid = int(proc.name)
-                    before = process_stat(self.proc_root, pid)
-                    handle = os.pidfd_open(pid)
+                for descriptor in descriptors:
                     try:
+                        link = os.readlink(descriptor)
+                    except OSError:
+                        continue
+                    if link != target:
+                        continue
+                    handle = None
+                    try:
+                        pid = int(proc.name)
+                        before = process_stat(self.proc_root, pid)
+                        handle = os.pidfd_open(pid)
                         liveness = select.poll()
                         liveness.register(handle, select.POLLIN)
                         if os.readlink(descriptor) != target:
@@ -118,16 +119,24 @@ class ClientOriginGuard:
                             for key in ("pid", "ppid", "pgrp", "session", "start_ticks")
                         ) or liveness.poll(0):
                             raise ValueError("browser client socket owner raced or exited")
+                        if pid not in owners:
+                            owners[pid] = (after, handle)
+                            handle = None
+                    except ValueError:
+                        raise
+                    except OSError as error:
+                        raise ValueError("browser client socket owner raced during observation") from error
                     finally:
-                        os.close(handle)
-                    owners[pid] = after
-                except ValueError:
-                    raise
-                except OSError as error:
-                    raise ValueError("browser client socket owner raced during observation") from error
-        if len(owners) != 1:
-            raise ValueError("browser client socket owner is missing or ambiguous")
-        return next(iter(owners.values()))
+                        if handle is not None:
+                            os.close(handle)
+            if len(owners) != 1:
+                raise ValueError("browser client socket owner is missing or ambiguous")
+            owner = next(iter(owners.values()))
+            owners.clear()
+            return owner
+        finally:
+            for _, handle in owners.values():
+                os.close(handle)
 
     def _ancestry(self, owner):
         chain = [{"pid": owner["pid"], "start_ticks": owner["start_ticks"]}]
@@ -150,21 +159,66 @@ class ClientOriginGuard:
             raise ValueError("browser wrapper PID changed during request")
         return chain
 
-    def observe_socket(self, connection):
+    def _observe_socket(self, connection):
         inode, peer, local = self._client_inode(connection)
-        owner = self._owner(inode)
-        chain = self._ancestry(owner)
-        observed = boottime_ns()
-        if owner["start_ticks"] * TICK_NS > observed:
-            raise ValueError("browser client process started after its request")
-        return {
-            "client_pid": owner["pid"], "client_start_ticks": owner["start_ticks"],
-            "client_socket_inode": int(inode),
-            "client_address": peer[0], "client_port": peer[1],
-            "server_address": local[0], "server_port": local[1],
-            "client_ancestry": chain, "observed_boottime_ns": observed,
-            "method": "linux_procfs_tcp_fd",
-        }
+        owner, handle = self._owner(inode)
+        try:
+            chain = self._ancestry(owner)
+            observed = boottime_ns()
+            if owner["start_ticks"] * TICK_NS > observed:
+                raise ValueError("browser client process started after its request")
+            return {
+                "client_pid": owner["pid"], "client_start_ticks": owner["start_ticks"],
+                "client_socket_inode": int(inode),
+                "client_address": peer[0], "client_port": peer[1],
+                "server_address": local[0], "server_port": local[1],
+                "client_ancestry": chain, "observed_boottime_ns": observed,
+                "method": "linux_procfs_tcp_fd",
+            }, handle
+        except BaseException:
+            os.close(handle)
+            raise
+
+    def observe_socket(self, connection):
+        record, handle = self._observe_socket(connection)
+        os.close(handle)
+        return record
+
+    def hold_socket(self, connection):
+        record, handle = self._observe_socket(connection)
+        return ClientOriginLease(self, connection, record, handle)
+
+
+class ClientOriginLease:
+    def __init__(self, guard, connection, initial, pidfd):
+        self.guard = guard
+        self.connection = connection
+        self.initial = initial
+        self.pidfd = pidfd
+        self.check_times_ns = [initial["observed_boottime_ns"]]
+
+    def verify(self):
+        liveness = select.poll()
+        liveness.register(self.pidfd, select.POLLIN)
+        if liveness.poll(0):
+            raise ValueError("browser client process exited during request")
+        current = self.guard.observe_socket(self.connection)
+        for key in (
+            "client_pid", "client_start_ticks", "client_socket_inode",
+            "client_address", "client_port", "server_address", "server_port",
+            "client_ancestry", "method",
+        ):
+            if current[key] != self.initial[key]:
+                raise ValueError("browser client socket ownership changed during request")
+        if liveness.poll(0):
+            raise ValueError("browser client process exited during request")
+        self.check_times_ns.append(current["observed_boottime_ns"])
+        return {**current, "check_times_ns": list(self.check_times_ns)}
+
+    def close(self):
+        if self.pidfd is not None:
+            os.close(self.pidfd)
+            self.pidfd = None
 
 
 class ChromeObserver:
@@ -320,6 +374,7 @@ class ChromeObserver:
             "completion_boottime_ns": completion_ns,
             "completion_nonce_sha256": hashlib.sha256(nonce.encode()).hexdigest(),
             "request_origin_method": "linux_procfs_tcp_fd",
+            "request_origin_scope": "socket_owner_consistency_only",
             "request_origin_count": len(request_origins),
             "selected_image_path": str(self.selected_binary),
             "selected_image_sha256": self.selected_sha256,

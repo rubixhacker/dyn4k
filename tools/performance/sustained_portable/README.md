@@ -44,12 +44,22 @@ live Chrome PID through its unique profile and page arguments, wrapper
 ancestry, start time, and mapped `/proc/<pid>/exe` digest. For every accepted
 page, bundle, and completion request, the server resolves the client TCP
 socket inode to its owning process fd and records that process's ancestry to
-the selected Chrome PID. Missing or foreign socket owners reject the request;
-the archive records the origin proof and any rejection. The wrapper PID is
-not described as the browser image. This proof requires an accessible Linux
-`/proc` TCP and fd view and does not establish a browser process identity on
-other hosts. Incomplete or rejected browser runs retain their raw archives.
-Earlier virtual-clock failures are preserved.
+the selected Chrome PID. It retains a pidfd for the initially observed owner
+through the request and checks socket ownership, ancestry, and liveness again
+while handling the request. A completion body is checked both before and after
+it is read. Missing, foreign, changed, or ambiguous owners reject the request.
+After server shutdown, the launcher compares the final response, origin, and
+completion records with the snapshot checked at completion. Late records reject
+the capture. The archive retains rejected completion bodies and errors.
+
+These Linux `/proc` observations establish socket owner consistency at the
+sample points. A TCP socket may be shared, so they cannot identify which
+process sent each request byte. The receipt marks `stream_origin` unpassed;
+there is no independent Chrome target Network event receipt yet. The wrapper
+PID is not described as the browser image. This observation requires an
+accessible Linux `/proc` TCP and fd view and does not establish browser process
+identity on other hosts. Incomplete or rejected browser runs retain their raw
+archives. Earlier virtual-clock failures are preserved.
 
 Wasm WASI receives the fixed launch fields on one tab-delimited stdin line.
 The archive retains that line. The other targets receive the fields as

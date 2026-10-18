@@ -38,8 +38,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def setup(self):
         super().setup()
-        self.connection_origin = {}
+        self.connection.settimeout(5)
+        self.connection_lease = None
         self.connection_origin_error = None
+        self.origin_error_reported = False
         if not self.server.origin_required:
             return
         if not self.server.origin_ready.wait(timeout=2):
@@ -48,9 +50,20 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if self.server.origin_guard is None:
                 raise ValueError("browser request origin guard is missing")
-            self.connection_origin = self.server.origin_guard.observe_socket(self.connection)
+            self.connection_lease = self.server.origin_guard.hold_socket(self.connection)
+            self.connection_lease.verify()
         except (OSError, ValueError) as error:
             self.connection_origin_error = str(error)
+            if self.connection_lease is not None:
+                self.connection_lease.close()
+                self.connection_lease = None
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            if self.connection_lease is not None:
+                self.connection_lease.close()
 
     def read_resource(self, selected):
         with selected.open("rb") as stream:
@@ -60,12 +73,20 @@ class Handler(SimpleHTTPRequestHandler):
         with self.server.resource_lock:
             self.server.resource_errors.append(message)
 
-    def prove_origin(self):
+    def prove_origin(self, send_error=True):
         if self.connection_origin_error is None:
-            return self.connection_origin
-        with self.server.resource_lock:
-            self.server.origin_errors.append(self.connection_origin_error)
-        self.send_error(403)
+            if not self.server.origin_required:
+                return {}
+            try:
+                return self.connection_lease.verify()
+            except (OSError, ValueError) as error:
+                self.connection_origin_error = str(error)
+        if not self.origin_error_reported:
+            with self.server.resource_lock:
+                self.server.origin_errors.append(self.connection_origin_error)
+            self.origin_error_reported = True
+        if send_error:
+            self.send_error(403)
         return None
 
     def do_GET(self):
@@ -140,14 +161,24 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path not in ("/complete", "/error"):
             self.send_error(404)
             return
-        origin = self.prove_origin()
-        if origin is None:
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400)
             return
-        size = int(self.headers.get("Content-Length", "0"))
         if size < 1 or size > 4_000_000:
             self.send_error(413)
             return
+        request_origin = self.prove_origin(send_error=False)
         payload = self.rfile.read(size)
+        origin = self.prove_origin(send_error=False)
+        if len(payload) != size or request_origin is None or origin is None:
+            with self.server.resource_lock:
+                self.server.rejected_completion_payloads.append(payload)
+                if len(payload) != size:
+                    self.server.origin_errors.append("browser completion body was truncated")
+            self.send_error(403 if len(payload) == size else 400)
+            return
         with self.server.completion_lock:
             if not self.server.completed.is_set():
                 self.server.received = {"kind": self.path[1:], "payload": payload}
@@ -184,6 +215,7 @@ def required_resources(target):
 def browser_server(directory, page, bundle, target, handler=Handler,
                    origin_required=True):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.daemon_threads = False
     server.directory_path = Path(directory)
     server.page = page
     server.expected_bundle = dict(bundle)
@@ -205,6 +237,7 @@ def browser_server(directory, page, bundle, target, handler=Handler,
     server.origin_guard = None
     server.origin_errors = []
     server.request_origins = []
+    server.rejected_completion_payloads = []
     return server
 
 
@@ -277,14 +310,32 @@ def validate_loaded_resources(server):
     }
 
 
-def snapshot_request_origins(server):
+def snapshot_exchange(server):
     try:
         with server.resource_lock:
-            records = list(server.request_origins)
-            errors = list(server.origin_errors)
-    except (AttributeError, TypeError) as error:
-        raise ValueError("browser request origin state is incomplete") from error
-    return {"request_origins": records, "origin_errors": errors}
+            return {
+                "origin": {"request_origins": list(server.request_origins),
+                           "origin_errors": list(server.origin_errors)},
+                "resources": {
+                    "resource_responses": list(server.resource_responses),
+                    "served": dict(server.served),
+                    "served_bytes": dict(server.served_bytes),
+                    "resource_errors": list(server.resource_errors),
+                },
+                "times": {
+                    "page": server.page_served_boottime_ns,
+                    "first_resource": server.first_resource_boottime_ns,
+                    "last_resource": server.last_resource_boottime_ns,
+                    "completion": server.completion_boottime_ns,
+                },
+                "completion": None if server.received is None else {
+                    "kind": server.received["kind"],
+                    "sha256": hashlib.sha256(server.received["payload"]).hexdigest(),
+                    "bytes": len(server.received["payload"]),
+                },
+            }
+    except (AttributeError, KeyError, TypeError) as error:
+        raise ValueError("browser exchange state is incomplete") from error
 
 
 def validate_origin_stream(server, state):
@@ -315,7 +366,7 @@ def validate_origin_stream(server, state):
         if (origin.keys() != {
             "client_pid", "client_start_ticks", "client_socket_inode",
             "client_address", "client_port", "server_address", "server_port",
-            "client_ancestry", "observed_boottime_ns", "method"
+            "client_ancestry", "observed_boottime_ns", "check_times_ns", "method"
         } or any(type(origin[key]) is not int or origin[key] <= 0 for key in (
             "client_pid", "client_start_ticks", "client_socket_inode", "client_port",
             "server_port", "observed_boottime_ns"
@@ -332,7 +383,13 @@ def validate_origin_stream(server, state):
             origin["client_ancestry"][0] != {
                 "pid": origin["client_pid"],
                 "start_ticks": origin["client_start_ticks"]
-            } or origin["observed_boottime_ns"] > record["time_ns"]):
+            } or type(origin["check_times_ns"]) is not list or
+            len(origin["check_times_ns"]) < (4 if record["kind"] in ("complete", "error") else 3) or
+            not all(type(instant) is int and instant > 0
+                    for instant in origin["check_times_ns"]) or
+            origin["check_times_ns"] != sorted(origin["check_times_ns"]) or
+            origin["check_times_ns"][-1] != origin["observed_boottime_ns"] or
+            origin["observed_boottime_ns"] > record["time_ns"]):
             raise ValueError(f"browser request origin record {index} has invalid socket proof")
         if record["kind"] == "page":
             page.append(record)
@@ -464,6 +521,7 @@ def run(args):
     process_error = None
     origin_error = None
     origin_state = {"request_origins": [], "origin_errors": []}
+    early_exchange = None
     completed = False
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -491,7 +549,8 @@ def run(args):
                 break
         completed = server.completed.is_set()
         try:
-            origin_state = snapshot_request_origins(server)
+            early_exchange = snapshot_exchange(server)
+            origin_state = early_exchange["origin"]
             validate_origin_stream(server, origin_state)
         except ValueError as error:
             origin_error = str(error)
@@ -519,6 +578,17 @@ def run(args):
             stdout, stderr = b"", b""
         server.shutdown()
         server.server_close()
+    try:
+        final_exchange = snapshot_exchange(server)
+        origin_state = final_exchange["origin"]
+        if early_exchange is None or final_exchange != early_exchange:
+            origin_error = "browser exchange changed after completion"
+        try:
+            validate_origin_stream(server, origin_state)
+        except ValueError as error:
+            origin_error = (origin_error + "; " if origin_error else "") + str(error)
+    except ValueError as error:
+        origin_error = (origin_error + "; " if origin_error else "") + str(error)
     ended = time.monotonic_ns()
     (args.archive / "stdout.raw").write_bytes(stdout)
     (args.archive / "stderr.raw").write_bytes(stderr)
@@ -526,6 +596,16 @@ def run(args):
     raw = received["payload"] if received and received["kind"] == "complete" else b""
     (args.archive / "producer.raw").write_bytes(raw)
     (args.archive / "completion.raw").write_bytes(received["payload"] if received else b"")
+    with server.resource_lock:
+        rejected_payloads = list(server.rejected_completion_payloads)
+    rejected_completions = []
+    for index, payload in enumerate(rejected_payloads, 1):
+        name = f"rejected-completion-{index:03d}.raw"
+        (args.archive / name).write_bytes(payload)
+        rejected_completions.append({
+            "file": name, "sha256": capture.digest(args.archive / name),
+            "bytes": len(payload),
+        })
     try:
         resource_state = validate_loaded_resources(server)
     except ValueError as error:
@@ -538,6 +618,8 @@ def run(args):
             "completion_sha256": capture.digest(args.archive / "completion.raw"),
             "resource_validation_error": str(error),
             **origin_state,
+            "rejected_completions": rejected_completions,
+            "stream_origin": "unpassed_shared_tcp_socket_possible",
         }
         if process_error is not None:
             failure["process_validation_error"] = process_error
@@ -573,6 +655,8 @@ def run(args):
         "stderr_bytes": len(stderr),
         "browser_process_image": process_image,
         **origin_state,
+        "rejected_completions": rejected_completions,
+        "stream_origin": "unpassed_shared_tcp_socket_possible",
         **({"origin_validation_error": origin_error} if origin_error is not None else {}),
         "memory_attribution": "missing", "allocation": "missing", "plateau": "missing",
         "required_non_jvm_gates": {

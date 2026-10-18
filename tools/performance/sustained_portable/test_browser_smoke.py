@@ -1,9 +1,12 @@
+import array
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -205,6 +208,95 @@ class BrowserResourceBindingTest(unittest.TestCase):
         self.assertTrue(all("outside launched wrapper tree" in error
                             for error in server.origin_errors))
 
+    def test_transferred_fd_cannot_post_after_original_owner_exits(self):
+        class SetupObserved(browser_smoke.Handler):
+            def setup(self):
+                super().setup()
+                self.server.setup_origin_error = self.connection_origin_error
+                self.server.setup_observed.set()
+
+        server = browser_smoke.browser_server(self.root, b"<html>fixture</html>",
+                                              self.bundle, "wasmJs", handler=SetupObserved)
+        server.setup_observed = threading.Event()
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        control, child_control = socket.socketpair()
+        self.addCleanup(control.close)
+        child_code = (
+            "import array, os, socket, sys\n"
+            "control = socket.socket(fileno=int(sys.argv[1]))\n"
+            "if os.fork() == 0:\n"
+            "    control.recv(1)\n"
+            "    client = socket.create_connection(('127.0.0.1', int(sys.argv[2])))\n"
+            "    control.sendall(b'C')\n"
+            "    control.recv(1)\n"
+            "    control.sendmsg([b'F'], [(socket.SOL_SOCKET, socket.SCM_RIGHTS,\n"
+            "                              array.array('i', [client.fileno()]))])\n"
+            "    client.close()\n"
+            "    control.close()\n"
+            "    os._exit(0)\n"
+            "os.wait()\n"
+            "control.close()\n"
+        )
+        wrapper = subprocess.Popen(
+            [sys.executable, "-B", "-c", child_code,
+             str(child_control.fileno()), str(server.server_port)],
+            pass_fds=[child_control.fileno()],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        child_control.close()
+        try:
+            server.origin_guard = browser_process.ClientOriginGuard(wrapper.pid)
+            server.origin_ready.set()
+            control.settimeout(5)
+            control.sendall(b'S')
+            self.assertEqual(control.recv(1), b'C')
+            self.assertTrue(server.setup_observed.wait(5))
+            self.assertIsNone(server.setup_origin_error)
+            control.sendall(b'T')
+            marker, ancillary, _, _ = control.recvmsg(1, socket.CMSG_SPACE(4))
+            self.assertEqual(marker, b'F')
+            descriptors = array.array('i')
+            descriptors.frombytes(ancillary[0][2][:4])
+            with socket.socket(fileno=descriptors[0]) as foreign:
+                foreign.settimeout(5)
+                self.assertEqual(wrapper.wait(timeout=5), 0)
+                payload = b"DYN4K\tCOMPLETE\tforeign\n"
+                request = (b"POST /complete HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                           + f"Content-Length: {len(payload)}\r\n\r\n".encode()
+                           + payload)
+                foreign.sendall(request)
+                response = bytearray()
+                while chunk := foreign.recv(4096):
+                    response.extend(chunk)
+            self.assertIn(b" 403 ", bytes(response).split(b"\r\n", 1)[0])
+            self.assertIsNone(server.received)
+            self.assertTrue(server.origin_errors)
+            self.assertTrue(any("exited" in error or "ownership changed" in error or
+                                "outside launched wrapper tree" in error
+                                for error in server.origin_errors))
+            destination = os.environ.get("DYN4K_BROWSER_CONTROL_ARCHIVE")
+            if destination:
+                archive = Path(destination) / "fd-transfer-after-setup"
+                archive.mkdir(parents=True, exist_ok=False)
+                (archive / "request.raw").write_bytes(request)
+                (archive / "response.raw").write_bytes(response)
+                source = subprocess.check_output(
+                    ["git", "-C", str(browser_smoke.capture.ROOT), "rev-parse", "HEAD"],
+                    text=True).strip()
+                (archive / "control.json").write_text(json.dumps({
+                    "qualification": "rejected_control", "source_sha": source,
+                    "http_status": 403,
+                    "request_sha256": hashlib.sha256(request).hexdigest(),
+                    "response_sha256": hashlib.sha256(response).hexdigest(),
+                    "origin_errors": server.origin_errors,
+                }, indent=2) + "\n")
+        finally:
+            if wrapper.poll() is None:
+                wrapper.terminate()
+                wrapper.wait(timeout=5)
+            wrapper.stderr.close()
+
 
 class BrowserResourceRecordTest(unittest.TestCase):
     def server(self):
@@ -342,10 +434,13 @@ class BrowserOriginRecordTest(unittest.TestCase):
             "observed_boottime_ns": 90, "method": "linux_procfs_tcp_fd",
         }
         def event(kind, name, payload, observed):
+            proof = dict(origin)
+            proof["check_times_ns"] = ([87, 88, 89, 90]
+                                       if kind in ("complete", "error") else [88, 89, 90])
             return {"kind": kind, "name": name,
                     "sha256": hashlib.sha256(payload).hexdigest(),
                     "bytes": len(payload), "time_ns": observed,
-                    "origin": dict(origin)}
+                    "origin": proof}
         return server, {"origin_errors": [], "request_origins": [
             event("page", "/", page, 100),
             event("resource", "fixture.js", resource, 200),
@@ -371,6 +466,159 @@ class BrowserOriginRecordTest(unittest.TestCase):
                     state["origin_errors"].append("foreign client socket")
                 with self.assertRaises(ValueError):
                     browser_smoke.validate_origin_stream(server, state)
+
+
+class BrowserQuiescenceTest(unittest.TestCase):
+    def test_resource_finishing_after_first_completion_rejects_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "bundle"
+            bundle.mkdir()
+            for name in JS_FILES:
+                (bundle / name).write_bytes(name.encode())
+            core = root / "core.bin"
+            kotlin = root / "kotlin.bin"
+            inventory = root / "inventory.json"
+            binary = root / "files/extra/chrome"
+            binary.parent.mkdir(parents=True)
+            for path in (core, kotlin, binary):
+                path.write_bytes(b"fixture")
+            inventory.write_text("{}")
+            source = "a" * 40
+            raw = b"DYN4K\tCOMPLETE\tretained raw\n"
+            archive = root / "capture"
+            args = SimpleNamespace(
+                archive=archive, target="js",
+                scenario="pile.default.small.30hz.direct_kotlin",
+                source_sha=source, steps=1, warmup=0,
+                harness=str(bundle / "dyn4k-performance-portable.js"),
+                core=str(core), kotlin=str(kotlin), inventory=str(inventory),
+            )
+            delayed_read = threading.Event()
+            release = threading.Event()
+            delayed_done = threading.Event()
+            browser_done = threading.Event()
+            threads = []
+
+            class DelayedResource(browser_smoke.Handler):
+                def read_resource(self, selected):
+                    payload = super().read_resource(selected)
+                    if selected.name == JS_FILES[0]:
+                        delayed_read.set()
+                        if not release.wait(5):
+                            raise OSError("delayed resource was not released")
+                    return payload
+
+            original_server = browser_smoke.browser_server
+
+            def server_factory(*factory_args):
+                server = original_server(*factory_args, handler=DelayedResource)
+
+                def request_page_and_complete():
+                    self.assertTrue(server.origin_ready.wait(5))
+                    url = f"http://127.0.0.1:{server.server_port}"
+                    with urlopen(url + "/", timeout=5) as response:
+                        response.read()
+
+                    def delayed_fetch():
+                        with urlopen(url + "/" + JS_FILES[0], timeout=5) as response:
+                            response.read()
+                        delayed_done.set()
+
+                    delayed_thread = threading.Thread(target=delayed_fetch)
+                    delayed_thread.start()
+                    threads.append(delayed_thread)
+                    self.assertTrue(delayed_read.wait(5))
+                    for name in JS_FILES[1:]:
+                        with urlopen(url + "/" + name, timeout=5) as response:
+                            response.read()
+                    with urlopen(Request(url + "/complete", data=raw,
+                                         method="POST"), timeout=5) as response:
+                        self.assertEqual(response.status, 204)
+                    browser_done.set()
+
+                browser_thread = threading.Thread(target=request_page_and_complete)
+                browser_thread.start()
+                threads.append(browser_thread)
+                return server
+
+            class FinishedProcess:
+                pid = os.getpid()
+                returncode = 0
+
+                def poll(self):
+                    return None
+
+                def communicate(self, timeout):
+                    return b"", b""
+
+            assert_true = self.assertTrue
+
+            class Observer:
+                def __init__(self, *items):
+                    pass
+
+                def sample(self):
+                    pass
+
+                def finish(self, *items):
+                    release.set()
+                    assert_true(delayed_done.wait(5))
+                    return {"pid": os.getpid()}
+
+            def check_output(command, text):
+                if command[0] == "git" and "rev-parse" in command:
+                    return source + "\n"
+                if command[0] == "git" and "status" in command:
+                    return ""
+                if command[:3] == ["flatpak", "info", "--show-commit"]:
+                    return "fixture-commit"
+                if command[:3] == ["flatpak", "info", "--show-location"]:
+                    return str(root)
+                raise AssertionError(command)
+
+            try:
+                with mock.patch.object(browser_smoke.subprocess, "check_output",
+                                       side_effect=check_output), \
+                     mock.patch.object(browser_smoke.subprocess, "Popen",
+                                       return_value=FinishedProcess()), \
+                     mock.patch.object(browser_smoke.os, "killpg"), \
+                     mock.patch.object(browser_smoke.capture, "source_tree",
+                                       return_value="fixture-tree"), \
+                     mock.patch.object(browser_smoke.capture, "validate_inventory",
+                                       return_value={"gradle": "9.5.0", "kgp": "2.4.20",
+                                                     "compile_configuration": "development"}), \
+                     mock.patch.object(browser_smoke.capture, "validate_protocol"), \
+                     mock.patch.object(browser_smoke, "browser_server",
+                                       side_effect=server_factory), \
+                     mock.patch.object(browser_smoke, "ChromeObserver", Observer):
+                    with self.assertRaisesRegex(ValueError, "changed after completion"):
+                        browser_smoke.run(args)
+            finally:
+                release.set()
+                for thread in threads:
+                    thread.join(timeout=5)
+            self.assertTrue(browser_done.is_set())
+            self.assertEqual((archive / "producer.raw").read_bytes(), raw)
+            receipt = json.loads((archive / "capture.json").read_text())
+            self.assertEqual(receipt["qualification"], "unpassed")
+            self.assertIn("changed after completion", receipt["origin_validation_error"])
+            self.assertIn(JS_FILES[0], receipt["loaded_resources_sha256"])
+            destination = os.environ.get("DYN4K_BROWSER_CONTROL_ARCHIVE")
+            if destination:
+                retained = Path(destination) / "delayed-resource-after-completion"
+                shutil.copytree(archive, retained)
+                source = subprocess.check_output(
+                    ["git", "-C", str(browser_smoke.capture.ROOT), "rev-parse", "HEAD"],
+                    text=True).strip()
+                (retained / "control.json").write_text(json.dumps({
+                    "qualification": "rejected_control", "source_sha": source,
+                    "fixture_source_sha": args.source_sha,
+                    "case": "resource response appended after completion snapshot",
+                    "producer_sha256": hashlib.sha256(raw).hexdigest(),
+                    "receipt_sha256": hashlib.sha256(
+                        (retained / "capture.json").read_bytes()).hexdigest(),
+                }, indent=2) + "\n")
 
 
 class BrowserRunFailureReceiptTest(unittest.TestCase):
