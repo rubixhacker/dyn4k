@@ -109,6 +109,24 @@ class FullInstalledEvidenceTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "instrumentation process"):
                 full_evidence.validate_full_process_log(bad, package)
 
+    def test_api21_process_log_requires_matching_started_and_finished_pid(self):
+        package = "io.github.rubixhacker.dyn4k.full"
+        log = (f"I/ActivityManager( 1485): Start proc {package} for activity "
+               f"{package}/.FullActivity: pid=3334 uid=10058 gids={{50058}} abi=x86\n"
+               f"I/ActivityManager( 1485): Killing 3334:{package}/u0a58 (adj 0): stop {package}\n"
+               f"I/ActivityManager( 1485): Start proc {package} for added application "
+               f"{package}: pid=3378 uid=10058 gids={{50058, 9997}} abi=x86\n"
+               f"I/ActivityManager( 1485): Force stopping {package} appid=10058 user=0: "
+               "finished inst\n"
+               f"I/ActivityManager( 1485): Killing 3378:{package}/u0a58 (adj 0): stop {package}\n")
+        self.assertEqual(run_full.validate_api21_process_log(log, package, "x86"), "3378")
+        for bad in (log.replace("pid=3378", "pid=3379"),
+                    log.replace("finished inst", "crash"),
+                    log.replace("abi=x86\n", "abi=arm64-v8a\n"),
+                    log + log):
+            with self.subTest(bad=bad[-100:]), self.assertRaisesRegex(ValueError, "instrumentation process"):
+                run_full.validate_api21_process_log(bad, package, "x86")
+
     def test_accepts_exact_case_id_set(self):
         result = full_evidence.validate_full_installed(RAW, {CASE, CONSUMER}, 0)
         self.assertEqual(result["portable"]["passed"], 2)

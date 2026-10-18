@@ -131,6 +131,25 @@ def validate_runtime(identity, expected_api, expected_abi, boot_completed):
         raise ValueError(f"wrong installed runtime: {identity}")
 
 
+def validate_api21_process_log(log, package, expected_abi):
+    escaped = re.escape(package)
+    starts = list(re.finditer(
+        rf"(?m)^I/ActivityManager\(\s*\d+\): Start proc {escaped} for added application "
+        rf"{escaped}: pid=(\d+) uid=\d+ gids=\{{[\d, ]*\}} abi={re.escape(expected_abi)}$",
+        log))
+    finishes = list(re.finditer(
+        rf"(?m)^I/ActivityManager\(\s*\d+\): Force stopping {escaped} "
+        r"appid=\d+ user=\d+: finished inst$", log))
+    if len(starts) != 1 or len(finishes) != 1 or starts[0].start() >= finishes[0].start():
+        raise ValueError("instrumentation process identity or normal shutdown missing")
+    kills = re.findall(
+        rf"(?m)^I/ActivityManager\(\s*\d+\): Killing (\d+):{escaped}/\S+ "
+        rf"\(adj \d+\): stop {escaped}$", log[finishes[0].end():])
+    if kills != [starts[0].group(1)]:
+        raise ValueError("instrumentation process identity or normal shutdown missing")
+    return starts[0].group(1)
+
+
 def build_artifacts(app, provider_artifacts):
     paths = {f"{kind}-{build}-apk": apk_path(app, build, kind == "test")
              for build in ("debug", "release") for kind in ("app", "test")}
@@ -294,7 +313,9 @@ def run(args):
         expected.add("external-kotlin:io.github.rubixhacker.dyn4k.full.FullKotlinJourney#run")
         result["cases"] = validate_full_installed(executed.stdout, expected, executed.returncode)
         log = command(adb + ["logcat", "-d"], output / "logcat.txt")
-        instrumentation_pid = validate_full_process_log(log, package)
+        instrumentation_pid = (validate_api21_process_log(log, package, args.expected_abi)
+                               if args.expected_api == "21" else
+                               validate_full_process_log(log, package))
         after_pid = command(adb + ["shell", "pidof", package],
                             output / "process-after.txt", check=False).strip()
         result["process"] = {"before": before_pid, "instrumentation": instrumentation_pid,
