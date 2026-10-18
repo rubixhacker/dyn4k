@@ -71,7 +71,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((workflow.name, line, upper_bound))
         self.assertGreater(checked, 0)
-        self.assertEqual(violations, [("windows-collision-focus.yml", 43, 31130)])
+        self.assertEqual(violations, [])
 
 
 def workflow_nodes():
