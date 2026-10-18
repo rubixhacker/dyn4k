@@ -39,6 +39,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $native, $java | Out-Null
           $gradleExit = $null
           $javaExit = -1
+          $scalarExit = 1
           $collectionStatus = 0
           $validationStatus = 0
           $nativeStarted = $false
@@ -46,6 +47,11 @@ jobs:
           $gradleExitFile = Join-Path $native 'gradle-exit-code.txt'
           $javaLog = Join-Path $java 'java-console.log'
           $javaExitFile = Join-Path $java 'java-exit-code.txt'
+          $scalar = Join-Path $evidence 'scalar'
+          $scalarLog = Join-Path $scalar 'scalar-control-console.log'
+          $scalarStdout = Join-Path $scalar 'scalar-control-stdout.log'
+          $scalarStderr = Join-Path $scalar 'scalar-control-stderr.log'
+          $scalarExitFile = Join-Path $scalar 'scalar-exit-code.txt'
           $collectionErrors = [System.Collections.Generic.List[string]]::new()
           $results = Join-Path $PWD 'dyn4k-core/build/test-results/mingwX64Test'
           $xmlFiles = @()
@@ -152,6 +158,81 @@ jobs:
           }
 
           try {
+            New-Item -ItemType Directory -Force -Path $scalar | Out-Null
+            $konanRoot = Join-Path $env:USERPROFILE '.konan'
+            $konanDistributions = @(Get-ChildItem -LiteralPath $konanRoot -Directory -Filter 'kotlin-native-prebuilt-windows-x86_64-2.4.20' -ErrorAction Stop)
+            if ($konanDistributions.Count -ne 1) {
+              throw "Expected one installed Kotlin/Native 2.4.20 Windows distribution under $konanRoot; found $($konanDistributions.Count)"
+            }
+            $konancHome = $konanDistributions[0].FullName
+            $konanc = Join-Path $konancHome 'bin/kotlinc-native.bat'
+            if (-not (Test-Path -LiteralPath $konanc -PathType Leaf)) {
+              throw "Kotlin/Native compiler is missing: $konanc"
+            }
+            $konancVersion = (& $konanc -version 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $konancVersion -notmatch '2\.4\.20') {
+              throw "Kotlin/Native version check failed: $konancVersion"
+            }
+            Set-Content -Path (Join-Path $scalar 'kotlin-native-version.txt') -Value $konancVersion
+            $pwsh = Get-Command pwsh.exe -ErrorAction Stop
+            & $pwsh.Source -NoProfile -File .\tools\diagnostic\windows_collision\run-scalar-control.ps1 `
+              -KonancHome $konancHome -JdkHome $env:JAVA_HOME -BaselineJar $jar `
+              -BaselineSource $source -OutputDirectory $scalar `
+              1> $scalarStdout 2> $scalarStderr
+            $scalarExit = $LASTEXITCODE
+            if ($null -eq $scalarExit) { $scalarExit = 1 }
+            @(
+              "exit_code=$scalarExit"
+              '--- stdout ---'
+              Get-Content -LiteralPath $scalarStdout -ErrorAction SilentlyContinue
+              '--- stderr ---'
+              Get-Content -LiteralPath $scalarStderr -ErrorAction SilentlyContinue
+            ) | Set-Content -Path $scalarLog
+            Get-Content -LiteralPath $scalarLog
+          } catch {
+            try { $_ | Out-String | Add-Content -Path $scalarLog -ErrorAction Stop }
+            catch {
+              $collectionErrors.Add("Scalar control console collection failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
+            $scalarExit = 1
+          } finally {
+            try {
+              Set-Content -Path $scalarExitFile -Value $scalarExit
+            } catch {
+              $collectionErrors.Add("Scalar control exit code record failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
+          }
+
+          $scalarExecutable = Join-Path $scalar 'windows-collision-scalar.exe'
+          if (Test-Path -LiteralPath $scalarExecutable -PathType Leaf) {
+            try {
+              $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+              $objdump = Get-Command llvm-objdump.exe, objdump.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($null -ne $dumpbin) {
+                & $dumpbin.Source /imports $scalarExecutable 2>&1 |
+                  Set-Content -Path (Join-Path $scalar 'native-imports.txt')
+                Set-Content -Path (Join-Path $scalar 'native-imports-exit-code.txt') -Value $LASTEXITCODE
+              } else {
+                Set-Content -Path (Join-Path $scalar 'native-imports-status.txt') -Value 'UNAVAILABLE: dumpbin.exe not found'
+              }
+              if ($null -ne $objdump) {
+                & $objdump.Source -d $scalarExecutable 2>&1 |
+                  Set-Content -Path (Join-Path $scalar 'native-disassembly.txt')
+                Set-Content -Path (Join-Path $scalar 'native-disassembly-exit-code.txt') -Value $LASTEXITCODE
+              } else {
+                Set-Content -Path (Join-Path $scalar 'native-disassembly-status.txt') -Value 'UNAVAILABLE: llvm-objdump.exe and objdump.exe not found'
+              }
+            } catch {
+              $collectionErrors.Add("Optional native import or disassembly collection failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
+          } else {
+            Set-Content -Path (Join-Path $scalar 'native-executable-status.txt') -Value 'UNAVAILABLE: scalar compiler did not produce an executable'
+          }
+
+          try {
             $javaTsv = Join-Path $java 'dyn4j-6.0.0-windows-control.tsv'
             $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
             $validationLog = Join-Path $evidence 'trace-validation.log'
@@ -247,8 +328,8 @@ jobs:
             $collectionErrors.Add("Final status decision failed: $($_.ToString())")
             $statusExit = 1
           }
-          if ($statusExit -ne 0) {
-            throw "Focused controls failed: gradle=$gradleExit java=$javaExit collection=$collectionStatus validation=$validationStatus"
+          if ($statusExit -ne 0 -or $scalarExit -ne 0) {
+            throw "Focused controls failed: gradle=$gradleExit java=$javaExit scalar=$scalarExit collection=$collectionStatus validation=$validationStatus"
           }
       - name: Upload Windows collision evidence
         if: always()
