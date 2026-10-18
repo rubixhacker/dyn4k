@@ -11,6 +11,7 @@ import selectors
 import signal
 import stat
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -30,6 +31,7 @@ HOSTED_SOURCE_INPUTS = (Path("tools/qualification/full_hosted.py"),
                         Path("tools/qualification/safari-launch.sh"),
                         Path(".github/workflows/safari-yarn-lock-diagnostic.yml"),
                         Path("tools/qualification/safari_reporter.py"),
+                        Path("tools/qualification/safari_windows_file.py"),
                         Path("tools/qualification/safari-karma-reporter.js"))
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PACKAGES = 128
@@ -87,6 +89,9 @@ def digest(path):
 
 def capture_karma_context(repository, candidate_sha, context, raw_context):
     repository = repository.resolve()
+    windows = os.name == "nt"
+    if windows:
+        from safari_windows_file import FILE_ATTRIBUTE_REPARSE_POINT, LockedDirectory
     if re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is None:
         raise ValueError("invalid Safari context candidate SHA")
     if (context.is_symlink() or context.resolve().is_relative_to(repository)
@@ -131,9 +136,27 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
             record(path, "failed", "traversal_deadline")
             raise TimeoutError("Safari context traversal deadline")
 
+    def scan(directory):
+        return os.scandir(directory.path if windows else directory)
+
+    def close_directory(directory):
+        directory.close() if windows else os.close(directory)
+
+    def open_file(directory, name):
+        if windows:
+            return directory.open_file(name)
+        return os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                       dir_fd=directory)
+
+    def open_child(directory, name):
+        if windows:
+            return directory.child(name)
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                       dir_fd=directory)
+
     def visit(directory_fd, relative, depth, seen_files):
         check_deadline(relative)
-        with os.scandir(directory_fd) as entries:
+        with scan(directory_fd) as entries:
             for entry in entries:
                 path = relative / entry.name
                 inventory["entries_seen"] += 1
@@ -144,19 +167,20 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                 if entry.name == "node_modules":
                     record(path, "skipped", "excluded_node_modules")
                     continue
-                if entry.is_symlink():
+                if (entry.is_symlink() or windows and
+                        entry.stat(follow_symlinks=False).st_file_attributes &
+                        FILE_ATTRIBUTE_REPARSE_POINT):
                     record(path, "skipped", "symlink")
                     continue
                 if entry.is_dir(follow_symlinks=False):
                     if depth >= CONTEXT_MAX_DEPTH:
                         record(path, "failed", "depth_limit")
                         raise ValueError("Safari context depth limit")
-                    child_fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                                       dir_fd=directory_fd)
+                    child_fd = open_child(directory_fd, entry.name)
                     try:
                         visit(child_fd, path, depth + 1, seen_files)
                     finally:
-                        os.close(child_fd)
+                        close_directory(child_fd)
                     continue
                 if not fnmatch.fnmatchcase(entry.name, "*karma*.js"):
                     continue
@@ -164,8 +188,7 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                 if inventory["matched_files"] > CONTEXT_MAX_FILES:
                     record(path, "failed", "file_count_limit")
                     raise ValueError("Safari context file count limit")
-                source_fd = os.open(entry.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
-                                    dir_fd=directory_fd)
+                source_fd = open_file(directory_fd, entry.name)
                 try:
                     before = os.fstat(source_fd)
                     if not stat.S_ISREG(before.st_mode):
@@ -203,15 +226,22 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                     data = b"".join(chunks)
                     destination = config / path
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination_fd = os.open(destination,
-                                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                                             0o600)
+                    destination_guard = (LockedDirectory(context, Path("config") / path.parent,
+                                                         resolve_root=False)
+                                         if windows else None)
                     try:
-                        with os.fdopen(destination_fd, "wb") as stream:
-                            stream.write(data)
-                    except BaseException:
-                        destination.unlink(missing_ok=True)
-                        raise
+                        destination_fd = os.open(destination,
+                                                 os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                                 getattr(os, "O_NOFOLLOW", 0), 0o600)
+                        try:
+                            with os.fdopen(destination_fd, "wb") as stream:
+                                stream.write(data)
+                        except BaseException:
+                            destination.unlink(missing_ok=True)
+                            raise
+                    finally:
+                        if destination_guard is not None:
+                            destination_guard.close()
                     inventory["copied_files"] += 1
                     inventory["copied_bytes"] += size
                     inventory["upload_data_bytes"] += size
@@ -229,9 +259,8 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
     def copy_sidecar(directory_fd, name, seen_files):
         check_deadline(name)
         try:
-            source_fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
-                                dir_fd=directory_fd)
-        except OSError as error:
+            source_fd = open_file(directory_fd, name)
+        except (OSError, ValueError) as error:
             record(name, "failed", "missing_or_unreadable_sidecar",
                    original_size=None, retained_size=0, error=str(error))
             return
@@ -271,15 +300,21 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
                 return
             data = b"".join(chunks)
             destination = context / name
-            destination_fd = os.open(destination,
-                                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                                     0o600)
+            destination_guard = (LockedDirectory(context, resolve_root=False)
+                                 if windows else None)
             try:
-                with os.fdopen(destination_fd, "wb") as stream:
-                    stream.write(data)
-            except BaseException:
-                destination.unlink(missing_ok=True)
-                raise
+                destination_fd = os.open(destination,
+                                         os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                         getattr(os, "O_NOFOLLOW", 0), 0o600)
+                try:
+                    with os.fdopen(destination_fd, "wb") as stream:
+                        stream.write(data)
+                except BaseException:
+                    destination.unlink(missing_ok=True)
+                    raise
+            finally:
+                if destination_guard is not None:
+                    destination_guard.close()
             inventory["upload_data_bytes"] += size
             status = "truncated" if size < before.st_size else "copied"
             reason = ("per_file_byte_limit" if status == "truncated"
@@ -302,6 +337,17 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
         config.mkdir()
         for root in CONTEXT_ROOTS:
             check_deadline(root)
+            if windows:
+                try:
+                    directory_fd = LockedDirectory(repository, root)
+                except (OSError, ValueError) as error:
+                    record(root, "skipped", "missing_or_unsafe_root", error=str(error))
+                    continue
+                try:
+                    visit(directory_fd, root, len(root.parts), seen_files)
+                finally:
+                    close_directory(directory_fd)
+                continue
             directory_fd = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
                 try:
@@ -343,9 +389,10 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
     try:
         if raw_context.is_symlink():
             raise ValueError("symlink Safari raw context")
-        directory_fd = os.open(raw_context, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory_fd = (LockedDirectory(raw_context, resolve_root=False) if windows else
+                        os.open(raw_context, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
         try:
-            with os.scandir(directory_fd) as entries:
+            with scan(directory_fd) as entries:
                 names = [entry.name for entry in itertools.islice(
                     entries, CONTEXT_MAX_RAW_ENTRIES + 1)]
             if len(names) > CONTEXT_MAX_RAW_ENTRIES:
@@ -370,7 +417,7 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
             for name in required:
                 copy_sidecar(directory_fd, name, seen_files)
         finally:
-            os.close(directory_fd)
+            close_directory(directory_fd)
         host_outcome = context / "host-outcome.txt"
         if (not host_outcome.is_file() or host_outcome.read_text(errors="replace").splitlines()
                 != ["session_exit=0", "process_exit=0"]):
@@ -433,6 +480,22 @@ def source_path(repository, relative):
 
 def source_bytes(repository, relative):
     path = source_path(repository, relative)
+    if os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        with LockedDirectory(repository, relative.parent) as directory:
+            descriptor = directory.open_file(relative.name)
+            try:
+                before = os.fstat(descriptor)
+                data = os.read(descriptor, MAX_FILE_BYTES + 1)
+                after = os.fstat(descriptor)
+                if len(data) > MAX_FILE_BYTES:
+                    raise ValueError(f"oversized diagnostic source: {relative}")
+                if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                        after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                    raise ValueError(f"source path identity changed: {relative}")
+                return data
+            finally:
+                os.close(descriptor)
     directory = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for part in relative.parts[:-1]:
@@ -514,8 +577,11 @@ def full_hosted_command(repository, init, configuration, invocation_id):
 
 def run_lock_task(repository, output, command=None):
     if command is None:
-        command = [str(repository / "gradlew"), "--no-daemon", "--console=plain",
+        wrapper = "gradlew.bat" if os.name == "nt" else "gradlew"
+        command = [str(repository / wrapper), "--no-daemon", "--console=plain",
                    "--rerun-tasks", ":kotlinStoreYarnLock"]
+    if os.name == "nt":
+        return _run_lock_task_windows(repository, output, command)
     started = time.time_ns()
     process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
@@ -576,6 +642,61 @@ def run_lock_task(repository, output, command=None):
             "stdout_bytes_seen": seen["stdout"], "stderr_bytes_seen": seen["stderr"],
             "stdout_truncated": seen["stdout"] > MAX_FILE_BYTES,
             "stderr_truncated": seen["stderr"] > MAX_FILE_BYTES}
+
+
+def _run_lock_task_windows(repository, output, command):
+    started = time.time_ns()
+    process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    seen = {"stdout": 0, "stderr": 0}
+    kept = {"stdout": 0, "stderr": 0}
+    timed_out = False
+    with (output / "stdout.txt").open("wb") as stdout, \
+            (output / "stderr.txt").open("wb") as stderr:
+        def drain(name, source, destination):
+            while chunk := source.read(64 * 1024):
+                seen[name] += len(chunk)
+                writable = min(len(chunk), max(0, MAX_FILE_BYTES - kept[name]))
+                if writable:
+                    destination.write(chunk[:writable])
+                    kept[name] += writable
+
+        threads = [threading.Thread(target=drain, args=(name, source, destination),
+                                    daemon=True)
+                   for name, source, destination in (("stdout", process.stdout, stdout),
+                                                     ("stderr", process.stderr, stderr))]
+        for thread in threads:
+            thread.start()
+        try:
+            process.wait(timeout=MAX_PROCESS_SECONDS)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=MAX_DRAIN_SECONDS, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                process.kill()
+            try:
+                process.wait(timeout=MAX_DRAIN_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=MAX_DRAIN_SECONDS)
+        for thread in threads:
+            thread.join(timeout=MAX_DRAIN_SECONDS)
+        stream_incomplete = any(thread.is_alive() for thread in threads)
+    if not stream_incomplete:
+        process.stdout.close()
+        process.stderr.close()
+    finished = time.time_ns()
+    return {"command": command, "pid": process.pid, "exit_code": process.returncode,
+            "started_ns": started, "finished_ns": finished,
+            "deadline_seconds": MAX_PROCESS_SECONDS, "timed_out": timed_out,
+            "stream_incomplete": stream_incomplete,
+            "stdout_bytes_seen": seen["stdout"], "stderr_bytes_seen": seen["stderr"],
+            "stdout_truncated": seen["stdout"] > kept["stdout"],
+            "stderr_truncated": seen["stderr"] > kept["stderr"]}
 
 
 def capture_package_graph(repository, output, files, receipt):

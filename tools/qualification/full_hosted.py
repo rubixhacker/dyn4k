@@ -36,6 +36,7 @@ PAIRS = "tools/qualification/full-common-reviewed-pairs.tsv"
 INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json",
           "tools/qualification/full_corpus.py", "tools/qualification/full_hosted.py",
           "tools/qualification/safari_reporter.py",
+          "tools/qualification/safari_windows_file.py",
           "tools/qualification/safari-karma-reporter.js",
           "tools/qualification/hosted.py", "tools/qualification/qualify.py",
           "tools/qualification/artifact.py", "build.gradle.kts",

@@ -27,6 +27,8 @@ def replace_loose_object(repository, advertised, source, kind):
 def write_loose_object(repository, advertised, raw, kind):
     slot = repository / ".git/objects" / advertised[:2] / advertised[2:]
     slot.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt" and slot.exists():
+        slot.chmod(0o666)
     slot.unlink(missing_ok=True)
     slot.write_bytes(zlib.compress(kind.encode() + b" " + str(len(raw)).encode()
                                    + b"\0" + raw))
@@ -36,6 +38,15 @@ def git_oid(repository, revision):
     return subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "rev-parse", revision],
         text=True).strip()
+
+
+def bash_path(path):
+    if os.name == "nt":
+        path = Path(path).absolute()
+        if len(path.drive) != 2 or path.drive[1] != ":":
+            raise ValueError("unsupported Git Bash test path")
+        return f"/{path.drive[0].lower()}{path.as_posix()[2:]}"
+    return str(path)
 
 
 LOCK_FAILURE = ("FAILURE: Build failed with an exception.\n\n"
@@ -69,7 +80,8 @@ class SafariYarnLockTests(unittest.TestCase):
         (self.repository / "tools/qualification").mkdir(parents=True)
         (self.repository / "tools/qualification/full_hosted.py").write_text("# hosted source\n")
         qualification = Path(__file__).parent
-        for name in ("safari-karma-reporter.js", "safari-launch.sh", "safari_reporter.py"):
+        for name in ("safari-karma-reporter.js", "safari-launch.sh", "safari_reporter.py",
+                     "safari_windows_file.py"):
             shutil.copyfile(qualification / name, self.repository / "tools/qualification" / name)
         (self.repository / ".github/workflows").mkdir(parents=True)
         shutil.copyfile(qualification.parents[1] / ".github/workflows/safari-yarn-lock-diagnostic.yml",
@@ -382,32 +394,34 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertFalse(receipt["qualified"])
 
     def test_lock_task_keeps_gradle_mismatch_enforcement(self):
-        wrapper = self.repository / "gradlew"
-        wrapper.write_text("#!/bin/sh\n"
-                           "printf ':kotlinStoreYarnLock FAILED\\n'\n"
-                           "printf 'Lock file was changed\\n' >&2\n"
-                           "exit 1\n")
+        wrapper = self.repository / ("gradlew.bat" if os.name == "nt" else "gradlew")
+        if os.name == "nt":
+            wrapper.write_text("@echo off\r\necho :kotlinStoreYarnLock FAILED\r\n"
+                               "echo Lock file was changed 1>&2\r\nexit /b 1\r\n")
+        else:
+            wrapper.write_text("#!/bin/sh\n"
+                               "printf ':kotlinStoreYarnLock FAILED\\n'\n"
+                               "printf 'Lock file was changed\\n' >&2\n"
+                               "exit 1\n")
         wrapper.chmod(0o755)
         self.output.mkdir()
         result = safari_yarn_lock.run_lock_task(self.repository, self.output)
         command = result["command"]
-        self.assertEqual([str(self.repository / "gradlew"), "--no-daemon",
+        self.assertEqual([str(wrapper), "--no-daemon",
                           "--console=plain", "--rerun-tasks", ":kotlinStoreYarnLock"],
                          command)
         self.assertNotIn("kotlinUpgradeYarnLock", command)
         self.assertEqual(1, result["exit_code"])
-        self.assertEqual(b"Lock file was changed\n",
-                         (self.output / "stderr.txt").read_bytes())
+        self.assertEqual([b"Lock file was changed"],
+                         (self.output / "stderr.txt").read_bytes().splitlines())
 
     def test_process_streams_and_bounds_logs_without_buffering_complete_output(self):
-        wrapper = self.repository / "gradlew"
-        wrapper.write_text("#!/bin/sh\npython3 -c 'import sys; "
-                           "sys.stdout.buffer.write(b\"x\" * 257); "
-                           "sys.stderr.buffer.write(b\"y\" * 257)'\n")
-        wrapper.chmod(0o755)
         self.output.mkdir()
+        command = [sys.executable, "-c", "import sys; "
+                   "sys.stdout.buffer.write(b'x' * 257); "
+                   "sys.stderr.buffer.write(b'y' * 257)"]
         with mock.patch.object(safari_yarn_lock, "MAX_FILE_BYTES", 128):
-            result = safari_yarn_lock.run_lock_task(self.repository, self.output)
+            result = safari_yarn_lock.run_lock_task(self.repository, self.output, command)
         self.assertEqual(0, result["exit_code"])
         self.assertEqual(128, (self.output / "stdout.txt").stat().st_size)
         self.assertEqual(128, (self.output / "stderr.txt").stat().st_size)
@@ -417,12 +431,10 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(257, result["stderr_bytes_seen"])
 
     def test_process_deadline_kills_a_stalled_wrapper(self):
-        wrapper = self.repository / "gradlew"
-        wrapper.write_text("#!/bin/sh\nsleep 5\n")
-        wrapper.chmod(0o755)
         self.output.mkdir()
+        command = [sys.executable, "-c", "import time; time.sleep(5)"]
         with mock.patch.object(safari_yarn_lock, "MAX_PROCESS_SECONDS", 0.2):
-            result = safari_yarn_lock.run_lock_task(self.repository, self.output)
+            result = safari_yarn_lock.run_lock_task(self.repository, self.output, command)
         self.assertTrue(result["timed_out"])
         self.assertLess(result["finished_ns"] - result["started_ns"], 3_000_000_000)
 
@@ -755,7 +767,16 @@ class SafariYarnLockTests(unittest.TestCase):
                 mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed), \
                 mock.patch.object(sys, "argv", arguments), \
                 redirect_stdout(io.StringIO()):
-            self.assertEqual(1, safari_yarn_lock.main())
+            if os.name == "nt":
+                with self.assertRaises(OSError):
+                    safari_yarn_lock.main()
+            else:
+                self.assertEqual(1, safari_yarn_lock.main())
+        if os.name == "nt":
+            self.assertEqual(b"outside bytes\n",
+                             (outside / "qualification-safari-reporter.js").read_bytes())
+            self.assertFalse((self.output / "receipt.json").exists())
+            return
         receipt = json.loads((self.output / "receipt.json").read_text())
         self.assertEqual("STAGED_REPORTER_CHANGED", receipt["status"])
         self.assertEqual("DIRECTORY_CHANGED", receipt["reporter_stage"]["projects"]["dyn4k-core"])
@@ -789,7 +810,15 @@ class SafariYarnLockTests(unittest.TestCase):
                 mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed), \
                 mock.patch.object(sys, "argv", arguments), \
                 redirect_stdout(io.StringIO()):
-            self.assertEqual(1, safari_yarn_lock.main())
+            if os.name == "nt":
+                with self.assertRaises(OSError):
+                    safari_yarn_lock.main()
+            else:
+                self.assertEqual(1, safari_yarn_lock.main())
+        if os.name == "nt":
+            self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
+            self.assertFalse((self.output / "receipt.json").exists())
+            return
         receipt = json.loads((self.output / "receipt.json").read_text())
         self.assertEqual("CHANGED", receipt["reporter_stage"]["status"])
         self.assertEqual(b"OUTSIDE SENTINEL\n", sentinel.read_bytes())
@@ -1517,13 +1546,14 @@ class SafariYarnLockTests(unittest.TestCase):
         fake_open.write_text("#!/bin/bash\nexit 23\n")
         fake_open.chmod(0o755)
         controlled = self.root / "controlled-launch.sh"
-        controlled.write_text(launcher.replace("/usr/bin/open", str(fake_open))
+        controlled.write_text(launcher.replace("/usr/bin/open", bash_path(fake_open))
                               .replace("/bin/sleep 2", "/bin/sleep 0.01"))
         redirect = self.root / "redirect.html"
         redirect.write_text("redirect\n")
         context = self.root / "launch-context"
-        result = subprocess.run(["bash", str(controlled), str(redirect)],
-                                env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": str(context)},
+        result = subprocess.run(["bash", bash_path(controlled), bash_path(redirect)],
+                                env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT":
+                                     bash_path(context)},
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(23, result.returncode)
         state = list(context.glob("sample-state-*.txt"))
@@ -1535,7 +1565,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(5, process[0].read_text().count("sample="))
         normal_environment = dict(os.environ)
         normal_environment.pop("DYN4K_SAFARI_LAUNCH_CONTEXT", None)
-        normal = subprocess.run(["bash", str(controlled), str(redirect)],
+        normal = subprocess.run(["bash", bash_path(controlled), bash_path(redirect)],
                                 env=normal_environment, capture_output=True,
                                 text=True, timeout=5)
         self.assertEqual(23, normal.returncode)
@@ -1548,14 +1578,14 @@ class SafariYarnLockTests(unittest.TestCase):
         fake_open.write_text("#!/bin/bash\nexec /bin/sleep 5\n")
         fake_open.chmod(0o755)
         controlled = self.root / "controlled-pending-launch.sh"
-        controlled.write_text(launcher.replace("/usr/bin/open", str(fake_open))
+        controlled.write_text(launcher.replace("/usr/bin/open", bash_path(fake_open))
                               .replace("/bin/sleep 2", "/bin/sleep 0.01"))
         redirect = self.root / "redirect.html"
         redirect.write_text("redirect\n")
         context = self.root / "pending-launch-context"
-        process = subprocess.Popen(["bash", str(controlled), str(redirect)],
+        process = subprocess.Popen(["bash", bash_path(controlled), bash_path(redirect)],
                                    env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT":
-                                        str(context)}, start_new_session=True,
+                                        bash_path(context)}, start_new_session=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             deadline = time.monotonic() + 2
@@ -1568,7 +1598,11 @@ class SafariYarnLockTests(unittest.TestCase):
             self.assertEqual(1, len(outcome))
             self.assertEqual("open_state=pending\n", outcome[0].read_text())
         finally:
-            os.killpg(process.pid, signal.SIGTERM)
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                               capture_output=True, check=False, timeout=3)
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
             process.communicate(timeout=3)
 
 

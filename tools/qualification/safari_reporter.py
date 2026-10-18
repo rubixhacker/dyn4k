@@ -98,6 +98,7 @@ APPROVED_GENERATOR_TAIL = (
     'config.set({webpack: createWebpackConfig()});\n'
     '\n'
     '\n'
+    f'// {STAGED_NAME}\n'
 )
 
 
@@ -299,6 +300,23 @@ def same_directory(repository, relative, descriptor):
 
 
 def read_generated_config(repository, relative):
+    if os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        with LockedDirectory(repository, relative.parent) as directory:
+            descriptor = directory.open_file(relative.name)
+            try:
+                before = os.fstat(descriptor)
+                if before.st_size > MAX_FRAGMENT_BYTES:
+                    raise ValueError(f"unsafe or oversized Safari generated config: {relative}")
+                data = os.read(descriptor, MAX_FRAGMENT_BYTES + 1)
+                after = os.fstat(descriptor)
+                identity = lambda item: (item.st_dev, item.st_ino, item.st_size,
+                                         item.st_mtime_ns, item.st_ctime_ns)
+                if len(data) != before.st_size or identity(before) != identity(after):
+                    raise ValueError(f"Safari generated config changed while reading: {relative}")
+                return data, before
+            finally:
+                os.close(descriptor)
     directory = open_directory_no_follow(repository, relative.parent)
     try:
         descriptor = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -362,6 +380,114 @@ def _forensic(directory, name, output, relative):
     return record
 
 
+def _forensic_windows(directory, name, output, relative):
+    record = {"path": str(relative), "original_size": None, "retained_size": 0}
+    try:
+        descriptor = directory.open_file(name)
+        try:
+            before = os.fstat(descriptor)
+            record["original_size"] = before.st_size
+            data = os.read(descriptor, min(before.st_size, MAX_FRAGMENT_BYTES))
+            after = os.fstat(descriptor)
+            if (len(data) != min(before.st_size, MAX_FRAGMENT_BYTES) or
+                    (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) !=
+                    (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+                raise ValueError("staged reporter changed during forensic capture")
+        finally:
+            os.close(descriptor)
+        destination = output / "forensic/safari-reporter" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("xb") as stream:
+            stream.write(data)
+        record.update(archive_path=destination.relative_to(output).as_posix(),
+                      retained_size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                      truncated=before.st_size > MAX_FRAGMENT_BYTES)
+    except (OSError, ValueError) as error:
+        record["error"] = str(error)
+    return record
+
+
+@contextmanager
+def _stage_windows(repository, projects, content, output, result):
+    from safari_windows_file import LockedDirectory
+    created = []
+    try:
+        for project in projects:
+            relative = Path(project)
+            root = LockedDirectory(repository, relative)
+            directory = None
+            try:
+                stage_path = root.path / "karma.config.d"
+                stage_path.mkdir()
+                directory = root.child("karma.config.d")
+                created.append((relative, root, directory))
+                with (stage_path / STAGED_NAME).open("xb") as staged:
+                    staged.write(content)
+                result["projects"][relative.as_posix()] = "STAGED"
+            except BaseException:
+                if directory is None:
+                    root.close()
+                raise
+        yield result
+    finally:
+        for relative, root, directory in reversed(created):
+            key = relative.as_posix()
+            try:
+                try:
+                    descriptor = directory.open_file(STAGED_NAME)
+                    try:
+                        observed = os.fstat(descriptor)
+                        unchanged = (observed.st_size == len(content) and
+                                     os.read(descriptor, len(content) + 1) == content)
+                    finally:
+                        os.close(descriptor)
+                except (OSError, ValueError):
+                    unchanged = False
+                if not unchanged:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "CHANGED"
+                    result["forensic"].append(_forensic_windows(
+                        directory, STAGED_NAME, output, relative / STAGED_NAME))
+                else:
+                    result["projects"][key] = "CLEAN"
+                try:
+                    (directory.path / STAGED_NAME).unlink(missing_ok=True)
+                except OSError as error:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "LEFTOVER"
+                    result["forensic"].append({"path": str(relative / STAGED_NAME),
+                                               "error": str(error)})
+                try:
+                    with os.scandir(directory.path) as entries:
+                        leftovers = sorted(item.name for item in itertools.islice(entries, 17))
+                except OSError as error:
+                    leftovers = []
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "LEFTOVER"
+                    result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                               "error": str(error)})
+                if leftovers:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "LEFTOVER"
+                    result.setdefault("leftovers", {})[key] = leftovers[:16]
+                    if len(leftovers) > 16:
+                        result.setdefault("leftovers_truncated", []).append(key)
+                    for name in leftovers[:16]:
+                        result["forensic"].append(_forensic_windows(
+                            directory, name, output, relative / name))
+            finally:
+                directory.close()
+                if not result.get("leftovers", {}).get(key):
+                    try:
+                        (root.path / "karma.config.d").rmdir()
+                    except OSError as error:
+                        result["status"] = "CHANGED"
+                        result["projects"][key] = "LEFTOVER"
+                        result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                                   "error": str(error)})
+                root.close()
+
+
 @contextmanager
 def stage(repository, candidate_sha, projects, output):
     repository = repository.resolve()
@@ -374,6 +500,10 @@ def stage(repository, candidate_sha, projects, output):
         raise ValueError("invalid Safari reporter projects")
     result = {"status": "CLEAN", "source_sha256": hashlib.sha256(content).hexdigest(),
               "projects": {}, "forensic": []}
+    if os.name == "nt":
+        with _stage_windows(repository, projects, content, output, result) as staged:
+            yield staged
+        return
     created = []
     try:
         for project in projects:
