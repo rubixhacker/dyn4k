@@ -36,7 +36,31 @@ Every inventoried file must match its recorded hash, size, and nanosecond modifi
 
 `qualify.py record --full-hosted-bundle <directory>` verifies the archive. It stores exact common and bounded consumer case IDs under `full_hosted_receipts`. Each configuration maps to one `current` support lane. That mapping includes its observed runtime version and both target hashes. The committed manifest binds case areas, lane gates, and independent gate definitions. Native lanes select 2,512 portable methods. The three facade JVM-only methods apply only to JVM lanes.
 
-A complete lane also needs separate, independently verified receipts for every applicable gate. Self-reported gate JSON cannot produce a production `PASSED`. At integration revision `23aa6bc4f086b929610d4260fd480cf77e8fafce`, `record` reported 112 `NOT_RUN` lanes. The report is `/tmp/dyn4k-qualification-status-docs-record-23aa.json`.
+A complete lane needs independent receipts for every applicable gate. `record` accepts raw archive paths and a signed audit. It calls `full_suite_manifest.select_lane` for each selected lane. It passes the archives and signed expectations to the public `independent_gates.evaluate` verifier. That verifier checks producer bytes, process, source, artifacts, and all required gates. A `PASSED` lane needs every selected case exactly once in its evidence and raw full-suite consumer XML. Self-reported gate hashes must match the signed archive digests. The recorder fills a missing producer claim only from the verified audit.
+
+The audit uses a detached Ed25519 signature. The operator supplies the public key and its SHA-256 fingerprint independently of the producer archive. The fingerprint covers the public key in DER form. `record` checks the fingerprint and signature before parsing the same audited bytes. An unsigned audit, untrusted key, or changed audit cannot produce `PASSED`. Key custody and signing remain independent operational requirements.
+
+The archive map has `schema`, `candidate_sha`, and `lanes`. Each selected lane maps gate names to raw archive directories. The signed audit has `schema`, `candidate_sha`, `suite_manifest_sha256`, and the same selected `lanes`. For a complete lane, it also binds `candidate_manifest_sha256` and `staged_audit_sha256`. Each signed lane supplies `expected_archive_digests`, `expected_artifact_hashes`, `expected_runtime_identity`, and any `expected_producer_scopes`. The recorder compares target and JVM producer hashes with the verified staged publications. It also compares the signed runtime identity with the candidate manifest. The audit supplies `expected_all_target_hashes` for the 21-target publication gate. Use `--independent-performance-key` for a separately trusted sustained-performance key.
+
+Every passing lane must agree on each global gate's verified archive, signed digest, and producer scope. A differing global result fails the affected passing lanes, including an otherwise complete 112-lane set. The independent verifier defines the gate and producer scope contracts. Missing archives remain `NOT_RUN`. A valid external unavailability receipt remains `UNAVAILABLE`. A legacy `--availability` reason is labeled `UNVERIFIED` until a bound external observation supports it. Attempted invalid bytes remain `FAILED`.
+
+Use the signed inputs with `record`:
+
+```sh
+python3 tools/qualification/qualify.py record \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --evidence "$COMPLETE_SUITE_EVIDENCE" \
+  --audit "$STAGED_ARTIFACT_AUDIT" \
+  --candidate-manifest "$CANDIDATE_MANIFEST" \
+  --independent-archives "$RAW_GATE_ARCHIVE_MAP" \
+  --independent-audit "$INDEPENDENT_AUDIT" \
+  --independent-audit-signature "$INDEPENDENT_AUDIT_SIGNATURE" \
+  --trusted-audit-public-key "$TRUSTED_AUDIT_PUBLIC_KEY" \
+  --trusted-audit-key-sha256 "$TRUSTED_AUDIT_KEY_SHA256" \
+  --output "$QUALIFICATION_REPORT"
+```
+
+The report keeps all 112 lanes and embeds each selected lane's independent gate result. A signed audit is not itself a passing runtime observation. At integration revision `23aa6bc4f086b929610d4260fd480cf77e8fafce`, `record` reported 112 `NOT_RUN` lanes. The report is `/tmp/dyn4k-qualification-status-docs-record-23aa.json`.
 
 The exact command was:
 

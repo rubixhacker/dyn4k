@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import qualify
+import independent_adapter
 
 
 class QualificationTests(unittest.TestCase):
@@ -797,9 +798,9 @@ class QualificationTests(unittest.TestCase):
 
     def test_production_manifest_cannot_use_self_reported_gate_receipts(self):
         results = [{"id": "macosArm64:macOS ARM64:current:debug-g", "status": "PASSED"}]
-        qualify.reject_unverified_production_gates(results, {"bindings": {"corpus_sha256": "a" * 64}})
+        independent_adapter.apply(results, {}, {})
         self.assertEqual("FAILED", results[0]["status"])
-        self.assertIn("separate verification", results[0]["reason"])
+        self.assertIn("independent raw gate archives", results[0]["reason"])
 
 
 if __name__ == "__main__":

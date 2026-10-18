@@ -1318,16 +1318,6 @@ def full_hosted_lane(receipt, receipt_sha256, suite_manifest=None):
             "reason": "reviewed common corpus and bounded staged consumer only"}
 
 
-def reject_unverified_production_gates(results, suite_manifest):
-    if not isinstance(suite_manifest, dict) or not suite_manifest.get("bindings"):
-        return results
-    for result in results:
-        if result["status"] == "PASSED":
-            result.update(status="FAILED",
-                          reason="independent gate receipt archives require separate verification")
-    return results
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -1341,6 +1331,12 @@ def main():
     record.add_argument("--hosted-probe", action="append", type=Path, default=[])
     record.add_argument("--raw-bundle", action="append", type=Path, default=[])
     record.add_argument("--full-hosted-bundle", action="append", type=Path, default=[])
+    record.add_argument("--independent-archives", type=Path)
+    record.add_argument("--independent-audit", type=Path)
+    record.add_argument("--independent-audit-signature", type=Path)
+    record.add_argument("--trusted-audit-public-key", type=Path)
+    record.add_argument("--trusted-audit-key-sha256")
+    record.add_argument("--independent-performance-key", type=Path)
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -1498,6 +1494,36 @@ def main():
             except (OSError, KeyError, TypeError, ValueError, ET.ParseError,
                     tarfile.TarError) as error:
                 parser.error(f"full hosted receipt failed: {error}")
+    import independent_adapter
+    independent_options = (args.independent_archives, args.independent_audit,
+                           args.independent_audit_signature,
+                           args.trusted_audit_public_key,
+                           args.trusted_audit_key_sha256)
+    if args.independent_performance_key and not args.independent_archives:
+        parser.error("independent performance key requires raw gate archives")
+    if any(value is not None for value in independent_options):
+        if not all(value is not None for value in independent_options):
+            parser.error("independent archives require a signed audit and pinned trusted key")
+        if suite_manifest is None:
+            parser.error("independent archives require the tracked complete suite")
+        try:
+            verified_gates = independent_adapter.verify_lanes(
+                repository, args.candidate_sha, suite_manifest,
+                args.independent_archives, args.independent_audit,
+                args.independent_audit_signature, args.trusted_audit_public_key,
+                args.trusted_audit_key_sha256, args.independent_performance_key,
+                candidate_manifest, audit_data)
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError,
+                ImportError) as error:
+            parser.error(f"independent gate verification failed: {error}")
+    else:
+        verified_gates = {}
+    by_case_id = {case["id"]: case for case in cases}
+    independent_adapter.apply(
+        results, evidence, verified_gates,
+        lambda lane_id, observed: evaluate(by_case_id[lane_id], observed,
+                                           args.candidate_sha, candidate_manifest,
+                                           suite_manifest, audit_data))
     by_result_id = {item["id"]: item for item in results}
     for scoped in full_hosted:
         for lane_id in scoped["configuration_lanes"]:
@@ -1505,13 +1531,9 @@ def main():
             if result["status"] != "PASSED":
                 continue
             lane_evidence = evidence.get(lane_id, {})
-            gates = lane_evidence.get("gate_results", {})
-            staged_consumer = gates.get("staged-consumer", {}) if isinstance(gates, dict) else {}
-            if (lane_evidence.get("full_hosted_receipt_sha256") != scoped["receipt_sha256"]
-                    or staged_consumer.get("receipt_sha256") != scoped["receipt_sha256"]):
+            if lane_evidence.get("full_hosted_receipt_sha256") != scoped["receipt_sha256"]:
                 result.update(status="FAILED",
                               reason="complete lane evidence does not bind verified full hosted receipt")
-    reject_unverified_production_gates(results, suite_manifest)
     hosted_probes = []
     if len(args.raw_bundle) != len(args.hosted_probe):
         parser.error("each hosted probe needs its matching raw XML bundle")
@@ -1537,7 +1559,9 @@ def main():
               "counts": {status: sum(item["status"] == status for item in results)
                          for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")},
               "lanes": results, "bounded_hosted_probes": hosted_probes,
-              "full_hosted_receipts": full_hosted}
+              "full_hosted_receipts": full_hosted,
+              "independent_gate_results": {lane: item["verification"]
+                                           for lane, item in verified_gates.items()}}
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["counts"]))
     return 0 if report["counts"]["PASSED"] == len(results) else 1
