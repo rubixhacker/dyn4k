@@ -359,6 +359,87 @@ jobs:
           --candidate-sha "${{ github.sha }}"
           --target "${{ matrix.target }}"
           --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+      - name: Run focused Windows collision diagnostics and original fixtures
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.windows_diagnostics == true && matrix.target == 'mingwX64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'windows-native-diagnostics/focused'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          $console = Join-Path $diagnostics 'mingwX64Test.console.txt'
+          $exitPath = Join-Path $diagnostics 'mingwX64Test.exit-code'
+          try {
+            $results = 'dyn4k-core/build/test-results/mingwX64Test'
+            if (Test-Path $results) {
+              Copy-Item -Recurse -Force $results (Join-Path $diagnostics 'prior-xml')
+            }
+            & .\gradlew.bat :dyn4k-core:mingwX64Test `
+              --tests 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CircleSliceTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest' `
+              --rerun-tasks --console=plain 2>&1 | Tee-Object -FilePath $console
+            $nativeExit = $LASTEXITCODE
+            Set-Content -Path $exitPath -Value $nativeExit
+            if (Test-Path $results) {
+              Copy-Item -Recurse -Force $results (Join-Path $diagnostics 'xml')
+            } else {
+              throw "Focused native XML directory is missing: $results"
+            }
+            $xml = @(Get-ChildItem (Join-Path $diagnostics 'xml') -Recurse -Filter 'TEST-*.xml')
+            foreach ($fixture in @('CapsuleSliceTest', 'CirclePolygonTest', 'CircleSegmentTest',
+                'CircleSliceTest', 'PolygonCapsuleTest', 'PolygonPolygonTest')) {
+              $fixtureXml = @($xml | Where-Object { $_.Name -like "*$($fixture).xml" })
+              if ($fixtureXml.Count -eq 0) {
+                throw "Focused native XML is missing original fixture: $fixture"
+              }
+            }
+            $records = @(Select-String -Path $xml.FullName -Pattern 'DYN4K_COLLISION_DIAGNOSTIC\s+v2')
+            if ($records.Count -ne 72) { throw "Expected 72 native v2 records; found $($records.Count)" }
+            exit $nativeExit
+          } catch {
+            if (-not (Test-Path $exitPath)) { Set-Content -Path $exitPath -Value 1 }
+            Set-Content -Path (Join-Path $diagnostics 'native.error.txt') -Value $_.ToString()
+            Write-Error $_
+            exit 1
+          }
+      - name: Run pinned dyn4j Java collision control on Windows
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.windows_diagnostics == true && matrix.target == 'mingwX64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'windows-native-diagnostics/java-control'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          $console = Join-Path $diagnostics 'control.console.txt'
+          $exitPath = Join-Path $diagnostics 'control.exit-code'
+          try {
+            $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0-control.jar'
+            Invoke-WebRequest 'https://repo.maven.apache.org/maven2/org/dyn4j/dyn4j/6.0.0/dyn4j-6.0.0.jar' -OutFile $jar
+            $source = Join-Path $env:RUNNER_TEMP 'dyn4j-control-source'
+            & git clone --quiet 'https://github.com/dyn4j/dyn4j.git' $source
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source clone failed: $LASTEXITCODE" }
+            & git -C $source checkout --quiet --detach 058bf6d982a0fb89b54050f929f6ea9dae53b714
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source checkout failed: $LASTEXITCODE" }
+            & .\tools\diagnostic\windows_collision\run-java-control.ps1 `
+              -JdkHome $env:JAVA_HOME -BaselineJar $jar `
+              -BaselineSource $source -OutputDirectory $diagnostics `
+              2>&1 | Tee-Object -FilePath $console
+            if (-not $?) { throw 'Pinned Java control runner failed.' }
+            $pins = @(Select-String -Path $console -Pattern '^PINNED_DYN4J_CONTROL ')
+            if ($pins.Count -ne 1) { throw "Expected one pin summary; found $($pins.Count)" }
+            Set-Content -Path (Join-Path $diagnostics 'control.pins.txt') -Value $pins[0].Line
+            Set-Content -Path $exitPath -Value 0
+          } catch {
+            Set-Content -Path $exitPath -Value 1
+            Set-Content -Path (Join-Path $diagnostics 'control.error.txt') -Value $_.ToString()
+            Write-Error $_
+            exit 1
+          }
       - name: Independently verify full native archive
         if: always()
         run: >-
@@ -401,6 +482,9 @@ jobs:
           set -euo pipefail
           diagnostics="$RUNNER_TEMP/windows-native-diagnostics"
           mkdir -p "$diagnostics/xml" "$diagnostics/logs"
+          printf 'sha=%s\nrun_id=%s\nrun_attempt=%s\njob=%s\ntarget=%s\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" '${{ matrix.target }}' \
+            > "$diagnostics/identity.txt"
           errors="$diagnostics/logs/collection-errors.txt"
           missing=0
           xml_manifest="$RUNNER_TEMP/windows-native-xml-files"
