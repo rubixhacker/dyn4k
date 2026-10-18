@@ -95,12 +95,17 @@ class Handler(SimpleHTTPRequestHandler):
             if origin is None:
                 return
             page = self.server.page
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(page)))
-            self.end_headers()
-            self.wfile.write(page)
             with self.server.resource_lock:
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(page)))
+                    self.end_headers()
+                    if self.wfile.write(page) != len(page):
+                        raise OSError("short page response write")
+                except OSError:
+                    self.server.resource_errors.append("page response incomplete")
+                    return
                 observed_ns = boottime_ns()
                 if self.server.page_served_boottime_ns is None:
                     self.server.page_served_boottime_ns = observed_ns
@@ -134,16 +139,17 @@ class Handler(SimpleHTTPRequestHandler):
                 self.resource_error(f"resource digest mismatch: {name}")
                 self.send_error(409)
                 return
-            self.send_response(200)
-            self.send_header("Content-Type", self.guess_type(name))
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            try:
-                self.wfile.write(payload)
-            except OSError:
-                self.resource_error(f"resource response incomplete: {name}")
-                return
             with self.server.resource_lock:
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", self.guess_type(name))
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    if self.wfile.write(payload) != len(payload):
+                        raise OSError("short resource response write")
+                except OSError:
+                    self.server.resource_errors.append(f"resource response incomplete: {name}")
+                    return
                 observed_ns = boottime_ns()
                 self.server.served[name] = actual
                 self.server.served_bytes[name] = len(payload)
@@ -181,17 +187,17 @@ class Handler(SimpleHTTPRequestHandler):
             return
         with self.server.completion_lock:
             if not self.server.completed.is_set():
-                self.server.received = {"kind": self.path[1:], "payload": payload}
-                self.server.completion_boottime_ns = boottime_ns()
-                if self.server.origin_required:
-                    with self.server.resource_lock:
+                with self.server.resource_lock:
+                    self.server.received = {"kind": self.path[1:], "payload": payload}
+                    self.server.completion_boottime_ns = boottime_ns()
+                    if self.server.origin_required:
                         self.server.request_origins.append({
                             "kind": self.path[1:], "name": self.path,
                             "sha256": hashlib.sha256(payload).hexdigest(),
                             "bytes": len(payload),
                             "time_ns": self.server.completion_boottime_ns,
                             "origin": origin})
-                self.server.completed.set()
+                    self.server.completed.set()
             else:
                 with self.server.resource_lock:
                     self.server.origin_errors.append("browser completion was repeated")

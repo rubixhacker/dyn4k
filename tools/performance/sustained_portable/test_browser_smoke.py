@@ -181,6 +181,125 @@ class BrowserResourceBindingTest(unittest.TestCase):
         self.assertEqual(server.served_bytes,
                          {name: len(("original:" + name).encode()) for name in WASM_FILES})
 
+    def test_completion_waits_for_sent_resource_accounting(self):
+        target = WASM_FILES[-1]
+        payload = ("original:" + target).encode()
+
+        class PausingWriter:
+            def __init__(self, stream, server):
+                self.stream = stream
+                self.server = server
+
+            def write(self, data):
+                count = self.stream.write(data)
+                if data == payload:
+                    self.server.resource_bytes_sent.set()
+                    if not self.server.release_accounting.wait(5):
+                        raise OSError("resource accounting was not released")
+                return count
+
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+
+        class PausedResponse(browser_smoke.Handler):
+            def setup(self):
+                super().setup()
+                self.wfile = PausingWriter(self.wfile, self.server)
+
+            def do_POST(self):
+                self.server.post_entered.set()
+                super().do_POST()
+
+        server = self.serve(PausedResponse)
+        server.resource_bytes_sent = threading.Event()
+        server.release_accounting = threading.Event()
+        server.post_entered = threading.Event()
+        resource_done = threading.Event()
+        failures = []
+        url = f"http://127.0.0.1:{server.server_port}"
+        for name in WASM_FILES[:-1]:
+            self.get(server, name)
+
+        def get_resource():
+            try:
+                with urlopen(url + "/" + target, timeout=5) as response:
+                    if response.read() != payload:
+                        raise AssertionError("resource response bytes changed")
+                resource_done.set()
+            except Exception as error:
+                failures.append(error)
+
+        def post_completion():
+            try:
+                with urlopen(Request(url + "/complete", data=b"complete",
+                                     method="POST"), timeout=5) as response:
+                    if response.status != 204:
+                        raise AssertionError("completion status changed")
+            except Exception as error:
+                failures.append(error)
+
+        resource_thread = threading.Thread(target=get_resource)
+        completion_thread = threading.Thread(target=post_completion)
+        try:
+            resource_thread.start()
+            self.assertTrue(server.resource_bytes_sent.wait(5))
+            self.assertTrue(resource_done.wait(5))
+            completion_thread.start()
+            self.assertTrue(server.post_entered.wait(5))
+            self.assertFalse(server.completed.wait(0.3))
+        finally:
+            server.release_accounting.set()
+            resource_thread.join(timeout=5)
+            if completion_thread.ident is not None:
+                completion_thread.join(timeout=5)
+        self.assertEqual(failures, [])
+        self.assertTrue(server.completed.is_set())
+        browser_smoke.validate_loaded_resources(server)
+        self.assertLessEqual(server.last_resource_boottime_ns,
+                             server.completion_boottime_ns)
+
+    def test_partial_resource_send_stays_rejected(self):
+        target = WASM_FILES[-1]
+        payload = ("original:" + target).encode()
+
+        class TruncatingWriter:
+            def __init__(self, stream, silent):
+                self.stream = stream
+                self.silent = silent
+
+            def write(self, data):
+                if data == payload:
+                    self.stream.write(data[:3])
+                    if self.silent:
+                        return 3
+                    raise BrokenPipeError("forced partial send")
+                return self.stream.write(data)
+
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+
+        class PartialResponse(browser_smoke.Handler):
+            def setup(self):
+                super().setup()
+                self.wfile = TruncatingWriter(self.wfile, silent)
+
+        for silent in (False, True):
+            with self.subTest(silent=silent):
+                server = self.serve(PartialResponse)
+                with socket.create_connection(("127.0.0.1", server.server_port),
+                                              timeout=5) as client:
+                    client.sendall(
+                        f"GET /{target} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n".encode())
+                    response = bytearray()
+                    while chunk := client.recv(4096):
+                        response.extend(chunk)
+                self.assertEqual(bytes(response).split(b"\r\n\r\n", 1)[1], payload[:3])
+                self.assertEqual(server.resource_errors,
+                                 [f"resource response incomplete: {target}"])
+                self.assertNotIn(target, server.served)
+                with self.assertRaisesRegex(ValueError, "resource response incomplete"):
+                    browser_smoke.validate_loaded_resources(server)
+
     def test_independent_client_cannot_fetch_guarded_page(self):
         wrapper = subprocess.Popen(["/usr/bin/sleep", "5"])
         self.addCleanup(wrapper.wait)
