@@ -11,9 +11,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+import sustained_archive
 
 from manifest import manifest
 from sustained_archive import (CLOCK_FIELDS, MEMORY_FIELDS, PLATEAU_FIELDS, STEP_FIELDS,
@@ -33,6 +35,38 @@ from analyze import bootstrap_ratio
 
 
 class SustainedArchiveContractTest(unittest.TestCase):
+    def test_windows_stop_dispatch_uses_original_child_handle_and_native_result(self):
+        kernel = Mock()
+        kernel.GetProcessId.return_value = 42
+        process = Mock(pid=42, returncode=None)
+        process._handle = 123
+        with patch("sustained_archive.ctypes.WinDLL", return_value=kernel, create=True), \
+             patch("sustained_archive.ctypes.get_last_error", return_value=5, create=True):
+            kernel.TerminateProcess.return_value = 1
+            sustained_archive.windows_dispatch_stop(process, 42)
+            kernel.TerminateProcess.assert_called_once_with(123, 1)
+            process.terminate.assert_not_called()
+            process.kill.assert_not_called()
+            kernel.TerminateProcess.reset_mock()
+            process.returncode = 1
+            kernel.TerminateProcess.return_value = 0
+            with self.assertRaisesRegex(OSError, "TerminateProcess dispatch failed") as exited:
+                sustained_archive.windows_dispatch_stop(process, 42)
+            self.assertEqual(5, exited.exception.errno)
+            kernel.TerminateProcess.assert_called_once_with(123, 1)
+            process.terminate.assert_not_called()
+            kernel.TerminateProcess.reset_mock()
+            process.returncode = None
+            with self.assertRaisesRegex(OSError, "TerminateProcess dispatch failed") as denied:
+                sustained_archive.windows_dispatch_stop(process, 42)
+            self.assertEqual(5, denied.exception.errno)
+            kernel.TerminateProcess.assert_called_once_with(123, 1)
+            kernel.GetProcessId.return_value = 43
+            kernel.TerminateProcess.reset_mock()
+            with self.assertRaisesRegex(ValueError, "handle PID differs"):
+                sustained_archive.windows_dispatch_stop(process, 42)
+            kernel.TerminateProcess.assert_not_called()
+
     def test_windows_native_terminal_counter_handle_pid_and_query_contract(self):
         kernel = Mock()
         kernel.OpenProcess.return_value = 123
@@ -668,7 +702,9 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         receipt = json.loads(receipt_path.read_text())
         receipt.update(method=item["stress_monitor_method"], exit_code=1,
                        metric_kind="peak_working_set_bytes", terminal_exit_code=1,
-                       terminal_peak_working_set_bytes=2000)
+                       terminal_peak_working_set_bytes=2000,
+                       stop_dispatch_method="windows_terminate_process_v1",
+                       stop_dispatch_result="os_success")
         del receipt["terminal_wait_status"]
         del receipt["terminal_ru_maxrss_bytes"]
         image = json.loads((root / item["process_image_receipt_path"]).read_text())
@@ -681,12 +717,19 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         status, result = self.cli_capacity(root, policy, capture_index)
         self.assertEqual(0, status, result)
         self.assertTrue(result["capacity_report"]["complete"])
-        for field, value in (("terminal_pid", item["pid"] + 1),
+        for field, value in (("stop_dispatch_result", None),
+                             ("stop_dispatch_result", "already_exited"),
+                             ("stop_dispatch_result", "access_denied"),
+                             ("stop_dispatch_method", "popen_return_v1"),
+                             ("terminal_pid", item["pid"] + 1),
                              ("metric_kind", "peak_rss_bytes"),
                              ("terminal_peak_working_set_bytes", 1),
                              ("terminal_exit_code", 0)):
             with self.subTest(field=field):
-                receipt_path.write_text(json.dumps({**receipt, field: value}))
+                changed = {**receipt, field: value}
+                if value is None:
+                    del changed[field]
+                receipt_path.write_text(json.dumps(changed))
                 item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
                 self.reseal(index_path, index)
                 status, result = self.cli_capacity(root, policy, capture_index)
@@ -1593,6 +1636,85 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                          os.waitstatus_to_exitcode(receipt["terminal_wait_status"]))
         self.assertGreater(receipt["terminal_ru_maxrss_bytes"], 0)
         self.assertLessEqual(receipt["terminal_observed_ns"], captured["ended_ns"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires a bounded local child process")
+    def test_public_capture_simulated_windows_post_exit_denial_stays_incomplete(self):
+        root, index_path, index = self.changed_archive("windows-dispatch-race-producer")
+        removed = next(item for item in index["captures"] if item["kind"] == "report" and
+                       item["mode"] == "timing" and item["scenario_id"].endswith("baseline"))
+        index["captures"].remove(removed)
+        policy = copy.deepcopy(self.policy)
+        policy["sustained_gate"]["stress_limits"]["jvm.java"].update(
+            rss_stop_bytes=1, rss_metric_kind="peak_working_set_bytes")
+        runtime = Path(sys.executable).resolve()
+        reference = index["references"]["jvm.java"]
+        shutil.copyfile(runtime, root / reference["runtime"]["archive_path"])
+        reference["runtime"].update(path=str(runtime), sha256=sha256(runtime))
+        policy["sustained_gate"]["noise_controls"]["jvm.java"]["runtime_sha256"] = \
+            sha256(runtime)
+        script = ("import json,os,time; "
+                  "open(os.environ['DYN4K_CLOCK_ORIGIN_JSON'],'w').write(json.dumps("
+                  "{{'pid':os.getpid(),'runtime_ns':time.monotonic_ns(),"
+                  "'nonce':os.environ['DYN4K_CLOCK_NONCE']}})); "
+                  "time.sleep(0.2); raise SystemExit(1)")
+        policy["sustained_gate"]["harnesses"]["jvm.java"]["command_prefix"] = [
+            "{runtime}", "-c", script, "-cp",
+            "{harness}:{adapter}:{baseline}:{core}:{kotlin}"]
+        scenario = next(s for s in policy["scenarios"] if s["id"] == removed["scenario_id"])
+        tail = [scenario["family"], scenario["variant"], scenario["size"],
+                str(scenario["rate_hz"]), str(60 * scenario["rate_hz"]),
+                removed["mode"], str(120 * scenario["rate_hz"])]
+        job = {name: removed[name] for name in
+               ("kind", "row_id", "scenario_id", "mode", "repeat", "sequence")}
+        job["command"] = command_prefix(reference, policy, "jvm.java",
+                                        index["artifacts"], index["baseline"]) + tail
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        key_path = Path(self.folder.name) / "simulated-windows-operator.key"
+        key_path.write_bytes(self.key)
+        job_path = Path(self.folder.name) / "simulated-windows-job.json"
+        job_path.write_text(json.dumps(job))
+        real_popen = subprocess.Popen
+        def child(command, **kwargs):
+            process = real_popen(command, **kwargs)
+            process._handle = 123
+            return process
+        def native_denial(process, pid):
+            self.assertEqual(process.pid, pid)
+            self.assertEqual(1, process.wait(timeout=2))
+            raise OSError("Windows TerminateProcess dispatch failed")
+        def observed_image(pid):
+            return {"pid": pid, "observed_ns": time.monotonic_ns(),
+                    "method": "windows_query_image", "executable_path": str(runtime),
+                    "sha256": sha256(runtime)}
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["sustained_archive.py", "capture", "--archive",
+                                      str(root), "--trusted-key", str(key_path),
+                                      "--job", str(job_path)]), \
+             patch("sustained_archive.frozen_policy", return_value=policy), \
+             patch("sustained_archive.platform.system", return_value="Windows"), \
+             patch("sustained_archive.observed_host", return_value=reference["host"]), \
+             patch("sustained_archive.observe_process_image", side_effect=observed_image), \
+             patch("sustained_archive.subprocess.Popen", side_effect=child), \
+             patch("sustained_archive.windows_peak_handle", return_value=123), \
+             patch("sustained_archive.close_windows_peak_handle"), \
+             patch("sustained_archive.peak_rss_bytes", return_value=2000), \
+             patch("sustained_archive.windows_dispatch_stop", side_effect=native_denial) as dispatch, \
+             contextlib.redirect_stdout(output):
+            main()
+        self.assertEqual(1, dispatch.call_count)
+        self.assertEqual("failed", json.loads(output.getvalue())["status"])
+        saved = json.loads(index_path.read_text())
+        captured = saved["captures"][-1]
+        self.assertEqual(1, captured["exit_code"])
+        self.assertEqual("monitor_unavailable", captured["termination_reason"])
+        receipt = json.loads((root / captured["stress_monitor_receipt_path"]).read_text())
+        self.assertNotIn("stop_dispatch_result", receipt)
+        self.assertNotIn("stop_dispatched_ns", receipt)
+        status, result = self.cli_capacity(root, policy, len(saved["captures"]) - 1)
+        self.assertNotEqual(0, status, result)
+        self.assertEqual("unpassed", result["qualification"])
+        self.assertIn("capacity", result["reason"])
 
     def test_initializer_requires_optimized_build_and_copies_approved_binaries(self):
         index = json.loads((self.root / "archive.json").read_text())

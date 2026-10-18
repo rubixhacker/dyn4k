@@ -98,6 +98,21 @@ def windows_terminal_peak(handle, pid):
     return counters.PeakWorkingSetSize
 
 
+def windows_dispatch_stop(process, pid):
+    handle = getattr(process, "_handle", None)
+    require(type(pid) is int and pid > 0 and handle,
+            "Windows child process handle is unavailable")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetProcessId.argtypes = [ctypes.c_void_p]
+    kernel.GetProcessId.restype = wintypes.DWORD
+    kernel.TerminateProcess.argtypes = [ctypes.c_void_p, wintypes.UINT]
+    kernel.TerminateProcess.restype = wintypes.BOOL
+    require(kernel.GetProcessId(handle) == pid, "Windows stop handle PID differs")
+    if not kernel.TerminateProcess(handle, 1):
+        error_code = ctypes.get_last_error() if hasattr(ctypes, "get_last_error") else 0
+        raise OSError(error_code, "Windows TerminateProcess dispatch failed")
+
+
 def close_windows_peak_handle(handle):
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CloseHandle.argtypes = [ctypes.c_void_p]
@@ -772,6 +787,8 @@ def validate_stress(root, item, policy, image_receipt):
                         if system == "Windows" else
                         {"terminal_wait_status", "terminal_ru_maxrss_bytes"}))
     stop_fields = {"stop_action", "stop_requested_ns", "stop_dispatched_ns"} if limited else set()
+    windows_stop_fields = ({"stop_dispatch_method", "stop_dispatch_result"}
+                           if limited and system == "Windows" else set())
     terminal_peak_field = ("terminal_peak_working_set_bytes" if system == "Windows" else
                            "terminal_ru_maxrss_bytes")
     terminal_status_valid = (
@@ -786,14 +803,16 @@ def validate_stress(root, item, policy, image_receipt):
          item["started_ns"] + elapsed[-1] <= receipt["stop_requested_ns"] <=
          receipt["stop_dispatched_ns"] <= receipt.get("terminal_observed_ns", -1) <=
          item["ended_ns"] and
-         (item["exit_code"] == 1 if system == "Windows" else
+         ((item["exit_code"] == 1 and
+           receipt.get("stop_dispatch_method") == "windows_terminate_process_v1" and
+           receipt.get("stop_dispatch_result") == "os_success") if system == "Windows" else
           os.WIFSIGNALED(receipt["terminal_wait_status"]) and
           os.WTERMSIG(receipt["terminal_wait_status"]) ==
           (15 if receipt["stop_action"] == "terminate" else 9))))
     require(set(receipt) == {"pid", "method", "process_image_sha256",
                              "process_image_observed_ns", "started_ns", "ended_ns",
                              "sample_count", "peak_rss_bytes", "termination_reason",
-                             "exit_code"} | terminal_fields | stop_fields and
+                             "exit_code"} | terminal_fields | stop_fields | windows_stop_fields and
             all(type(receipt[field]) is int for field in
                 ("pid", "process_image_observed_ns", "started_ns", "ended_ns",
                  "sample_count", "peak_rss_bytes", "exit_code", "terminal_pid",
@@ -810,7 +829,10 @@ def validate_stress(root, item, policy, image_receipt):
                         "exit_code": item["exit_code"],
                         **({"stop_action": receipt["stop_action"],
                             "stop_requested_ns": receipt["stop_requested_ns"],
-                            "stop_dispatched_ns": receipt["stop_dispatched_ns"]}
+                            "stop_dispatched_ns": receipt["stop_dispatched_ns"],
+                            **({"stop_dispatch_method": "windows_terminate_process_v1",
+                                "stop_dispatch_result": "os_success"}
+                               if system == "Windows" else {})}
                            if limited else {}),
                         "metric_kind": metric_kind,
                         "terminal_pid": item["pid"],
@@ -2197,7 +2219,10 @@ def capture_one(root, job, key):
                         stop_requested_ns = time.monotonic_ns()
                         stop_action = "terminate"
                         try:
-                            process.terminate()
+                            if system == "Windows":
+                                windows_dispatch_stop(process, pid)
+                            else:
+                                process.terminate()
                             stop_dispatched_ns = time.monotonic_ns()
                             if system in ("Linux", "Darwin"):
                                 deadline = time.monotonic() + 5
@@ -2219,7 +2244,7 @@ def capture_one(root, job, key):
                                 except subprocess.TimeoutExpired:
                                     stop_action = "kill"
                                     stop_requested_ns = time.monotonic_ns()
-                                    process.kill()
+                                    windows_dispatch_stop(process, pid)
                                     stop_dispatched_ns = time.monotonic_ns()
                                     process.wait()
                                 terminal_peak = windows_terminal_peak(windows_handle, pid)
@@ -2300,7 +2325,10 @@ def capture_one(root, job, key):
                     "exit_code": returncode,
                     **({"stop_action": stop_action,
                         "stop_requested_ns": stop_requested_ns,
-                        "stop_dispatched_ns": stop_dispatched_ns}
+                        "stop_dispatched_ns": stop_dispatched_ns,
+                        **({"stop_dispatch_method": "windows_terminate_process_v1",
+                            "stop_dispatch_result": "os_success"}
+                           if platform.system() == "Windows" else {})}
                        if capacity_limited else {}),
                     **({"metric_kind": ("peak_working_set_bytes" if platform.system() == "Windows"
                                          else "peak_rss_bytes"),
