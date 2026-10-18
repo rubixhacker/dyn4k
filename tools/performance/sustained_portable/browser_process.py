@@ -137,7 +137,12 @@ class ClientOriginGuard:
             if current["pid"] in seen or len(chain) >= 32:
                 raise ValueError("browser client ancestry is cyclic or too deep")
             seen.add(current["pid"])
-            current = process_stat(self.proc_root, current["ppid"])
+            if current["ppid"] <= 0:
+                raise ValueError("browser HTTP client is outside launched wrapper tree")
+            try:
+                current = process_stat(self.proc_root, current["ppid"])
+            except OSError as error:
+                raise ValueError("browser HTTP client ancestry raced") from error
             if current["state"] in ("Z", "X"):
                 raise ValueError("browser client ancestor exited during observation")
             chain.append({"pid": current["pid"], "start_ticks": current["start_ticks"]})

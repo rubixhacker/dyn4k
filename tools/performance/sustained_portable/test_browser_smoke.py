@@ -202,6 +202,8 @@ class BrowserResourceBindingTest(unittest.TestCase):
                 error.exception.close()
         self.assertEqual(server.request_origins, [])
         self.assertEqual(len(server.origin_errors), 3)
+        self.assertTrue(all("outside launched wrapper tree" in error
+                            for error in server.origin_errors))
 
 
 class BrowserResourceRecordTest(unittest.TestCase):
