@@ -476,6 +476,7 @@ class FullHostedTests(unittest.TestCase):
         evidence = evidence.resolve()
         actual_repository = Path(__file__).resolve().parents[2]
         repository = evidence / "checkout"
+        cache_home = evidence / "gradle-home"
         repository.mkdir()
         output = evidence / "full"
         unresolved_alias_parent = evidence / "RUNNER~1"
@@ -571,7 +572,7 @@ class FullHostedTests(unittest.TestCase):
                 for module in qualify.MODULES:
                     name = qualify.target_publication_name(module, target)
                     binary = repository / "build/staging-repository" / qualify.target_binary_path(module, target)
-                    cached = (evidence / "gradle-home/caches/modules-2/files-2.1" /
+                    cached = (cache_home / "caches/modules-2/files-2.1" /
                               qualify.GROUP / name / qualify.VERSION /
                               hashlib.sha1(binary.read_bytes()).hexdigest() /
                               f"{module}-{target}Main-{qualify.VERSION}.klib")
@@ -582,7 +583,7 @@ class FullHostedTests(unittest.TestCase):
                                       "size": cached.stat().st_size,
                                       "sha256": full_hosted.sha256(cached)})
                 graph = {"configuration": f"{target}CompileKlibraries",
-                         "gradle_user_home": str(evidence / "gradle-home"),
+                         "gradle_user_home": str(cache_home),
                          "components": [item["component"] for item in artifacts] +
                          [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
                          "artifacts": artifacts}
@@ -601,7 +602,7 @@ class FullHostedTests(unittest.TestCase):
                    "simulators": {"tvOS": [{"udid": simulator,
                                             "runtime": "com.apple.CoreSimulator.SimRuntime.tvOS-26-0"}]}}
         runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
-                  "GRADLE_USER_HOME": str(evidence / "gradle-home"),
+                  "GRADLE_USER_HOME": str(cache_home),
                   "RUNNER_NAME": "synthetic-runner", "RUNNER_OS": "macOS",
                   "RUNNER_ARCH": "ARM64"}
         with mock.patch.object(full_hosted, "__file__", str(repository /
@@ -634,8 +635,8 @@ class FullHostedTests(unittest.TestCase):
             self.assertEqual(2, load.call_count)
             receipt = qualify.load_json_strict(output / "receipt.json")
             self.assertEqual(emitted, receipt)
-            self.assertEqual(str(evidence / "gradle-home"), receipt["gradle_user_home"])
-            self.assertEqual(str(evidence / "gradle-home"),
+            self.assertEqual(str(cache_home), receipt["gradle_user_home"])
+            self.assertEqual(str(cache_home),
                              receipt["gradle_user_home_override"])
             full_hosted.verify_raw_files(output, receipt)
             archive = evidence / "full.tar"
@@ -694,7 +695,8 @@ class FullHostedTests(unittest.TestCase):
                     ValueError, "test or graph init script is unbound") as wrong_tar_error:
                 full_hosted.verify_transport_archive(adverse_root_archive, candidate, target)
 
-            clean = evidence / "clean-checkout"
+            clean = evidence / "replay-other-parent/clean-checkout"
+            clean.parent.mkdir()
             subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "-q",
                             "--no-local", str(repository), str(clean)], check=True)
             subprocess.run(["git", "-C", str(clean), "config", "core.autocrlf", "false"],
@@ -949,6 +951,77 @@ class FullHostedTests(unittest.TestCase):
                 cwd=clean, capture_output=True, text=True)
             self.assertEqual(2, adverse_record.returncode)
             self.assertIn("full hosted receipt failed", adverse_record.stderr)
+            cache_home = evidence / "outside-checkout-gradle-home"
+            relative_override = "../outside-checkout-gradle-home"
+            self.assertEqual(cache_home, (repository / relative_override).resolve())
+            self.assertNotEqual(cache_home, (clean / relative_override).resolve())
+            relative_output = evidence / "relative-home-full"
+            shutil.rmtree(repository / "build/staging-repository")
+            with mock.patch.dict(os.environ, {"GRADLE_USER_HOME": relative_override}):
+                relative_receipt = full_hosted.run(target, candidate, relative_output)
+            self.assertEqual("FULL_COMMON_PASSED", relative_receipt["status"],
+                             relative_receipt.get("reason"))
+            self.assertEqual(relative_override, relative_receipt["gradle_user_home_override"])
+            self.assertEqual(str(cache_home), relative_receipt["gradle_user_home"])
+            full_hosted.verify_raw_files(relative_output, relative_receipt)
+            relative_archive = evidence / "relative-home-full.tar"
+            full_hosted.package_archive(relative_output, relative_archive)
+            self.assertEqual(relative_receipt,
+                             full_hosted.verify_transport_archive(relative_archive, candidate, target))
+            for command_prefix, bundle in ((directory_command[:-1], relative_output),
+                                           (command[:-1], relative_archive)):
+                accepted = subprocess.run([*command_prefix, str(bundle)], cwd=clean,
+                                          capture_output=True, text=True)
+                self.assertEqual(0, accepted.returncode, accepted.stderr)
+            for bundle in (relative_output, relative_archive):
+                accepted = subprocess.run([*artifact_command, str(bundle)], cwd=clean,
+                                          capture_output=True, text=True)
+                self.assertEqual(0, accepted.returncode, accepted.stderr)
+            relative_report = evidence / "relative-home-qualification.json"
+            accepted_record = subprocess.run([
+                sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                "--candidate-sha", candidate, "--full-hosted-bundle", str(relative_archive),
+                "--output", str(relative_report)], cwd=clean, capture_output=True, text=True)
+            self.assertEqual(1, accepted_record.returncode, accepted_record.stderr)
+            relative_qualification = qualify.load_json_strict(relative_report)
+            self.assertEqual(112, relative_qualification["total"])
+            self.assertEqual(0, relative_qualification["counts"]["PASSED"])
+            self.assertEqual(112, relative_qualification["counts"]["NOT_RUN"])
+
+            for label, key, value in (
+                    ("cwd", "repository_root", str(evidence / "other/checkout")),
+                    ("override", "gradle_user_home_override", "../other-gradle-home"),
+                    ("home", "gradle_user_home", str(evidence / "other-gradle-home"))):
+                with self.subTest(relative_home_mutation=label):
+                    altered_output = evidence / f"adverse-relative-{label}"
+                    shutil.copytree(relative_output, altered_output)
+                    altered = qualify.load_json_strict(altered_output / "receipt.json")
+                    altered[key] = value
+                    (altered_output / "receipt.json").write_text(json.dumps(altered, sort_keys=True))
+                    altered_archive = evidence / f"adverse-relative-{label}.tar"
+                    full_hosted.package_archive(altered_output, altered_archive)
+                    with self.assertRaisesRegex(ValueError, "Gradle user home differs"):
+                        full_hosted.verify_raw_files(altered_output, altered)
+                    with self.assertRaisesRegex(ValueError, "Gradle user home differs"):
+                        full_hosted.verify_transport_archive(altered_archive, candidate, target)
+                    for command_prefix, bundle in ((directory_command[:-1], altered_output),
+                                                   (command[:-1], altered_archive)):
+                        rejected = subprocess.run([*command_prefix, str(bundle)], cwd=clean,
+                                                  capture_output=True, text=True)
+                        self.assertNotEqual(0, rejected.returncode)
+                        self.assertIn("Gradle user home differs", rejected.stderr)
+                    for bundle in (altered_output, altered_archive):
+                        rejected = subprocess.run([*artifact_command, str(bundle)], cwd=clean,
+                                                  capture_output=True, text=True)
+                        self.assertEqual(1, rejected.returncode)
+                        self.assertIn("full hosted archive failed", rejected.stderr)
+                    rejected_record = subprocess.run([
+                        sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                        "--candidate-sha", candidate, "--full-hosted-bundle", str(altered_archive),
+                        "--output", str(evidence / f"adverse-relative-{label}-qualification.json")],
+                        cwd=clean, capture_output=True, text=True)
+                    self.assertEqual(2, rejected_record.returncode)
+                    self.assertIn("full hosted receipt failed", rejected_record.stderr)
             (evidence / "evidence.json").write_text(json.dumps({
                 "synthetic": True, "real_hosted_runtime": False,
                 "corpus_loader": "real_source_derived_candidate",
@@ -965,6 +1038,11 @@ class FullHostedTests(unittest.TestCase):
                                                    for module in qualify.MODULES},
                 "consumer_cases_per_configuration": len(consumer_cases),
                 "positive_archive_sha256": full_hosted.sha256(archive),
+                "relative_home_override": relative_override,
+                "relative_home_observed": relative_receipt["gradle_user_home"],
+                "relative_home_archive_sha256": full_hosted.sha256(relative_archive),
+                "relative_home_qualification_lanes": relative_qualification["total"],
+                "relative_home_passed_lanes": relative_qualification["counts"]["PASSED"],
                 "cache_bytes_archive_sha256": full_hosted.sha256(adverse_cache_archive),
                 "process_order_archive_sha256": full_hosted.sha256(order_archive),
                 "process_order_rejection": order_record.stderr.strip().splitlines()[-1],

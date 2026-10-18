@@ -4,7 +4,9 @@ import csv
 import hashlib
 import json
 import math
+import ntpath
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -87,7 +89,15 @@ def expected_gradle_home(target, receipt):
         return home / ".gradle"
     if not isinstance(override, str) or not override:
         raise ValueError("Gradle user home override is invalid")
-    return original_path(target, override)
+    kind = PureWindowsPath if target == "mingwX64" else PurePosixPath
+    requested = kind(override)
+    if requested.is_absolute():
+        return original_path(target, override)
+    if requested.drive or requested.root:
+        raise ValueError("Gradle user home override is not a relative path")
+    process_root = original_path(target, receipt.get("repository_root"))
+    normalize = ntpath.normpath if target == "mingwX64" else posixpath.normpath
+    return original_path(target, normalize(str(process_root / requested)))
 
 
 def archived_file(output, name):
