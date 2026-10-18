@@ -44,9 +44,9 @@ jobs:
           $nativeExitFile = Join-Path $native 'gradle-exit-code.txt'
           $javaLog = Join-Path $java 'java-console.log'
           $javaExitFile = Join-Path $java 'java-exit-code.txt'
-          $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
           $collectionErrors = [System.Collections.Generic.List[string]]::new()
           $results = Join-Path $PWD 'dyn4k-core/build/test-results/mingwX64Test'
+          $xmlFiles = @()
 
           try {
             if (Test-Path $results) { Remove-Item -LiteralPath $results -Recurse -Force }
@@ -66,66 +66,25 @@ jobs:
             $nativeExit = 1
           }
 
-          $expectedSuites = [ordered]@{
-            'TEST-org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest'
-            'TEST-org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest'
-            'TEST-org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest'
-            'TEST-org.dyn4j.coverage.collision.shapes.a.CircleSliceTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.CircleSliceTest'
-            'TEST-org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest'
-            'TEST-org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest.xml' = 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest'
-            'TEST-org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest.xml' = 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest'
-          }
-          $expectedDiagnosticCases = @('capsuleSlice[mingwX64]', 'circlePolygon[mingwX64]',
-            'circleSegment[mingwX64]', 'circleSlice[mingwX64]', 'polygonCapsule[mingwX64]',
-            'polygonPolygon[mingwX64]')
-          $records = @()
-          $xmlFiles = @()
           try {
             if (-not $nativeStarted) { throw 'Native test command did not start after result cleanup.' }
             $xmlFiles = @(Get-ChildItem $results -Filter 'TEST-*.xml' -File -ErrorAction Stop)
           } catch {
             $collectionErrors.Add("Native XML listing failed: $($_.ToString())")
           }
+          if ($null -ne $xmlFiles) {
+            foreach ($file in $xmlFiles) {
+              try {
+                Copy-Item -LiteralPath $file.FullName -Destination $native -ErrorAction Stop
+              } catch {
+                $collectionErrors.Add("Native XML copy failed for $($file.Name): $($_.ToString())")
+              }
+            }
+          }
           if ($xmlFiles.Count -ne 7) {
-            $collectionErrors.Add("Expected seven same-run XML files; found $($xmlFiles.Count)")
+            $collectionErrors.Add("Expected seven same-run XML reports; found $($xmlFiles.Count)")
+            $nativeExit = 1
           }
-          foreach ($file in $xmlFiles) {
-            try {
-              Copy-Item -LiteralPath $file.FullName -Destination $native -ErrorAction Stop
-            } catch {
-              $collectionErrors.Add("Native XML copy failed for $($file.Name): $($_.ToString())")
-            }
-          }
-          foreach ($name in $expectedSuites.Keys) {
-            $suiteFiles = @($xmlFiles | Where-Object Name -eq $name)
-            if ($suiteFiles.Count -ne 1) {
-              $collectionErrors.Add("Expected exactly one same-run suite report: $name")
-              continue
-            }
-            try {
-              [xml]$suiteXml = [IO.File]::ReadAllText($suiteFiles[0].FullName)
-              if ($suiteXml.testsuite.name -ne $expectedSuites[$name]) {
-                throw "Wrong suite identity: $($suiteXml.testsuite.name)"
-              }
-              if ($name -like '*WindowsCollisionIntermediateDiagnosticTest.xml') {
-                $cases = @($suiteXml.testsuite.testcase | ForEach-Object name | Sort-Object)
-                $expectedSorted = @($expectedDiagnosticCases | Sort-Object)
-                if ($cases.Count -ne 6 -or (Compare-Object $expectedSorted $cases)) {
-                  throw "Diagnostic suite must contain the six focused test cases; found $($cases.Count)"
-                }
-                $systemOutput = $suiteXml.SelectSingleNode('//system-out')
-                if ($null -eq $systemOutput) { throw 'Diagnostic XML has no system-out trace.' }
-                $records = @($systemOutput.InnerText -split "`r?`n" | Where-Object {
-                  $_.StartsWith("DYN4K_COLLISION_DIAGNOSTIC`tv2`t", [StringComparison]::Ordinal)
-                })
-                if ($records.Count -ne 72) { throw "Expected 72 same-run native v2 records; found $($records.Count)" }
-                [IO.File]::WriteAllLines($nativeTsv, [string[]]$records, [Text.UTF8Encoding]::new($false))
-              }
-            } catch {
-              $collectionErrors.Add("Native XML read/validation failed for ${name}: $($_.ToString())")
-            }
-          }
-          if ($collectionErrors.Count -gt 0) { $nativeExit = 1 }
 
           try {
             $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0.jar'
@@ -162,44 +121,18 @@ jobs:
 
           try {
             $javaTsv = Join-Path $java 'dyn4j-6.0.0-windows-control.tsv'
-            if (-not (Test-Path -LiteralPath $javaTsv -PathType Leaf)) {
-              throw 'Pinned Java control TSV is missing.'
-            }
-            $javaRecords = @(Select-String -LiteralPath $javaTsv `
-              -Pattern '^DYN4K_COLLISION_DIAGNOSTIC\tv2\t' -ErrorAction Stop | ForEach-Object Line)
-            if ($javaRecords.Count -ne 72) { throw "Expected 72 Java v2 records; found $($javaRecords.Count)" }
-            if ($records.Count -ne 72) { throw 'Cannot compare identities without 72 native records.' }
-            $nativeKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-            $javaKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-            foreach ($record in $records) {
-              if ($record -notmatch '^DYN4K_COLLISION_DIAGNOSTIC\tv2\tprovider=dyn4k\t') {
-                throw 'Malformed native v2 record or wrong provider.'
-              }
-              $match = [regex]::Match($record, '\tfixture=([^\t]+)\tmethod=([^\t]+)\tphase=([^\t]+)\torder=([^\t]+)\tstep=([^\t]+)\talgorithm=([^\t]+)')
-              if (-not $match.Success) { throw 'Malformed native v2 identity.' }
-              $key = @($match.Groups[1].Value, $match.Groups[2].Value,
-                $match.Groups[3].Value, $match.Groups[4].Value,
-                $match.Groups[5].Value, $match.Groups[6].Value) -join "`t"
-              if (-not $nativeKeys.Add($key)) { throw "Duplicate native identity: $key" }
-            }
-            foreach ($record in $javaRecords) {
-              if ($record -notmatch '^DYN4K_COLLISION_DIAGNOSTIC\tv2\tprovider=dyn4j-6\.0\.0\t') {
-                throw 'Malformed Java v2 record or wrong provider.'
-              }
-              $match = [regex]::Match($record, '\tfixture=([^\t]+)\tmethod=([^\t]+)\tphase=([^\t]+)\torder=([^\t]+)\tstep=([^\t]+)\talgorithm=([^\t]+)')
-              if (-not $match.Success) { throw 'Malformed Java v2 identity.' }
-              $key = @($match.Groups[1].Value, $match.Groups[2].Value,
-                $match.Groups[3].Value, $match.Groups[4].Value,
-                $match.Groups[5].Value, $match.Groups[6].Value) -join "`t"
-              if (-not $javaKeys.Add($key)) { throw "Duplicate Java identity: $key" }
-            }
-            if ($nativeKeys.Count -ne 72 -or $javaKeys.Count -ne 72 -or
-                @($nativeKeys | Where-Object { -not $javaKeys.Contains($_) }).Count -ne 0 -or
-                @($javaKeys | Where-Object { -not $nativeKeys.Contains($_) }).Count -ne 0) {
-              throw 'Native and Java v2 identity sets do not match exactly.'
+            $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
+            $validationLog = Join-Path $evidence 'trace-validation.log'
+            & python tools/compatibility/windows_collision_focus.py `
+              --native-directory $native --java-tsv $javaTsv --native-tsv $nativeTsv `
+              2>&1 | Tee-Object -FilePath $validationLog
+            $validationExit = $LASTEXITCODE
+            if ($validationExit -ne 0) {
+              $collectionErrors.Add("Shared XML and TSV validation failed with exit $validationExit")
+              $nativeExit = 1
             }
           } catch {
-            $collectionErrors.Add("Trace validation failed: $($_.ToString())")
+            $collectionErrors.Add("Shared XML and TSV validation could not run: $($_.ToString())")
             $nativeExit = 1
           }
 
