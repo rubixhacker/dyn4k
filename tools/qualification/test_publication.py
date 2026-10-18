@@ -227,6 +227,50 @@ class PublicationAuditTests(unittest.TestCase):
                 qualify.validate_source_archive(archive_path, {
                     "commonMain/api/Type.kt": hashlib.sha256(source).hexdigest()})
 
+    def test_candidate_source_contract_uses_committed_bytes_across_autocrlf(self):
+        source = b"// $Format:%H$\npackage api\nclass Type\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for module in qualify.MODULES:
+                path = root / module / "src/commonMain/kotlin/api/Type.kt"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(source)
+            (root / ".gitattributes").write_bytes(b"*.kt export-subst\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "core.autocrlf=false", "add",
+                            ".gitattributes", "dyn4k-core", "dyn4k"], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
+                            "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
+                           check=True)
+            candidate = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                                text=True).strip()
+            self.assertEqual(source, subprocess.check_output([
+                "git", "-C", str(root), "show",
+                f"{candidate}:dyn4k-core/src/commonMain/kotlin/api/Type.kt"]))
+            archive_path = root / "sources.jar"
+            for setting in ("false", "true"):
+                with self.subTest(core_autocrlf=setting):
+                    subprocess.run(["git", "-C", str(root), "config", "--local",
+                                    "core.autocrlf", setting], check=True)
+                    contract = qualify.candidate_source_contract(root, candidate)
+                    expected = qualify.expected_source_entries(contract, "dyn4k-core", "jvm")
+                    self.assertEqual({"commonMain/api/Type.kt": hashlib.sha256(source).hexdigest()},
+                                     expected)
+                    self.assertEqual(expected, qualify.expected_source_entries(
+                        contract, "dyn4k", "jvm"))
+                    with zipfile.ZipFile(archive_path, "w") as jar:
+                        jar.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
+                        jar.writestr("commonMain/api/Type.kt", source)
+                    qualify.validate_source_archive(archive_path, expected)
+                    for mutation, changed in (("edited", source.replace(b"Type", b"Changed")),
+                                              ("crlf", source.replace(b"\n", b"\r\n"))):
+                        with self.subTest(core_autocrlf=setting, mutation=mutation):
+                            with zipfile.ZipFile(archive_path, "w") as jar:
+                                jar.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
+                                jar.writestr("commonMain/api/Type.kt", changed)
+                            with self.assertRaisesRegex(ValueError, "source bytes differ"):
+                                qualify.validate_source_archive(archive_path, expected)
+
     def test_jvm_module_descriptor_matches_only_committed_core_jvm_source(self):
         descriptor = b"module org.dyn4j { exports org.dyn4j; }\n"
         source = b"package api\nclass Type\n"

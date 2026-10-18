@@ -219,13 +219,37 @@ def source_sets_for_publication(module, target):
 def candidate_source_contract(repository, candidate_sha):
     source_files = {}
     if (repository / ".git").exists():
-        archive = subprocess.check_output(
-            ["git", "-C", str(repository), "archive", "--format=tar", candidate_sha,
-             "dyn4k-core/src", "dyn4k/src"], stderr=subprocess.PIPE)
-        with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
-            for entry in tree:
-                if entry.isfile() and entry.name.endswith((".kt", ".java")):
-                    source_files[entry.name] = tree.extractfile(entry).read()
+        # Read Git blobs directly; archive substitutions and line endings can change source bytes.
+        tree = subprocess.check_output(
+            ["git", "-C", str(repository), "ls-tree", "-r", "-z", "--full-tree",
+             candidate_sha, "--", "dyn4k-core/src", "dyn4k/src"], stderr=subprocess.PIPE)
+        blobs = []
+        for entry in tree.split(b"\0"):
+            if not entry:
+                continue
+            metadata, name = entry.split(b"\t", 1)
+            mode, kind, oid = metadata.split()
+            path = os.fsdecode(name)
+            if path.endswith((".kt", ".java")):
+                if mode not in (b"100644", b"100755") or kind != b"blob":
+                    raise ValueError(f"candidate source is not a regular file: {path}")
+                blobs.append((path, oid))
+        contents = subprocess.check_output(
+            ["git", "-C", str(repository), "cat-file", "--batch"],
+            input=b"".join(oid + b"\n" for _, oid in blobs), stderr=subprocess.PIPE)
+        stream = io.BytesIO(contents)
+        for path, oid in blobs:
+            header = stream.readline().rstrip(b"\n")
+            prefix = oid + b" blob "
+            if not header.startswith(prefix):
+                raise ValueError(f"candidate source blob is invalid: {path}")
+            size = int(header[len(prefix):])
+            source = stream.read(size)
+            if len(source) != size or stream.read(1) != b"\n":
+                raise ValueError(f"candidate source blob is incomplete: {path}")
+            source_files[path] = source
+        if stream.read(1):
+            raise ValueError("candidate source blob response has unexpected data")
     else:
         for module in MODULES:
             for source in (repository / module / "src").glob("*Main/*/**/*"):
