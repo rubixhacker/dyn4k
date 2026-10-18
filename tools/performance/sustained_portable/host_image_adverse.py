@@ -25,7 +25,7 @@ def checked(stage, action):
         raise AdverseStepError(stage, error) from error
 
 
-def path_swap_control(receipt=None, retained_image=None):
+def path_swap_control(receipt=None):
     if receipt is None:
         receipt = {}
     if sys.platform == "win32":
@@ -34,7 +34,7 @@ def path_swap_control(receipt=None, retained_image=None):
     else:
         source = Path("/bin/sleep")
         arguments = ["10"]
-    with tempfile.TemporaryDirectory(prefix="dyn4k-image-adverse-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="dyn4k-image-adverse-", dir=Path.home()) as temporary:
         executable = Path(temporary) / source.name
         moved = Path(temporary) / ("original-" + source.name)
         checked("copy_image", lambda: shutil.copyfile(source, executable))
@@ -42,16 +42,10 @@ def path_swap_control(receipt=None, retained_image=None):
             checked("make_executable", lambda: os.chmod(executable, 0o700))
         original_sha = checked("hash_image", lambda: capture.digest(executable))
         receipt.update({"host": sys.platform, "control_image_source": str(source),
-                        "original_sha256": original_sha, "swap": "unattempted",
+                        "original_sha256": original_sha,
+                        "control_image_size": executable.stat().st_size,
+                        "swap": "unattempted",
                         "mapped_image_identity": "unobserved"})
-        if retained_image is not None:
-            def retain_selected():
-                with executable.open("rb") as source_stream, retained_image.open("xb") as output_stream:
-                    shutil.copyfileobj(source_stream, output_stream)
-                if capture.digest(retained_image) != original_sha:
-                    raise ValueError("retained selected executable differs from launched image")
-            checked("retain_selected_image", retain_selected)
-            receipt["selected_image_archive"] = str(retained_image)
         process = checked("launch_image", lambda: subprocess.Popen(
             [str(executable), *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
         receipt["pid"] = process.pid
@@ -115,11 +109,9 @@ def main():
     if not args.output.is_absolute() or args.output.exists():
         parser.error("output must be a new absolute path")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    retained_image = args.output.with_name(args.output.stem + "-selected.exe") \
-        if sys.platform == "win32" else None
     partial = {}
     try:
-        result = path_swap_control(partial, retained_image)
+        result = path_swap_control(partial)
     except (OSError, ValueError) as error:
         result = {**partial, "host": sys.platform, "swap": "unavailable", "error": str(error),
                   "mapped_image_identity": "unobserved"}

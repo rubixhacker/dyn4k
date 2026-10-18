@@ -243,7 +243,8 @@ def pe_executable_sections(image):
             offset += block_size
     return {"image_size": image_size, "header_size": header_size,
             "preferred_base": preferred_base, "image_base_offset": optional + 24,
-            "sections": executable,
+            "sections": executable, "relocation_directory_rva": reloc_rva,
+            "relocation_directory_size": reloc_size,
             "relocations": relocations}
 
 
@@ -287,10 +288,18 @@ def compare_pe_code(image, layout, read_memory, base):
             window = slice(max(0, index - 8), min(len(expected), index + 9))
             raise PECodeMismatch({
                 "section": section["name"], "section_rva": section["rva"],
-                "section_size": len(expected), "mapped_base": base,
+                "section_size": len(expected),
+                "section_raw_offset": section["raw_offset"],
+                "section_flags": section["flags"],
+                "selected_file_size": len(image),
+                "pe_image_size": layout["image_size"],
+                "pe_header_size": layout["header_size"],
+                "mapped_base": base,
                 "preferred_base": layout["preferred_base"],
                 "selected_image_sha256": hashlib.sha256(image).hexdigest(),
                 "parsed_relocation_byte_count": len(layout["relocations"]),
+                "relocation_directory_rva": layout["relocation_directory_rva"],
+                "relocation_directory_size": layout["relocation_directory_size"],
                 "rva": section["rva"] + index,
                 "file_offset": section["raw_offset"] + index,
                 "selected_byte": expected[index], "mapped_byte": observed[index],
