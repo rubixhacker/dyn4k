@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import subprocess
 from fractions import Fraction
 from itertools import zip_longest
@@ -792,10 +793,15 @@ def verify_baseline_producer(root, key, attestation=None):
     from run import git
     if fixture_source_sha256() != verified.get("fixture_source_sha256"):
         raise Rejected("baseline recorder source binding differs")
+    revision = verified.get("candidate_recorder_commit")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise Rejected("baseline recorder source binding differs")
     try:
-        source = git("-c", "core.autocrlf=false", "archive", "--format=tar",
-                     verified["candidate_recorder_commit"])
-    except (subprocess.CalledProcessError, TypeError, ValueError) as error:
+        if git("--no-replace-objects", "cat-file", "-t", revision).strip() != b"commit":
+            raise Rejected("baseline recorder source binding differs")
+        source = git("--no-replace-objects", "-c", "core.autocrlf=false",
+                     "archive", "--format=tar", revision)
+    except (OSError, subprocess.CalledProcessError) as error:
         raise Rejected("baseline recorder source binding differs") from error
     if hashlib.sha256(source).hexdigest() != verified.get("source_sha256"):
         raise Rejected("baseline recorder source binding differs")

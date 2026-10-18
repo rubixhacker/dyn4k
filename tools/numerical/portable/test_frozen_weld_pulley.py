@@ -1,7 +1,9 @@
 import gzip
+import hashlib
 import json
 import math
 import os
+import subprocess
 import tempfile
 import unittest
 from fractions import Fraction
@@ -9,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import baseline_capture
+import run
 from frozen_weld_pulley import (BOUNDS, certify_observed_math, compare_branches,
                                compare_case, compare_records,
                                policy, verify_baseline_producer,
@@ -25,6 +28,66 @@ ATTESTATION = Path("/var/home/stewart/dyn4k-evidence/portable-706-review-fix/"
 
 
 class FrozenWeldPulleySeamTest(unittest.TestCase):
+    @unittest.skipUnless(CHAIN_ARCHIVE.is_dir() and ATTESTATION.is_file(),
+                         "retained baseline evidence is unavailable")
+    def test_frozen_recorder_commit_ignores_same_type_replacement(self):
+        verified = json.loads((CHAIN_ARCHIVE / "verified.json").read_text())
+        original = verified["candidate_recorder_commit"]
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "source"
+            subprocess.run(("git", "clone", "-q", "--shared", "--no-checkout",
+                            str(run.ROOT), str(repository)), check=True)
+            substitute = subprocess.check_output(
+                ("git", "-C", str(repository), "rev-parse", "HEAD"), text=True).strip()
+            self.assertNotEqual(original, substitute)
+            for revision in (original, substitute):
+                self.assertEqual(subprocess.check_output(
+                    ("git", "-C", str(repository), "--no-replace-objects",
+                     "cat-file", "-t", revision)).strip(), b"commit")
+            subprocess.run(("git", "-C", str(repository), "replace", original,
+                            substitute), check=True)
+            with patch.object(run, "ROOT", repository):
+                canonical = run.git("--no-replace-objects", "-c", "core.autocrlf=false",
+                                    "archive", "--format=tar", original)
+                replaced = run.git("-c", "core.autocrlf=false", "archive",
+                                   "--format=tar", original)
+            self.assertNotEqual(canonical, replaced)
+            self.assertEqual(hashlib.sha256(canonical).hexdigest(),
+                             verified["source_sha256"])
+            root = Path(directory) / "archive"
+            root.mkdir()
+            (root / "dyn4j-6.0.0.jar").symlink_to(CHAIN_ARCHIVE / "dyn4j-6.0.0.jar")
+            (root / "baseline-jvm").mkdir()
+            (root / "baseline-jvm/cases").symlink_to(
+                CHAIN_ARCHIVE / "baseline-jvm/cases", target_is_directory=True)
+            (root / "verified.json").write_text(json.dumps(verified))
+            with patch.object(run, "ROOT", repository), \
+                    patch("baseline_capture.verify_attestation",
+                          return_value=json.loads(ATTESTATION.read_text())), \
+                    patch("baseline_capture.fixture_source_sha256",
+                          return_value=verified["fixture_source_sha256"]):
+                forged = {**verified,
+                          "source_sha256": hashlib.sha256(replaced).hexdigest()}
+                (root / "verified.json").write_text(json.dumps(forged))
+                with self.assertRaisesRegex(Rejected,
+                                            "baseline recorder source binding differs"):
+                    verify_baseline_producer(root, "weld-enabled-equal", ATTESTATION)
+                (root / "verified.json").write_text(json.dumps(verified))
+                self.assertEqual(verify_baseline_producer(
+                    root, "weld-enabled-equal", ATTESTATION)["case_sha256"],
+                    verified["case_sha256"]["P-JINT-Weld-enabled-equal"])
+                tree = run.git("--no-replace-objects", "rev-parse",
+                               f"{original}^{{tree}}").decode().strip()
+                tree_source = run.git("--no-replace-objects", "-c",
+                                      "core.autocrlf=false", "archive",
+                                      "--format=tar", tree)
+                (root / "verified.json").write_text(json.dumps({
+                    **verified, "candidate_recorder_commit": tree,
+                    "source_sha256": hashlib.sha256(tree_source).hexdigest()}))
+                with self.assertRaisesRegex(Rejected,
+                                            "baseline recorder source binding differs"):
+                    verify_baseline_producer(root, "weld-enabled-equal", ATTESTATION)
+
     @unittest.skipUnless(CHAIN_ARCHIVE.is_dir(), "retained baseline archive is unavailable")
     def test_historical_recorder_source_uses_canonical_archive_under_autocrlf(self):
         verified = json.loads((CHAIN_ARCHIVE / "verified.json").read_text())
