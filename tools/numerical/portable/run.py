@@ -1,0 +1,886 @@
+import argparse
+import hashlib
+import io
+import json
+import os
+import platform
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import urllib.parse
+import zipfile
+from concurrent.futures import ProcessPoolExecutor
+from itertools import chain
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cases import declared_cases
+from exact_consistency import audit_trace
+from frozen_weld_pulley import KEYS as WELD_PULLEY_KEYS, compare_case as compare_weld_pulley
+from physical import nominal_free, sleep_wake_rows
+from prospective_compare import compare_host
+from reference_diagnostic import diagnostic, portable_case_id
+from receipt import Identity, Rejected, digest, records, seal
+
+
+ROOT = Path(__file__).resolve().parents[3]
+PORTABLE = Path(__file__).resolve().parent
+STAGED = ROOT / "build/staging-repository/io/github/rubixhacker"
+VERSION = "0.1.0-alpha.1"
+HOST_TASKS = {
+    "jvm": "jvmTest",
+    "jvm8": "jvmTest",
+    "android-host": "testAndroidHostTest",
+    "linux-x64": "linuxX64Test",
+    "node-js": "jsNodeTest",
+    "node-wasm-js": "wasmJsNodeTest",
+    "node-wasm-wasi": "wasmWasiNodeTest",
+}
+MATRIX_METHODS = (
+    "geometryCollisionBoundaryAndScale",
+    "freeMotionForcesDampingAndRestitution",
+    "defaultContactsFrictionSleepAndWake",
+    "configured30Repeat1", "configured30Repeat2",
+    "configured60Repeat1", "configured60Repeat2",
+    "configured120Repeat1", "configured120Repeat2",
+    "everyJointWithInitialAndApplicableActiveModes",
+    "independentJointBooleanModes",
+    "independentJointNumericAndLimitModes",
+    "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure",
+    "continuousCollisionCasesAtFrozenRates",
+    "longRunningFreeMotionInvariantScene",
+)
+MATRIX_METHOD_CASE_COUNTS = (75, 10, 3, 1, 1, 1, 1, 1, 1, 24, 102, 98, 1, 12, 1)
+
+
+def method_case_ids(method):
+    if method not in MATRIX_METHODS:
+        raise Rejected(f"unknown numerical matrix method: {method}")
+    index = MATRIX_METHODS.index(method)
+    start = sum(MATRIX_METHOD_CASE_COUNTS[:index])
+    end = start + MATRIX_METHOD_CASE_COUNTS[index]
+    cases = declared_cases()
+    if len(cases) != sum(MATRIX_METHOD_CASE_COUNTS):
+        raise Rejected("method and declared case inventories differ")
+    return [case["id"] for case in cases[start:end]]
+
+
+STAGE_TASKS = (
+    ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
+    ":dyn4k-core:publishJvmPublicationToStagingRepository",
+    ":dyn4k-core:publishAndroidPublicationToStagingRepository",
+    ":dyn4k-core:publishLinuxX64PublicationToStagingRepository",
+    ":dyn4k-core:publishJsPublicationToStagingRepository",
+    ":dyn4k-core:publishWasmJsPublicationToStagingRepository",
+    ":dyn4k-core:publishWasmWasiPublicationToStagingRepository",
+)
+ARTIFACT_NAME = {
+    "jvm": ("jvm", "jar"),
+    "jvm8": ("jvm", "jar"),
+    "android-host": ("android", "aar"),
+    "linux-x64": ("linuxx64", "klib"),
+    "node-js": ("js", "klib"),
+    "node-wasm-js": ("wasm-js", "klib"),
+    "node-wasm-wasi": ("wasm-wasi", "klib"),
+}
+OTHER_LANES = (
+    "android-device", "linux-arm64", "windows-x64", "macos-arm64", "ios-arm64",
+    "ios-simulator-arm64", "ios-simulator-x64", "tvos-arm64", "tvos-simulator-arm64",
+    "watchos-arm64", "watchos-device-arm64", "watchos-simulator-arm64",
+    "android-native-arm32", "android-native-arm64", "android-native-x86", "android-native-x64",
+)
+CATALOG = ROOT / "tools/numerical/fixtures.json"
+PROVENANCE_SCRIPT = PORTABLE / "provenance.gradle"
+GENERATED_ROOTS = (
+    b"", b"dyn4k/", b"dyn4k-core/", b"consumers/qualification/",
+    b"consumers/qualification/portable/", b"tools/numerical/portable/",
+    b"tools/numerical/portable/baseline/",
+)
+GENERATED_PREFIXES = tuple(root + directory + b"/" for root in GENERATED_ROOTS
+                           for directory in (b"build", b".gradle", b".kotlin")) + (
+                               b"tools/numerical/portable/__pycache__/",)
+GENERATED_FILES = {b"tools/numerical/portable/kotlin-js-store/yarn.lock"}
+
+
+def git(*args):
+    return subprocess.run(("git", *args), cwd=ROOT, check=True, capture_output=True).stdout
+
+
+def clean_identity():
+    status = git("status", "--porcelain", "--untracked-files=all").decode()
+    dirty = status.splitlines()
+    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    dirty.extend("ignored " + os.fsdecode(path) for path in ignored.split(b"\0")
+                 if path and path not in GENERATED_FILES
+                 and not path.startswith(GENERATED_PREFIXES))
+    if dirty:
+        raise Rejected("source tree is dirty: " + ", ".join(dirty[:5]))
+    return git("rev-parse", "HEAD").decode().strip(), hashlib.sha256(git("archive", "--format=tar", "HEAD")).hexdigest()
+
+
+def artifacts(host):
+    suffix, extension = ARTIFACT_NAME[host]
+    main = STAGED / f"dyn4k-core-{suffix}" / VERSION / f"dyn4k-core-{suffix}-{VERSION}.{extension}"
+    metadata = STAGED / "dyn4k-core" / VERSION / f"dyn4k-core-{VERSION}.jar"
+    for path in (main, metadata):
+        if not path.is_file():
+            raise Rejected(f"staged publication is absent: {path}")
+    return {"target": main, "metadata": metadata}
+
+
+def stage(output, commit, source_sha256):
+    started = __import__("time").time()
+    env = os.environ.copy()
+    env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
+    command = [str(ROOT / "gradlew"), *STAGE_TASKS, "--rerun-tasks", "--no-daemon",
+               "--console=plain", "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+    with (output / "publication.log").open("x", encoding="utf-8") as log:
+        completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                                   stderr=subprocess.STDOUT, check=False)
+    if completed.returncode:
+        raise Rejected("staged publication build failed; see publication.log")
+    if clean_identity() != (commit, source_sha256):
+        raise Rejected("source changed during staged publication build")
+    files = {str(path.relative_to(STAGED)): path
+             for host in HOST_TASKS for path in artifacts(host).values()}
+    if any(path.stat().st_mtime < started for path in files.values()):
+        raise Rejected("staged publication is older than this build")
+    manifest = {"candidate_commit": commit, "source_sha256": source_sha256,
+                "artifact_sha256": {name: digest(path) for name, path in files.items()},
+                "publication_log_sha256": digest(output / "publication.log")}
+    (output / "publication.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest
+
+
+def _provider_classes(path):
+    path = Path(path)
+    if path.is_dir():
+        return {str(item.relative_to(path)): item.read_bytes()
+                for item in path.rglob("*.class")
+                if str(item.relative_to(path)).startswith("org/dyn4j/")}
+    if not path.is_file() or not zipfile.is_zipfile(path):
+        return {}
+    with zipfile.ZipFile(path) as archive:
+        return {name: archive.read(name) for name in archive.namelist()
+                if name.startswith("org/dyn4j/") and name.endswith(".class")}
+
+
+def _java_classpath(command):
+    tokens = []
+    argfiles = []
+    for token in command[1:]:
+        if token.startswith("@"):
+            path = Path(token[1:]).resolve()
+            if not path.is_file():
+                raise Rejected("executed Java worker argument file is absent")
+            argfiles.append(path)
+            tokens.extend(shlex.split(path.read_text()))
+        else:
+            tokens.append(token)
+    classpaths = [tokens[index + 1] for index, token in enumerate(tokens[:-1])
+                  if token in ("-cp", "-classpath", "--class-path")]
+    if len(classpaths) != 1:
+        raise Rejected("executed Java worker classpath is absent or ambiguous")
+    return [Path(entry).resolve() for entry in classpaths[0].split(os.pathsep)], argfiles
+
+
+def _loaded_java_classes(log_path, expected, dependency, direct_path):
+    loaded = {}
+    inspected = {}
+    with Path(log_path).open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            old = re.search(r'\[Loaded (org\.dyn4j\.[^ ]+) from (file:[^\]]+)\]', line)
+            modern = re.search(r'\[class,load\] (org\.dyn4j\.[^ ]+) source: (file:[^ ]+)', line)
+            found = old or modern
+            if found is None:
+                continue
+            name = found.group(1).replace(".", "/") + ".class"
+            origin = Path(urllib.parse.unquote(urllib.parse.urlparse(
+                found.group(2)).path)).resolve()
+            if origin not in inspected:
+                inspected[origin] = _provider_classes(origin)
+            if name not in expected or inspected[origin].get(name) != expected[name]:
+                raise Rejected("loaded Java provider differs from staged dependency")
+            loaded[name] = str(origin)
+    if "org/dyn4j/geometry/Vector2.class" not in loaded:
+        raise Rejected("loaded staged dependency class proof is absent")
+    if direct_path and dependency.resolve() not in {Path(path) for path in loaded.values()}:
+        raise Rejected("loaded Java provider path omits staged dependency")
+    return loaded
+
+
+def _java_worker_open_proof(command, dependency, execution_log):
+    if execution_log is None or not Path(execution_log).is_file():
+        raise Rejected("Java 8 worker process trace is absent")
+    workers = []
+    children = {}
+    opened = []
+    with Path(execution_log).open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            launched = re.match(r'^(\d+) execve\("([^"]+)",.*GradleWorkerMain.*\) = 0$', line)
+            if launched and Path(launched.group(2)).resolve() == Path(command[0]).resolve():
+                workers.append(launched.group(1))
+            cloned = re.match(r'^(\d+) clone3?\(.*\) = (\d+)$', line)
+            if cloned:
+                children.setdefault(cloned.group(1), set()).add(cloned.group(2))
+            jar = re.match(r'^(\d+) openat\([^,]+, "([^"]+)",.*\) = \d+$', line)
+            if jar and "dyn4k-core" in jar.group(2):
+                opened.append((jar.group(1), Path(jar.group(2)).resolve()))
+    if len(workers) != 1:
+        raise Rejected(f"expected one Java 8 worker process, found {len(workers)}")
+    descendants = {workers[0]}
+    pending = [workers[0]]
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in descendants:
+                descendants.add(child)
+                pending.append(child)
+    worker_jars = [path for pid, path in opened if pid in descendants]
+    if dependency.resolve() not in worker_jars or \
+            any(path != dependency.resolve() for path in worker_jars):
+        raise Rejected("Java 8 worker did not open only the staged dependency")
+    return {"worker_pid": workers[0], "opened_artifact_sha256": digest(dependency),
+            "execution_log_sha256": digest(execution_log)}
+
+
+def _java_dependency_proof(host, command, dependency, log_path, proof_dir=None,
+                           require_loaded=False, execution_log=None):
+    entries, argfiles = _java_classpath(command)
+    if not dependency.is_file():
+        raise Rejected("staged dependency artifact is absent")
+    if host == "android-host":
+        with zipfile.ZipFile(dependency) as outer:
+            staged = outer.read("classes.jar")
+        with zipfile.ZipFile(io.BytesIO(staged)) as inner:
+            expected = {name: inner.read(name) for name in inner.namelist()
+                        if name.startswith("org/dyn4j/") and name.endswith(".class")}
+    else:
+        if host != "jvm8" and dependency.resolve() not in entries:
+            raise Rejected("executed classpath omits staged dependency")
+        expected = _provider_classes(dependency)
+    if not expected or "org/dyn4j/geometry/Vector2.class" not in expected:
+        raise Rejected("staged dependency provider classes are absent")
+    providers = []
+    for entry in entries:
+        classes = _provider_classes(entry)
+        if not classes:
+            continue
+        if any(expected.get(name) != value for name, value in classes.items()):
+            raise Rejected("executed classpath provider differs from staged dependency")
+        providers.append({"path": str(entry), "sha256": digest(entry) if entry.is_file() else
+                          hashlib.sha256(b"".join(classes[name] for name in sorted(classes))).hexdigest(),
+                          "classes": len(classes)})
+    loaded = (_loaded_java_classes(log_path, expected, dependency,
+                                   host != "android-host")
+              if host == "jvm8" or proof_dir is not None or require_loaded else {})
+    if not providers and not loaded:
+        raise Rejected("executed classpath has no staged provider classes")
+    archived = []
+    if proof_dir is not None:
+        proof_dir = Path(proof_dir)
+        proof_dir.mkdir(parents=True, exist_ok=True)
+        for index, path in enumerate(argfiles):
+            target = proof_dir / f"worker-args-{index}.txt"
+            shutil.copyfile(path, target)
+            archived.append({"path": str(target), "sha256": digest(target)})
+    result = {"classpath": [str(entry) for entry in entries], "providers": providers,
+              "dependency_sha256": digest(dependency), "loaded_classes": loaded,
+              "argument_files": archived}
+    if host == "jvm8":
+        result["worker_open"] = _java_worker_open_proof(command, dependency, execution_log)
+    return result
+
+
+def _compiled_dependency_proof(host, log_path, dependency):
+    if not dependency.is_file():
+        raise Rejected("staged dependency artifact is absent")
+    expected_sha = digest(dependency)
+    required = {
+        "linux-x64": (":compileKotlinLinuxX64", ":compileTestKotlinLinuxX64",
+                      ":linkDebugTestLinuxX64"),
+        "node-js": (":compileKotlinJs", ":compileTestKotlinJs",
+                    ":compileTestDevelopmentExecutableKotlinJs"),
+        "node-wasm-js": (":compileKotlinWasmJs", ":compileTestKotlinWasmJs",
+                         ":compileTestDevelopmentExecutableKotlinWasmJs"),
+        "node-wasm-wasi": (":compileKotlinWasmWasi", ":compileTestKotlinWasmWasi",
+                           ":compileTestDevelopmentExecutableKotlinWasmWasi"),
+    }[host]
+    found = []
+    with Path(log_path).open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            if not line.startswith("NUMERICAL_PROOF_INPUT "):
+                continue
+            item = json.loads(line.split(" ", 1)[1])
+            if item["task"] not in required:
+                continue
+            path = Path(item["path"]).resolve()
+            if path != dependency.resolve() and not (
+                    "io.github.rubixhacker" in path.parts and
+                    any(part.startswith("dyn4k-core-") for part in path.parts)):
+                raise Rejected("executed compiler input is outside staged publication resolution")
+            if not path.is_file() or digest(path) != expected_sha or \
+                    item["sha256"] != expected_sha or \
+                    item["bytes"] != dependency.stat().st_size:
+                raise Rejected("executed compiler input differs from staged dependency")
+            found.append(item)
+    if not set(required) <= {item["task"] for item in found}:
+        raise Rejected("executed compiler staged dependency proof is incomplete")
+    return {"artifact": str(dependency.resolve()), "artifact_sha256": expected_sha,
+            "tasks": found, "provenance_script_sha256": digest(PROVENANCE_SCRIPT)}
+
+
+def _executed_node_bundle(host, execution_log, executable):
+    if execution_log is None or not Path(execution_log).is_file():
+        raise Rejected("executed Node test process log is absent")
+    marker = ("dyn4k-portable-numerical-consumer-test.js" if host == "node-js" else
+              "runUnitTests.mjs")
+    executed = []
+    with Path(execution_log).open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            if "execve(" not in line or not line.rstrip().endswith("= 0") or \
+                    marker not in line or "--dryRun" in line:
+                continue
+            if host == "node-js" and "--reporter" not in line:
+                continue
+            paths = re.findall(r'"([^"\n]+)"', line)
+            if not paths or Path(paths[0]).resolve() != executable:
+                continue
+            matching = [Path(value).resolve() for value in paths[1:]
+                        if value.endswith(marker)]
+            if len(matching) != 1:
+                raise Rejected("executed Node test bundle command is ambiguous")
+            executed.append(matching[0])
+    if len(executed) != 1:
+        raise Rejected(f"expected one executed Node test worker, found {len(executed)}")
+    bundle = executed[0]
+    if not bundle.is_file():
+        raise Rejected("executed Node test bundle is absent")
+    payloads = [bundle]
+    if host == "node-js":
+        core = bundle.with_name("dyn4k-dyn4k-core.js")
+        if "dyn4k-dyn4k-core.js" not in bundle.read_text():
+            raise Rejected("executed Node bundle omits linked core module")
+        payloads.append(core)
+    else:
+        module_name = "dyn4k-portable-numerical-consumer-test.mjs"
+        candidates = (bundle.parent.parent / module_name,
+                      bundle.parent.parent / "kotlin" / module_name)
+        existing = [path for path in candidates if path.is_file()]
+        if len(existing) != 1:
+            raise Rejected("executed Wasm module is absent or ambiguous")
+        module = existing[0]
+        wasm = module.with_suffix(".wasm")
+        if module.name not in bundle.read_text() or wasm.name not in module.read_text():
+            raise Rejected("executed Wasm bundle omits linked module")
+        payloads.extend((module, wasm))
+    if any(not path.is_file() for path in payloads):
+        raise Rejected("executed Node linked payload is absent")
+    return {"command_bundle": str(bundle),
+            "payload_sha256": {str(path): digest(path) for path in payloads},
+            "process_executions": len(executed)}
+
+
+def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
+            require_loaded=False):
+    if host == "linux-x64":
+        binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
+        if len(binaries) != 1:
+            raise Rejected(f"expected one Linux x64 test binary, found {len(binaries)}")
+        binary = binaries[0].resolve()
+        if execution_log is None or not Path(execution_log).is_file():
+            raise Rejected("executed native test binary log is absent")
+        executed = []
+        with Path(execution_log).open(encoding="utf-8") as stream:
+            for line in stream:
+                found = re.search(r'\bexecve\("([^"]+\.kexe)".*\)\s+=\s+0$', line)
+                if found:
+                    executed.append(Path(found.group(1)).resolve())
+        if len(executed) != 1:
+            raise Rejected(f"expected one executed native test binary, found {len(executed)}")
+        if executed[0] != binary:
+            raise Rejected("executed native test binary does not match linked binary")
+        if dependency is None:
+            raise Rejected("staged dependency proof is absent")
+        return {"host": host, "os": platform.platform(), "machine": platform.machine(),
+                "device": False, "executable": str(binary), "executable_sha256": digest(binary),
+                "version": platform.platform(), "process_executions": len(executed),
+                "dependency": _compiled_dependency_proof(host, log_path, Path(dependency))}
+    needle = "Starting process 'command '" if host.startswith("node-") else "Starting process 'Gradle Test Executor"
+    commands = []
+    node_marker = ("dyn4k-portable-numerical-consumer-test.js" if host == "node-js"
+                   else "runUnitTests.mjs")
+    with Path(log_path).open(encoding="utf-8") as stream:
+        for line in stream:
+            if needle in line and " Command: " in line:
+                candidate = shlex.split(line.rsplit(" Command: ", 1)[1])
+                if candidate and (not host.startswith("node-") or
+                                  (Path(candidate[0]).name == "node" and
+                                   any(node_marker in argument for argument in candidate[1:]))):
+                    commands.append(candidate)
+    if not commands:
+        raise Rejected(f"no executed test runtime command in Gradle log for {host}")
+    if len(commands) != 1:
+        raise Rejected(f"expected one test worker command for {host}, found {len(commands)}")
+    resolved = Path(commands[0][0]).resolve()
+    if not resolved.is_file():
+        raise Rejected(f"executed runtime is missing: {resolved}")
+    result = {"host": host, "os": platform.platform(), "machine": platform.machine(),
+              "device": False, "executable": str(resolved), "executable_sha256": digest(resolved)}
+    command = (str(resolved), "--version") if host.startswith("node-") else (str(resolved), "-version")
+    probe = subprocess.run(command, capture_output=True, text=True, check=False)
+    result["version"] = (probe.stdout + probe.stderr).strip().splitlines()[0] if probe.stdout or probe.stderr else "UNAVAILABLE"
+    if host == "jvm8" and 'version "1.8.' not in result["version"]:
+        raise Rejected("JVM 8 lane did not execute on Java 8")
+    if host in ("jvm", "android-host") and 'version "21.' not in result["version"]:
+        raise Rejected(f"{host} lane did not execute on Java 21")
+    if dependency is None:
+        raise Rejected("staged dependency proof is absent")
+    dependency = Path(dependency)
+    if host.startswith("node-"):
+        result["dependency"] = _compiled_dependency_proof(host, log_path, dependency)
+        result["bundle"] = _executed_node_bundle(host, execution_log, resolved)
+        result["process_executions"] = result["bundle"]["process_executions"]
+        result["worker_command"] = commands[0]
+        return result
+    result["process_executions"] = len(commands)
+    result["worker_command"] = commands[0]
+    result["dependency"] = _java_dependency_proof(host, commands[0], dependency,
+                                                   log_path, proof_dir,
+                                                   require_loaded, execution_log)
+    return result
+
+
+def runtime_identity(row):
+    return {key: value for key, value in row.items()
+            if key not in ("worker_command", "dependency", "bundle", "process_executions")}
+
+
+def extract_xml(host, output, method=None, source=None):
+    if source is None:
+        directory = PORTABLE / "build/test-results" / HOST_TASKS[host]
+        matching = sorted(directory.glob("TEST-*PortableMatrixTest*.xml"))
+        if len(matching) != 1:
+            raise Rejected(f"expected one matrix XML for {host}, found {len(matching)}")
+        source = matching[0]
+    with source.open("rb") as stream:
+        stream.readline()
+        suite = stream.readline().decode()
+    attributes = dict(re.findall(r'([a-z]+)="([^"]*)"', suite))
+    if method is None:
+        shutil.copyfile(source, output / "matrix.xml")
+    else:
+        xml_dir = output / "xml"
+        xml_dir.mkdir(exist_ok=True)
+        shutil.move(source, xml_dir / f"{method}.xml")
+    trace = output / "trace.jsonl"
+    cases = output / "cases"
+    cases.mkdir(exist_ok=True)
+    expected = {item["id"] for item in declared_cases()}
+    observed = {}
+    input_records = 0
+    method_order = method_case_ids(method) if method is not None else None
+    case_stream = None
+    active_case = None
+    archived = output / "xml" / f"{method}.xml" if method is not None else source
+    with archived.open("r", encoding="utf-8") as stream, trace.open(
+            "a" if method is not None and trace.exists() else "x", encoding="utf-8") as target:
+        try:
+            for line in stream:
+                if "NUMERICAL_JSON " not in line:
+                    continue
+                payload = line.split("NUMERICAL_JSON ", 1)[1].split("]]>", 1)[0].rstrip("\r\n")
+                row = json.loads(payload, parse_constant=lambda value: (_ for _ in ()).throw(Rejected(value)))
+                target.write(payload + "\n")
+                case_id = row.get("id")
+                if row.get("kind") == "inputs":
+                    if method_order is not None and (input_records >= len(method_order) or
+                            row.get("id") != method_order[input_records]):
+                        raise Rejected(f"numerical method case order differs: {method}")
+                    input_records += 1
+                if case_id in expected:
+                    count = observed.setdefault(case_id, {"inputs": 0, "states": 0,
+                                                           "events": 0, "endpoints": 0,
+                                                           "case_ends": 0, "tagged_nonfinite_values": 0})
+                    kind = row.get("kind")
+                    field = {"inputs": "inputs", "state": "states", "event": "events",
+                             "endpoint": "endpoints", "case-end": "case_ends"}.get(kind)
+                    if field is not None:
+                        count[field] += 1
+                    count["tagged_nonfinite_values"] += payload.count('"nonfinite":')
+                if row.get("kind") == "inputs":
+                    if case_stream is not None:
+                        case_stream.close()
+                    active_case = row.get("id")
+                    case_stream = ((cases / f"{active_case}.jsonl").open("x", encoding="utf-8")
+                                   if active_case in expected else None)
+                if case_stream is not None and row.get("id") == active_case:
+                    case_stream.write(payload + "\n")
+                    if row.get("kind") == "case-end":
+                        case_stream.close()
+                        case_stream = None
+                        active_case = None
+        finally:
+            if case_stream is not None:
+                case_stream.close()
+    if method_order is not None and input_records != len(method_order):
+        raise Rejected(f"numerical method case order is incomplete: {method}")
+    raw_counts = {"expected_cases": len(expected), "input_records": input_records,
+                  "observed_cases": len(observed),
+                  "completed_cases": sum(item["case_ends"] == 1 for item in observed.values()),
+                  "states": sum(item["states"] for item in observed.values()),
+                  "tagged_nonfinite_values": sum(item["tagged_nonfinite_values"] for item in observed.values()),
+                  "per_case": observed}
+    return trace, attributes, raw_counts
+
+
+def absent_lane(output, name, commit, source_sha256, status, reason):
+    lane = output / name
+    lane.mkdir(parents=True, exist_ok=False)
+    result = {"host": name, "status": status, "reason": reason,
+              "candidate_commit": commit, "source_sha256": source_sha256,
+              "expected_cases": len(declared_cases()), "executed_cases": 0,
+              "skipped": 0, "qualification": "UNPASSED"}
+    (lane / "receipt.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
+def other_lane_status(name):
+    if name == "android-device":
+        return "NOT_RUN", "This consumer executed Android host tests only"
+    if name == "android-native-x64":
+        return "NOT_RUN", "This consumer has no Android Native x64 task; the separate ELF harness is available"
+    return "UNAVAILABLE", "Target runtime is not available to this consumer on this Bazzite host"
+
+
+def _compare_frozen_one(job):
+    key, source, candidate, baseline_root, candidate_cases, baseline_attestation = job
+    try:
+        if not candidate.is_file():
+            raise Rejected("matching portable case trace is absent")
+        if key in WELD_PULLEY_KEYS:
+            predecessors = {
+                "pulley-preparation-1": "pulley-preparation-0",
+                "pulley-slack-transition": "pulley-preparation-1"}
+            producer = (baseline_root / "baseline-jvm/cases" /
+                        f"{portable_case_id(key)}.jsonl" if baseline_root else None)
+            prior_key = predecessors.get(key)
+            prior_producer = (baseline_root / "baseline-jvm/cases" /
+                              f"{portable_case_id(prior_key)}.jsonl"
+                              if baseline_root and prior_key else None)
+            prior_candidate = (candidate_cases / f"{portable_case_id(prior_key)}.jsonl"
+                               if prior_key else None)
+            if producer is not None and not producer.is_file():
+                producer = None
+            if prior_producer is not None and not prior_producer.is_file():
+                prior_producer = None
+            if prior_candidate is not None and not prior_candidate.is_file():
+                prior_candidate = None
+            return compare_weld_pulley(key, source, candidate,
+                                       previous_reference=prior_producer,
+                                       previous_candidate=prior_candidate,
+                                       reference_producer=producer,
+                                       baseline_root=baseline_root,
+                                       baseline_attestation=baseline_attestation)
+        return diagnostic(key, source, candidate)
+    except (Rejected, OSError, EOFError, StopIteration, KeyError, TypeError, ValueError) as error:
+        return {"fixture_key": key, "status": "FAILED",
+                "reason": str(error), "qualification": "UNPASSED"}
+
+
+def comparison_coverage():
+    declared = {case["id"] for case in declared_cases()}
+    catalog = json.loads(CATALOG.read_text())
+    mapped = {portable_case_id(fixture["key"]) for fixture in catalog["fixtures"]}
+    if not mapped <= declared:
+        raise Rejected(f"frozen mapping has undeclared portable cases: {sorted(mapped - declared)}")
+    unreferenced = sorted(declared - mapped)
+    return {"status": "UNPASSED_REFERENCE_COVERAGE" if unreferenced else
+            "COMPLETE_FROZEN_REFERENCE_COVERAGE",
+            "declared_cases": len(declared), "frozen_reference_cases": len(mapped),
+            "frozen_case_ids": sorted(mapped),
+            "unreferenced_cases": len(unreferenced),
+            "unreferenced_case_ids": unreferenced,
+            "qualification": "UNPASSED"}
+
+
+def compare_frozen(lane, reference_dirs, baseline_root=None, baseline_attestation=None):
+    catalog = json.loads(CATALOG.read_text())
+    resolved = []
+    jobs = []
+    for fixture in catalog["fixtures"]:
+        key = fixture["key"]
+        filename = fixture["reference"]["file"]
+        source = next((directory / filename for directory in reference_dirs
+                       if (directory / filename).is_file()), None)
+        if source is None:
+            resolved.append({"fixture_key": key, "status": "UNAVAILABLE_REFERENCE",
+                             "expected_reference_sha256": fixture["reference"]["gzip_sha256"],
+                             "qualification": "UNPASSED"})
+        else:
+            jobs.append((key, source, lane / "cases" / f"{portable_case_id(key)}.jsonl",
+                         baseline_root, lane / "cases", baseline_attestation))
+            resolved.append(None)
+    if jobs:
+        with ProcessPoolExecutor(max_workers=min(4, len(jobs))) as pool:
+            compared = iter(pool.map(_compare_frozen_one, jobs))
+            results = [entry if entry is not None else next(compared) for entry in resolved]
+    else:
+        results = resolved
+    (lane / "frozen-comparison.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+    return results
+
+
+def _audit_exact_one(job):
+    trace, case_id, outer_hz, configured = job
+    return audit_trace(trace, case_id, outer_hz, configured)
+
+
+def check_exact_consistency(lane):
+    jobs = [(lane / "cases" / f"contacts-default-{hz}.jsonl",
+             f"S-sleep-wake-hz{hz}", hz, False) for hz in (30, 60, 120)]
+    jobs += [(lane / "cases" / f"contacts-configured-{hz}-r{repetition}.jsonl",
+              f"Q-sleep-wake-outer{hz}-repeat{repetition}", hz, True)
+             for hz in (30, 60, 120) for repetition in (1, 2)]
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        cases = list(pool.map(_audit_exact_one, jobs))
+    result = {"status": "PASSED" if all(item["status"] == "PASSED" for item in cases)
+              else "FAILED", "cases": cases, "qualification": "UNPASSED",
+              "semantic_source_revision": "44dd7cf05502fa4b5fdc3523e3271c3cba335de8"}
+    (lane / "exact-consistency.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
+def execute(host, output, commit, source_sha256, reference_dirs,
+            prospective_baseline=None, frozen_baseline=None,
+            frozen_attestation=None):
+    lane = output / host
+    lane.mkdir(parents=True, exist_ok=False)
+    target_artifacts = artifacts(host)
+    artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
+    env = os.environ.copy()
+    env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
+    if host in ("jvm", "jvm8", "android-host"):
+        env["JAVA_TOOL_OPTIONS"] = (env.get("JAVA_TOOL_OPTIONS", "") +
+                                    " -verbose:class").strip()
+    outcome = {"host": host, "task": HOST_TASKS[host], "gradle_exit": 0,
+               "status": "PASSED",
+               "qualification": "UNPASSED", "frozen_comparison": "NOT_RUN",
+               "candidate_commit": commit, "source_sha256": source_sha256,
+               "artifact_sha256": artifact_sha256,
+               "comparison_coverage": comparison_coverage(),
+               "prospective_reference": {
+                   "status": "NOT_RUN" if prospective_baseline else "UNAVAILABLE_REFERENCE",
+                   "qualification": "UNPASSED", "cases": 0,
+                   "reason": ("Host trace is not sealed" if prospective_baseline else
+                              "No verified pinned baseline archive was supplied")}}
+    trace = None
+    try:
+        attributes = {key: 0 for key in ("tests", "skipped", "failures", "errors")}
+        raw_counts = {"expected_cases": len(declared_cases()), "input_records": 0,
+                      "observed_cases": 0, "completed_cases": 0, "states": 0,
+                      "tagged_nonfinite_values": 0, "per_case": {}}
+        methods = []
+        runtimes = []
+        for method in MATRIX_METHODS:
+            started = __import__("time").time()
+            command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
+                       "--tests", f"portable.PortableMatrixTest.{method}",
+                       f"-PportableRepository={ROOT / 'build/staging-repository'}",
+                       "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
+                       "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g",
+                       "--init-script", str(PROVENANCE_SCRIPT)]
+            if host == "jvm8":
+                command.extend(("-PportableJvm8=true",
+                                "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
+            log_path = lane / f"gradle-{method}.log"
+            execution_log = None
+            if host == "linux-x64" or host == "jvm8" or host.startswith("node-"):
+                tracer = shutil.which("strace")
+                if tracer is None:
+                    raise Rejected("strace is unavailable for native process binding")
+                execution_log = lane / f"native-exec-{method}.log"
+                calls = "trace=process,openat" if host == "jvm8" else "trace=execve"
+                command = [tracer, "-f", "-s", "65535", "-e", calls, "-o",
+                           str(execution_log), *command]
+            with log_path.open("x", encoding="utf-8") as log:
+                completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                                           stderr=subprocess.STDOUT, check=False)
+            method_result = {"method": method, "gradle_exit": completed.returncode,
+                             "log_sha256": digest(log_path)}
+            if execution_log is not None and execution_log.is_file():
+                method_result["execution_log_sha256"] = digest(execution_log)
+            methods.append(method_result)
+            if completed.returncode:
+                outcome["gradle_exit"] = completed.returncode
+                outcome["status"] = "FAILED"
+            xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
+                "TEST-*PortableMatrixTest*.xml"))
+            if len(xml) != 1 or xml[0].stat().st_mtime < started:
+                method_result["reason"] = "matrix XML is missing or stale"
+                outcome["status"] = "FAILED"
+                continue
+            trace, row_attributes, row_counts = extract_xml(host, lane, method)
+            method_result["xml"] = row_attributes
+            method_result["xml_sha256"] = digest(lane / "xml" / f"{method}.xml")
+            method_result["cases"] = row_counts["completed_cases"]
+            for key in attributes:
+                attributes[key] += int(row_attributes.get(key, "-1"))
+            for key in ("input_records", "completed_cases", "states", "tagged_nonfinite_values"):
+                raw_counts[key] += row_counts[key]
+            duplicate = raw_counts["per_case"].keys() & row_counts["per_case"].keys()
+            if duplicate:
+                raise Rejected(f"case appears in more than one test method: {sorted(duplicate)[:5]}")
+            raw_counts["per_case"].update(row_counts["per_case"])
+            try:
+                executed = runtime(host, log_path, execution_log,
+                                   target_artifacts["target"],
+                                   lane / "process-proof" / method)
+                method_result["process"] = executed
+                runtimes.append(runtime_identity(executed))
+            except Rejected as error:
+                method_result["reason"] = str(error)
+                outcome["status"] = "FAILED"
+        outcome["methods"] = methods
+        raw_counts["observed_cases"] = len(raw_counts["per_case"])
+        if not runtimes:
+            raise Rejected("no executed target runtime was bound")
+        executed_runtime = runtimes[0]
+        if any(row != executed_runtime for row in runtimes[1:]):
+            raise Rejected("test methods used different target runtimes")
+        executed_runtime["method_executions"] = len(runtimes)
+        executed_runtime["dependency_sha256"] = artifact_sha256["target"]
+        executed_runtime["method_process_sha256"] = hashlib.sha256(json.dumps(
+            [item["process"] for item in methods], sort_keys=True).encode()).hexdigest()
+        outcome["xml"] = attributes
+        outcome["raw_counts"] = raw_counts
+        outcome["started_cases"] = raw_counts["observed_cases"]
+        outcome["executed_cases"] = raw_counts["completed_cases"]
+        outcome["incomplete_cases"] = sorted(case_id for case_id, counts in
+                                             raw_counts["per_case"].items()
+                                             if counts["case_ends"] != 1)
+        outcome["runtime"] = executed_runtime
+        comparisons = compare_frozen(lane, reference_dirs, frozen_baseline,
+                                     frozen_attestation)
+        outcome["frozen_comparison_results"] = {
+            "available": sum(item["status"] != "UNAVAILABLE_REFERENCE" for item in comparisons),
+            "unavailable": sum(item["status"] == "UNAVAILABLE_REFERENCE" for item in comparisons),
+            "failed": sum(item["status"].startswith("FAILED") for item in comparisons),
+            "unpassed": sum(item["status"].startswith("UNPASSED") for item in comparisons),
+            "passed": sum(item["status"] == "PASSED_APPROVED_PROJECTION" for item in comparisons)}
+        outcome["frozen_comparison"] = (
+            "PASSED_APPROVED_PROJECTION" if all(item["status"] ==
+                "PASSED_APPROVED_PROJECTION" for item in comparisons) else "UNPASSED")
+        physical = nominal_free(lane / "cases/long-free-60.jsonl")
+        outcome["physical"] = physical
+        sleep_ids = ([f"contacts-default-{hz}" for hz in (30, 60, 120)] +
+                     [f"contacts-configured-{hz}-r{repetition}"
+                      for hz in (30, 60, 120) for repetition in (1, 2)])
+        sleep = sleep_wake_rows(chain.from_iterable(
+            records(lane / "cases" / f"{case_id}.jsonl", allow_tagged_nonfinite=True)
+            for case_id in sleep_ids if (lane / "cases" / f"{case_id}.jsonl").is_file()))
+        outcome["sleep_wake_physical"] = sleep
+        exact_consistency = check_exact_consistency(lane)
+        outcome["exact_consistency"] = exact_consistency
+        if outcome["status"] == "FAILED":
+            raise Rejected("one or more method tasks failed or lacked current XML")
+        if any(int(attributes.get(key, "-1")) != expected for key, expected in
+               (("tests", 15), ("skipped", 0), ("failures", 0), ("errors", 0))):
+            raise Rejected(f"matrix XML reports incomplete tests: {attributes}")
+        if clean_identity() != (commit, source_sha256):
+            raise Rejected("source changed during host execution")
+        identity = Identity(commit, source_sha256, artifact_sha256, executed_runtime)
+        sealed = seal(trace, declared_cases(), identity, target_artifacts)
+        (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
+        outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
+                        "artifact_sha256": identity.artifact_sha256})
+        outcome["angle_physical"] = {
+            "status": "FAILED_PHYSICAL" if sealed["counts"]["known_nonfinite_cases"] else "NO_NONFINITE",
+            "known_nonfinite_cases": sealed["counts"]["known_nonfinite_cases"]}
+        if sealed["counts"]["known_nonfinite_cases"]:
+            outcome["status"] = "FAILED"
+            outcome.setdefault("failure_reasons", []).append("Angle nonfinite physical case failed")
+        if prospective_baseline is not None:
+            prospective = compare_host(prospective_baseline, lane,
+                                       outcome["comparison_coverage"]["frozen_case_ids"])
+            outcome["prospective_reference"] = {
+                key: value for key, value in prospective.items() if key != "results"}
+            if prospective["failed"]:
+                outcome["status"] = "FAILED"
+                outcome.setdefault("failure_reasons", []).append(
+                    "prospective baseline comparison failed")
+        if physical["status"] != "PASSED" or sleep["status"] != "PHYSICAL_PASSED":
+            outcome["status"] = "FAILED"
+            outcome.setdefault("failure_reasons", []).append("physical diagnostic failed")
+        if exact_consistency["status"] != "PASSED":
+            outcome["status"] = "FAILED"
+            outcome.setdefault("failure_reasons", []).append(
+                "exact consistency diagnostic failed")
+        if "failure_reasons" in outcome:
+            outcome["reason"] = "; ".join(outcome["failure_reasons"])
+    except (Rejected, OSError, ValueError, KeyError) as error:
+        outcome["status"] = "FAILED"
+        outcome["reason"] = str(error)
+    if trace is not None and "trace_sha256" not in outcome:
+        outcome["trace_sha256"] = digest(trace)
+    if not (lane / "receipt.json").exists():
+        (lane / "receipt.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+    (lane / "result.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+    return outcome
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
+    parser.add_argument("--reference-dir", type=Path, action="append", default=[])
+    parser.add_argument("--prospective-baseline", type=Path)
+    parser.add_argument("--frozen-baseline", type=Path)
+    parser.add_argument("--frozen-attestation", type=Path)
+    args = parser.parse_args()
+    output = Path(args.output).resolve()
+    if output.exists():
+        parser.error("output already exists")
+    try:
+        commit, source_sha256 = clean_identity()
+        output.mkdir(parents=True)
+        try:
+            publication = stage(output, commit, source_sha256)
+        except Rejected as error:
+            results = [absent_lane(output, host, commit, source_sha256, "NOT_RUN",
+                                   f"Staged publication failed: {error}") for host in HOST_TASKS]
+            results += [absent_lane(output, name, commit, source_sha256, "NOT_RUN",
+                                    f"Staged publication failed: {error}") for name in OTHER_LANES]
+            summary = {"commit": commit, "source_sha256": source_sha256,
+                       "status": "FAILED", "reason": str(error), "lanes": results}
+            (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+            print(json.dumps(summary, sort_keys=True))
+            return 1
+        reference_dirs = args.reference_dir or [Path("/tmp/dyn4k-configured-control/baseline-trace")]
+        results = [execute(host, output, commit, source_sha256, reference_dirs,
+                           args.prospective_baseline, args.frozen_baseline,
+                           args.frozen_attestation)
+                   for host in args.hosts]
+        for host in HOST_TASKS:
+            if host not in args.hosts:
+                results.append(absent_lane(output, host, commit, source_sha256, "NOT_RUN",
+                                           "Host task was not selected for this invocation"))
+        for name in OTHER_LANES:
+            status, reason = other_lane_status(name)
+            results.append(absent_lane(output, name, commit, source_sha256, status, reason))
+        summary = {"commit": commit, "source_sha256": source_sha256,
+                   "publication": publication, "lanes": results}
+        (output / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(summary, sort_keys=True))
+        return 0 if all(result["status"] == "PASSED" for result in results if result["host"] in args.hosts) else 1
+    except (Rejected, OSError, subprocess.CalledProcessError) as error:
+        print(json.dumps({"status": "FAILED", "reason": str(error)}))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

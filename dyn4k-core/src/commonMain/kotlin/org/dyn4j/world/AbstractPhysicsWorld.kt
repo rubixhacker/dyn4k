@@ -635,7 +635,9 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         if (!allow) return false
         val impactTime = impact.getTime()
         body1.getPreviousTransform().lerp(body1.getTransform(), impactTime, body1.getTransform())
-        if (other.isDynamic()) other.getPreviousTransform().lerp(other.getTransform(), impactTime, other.getTransform())
+        val otherDynamic = other.isDynamic()
+        if (otherDynamic) other.getPreviousTransform().lerp(other.getTransform(), impactTime, other.getTransform())
+        ToiAcceptedResetTap.listener?.invoke(body1, other, impactTime, otherDynamic)
         if (impact.getSeparation().getDistance() <= 0.0) return true
         timeOfImpactSolver.solve(body1, other, impact, settings)
         return true
