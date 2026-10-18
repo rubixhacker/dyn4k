@@ -13,7 +13,7 @@ from prospective_compare import (compare_case, verify_baseline_manifest,
                                  load_policy_catalog, verify_policy_catalog,
                                  reference_path_inventory, verify_reference_inventory,
                                  compare_policy_case, verify_candidate_identity)
-from prospective_compare import verify_candidate_inventory
+from prospective_compare import verify_arithmetic_captures, verify_candidate_inventory
 from prospective_compare import verify_numeric_probe, compare_host
 from receipt import digest
 
@@ -361,6 +361,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
         (baseline / "verified.json").write_text(json.dumps({
             "baseline_jar_sha256": "jar", "trace_sha256": "trace",
             "fixture_source_sha256": "fixture", "case_sha256": {"one": "case"}}))
+        sidecar = self.root / "external-attestation.json"
+        sidecar.write_text("{}")
         (lane / "receipt.json").write_text(json.dumps({
             "artifact_sha256": {"target": digest(artifacts["target"])},
             "trace_sha256": "candidate-trace"}))
@@ -371,7 +373,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
             "artifact_sha256": {"target.jar": digest(artifacts["target"])}}))
         case = {"id": "one", "steps": 1, "family": "free-motion"}
         numerical = {"id": "one", "status": "PASSED_NUMERICAL_POLICY",
-                     "qualification": "UNPASSED", "different_numeric_values": 0}
+                     "qualification": "UNPASSED", "different_numeric_values": 0,
+                     "target_premises": {"producer": "UNPASSED"}}
         with ExitStack() as stack:
             for name in ("verify_candidate_inventory", "verify_baseline_manifest",
                          "verify_baseline_bytes", "verify_policy_catalog",
@@ -383,6 +386,9 @@ class ProspectiveComparisonTest(unittest.TestCase):
                                       return_value=numerical))
             stack.enter_context(patch("baseline_capture.fixture_source_sha256",
                                       return_value="fixture"))
+            attested = {"case_map_sha256": "case-map", "source_sha256": "baseline-source"}
+            verify_attestation = stack.enter_context(patch(
+                "baseline_capture.verify_attestation", return_value=attested))
             stack.enter_context(patch("baseline_capture.verify_case_slices"))
             stack.enter_context(patch("receipt.verify"))
             stack.enter_context(patch("run.HOST_TASKS", {"jvm": "jvmTest"}))
@@ -391,15 +397,132 @@ class ProspectiveComparisonTest(unittest.TestCase):
             stack.enter_context(patch("run.artifacts", return_value=artifacts))
             stack.enter_context(patch("run.clean_identity", return_value=("commit", "source")))
             stack.enter_context(patch("run.runtime", return_value=runtime))
+            with self.assertRaisesRegex(Exception, "external baseline attestation"):
+                compare_host(baseline, lane, set())
             for archive_consistent in (False, True):
                 with patch("prospective_compare.verify_numeric_probe",
                            return_value=archive_consistent):
-                    result = compare_host(baseline, lane, set())
+                    result = compare_host(baseline, lane, set(), sidecar)
                 self.assertEqual(result["passed_case_policy"], 0)
                 self.assertEqual(result["results"][0]["qualification"], "UNPASSED")
                 self.assertEqual(result["numeric_probe"],
-                                 "UNPASSED_UNBOUND_PRODUCER" if archive_consistent else
+                                 "PASSED" if archive_consistent else
                                  "UNPASSED_NOT_EXECUTED")
+            verify_attestation.assert_called_with(baseline, sidecar)
+            with patch("actual_arithmetic.expected_case_ids",
+                       return_value={"captureGeometry": ["one"]}), \
+                    patch("prospective_compare.verify_numeric_probe", return_value=True), \
+                    patch("prospective_compare.verify_arithmetic_captures",
+                          return_value={"captureGeometry": {"receipt_sha256": "proof"}}):
+                result = compare_host(baseline, lane, set(), sidecar,
+                                      self.root / "arithmetic")
+            self.assertEqual(result["passed_case_policy"], 1)
+            self.assertEqual(result["numeric_probe"], "PASSED")
+            self.assertEqual(result["qualification"], "UNPASSED")
+            self.assertEqual(result["baseline_attestation_sha256"], digest(sidecar))
+            self.assertEqual(result["operation_evidence"]["captureGeometry"]["receipt_sha256"],
+                             "proof")
+            with patch("actual_arithmetic.expected_case_ids",
+                       return_value={"captureGeometry": ["one"]}), \
+                    patch("prospective_compare.verify_numeric_probe", return_value=False), \
+                    patch("prospective_compare.verify_arithmetic_captures",
+                          return_value={"captureGeometry": {"receipt_sha256": "proof"}}):
+                without_optional_probe = compare_host(baseline, lane, set(), sidecar,
+                                                      self.root / "arithmetic")
+            self.assertEqual(without_optional_probe["passed_case_policy"], 1)
+            self.assertEqual(without_optional_probe["numeric_probe"],
+                             "UNPASSED_NOT_EXECUTED")
+            self.assertEqual(without_optional_probe["operation_binding"],
+                             "VERIFIED_ARITHMETIC_BINDING")
+            with patch("baseline_capture.verify_attestation", side_effect=ValueError(
+                    "wrong sidecar")):
+                with self.assertRaisesRegex(ValueError, "wrong sidecar"):
+                    compare_host(baseline, lane, set(), sidecar)
+
+    def test_arithmetic_bridge_binds_raw_receipt_and_matrix_case(self):
+        from actual_arithmetic import CaptureRejected, make_capture_receipt
+        from test_actual_arithmetic import fixture, xml_for
+        from test_actual_capture_receipt import CaptureReceiptTest
+
+        commit = "a" * 40
+        method = "captureGeometry"
+        case_id = "geometry-boundary-s0-o0-d0"
+        with patch("actual_arithmetic._source_archive", return_value=b"source"), \
+                patch("actual_arithmetic._check_local_binaries"), \
+                patch("actual_arithmetic._inspect_worker_classpath",
+                      return_value=[{"path": "staged", "sha256": "0" * 64}]), \
+                patch("actual_arithmetic.expected_case_ids",
+                      return_value={method: [case_id]}):
+            receipt, files, _ = CaptureReceiptTest().fixture()
+            root = self.root / "arithmetic"
+            directory = root / method
+            directory.mkdir(parents=True)
+            names = {"xml": "capture.xml", "stage_log": "stage.log",
+                     "gradle_log": "gradle.log", "execve_log": "execve.log",
+                     "artifact": "artifact.jar", "runtime": "runtime-java",
+                     "source": "source.tar", "worker_classpath": "worker-classpath.txt",
+                     "portable_classes": "portable-classes.zip",
+                     "worker_class_load": "worker-class-load-123.log"}
+            for key, name in names.items():
+                (directory / name).write_bytes(files[key])
+            receipt_path = directory / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt))
+            lane = self.root / "jvm"
+            cases = lane / "cases"
+            cases.mkdir(parents=True)
+            trace = "".join(line.split(" ", 1)[1] + "\n" for line in fixture()
+                            if line.startswith("NUMERICAL_JSON "))
+            (cases / f"{case_id}.jsonl").write_text(trace)
+
+            def verify():
+                return verify_arithmetic_captures(
+                    root, lane, commit, digest(directory / "source.tar"),
+                    digest(directory / "artifact.jar"))
+
+            result = verify()
+            self.assertEqual(result[method]["operations_verified"], 1)
+            self.assertEqual(result[method]["trace_sha256"],
+                             receipt["summary"]["trace_sha256"])
+            with patch("actual_arithmetic.expected_case_ids",
+                       return_value={method: [case_id], "captureJoints": []}):
+                with self.assertRaisesRegex(Exception, "method inventory"):
+                    verify()
+            duplicate = directory / "duplicate-receipt.json"
+            duplicate.write_text("{}")
+            with self.assertRaisesRegex(Exception, "receipt or class-load inventory"):
+                verify()
+            duplicate.unlink()
+            changed = deepcopy(receipt)
+            changed["method"] = "captureJoints"
+            receipt_path.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(Exception, "method or source"):
+                verify()
+            receipt_path.write_text(json.dumps(receipt))
+            load = directory / names["worker_class_load"]
+            original_load = load.read_bytes()
+            load.write_bytes(original_load.replace(b"[123]", b"[124]"))
+            with self.assertRaisesRegex(Exception, "arithmetic capture differs"):
+                verify()
+            load.write_bytes(original_load)
+            xml = directory / "capture.xml"
+            original_xml = xml.read_bytes()
+            xml.write_bytes(original_xml.replace(b'"body_id": "b0"',
+                                                 b'"body_id": "b1"'))
+            with self.assertRaisesRegex(Exception, "arithmetic capture differs"):
+                verify()
+            changed_files = {**files, "xml": xml.read_bytes()}
+            with self.assertRaises(CaptureRejected):
+                make_capture_receipt(changed_files, method, commit, [case_id],
+                                     "/tmp/dyn4k-tools/jdk21/bin/java")
+            xml.write_bytes(original_xml)
+            candidate = cases / f"{case_id}.jsonl"
+            candidate.write_text(trace.replace('"step": 1', '"step": 2', 1))
+            with self.assertRaisesRegex(Exception, "target output differs"):
+                verify()
+            candidate.write_text(trace)
+            (directory / "source.tar").write_bytes(b"old source")
+            with self.assertRaisesRegex(Exception, "arithmetic capture differs"):
+                verify()
 
     def test_target_probe_rejects_stale_identity_output_and_nonfinite(self):
         lane, original, runtime, artifacts, xml, log = self.numeric_probe_fixture()

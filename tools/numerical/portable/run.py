@@ -657,7 +657,8 @@ def check_exact_consistency(lane):
 
 def execute(host, output, commit, source_sha256, reference_dirs,
             prospective_baseline=None, frozen_baseline=None,
-            frozen_attestation=None):
+            frozen_attestation=None, prospective_attestation=None,
+            arithmetic_captures=None):
     lane = output / host
     lane.mkdir(parents=True, exist_ok=False)
     target_artifacts = artifacts(host)
@@ -806,7 +807,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
             outcome.setdefault("failure_reasons", []).append("Angle nonfinite physical case failed")
         if prospective_baseline is not None:
             prospective = compare_host(prospective_baseline, lane,
-                                       outcome["comparison_coverage"]["frozen_case_ids"])
+                                       outcome["comparison_coverage"]["frozen_case_ids"],
+                                       prospective_attestation, arithmetic_captures)
             outcome["prospective_reference"] = {
                 key: value for key, value in prospective.items() if key != "results"}
             if prospective["failed"]:
@@ -839,9 +841,17 @@ def main():
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
     parser.add_argument("--reference-dir", type=Path, action="append", default=[])
     parser.add_argument("--prospective-baseline", type=Path)
+    parser.add_argument("--prospective-attestation", type=Path)
+    parser.add_argument("--arithmetic-captures", type=Path)
     parser.add_argument("--frozen-baseline", type=Path)
     parser.add_argument("--frozen-attestation", type=Path)
     args = parser.parse_args()
+    if args.prospective_baseline is not None and args.prospective_attestation is None:
+        parser.error("--prospective-baseline requires --prospective-attestation")
+    if args.prospective_attestation is not None and args.prospective_baseline is None:
+        parser.error("--prospective-attestation requires --prospective-baseline")
+    if args.arithmetic_captures is not None and args.prospective_baseline is None:
+        parser.error("--arithmetic-captures requires --prospective-baseline")
     output = Path(args.output).resolve()
     if output.exists():
         parser.error("output already exists")
@@ -863,7 +873,8 @@ def main():
         reference_dirs = args.reference_dir or [Path("/tmp/dyn4k-configured-control/baseline-trace")]
         results = [execute(host, output, commit, source_sha256, reference_dirs,
                            args.prospective_baseline, args.frozen_baseline,
-                           args.frozen_attestation)
+                           args.frozen_attestation, args.prospective_attestation,
+                           args.arithmetic_captures)
                    for host in args.hosts]
         for host in HOST_TASKS:
             if host not in args.hosts:

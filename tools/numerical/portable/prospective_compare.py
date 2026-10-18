@@ -932,11 +932,71 @@ def verify_candidate_inventory(lane, expected_ids, hosts):
             raise Rejected("candidate receipt set differs")
 
 
-def compare_host(baseline, lane, frozen_ids):
-    from baseline_capture import PINNED_JAR_SHA256, fixture_source_sha256, verify_case_slices
-    from receipt import Identity, verify as verify_receipt
-    from run import HOST_TASKS, MATRIX_METHODS, STAGED, artifacts, clean_identity, runtime
+def verify_arithmetic_captures(root, lane, commit, source_sha256, artifact_sha256):
+    from actual_arithmetic import (CaptureRejected, expected_case_ids,
+                                   verify_capture_receipt)
 
+    root = Path(root)
+    methods = expected_case_ids()
+    if not root.is_dir() or {path.name for path in root.iterdir()} != set(methods) or \
+            any(not (root / method).is_dir() for method in methods):
+        raise Rejected("arithmetic method inventory differs")
+    identities = {}
+    for method, case_ids in methods.items():
+        directory = root / method
+        receipt_path = directory / "receipt.json"
+        if not receipt_path.is_file() or \
+                {path.name for path in directory.glob("*receipt*.json")} != {"receipt.json"} or \
+                len(list(directory.glob("worker-class-load-*.log"))) != 1:
+            raise Rejected(f"arithmetic receipt or class-load inventory differs: {method}")
+        receipt = json.loads(receipt_path.read_text())
+        if receipt.get("method") != method or receipt.get("candidate_commit") != commit:
+            raise Rejected(f"arithmetic method or source differs: {method}")
+        names = {"xml": "capture.xml", "stage_log": "stage.log",
+                 "gradle_log": "gradle.log", "execve_log": "execve.log",
+                 "artifact": "artifact.jar", "runtime": "runtime-java",
+                 "source": "source.tar", "worker_classpath": "worker-classpath.txt",
+                 "portable_classes": "portable-classes.zip"}
+        try:
+            files = {key: (directory / name).read_bytes() for key, name in names.items()}
+            files["worker_class_load"] = (directory / f"worker-class-load-{receipt['worker_pid']}.log").read_bytes()
+            summary = verify_capture_receipt(receipt, files, method, commit, case_ids,
+                                             "/tmp/dyn4k-tools/jdk21/bin/java")
+        except (OSError, KeyError, CaptureRejected) as error:
+            raise Rejected(f"arithmetic capture differs: {method}: {error}") from error
+        if (receipt["source_archive_sha256"] != source_sha256 or
+                receipt["artifact_sha256"] != artifact_sha256 or
+                summary["status"] != "VERIFIED_ARITHMETIC_BINDING" or
+                summary["pair_inputs_unbound"] != 0):
+            raise Rejected(f"arithmetic source, artifact, or premise differs: {method}")
+        trace = hashlib.sha256()
+        for case_id in case_ids:
+            try:
+                trace.update((Path(lane) / "cases" / f"{case_id}.jsonl").read_bytes())
+            except OSError as error:
+                raise Rejected(f"arithmetic matrix case is missing: {case_id}") from error
+        if trace.hexdigest() != summary["trace_sha256"]:
+            raise Rejected(f"arithmetic target output differs from matrix trace: {method}")
+        identities[method] = {"receipt_sha256": digest(receipt_path),
+                              "trace_sha256": summary["trace_sha256"],
+                              "operations_sha256": summary["operations_sha256"],
+                              "binding_sha256": summary["binding_sha256"],
+                              "operations_verified": summary["operations_verified"],
+                              "body_step_receipts": summary["body_step_receipts"]}
+    return identities
+
+
+def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
+                 arithmetic_captures=None):
+    from baseline_capture import (PINNED_JAR_SHA256, fixture_source_sha256,
+                                  verify_attestation, verify_case_slices)
+    from receipt import Identity, verify as verify_receipt
+    from run import (HOST_TASKS, MATRIX_METHODS, STAGED, artifacts, clean_identity,
+                     runtime, runtime_identity)
+
+    if baseline_attestation is None:
+        raise Rejected("external baseline attestation is required")
+    attestation = verify_attestation(baseline, baseline_attestation)
     manifest = json.loads((Path(baseline) / "verified.json").read_text())
     cases = declared_cases()
     expected = {case["id"] for case in cases}
@@ -968,11 +1028,19 @@ def compare_host(baseline, lane, frozen_ids):
                   str(path.relative_to(STAGED))] for role, path in target_artifacts.items()}}
     runtime_proofs = [runtime(host, Path(lane) / f"gradle-{method}.log",
                               Path(lane) / f"native-exec-{method}.log"
-                              if host == "linux-x64" else None)
+                              if host == "linux-x64" or host == "jvm8" or
+                              host.startswith("node-") else None,
+                              target_artifacts["target"],
+                              Path(lane) / "process-proof" / method,
+                              require_loaded=host in ("jvm", "jvm8", "android-host"))
                       for method in MATRIX_METHODS]
-    if any(proof != runtime_proofs[0] for proof in runtime_proofs[1:]):
+    identities = [runtime_identity(proof) for proof in runtime_proofs]
+    if any(proof != identities[0] for proof in identities[1:]):
         raise Rejected("candidate methods used different runtime producers")
-    runtime_proof = {**runtime_proofs[0], "method_executions": len(runtime_proofs)}
+    runtime_proof = {**identities[0], "method_executions": len(runtime_proofs),
+                     "dependency_sha256": receipt["artifact_sha256"]["target"],
+                     "method_process_sha256": hashlib.sha256(json.dumps(
+                         runtime_proofs, sort_keys=True).encode()).hexdigest()}
     verify_candidate_identity(receipt, subset, commit, source_sha256,
                               target_artifacts, runtime_proof)
     identity = Identity(commit, source_sha256, receipt["artifact_sha256"], runtime_proof)
@@ -981,7 +1049,19 @@ def compare_host(baseline, lane, frozen_ids):
     probe_archive_consistent = verify_numeric_probe(lane, commit, source_sha256,
                                                     receipt["trace_sha256"],
                                                     target_artifacts, runtime_proof)
-    probe_verified = False
+    operation_evidence = None
+    if arithmetic_captures is not None and host == "jvm":
+        operation_evidence = verify_arithmetic_captures(
+            arithmetic_captures, lane, commit, source_sha256,
+            receipt["artifact_sha256"]["target"])
+    arithmetic_verified = operation_evidence is not None
+    arithmetic_method = {}
+    if operation_evidence is not None:
+        from actual_arithmetic import expected_case_ids
+        arithmetic_method = {case_id: method for method, case_ids in
+                             expected_case_ids().items() for case_id in case_ids}
+        if set(arithmetic_method) != expected:
+            raise Rejected("arithmetic case inventory differs from matrix")
     prospective = [case for case in cases if case["id"] not in frozen_ids]
     results = []
     for case in prospective:
@@ -990,8 +1070,16 @@ def compare_host(baseline, lane, frozen_ids):
         candidate = Path(lane) / "cases" / f"{case_id}.jsonl"
         verify_reference_inventory(reference, case_id, catalog)
         compared = compare_policy_case(reference, candidate, case, catalog)
-        if compared["status"] == "PASSED_NUMERICAL_POLICY" and probe_verified:
+        if compared["status"] == "PASSED_NUMERICAL_POLICY" and arithmetic_verified:
             compared["qualification"] = "PASSED_CASE_POLICY"
+            compared["target_arithmetic"] = "PASSED_BOUND_OPERATION_EVIDENCE"
+            compared["target_premises"] = {name: "PASSED_CAPTURE" for name in
+                                            compared["target_premises"]}
+            compared["rotation_audit"] = "PASSED_BOUND_OPERATION_TRACE"
+        if operation_evidence is not None:
+            method = arithmetic_method[case_id]
+            compared["operation_method"] = method
+            compared["operation_receipt_sha256"] = operation_evidence[method]["receipt_sha256"]
         results.append(compared)
     if len(results) != len(expected - set(frozen_ids)):
         raise Rejected("prospective case coverage differs")
@@ -1000,16 +1088,26 @@ def compare_host(baseline, lane, frozen_ids):
     passed = sum(row["qualification"] == "PASSED_CASE_POLICY" for row in results)
     summary = {"status": ("FAILED_PHYSICAL" if any(row["status"] == "FAILED_PHYSICAL"
                             for row in results) else
-                          "UNPASSED" if failed or unpassed or not probe_verified else
+                          "UNPASSED" if failed or unpassed or not arithmetic_verified else
                           "PASSED_NUMERICAL_POLICY"),
                "qualification": "UNPASSED",
-               "numeric_probe": ("PASSED" if probe_verified else
-                                 "UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
+               "numeric_probe": ("PASSED" if probe_archive_consistent else
                                  "UNPASSED_NOT_EXECUTED"),
+               "operation_binding": ("VERIFIED_ARITHMETIC_BINDING" if
+                                     arithmetic_verified else "UNPASSED_NOT_EXECUTED"),
                "baseline_jar_sha256": manifest["baseline_jar_sha256"],
                "baseline_trace_sha256": manifest["trace_sha256"],
                "baseline_fixture_source_sha256": manifest["fixture_source_sha256"],
+               "baseline_attestation_sha256": digest(baseline_attestation),
+               "baseline_case_map_sha256": attestation["case_map_sha256"],
+               "baseline_source_sha256": attestation["source_sha256"],
                "candidate_trace_sha256": receipt["trace_sha256"],
+               "candidate_source_sha256": source_sha256,
+               "candidate_artifact_sha256": receipt["artifact_sha256"],
+               "operation_evidence": operation_evidence,
+               "numeric_probe_receipt_sha256": (digest(Path(lane) /
+                                                    "numeric-probe-receipt.json")
+                                                if probe_archive_consistent else None),
                "cases": len(results),
                "exact_diagnostic": sum(row["status"] == "PASSED_NUMERICAL_POLICY" and
                                        row["different_numeric_values"] == 0 for row in results),
