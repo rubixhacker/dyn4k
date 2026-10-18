@@ -2210,6 +2210,73 @@ class FullHostedTests(unittest.TestCase):
                 archive, receipt["candidate_sha"], "jsSafari",
                 candidate_repository=self.candidate_repository)
 
+    def test_public_safari_rejects_resealed_nonzero_underflow(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        rows = self.safari_diagnostic_rows()
+        self.assertEqual(72, len(rows))
+        self.assertEqual(72, len(set(rows)))
+        archive = self.root.parent / (self.root.name + "-underflow.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+
+        for index, lane in enumerate(receipt["configurations"]):
+            report = self.root / lane["configuration"] / "xml/dyn4k-core/TEST-all.xml"
+            original = report.read_bytes()
+            modified_ns = report.stat().st_mtime_ns
+            self.assertEqual("".join(rows), ET.fromstring(original).findtext("system-out"))
+            for bits in ("0", "-9223372036854775808"):
+                with self.subTest(configuration=lane["configuration"], bits=bits):
+                    changed = json.loads(json.dumps(receipt))
+                    suite = ET.fromstring(original)
+                    output = suite.find("system-out")
+                    actual = output.text.splitlines(keepends=True)
+                    self.assertEqual(rows, actual)
+                    fields = actual[0].split("\t")
+                    transform = next(i for i, field in enumerate(fields)
+                                     if field.startswith("a.transform="))
+                    values = fields[transform].split("=", 1)[1].split(",")
+                    values[values.index("0@0")] = f"1e-999@{bits}"
+                    fields[transform] = "a.transform=" + ",".join(values)
+                    actual[0] = "\t".join(fields)
+                    self.assertEqual(72, len(set(actual)))
+                    output.text = "".join(actual)
+                    try:
+                        report.write_bytes(ET.tostring(suite))
+                        os.utime(report, ns=(modified_ns, modified_ns))
+                        changed["configurations"][index]["source"][0]["reports"][0][
+                            "sha256"] = full_hosted.sha256(report)
+                        changed["files"] = full_hosted.archive_inventory(self.root)
+                        errors = []
+                        try:
+                            full_hosted.verify_raw_files(
+                                self.root, changed, manifest, consumer,
+                                candidate_repository=self.candidate_repository)
+                        except ValueError as error:
+                            errors.append(str(error))
+                        (self.root / "receipt.json").write_text(json.dumps(changed))
+                        full_hosted.package_archive(self.root, archive)
+                        with mock.patch.object(full_hosted, "load_corpus",
+                                               return_value=manifest):
+                            try:
+                                full_hosted.verify_transport_archive(
+                                    archive, changed["candidate_sha"], "jsSafari",
+                                    candidate_repository=self.candidate_repository)
+                            except ValueError as error:
+                                errors.append(str(error))
+                        self.assertEqual(2, len(errors), errors)
+                        self.assertTrue(all("Safari diagnostic" in error for error in errors),
+                                        errors)
+                    finally:
+                        report.write_bytes(original)
+                        os.utime(report, ns=(modified_ns, modified_ns))
+
     def test_safari_real_rows_reject_incomplete_nested_v2_values(self):
         rows = self.safari_diagnostic_rows()
         suite = ET.Element("testsuite")
@@ -2294,11 +2361,16 @@ class FullHostedTests(unittest.TestCase):
     def test_safari_v2_number_requires_explicit_zero_sign_to_match_raw_bits(self):
         for value in ("0@0", "0@-9223372036854775808",
                       "-0@-9223372036854775808", "1@4607182418800017408",
+                      "5e-324@1", "-5e-324@-9223372036854775807",
                       "NaN@9221120237041090560", "Infinity@9218868437227405312",
                       "-Infinity@-4503599627370496"):
             with self.subTest(value=value):
                 full_hosted.safari_v2_number(value, "a.transform")
-        for value in ("-0@0", "-0.0@0", "-0e2@0", "1@1"):
+        for value in ("-0@0", "-0.0@0", "-0e2@0", "1@1",
+                      "1e-999@0", "1e-999@-9223372036854775808",
+                      "-1e-999@0", "-1e-999@-9223372036854775808",
+                      "1e999@9218868437227405312",
+                      "-1e999@-4503599627370496"):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
                     full_hosted.safari_v2_number(value, "a.transform")
