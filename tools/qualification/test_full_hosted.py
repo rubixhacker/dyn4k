@@ -443,6 +443,31 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(adverse, adverse_archive)
             with self.assertRaises(ValueError) as tar_error:
                 full_hosted.verify_transport_archive(adverse_archive, candidate, target)
+
+            adverse_capability = evidence / "adverse-capability"
+            shutil.copytree(output, adverse_capability)
+            metadata_path = (adverse_capability / "staged" / qualify.GROUP.replace(".", "/") /
+                             name / qualify.VERSION / f"{name}-{qualify.VERSION}.module")
+            metadata = qualify.load_json_strict(metadata_path)
+            metadata["variants"][0]["capabilities"] = [{
+                "group": qualify.GROUP, "name": "forged-capability",
+                "version": qualify.VERSION,
+            }]
+            metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
+            metadata_path.with_name(metadata_path.name + ".sha256").write_text(
+                full_hosted.sha256(metadata_path) + "\n")
+            capability_receipt = qualify.load_json_strict(adverse_capability / "receipt.json")
+            capability_receipt["files"] = full_hosted.archive_inventory(adverse_capability)
+            (adverse_capability / "receipt.json").write_text(
+                json.dumps(capability_receipt, sort_keys=True) + "\n")
+            metadata_rejection = ("archived staged publication differs from content audit: .*"
+                                  "metadata fields differ from publication contract")
+            with self.assertRaisesRegex(ValueError, metadata_rejection) as capability_directory_error:
+                full_hosted.verify_raw_files(adverse_capability, capability_receipt)
+            capability_archive = evidence / "adverse-capability.tar"
+            full_hosted.package_archive(adverse_capability, capability_archive)
+            with self.assertRaisesRegex(ValueError, metadata_rejection) as capability_tar_error:
+                full_hosted.verify_transport_archive(capability_archive, candidate, target)
             (evidence / "evidence.json").write_text(json.dumps({
                 "synthetic": True, "real_hosted_runtime": False,
                 "corpus_loader": "real_source_derived_candidate",
@@ -457,6 +482,9 @@ class FullHostedTests(unittest.TestCase):
                 "adverse_archive_sha256": full_hosted.sha256(adverse_archive),
                 "adverse_directory_rejection": str(directory_error.exception),
                 "adverse_tar_rejection": str(tar_error.exception),
+                "capability_archive_sha256": full_hosted.sha256(capability_archive),
+                "capability_directory_rejection": str(capability_directory_error.exception),
+                "capability_tar_rejection": str(capability_tar_error.exception),
             }, indent=2, sort_keys=True) + "\n")
 
     def full_archive(self):
