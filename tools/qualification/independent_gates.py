@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -28,10 +29,16 @@ LANE_GATES = frozenset(("staged-artifacts", "staged-consumer", "numerical-parity
                         "java-source-compatibility", "duplicate-provider"))
 GLOBAL_GATES = frozenset(("migration-journeys", "performance-resource",
                           "publication-contract", "independent-review"))
+PRODUCER_SCOPED_GATES = frozenset(("unchanged-java-corpus", "java-source-compatibility",
+                                   "migration-journeys", "performance-resource",
+                                   "independent-review"))
 APPROVED_POLICY = {
     "tools/numerical/fixtures.json": "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c",
     "tools/numerical/compare.py": "4310fe9ddad700bd591b7708cc1a61e9b307029ca97f5240b608a61fe0430fa3",
     "tools/numerical/physical.py": "98ff243a02eece8a47a4faeda06385696174b2b10836e4e1315d6a13e22ee5ba",
+    "tools/numerical/weld-pulley-physical-declaration.json": "9794a4ef64c93f6ff76afb03d98784b27be68fe413256362abf1a3f84cf96368",
+    "tools/numerical/weld-pulley-physical-manifest.json": "5531b263fbd5a7684db0ea9fbef167c8d8772104949ce01ba4de7606498aecab",
+    "tools/numerical/weld_pulley_quality.py": "f8c7cb7449b5d007e5c7dabb20e08deda93974b3cd8a4bedf0cd96f1640c2c87",
 }
 APPROVED_MIGRATION = {
     "tools/migration/journeys.py": "f5111af3f263691446eae984904232d26a1d9392d6fa26881225bf8c9079b9b9",
@@ -44,6 +51,13 @@ MIGRATION_DEPENDENCIES = {
 }
 REVIEWED_FULL_CI_REVISION = "00d2f949fd485287b737e905808bfb65be942733"
 REVIEWED_FULL_CI_SHA256 = "f8e0bda794d141b1418b76ccd712306b9c9f1d587446fe79fcb4697b57885ad7"
+NUMERICAL_SOURCE_HASH_METHOD = "SHA-256 of git archive --format=tar HEAD"
+PROSPECTIVE_CASE_COUNT = 318
+JOINT_PHYSICAL_CASES = ("weld-spring-equal", "pulley-taut")
+JOINT_PHYSICAL_STEPS = 36000
+PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
+PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
+PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
 
 
 def digest(value):
@@ -176,6 +190,61 @@ def _policy_binding(repository, candidate_sha):
                            "numerical approved policy/checker")
 
 
+def verified_numerical_source_sha256(repository, candidate_sha):
+    if not isinstance(candidate_sha, str) or not SHA40.fullmatch(candidate_sha):
+        raise ValueError("numerical source requires an exact candidate commit")
+    archive = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "archive",
+         "--format=tar", candidate_sha], stderr=subprocess.PIPE)
+    return hashlib.sha256(archive).hexdigest()
+
+
+@lru_cache(maxsize=4)
+def approved_prospective_catalog(repository):
+    raw = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{PROSPECTIVE_POLICY_REVISION}:{PROSPECTIVE_POLICY_PATH}"],
+        stderr=subprocess.PIPE)
+    if hashlib.sha256(raw).hexdigest() != PROSPECTIVE_POLICY_SHA256:
+        raise ValueError("adopted prospective policy catalog differs")
+    catalog = json.loads(raw, object_pairs_hook=_strict_object)
+    cases = catalog.get("cases")
+    if (not isinstance(cases, dict) or len(cases) != PROSPECTIVE_CASE_COUNT
+            or any(not isinstance(name, str) or not name for name in cases)):
+        raise ValueError("adopted prospective case inventory differs")
+    return catalog
+
+
+def approved_prospective_cases(repository):
+    return tuple(sorted(approved_prospective_catalog(str(repository))["cases"]))
+
+
+def _missing_numerical_subgates(repository):
+    cases = {case: {"rule": "NOT_RUN", "arithmetic": "NOT_RUN", "status": "NOT_RUN"}
+             for case in approved_prospective_cases(str(repository))}
+    return {"frozen-traces": {"status": "NOT_RUN", "required_cases": 14},
+            "prospective-rule-arithmetic": {
+                "status": "NOT_RUN", "required_cases": PROSPECTIVE_CASE_COUNT,
+                "reason": "318 per-case rule comparisons and target arithmetic audits are absent",
+                "reference_diagnostic": "41 failed derived rules, 4 unpassed premises, 1 failed physical case under operative fixed-32-ulps policy",
+                "cases": cases}}
+
+
+def _missing_physical_profiles():
+    return {"default-sleep-wake": {"candidate_status": "NOT_RUN",
+                                   "approved_reference_status": "FAILED_125847_OF_126000"},
+            "configured-sleep-wake": {"candidate_status": "NOT_RUN",
+                                      "approved_reference_status": "PASSED"},
+            "weld-pulley": {"candidate_status": "NOT_RUN",
+                            "required_cases": len(JOINT_PHYSICAL_CASES),
+                            "steps_per_case": JOINT_PHYSICAL_STEPS,
+                            "approved_reference_status": "PASSED_BASELINE_ONLY",
+                            "legacy_pulley_diagnostic": "39 old-reference samples exceeded the 0.005 m solver tolerance; observed maximum extension 0.1208278904872957 m",
+                            "reason": "candidate Weld and Pulley physical traces are absent"},
+            "nominal": {"candidate_status": "NOT_RUN",
+                        "reason": "candidate nominal physical quality evidence is absent"}}
+
+
 def _source_binding(repository, candidate_sha, approved_paths, label):
     for relative, approved in approved_paths.items():
         local = Path(__file__).resolve().parents[2] / relative
@@ -208,8 +277,218 @@ def _numerical_modules(directory):
     return compare, physical
 
 
+def _joint_quality_module(directory):
+    compare, _ = _numerical_modules(directory)
+    previous = sys.modules.get("compare")
+    sys.modules["compare"] = compare
+    try:
+        specification = importlib.util.spec_from_file_location(
+            "dyn4k_approved_joint_quality", directory / "weld_pulley_quality.py")
+        quality = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(quality)
+    finally:
+        if previous is None:
+            del sys.modules["compare"]
+        else:
+            sys.modules["compare"] = previous
+    return quality
+
+
+def verify_joint_physical_cases(root, receipt, candidate_sha,
+                                expected_artifact_hashes, source_sha):
+    directory = Path(__file__).resolve().parents[1] / "numerical"
+    declaration = _json(directory / "weld-pulley-physical-declaration.json")
+    manifest = _json(directory / "weld-pulley-physical-manifest.json")
+    quality = _joint_quality_module(directory)
+    rows = receipt.get("joint_physical_cases")
+    if rows is None:
+        raise ValueError("36,000-step candidate Weld and Pulley traces are absent")
+    if (not isinstance(rows, list) or len(rows) != len(JOINT_PHYSICAL_CASES)
+            or {row.get("case") for row in rows if isinstance(row, dict)}
+            != set(JOINT_PHYSICAL_CASES)):
+        raise ValueError("candidate Weld/Pulley case identities or counts differ")
+    if (declaration.get("steps_per_case") != JOINT_PHYSICAL_STEPS
+            or set(manifest.get("cases", {})) != set(JOINT_PHYSICAL_CASES)):
+        raise ValueError("approved Weld/Pulley declaration or case set differs")
+    failures = {}
+    for row in rows:
+        case = row["case"]
+        reference = directory / "references" / manifest["cases"][case]["file"]
+        baseline = quality.audit_quality(declaration, manifest, case, reference)
+        if baseline["status"] != "PHYSICAL_PASSED":
+            raise ValueError(f"{case} approved baseline physical archive differs")
+        trace = _file_path(root, row.get("candidate"))
+        capture = _json(_file_path(root, row.get("capture_receipt")))
+        raw = trace.read_bytes()
+        counts = manifest["cases"][case]["counts"]
+        required_capture = {
+            "case": case, "candidate_commit": candidate_sha,
+            "source_hash_method": NUMERICAL_SOURCE_HASH_METHOD,
+            "source_sha256": source_sha,
+            "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+            "trace_sha256": hashlib.sha256(raw).hexdigest(),
+            "expected_counts": counts, "executed_counts": counts, "skipped": 0}
+        if any(capture.get(key) != value for key, value in required_capture.items()):
+            raise ValueError(f"{case} candidate physical capture identity or counts differ")
+        records = iter(_numerical_modules(directory)[0].records(trace))
+        try:
+            _, header = next(records)
+        except StopIteration as error:
+            raise ValueError(f"{case} candidate physical trace is empty") from error
+        if header != {"kind": "inputs", "case": case,
+                       "declaration_sha256": manifest["declaration_sha256"],
+                       "candidate_commit": candidate_sha, "source_sha256": source_sha,
+                       "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+                       "step_seconds": declaration["step_seconds"],
+                       "steps": JOINT_PHYSICAL_STEPS}:
+            raise ValueError(f"{case} candidate physical input or source identity differs")
+        failed = {metric: 0 for metric in declaration["cases"][case]["metrics"]}
+        for step in range(1, JOINT_PHYSICAL_STEPS + 1):
+            for order, callback in enumerate(quality.CALLBACKS):
+                try:
+                    _, event = next(records)
+                except StopIteration as error:
+                    raise ValueError(f"{case} missing callback at step {step}") from error
+                if event != {"kind": "event", "step": step, "order": order,
+                             "callback": callback}:
+                    raise ValueError(f"{case} callback identity or order differs")
+            try:
+                _, state = next(records)
+            except StopIteration as error:
+                raise ValueError(f"{case} missing state at step {step}") from error
+            if state.keys() != {"kind", "step", "state"} or state["kind"] != "state" or state["step"] != step:
+                raise ValueError(f"{case} state identity or order differs")
+            metrics = quality.weld(state["state"]) if case == "weld-spring-equal" else quality.pulley(state["state"])
+            for metric, (lower, upper) in metrics.items():
+                ceiling = quality.limit(declaration, case, metric)
+                if lower <= ceiling < upper:
+                    raise ValueError(f"{case} physical metric straddles approved limit")
+                if lower > ceiling:
+                    failed[metric] += 1
+        if next(records, None) is not None:
+            raise ValueError(f"{case} candidate physical trace has extra records")
+        failures[case] = failed
+    return {"candidate_status": "FAILED" if any(any(row.values()) for row in failures.values()) else "PASSED",
+            "required_cases": 2, "steps_per_case": JOINT_PHYSICAL_STEPS,
+            "approved_reference_status": "PASSED_BASELINE_ONLY",
+            "legacy_pulley_diagnostic": "39 old-reference samples exceeded the 0.005 m solver tolerance; observed maximum extension 0.1208278904872957 m",
+            "failures": failures}
+
+
+def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
+                                     expected_artifact_hashes, source_sha):
+    catalog = approved_prospective_catalog(str(repository))
+    expected = set(catalog["cases"])
+    rows = receipt.get("prospective_cases")
+    if (not isinstance(rows, list) or len(rows) != PROSPECTIVE_CASE_COUNT
+            or {row.get("id") for row in rows if isinstance(row, dict)} != expected):
+        raise ValueError("318 prospective rule/arithmetic raw case identities are missing or duplicated")
+    if receipt.get("prospective_catalog_sha256") != PROSPECTIVE_POLICY_SHA256:
+        raise ValueError("adopted prospective catalog identity differs")
+    portable = "tools/numerical/portable"
+    for filename in ("prospective_policy_catalog.json", "prospective_compare.py",
+                     "cases.py", "orthogonality.py", "reference_diagnostic.py", "receipt.py"):
+        relative = f"{portable}/{filename}"
+        approved = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{PROSPECTIVE_POLICY_REVISION}:{relative}"], stderr=subprocess.PIPE)
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+        if committed != approved:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}")
+    archive = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "archive", candidate_sha,
+         portable, "tools/numerical/compare.py", "tools/numerical/fixtures.json"],
+        stderr=subprocess.PIPE)
+    with tempfile.TemporaryDirectory(prefix="dyn4k-prospective-checker-") as temporary:
+        with tarfile.open(fileobj=io.BytesIO(archive)) as package:
+            package.extractall(temporary, filter="data")
+        package_path = str(Path(temporary) / portable)
+        names = ("prospective_compare", "cases", "orthogonality", "reference_diagnostic",
+                 "receipt", "compare")
+        prior = {name: sys.modules.get(name) for name in names}
+        previous_bytecode = sys.dont_write_bytecode
+        for name in names:
+            sys.modules.pop(name, None)
+        sys.path.insert(0, package_path)
+        try:
+            import prospective_compare
+            declared = {case["id"]: case for case in prospective_compare.declared_cases()
+                        if case["id"] in expected}
+            if set(declared) != expected:
+                raise ValueError("prospective executable case declarations differ")
+            cases = {}
+            for row in rows:
+                case_id = row["id"]
+                if set(row) != {"id", "reference", "candidate", "capture_receipt", "arithmetic_audit"}:
+                    raise ValueError(f"{case_id} prospective raw fields differ")
+                reference = _file_path(root, row["reference"])
+                candidate = _file_path(root, row["candidate"])
+                capture = _json(_file_path(root, row["capture_receipt"]))
+                arithmetic = _json(_file_path(root, row["arithmetic_audit"]))
+                required = {"case_id": case_id, "candidate_commit": candidate_sha,
+                            "source_hash_method": NUMERICAL_SOURCE_HASH_METHOD,
+                            "source_sha256": source_sha,
+                            "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+                            "trace_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+                            "expected_steps": declared[case_id]["steps"],
+                            "executed_steps": declared[case_id]["steps"], "skipped": 0}
+                if any(capture.get(key) != value for key, value in required.items()):
+                    raise ValueError(f"{case_id} prospective capture source, artifact, or step identity differs")
+                if (arithmetic.get("case_id") != case_id
+                        or arithmetic.get("candidate_commit") != candidate_sha
+                        or arithmetic.get("trace_sha256") != required["trace_sha256"]):
+                    raise ValueError(f"{case_id} target arithmetic raw audit identity differs")
+                prospective_compare.verify_reference_inventory(reference, case_id, catalog)
+                compared = prospective_compare.compare_policy_case(
+                    reference, candidate, declared[case_id], catalog)
+                rule = compared["status"]
+                cases[case_id] = {"rule": rule,
+                                  "arithmetic": "NOT_RUN",
+                                  "status": "FAILED" if rule.startswith("FAILED") else "NOT_RUN"}
+            return {"status": "FAILED" if any(item["status"] == "FAILED" for item in cases.values()) else "NOT_RUN",
+                    "required_cases": PROSPECTIVE_CASE_COUNT,
+                    "reason": "target arithmetic audits lack an approved independent raw oracle",
+                    "cases": cases}
+        finally:
+            sys.path.pop(0)
+            source_parent = str(Path(temporary) / "tools/numerical")
+            if source_parent in sys.path:
+                sys.path.remove(source_parent)
+            sys.dont_write_bytecode = previous_bytecode
+            for name in names:
+                sys.modules.pop(name, None)
+                if prior[name] is not None:
+                    sys.modules[name] = prior[name]
+
+
+def _producer_scope(gate, candidate_sha, scopes):
+    scope = scopes.get(gate) if isinstance(scopes, dict) else None
+    if not isinstance(scope, dict) or set(scope) != {
+            "candidate_sha", "target", "runtime", "runtime_identity", "artifact_hashes"}:
+        raise ValueError(f"{gate} independent producing artifact/runtime scope is missing")
+    if scope["candidate_sha"] != candidate_sha:
+        raise ValueError(f"{gate} producing source commit differs from exact candidate")
+    expected_target = "source" if gate == "independent-review" else "jvm"
+    expected_runtime = "codex" if gate == "independent-review" else "Java"
+    if (scope["target"] != expected_target or scope["runtime"] != expected_runtime
+            or not isinstance(scope["runtime_identity"], str)
+            or not scope["runtime_identity"]):
+        raise ValueError(f"{gate} producing target or runtime identity differs")
+    hashes = scope["artifact_hashes"]
+    required = (set() if gate == "independent-review" else
+                {"dyn4k-core"} if gate == "migration-journeys" else
+                set(qualify.MODULES))
+    if (not isinstance(hashes, dict) or set(hashes) != required
+            or any(not SHA64.fullmatch(str(value)) for value in hashes.values())):
+        raise ValueError(f"{gate} producing artifact hashes are incomplete")
+    return scope
+
+
 def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
-             expected_artifact_hashes, expected_runtime_identity, gate):
+             expected_artifact_hashes, expected_runtime_identity, gate,
+             expected_producer_scopes):
     if receipt.get("schema") != 1 or receipt.get("candidate_sha") != candidate_sha:
         raise ValueError("raw candidate SHA differs")
     source_tree = subprocess.check_output(
@@ -223,14 +502,23 @@ def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
         for key in ("target", "runtime", "version", "configuration"):
             if receipt.get(key) != lane.get(key):
                 raise ValueError(f"raw {key} differs from selected lane")
-        if (not isinstance(expected_runtime_identity, str) or not expected_runtime_identity
+        if gate not in PRODUCER_SCOPED_GATES and (
+                not isinstance(expected_runtime_identity, str) or not expected_runtime_identity
                 or receipt.get("runtime_identity") != expected_runtime_identity):
             raise ValueError("raw runtime identity differs from independent selection")
-    if (not isinstance(expected_artifact_hashes, dict)
-            or set(expected_artifact_hashes) != set(qualify.MODULES)
-            or any(not SHA64.fullmatch(str(value)) for value in expected_artifact_hashes.values())):
-        raise ValueError("independently audited target binary hashes are missing")
-    if receipt.get("artifact_hashes") != expected_artifact_hashes:
+    if gate in PRODUCER_SCOPED_GATES:
+        scope = _producer_scope(gate, candidate_sha, expected_producer_scopes)
+        if (receipt.get("producer_scope") != scope
+                or receipt.get("runtime_identity") != scope["runtime_identity"]):
+            raise ValueError("raw producing artifact/runtime scope differs from independent selection")
+        selected_hashes = scope["artifact_hashes"]
+    else:
+        if (not isinstance(expected_artifact_hashes, dict)
+                or set(expected_artifact_hashes) != set(qualify.MODULES)
+                or any(not SHA64.fullmatch(str(value)) for value in expected_artifact_hashes.values())):
+            raise ValueError("independently audited target binary hashes are missing")
+        selected_hashes = expected_artifact_hashes
+    if receipt.get("artifact_hashes") != selected_hashes:
         raise ValueError("raw artifact hashes differ from independent staging audit")
     process = receipt.get("process")
     if (not isinstance(process, dict) or not isinstance(process.get("command"), list)
@@ -762,7 +1050,7 @@ def _java_full_ci(root, receipt, gate, candidate_sha, repository,
             "216-type strict source compatibility verified by reviewed full_ci")
 
 
-def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
+def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, repository,
                        physical_only=False):
     numerical_dir = Path(__file__).resolve().parents[1] / "numerical"
     compare, physical = _numerical_modules(numerical_dir)
@@ -773,7 +1061,7 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
     if not isinstance(entries, list) or {item.get("key") for item in entries
                                          if isinstance(item, dict)} != selected or len(entries) != len(selected):
         raise ValueError("frozen numerical fixture identities or counts differ")
-    source_sha = hashlib.sha256(receipt["source_tree"].encode()).hexdigest()
+    source_sha = verified_numerical_source_sha256(repository, candidate_sha)
     physical_profiles = {"default-sleep-wake": {"states": 0, "failures": 0},
                          "configured-sleep-wake": {"states": 0, "failures": 0}}
     for item in entries:
@@ -781,6 +1069,8 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
         reference = _file_path(root, item.get("reference"))
         candidate = _file_path(root, item.get("candidate"))
         capture = _file_path(root, item.get("capture_receipt"))
+        if _json(capture).get("source_hash_method") != NUMERICAL_SOURCE_HASH_METHOD:
+            raise ValueError(f"{item['key']} numerical producer source digest method differs")
         result = compare.compare(fixture, reference, candidate, capture,
                                  source_sha, expected_artifact_hashes["dyn4k-core"],
                                  candidate_sha)
@@ -812,17 +1102,22 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
             "FAILED" if physical_profiles["default-sleep-wake"]["failures"] else "PASSED")
         physical_profiles["configured-sleep-wake"]["candidate_status"] = (
             "FAILED" if physical_profiles["configured-sleep-wake"]["failures"] else "PASSED")
-        physical_profiles["weld-pulley"] = {"candidate_status": "NOT_RUN", "reason": "approved joint physical limits and candidate traces are absent"}
-        physical_profiles["nominal"] = {"candidate_status": "NOT_RUN", "reason": "nominal physical quality limits are absent"}
+        physical_profiles["weld-pulley"] = verify_joint_physical_cases(
+            root, receipt, candidate_sha, expected_artifact_hashes, source_sha)
+        physical_profiles["nominal"] = {"candidate_status": "NOT_RUN", "reason": "candidate nominal analytic physical evidence is absent"}
         return physical_profiles
-    return f"{len(entries)} frozen numerical fixture traces verified"
+    subgates = _missing_numerical_subgates(repository)
+    subgates["frozen-traces"] = {"status": "PASSED", "required_cases": len(entries)}
+    subgates["prospective-rule-arithmetic"] = verify_prospective_case_subgates(
+        root, receipt, repository, candidate_sha, expected_artifact_hashes, source_sha)
+    return subgates
 
 
 class IncompleteEvidence(Exception):
     pass
 
 
-def _performance_resource(root, candidate_sha):
+def _performance_resource(root, candidate_sha, expected_artifact_hashes):
     performance_dir = Path(__file__).resolve().parents[1] / "performance"
     sys.path.insert(0, str(performance_dir))
     try:
@@ -831,6 +1126,14 @@ def _performance_resource(root, candidate_sha):
         identity = _json(root / "evidence" / "candidate-identity-at-pilot.json")
         if identity.get("source_commit") != candidate_sha:
             raise ValueError("performance raw identity differs from exact candidate")
+        observed_hashes = identity.get("sha256")
+        if not isinstance(observed_hashes, dict):
+            raise ValueError("performance producing JVM binary inventory is missing")
+        for module in qualify.MODULES:
+            matching = [value for path, value in observed_hashes.items()
+                        if path.endswith(f"/{module}-jvm-0.1.0-alpha.1.jar")]
+            if matching != [expected_artifact_hashes[module]]:
+                raise ValueError(f"performance producing {module} JAR differs from independent audit")
         if raw.get("archive_audit") != "raw_hashes_verified":
             raise ValueError("performance raw archive audit did not verify")
         try:
@@ -846,7 +1149,8 @@ def _performance_resource(root, candidate_sha):
 
 def evaluate(manifest, candidate_sha, lane_id, archives, repository,
              expected_artifact_hashes=None, expected_runtime_identity=None,
-             expected_archive_digests=None, expected_all_target_hashes=None):
+             expected_archive_digests=None, expected_all_target_hashes=None,
+             expected_producer_scopes=None):
     repository = Path(repository)
     if digest(manifest) != APPROVED_MANIFEST_SHA256:
         raise ValueError("manifest differs from independently approved complete suite")
@@ -873,13 +1177,19 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
         expected_archive_digests = {}
     if not isinstance(expected_archive_digests, dict) or set(expected_archive_digests) - set(names):
         raise ValueError("independent archive digest map has an unknown gate")
+    if expected_producer_scopes is None:
+        expected_producer_scopes = {}
+    if (not isinstance(expected_producer_scopes, dict)
+            or set(expected_producer_scopes) - (set(names) & PRODUCER_SCOPED_GATES)):
+        raise ValueError("independent producing scope map has an unknown gate")
     for gate in names:
         gates[gate] = evaluate_gate(gate, archives.get(gate), candidate_sha,
                                     lane_id, lane, repository,
                                     expected_artifact_hashes,
                                     expected_runtime_identity,
                                     expected_archive_digests.get(gate),
-                                    expected_all_target_hashes, manifest)
+                                    expected_all_target_hashes, manifest,
+                                    expected_producer_scopes)
     statuses = {item["status"] for item in gates.values()}
     status = next((state for state in ("FAILED", "UNAVAILABLE", "NOT_RUN")
                    if state in statuses), "PASSED")
@@ -891,6 +1201,7 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
               "reviewed_full_ci_revision": REVIEWED_FULL_CI_REVISION,
               "expected_artifact_hashes": expected_artifact_hashes,
               "expected_all_target_hashes": expected_all_target_hashes,
+              "expected_producer_scopes": expected_producer_scopes,
               "expected_archive_digests": expected_archive_digests,
               "expected_runtime_identity": expected_runtime_identity,
               "gates": gates, "status": status}
@@ -901,19 +1212,14 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
 def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                   expected_artifact_hashes, expected_runtime_identity,
                   expected_archive_digest=None, expected_all_target_hashes=None,
-                  manifest=None):
+                  manifest=None, expected_producer_scopes=None):
     if archive is None:
         if gate == "physical-correctness":
             return _result(gate, "NOT_RUN", "no raw candidate physical archive supplied",
-                           profiles={
-                               "default-sleep-wake": {"candidate_status": "NOT_RUN",
-                                                      "approved_reference_status": "FAILED_125847_OF_126000"},
-                               "configured-sleep-wake": {"candidate_status": "NOT_RUN",
-                                                         "approved_reference_status": "PASSED"},
-                               "weld-pulley": {"candidate_status": "NOT_RUN",
-                                               "reason": "physical quality limits are not approved"},
-                               "nominal": {"candidate_status": "NOT_RUN",
-                                           "reason": "physical quality limits are not approved"}})
+                           profiles=_missing_physical_profiles())
+        if gate == "numerical-parity":
+            return _result(gate, "NOT_RUN", "no raw candidate numerical archive supplied",
+                           subgates=_missing_numerical_subgates(repository))
         return _result(gate, "NOT_RUN", "no raw archive supplied")
     root = Path(archive)
     try:
@@ -941,7 +1247,7 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
         archive_sha = _inventory(root, receipt)
         process = _binding(root, receipt, candidate_sha, lane_id, lane,
                            repository, expected_artifact_hashes,
-                           expected_runtime_identity, gate)
+                           expected_runtime_identity, gate, expected_producer_scopes)
         if receipt.get("status") not in ("PASSED", "FAILED", "NOT_RUN"):
             raise ValueError("reported gate status is invalid")
         if receipt["status"] == "NOT_RUN":
@@ -975,18 +1281,18 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate in ("unchanged-java-corpus", "java-source-compatibility"):
             reason = _java_full_ci(root, receipt, gate, candidate_sha,
-                                   repository, expected_artifact_hashes)
+                                   repository, expected_producer_scopes[gate]["artifact_hashes"])
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "migration-journeys":
             _source_binding(repository, candidate_sha, APPROVED_MIGRATION,
                             "migration raw validator")
             reason = _migration_journeys(root, candidate_sha,
-                                         expected_artifact_hashes)
+                                         expected_producer_scopes[gate]["artifact_hashes"])
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate in ("numerical-parity", "physical-correctness"):
             policy = _policy_binding(repository, candidate_sha)
             reason = _numerical_entries(
-                root, receipt, candidate_sha, expected_artifact_hashes,
+                root, receipt, candidate_sha, expected_artifact_hashes, repository,
                 physical_only=gate == "physical-correctness")
             if gate == "physical-correctness":
                 status = ("FAILED" if any(row["candidate_status"] == "FAILED" for row in reason.values())
@@ -994,10 +1300,14 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                 return _result(gate, status,
                                "default, configured, nominal, and joint physical obligations are reported separately",
                                profiles=reason, archive_sha256=archive_sha, policy_sha256=policy)
-            return _result(gate, "PASSED", reason, archive_sha256=archive_sha,
+            status = reason["prospective-rule-arithmetic"]["status"]
+            return _result(gate, status,
+                           "14 frozen traces and 318 prospective rule/arithmetic cases are separate obligations",
+                           subgates=reason, archive_sha256=archive_sha,
                            policy_sha256=policy)
         if gate == "performance-resource":
-            reason = _performance_resource(root, candidate_sha)
+            reason = _performance_resource(root, candidate_sha,
+                                           expected_producer_scopes[gate]["artifact_hashes"])
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "independent-review":
             reason = _independent_review(root, candidate_sha, repository)
@@ -1008,6 +1318,9 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError,
             json.JSONDecodeError, subprocess.CalledProcessError,
             zipfile.BadZipFile, ET.ParseError) as error:
+        if gate == "numerical-parity":
+            return _result(gate, "FAILED", str(error),
+                           subgates=_missing_numerical_subgates(repository))
         return _result(gate, "FAILED", str(error))
 
 
@@ -1021,6 +1334,7 @@ def main(argv=None):
     parser.add_argument("--archive", action="append", default=[], metavar="GATE=PATH")
     parser.add_argument("--expected-artifacts", type=Path)
     parser.add_argument("--expected-all-target-artifacts", type=Path)
+    parser.add_argument("--expected-producer-scopes", type=Path)
     parser.add_argument("--expected-archive-digests", type=Path)
     parser.add_argument("--expected-runtime-identity")
     args = parser.parse_args(argv)
@@ -1035,11 +1349,13 @@ def main(argv=None):
     hashes = json.loads(args.expected_artifacts.read_text()) if args.expected_artifacts else None
     all_hashes = (json.loads(args.expected_all_target_artifacts.read_text())
                   if args.expected_all_target_artifacts else None)
+    producer_scopes = (json.loads(args.expected_producer_scopes.read_text())
+                       if args.expected_producer_scopes else None)
     archive_digests = (json.loads(args.expected_archive_digests.read_text())
                        if args.expected_archive_digests else None)
     result = evaluate(manifest, args.candidate_sha, args.lane, archives,
                       args.repository, hashes, args.expected_runtime_identity,
-                      archive_digests, all_hashes)
+                      archive_digests, all_hashes, producer_scopes)
     print(json.dumps(result, sort_keys=True))
     return 0 if result["status"] == "PASSED" else 1
 
