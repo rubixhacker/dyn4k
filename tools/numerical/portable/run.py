@@ -119,7 +119,9 @@ def clean_identity():
                  and not path.startswith(GENERATED_PREFIXES))
     if dirty:
         raise Rejected("source tree is dirty: " + ", ".join(dirty[:5]))
-    return git("rev-parse", "HEAD").decode().strip(), hashlib.sha256(git("archive", "--format=tar", "HEAD")).hexdigest()
+    return (git("rev-parse", "HEAD").decode().strip(),
+            hashlib.sha256(git("-c", "core.autocrlf=false", "archive", "--format=tar",
+                               "HEAD")).hexdigest())
 
 
 def artifacts(host):

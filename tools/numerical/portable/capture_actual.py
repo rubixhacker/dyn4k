@@ -83,7 +83,8 @@ def run_capture(method, output):
     if not (JDK21 / "bin/java").is_file():
         raise CaptureRejected("pinned JDK21 is unavailable")
     with (output / "source.tar").open("xb") as archive:
-        subprocess.run(("git", "archive", "--format=tar", "HEAD"), cwd=ROOT,
+        subprocess.run(("git", "-c", "core.autocrlf=false", "archive",
+                        "--format=tar", commit), cwd=ROOT,
                        stdout=archive, check=True)
     stage_command = [str(ROOT / "gradlew"),
                      ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",

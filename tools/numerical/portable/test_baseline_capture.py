@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,50 @@ from receipt import digest
 
 
 class BaselineCaptureSeamTest(unittest.TestCase):
+    def test_recorder_source_archive_is_canonical_for_current_and_historical_commits(self):
+        revisions = {
+            "8b43f38d60bdee314fde06028b79bf73696d2c08":
+                "dee954984cc6064927b03438f180727a0e692259eaa017bae9b034dc7db2e604",
+            "cd21a4bd7d6731a096597f97966db9e02b9de448":
+                "7958113412c14be8e106706a77871eba4dc8c4e1335c38fd01c7b9e18d26e12d",
+        }
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(baseline_capture, "verify_baseline_jar"), \
+                patch.object(baseline_capture, "fixture_source_sha256", return_value="fixture"):
+            output = Path(directory)
+            for revision, canonical in revisions.items():
+                result = {"status": "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL",
+                          "baseline_jar_sha256": baseline_capture.PINNED_JAR_SHA256,
+                          "baseline_source_revision": baseline_capture.PINNED_SOURCE_REVISION,
+                          "fixture_source_sha256": "fixture",
+                          "candidate_recorder_commit": revision,
+                          "source_sha256": canonical, "methods": []}
+                for setting in ("false", "true"):
+                    with self.subTest(revision=revision, autocrlf=setting), \
+                            patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1",
+                                                    "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                                    "GIT_CONFIG_VALUE_0": setting}):
+                        (output / "result.json").write_text(json.dumps(result))
+                        with self.assertRaisesRegex(Exception, "baseline method inventory differs"):
+                            verify_archive(output, write_verified=False)
+                with patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1",
+                                            "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                            "GIT_CONFIG_VALUE_0": "true"}):
+                    converted = hashlib.sha256(baseline_capture.git(
+                        "archive", "--format=tar", revision)).hexdigest()
+                    self.assertNotEqual(converted, canonical)
+                    result["source_sha256"] = converted
+                    (output / "result.json").write_text(json.dumps(result))
+                    with self.assertRaisesRegex(Exception, "captured recorder source archive differs"):
+                        verify_archive(output, write_verified=False)
+            for revision in ("abc", None):
+                result["candidate_recorder_commit"] = revision
+                result["source_sha256"] = revisions["8b43f38d60bdee314fde06028b79bf73696d2c08"]
+                (output / "result.json").write_text(json.dumps(result))
+                with self.subTest(malformed_revision=revision), \
+                        self.assertRaisesRegex(Exception, "recorder source revision is invalid"):
+                    verify_archive(output, write_verified=False)
+
     def test_attestation_is_external_current_and_bound_to_original_seal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "archive"

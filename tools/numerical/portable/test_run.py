@@ -107,6 +107,23 @@ class ExtractionTest(unittest.TestCase):
                 with self.assertRaisesRegex(run.Rejected, "source tree is dirty"):
                     run.clean_identity()
 
+    def test_source_archive_identity_is_stable_across_autocrlf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            (root / ".gitattributes").write_text("* text=auto\n")
+            (root / "README.md").write_bytes(b"first line\nsecond line\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            subprocess.run(("git", "-C", str(root), "-c", "user.name=Test", "-c",
+                            "user.email=test@example.invalid", "commit", "-qm", "source"), check=True)
+            archive_hashes = {}
+            with patch.object(run, "ROOT", root):
+                for setting in ("false", "true"):
+                    subprocess.run(("git", "-C", str(root), "config", "core.autocrlf", setting),
+                                   check=True)
+                    archive_hashes[setting] = run.clean_identity()[1]
+            self.assertEqual(archive_hashes["false"], archive_hashes["true"])
+
     def test_unexecuted_android_native_host_is_not_called_unavailable(self):
         self.assertEqual(run.other_lane_status("android-native-x64")[0], "NOT_RUN")
         self.assertEqual(run.other_lane_status("android-device")[0], "NOT_RUN")
