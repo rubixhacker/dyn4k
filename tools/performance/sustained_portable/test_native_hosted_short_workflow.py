@@ -19,6 +19,7 @@ RUN_EXPRESSION_LIMIT = 21000
 AUDITED_WORKFLOW_SHA256 = {
     "full-hosted-mac-product-diagnostic.yml": "cef244e7f6ee8864313754dbd030e20fa34ec6d43dc3742b66b1b9f3a4191405",
     "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
+    "performance-host-capacity-control.yml": "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6",
     "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
     "qualification.yml": "3f6fdd560b92f9252f2123b15aa35f60a92a1769a6022b96fed4ca0ee97545b4",
     "safari-yarn-lock-diagnostic.yml": "60789e5d019be7109d9d16c39d5803f2cf50c57d99ca2ddb69602803234a8401",

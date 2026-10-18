@@ -1,0 +1,45 @@
+name: Terminal capacity host diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-26
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capture actual child terminal capacity
+        shell: bash
+        run: python -B "$GITHUB_WORKSPACE/tools/performance/host_capacity_control.py" capture --archive "$RUNNER_TEMP/performance-host-capacity-control" --key-output "$RUNNER_TEMP/performance-host-capacity-key/operator.key" --expected-source-commit "$GITHUB_SHA"
+      - name: Replay public diagnostic on source host
+        shell: bash
+        run: python -B "$GITHUB_WORKSPACE/tools/performance/host_capacity_control.py" verify --archive "$RUNNER_TEMP/performance-host-capacity-control" --trusted-key "$RUNNER_TEMP/performance-host-capacity-key/operator.key" --expected-source-commit "$GITHUB_SHA"
+      - name: Upload raw terminal capacity diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-host-capacity-${{ github.sha }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/performance-host-capacity-control/
+          if-no-files-found: warn
+      - name: Upload test-only replay key separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-host-capacity-key-${{ github.sha }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/performance-host-capacity-key/operator.key
+          if-no-files-found: warn
