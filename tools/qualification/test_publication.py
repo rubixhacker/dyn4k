@@ -158,11 +158,13 @@ class PublicationAuditTests(unittest.TestCase):
                                      "available-at": available}
                                     for kind in kinds)
             component = {"group": qualify.GROUP, "module": module,
-                         "version": qualify.VERSION}
+                         "version": qualify.VERSION,
+                         "attributes": {"org.gradle.status": "release"}}
             if target is not None:
                 component["url"] = f"../../{module}/{qualify.VERSION}/{module}-{qualify.VERSION}.module"
             self.write(base / f"{name}-{qualify.VERSION}.module", json.dumps({
-                "formatVersion": "1.1", "component": component, "variants": variants}).encode())
+                "formatVersion": "1.1", "createdBy": {"gradle": {"version": "9.5.0"}},
+                "component": component, "variants": variants}).encode())
         return staging
 
     def write(self, path, content):
@@ -410,6 +412,36 @@ class PublicationAuditTests(unittest.TestCase):
                 self.write(metadata, json.dumps(content).encode())
                 audit = qualify.audit_staging(staging, "a" * 40, ("jvm", "js"), root / "LICENSE.md")
                 self.assertEqual("FAILED", audit["status"], (mutation, audit["errors"]))
+
+    def test_gradle_metadata_rejects_unapproved_fields_and_creator(self):
+        for name, mutation in ((name, mutation) for name in ("dyn4k-core", "dyn4k-core-jvm")
+                               for mutation in ("top", "creator", "component", "status", "variant")):
+            with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                staging = self.stage(root)
+                base = staging / qualify.GROUP.replace(".", "/") / name / qualify.VERSION
+                metadata = base / f"{name}-{qualify.VERSION}.module"
+                content = json.loads(metadata.read_text())
+                if mutation == "top":
+                    content["unapproved"] = True
+                elif mutation == "creator":
+                    content["createdBy"]["gradle"]["version"] = "9.5.1"
+                elif mutation == "component":
+                    content["component"]["capabilities"] = [{"group": qualify.GROUP,
+                                                             "name": "unapproved", "version": qualify.VERSION}]
+                elif mutation == "status":
+                    content["component"]["attributes"]["org.gradle.status"] = "integration"
+                else:
+                    content["variants"][0]["capabilities"] = [{"group": qualify.GROUP,
+                                                                "name": "unapproved", "version": qualify.VERSION}]
+                self.write(metadata, json.dumps(content).encode())
+                audit = qualify.audit_staging(staging, "a" * 40, ("jvm", "js"), root / "LICENSE.md")
+                self.assertEqual("FAILED", audit["status"], (name, mutation, audit["errors"]))
+                reason = ("metadata creator differs" if mutation == "creator" else
+                          "component status differs" if mutation == "status" else
+                          "metadata fields differ")
+                self.assertTrue(any(reason in error for error in audit["errors"]),
+                                audit["errors"])
 
     def test_apple_metadata_reference_checks_every_advertised_hash(self):
         for algorithm in ("sha512", "sha256", "sha1", "md5"):
@@ -903,29 +935,39 @@ class PublicationAuditTests(unittest.TestCase):
             bundle = root / "bundle"
             publication.package(root, audit_file, bundle)
             manifest_sha256 = hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
+            publication.verify(bundle, "a" * 40, manifest_sha256)
             relative = Path("build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm") / (
                 f"{qualify.VERSION}/dyn4k-core-jvm-{qualify.VERSION}.module")
-            metadata = bundle / relative
-            content = json.loads(metadata.read_text())
-            for variant in content["variants"]:
-                if variant["name"] in ("jvmApiElements-published", "jvmRuntimeElements-published"):
-                    variant["files"][0]["url"] = "missing-core-jvm.jar"
-            metadata.write_text(json.dumps(content))
-            checksum = metadata.with_name(metadata.name + ".sha256")
-            checksum.write_text(hashlib.sha256(metadata.read_bytes()).hexdigest() + "\n")
-            audit_path = bundle / "artifact-audit.json"
-            audit = json.loads(audit_path.read_text())
-            next(item for item in audit["artifacts"] if item["path"] ==
-                 relative.relative_to("build/staging-repository").as_posix())["sha256"] = (
-                     hashlib.sha256(metadata.read_bytes()).hexdigest())
-            audit_path.write_text(json.dumps(audit))
-            manifest_path = bundle / "manifest.json"
-            manifest = json.loads(manifest_path.read_text())
-            for path in (metadata, checksum, audit_path):
-                manifest["files"][path.relative_to(bundle).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-            manifest_path.write_text(json.dumps(manifest))
-            with self.assertRaises(ValueError):
-                publication.verify(bundle, "a" * 40, manifest_sha256)
+            for mutation in ("wrong_file", "capabilities"):
+                with self.subTest(mutation=mutation):
+                    changed = root / f"changed-{mutation}"
+                    shutil.copytree(bundle, changed)
+                    metadata = changed / relative
+                    content = json.loads(metadata.read_text())
+                    for variant in content["variants"]:
+                        if variant["name"] in ("jvmApiElements-published", "jvmRuntimeElements-published"):
+                            if mutation == "wrong_file":
+                                variant["files"][0]["url"] = "missing-core-jvm.jar"
+                            else:
+                                variant["capabilities"] = [{"group": qualify.GROUP,
+                                                            "name": "unapproved", "version": qualify.VERSION}]
+                    metadata.write_text(json.dumps(content))
+                    checksum = metadata.with_name(metadata.name + ".sha256")
+                    checksum.write_text(hashlib.sha256(metadata.read_bytes()).hexdigest() + "\n")
+                    audit_path = changed / "artifact-audit.json"
+                    audit = json.loads(audit_path.read_text())
+                    next(item for item in audit["artifacts"] if item["path"] ==
+                         relative.relative_to("build/staging-repository").as_posix())["sha256"] = (
+                             hashlib.sha256(metadata.read_bytes()).hexdigest())
+                    audit_path.write_text(json.dumps(audit))
+                    manifest_path = changed / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text())
+                    for path in (metadata, checksum, audit_path):
+                        manifest["files"][path.relative_to(changed).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    manifest_path.write_text(json.dumps(manifest))
+                    refreshed_pin = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+                    with self.assertRaisesRegex(ValueError, "staged audit differs"):
+                        publication.verify(changed, "a" * 40, refreshed_pin)
 
     def test_downloaded_bundle_rejects_coherent_pom_source_docs_and_apple_changes(self):
         with tempfile.TemporaryDirectory() as temporary:

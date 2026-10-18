@@ -347,12 +347,22 @@ def audit_publication_metadata(base, module, target, data):
     errors = []
     if not isinstance(data, dict) or data.get("formatVersion") != "1.1":
         errors.append(f"{name}: Gradle metadata formatVersion differs from publication contract")
+    if (not isinstance(data, dict)
+            or set(data) != {"formatVersion", "createdBy", "component", "variants"}):
+        errors.append(f"{name}: Gradle metadata fields differ from publication contract")
+    if isinstance(data, dict) and data.get("createdBy") != {"gradle": {"version": "9.5.0"}}:
+        errors.append(f"{name}: Gradle metadata creator differs from publication contract")
     expected_component = {"group": GROUP, "module": module, "version": VERSION}
     if target is not None:
         expected_component["url"] = f"../../{module}/{VERSION}/{module}-{VERSION}.module"
     component = data.get("component") if isinstance(data, dict) else None
     if not isinstance(component, dict) or any(component.get(key) != value for key, value in expected_component.items()):
         errors.append(f"{name}: Gradle component coordinate differs from publication contract")
+    if isinstance(component, dict):
+        if set(component) != set(expected_component) | {"attributes"}:
+            errors.append(f"{name}: Gradle component metadata fields differ from publication contract")
+        if component.get("attributes") != {"org.gradle.status": "release"}:
+            errors.append(f"{name}: Gradle component status differs from publication contract")
     if target is None and isinstance(component, dict) and "url" in component:
         errors.append(f"{name}: root Gradle component has a parent URL")
     variants = data.get("variants") if isinstance(data, dict) else None
@@ -368,9 +378,14 @@ def audit_publication_metadata(base, module, target, data):
         item = actual.get(variant_name)
         if not isinstance(item, dict):
             continue
+        available = specification.get("available-at")
+        expected_fields = ({"name", "attributes", "available-at"} if available is not None else
+                           {"name", "attributes", "files"} |
+                           ({"dependencies"} if specification["dependencies"] else set()))
+        if set(item) != expected_fields:
+            errors.append(f"{name}: {variant_name} metadata fields differ from publication contract")
         if item.get("attributes") != variant_attributes(specification["target"], specification["kind"]):
             errors.append(f"{name}: {variant_name} selection attributes differ from publication contract")
-        available = specification.get("available-at")
         if available is not None:
             if (item.get("available-at") != available or "files" in item
                     or "dependencies" in item):
