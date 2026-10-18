@@ -20,6 +20,13 @@ STAGED_JAR = (ROOT / "build/staging-repository/io/github/rubixhacker/"
               "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
 XML = PORTABLE / "build/test-results/jvmTest/TEST-portable.ProspectiveArithmeticTest.xml"
 ENVIRONMENT_SENTINEL = "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
+GENERATED_ROOTS = (
+    ".gradle", ".kotlin", "build",
+    "dyn4k-core/.gradle", "dyn4k-core/.kotlin", "dyn4k-core/build",
+    "tools/numerical/portable/.gradle", "tools/numerical/portable/.kotlin",
+    "tools/numerical/portable/build", "tools/numerical/portable/__pycache__",
+    "tools/numerical/portable/kotlin-js-store",
+)
 
 
 def reject_environment_trace(trace_path):
@@ -47,6 +54,14 @@ def git(*args):
 def clean_source():
     if git("status", "--porcelain", "--untracked-files=all").strip():
         raise CaptureRejected("target source is not clean")
+    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard",
+                  "--full-name", "-z").split(b"\0")
+    for name in ignored:
+        if not name:
+            continue
+        relative = os.fsdecode(name)
+        if not any(relative.startswith(root + "/") for root in GENERATED_ROOTS):
+            raise CaptureRejected("ignored file outside exact generated roots")
     return git("rev-parse", "HEAD").decode().strip()
 
 
