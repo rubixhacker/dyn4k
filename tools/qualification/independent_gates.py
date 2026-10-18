@@ -268,7 +268,8 @@ def verified_numerical_source_sha256(repository, candidate_sha):
     if not isinstance(candidate_sha, str) or not SHA40.fullmatch(candidate_sha):
         raise ValueError("numerical source requires an exact candidate commit")
     archive = subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "archive",
+        ["git", "-c", "core.autocrlf=false", "--no-replace-objects",
+         "-C", str(repository), "archive",
          "--format=tar", candidate_sha], stderr=subprocess.PIPE)
     return hashlib.sha256(archive).hexdigest()
 

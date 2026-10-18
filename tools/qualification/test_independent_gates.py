@@ -188,20 +188,43 @@ class IndependentGateSeamTests(unittest.TestCase):
 
     def test_historical_numerical_source_adapter_matches_producer_git_archive(self):
         candidate = "cd21a4bd7d6731a096597f97966db9e02b9de448"
-        def archive_sha(autocrlf):
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                          cwd=ROOT, text=True).strip()
+
+        def archive_sha(autocrlf, revision):
             return hashlib.sha256(subprocess.check_output(
                 ["git", "-c", f"core.autocrlf={autocrlf}", "--no-replace-objects",
-                 "-C", str(ROOT), "archive", "--format=tar", candidate])).hexdigest()
+                 "-C", str(ROOT), "archive", "--format=tar", revision])).hexdigest()
 
         self.assertEqual("7958113412c14be8e106706a77871eba4dc8c4e1335c38fd01c7b9e18d26e12d",
-                         archive_sha("false"))
+                         archive_sha("false", candidate))
         self.assertEqual("371f767bb7e78c0203102f491ac1c7577177b7b7c91887030413af2e72466a05",
-                         archive_sha("true"))
-        configured = hashlib.sha256(subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(ROOT), "archive", "--format=tar",
-             candidate])).hexdigest()
-        self.assertEqual(configured,
-                         independent_gates.verified_numerical_source_sha256(ROOT, candidate))
+                         archive_sha("true", candidate))
+        for revision in (candidate, current):
+            canonical = archive_sha("false", revision)
+            for autocrlf in ("false", "true"):
+                with self.subTest(revision=revision, autocrlf=autocrlf), mock.patch.dict(
+                        os.environ, {"GIT_CONFIG_COUNT": "1",
+                                     "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                     "GIT_CONFIG_VALUE_0": autocrlf}):
+                    self.assertEqual(canonical,
+                                     independent_gates.verified_numerical_source_sha256(
+                                         ROOT, revision))
+
+    def test_canonical_archive_does_not_accept_converted_working_checker(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        checker = ROOT / "tools/numerical/compare.py"
+        original_read_bytes = Path.read_bytes
+
+        def converted(path):
+            raw = original_read_bytes(path)
+            return raw.replace(b"\n", b"\r\n") if path == checker else raw
+
+        with mock.patch.object(Path, "read_bytes", converted):
+            with self.assertRaisesRegex(ValueError,
+                                        "approved policy/checker blob differs: tools/numerical/compare.py"):
+                independent_gates._policy_binding(ROOT, candidate)
 
     def test_prospective_and_joint_obligations_are_separate_when_unexecuted(self):
         gates = independent_gates.evaluate(self.manifest, BASE, LANE, {}, ROOT)["gates"]
