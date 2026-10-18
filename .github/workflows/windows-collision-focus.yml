@@ -1,0 +1,136 @@
+name: Windows collision focus
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-collision-focus:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Check out dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify candidate revision
+        shell: pwsh
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '${{ github.sha }}') {
+            throw "Checkout revision mismatch: $actual"
+          }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run focused native and pinned Java controls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $evidence = Join-Path $env:RUNNER_TEMP 'windows-collision-focus'
+          $native = Join-Path $evidence 'native'
+          $java = Join-Path $evidence 'java'
+          New-Item -ItemType Directory -Force -Path $native, $java | Out-Null
+          $nativeExit = -1
+          $javaExit = -1
+          $nativeLog = Join-Path $native 'gradle-console.log'
+          $nativeExitFile = Join-Path $native 'gradle-exit-code.txt'
+          $javaLog = Join-Path $java 'java-console.log'
+          $javaExitFile = Join-Path $java 'java-exit-code.txt'
+
+          try {
+            & .\gradlew.bat :dyn4k-core:mingwX64Test `
+              --tests 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.CircleSliceTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest' `
+              --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest' `
+              --no-daemon --rerun-tasks --console=plain 2>&1 | Tee-Object -FilePath $nativeLog
+            $nativeExit = $LASTEXITCODE
+          } catch {
+            $_ | Out-String | Add-Content -Path $nativeLog
+            $nativeExit = 1
+          } finally {
+            Set-Content -Path $nativeExitFile -Value $nativeExit
+            $xmlSource = Join-Path $PWD 'dyn4k-core/build/test-results/mingwX64Test'
+            if (Test-Path $xmlSource) {
+              Get-ChildItem $xmlSource -Filter 'TEST-*.xml' -File | Copy-Item -Destination $native
+            }
+          }
+
+          try {
+            $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0.jar'
+            Invoke-WebRequest 'https://repo.maven.apache.org/maven2/org/dyn4j/dyn4j/6.0.0/dyn4j-6.0.0.jar' -OutFile $jar
+            $jarSha256 = (Get-FileHash -Algorithm SHA256 $jar).Hash.ToLowerInvariant()
+            if ($jarSha256 -ne '204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e') {
+              throw "Baseline JAR SHA-256 mismatch: $jarSha256"
+            }
+            $source = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0-source'
+            & git init $source
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source init failed: $LASTEXITCODE" }
+            & git -C $source remote add origin https://github.com/dyn4j/dyn4j.git
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source remote failed: $LASTEXITCODE" }
+            & git -C $source fetch --depth=1 origin 058bf6d982a0fb89b54050f929f6ea9dae53b714
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source fetch failed: $LASTEXITCODE" }
+            & git -C $source checkout --quiet --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw "Baseline source checkout failed: $LASTEXITCODE" }
+            $sourceRevision = (& git -C $source rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $sourceRevision -ne '058bf6d982a0fb89b54050f929f6ea9dae53b714') {
+              throw "Baseline source revision mismatch: $sourceRevision"
+            }
+            Set-Content -Path (Join-Path $evidence 'baseline-source-revision.txt') -Value $sourceRevision
+            & .\tools\diagnostic\windows_collision\run-java-control.ps1 `
+              -JdkHome $env:JAVA_HOME -BaselineJar $jar `
+              -BaselineSource $source -OutputDirectory $java `
+              2>&1 | Tee-Object -FilePath $javaLog
+            $javaExit = $LASTEXITCODE
+          } catch {
+            $_ | Out-String | Add-Content -Path $javaLog
+            $javaExit = 1
+          } finally {
+            Set-Content -Path $javaExitFile -Value $javaExit
+          }
+
+          @(
+            "candidate=$(git rev-parse HEAD)"
+            "runner_os=$env:RUNNER_OS"
+            "runner_arch=$env:RUNNER_ARCH"
+            "image_os=$env:ImageOS"
+            "image_version=$env:ImageVersion"
+            "java_home=$env:JAVA_HOME"
+            "java_version=$(& java -version 2>&1 | Select-Object -First 1)"
+            "gradle_version=$(& .\gradlew.bat --version --console=plain | Select-String '^Gradle ' | Select-Object -First 1)"
+            "powershell=$($PSVersionTable.PSVersion)"
+          ) | Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')
+
+          $xml = @(Get-ChildItem $native -Filter 'TEST-*.xml' -File)
+          if ($xml.Count -ne 7) {
+            "Expected seven focused XML files; found $($xml.Count)." | Add-Content -Path (Join-Path $native 'collection-error.txt')
+            if ($nativeExit -eq 0) { $nativeExit = 1; Set-Content -Path $nativeExitFile -Value $nativeExit }
+          }
+          $inventory = Join-Path $evidence 'sha256-inventory.txt'
+          Get-ChildItem $evidence -Recurse -File | Where-Object FullName -ne $inventory |
+            Sort-Object FullName | ForEach-Object {
+              $relative = [IO.Path]::GetRelativePath($evidence, $_.FullName)
+              $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $relative"
+            } | Set-Content -Path $inventory
+
+          if ($nativeExit -ne 0 -or $javaExit -ne 0) {
+            throw "Focused controls failed: native=$nativeExit java=$javaExit"
+          }
+      - name: Upload Windows collision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-collision-focus-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-collision-focus/
+          if-no-files-found: error
