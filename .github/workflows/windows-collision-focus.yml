@@ -36,11 +36,13 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $evidence = Join-Path $env:RUNNER_TEMP 'windows-collision-focus'
           $native = Join-Path $evidence 'native'
+          $precision = Join-Path $native 'pc53'
           $java = Join-Path $evidence 'java'
-          New-Item -ItemType Directory -Force -Path $native, $java | Out-Null
+          New-Item -ItemType Directory -Force -Path $native, $precision, $java | Out-Null
           $diagnosticDeadlineEpoch = [DateTimeOffset]::UtcNow.AddMinutes(60).ToUnixTimeSeconds()
           Set-Content -Path (Join-Path $evidence 'diagnostic-deadline-epoch.txt') -Value $diagnosticDeadlineEpoch
           $gradleExit = $null
+          $precisionExit = 'NOT_RUN'
           $javaExit = -1
           $scalarExit = 1
           $collectionStatus = 0
@@ -125,7 +127,7 @@ jobs:
             }
           }
           if ($xmlFiles.Count -ne 7) {
-            $collectionErrors.Add("Expected seven same-run XML reports; found $($xmlFiles.Count)")
+            $collectionErrors.Add("Expected seven original same-run XML reports; found $($xmlFiles.Count)")
             $collectionStatus = 1
           }
 
@@ -150,6 +152,50 @@ jobs:
             $collectionStatus = 1
           }
           Set-Content -Path (Join-Path $native 'test-pe-collector-exit-code.txt') -Value $testPeExit
+
+          $precisionCommand = @(
+            '.\gradlew.bat', ':dyn4k-core:mingwX64Test',
+            '--tests', 'org.dyn4j.collision.narrowphase.WindowsCollisionPrecisionControlTest',
+            '--no-daemon', '--rerun-tasks', '--console=plain', '--info'
+          )
+          $precisionCommand | Set-Content -Path (Join-Path $precision 'gradle-command.txt')
+          $precisionStdout = Join-Path $precision 'gradle-stdout.log'
+          $precisionStderr = Join-Path $precision 'gradle-stderr.log'
+          $precisionReceipt = Join-Path $precision 'gradle-receipt.json'
+          try {
+            if (Test-Path $results) { Remove-Item -LiteralPath $results -Recurse -Force }
+            & python .\tools\diagnostic\windows_collision\collect-test-pe.py run-bounded `
+              --timeout-seconds 1200 --deadline-epoch $diagnosticDeadlineEpoch `
+              --stdout $precisionStdout --stderr $precisionStderr --receipt $precisionReceipt `
+              -- cmd.exe /d /s /c ($precisionCommand -join ' ')
+            $precisionExit = [string]$LASTEXITCODE
+          } catch {
+            $precisionExit = 'START_FAILED'
+            $_ | Out-String | Set-Content -Path (Join-Path $precision 'gradle-launch-error.log')
+            $collectionErrors.Add("Controlled Gradle invocation failed to start: $($_.ToString())")
+            $collectionStatus = 1
+          }
+          Set-Content -Path (Join-Path $precision 'gradle-exit-code.txt') -Value $precisionExit
+          try {
+            $controlledXml = @(Get-ChildItem $results -Filter 'TEST-*.xml' -File -ErrorAction Stop)
+            $controlledName = 'TEST-mingwX64Test.org.dyn4j.collision.narrowphase.WindowsCollisionPrecisionControlTest.xml'
+            if ($controlledXml.Count -ne 1 -or $controlledXml[0].Name -ne $controlledName) {
+              throw "Expected one controlled XML report; found $($controlledXml.Count)"
+            }
+            Copy-Item -LiteralPath $controlledXml[0].FullName -Destination $precision -ErrorAction Stop
+          } catch {
+            $collectionErrors.Add("Controlled XML collection failed: $($_.ToString())")
+            $collectionStatus = 1
+          }
+          try {
+            $controlledPe = Join-Path $PWD 'dyn4k-core/build/bin/mingwX64/debugTest/test.exe'
+            Copy-Item -LiteralPath $controlledPe -Destination (Join-Path $precision 'test.exe') -ErrorAction Stop
+            $controlledPeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $precision 'test.exe')).Hash.ToLowerInvariant()
+            Set-Content -Path (Join-Path $precision 'test-executable-sha256.txt') -Value "$controlledPeHash  test.exe"
+          } catch {
+            $collectionErrors.Add("Controlled test PE collection failed: $($_.ToString())")
+            $collectionStatus = 1
+          }
 
           try {
             $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0.jar'
@@ -319,6 +365,26 @@ jobs:
             $validationStatus = 1
           }
           try {
+            $precisionValidation = Join-Path $precision 'precision-validation.log'
+            $candidateSource = (& git rev-parse HEAD).Trim()
+            & python tools/diagnostic/windows_collision/validate-precision-control.py validate `
+              --native-directory $native --controlled-directory $precision `
+              --java-trace $javaTsv --java-scalars (Join-Path $scalar 'java-scalar.tsv') `
+              --controlled-trace (Join-Path $precision 'mingwX64-collision-diagnostics-pc53.tsv') `
+              --result (Join-Path $precision 'precision-result.json') --source-sha $candidateSource `
+              2>&1 | Tee-Object -FilePath $precisionValidation
+            $precisionValidationExit = $LASTEXITCODE
+            if ($null -eq $precisionValidationExit -or $precisionValidationExit -ne 0) {
+              $collectionErrors.Add("Precision control validation failed with exit $precisionValidationExit")
+              $validationStatus = 1
+            }
+          } catch {
+            $precisionValidationExit = 1
+            $collectionErrors.Add("Precision control validation could not run: $($_.ToString())")
+            $validationStatus = 1
+          }
+          Set-Content -Path (Join-Path $precision 'precision-validation-exit-code.txt') -Value $precisionValidationExit
+          try {
             Set-Content -Path (Join-Path $evidence 'validation-status.txt') -Value $validationStatus
           } catch {
             $collectionErrors.Add("Validation status record failed: $($_.ToString())")
@@ -351,6 +417,16 @@ jobs:
             'tools/diagnostic/windows_collision/collect-test-pe.py'
             'tools/diagnostic/windows_collision/run-mode-controls.ps1'
             'tools/diagnostic/windows_collision/validate-mode-control.py'
+            'tools/diagnostic/windows_collision/validate-precision-control.py'
+            'tools/compatibility/windows_collision_focus.py'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt'
+            'dyn4k-core/src/mingwX64Test/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionPrecisionControlTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CapsuleSliceTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CirclePolygonTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CircleSegmentTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CircleSliceTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/PolygonCapsuleTest.kt'
+            'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/PolygonPolygonTest.kt'
           )
           $controlSourceHashes = [System.Collections.Generic.List[string]]::new()
           foreach ($relativeSource in $controlSources) {
@@ -429,8 +505,8 @@ jobs:
             $collectionErrors.Add("Final status decision failed: $($_.ToString())")
             $statusExit = 1
           }
-          if ($statusExit -ne 0 -or $scalarExit -ne 0) {
-            throw "Focused controls failed: gradle=$gradleExit java=$javaExit scalar=$scalarExit collection=$collectionStatus validation=$validationStatus"
+          if ($statusExit -ne 0 -or $scalarExit -ne 0 -or $precisionExit -ne '0') {
+            throw "Focused controls failed: gradle=$gradleExit precision=$precisionExit java=$javaExit scalar=$scalarExit collection=$collectionStatus validation=$validationStatus"
           }
       - name: Upload Windows collision evidence
         if: always()
