@@ -65,9 +65,9 @@ selected commit under home storage. Its four build output directories must
 not exist. Run the traced builder from that checkout with the pinned offline
 toolchain. Keep the trace archive and checkout together. The builder records
 each exact Gradle command, JDK and tracer hash, raw syscall trace, Gradle log,
-Kotlin source digests, freshly built and staged KLIB hashes, resolved link
-inputs, writable temporary executable mappings, rename installs, and both
-executable hashes.
+engine and producer Kotlin source digests, generated producer identity, fresh
+and staged KLIB hashes, resolved link inputs, writable temporary executable
+mappings, rename installs, and both executable hashes.
 
 ```sh
 git worktree add --detach /home/stewart/native-source-link-checkout COMMIT

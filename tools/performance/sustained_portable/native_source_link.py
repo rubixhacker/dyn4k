@@ -29,6 +29,21 @@ def source_files(root=ROOT):
     return files
 
 
+def consumer_source_files(root=ROOT):
+    source_root = root / "consumers/performance/portable/src"
+    files = {}
+    for source_set in SOURCE_SETS:
+        for path in sorted((source_root / source_set).rglob("*.kt")):
+            files[str(path.resolve())] = capture.digest(path)
+    if not files:
+        raise ValueError("Linux x64 producer source set is empty")
+    return files
+
+
+def identity_source(root=ROOT):
+    return root / "consumers/performance/portable/build/generated/portableIdentity/commonMain/kotlin/performance/portable/BuildIdentity.kt"
+
+
 def git_value(*arguments):
     return subprocess.check_output(["git", "-C", str(ROOT), *arguments], text=True).strip()
 
@@ -141,6 +156,7 @@ def build(args):
     if "gradle-9.5.0" not in str(gradle) or "jdk21" not in str(java):
         raise ValueError("select pinned Gradle 9.5.0 and JDK 21")
     sources = source_files()
+    producer_sources = consumer_source_files()
     args.archive.mkdir(parents=True)
     temporary = args.archive / "tmp"
     temporary.mkdir()
@@ -187,18 +203,24 @@ def build(args):
             if selected[label]["sha256"] != publication[label]["sha256"]:
                 raise ValueError("consumer resolved KLIB differs from fresh compiler output")
         executable = capture.required_file(inventory["harness"], "fresh linked executable")
+        identity = capture.required_file(str(identity_source()), "generated producer identity")
         inventories[build_name] = {"path": str(inventory_path), "sha256": capture.digest(inventory_path),
                                    "executable": str(executable), "executable_sha256": capture.digest(executable),
+                                   "generated_identity": str(identity),
+                                   "generated_identity_sha256": capture.digest(identity),
                                    "resolved_klibs": {label: selected[label] for label in LABELS}}
         link_events[build_name] = trace_events(Path(actions[build_name]["trace"]),
-            [selected[label]["path"] for label in LABELS] + [str(executable)])
+            [selected[label]["path"] for label in LABELS] + [str(executable), str(identity)] +
+            list(producer_sources))
         link_events[build_name]["executable_install"] = executable_install(
             Path(actions[build_name]["trace"]), str(executable))
-    if source_files() != sources or git_value("status", "--porcelain", "--untracked-files=all"):
+    if (source_files() != sources or consumer_source_files() != producer_sources or
+            git_value("status", "--porcelain", "--untracked-files=all")):
         raise ValueError("source checkout changed during traced build")
     receipt = {"format": "linux-x64-native-source-link-v1", "qualification": "unpassed",
                "source_to_link": "unpassed", "source_sha": git_value("rev-parse", "HEAD"),
                "checkout": str(ROOT), "source_files": sources, "actions": actions,
+               "producer_source_files": producer_sources,
                "publication": publication, "inventories": inventories,
                "observed_syscalls": {"publication": publication_events,
                                      "development": link_events["development"],
@@ -217,7 +239,8 @@ def verify_receipt(path, inventory=None, build_name=None):
             receipt.get("source_to_link") != "unpassed" or
             receipt.get("checkout") != str(ROOT) or
             receipt.get("source_sha") != git_value("rev-parse", "HEAD") or
-            receipt.get("source_files") != source_files()):
+            receipt.get("source_files") != source_files() or
+            receipt.get("producer_source_files") != consumer_source_files()):
         raise ValueError("source-link receipt differs from selected checkout source")
     if set(receipt.get("actions", {})) != {"publication", *BUILDS}:
         raise ValueError("source-link receipt lacks exact traced build actions")
@@ -280,16 +303,25 @@ def verify_receipt(path, inventory=None, build_name=None):
                 selected_inventory.get("target") != "linuxX64" or
                 selected_inventory.get("build") != mode or
                 selected_inventory.get("harness") != item["executable"] or
+                item["generated_identity"] != str(identity_source()) or
+                capture.digest(identity_source()) != item["generated_identity_sha256"] or
                 capture.digest(Path(item["executable"])) != item["executable_sha256"]):
             raise ValueError("fresh executable or inventory differs from traced build")
+        identity_text = identity_source().read_text()
+        if (receipt["source_sha"] not in identity_text or
+                selected_inventory["producer_tree"] not in identity_text):
+            raise ValueError("generated identity differs from selected source")
         selected = capture.native_artifacts(selected_inventory, "linuxX64")
         trace = Path(receipt["actions"][mode]["trace"])
         paths = [selected[label]["path"] for label in LABELS]
-        events = trace_events(trace, paths + [item["executable"]])
+        expected_sources = set(receipt["producer_source_files"]) | {item["generated_identity"]}
+        events = trace_events(trace, paths + [item["executable"]] + list(expected_sources))
         events["executable_install"] = executable_install(trace, item["executable"])
         if events != receipt["observed_syscalls"][mode]:
             raise ValueError(f"{mode} syscall observations differ from raw trace")
         reads = events["read"]
+        if not expected_sources <= set(reads):
+            raise ValueError(f"{mode} producer compiler source reads unobserved")
         for label in LABELS:
             if (selected[label] != item["resolved_klibs"][label] or
                     selected[label]["sha256"] != receipt["publication"][label]["sha256"] or

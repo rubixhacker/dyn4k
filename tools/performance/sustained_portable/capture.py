@@ -564,6 +564,7 @@ def capture(args):
         "source_to_link": "unpassed",
         "source_link_trace": ({"receipt_sha256": digest(args.archive / "source-link.json"),
                                "source_reads": len(source_link["source_files"]),
+                               "producer_source_reads": len(source_link["producer_source_files"]) + 1,
                                "build": args.build,
                                "publication_writes": source_link["observed_syscalls"]["publication"]["write"],
                                "link_writes": source_link["observed_syscalls"][args.build]["write"],
