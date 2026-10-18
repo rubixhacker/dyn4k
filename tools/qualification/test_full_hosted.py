@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -7,6 +8,7 @@ import tempfile
 import time
 import unittest
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path, PureWindowsPath
 from unittest import mock
 
@@ -245,6 +247,23 @@ class FullHostedTests(unittest.TestCase):
             self.assertEqual(set(qualify.MODULES), set(receipt["artifact_hashes"]))
             self.assertTrue(receipt["staged_gav"])
             self.assertEqual(audit["content_contract"], captured[0][3])
+            self.assertEqual(audit["content_contract"], receipt["staged_content_contract"])
+            staged = [item for item in full_hosted.archive_inventory(self.root / "captured")
+                      if item["path"].startswith("staged/")]
+            self.assertEqual(52, len(staged))
+            full_hosted.verify_staging(self.root / "captured", {
+                "target": target, "staged_gav": receipt["staged_gav"],
+                "artifact_hashes": receipt["artifact_hashes"], "files": staged})
+            full_hosted.verify_staged_content(self.root / "captured", receipt, repository)
+            name = qualify.target_publication_name("dyn4k-core", target)
+            metadata = (self.root / "captured/staged" / qualify.GROUP.replace(".", "/") /
+                        name / qualify.VERSION / f"{name}-{qualify.VERSION}-metadata.jar")
+            original = metadata.read_bytes()
+            metadata.write_bytes(original + b"\n")
+            metadata.with_name(metadata.name + ".sha256").write_text(
+                full_hosted.sha256(metadata) + "\n")
+            with self.assertRaisesRegex(ValueError, "content audit"):
+                full_hosted.verify_staged_content(self.root / "captured", receipt, repository)
 
             calls.clear()
             wrong = full_hosted.run(target, "b" * 40, self.root / "wrong-candidate")
@@ -259,7 +278,7 @@ class FullHostedTests(unittest.TestCase):
         target = "mingwX64"
         now = time.time_ns()
         receipt = {"schema": 2, "kind": "hosted-full-common-corpus", "target": target,
-                   "status": "FULL_COMMON_PASSED", "candidate_sha": "a" * 40,
+                   "status": "FULL_COMMON_PASSED",
                    "manifest_sha256": full_hosted.canonical_hash(manifest),
                    "source_tree_sha256": manifest["source_tree_sha256"],
                    "map_sha256": full_hosted.sha256(repository / full_hosted.MAPPING),
@@ -313,35 +332,27 @@ class FullHostedTests(unittest.TestCase):
         for source in manifest["source_files"]:
             full_hosted.archive_copy(repository / source["path"], self.root,
                                      f"sources/{source['path']}")
-        names = {module for module in qualify.MODULES}
-        names.update(qualify.target_publication_name(module, target) for module in qualify.MODULES)
-        receipt["staged_gav"] = [f"{qualify.GROUP}:{name}:{qualify.VERSION}" for name in sorted(names)]
-        for name in names:
-            base = self.root / "staged" / qualify.GROUP.replace(".", "/") / name / qualify.VERSION
-            deps = ""
-            if name == "dyn4k" or name.startswith("dyn4k-") and not name.startswith("dyn4k-core"):
-                core = name.replace("dyn4k", "dyn4k-core", 1)
-                deps = f"<dependencies><dependency><groupId>{qualify.GROUP}</groupId><artifactId>{core}</artifactId><version>{qualify.VERSION}</version></dependency></dependencies>"
-            write(base / f"{name}-{qualify.VERSION}.pom", f"<project xmlns='http://maven.apache.org/POM/4.0.0'><groupId>{qualify.GROUP}</groupId><artifactId>{name}</artifactId><version>{qualify.VERSION}</version>{deps}</project>")
-            variants = []
-            component_name = name
-            if name in qualify.MODULES:
-                mapped = qualify.target_publication_name(name, target)
-                variants = [{"available-at": {"group": qualify.GROUP, "module": mapped,
-                    "version": qualify.VERSION,
-                    "url": f"../../{mapped}/{qualify.VERSION}/{mapped}-{qualify.VERSION}.module"}}]
-            else:
-                component_name = "dyn4k-core" if name.startswith("dyn4k-core-") else "dyn4k"
-            component = {"group": qualify.GROUP, "module": component_name, "version": qualify.VERSION}
-            if name not in qualify.MODULES:
-                component["url"] = f"../../{component_name}/{qualify.VERSION}/{component_name}-{qualify.VERSION}.module"
-            write(base / f"{name}-{qualify.VERSION}.module", json.dumps({"component": component,
-                "variants": variants}))
-        for module in qualify.MODULES:
-            binary = self.root / "staged" / qualify.target_binary_path(module, target)
-            write(binary, (module + "-staged").encode())
-            receipt["artifact_hashes"][module] = full_hosted.sha256(binary)
-            write(binary.with_name(binary.name + ".sha256"), receipt["artifact_hashes"][module] + "\n")
+        self.candidate_repository = Path(tempfile.mkdtemp(prefix="candidate-",
+                                                          dir=self.root.parent))
+        self.addCleanup(shutil.rmtree, self.candidate_repository)
+        checkout_patch = mock.patch.object(full_hosted, "candidate_checkout",
+                                           return_value=self.candidate_repository)
+        checkout_patch.start()
+        self.addCleanup(checkout_patch.stop)
+        test_publication.PublicationAuditTests().stage(self.candidate_repository, (target,))
+        subprocess.run(["git", "init", "-q", str(self.candidate_repository)], check=True)
+        subprocess.run(["git", "-C", str(self.candidate_repository), "add", "LICENSE.md",
+                        "dyn4k-core/src", "dyn4k/src"], check=True)
+        subprocess.run(["git", "-C", str(self.candidate_repository), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
+                       check=True)
+        receipt["candidate_sha"] = subprocess.check_output(
+            ["git", "-C", str(self.candidate_repository), "rev-parse", "HEAD"],
+            text=True).strip()
+        receipt["staged_gav"], _, staged_hashes, receipt["staged_content_contract"] = (
+            full_hosted.artifact.capture_staging(self.candidate_repository, self.root,
+                                                 [target], receipt["candidate_sha"]))
+        receipt["artifact_hashes"] = staged_hashes[target]
         receipt["stage"] = process(self.root / "stage", None,
                                    ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                                    "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository")
@@ -446,7 +457,7 @@ class FullHostedTests(unittest.TestCase):
                     (self.root / "receipt.json").write_text(json.dumps(receipt))
                     full_hosted.package_archive(self.root, archive)
                     with self.assertRaisesRegex(ValueError, "toolchain"):
-                        full_hosted.verify_transport_archive(archive, "a" * 40, "mingwX64")
+                        full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
                     receipt["runtime"][key] = pinned[key]
 
     def test_resealed_stale_process_logs_fail_directory_and_tar(self):
@@ -467,7 +478,7 @@ class FullHostedTests(unittest.TestCase):
                     (self.root / "receipt.json").write_text(json.dumps(receipt))
                     full_hosted.package_archive(self.root, archive)
                     with self.assertRaisesRegex(ValueError, "process log timestamp"):
-                        full_hosted.verify_transport_archive(archive, "a" * 40, "mingwX64")
+                        full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
                     os.utime(path, ns=(original, original))
                     receipt["files"] = full_hosted.archive_inventory(self.root)
 
@@ -484,6 +495,108 @@ class FullHostedTests(unittest.TestCase):
         receipt["configurations"][0]["source"][0]["reports"][0].update(
             sha256=full_hosted.sha256(report), modified_ns=report.stat().st_mtime_ns)
         with self.assertRaisesRegex(ValueError, "XML|cases"):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+
+    def test_complete_staged_publication_reaches_directory_and_transport_verifiers(self):
+        receipt, manifest, consumer = self.full_archive()
+        staged = [item for item in receipt["files"] if item["path"].startswith("staged/")]
+        self.assertEqual(48, len(staged))
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        archive = self.root.parent / (self.root.name + "-complete.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "mingwX64",
+                candidate_repository=self.candidate_repository)
+
+    def test_resealed_staged_publication_mutations_fail_directory_and_tar(self):
+        receipt, manifest, consumer = self.full_archive()
+        base = self.root / "staged" / qualify.GROUP.replace(".", "/")
+        name = qualify.target_publication_name("dyn4k-core", "mingwX64")
+        files = {
+            "sources": base / name / qualify.VERSION / f"{name}-{qualify.VERSION}-sources.jar",
+            "docs": base / name / qualify.VERSION / f"{name}-{qualify.VERSION}-javadoc.jar",
+            "license": base / name / qualify.VERSION / f"{name}-{qualify.VERSION}-license.md",
+            "metadata": base / name / qualify.VERSION / f"{name}-{qualify.VERSION}.module",
+        }
+        archive = self.root.parent / (self.root.name + "-mutated.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            for label, path in files.items():
+                for mutation in ("missing", "extra", "changed"):
+                    with self.subTest(file=label, mutation=mutation):
+                        original = path.read_bytes()
+                        sidecar = path.with_name(path.name + ".sha256")
+                        original_sidecar = sidecar.read_bytes()
+                        extra = path.with_name(path.name + ".extra")
+                        try:
+                            if mutation == "missing":
+                                path.unlink()
+                                sidecar.unlink()
+                            elif mutation == "extra":
+                                extra.write_bytes(b"extra staged publication file")
+                            else:
+                                if label == "metadata":
+                                    metadata = json.loads(original)
+                                    metadata["component"]["url"] = "../../wrong/1/wrong.module"
+                                    path.write_text(json.dumps(metadata))
+                                else:
+                                    path.write_bytes(original + b"\n")
+                                sidecar.write_text(full_hosted.sha256(path) + "\n")
+                            receipt["files"] = full_hosted.archive_inventory(self.root)
+                            with self.assertRaises(ValueError):
+                                full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+                            (self.root / "receipt.json").write_text(json.dumps(receipt))
+                            full_hosted.package_archive(self.root, archive)
+                            with self.assertRaises(ValueError):
+                                full_hosted.verify_transport_archive(
+                                    archive, receipt["candidate_sha"], "mingwX64")
+                        finally:
+                            path.write_bytes(original)
+                            sidecar.write_bytes(original_sidecar)
+                            extra.unlink(missing_ok=True)
+
+    def test_resealed_content_contract_and_wrong_candidate_fail(self):
+        receipt, manifest, consumer = self.full_archive()
+        contract = receipt.pop("staged_content_contract")
+        with self.assertRaisesRegex(ValueError, "content contract is absent"):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+        receipt["staged_content_contract"] = contract
+        sources = receipt["staged_content_contract"]["sources"]["dyn4k-core"]
+        original_source = sources["commonMain/api/Type.kt"]
+        sources["commonMain/api/Type.kt"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "exact candidate"):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+        sources["commonMain/api/Type.kt"] = original_source
+        receipt["candidate_sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "candidate source is unavailable"):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        archive = self.root.parent / (self.root.name + "-wrong-candidate.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "candidate source is unavailable"):
+                full_hosted.verify_transport_archive(archive, "b" * 40, "mingwX64")
+
+    def test_resealed_root_docs_contract_must_match_generated_checkout(self):
+        receipt, manifest, consumer = self.full_archive()
+        module = "dyn4k-core"
+        jar = (self.root / "staged" / qualify.GROUP.replace(".", "/") / module /
+               qualify.VERSION / f"{module}-{qualify.VERSION}-javadoc.jar")
+        with zipfile.ZipFile(jar) as source:
+            entries = [(info, source.read(info.filename)) for info in source.infolist()]
+        with zipfile.ZipFile(jar, "w") as changed:
+            for info, contents in entries:
+                changed.writestr(info, b"<html>forged</html>" if info.filename == "index.html"
+                                 else contents)
+        jar.with_name(jar.name + ".sha256").write_text(full_hosted.sha256(jar) + "\n")
+        receipt["staged_content_contract"]["api_docs_sha256"][module] = full_hosted.sha256(jar)
+        receipt["files"] = full_hosted.archive_inventory(self.root)
+        with self.assertRaisesRegex(ValueError, "Dokka"):
             full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
 
     def test_complete_archive_rejects_missing_consumer_graph_and_executable_tamper(self):
@@ -549,7 +662,7 @@ class FullHostedTests(unittest.TestCase):
     def test_verify_cli_reads_receipt_and_rechecks_archive(self):
         receipt, manifest, _ = self.full_archive()
         (self.root / "receipt.json").write_text(json.dumps(receipt))
-        arguments = ["full_hosted.py", "--verify", "--candidate-sha", "a" * 40,
+        arguments = ["full_hosted.py", "--verify", "--candidate-sha", receipt["candidate_sha"],
                      "--target", "mingwX64", "--output", str(self.root)]
         with mock.patch.object(sys, "argv", arguments), mock.patch.object(
                 full_hosted, "load_corpus", return_value=manifest):
@@ -566,8 +679,8 @@ class FullHostedTests(unittest.TestCase):
         self.addCleanup(archive.unlink, missing_ok=True)
         full_hosted.package_archive(self.root, archive)
         with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
-            full_hosted.verify_transport_archive(archive, "a" * 40, "mingwX64")
-            arguments = ["full_hosted.py", "--verify-tar", "--candidate-sha", "a" * 40,
+            full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
+            arguments = ["full_hosted.py", "--verify-tar", "--candidate-sha", receipt["candidate_sha"],
                          "--target", "mingwX64", "--archive", str(archive)]
             with mock.patch.object(sys, "argv", arguments):
                 self.assertEqual(0, full_hosted.main())
@@ -577,7 +690,7 @@ class FullHostedTests(unittest.TestCase):
             info.pax_headers = {"dyn4k.mtime_ns": "1"}
             packed.addfile(info)
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            full_hosted.verify_transport_archive(archive, "a" * 40, "mingwX64")
+            full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
         full_hosted.package_archive(self.root, archive)
         with tarfile.open(archive, "a") as packed:
             info = tarfile.TarInfo("../escape")
@@ -585,7 +698,7 @@ class FullHostedTests(unittest.TestCase):
             info.pax_headers = {"dyn4k.mtime_ns": "1"}
             packed.addfile(info)
         with self.assertRaisesRegex(ValueError, "unsafe archive path"):
-            full_hosted.verify_transport_archive(archive, "a" * 40, "mingwX64")
+            full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
 
 if __name__ == "__main__":
     unittest.main()

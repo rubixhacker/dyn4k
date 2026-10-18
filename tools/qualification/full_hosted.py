@@ -138,7 +138,7 @@ def package_archive(output, archive):
                 packed.addfile(info, stream)
 
 
-def verify_transport_archive(archive, candidate_sha, target):
+def verify_transport_archive(archive, candidate_sha, target, candidate_repository=None):
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary)
         names = set()
@@ -169,7 +169,7 @@ def verify_transport_archive(archive, candidate_sha, target):
         receipt = qualify.load_json_strict(output / "receipt.json")
         if receipt.get("candidate_sha") != candidate_sha or receipt.get("target") != target:
             raise ValueError("transport archive candidate or target differs")
-        verify_raw_files(output, receipt)
+        verify_raw_files(output, receipt, candidate_repository=candidate_repository)
         return receipt
 
 
@@ -179,6 +179,10 @@ def sha256(path):
 
 def canonical_hash(value):
     return qualify.manifest_digest(value)
+
+
+def candidate_checkout():
+    return Path(__file__).resolve().parents[2]
 
 
 def committed_input(repository, candidate_sha, relative):
@@ -529,9 +533,16 @@ def verify_staging(output, receipt):
     ns = "{http://maven.apache.org/POM/4.0.0}"
     for name in expected_names:
         base = Path("staged") / qualify.GROUP.replace(".", "/") / name / qualify.VERSION
+        suffixes = (".pom", ".module", "-sources.jar", "-javadoc.jar", "-license.md")
+        if name in qualify.MODULES:
+            suffixes += (".jar",)
+        if artifact_target in qualify.APPLE_TARGETS and name not in qualify.MODULES:
+            suffixes += ("-metadata.jar",)
+        for suffix in suffixes:
+            relative = base / f"{name}-{qualify.VERSION}{suffix}"
+            expected_paths.update((relative.as_posix(), relative.as_posix() + ".sha256"))
         for suffix in (".pom", ".module"):
             relative = base / f"{name}-{qualify.VERSION}{suffix}"
-            expected_paths.add(relative.as_posix())
             path = archived_file(output, relative.as_posix())
             if suffix == ".pom":
                 root = ET.parse(path).getroot()
@@ -583,6 +594,42 @@ def verify_staging(output, receipt):
         raise ValueError("staged artifact archive inventory differs")
 
 
+def verify_staged_content(output, receipt, repository):
+    contract = receipt.get("staged_content_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("staged publication content contract is absent")
+    if not (repository / ".git").exists():
+        raise ValueError("staged publication candidate Git checkout is absent")
+    candidate_sha = receipt["candidate_sha"]
+    try:
+        candidate_sources = qualify.candidate_source_contract(repository, candidate_sha)
+        license_bytes = committed_input(repository, candidate_sha, "LICENSE.md")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("staged publication candidate source is unavailable") from error
+    if contract.get("sources") != candidate_sources:
+        raise ValueError("staged sources differ from exact candidate")
+    license_path = archived_file(output, "LICENSE.md")
+    if license_path.read_bytes() != license_bytes:
+        raise ValueError("staged license differs from exact candidate")
+    docs = contract.get("api_docs_sha256")
+    if not isinstance(docs, dict) or set(docs) != set(qualify.MODULES):
+        raise ValueError("staged API documentation contract is invalid")
+    for module in qualify.MODULES:
+        name = f"{module}-{qualify.VERSION}-javadoc.jar"
+        relative = Path("staged") / qualify.GROUP.replace(".", "/") / module / qualify.VERSION / name
+        jar = archived_file(output, relative.as_posix())
+        qualify.validate_generated_docs(jar, repository / module / "build/dokka/html",
+                                        license_bytes)
+        if sha256(jar) != docs[module]:
+            raise ValueError("staged API documentation differs from audited checkout")
+    target = "js" if receipt["target"] == "jsSafari" else receipt["target"]
+    audit = qualify.audit_staging(output / "staged", candidate_sha, [target], license_path,
+                                  content_contract=contract)
+    if audit["status"] != "PASSED" or audit["content_contract"] != contract:
+        raise ValueError("archived staged publication differs from content audit: "
+                         + "; ".join(audit["errors"]))
+
+
 def verify_process(output, folder, process, invocation, required_task=None):
     if (process.get("invocation_id") != invocation or process.get("exit_code") != 0
             or type(process.get("pid")) is not int or process["pid"] <= 0
@@ -624,7 +671,8 @@ def verify_report_group(output, folder, group, checked, prefix):
             raise ValueError("archived XML differs from receipt")
 
 
-def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None):
+def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
+                     candidate_repository=None):
     target = receipt.get("target")
     if (target not in TARGETS or receipt.get("status") != "FULL_COMMON_PASSED"
             or receipt.get("schema") != 2 or receipt.get("kind") != "hosted-full-common-corpus"
@@ -673,6 +721,7 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None):
         raise ValueError("GitHub runner OS or architecture differs")
     verify_inventory(output, receipt.get("files"))
     verify_staging(output, receipt)
+    verify_staged_content(output, receipt, candidate_repository or candidate_checkout())
     stage = receipt.get("stage")
     if not isinstance(stage, dict):
         raise ValueError("staging process is absent")
@@ -897,8 +946,9 @@ def run(target, candidate_sha, output):
         staging = repository / "build/staging-repository"
         receipt["staging_repository"] = str(staging)
         receipt["artifact_hashes"] = hosted.target_hashes(staging, artifact_target)
-        receipt["staged_gav"], _, staged_hashes, _ = artifact.capture_staging(
-            repository, output, [artifact_target], candidate_sha)
+        (receipt["staged_gav"], _, staged_hashes,
+         receipt["staged_content_contract"]) = artifact.capture_staging(
+             repository, output, [artifact_target], candidate_sha)
         if staged_hashes[artifact_target] != receipt["artifact_hashes"]:
             raise ValueError("staged artifact capture differs from target hashes")
         for config in CONFIGS[target]:
