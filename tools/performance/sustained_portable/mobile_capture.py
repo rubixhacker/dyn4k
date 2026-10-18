@@ -192,6 +192,35 @@ def selected_artifact(inventory, module, target):
     return matches[0]
 
 
+def validate_apple_image_derivation(inventory, linked, harness, target, build):
+    app = Path(inventory["app_bundle"])
+    simulator = target in APPLE_SIMULATORS
+    linked_sha = capture.digest(linked)
+    packaged_sha = capture.digest(harness)
+    linked_size = linked.stat().st_size
+    packaged_size = harness.stat().st_size
+    sign_command = (["codesign", "--force", "--sign", "-", "--timestamp=none", str(app)]
+                    if simulator else None)
+    verify_command = ["codesign", "--verify", str(app)] if simulator else None
+    expected = {
+        "format": "portable-apple-image-derivation-v1", "target": target, "build": build,
+        "linked_path": str(linked), "linked_sha256": linked_sha, "linked_size": linked_size,
+        "copied_sha256": linked_sha, "copied_size": linked_size,
+        "package_path": str(app), "packaged_sha256": packaged_sha,
+        "packaged_size": packaged_size, "signing": "ad_hoc" if simulator else "none",
+        "signing_command": sign_command, "verification_command": verify_command,
+        "codesign_verified": simulator,
+    }
+    actual = inventory.get("image_derivation")
+    if (linked_size <= 0 or packaged_size <= 0
+            or (not simulator and (packaged_sha != linked_sha or packaged_size != linked_size))
+            or not isinstance(actual, dict) or actual != expected
+            or any(type(actual.get(key)) is not type(value) for key, value in expected.items())
+            or inventory["bundle_sha256"].get(harness.name) != packaged_sha):
+        raise ValueError("Apple linked-to-package image derivation differs from selected build")
+    return expected
+
+
 def validate_inventory(path, target, build):
     inventory = json.loads(path.read_text())
     sha = command(["git", "-C", str(capture.ROOT), "rev-parse", "HEAD"]).stdout.strip()
@@ -240,6 +269,10 @@ def validate_inventory(path, target, build):
                      for item in sorted(bundle_root.rglob("*")) if item.is_file()}
     if not actual_bundle or inventory.get("bundle_sha256") != actual_bundle:
         raise ValueError("mobile package bytes differ from build inventory")
+    if apple:
+        validate_apple_image_derivation(inventory, linked, harness, target, build)
+    elif inventory.get("image_derivation") is not None:
+        raise ValueError("Android Native inventory contains Apple image derivation")
     artifacts = inventory.get("resolved_artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("mobile compilation has no resolved artifacts")
@@ -368,22 +401,28 @@ def run_simulator(args, inventory, harness, producer, nonce):
     validate_simctl_launch_help(help_result.stdout + help_result.stderr)
     app = inventory["app_bundle"]
     bundle = inventory["bundle_id"]
+    setup_command(args.archive, "apple-selected-signature", ["codesign", "--verify", app])
     setup_command(args.archive, "apple-install", ["xcrun", "simctl", "install", args.udid, app], timeout=120)
     container = setup_command(args.archive, "apple-container",
                               ["xcrun", "simctl", "get_app_container", args.udid, bundle, "app"]).stdout.strip()
     installed_app = Path(container)
     installed = installed_app / harness.name
+    setup_command(args.archive, "apple-installed-signature", ["codesign", "--verify", str(installed_app)])
     installed_bundle = validate_installed_bundle(Path(app), installed_app)
     selected_sha = capture.digest(harness)
     selected_size = harness.stat().st_size
-    if (selected_sha != inventory["linked_sha256"] or selected_size <= 0
+    derivation = inventory.get("image_derivation")
+    if (not isinstance(derivation, dict) or selected_size <= 0
+            or derivation.get("linked_sha256") != inventory["linked_sha256"]
+            or derivation.get("packaged_sha256") != selected_sha
+            or derivation.get("packaged_size") != selected_size
             or installed_bundle != inventory["bundle_sha256"]
             or installed_bundle.get(harness.name) != selected_sha
             or not installed.is_file() or capture.digest(installed) != selected_sha):
-        raise ValueError("installed simulator executable differs from selected link")
+        raise ValueError("installed simulator executable differs from selected signed package")
     prelaunch_image = apple_file_identity(installed)
     if prelaunch_image["size"] != selected_size:
-        raise ValueError("installed simulator executable size differs from selected link")
+        raise ValueError("installed simulator executable size differs from selected signed package")
     data_container = Path(setup_command(args.archive, "apple-data-container",
         ["xcrun", "simctl", "get_app_container", args.udid, bundle, "data"]).stdout.strip())
     if not data_container.is_absolute() or not data_container.is_dir() or data_container.is_symlink():
@@ -461,6 +500,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
                             "installed_image_size": apple_file_identity(installed)["size"],
                             "installed_bundle_sha256": postlaunch_bundle,
                             "linked_sha256": inventory["linked_sha256"],
+                            "image_derivation": derivation,
                             "launch": {"pid": image["pid"], "method": "simctl-redirected-files",
                                        "stdout_sha256": capture.digest(args.archive / "setup/apple-launch.stdout.bin")},
                             "output": {"stdout_path": str(stdout_path), "stderr_path": str(stderr_path),
@@ -573,6 +613,7 @@ def run(args):
         receipt["source_sha"] = inventory["source_sha"]
         receipt["producer_tree"] = inventory["producer_tree"]
         receipt["executable_sha256"] = capture.digest(harness)
+        receipt["linked_executable_sha256"] = inventory["linked_sha256"]
         receipt["artifacts"] = artifacts
         if process["ended_ns"] <= process["started_ns"] or process["image"]["pid"] <= 0:
             raise ValueError("process PID or monotonic interval is invalid")
@@ -596,12 +637,28 @@ def run(args):
             if not isinstance(output, dict) or output.get("stdout_sha256") != hashlib.sha256(stdout).hexdigest() \
                     or output.get("stderr_sha256") != hashlib.sha256(stderr).hexdigest():
                 raise ValueError("simulator redirected producer output bytes changed")
-            if process.get("linked_sha256") != inventory["linked_sha256"] \
+            signed_sha = inventory["bundle_sha256"].get(harness.name)
+            derivation = inventory.get("image_derivation")
+            linked_path = Path(inventory["linked_executable"])
+            observed_path = Path(process["image"].get("path", ""))
+            if (not linked_path.is_file() or capture.digest(linked_path) != inventory["linked_sha256"]
+                    or not isinstance(derivation, dict)
+                    or linked_path.stat().st_size != derivation.get("linked_size")
+                    or capture.digest(harness) != signed_sha
+                    or harness.stat().st_size != derivation.get("packaged_size")
+                    or not observed_path.is_absolute() or observed_path.is_symlink()
+                    or not observed_path.is_file() or capture.digest(observed_path) != signed_sha
+                    or observed_path.stat().st_size != derivation.get("packaged_size")):
+                raise ValueError("simulator raw link or selected/installed signed executable changed")
+            if not isinstance(derivation, dict) or process.get("image_derivation") != derivation \
+                    or derivation.get("linked_sha256") != inventory["linked_sha256"] \
+                    or derivation.get("packaged_sha256") != signed_sha \
+                    or process.get("linked_sha256") != inventory["linked_sha256"] \
                     or process.get("installed_bundle_sha256") != inventory["bundle_sha256"] \
-                    or process.get("installed_image_sha256") != inventory["linked_sha256"] \
-                    or process["image"].get("sha256") != inventory["linked_sha256"] \
-                    or process.get("installed_image_size") != harness.stat().st_size \
-                    or process["image"].get("size") != harness.stat().st_size:
+                    or process.get("installed_image_sha256") != signed_sha \
+                    or process["image"].get("sha256") != signed_sha \
+                    or process.get("installed_image_size") != derivation.get("packaged_size") \
+                    or process["image"].get("size") != derivation.get("packaged_size"):
                 raise ValueError("simulator installed package or link differs from inventory")
             protocol_bytes = simulator_protocol_bytes(
                 stdout, launch_file.read_bytes(), process["bundle_id"], process["image"]["pid"])

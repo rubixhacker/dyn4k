@@ -1,3 +1,4 @@
+import copy
 import json
 import io
 from pathlib import Path
@@ -10,6 +11,26 @@ from unittest.mock import Mock, patch
 
 import mobile_capture
 import test_capture
+
+
+def apple_derivation(linked, harness, target="iosX64", build="development"):
+    app = harness.parent
+    simulator = target in mobile_capture.APPLE_SIMULATORS
+    linked_sha = mobile_capture.capture.digest(linked)
+    return {
+        "format": "portable-apple-image-derivation-v1", "target": target, "build": build,
+        "linked_path": str(linked), "linked_sha256": linked_sha,
+        "linked_size": linked.stat().st_size,
+        "copied_sha256": linked_sha, "copied_size": linked.stat().st_size,
+        "package_path": str(app),
+        "packaged_sha256": mobile_capture.capture.digest(harness),
+        "packaged_size": harness.stat().st_size,
+        "signing": "ad_hoc" if simulator else "none",
+        "signing_command": (["codesign", "--force", "--sign", "-", "--timestamp=none", str(app)]
+                            if simulator else None),
+        "verification_command": ["codesign", "--verify", str(app)] if simulator else None,
+        "codesign_verified": simulator,
+    }
 
 
 class MobileCaptureAdverseTest(unittest.TestCase):
@@ -98,7 +119,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             "--stdout=<path> Redirect the application's standard output to a file.\n"
             "--stderr=<path> Redirect the application's standard error to a file.")
 
-    def test_simulator_adapter_separates_os_receipt_and_app_files(self):
+    def test_simulator_adapter_accepts_signed_image_distinct_from_raw_link(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             selected = root / "selected.app"
@@ -108,19 +129,25 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             for path in (selected, installed, data, archive):
                 path.mkdir()
             for app in (selected, installed):
-                (app / "Dyn4kPerformance").write_bytes(b"same executable")
+                (app / "Dyn4kPerformance").write_bytes(b"signed executable")
                 (app / "Info.plist").write_bytes(b"same package")
+            linked = root / "raw-linked.kexe"
+            linked.write_bytes(b"raw linked executable")
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
             app_raw = b"DYN4K\tCOMPLETE\tnonce\n"
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
-                         "linked_sha256": mobile_capture.capture.digest(selected / "Dyn4kPerformance"),
-                         "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed)}
+                         "linked_sha256": mobile_capture.capture.digest(linked),
+                         "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
+                         "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
             launches = []
+            signature_checks = []
 
             def setup(_archive, label, argv, **_kwargs):
+                if label in ("apple-selected-signature", "apple-installed-signature"):
+                    signature_checks.append((label, argv))
                 if label == "apple-xcode":
                     output = "Xcode 26.4.1\nBuild version 1\n"
                 elif label == "apple-device-list":
@@ -165,9 +192,14 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual((archive / "stderr.bin").read_bytes(), stderr)
             self.assertEqual((archive / "setup/apple-launch.stdout.bin").read_bytes(), launch_raw)
             self.assertEqual(process["launch"]["pid"], 123)
-            self.assertEqual(process["image"]["sha256"], inventory["linked_sha256"])
+            self.assertEqual(process["image"]["sha256"], inventory["bundle_sha256"]["Dyn4kPerformance"])
+            self.assertNotEqual(process["image"]["sha256"], inventory["linked_sha256"])
             self.assertEqual(process["installed_image_size"], identity["size"])
             self.assertEqual(len(launches), 1)
+            self.assertEqual(signature_checks, [
+                ("apple-selected-signature", ["codesign", "--verify", str(selected)]),
+                ("apple-installed-signature", ["codesign", "--verify", str(installed)]),
+            ])
             self.assertNotIn("--console", launches[0])
             self.assertTrue(any(arg.startswith("--stdout=") for arg in launches[0]))
             self.assertTrue(any(arg.startswith("--stderr=") for arg in launches[0]))
@@ -182,11 +214,14 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             for app in (selected, installed):
                 (app / "Dyn4kPerformance").write_bytes(b"selected image")
                 (app / "Info.plist").write_bytes(b"selected package")
+            linked = root / "raw-linked.kexe"
+            linked.write_bytes(b"raw linked image")
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             selected_sha = mobile_capture.capture.digest(selected / "Dyn4kPerformance")
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
-                         "linked_sha256": selected_sha,
-                         "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed)}
+                         "linked_sha256": mobile_capture.capture.digest(linked),
+                         "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
+                         "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
 
@@ -247,6 +282,64 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "package bytes"):
                 mobile_capture.validate_installed_bundle(selected, installed)
 
+    def test_apple_derivation_binds_raw_copy_and_signed_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            linked = root / "raw.kexe"
+            linked.write_bytes(b"raw linked image")
+            app = root / "selected.app"
+            app.mkdir()
+            signed = app / "Dyn4kPerformance"
+            signed.write_bytes(b"signed linked image with signature")
+            inventory = {
+                "app_bundle": str(app),
+                "linked_sha256": mobile_capture.capture.digest(linked),
+                "bundle_sha256": {"Dyn4kPerformance": mobile_capture.capture.digest(signed)},
+                "image_derivation": apple_derivation(linked, signed),
+            }
+            self.assertNotEqual(mobile_capture.capture.digest(linked),
+                                mobile_capture.capture.digest(signed))
+            self.assertEqual(mobile_capture.validate_apple_image_derivation(
+                inventory, linked, signed, "iosX64", "development"),
+                inventory["image_derivation"])
+            for field, value in (("linked_sha256", "0" * 64), ("copied_sha256", "0" * 64),
+                                 ("copied_size", 1), ("linked_size", float(linked.stat().st_size)),
+                                 ("packaged_sha256", "0" * 64), ("packaged_size", 1),
+                                 ("codesign_verified", False), ("codesign_verified", 1),
+                                 ("signing", "none"), ("target", "iosSimulatorArm64"),
+                                 ("signing_command", None), ("verification_command", None),
+                                 ("linked_path", str(signed)), ("package_path", str(root))):
+                changed = {**inventory, "image_derivation": {**inventory["image_derivation"],
+                                                             field: value}}
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(ValueError, "derivation"):
+                    mobile_capture.validate_apple_image_derivation(
+                        changed, linked, signed, "iosX64", "development")
+            signed.write_bytes(b"substituted signed image")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, signed, "iosX64", "development")
+
+    def test_unsigned_physical_apple_package_must_equal_raw_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            linked = root / "raw.kexe"
+            linked.write_bytes(b"raw linked image")
+            app = root / "selected.app"
+            app.mkdir()
+            image = app / "Dyn4kPerformance"
+            image.write_bytes(linked.read_bytes())
+            inventory = {"app_bundle": str(app),
+                         "bundle_sha256": {"Dyn4kPerformance": mobile_capture.capture.digest(image)},
+                         "image_derivation": apple_derivation(linked, image, target="iosArm64")}
+            mobile_capture.validate_apple_image_derivation(
+                inventory, linked, image, "iosArm64", "development")
+            image.write_bytes(b"changed physical image")
+            inventory["bundle_sha256"]["Dyn4kPerformance"] = mobile_capture.capture.digest(image)
+            inventory["image_derivation"] = apple_derivation(linked, image, target="iosArm64")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, image, "iosArm64", "development")
+
     def test_apple_process_vnode_requires_one_exact_kernel_text_mapping(self):
         executable = Path("/private/tmp/installed.app/Dyn4kPerformance")
         good = (b"p123\0\nftxt\0D0x10\0i42\0s14\0n" +
@@ -279,7 +372,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "dyn4k": {"sha256": fixture.hashes["kotlin"]}}
             inventory = {"source_sha": fixture.source,
                          "producer_tree": fixture.producer_tree,
-                         "build": "development"}
+                         "build": "development",
+                         "linked_sha256": mobile_capture.capture.digest(executable)}
             process = {"started_ns": 1, "ended_ns": 2,
                        "bundle_id": "io.github.rubixhacker.dyn4k.performance.iosx64",
                        "image": {"pid": 123, "sha256": mobile_capture.capture.digest(executable)}}
@@ -303,8 +397,16 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             root = Path(directory)
             inventory_path = root / "inventory.json"
             inventory_path.write_text("{}")
-            executable = root / "Dyn4kPerformance"
-            executable.write_bytes(b"test image")
+            selected_app = root / "selected.app"
+            installed_app = root / "installed.app"
+            selected_app.mkdir()
+            installed_app.mkdir()
+            executable = selected_app / "Dyn4kPerformance"
+            executable.write_bytes(b"signed test image")
+            installed = installed_app / "Dyn4kPerformance"
+            installed.write_bytes(executable.read_bytes())
+            linked = root / "raw-linked.kexe"
+            linked.write_bytes(b"raw test image")
             archive = root / "capture"
             args = SimpleNamespace(archive=archive, inventory=inventory_path,
                                    target="iosX64", build="development",
@@ -313,12 +415,16 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "dyn4k": {"sha256": fixture.hashes["kotlin"]}}
             package = {"Dyn4kPerformance": mobile_capture.capture.digest(executable)}
             inventory = {"source_sha": fixture.source, "producer_tree": fixture.producer_tree,
-                         "build": "development", "linked_sha256": mobile_capture.capture.digest(executable),
-                         "bundle_sha256": package}
+                         "build": "development", "linked_sha256": mobile_capture.capture.digest(linked),
+                         "linked_executable": str(linked),
+                         "app_bundle": str(selected_app),
+                         "bundle_sha256": package,
+                         "image_derivation": apple_derivation(linked, executable)}
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
             process = {"started_ns": 1, "ended_ns": 2, "bundle_id": bundle,
-                       "image": {"pid": 123, "sha256": mobile_capture.capture.digest(executable),
+                       "image": {"pid": 123, "path": str(installed),
+                                 "sha256": mobile_capture.capture.digest(executable),
                                  "size": executable.stat().st_size, "device": 1, "inode": 2,
                                  "method": "simctl-launch-pid/proc_pidpath/lsof-text-vnode"},
                        "launch": {"pid": 123, "method": "simctl-redirected-files",
@@ -326,9 +432,10 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                        "output": {"stdout_sha256": mobile_capture.hashlib.sha256(raw).hexdigest(),
                                   "stderr_sha256": mobile_capture.hashlib.sha256(b"").hexdigest()},
                        "linked_sha256": inventory["linked_sha256"],
-                       "installed_image_sha256": inventory["linked_sha256"],
+                       "installed_image_sha256": package["Dyn4kPerformance"],
                        "installed_image_size": executable.stat().st_size,
-                       "installed_bundle_sha256": package}
+                       "installed_bundle_sha256": package,
+                       "image_derivation": inventory["image_derivation"]}
 
             def simulator(*_unused):
                 (args.archive / "setup").mkdir()
@@ -345,17 +452,47 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual(result["protocol"], "valid")
             self.assertEqual(result["qualification"], "unpassed")
             self.assertEqual(result["step_count"], 1)
-            args.archive = root / "forged-image"
-            process["image"]["sha256"] = "0" * 64
-            with patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
-                 patch.object(mobile_capture, "validate_inventory",
-                              return_value=(inventory, executable, artifacts)), \
-                 patch.object(mobile_capture.secrets, "token_hex", return_value=fixture.nonce), \
-                 patch.object(mobile_capture, "run_simulator", side_effect=simulator):
-                self.assertEqual(mobile_capture.run(args), 1)
-            forged = json.loads((args.archive / "result.json").read_text())
-            self.assertNotIn("protocol", forged)
-            self.assertIn("installed package or link", forged["error"])
+            self.assertNotEqual(result["process"]["linked_sha256"],
+                                result["process"]["image"]["sha256"])
+            self.assertEqual(result["linked_executable_sha256"], inventory["linked_sha256"])
+            self.assertEqual(result["executable_sha256"], package["Dyn4kPerformance"])
+            valid_process = copy.deepcopy(process)
+            for label, field, value in (
+                    ("image", "image", {**process["image"], "sha256": "0" * 64}),
+                    ("raw-link", "linked_sha256", "0" * 64),
+                    ("derivation", "image_derivation", {**process["image_derivation"],
+                                                          "codesign_verified": False}),
+                    ("installed-image", "installed_image_sha256", "0" * 64),
+                    ("installed-size", "installed_image_size", 1)):
+                args.archive = root / f"forged-{label}"
+                process = {**valid_process, field: value}
+                with self.subTest(label=label), \
+                     patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
+                     patch.object(mobile_capture, "validate_inventory",
+                                  return_value=(inventory, executable, artifacts)), \
+                     patch.object(mobile_capture.secrets, "token_hex", return_value=fixture.nonce), \
+                     patch.object(mobile_capture, "run_simulator", side_effect=simulator):
+                    self.assertEqual(mobile_capture.run(args), 1)
+                forged = json.loads((args.archive / "result.json").read_text())
+                self.assertNotIn("protocol", forged)
+                self.assertIn("installed package or link", forged["error"])
+            process = valid_process
+            for label, path in (("raw-link", linked), ("selected", executable),
+                                ("installed", installed)):
+                original = path.read_bytes()
+                path.write_bytes(b"substituted image")
+                args.archive = root / f"changed-{label}"
+                with self.subTest(path=label), \
+                     patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
+                     patch.object(mobile_capture, "validate_inventory",
+                                  return_value=(inventory, executable, artifacts)), \
+                     patch.object(mobile_capture.secrets, "token_hex", return_value=fixture.nonce), \
+                     patch.object(mobile_capture, "run_simulator", side_effect=simulator):
+                    self.assertEqual(mobile_capture.run(args), 1)
+                changed = json.loads((args.archive / "result.json").read_text())
+                self.assertNotIn("protocol", changed)
+                self.assertIn("raw link or selected/installed signed", changed["error"])
+                path.write_bytes(original)
 
     def test_setup_command_preserves_binary_output_and_failure(self):
         with tempfile.TemporaryDirectory() as directory:
