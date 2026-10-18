@@ -10,9 +10,23 @@ from reference_diagnostic import (strict_comparison, structural_differences,
                                   projected_records, auxiliary_record_diagnostic)
 from reference_diagnostic import nominal_zero_diagnostic
 from reference_diagnostic import projected_comparison
+from reference_diagnostic import compare_stream
+import compare as approved
 
 
 class FrozenComparatorSeamTest(unittest.TestCase):
+    def test_nominal_timestep_metadata_remains_unpassed_without_a_rule(self):
+        fixture = approved.load_fixture("nominal-free-motion")
+        values = {"getDeltaTime": 1 / 60, "getPrevousDeltaTime": 1 / 60,
+                  "getInverseDeltaTime": 60.0,
+                  "getPreviousInverseDeltaTime": 60.0,
+                  "getDeltaTimeRatio": 1.0}
+        reference = {"kind": "event", "payload": [values]}
+        result = compare_stream(fixture, [reference], [reference])
+        self.assertEqual(result["status"], "UNPASSED")
+        self.assertEqual(result["unpassed_channels"],
+                         sorted(f"event.payload[].{name}" for name in values))
+
     def test_projected_stream_requires_every_frozen_record(self):
         with tempfile.TemporaryDirectory() as directory:
             candidate = Path(directory) / "candidate.jsonl"
