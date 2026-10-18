@@ -64,6 +64,10 @@ def area_for(case):
         return "dynamics"
     if name.startswith(("geometry.", "coverage.geometry.")):
         return "geometry"
+    if (name.startswith("coverage.Upstream") and case["originals"] and
+            all(original.startswith("org.dyn4j.geometry.")
+                for original in case["originals"])):
+        return "geometry"
     if name.startswith("coverage.") or name.startswith("UpstreamAVLTree"):
         return "compatibility"
     raise ValueError(f"unclassified corpus case: {name}")

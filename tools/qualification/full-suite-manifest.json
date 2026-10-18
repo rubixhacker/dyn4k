@@ -5278,7 +5278,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "add",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5295,7 +5295,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5312,7 +5312,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "createFull",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5329,7 +5329,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "createFullArray",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5346,7 +5346,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "createLessThanFourElements",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5363,7 +5363,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "createMoreThanFourElements",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5380,7 +5380,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "createNullArray",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5397,7 +5397,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "determinant",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5414,7 +5414,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "difference",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5431,7 +5431,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "equals",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5448,7 +5448,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "getInverse",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5465,7 +5465,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "getTranspose",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5482,7 +5482,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "identity",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5499,7 +5499,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "invert",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5516,7 +5516,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "multiplyMatrix",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5533,7 +5533,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "multiplyScalar",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5550,7 +5550,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "multiplyVector",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5567,7 +5567,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "multiplyVectorT",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5584,7 +5584,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "norm",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5601,7 +5601,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "productMatrix",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5618,7 +5618,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "productScalar",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5635,7 +5635,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "productVector",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5652,7 +5652,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "productVectorT",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5669,7 +5669,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "solve",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5686,7 +5686,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "subtract",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5703,7 +5703,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "sum",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5720,7 +5720,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
       "method": "transpose",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5737,7 +5737,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "add",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5754,7 +5754,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5771,7 +5771,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "createFull",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5788,7 +5788,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "createFullArray",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5805,7 +5805,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "createNullArray",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5822,7 +5822,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "createPartialArray",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5839,7 +5839,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "determinant",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5856,7 +5856,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "difference",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5873,7 +5873,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "equalsHashcode",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5890,7 +5890,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "getInverse",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5907,7 +5907,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "getTranspose",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5924,7 +5924,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "identity",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5941,7 +5941,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "invert",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5958,7 +5958,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "multiplyMatrix",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5975,7 +5975,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "multiplyScalar",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -5992,7 +5992,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "multiplyVector",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6009,7 +6009,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "multiplyVectorT",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6026,7 +6026,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "productMatrix",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6043,7 +6043,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "productScalar",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6060,7 +6060,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "productVector",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6077,7 +6077,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "productVectorT",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6094,7 +6094,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "solve22",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6111,7 +6111,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "solve33",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6128,7 +6128,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "subtract",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6145,7 +6145,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "sum",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6162,7 +6162,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
       "method": "transpose",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6247,7 +6247,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "compare",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6264,7 +6264,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6281,7 +6281,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "create",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6298,7 +6298,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "cross",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6315,7 +6315,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "dot",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6332,7 +6332,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "equals",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6349,7 +6349,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "get",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6366,7 +6366,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "getNormalizedAngle",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6383,7 +6383,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "getRotated",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6400,7 +6400,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "getRotationBetween",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6417,7 +6417,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "getShortestDistance",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6434,7 +6434,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "inverse",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6451,7 +6451,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "isAngleBetween",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6468,7 +6468,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "isIdentity",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6485,7 +6485,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "rotate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6502,7 +6502,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "set",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6519,7 +6519,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "testIsUnit",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6536,7 +6536,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "toAngle",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6553,7 +6553,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
       "method": "toVector",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6570,7 +6570,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6587,7 +6587,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "getTransformed",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6604,7 +6604,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "getTranslationRotationTransform",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6621,7 +6621,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "identity",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6638,7 +6638,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "lerp",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6655,7 +6655,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "rotate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6672,7 +6672,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "setRotation",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6689,7 +6689,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "setTransform",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6706,7 +6706,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "setTranslation",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6723,7 +6723,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "transform",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6740,7 +6740,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "translate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6757,7 +6757,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
       "method": "values",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6774,7 +6774,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "add",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6791,7 +6791,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6808,7 +6808,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "create",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6825,7 +6825,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "cross",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6842,7 +6842,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "distance",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6859,7 +6859,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "distanceBugInVersions_1_1_0_to_3_1_7",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6876,7 +6876,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "divide",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6893,7 +6893,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "dot",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6910,7 +6910,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "equals",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6927,7 +6927,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "equalsEpsilon",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6944,7 +6944,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "get",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6961,7 +6961,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "getAngleBetweenRange",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6978,7 +6978,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "interpolate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -6995,7 +6995,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "isOrthogonal",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7012,7 +7012,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "isZero",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7029,7 +7029,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "left",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7046,7 +7046,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "multiply",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7063,7 +7063,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "negate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7080,7 +7080,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "normalize",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7097,7 +7097,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "project",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7114,7 +7114,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "right",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7131,7 +7131,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "rotate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7148,7 +7148,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "set",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7165,7 +7165,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "subtract",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7182,7 +7182,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "to",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7199,7 +7199,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "tripleProduct",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7216,7 +7216,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
       "method": "zero",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7233,7 +7233,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "add",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7250,7 +7250,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "copy",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7267,7 +7267,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "create",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7284,7 +7284,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "cross",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7301,7 +7301,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "distance",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7318,7 +7318,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "dot",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7335,7 +7335,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "equals",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7352,7 +7352,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "equalsEpsilon",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7369,7 +7369,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "get",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7386,7 +7386,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "interpolate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7403,7 +7403,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "isOrthogonal",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7420,7 +7420,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "isZero",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7437,7 +7437,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "multiply",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7454,7 +7454,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "negate",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7471,7 +7471,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "normalize",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7488,7 +7488,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "project",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7505,7 +7505,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "set",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7522,7 +7522,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "subtract",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7539,7 +7539,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "to",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7556,7 +7556,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "tripleProduct",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {
@@ -7573,7 +7573,7 @@
       "module": "dyn4k-core",
       "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
       "method": "zero",
-      "area": "compatibility",
+      "area": "geometry",
       "scope": "portable",
       "kind": "mapped-original",
       "source": {

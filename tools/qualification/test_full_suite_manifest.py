@@ -2,6 +2,7 @@ import copy
 import json
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 import full_suite_manifest
@@ -29,6 +30,26 @@ class FullSuiteManifestTest(unittest.TestCase):
         self.assertIn("numerical-parity", linux["required_gates"])
         self.assertIn("unchanged-java-corpus", jvm["required_gates"])
         self.assertNotIn("unchanged-java-corpus", linux["required_gates"])
+
+    def test_reviewed_geometry_originals_assign_upstream_math_methods_to_geometry(self):
+        expected = {
+            "UpstreamMatrix22CoverageTest": 27,
+            "UpstreamMatrix33CoverageTest": 26,
+            "UpstreamRotationCoverageTest": 19,
+            "UpstreamTransformCoverageTest": 12,
+            "UpstreamVector2CoverageTest": 27,
+            "UpstreamVector3CoverageTest": 21,
+        }
+        selected = [case for case in self.manifest["cases"]
+                    if case["classname"].removeprefix("org.dyn4j.coverage.") in expected]
+        self.assertEqual(expected, Counter(case["classname"].split(".")[-1]
+                                           for case in selected))
+        self.assertEqual(132, len(selected))
+        self.assertTrue(all(case["originals"] and
+                            all(original.startswith("org.dyn4j.geometry.")
+                                for original in case["originals"])
+                            for case in selected))
+        self.assertEqual({"geometry"}, {case["area"] for case in selected})
 
     def test_missing_area_case_extra_case_and_duplicate_case_fail(self):
         for mutation in ("area", "missing", "extra", "duplicate"):
