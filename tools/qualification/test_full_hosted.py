@@ -404,6 +404,11 @@ class FullHostedTests(unittest.TestCase):
         repository = evidence / "checkout"
         repository.mkdir()
         output = evidence / "full"
+        unresolved_alias_parent = evidence / "RUNNER~1"
+        unresolved_alias_parent.mkdir()
+        alias_output = unresolved_alias_parent / ".." / "full"
+        self.assertNotEqual(str(alias_output), str(output))
+        self.assertEqual(output, alias_output.resolve())
         target = "tvosSimulatorArm64"
         simulator = "00000000-0000-0000-0000-000000000001"
         (repository / "LICENSE.md").write_bytes(b"Fixture license\n")
@@ -529,10 +534,18 @@ class FullHostedTests(unittest.TestCase):
                 mock.patch.object(full_hosted.artifact, "capture_staging",
                                   wraps=full_hosted.artifact.capture_staging) as capture, \
                 mock.patch.dict(os.environ, runner):
-            emitted = full_hosted.run(target, candidate, output)
+            emitted = full_hosted.run(target, candidate, alias_output)
             self.assertEqual("FULL_COMMON_PASSED", emitted["status"], emitted.get("reason"))
+            self.assertEqual(str(output), emitted["archive_root"])
             self.assertEqual(2, len(emitted["configurations"]))
             self.assertEqual(candidate, capture.call_args.args[3])
+            self.assertEqual(output, capture.call_args.args[1])
+            for lane in emitted["configurations"]:
+                folder = output / lane["configuration"]
+                self.assertIn(str(folder / "qualification.init.gradle"),
+                              lane["source_process"]["command"])
+                self.assertIn(str(folder / "qualification-graph.init.gradle"),
+                              lane["graph_process"]["command"])
             self.assertEqual(52, len([item for item in emitted["files"]
                                       if item["path"].startswith("staged/")]))
             self.assertEqual(2, load.call_count)
@@ -543,6 +556,22 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(output, archive)
             transported = full_hosted.verify_transport_archive(archive, candidate, target)
             self.assertEqual(receipt, transported)
+
+            wrong_root = evidence / "different-root"
+            wrong_receipt = json.loads(json.dumps(receipt))
+            wrong_receipt["archive_root"] = str(wrong_root)
+            with self.assertRaisesRegex(
+                    ValueError, "test or graph init script is unbound") as wrong_root_error:
+                full_hosted.verify_raw_files(output, wrong_receipt)
+            adverse_root = evidence / "adverse-different-root"
+            shutil.copytree(output, adverse_root)
+            (adverse_root / "receipt.json").write_text(
+                json.dumps(wrong_receipt, sort_keys=True) + "\n")
+            adverse_root_archive = evidence / "adverse-different-root.tar"
+            full_hosted.package_archive(adverse_root, adverse_root_archive)
+            with self.assertRaisesRegex(
+                    ValueError, "test or graph init script is unbound") as wrong_tar_error:
+                full_hosted.verify_transport_archive(adverse_root_archive, candidate, target)
 
             clean = evidence / "clean-checkout"
             subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "-q",
@@ -730,6 +759,11 @@ class FullHostedTests(unittest.TestCase):
                 "candidate_input_count": len(full_hosted.INPUTS),
                 "reviewed_source_file_count": len(manifest["source_files"]),
                 "candidate_sha": candidate, "target": target,
+                "output_alias": str(alias_output),
+                "archive_root": receipt["archive_root"],
+                "different_root_rejection": str(wrong_root_error.exception),
+                "different_root_tar_rejection": str(wrong_tar_error.exception),
+                "different_root_archive_sha256": full_hosted.sha256(adverse_root_archive),
                 "staged_files": 52, "configurations": list(full_hosted.CONFIGS[target]),
                 "source_cases_per_configuration": {module: len(full_hosted.expected_cases(manifest, module))
                                                    for module in qualify.MODULES},
