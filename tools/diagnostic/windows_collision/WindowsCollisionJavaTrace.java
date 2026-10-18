@@ -10,6 +10,7 @@ import org.dyn4j.geometry.EdgeFeature;
 import org.dyn4j.geometry.Feature;
 import org.dyn4j.geometry.Interval;
 import org.dyn4j.geometry.PointFeature;
+import org.dyn4j.geometry.Polygon;
 import org.dyn4j.geometry.Rotation;
 import org.dyn4j.geometry.Segment;
 import org.dyn4j.geometry.Slice;
@@ -39,6 +40,33 @@ final class WindowsCollisionJavaTrace {
         List<String> result = new ArrayList<String>();
         for (double value : values) result.add(number(value));
         return join(result, ",");
+    }
+
+    static String polygonEdges(Convex shape) {
+        if (!(shape instanceof Polygon)) return "na";
+        Polygon polygon = (Polygon) shape;
+        Vector2[] vertices = polygon.getVertices();
+        Vector2[] normals = polygon.getNormals();
+        List<String> result = new ArrayList<String>();
+        for (int index = 0; index < vertices.length; index++) {
+            Vector2 next = vertices[(index + 1) % vertices.length];
+            double dx = next.x - vertices[index].x;
+            double dy = next.y - vertices[index].y;
+            double nx = dy;
+            double ny = -dx;
+            double xx = nx * nx;
+            double yy = ny * ny;
+            double sum = xx + yy;
+            double root = Math.sqrt(sum);
+            double reciprocal = 1.0 / root;
+            Vector2 normalized = new Vector2(nx, ny);
+            double returnedRoot = normalized.normalize();
+            result.add(index + ":" + number(dx) + ":" + number(dy) + ":" + number(xx) + ":" + number(yy)
+                    + ":" + number(sum) + ":" + number(root) + ":" + number(reciprocal)
+                    + ":" + number(nx * reciprocal) + "," + number(ny * reciprocal)
+                    + ":" + number(returnedRoot) + ":" + vector(normalized) + ":" + vector(normals[index]));
+        }
+        return join(result, ";");
     }
 
     static String shape(Convex shape) {
@@ -98,6 +126,8 @@ final class WindowsCollisionJavaTrace {
         List<String> fields = new ArrayList<String>();
         fields.add("a.shape.local=" + shape(a));
         fields.add("b.shape.local=" + shape(b));
+        fields.add("a.polygon.edgeArithmetic=" + polygonEdges(a));
+        fields.add("b.polygon.edgeArithmetic=" + polygonEdges(b));
         fields.add("a.foci.world=" + vectors(fociA));
         fields.add("b.foci.world=" + vectors(fociB));
         fields.add("a.axes.withB=" + vectors(axesA));
@@ -216,6 +246,16 @@ final class WindowsCollisionJavaTrace {
     }
 
     static final class RecordingEpa implements MinkowskiPenetrationSolver {
+        private static final class MirrorEdge {
+            final int id;
+            final ExpandingSimplexEdge edge;
+
+            MirrorEdge(int id, ExpandingSimplexEdge edge) {
+                this.id = id;
+                this.edge = edge;
+            }
+        }
+
         private final Epa delegate = new Epa();
         ExpandingSimplexEdge edge;
         private Vector2 support;
@@ -224,6 +264,8 @@ final class WindowsCollisionJavaTrace {
         private int iteration;
         private String stopReason = "notRun";
         private List<Vector2> simplexPoints = Collections.emptyList();
+        private final List<String> iterationRecords = new ArrayList<String>();
+        private boolean queueMirrorMatches = true;
 
         void reset() {
             edge = null;
@@ -233,6 +275,8 @@ final class WindowsCollisionJavaTrace {
             iteration = 0;
             stopReason = "notRun";
             simplexPoints = Collections.emptyList();
+            iterationRecords.clear();
+            queueMirrorMatches = true;
         }
 
         @Override public void getPenetration(List<Vector2> simplex, MinkowskiSum sum, Penetration penetration) {
@@ -240,16 +284,53 @@ final class WindowsCollisionJavaTrace {
             simplexPoints = new ArrayList<Vector2>();
             for (Vector2 point : simplex) simplexPoints.add(point.copy());
             ExpandingSimplex expanding = new ExpandingSimplex(simplex);
+            List<MirrorEdge> active = new ArrayList<MirrorEdge>();
+            for (int i = 0; i < simplex.size(); i++) {
+                active.add(new MirrorEdge(i, new ExpandingSimplexEdge(simplex.get(i), simplex.get((i + 1) % simplex.size()), expanding.getWinding())));
+            }
+            int nextEdgeId = simplex.size();
             for (int i = 0; i < delegate.getMaxIterations(); i++) {
                 ExpandingSimplexEdge candidate = expanding.getClosestEdge();
+                Vector2 normalBefore = candidate.normal.copy();
+                int selectedIndex = -1;
+                if (queueMirrorMatches && active.size() == expanding.size()) {
+                    for (int j = 0; j < active.size(); j++) {
+                        ExpandingSimplexEdge mirror = active.get(j).edge;
+                        if (mirror.point1 == candidate.point1 && mirror.point2 == candidate.point2
+                                && Double.doubleToRawLongBits(mirror.distance) == Double.doubleToRawLongBits(candidate.distance)) {
+                            selectedIndex = j;
+                            break;
+                        }
+                    }
+                }
+                if (selectedIndex < 0) queueMirrorMatches = false;
+                List<String> equalIds = new ArrayList<String>();
+                if (queueMirrorMatches) {
+                    for (MirrorEdge mirror : active) {
+                        if (mirror.edge.compareTo(candidate) == 0) equalIds.add(Integer.toString(mirror.id));
+                    }
+                }
                 Vector2 point = sum.getSupportPoint(candidate.normal);
                 edge = candidate;
                 support = point;
                 projection = point.dot(candidate.normal);
                 delta = projection - candidate.distance;
                 iteration = i + 1;
+                String decision = delta < delegate.getDistanceEpsilon() ? "epsilon"
+                        : iteration == delegate.getMaxIterations() ? "iterationLimit" : "continue";
+                iterationRecords.add(iteration + ":" + (selectedIndex < 0 ? "na" : active.get(selectedIndex).id)
+                        + ":" + vector(candidate.point1) + ":" + vector(candidate.point2)
+                        + ":" + vector(normalBefore) + ":" + vector(candidate.normal)
+                        + ":" + number(candidate.distance) + ":" + vector(point)
+                        + ":" + number(projection) + ":" + number(delta) + ":" + decision
+                        + ":" + (queueMirrorMatches ? join(equalIds, ",") : "na") + ":" + queueMirrorMatches);
                 if (delta < delegate.getDistanceEpsilon()) { stopReason = "epsilon"; return; }
                 expanding.expand(point);
+                if (queueMirrorMatches) {
+                    active.remove(selectedIndex);
+                    active.add(new MirrorEdge(nextEdgeId++, new ExpandingSimplexEdge(candidate.point1, point, expanding.getWinding())));
+                    active.add(new MirrorEdge(nextEdgeId++, new ExpandingSimplexEdge(point, candidate.point2, expanding.getWinding())));
+                }
             }
             stopReason = "iterationLimit";
         }
@@ -269,6 +350,9 @@ final class WindowsCollisionJavaTrace {
             fields.add("epa.replay.stop=" + stopReason);
             fields.add("epa.replay.epsilon=" + number(delegate.getDistanceEpsilon()));
             fields.add("epa.replay.maxIterations=" + delegate.getMaxIterations());
+            fields.add("epa.iteration.schema=index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:support:projection:delta:stop:equalDistanceEdgeIds:mirrorMatches");
+            fields.add("epa.iteration.records=" + join(iterationRecords, ";"));
+            fields.add("epa.queue.reconstructedMatches=" + queueMirrorMatches);
             fields.add("epa.edge.a=" + (edge == null ? "na" : vector(edge.point1)));
             fields.add("epa.edge.b=" + (edge == null ? "na" : vector(edge.point2)));
             fields.add("epa.edge.normal=" + (edge == null ? "na" : vector(edge.normal)));

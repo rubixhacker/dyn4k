@@ -99,6 +99,8 @@ class WindowsCollisionIntermediateDiagnosticTest {
     private fun vector(value: Vector2) = WindowsCollisionTrace.vector(value)
 
     private class EdgeRecordingEpa : MinkowskiPenetrationSolver {
+        private data class MirrorEdge(val id: Int, val edge: ExpandingSimplexEdge)
+
         private val delegate = Epa()
         var edge: ExpandingSimplexEdge? = null
         private var support: Vector2? = null
@@ -107,6 +109,8 @@ class WindowsCollisionIntermediateDiagnosticTest {
         private var iteration = 0
         private var stopReason = "notRun"
         private var simplexPoints: List<Vector2> = emptyList()
+        private val iterationRecords = mutableListOf<String>()
+        private var queueMirrorMatches = true
 
         fun reset() {
             edge = null
@@ -116,6 +120,8 @@ class WindowsCollisionIntermediateDiagnosticTest {
             iteration = 0
             stopReason = "notRun"
             simplexPoints = emptyList()
+            iterationRecords.clear()
+            queueMirrorMatches = true
         }
 
         fun fields(penetration: Penetration): List<String> {
@@ -127,6 +133,9 @@ class WindowsCollisionIntermediateDiagnosticTest {
                 "epa.replay.iteration=$iteration", "epa.replay.stop=$stopReason",
                 "epa.replay.epsilon=${WindowsCollisionTrace.number(delegate.getDistanceEpsilon())}",
                 "epa.replay.maxIterations=${delegate.getMaxIterations()}",
+                "epa.iteration.schema=index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:support:projection:delta:stop:equalDistanceEdgeIds:mirrorMatches",
+                "epa.iteration.records=${iterationRecords.joinToString(";")}",
+                "epa.queue.reconstructedMatches=$queueMirrorMatches",
                 "epa.edge.a=${candidate?.let { WindowsCollisionTrace.vector(it.point1) } ?: "na"}",
                 "epa.edge.b=${candidate?.let { WindowsCollisionTrace.vector(it.point2) } ?: "na"}",
                 "epa.edge.normal=${candidate?.let { WindowsCollisionTrace.vector(it.normal) } ?: "na"}",
@@ -143,16 +152,45 @@ class WindowsCollisionIntermediateDiagnosticTest {
             delegate.getPenetration(simplex, minkowskiSum, penetration)
             simplexPoints = simplex.map { it.copy() }
             val expanding = ExpandingSimplex(simplex)
+            val active = simplex.indices.mapTo(mutableListOf()) { index ->
+                MirrorEdge(index, ExpandingSimplexEdge(simplex[index], simplex[(index + 1) % simplex.size], expanding.getWinding()))
+            }
+            var nextEdgeId = simplex.size
             for (i in 0 until delegate.getMaxIterations()) {
                 val candidate = expanding.getClosestEdge()
+                val normalBefore = candidate.normal.copy()
+                val selectedIndex = if (queueMirrorMatches && active.size == expanding.size()) active.indexOfFirst {
+                    it.edge.point1 === candidate.point1 && it.edge.point2 === candidate.point2 &&
+                        it.edge.distance.toRawBits() == candidate.distance.toRawBits()
+                } else -1
+                if (selectedIndex < 0) queueMirrorMatches = false
+                val equalIds = if (queueMirrorMatches) active.filter { it.edge.compareTo(candidate) == 0 }.map { it.id } else emptyList()
                 val point = minkowskiSum.getSupportPoint(candidate.normal)
                 edge = candidate
                 support = point
                 projection = point.dot(candidate.normal)
                 delta = projection!! - candidate.distance
                 iteration = i + 1
+                val decision = when {
+                    delta!! < delegate.getDistanceEpsilon() -> "epsilon"
+                    iteration == delegate.getMaxIterations() -> "iterationLimit"
+                    else -> "continue"
+                }
+                iterationRecords += listOf(
+                    iteration.toString(), if (selectedIndex < 0) "na" else active[selectedIndex].id.toString(),
+                    WindowsCollisionTrace.vector(candidate.point1), WindowsCollisionTrace.vector(candidate.point2),
+                    WindowsCollisionTrace.vector(normalBefore), WindowsCollisionTrace.vector(candidate.normal),
+                    WindowsCollisionTrace.number(candidate.distance), WindowsCollisionTrace.vector(point),
+                    WindowsCollisionTrace.number(projection!!), WindowsCollisionTrace.number(delta!!), decision,
+                    if (queueMirrorMatches) equalIds.joinToString(",") else "na", queueMirrorMatches.toString()
+                ).joinToString(":")
                 if (delta!! < delegate.getDistanceEpsilon()) { stopReason = "epsilon"; return }
                 expanding.expand(point)
+                if (queueMirrorMatches) {
+                    active.removeAt(selectedIndex)
+                    active += MirrorEdge(nextEdgeId++, ExpandingSimplexEdge(candidate.point1, point, expanding.getWinding()))
+                    active += MirrorEdge(nextEdgeId++, ExpandingSimplexEdge(point, candidate.point2, expanding.getWinding()))
+                }
             }
             stopReason = "iterationLimit"
         }
