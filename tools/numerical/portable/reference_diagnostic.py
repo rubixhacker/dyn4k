@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import sys
 from itertools import zip_longest
 from pathlib import Path
@@ -51,6 +52,171 @@ def fixture_with_nominal_timestep_rule(fixture):
         raise Rejected("nominal timestep rule requires the nominal free-motion fixture")
     return {**fixture, "exact_numeric": [*fixture.get("exact_numeric", []),
             *(f"event.payload[].{name}" for name in NOMINAL_TIMESTEP)]}
+
+
+def fixture_with_default_sleep_rules(fixture):
+    if fixture.get("key") not in ("default-sleep-30", "default-sleep-60", "default-sleep-120"):
+        raise Rejected("default sleep rules require a frozen default fixture")
+    configured = approved.load_fixture("configured-30-r1")
+    exact = dict.fromkeys([*fixture.get("exact_numeric", []),
+                           *(pattern for pattern in configured["exact_numeric"]
+                             if not pattern.startswith(("state.outerStep", "state.innerWithinOuter",
+                                                        "outer-endpoint.")))])
+    return {**fixture, "rules": configured["rules"], "exact_numeric": list(exact),
+            "zero_numeric": configured["zero_numeric"],
+            "derived_rules": configured["derived_rules"],
+            "check_translation_aliases": True, "callback_fixed_body_id": "b0"}
+
+
+def default_timestep_diagnostic(reference, portable, hz, expected_callbacks=None):
+    if hz not in (30, 60, 120):
+        raise Rejected("default timestep rate is not frozen")
+    if expected_callbacks is None:
+        expected_callbacks = 3 * 600 * hz + 1
+    baseline = (row for row in reference_records(reference)
+                if row.get("kind") == "event" and row.get("listener") == "StepListener")
+    candidate = (row.get("frozenEvent") for row in
+                 records(portable, allow_tagged_nonfinite=True)
+                 if row.get("kind") == "event" and row.get("name", "").startswith("step."))
+    sentinel = object()
+    result = {"status": "PASSED", "callbacks": 0, "value_checks": 0,
+              "update_performed_callbacks": 0, "first_failures": [],
+              "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6243730891",
+              "correction": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6243770998"}
+
+    def fail(message):
+        if len(result["first_failures"]) < 20:
+            result["first_failures"].append({"callback": result["callbacks"], "reason": message})
+        result["status"] = "FAILED"
+
+    try:
+        for left, right in zip_longest(baseline, candidate, fillvalue=sentinel):
+            result["callbacks"] += 1
+            if left is sentinel or right is sentinel or not isinstance(right, dict):
+                fail("default StepListener callback is missing")
+                continue
+            if any(not exact(left.get(field), right.get(field))
+                   for field in ("step", "order", "method", "listener")):
+                fail("default StepListener callback identity differs")
+            step = left.get("step")
+            if type(step) is not int or step < 1 or step > 600 * hz:
+                fail("default StepListener step is outside the frozen range")
+                continue
+            if "updatePerformed" in left.get("method", ""):
+                result["update_performed_callbacks"] += 1
+            current = 1 / hz
+            previous = 1 / 60 if step == 1 else current
+            expected = {"getDeltaTime": current, "getInverseDeltaTime": float(hz),
+                        "getPrevousDeltaTime": previous,
+                        "getPreviousInverseDeltaTime": 60.0 if step == 1 else float(hz),
+                        "getDeltaTimeRatio": 60 / hz if step == 1 else 1.0}
+            for name, required in expected.items():
+                result["value_checks"] += 1
+                for label, event in (("baseline", left), ("portable", right)):
+                    payload = event.get("payload")
+                    value = (payload[0].get(name) if isinstance(payload, list) and payload and
+                             isinstance(payload[0], dict) else None)
+                    if (type(value) not in (int, float) or not math.isfinite(value) or
+                            not exact(value, required)):
+                        fail(f"{label} {name} differs from the per-step exact value")
+        if (result["callbacks"] != expected_callbacks or
+                result["value_checks"] != expected_callbacks * 5 or
+                result["update_performed_callbacks"] != 1):
+            fail("default StepListener callback coverage differs")
+    except (Rejected, OSError, EOFError, KeyError, TypeError, ValueError) as error:
+        fail(str(error))
+    return result
+
+
+def default_rotation_premise_diagnostic(reference, portable, hz, expected_states=None):
+    if hz not in (30, 60, 120):
+        raise Rejected("default rotation rate is not frozen")
+    if expected_states is None:
+        expected_states = 600 * hz
+    fixture = fixture_with_default_sleep_rules(approved.load_fixture(f"default-sleep-{hz}"))
+    expected_scope = "segment-only; unrecorded transform mutations invalidate"
+    result = {"status": "PASSED", "provider_checks": {},
+              "source_scope": expected_scope,
+              "derived_rule_source": "configured-sleep-wake"}
+
+    def inspect_provider(label, stream):
+        counts = {"states": 0, "snapshots": 0, "bodies": 0,
+                  "transform_checks": 0, "change_checks": 0}
+        checks = {"unpassed_channels": set(), "numeric_checks": 0,
+                  "exact_numeric_checks": 0, "derived_checks": 0}
+        for row in stream:
+            kind = row.get("kind")
+            if kind == "state":
+                counts["states"] += 1
+                snapshots = [row.get("state")]
+                path = "state.state.bodies[]"
+            elif kind == "instrumented-callback":
+                snapshots = row.get("values")
+                path = "instrumented-callback.values[].bodies[]"
+                if not isinstance(snapshots, list):
+                    raise Rejected(f"{label} wake snapshots are absent")
+                counts["snapshots"] += len(snapshots)
+            else:
+                continue
+            for snapshot in snapshots:
+                bodies = snapshot.get("bodies") if isinstance(snapshot, dict) else None
+                if not isinstance(bodies, list) or not bodies:
+                    raise Rejected(f"{label} default body snapshot is absent")
+                for body in bodies:
+                    if (not isinstance(body, dict) or
+                            body.get("rotationStepBoundBelowPi") is not True or
+                            body.get("rotationTrackingScope") != expected_scope):
+                        raise Rejected(f"{label} rotation source scope or step bound differs")
+                    counts["bodies"] += 1
+                    properties = body.get("properties")
+                    if properties is not None:
+                        if not isinstance(properties, dict):
+                            raise Rejected(f"{label} body properties are malformed")
+                        current = body["transform"]["getTranslation"]
+                        previous = body["previousTransform"]["getTranslation"]
+                        change = properties.get("getChangeInPosition")
+                        if (not isinstance(change, list) or len(change) != 2 or
+                                len(current) != 2 or len(previous) != 2 or
+                                any(type(value) not in (int, float) or not math.isfinite(value)
+                                    for value in [*current, *previous, *change]) or
+                                change != [current[i] - previous[i] for i in range(2)]):
+                            raise Rejected(f"{label} represented change in position differs")
+                        orientation, _ = approved.orientation_change(
+                            body["previousTransform"]["getRotationAngle"],
+                            body["transform"]["getRotationAngle"], body["angularVelocity"])
+                        if properties.get("getChangeInOrientation") != orientation:
+                            raise Rejected(f"{label} represented change in orientation differs")
+                        counts["change_checks"] += 2
+                    for name in ("transform", "previousTransform"):
+                        transform = body.get(name)
+                        if not isinstance(transform, dict) or any(
+                                type(transform.get(field)) not in (int, float) or
+                                not math.isfinite(transform[field])
+                                for field in ("getCost", "getSint", "getRotationAngle")):
+                            raise Rejected(f"{label} transform math value is absent or nonfinite")
+                        location = f"{path}.{name}"
+                        approved.check_cost_pair(fixture, transform, transform, location, checks)
+                        approved.check_sine_pair(fixture, transform, transform, location, checks)
+                        derived = checks.get("_derived_paths", set())
+                        if (location + ".getCost" not in derived or
+                                location + ".getSint" not in derived):
+                            raise Rejected(f"{label} transform math premise was not checked")
+                        counts["transform_checks"] += 2
+        if counts["states"] != expected_states or not counts["bodies"] or (
+                expected_states > 1 and (not counts["snapshots"] or not counts["change_checks"])):
+            raise Rejected(f"{label} default rotation premise coverage differs")
+        if checks["unpassed_channels"]:
+            raise Rejected(f"{label} transform math enclosure is unpassed")
+        result["provider_checks"][label] = counts
+
+    try:
+        inspect_provider("baseline", reference_records(reference))
+        inspect_provider("portable", projected_records(portable))
+    except (Rejected, approved.Rejected, OSError, EOFError, KeyError, IndexError,
+            TypeError, ValueError) as error:
+        result["status"] = "FAILED"
+        result["reason"] = str(error)
+    return result
 
 
 def nominal_timestep_diagnostic(reference, portable, expected_callbacks=108001):
@@ -140,7 +306,7 @@ def value_differences(reference, candidate, path="", limit=100):
     return differences[:limit]
 
 
-def zero_sign_differences(reference, candidate, path="", limit=20):
+def zero_sign_differences(reference, candidate, path="", limit=20, fixture=None):
     differences = []
     def visit(left, right, location):
         if isinstance(left, dict) and isinstance(right, dict):
@@ -151,7 +317,9 @@ def zero_sign_differences(reference, candidate, path="", limit=20):
                 visit(a, b, f"{location}[{index}]")
         elif (type(left) in (int, float) and type(right) in (int, float) and
               left == right == 0 and not exact(left, right)):
-            if len(differences) < limit:
+            canonical = re.sub(r"\[\d+\]", "[]", location)
+            numeric_zero = fixture is not None and approved.is_zero_numeric(fixture, canonical, {})
+            if not numeric_zero and len(differences) < limit:
                 differences.append(location)
     visit(reference, candidate, path)
     return differences
@@ -374,17 +542,8 @@ def compare_stream(fixture, reference, candidate):
             result["records"] += 1
             if left.get("kind") != right.get("kind"):
                 raise Rejected(f"frozen record kind differs at {result['records']}")
-            def zero_sign(left_value, right_value):
-                if (type(left_value) in (int, float) and type(right_value) in (int, float) and
-                        left_value == right_value == 0 and not exact(left_value, right_value)):
-                    raise Rejected(f"signed zero differs at frozen record {result['records']}")
-                if isinstance(left_value, dict) and isinstance(right_value, dict):
-                    for key in left_value.keys() & right_value.keys():
-                        zero_sign(left_value[key], right_value[key])
-                elif isinstance(left_value, list) and isinstance(right_value, list):
-                    for a, b in zip(left_value, right_value):
-                        zero_sign(a, b)
-            zero_sign(left, right)
+            if zero_sign_differences(left, right, left["kind"], 1, fixture):
+                raise Rejected(f"signed zero differs at frozen record {result['records']}")
             approved.compare_value(fixture, left, right, left["kind"], result)
         if result["unpassed_channels"]:
             result["status"] = "UNPASSED"
@@ -406,6 +565,8 @@ def diagnostic(fixture_key, reference, portable):
     approved_fixture = approved.load_fixture(fixture_key)
     if fixture_key == "nominal-free-motion":
         approved_fixture = fixture_with_nominal_timestep_rule(approved_fixture)
+    if fixture_key.startswith("default-sleep-"):
+        approved_fixture = fixture_with_default_sleep_rules(approved_fixture)
     if digest(reference) != fixture["reference"]["gzip_sha256"]:
         raise Rejected("frozen reference gzip SHA-256 differs")
     with gzip.open(reference, "rb") as stream:
@@ -421,6 +582,12 @@ def diagnostic(fixture_key, reference, portable):
                     if fixture_key == "nominal-free-motion" else None)
     nominal_timestep = (nominal_timestep_diagnostic(reference, portable)
                         if fixture_key == "nominal-free-motion" else None)
+    default_timestep = (default_timestep_diagnostic(reference, portable,
+                        int(fixture_key.rsplit("-", 1)[1]))
+                        if fixture_key.startswith("default-sleep-") else None)
+    default_rotation = (default_rotation_premise_diagnostic(reference, portable,
+                        int(fixture_key.rsplit("-", 1)[1]))
+                        if fixture_key.startswith("default-sleep-") else None)
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
     port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
@@ -481,7 +648,7 @@ def diagnostic(fixture_key, reference, portable):
             if not isinstance(candidate.get("frozenState"), dict):
                 raise Rejected("frozen state projection is absent")
             signs = zero_sign_differences(baseline["state"], candidate["frozenState"],
-                                          "state.state")
+                                          "state.state", fixture=approved_fixture)
             if signs:
                 full_state_zero_sign_paths.extend(signs[:max(0, 20 - len(full_state_zero_sign_paths))])
                 raise Rejected("signed zero differs in frozen state projection")
@@ -523,7 +690,9 @@ def diagnostic(fixture_key, reference, portable):
     status = ("FAILED_APPROVED_PROJECTION" if projected["status"] == "FAILED" or
               approved_failure_count or signed_zero_differences or
               (nominal_zero is not None and nominal_zero["status"] != "PASSED") or
-              (nominal_timestep is not None and nominal_timestep["status"] != "PASSED") else
+              (nominal_timestep is not None and nominal_timestep["status"] != "PASSED") or
+              (default_timestep is not None and default_timestep["status"] != "PASSED") or
+              (default_rotation is not None and default_rotation["status"] != "PASSED") else
               "UNPASSED_RULES" if projected["status"] == "UNPASSED" else
               "PASSED_APPROVED_PROJECTION")
     return {"status": status,
@@ -539,6 +708,8 @@ def diagnostic(fixture_key, reference, portable):
             "auxiliary_record_projection": auxiliary,
             "nominal_zero_invariant": nominal_zero,
             "nominal_timestep_invariant": nominal_timestep,
+            "default_timestep_invariant": default_timestep,
+            "default_rotation_premise": default_rotation,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,
             "event_records": events, "first_differences": first_differences,
