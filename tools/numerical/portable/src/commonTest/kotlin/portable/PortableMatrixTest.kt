@@ -17,11 +17,20 @@ import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
+import org.dyn4j.collision.CollisionItem
+import org.dyn4j.collision.broadphase.CollisionBodyBroadphaseFilter
+import org.dyn4j.collision.broadphase.CollisionItemAABBProducer
+import org.dyn4j.collision.broadphase.CollisionItemBroadphaseDetectorAdapter
+import org.dyn4j.collision.broadphase.CollisionItemBroadphaseFilter
+import org.dyn4j.collision.broadphase.DynamicAABBTree
+import org.dyn4j.collision.broadphase.StaticValueAABBExpansionMethod
 import org.dyn4j.collision.narrowphase.Gjk
 import org.dyn4j.collision.narrowphase.Penetration
 import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.world.World
+import org.dyn4j.world.PhysicsBodySweptAABBProducer
+import org.dyn4j.dynamics.BodyFixture
 import kotlin.math.PI
 import kotlin.test.Test
 
@@ -233,7 +242,10 @@ class PortableMatrixTest {
         val weldWorld = World<Body>()
         weldWorld.setGravity(0.0, -9.8)
         val weldGround = body(weldWorld, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true, 0.0)
-        val weldBody = body(weldWorld, Geometry.createRectangle(1.0, 0.5), 0.0, 2.0, false, 0.0)
+        val weldBody = body(weldWorld, Geometry.createCircle(0.5), 0.0, 2.0, false, 0.0)
+        weldBody.removeAllFixtures()
+        weldBody.addFixture(Geometry.createRectangle(1.0, 0.5)).setFriction(0.0)
+        weldBody.setMass(MassType.NORMAL)
         val weld = WeldJoint(weldGround, weldBody, weldBody.getWorldCenter().sum(-0.5, 0.0))
         weld.setSpringEnabled(true)
         weld.setSpringDamperEnabled(true)
@@ -549,6 +561,13 @@ class PortableMatrixTest {
     @Test
     fun longRunningFreeMotionInvariantScene() {
         val world = World<Body>()
+        world.setBroadphaseDetector(CollisionItemBroadphaseDetectorAdapter(
+            DynamicAABBTree<CollisionItem<Body, BodyFixture>>(
+                CollisionItemBroadphaseFilter(), CollisionItemAABBProducer(),
+                StaticValueAABBExpansionMethod(0.2))))
+        world.setContinuousCollisionDetectionBroadphaseDetector(DynamicAABBTree<Body>(
+            CollisionBodyBroadphaseFilter(), PhysicsBodySweptAABBProducer(),
+            StaticValueAABBExpansionMethod(0.2)))
         world.setGravity(0.0, 0.0)
         world.getSettings().setAtRestDetectionEnabled(false)
         val moving = body(world, Geometry.createCircle(0.5), 0.0, 0.0, false)
