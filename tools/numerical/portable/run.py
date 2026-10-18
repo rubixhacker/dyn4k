@@ -247,6 +247,22 @@ def _compare_frozen_one(job):
                 "reason": str(error), "qualification": "UNPASSED"}
 
 
+def comparison_coverage():
+    declared = {case["id"] for case in declared_cases()}
+    catalog = json.loads(CATALOG.read_text())
+    mapped = {portable_case_id(fixture["key"]) for fixture in catalog["fixtures"]}
+    if not mapped <= declared:
+        raise Rejected(f"frozen mapping has undeclared portable cases: {sorted(mapped - declared)}")
+    unreferenced = sorted(declared - mapped)
+    return {"status": "UNPASSED_REFERENCE_COVERAGE" if unreferenced else
+            "COMPLETE_FROZEN_REFERENCE_COVERAGE",
+            "declared_cases": len(declared), "frozen_reference_cases": len(mapped),
+            "frozen_case_ids": sorted(mapped),
+            "unreferenced_cases": len(unreferenced),
+            "unreferenced_case_ids": unreferenced,
+            "qualification": "UNPASSED"}
+
+
 def compare_frozen(lane, reference_dirs):
     catalog = json.loads(CATALOG.read_text())
     resolved = []
@@ -305,7 +321,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                "status": "PASSED",
                "qualification": "UNPASSED", "frozen_comparison": "NOT_RUN",
                "candidate_commit": commit, "source_sha256": source_sha256,
-               "artifact_sha256": artifact_sha256}
+               "artifact_sha256": artifact_sha256,
+               "comparison_coverage": comparison_coverage()}
     trace = None
     try:
         attributes = {key: 0 for key in ("tests", "skipped", "failures", "errors")}

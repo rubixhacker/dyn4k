@@ -8,6 +8,15 @@ import run
 
 
 class ExtractionTest(unittest.TestCase):
+    def test_comparison_coverage_lists_every_unreferenced_case(self):
+        coverage = run.comparison_coverage()
+        self.assertEqual(coverage["declared_cases"], 332)
+        self.assertEqual(coverage["frozen_reference_cases"], 14)
+        self.assertEqual(coverage["unreferenced_cases"], 318)
+        self.assertEqual(coverage["status"], "UNPASSED_REFERENCE_COVERAGE")
+        self.assertEqual(len(coverage["unreferenced_case_ids"]), 318)
+        self.assertNotIn("long-free-60", coverage["unreferenced_case_ids"])
+
     def test_java_8_receipt_uses_executed_test_worker(self):
         executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
         if not executable.is_file():
