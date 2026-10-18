@@ -88,16 +88,26 @@ jobs:
           def raw_file(path):
               if not path.is_file():
                   return {"status": "missing"}
-              size = path.stat().st_size
+              before = path.stat()
+              size = before.st_size
               if size > 64 * 1024 * 1024:
                   return {"bytes": size, "status": "hash_size_limit"}
               value = hashlib.sha256()
+              read_bytes = 0
               with path.open("rb") as stream:
-                  for block in iter(lambda: stream.read(65536), b""):
+                  while read_bytes < size + 1:
+                      block = stream.read(min(65536, size + 1 - read_bytes))
+                      if not block:
+                          break
                       value.update(block)
-              if path.stat().st_size != size:
-                  return {"bytes": size, "status": "changed_during_hash"}
-              return {"bytes": size, "sha256": value.hexdigest()}
+                      read_bytes += len(block)
+              after = path.stat()
+              identity = lambda row: (row.st_dev, row.st_ino, row.st_size,
+                                      row.st_mtime_ns, row.st_ctime_ns)
+              if read_bytes != size or identity(before) != identity(after):
+                  return {"bytes": after.st_size, "read_bytes": read_bytes,
+                          "status": "changed_during_hash"}
+              return {"bytes": read_bytes, "sha256": value.hexdigest()}
 
           def execute(label, argv, timeout=300):
               output = evidence / label
@@ -309,7 +319,8 @@ jobs:
                                             if isinstance(execution_receipt, dict) else "incomplete")
                       except (OSError, ValueError, UnicodeError):
                           raw_collection = "incomplete"
-                      if any("sha256" not in item for item in raw.values()):
+                      if (route["commands"][label].get("error") == "timeout" or
+                              any("sha256" not in item for item in raw.values())):
                           raw_collection = "incomplete"
                       failure = {"qualification": "unpassed", "source_sha": sha,
                                  "target": target, "build": build, "scenario": api,

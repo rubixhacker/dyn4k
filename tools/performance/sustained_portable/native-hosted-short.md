@@ -20,9 +20,11 @@ the runner stops the wrapper group, finds descendants across sessions, kills
 them, and checks the observed PIDs. Windows uses bounded `taskkill /T /F`.
 This includes Gradle started by the staging helper. The Native helper writes
 child raw streams from launch and bounds process-image observation. A failed
-capture also gets an unpassed workflow receipt with bounded raw file hashes.
-Raw files remain on disk if either stream exceeds the 64 MiB parse limit. Treat
-`deadline_tree_unverified` or `raw_collection: incomplete` as missing proof.
+capture also gets an unpassed workflow receipt. The hash reads at most the
+initial file size plus one byte, capped at 64 MiB plus one byte. A changing,
+oversized, or unreadable raw file has no trusted hash and remains on disk.
+Treat `deadline_tree_unverified` or `raw_collection: incomplete` as missing
+proof.
 
 The capture adapter gets its source SHA, executable runtime and harness, and
 both artifact identities from the exact consumer inventory. It does not use a
