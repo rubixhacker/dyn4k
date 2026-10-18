@@ -321,6 +321,18 @@ class ExtractionTest(unittest.TestCase):
             proof = run._java_worker_open_proof(command, staged, execution)
             self.assertEqual(proof["worker_pid"], "123")
             self.assertEqual(proof["opened_artifact_sha256"], run.digest(staged))
+            interrupted = (f'123 execve("{executable}", ["java", "GradleWorkerMain"], 0x1) = 0\n'
+                           '123 clone3({flags=CLONE_THREAD} <unfinished ...>\n'
+                           '123 <... clone3 resumed> => {parent_tid=[124]}, 88) = 124\n')
+            execution.write_text(interrupted +
+                                 f'124 openat(AT_FDCWD, "{staged}", O_RDONLY) = 4\n')
+            self.assertEqual(run._java_worker_open_proof(command, staged, execution)["worker_pid"],
+                             "123")
+            execution.write_text(interrupted.replace(
+                '123 clone3({flags=CLONE_THREAD} <unfinished ...>\n', '') +
+                f'124 openat(AT_FDCWD, "{staged}", O_RDONLY) = 4\n')
+            with self.assertRaisesRegex(run.Rejected, "only the staged dependency"):
+                run._java_worker_open_proof(command, staged, execution)
             execution.write_text(prefix +
                                  f'124 openat(AT_FDCWD, "{other}", O_RDONLY) = 4\n')
             with self.assertRaisesRegex(run.Rejected, "only the staged dependency"):

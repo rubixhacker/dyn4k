@@ -223,12 +223,19 @@ def _java_worker_open_proof(command, dependency, execution_log):
     workers = []
     children = {}
     opened = []
+    pending_clones = {}
     with Path(execution_log).open(encoding="utf-8", errors="replace") as source:
         for line in source:
             launched = re.match(r'^(\d+) execve\("([^"]+)",.*GradleWorkerMain.*\) = 0$', line)
             if launched and Path(launched.group(2)).resolve() == Path(command[0]).resolve():
                 workers.append(launched.group(1))
+            unfinished = re.match(r'^(\d+) (clone3?)\(.*<unfinished \.\.\.>$', line)
+            if unfinished:
+                pending_clones[unfinished.group(1)] = unfinished.group(2)
             cloned = re.match(r'^(\d+) clone3?\(.*\) = (\d+)$', line)
+            resumed = re.match(r'^(\d+) <\.\.\. (clone3?) resumed>.*\) = (\d+)$', line)
+            if resumed and pending_clones.pop(resumed.group(1), None) == resumed.group(2):
+                children.setdefault(resumed.group(1), set()).add(resumed.group(3))
             if cloned:
                 children.setdefault(cloned.group(1), set()).add(cloned.group(2))
             jar = re.match(r'^(\d+) openat\([^,]+, "([^"]+)",.*\) = \d+$', line)
