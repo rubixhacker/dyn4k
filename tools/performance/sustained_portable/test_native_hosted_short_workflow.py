@@ -336,6 +336,36 @@ class HostedRawFileContract(unittest.TestCase):
         self.assertFalse(check({**resident, "errors": [archived_unconfirmed]},
                                capture_receipt, execution, "macosArm64"))
 
+    def test_terminal_esrch_rejects_boolean_numeric_fields(self):
+        check = self.scope["resident_probe_errors_complete"]
+        terminal = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
+                    "exit_observed_monotonic_ns": 32, "exit_code": 0,
+                    "returncode_at_error": 0,
+                    "returncode_checked_monotonic_ns": 32,
+                    "errno": errno.ESRCH, "classification": "terminal_esrch_exit_confirmed",
+                    "error": "[Errno 3] macOS process resident bytes unavailable"}
+        resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
+                    "errors": [terminal]}
+        capture_receipt = {"rss_observation": {"errors": 1}}
+        execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
+                     "termination": "natural", "exit_code": 0}
+        self.assertTrue(check(resident, capture_receipt, execution, "macosArm64"))
+        for field in ("exit_code", "returncode_at_error"):
+            with self.subTest(row_field=field):
+                malformed = {**resident, "errors": [{**terminal, field: False}]}
+                self.assertFalse(check(malformed, capture_receipt, execution,
+                                       "macosArm64"))
+        with self.subTest(execution_field="exit_code"):
+            self.assertFalse(check(resident, capture_receipt,
+                                   {**execution, "exit_code": False}, "macosArm64"))
+        with self.subTest(capture_field="errors"):
+            self.assertFalse(check(resident, {"rss_observation": {"errors": True}},
+                                   execution, "macosArm64"))
+        with self.subTest(execution_field="started_monotonic_ns"):
+            self.assertFalse(check(resident, capture_receipt,
+                                   {**execution, "started_monotonic_ns": False},
+                                   "macosArm64"))
+
     def test_windows_image_control_uses_exact_inventory_executable(self):
         tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)

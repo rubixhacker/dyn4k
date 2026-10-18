@@ -95,19 +95,23 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     errors = resident["errors"]
     if not isinstance(errors, list):
         return False
-    if capture["rss_observation"]["errors"] != len(errors):
+    if (type(capture["rss_observation"]["errors"]) is not int or
+            capture["rss_observation"]["errors"] != len(errors)):
         return False
     if not errors:
         return True
     if (selected_target != "macosArm64" or len(errors) != 1 or
             resident["method"] != "proc_pidinfo_task_resident" or
-            execution["termination"] != "natural" or execution["exit_code"] != 0):
+            execution["termination"] != "natural" or
+            type(execution["exit_code"]) is not int or execution["exit_code"] != 0):
         return False
     row = errors[0]
     if (not isinstance(row, dict) or
             row.get("classification") != "terminal_esrch_exit_confirmed" or
-            row.get("errno") != errno.ESRCH or row.get("exit_code") != 0 or
-            row.get("returncode_at_error") != 0 or
+            row.get("errno") != errno.ESRCH or
+            type(row.get("exit_code")) is not int or row["exit_code"] != 0 or
+            type(row.get("returncode_at_error")) is not int or
+            row["returncode_at_error"] != 0 or
             row.get("returncode_checked_monotonic_ns") !=
                 row.get("exit_observed_monotonic_ns") or
             "macOS process resident bytes unavailable" not in row.get("error", "")):
@@ -115,7 +119,7 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     stamps = (execution["started_monotonic_ns"], row["monotonic_ns"],
               row["error_observed_monotonic_ns"], row["exit_observed_monotonic_ns"],
               execution["ended_monotonic_ns"])
-    return (all(isinstance(stamp, int) for stamp in stamps) and
+    return (all(type(stamp) is int for stamp in stamps) and
             list(stamps) == sorted(stamps) and
             stamps[3] - stamps[2] <= 1_000_000 and
             all(sample[0] < row["monotonic_ns"] for sample in resident["samples"]))
