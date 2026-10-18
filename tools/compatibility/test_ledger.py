@@ -585,6 +585,55 @@ class LedgerTests(unittest.TestCase):
             item["evidence"][0]["report_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertTrue(validate(value, self.reference, root, "a" * 40)["invalid"])
 
+    def test_old_ledger_receipts_cannot_pass_the_assembled_head(self):
+        root = Path(__file__).resolve().parents[2]
+        recorded = json.loads((root / "tools/compatibility/declaration-ledger.json").read_text())
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        self.assertNotEqual(recorded["candidate_source"]["revision"], head)
+        self.assertTrue((root / recorded["review_receipts"]["governing_disposition"]["path"]).is_file())
+        expected = {
+            "baseline": recorded["baseline"],
+            "baseline_test_counts": recorded["baseline_test_counts"],
+            "production": {row["id"]: row["sha256"] for row in recorded["production"]},
+            "tests": {row["id"]: row["sha256"] for row in recorded["tests"]},
+            "declarations": {row["id"]: (row["source_file"], row["signature"], row.get("flags"))
+                             for row in recorded["declarations"]},
+            "module": {key: value for key, value in recorded["module"].items()
+                       if key not in {"candidate", "evidence", "reason"}},
+        }
+        result = validate(recorded, expected, root, head)
+        self.assertEqual(result.get("source_scope"), "historical-unpassed")
+        self.assertEqual(result["candidate_source_revision"],
+                         "0681a8cd2e3f12327296a58da68bc8338224ea73")
+        self.assertEqual(result["requested_candidate_revision"], head)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("historical" in message for message in result["invalid"]))
+        self.assertEqual(result["obligation_counts"],
+                         {"total": 7486, "passed": 0, "unpassed": 7486,
+                          "by_kind": {"implementation": {"total": 268, "passed": 0, "unpassed": 268},
+                                      "java-test": {"total": 199, "passed": 0, "unpassed": 199},
+                                      "java-signature": {"total": 3508, "passed": 0, "unpassed": 3508},
+                                      "common-portable": {"total": 3508, "passed": 0, "unpassed": 3508},
+                                      "module-descriptor": {"total": 1, "passed": 0, "unpassed": 1},
+                                      "named-module-consumer": {"total": 1, "passed": 0, "unpassed": 1},
+                                      "java8-classpath": {"total": 1, "passed": 0, "unpassed": 1}}})
+        self.assertEqual(len(result["unpassed_obligations"]), 7486)
+        self.assertIsNone(result["governing_summary"])
+
+    def test_original_source_fixture_binds_its_revision_and_tree(self):
+        root = Path(__file__).resolve().parents[2]
+        recorded = json.loads((root / "tools/compatibility/declaration-ledger.json").read_text())
+        source = recorded["candidate_source"]
+        binding = getattr(ledger, "candidate_source_binding", None)
+        self.assertIsNotNone(binding)
+        self.assertEqual(binding(source, source["revision"], root),
+                         ("bound", None))
+        changed = {**source, "tree": "0" * 40}
+        scope, reason = binding(changed, source["revision"], root)
+        self.assertEqual(scope, "invalid")
+        self.assertIn("tree", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

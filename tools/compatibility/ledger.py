@@ -31,6 +31,9 @@ FIXTURE_SHA256 = {
     "module-info.java": "acc256154b37acb90c2abc9113404f585edec3e900697dfd4ef56267240ea0ce",
     "example/Main.java": "2cd5a3ad610ccd7e1de179eefdf69d19196391438ee423e8f3eeac6c8abf391f",
 }
+REQUIRED_KINDS = {"production": ("implementation",), "tests": ("java-test",),
+                  "declarations": ("java-signature", "common-portable")}
+MODULE_KINDS = ("module-descriptor", "named-module-consumer", "java8-classpath")
 
 
 def sha256(data: bytes) -> str:
@@ -388,6 +391,46 @@ def validate_module(item: object, expected: dict, baseline: dict, root: Path,
     return invalid, gaps, passed
 
 
+def candidate_source_binding(source: dict, requested_revision: str, root: Path) -> tuple[str, str | None]:
+    if not re.fullmatch(r"[0-9a-f]{40}", requested_revision):
+        return "invalid", "requested candidate revision is invalid"
+    try:
+        requested_tree = candidate_coverage.git(root, "rev-parse", f"{requested_revision}^{{tree}}")
+    except (OSError, subprocess.CalledProcessError):
+        return "invalid", "requested candidate revision cannot be verified"
+    if source.get("revision") != requested_revision:
+        return ("historical", "historical candidate source revision differs from requested HEAD: "
+                f"recorded={source.get('revision')}, requested={requested_revision}")
+    if source.get("tree") != requested_tree:
+        return "invalid", "candidate source tree differs from requested HEAD tree"
+    return "bound", None
+
+
+def unbound_candidate_report(expected: dict, source: dict, requested_revision: str,
+                             scope: str, reason: str) -> dict:
+    status = "historical-unpassed" if scope == "historical" else "invalid-unpassed"
+    obligations = [{"section": section, "id": key, "kind": kind,
+                    "status": status, "reason": reason}
+                   for section, kinds in REQUIRED_KINDS.items()
+                   for key in expected[section] for kind in kinds]
+    obligations.extend({"section": "module", "id": "module-info.java", "kind": kind,
+                        "status": status, "reason": reason} for kind in MODULE_KINDS)
+    by_kind = {}
+    for item in obligations:
+        bucket = by_kind.setdefault(item["kind"], {"total": 0, "passed": 0, "unpassed": 0})
+        bucket["total"] += 1
+        bucket["unpassed"] += 1
+    return {"passed": False, "invalid": [reason], "gaps": [reason],
+            "source_scope": status, "candidate_source_revision": source.get("revision"),
+            "requested_candidate_revision": requested_revision,
+            "governing_summary": None,
+            "obligation_counts": {"total": len(obligations), "passed": 0,
+                                  "unpassed": len(obligations), "by_kind": by_kind},
+            "unpassed_obligations": obligations, "missing_counterparts": None,
+            "counts": {**{section: len(expected[section]) for section in REQUIRED_KINDS},
+                       "module": 1}}
+
+
 def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str | None = None,
              baseline_source: Path | None = None) -> dict:
     invalid = []
@@ -397,9 +440,15 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
     replays = {}
     verified = {}
     source_revision = candidate_revision
+    source_scope = "unscoped"
     projection = None
     governing_summary = None
     source = ledger.get("candidate_source")
+    if candidate_revision is not None and isinstance(source, dict):
+        binding, reason = candidate_source_binding(source, candidate_revision, root)
+        if reason is not None:
+            return unbound_candidate_report(expected, source, candidate_revision, binding, reason)
+        source_scope = "bound-to-requested"
     if source is not None:
         if not isinstance(source, dict):
             invalid.append("candidate source revision record is invalid")
@@ -660,9 +709,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
     invalid.extend(module_invalid)
     gaps.extend(module_gaps)
     obligation_details = []
-    required = {"production": ("implementation",), "tests": ("java-test",),
-                "declarations": ("java-signature", "common-portable")}
-    for section, kinds in required.items():
+    for section, kinds in REQUIRED_KINDS.items():
         raw_entries = ledger.get(section)
         entries = {item.get("id"): item for item in (raw_entries if isinstance(raw_entries, list) else [])
                    if isinstance(item, dict)}
@@ -681,7 +728,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
                     reason = record.get("reason") or item.get("reason") or "no executable result"
                 obligation_details.append({"section": section, "id": key, "kind": kind,
                                            "status": status, "reason": reason})
-    for kind in ("module-descriptor", "named-module-consumer", "java8-classpath"):
+    for kind in MODULE_KINDS:
         module = ledger.get("module")
         module = module if isinstance(module, dict) else {}
         records = {record.get("kind"): record for record in (module.get("evidence") or [])
@@ -707,6 +754,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
     obligation_counts["by_kind"] = by_kind
     return {"passed": not invalid and not gaps, "invalid": invalid, "gaps": gaps,
             "candidate_source_revision": source_revision,
+            "requested_candidate_revision": candidate_revision, "source_scope": source_scope,
             "governing_summary": governing_summary,
             "obligation_counts": obligation_counts,
             "unpassed_obligations": [item for item in obligation_details if item["status"] != "passed"],
@@ -739,7 +787,10 @@ def main() -> None:
     report["candidate_revision"] = candidate_revision
     if args.report:
         args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"passed": report["passed"], "invalid": len(report["invalid"]),
+    print(json.dumps({"passed": report["passed"], "source_scope": report["source_scope"],
+                      "candidate_source_revision": report["candidate_source_revision"],
+                      "requested_candidate_revision": candidate_revision,
+                      "invalid": len(report["invalid"]),
                       "gaps": len(report["gaps"]), "missing_counterparts": report["missing_counterparts"],
                       "counts": report["counts"]}, indent=2))
     raise SystemExit(2 if report["invalid"] else 0 if report["passed"] else 1)
