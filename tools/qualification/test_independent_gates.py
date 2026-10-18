@@ -530,28 +530,54 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates._prospective_checker_binding(ROOT, current)
 
     def test_reviewed_p2_source_blobs_are_pinned_to_approved_revision(self):
-        revision = independent_gates.PROSPECTIVE_CHECKER_REVISION
-        self.assertEqual("82e8a46448d4d6107e69de28cfa9df183292baf3", revision)
+        historical = independent_gates.PROSPECTIVE_CHECKER_REVISION
+        revision = independent_gates.P2_CLASS_LOAD_REVISION
+        self.assertEqual("5b750850277a6e9d494483dc5fa2791b6d292233", revision)
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                           cwd=ROOT, text=True).strip()
         independent_gates._prospective_checker_binding(ROOT, current)
-        independent_gates._source_binding(
-            ROOT, current,
-            {f"tools/numerical/portable/{name}": value
-             for name, value in independent_gates.APPROVED_P2_PRODUCERS.items()},
-            "reviewed P2 raw producer")
+        for candidate in (historical, f"{revision}^", revision, current):
+            with self.subTest(candidate=candidate):
+                independent_gates._p2_producer_binding(ROOT, candidate)
+        with self.assertRaisesRegex(ValueError, "predates reviewed P2 raw producer"):
+            independent_gates._p2_producer_binding(
+                ROOT, independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION)
+        self.assertEqual(
+            "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
+            independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS["actual_arithmetic.py"])
+        self.assertEqual(
+            "b96043c57a918dabe8425961b02aff930a704e592c32baffc5645b94b84ce835",
+            independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"])
+        arithmetic_path = "tools/numerical/portable/actual_arithmetic.py"
+        for reviewed in ("6408495750659a46eb0e2fb6f2167186f6eca2ef",
+                         "ffdc8ba9b600732e6927e38e7d3da43a519994a4"):
+            self.assertEqual(
+                independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"],
+                hashlib.sha256(subprocess.check_output(
+                    ["git", "show", f"{reviewed}:{arithmetic_path}"], cwd=ROOT)).hexdigest())
+        for name, approved in independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS.items():
+            path = f"tools/numerical/portable/{name}"
+            self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{historical}:{path}"], cwd=ROOT)).hexdigest())
         for name, approved in independent_gates.APPROVED_P2_PRODUCERS.items():
             path = f"tools/numerical/portable/{name}"
             self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
                 ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
+            self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{current}:{path}"], cwd=ROOT)).hexdigest())
         with mock.patch.dict(independent_gates.APPROVED_P2_PRODUCERS,
                              {"actual_arithmetic.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
-                independent_gates._source_binding(
-                    ROOT, current,
-                    {f"tools/numerical/portable/{name}": value
-                     for name, value in independent_gates.APPROVED_P2_PRODUCERS.items()},
-                    "reviewed P2 raw producer")
+                independent_gates._p2_producer_binding(ROOT, current)
+        with mock.patch.dict(independent_gates.APPROVED_P2_PRODUCERS, {
+                "actual_arithmetic.py":
+                independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS["actual_arithmetic.py"]}):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
+        with mock.patch.dict(independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS,
+                             {"actual_arithmetic.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, historical)
 
     def test_p2_318_case_policy_requires_attested_method_and_policy_results(self):
         methods = independent_gates.PROSPECTIVE_BRIDGE_METHODS
@@ -732,6 +758,61 @@ class IndependentGateSeamTests(unittest.TestCase):
                 with self.assertRaisesRegex(CaptureRejected, "nonfinite binary64 field"):
                     verify_capture(failed.read_bytes(), "captureAngleFailure",
                                    expected_case_ids()["captureAngleFailure"])
+        finally:
+            sys.path.pop(0)
+
+    @unittest.skipUnless(
+        all(Path(f"/var/home/stewart/dyn4k-evidence/prospective-actual/"
+                 f"ffdc8ba-hooks-order-{route}/receipt.json").is_file()
+            for route in ("geometry", "ccd")),
+        "reviewed exact-commit arithmetic receipts are absent")
+    def test_reviewed_p2_class_load_receipts_replay_without_qualification(self):
+        producer_root = Path("/var/home/stewart/Workspace/dyn4k-port-rotation-hooks-isolation")
+        staged_jar = (producer_root / "build/staging-repository/io/github/rubixhacker/"
+                      "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
+        if not staged_jar.is_file():
+            self.skipTest("reviewed producer's same-source staged JAR is absent")
+        source = Path("/var/home/stewart/dyn4k-evidence/prospective-actual")
+        filenames = {"xml": "capture.xml", "stage_log": "stage.log",
+                     "gradle_log": "gradle.log", "execve_log": "execve.log",
+                     "artifact": "artifact.jar", "runtime": "runtime-java",
+                     "source": "source.tar", "worker_classpath": "worker-classpath.txt",
+                     "portable_classes": "portable-classes.zip"}
+        sys.path.insert(0, str(ROOT / "tools/numerical/portable"))
+        try:
+            import actual_arithmetic as arithmetic
+            self.assertEqual(independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"],
+                             hashlib.sha256(Path(arithmetic.__file__).read_bytes()).hexdigest())
+            with (mock.patch.object(arithmetic, "_ROOT", producer_root),
+                  mock.patch.object(arithmetic, "_STAGED_JAR", staged_jar)):
+                for name, count, resets in (("ffdc8ba-hooks-order-geometry", 75, 0),
+                                            ("ffdc8ba-hooks-order-ccd", 12, 6)):
+                    with self.subTest(archive=name):
+                        archive = source / name
+                        receipt = json.loads((archive / "receipt.json").read_text())
+                        files = {key: (archive / filename).read_bytes()
+                                 for key, filename in filenames.items()}
+                        files["worker_class_load"] = next(
+                            archive.glob("worker-class-load-*.log")).read_bytes()
+                        summary = arithmetic.verify_capture_receipt(
+                            receipt, files, receipt["method"], receipt["candidate_commit"],
+                            arithmetic.expected_case_ids()[receipt["method"]],
+                            receipt["runtime_executable"])
+                        self.assertEqual("VERIFIED_ARITHMETIC_BINDING", summary["status"])
+                        self.assertEqual("UNPASSED", summary["qualification"])
+                        self.assertEqual((count, resets),
+                                         (summary["cases"], summary["selected_resets"]))
+                        if resets:
+                            changed = dict(files)
+                            changed["worker_class_load"] = b"".join(
+                                row for row in files["worker_class_load"].splitlines(keepends=True)
+                                if b"org.dyn4j.world.ToiAcceptedResetTap " not in row)
+                            with self.assertRaises(arithmetic.CaptureRejected):
+                                arithmetic.verify_capture_receipt(
+                                    receipt, changed, receipt["method"],
+                                    receipt["candidate_commit"],
+                                    arithmetic.expected_case_ids()[receipt["method"]],
+                                    receipt["runtime_executable"])
         finally:
             sys.path.pop(0)
 

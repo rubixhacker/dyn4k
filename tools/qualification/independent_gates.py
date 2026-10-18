@@ -89,12 +89,17 @@ APPROVED_PROSPECTIVE_POLICY_CHECKERS = {
     "orthogonality.py": "a7fce390f154a9c044f20fb27803d104798cd6800bf8d757cc5ba9b862390644",
     "reference_diagnostic.py": "5d87eb26d11dabacc7caa0842a129d62d6e8f661a4b079c3383af309e7c6ef22",
 }
+P2_CLASS_LOAD_REVISION = "5b750850277a6e9d494483dc5fa2791b6d292233"
 APPROVED_P2_PRODUCERS = {
-    "actual_arithmetic.py": "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
+    "actual_arithmetic.py": "b96043c57a918dabe8425961b02aff930a704e592c32baffc5645b94b84ce835",
     "baseline_capture.py": "914e775309ffaa2ae4ea1690a22f83c055f422d7579e334e27d2fdf03d4e5a8f",
     "capture_actual.py": "2366b83a3314c72d208d49642609734536ae212c65db23025a7431dc636363b0",
     "rotation_oracle.py": "a95e4fba5883728dfe936c752daacd5a1fe0bb484dff4b14ddc9935b4a322ac6",
     "run.py": "2bd20f332a15621b10f634dee7cf3551310e0dbe8b6465f4c55d7e5a5d420d7e",
+}
+APPROVED_P2_HISTORICAL_PRODUCERS = {
+    **APPROVED_P2_PRODUCERS,
+    "actual_arithmetic.py": "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
 }
 ROTATION_ORACLE_REVISION = "8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb"
 ROTATION_ORACLE_SHA256 = "29de6401ef9253bee669714fdf31bade9291b4ee77d2aacaa34d62907f1bc238"
@@ -364,6 +369,33 @@ def _source_binding(repository, candidate_sha, approved_paths, label):
                 or hashlib.sha256(committed).hexdigest() != approved):
             raise ValueError(f"{label} blob differs: {relative}")
     return dict(approved_paths)
+
+
+def _p2_producer_binding(repository, candidate_sha):
+    def descends_from(revision):
+        checked = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+             "--is-ancestor", revision, candidate_sha],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        if checked.returncode not in (0, 1):
+            raise ValueError("reviewed P2 raw producer revision ancestry is unavailable")
+        return checked.returncode == 0
+
+    if not descends_from(PROSPECTIVE_CHECKER_REVISION):
+        raise ValueError("candidate predates reviewed P2 raw producer revision")
+    approved = (APPROVED_P2_PRODUCERS if descends_from(P2_CLASS_LOAD_REVISION)
+                else APPROVED_P2_HISTORICAL_PRODUCERS)
+    source_dir = "tools/numerical/portable"
+    for name, local_approved in APPROVED_P2_PRODUCERS.items():
+        relative = f"{source_dir}/{name}"
+        local = Path(__file__).resolve().parents[2] / relative
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+        if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved
+                or hashlib.sha256(committed).hexdigest() != approved[name]):
+            raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
+    return dict(approved)
 
 
 def _numerical_modules(directory):
@@ -793,10 +825,7 @@ def _p2_summary(summary, expected, methods, case_methods):
 def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
                     source_sha256, artifact_sha256):
     _prospective_checker_binding(repository, candidate_sha)
-    _source_binding(repository, candidate_sha,
-                    {f"tools/numerical/portable/{name}": value
-                     for name, value in APPROVED_P2_PRODUCERS.items()},
-                    "reviewed P2 raw producer")
+    _p2_producer_binding(repository, candidate_sha)
     baseline = _p2_directory(root, bridge["baseline"])
     candidate = _p2_directory(root, bridge["candidate"])
     arithmetic = _p2_directory(root, bridge["arithmetic"])
