@@ -10,6 +10,7 @@ import re
 import secrets
 import select
 import shlex
+import stat
 import subprocess
 import time
 
@@ -268,16 +269,85 @@ def apple_process_path(pid):
     return Path(os.fsdecode(buffer.value))
 
 
-def apple_process_image(executable, pid):
+def apple_file_identity(path):
+    if path.is_symlink():
+        raise ValueError("simulator process image is a substituted symlink")
+    details = path.stat()
+    if not stat.S_ISREG(details.st_mode):
+        raise ValueError("simulator process image is not a regular file")
+    return {"device": details.st_dev, "inode": details.st_ino, "size": details.st_size,
+            "mtime_ns": details.st_mtime_ns, "ctime_ns": details.st_ctime_ns}
+
+
+def parse_apple_process_vnode(raw, pid, executable):
+    fields = [part.lstrip(b"\n") for part in raw.split(b"\0") if part.strip(b"\n")]
+    records = []
+    current = None
+    observed_pid = None
+    for field in fields:
+        key, value = field[:1], field[1:]
+        if key == b"p":
+            if observed_pid is not None or current is not None or value != str(pid).encode():
+                raise ValueError("simulator process vnode PID is missing or ambiguous")
+            observed_pid = pid
+        elif key == b"f":
+            if observed_pid is None:
+                raise ValueError("simulator process vnode PID is missing")
+            if current is not None:
+                records.append(current)
+            current = {b"f": value}
+        elif current is not None:
+            if key in current:
+                raise ValueError("simulator process vnode field is ambiguous")
+            current[key] = value
+        else:
+            raise ValueError("simulator process vnode record is malformed")
+    if current is not None:
+        records.append(current)
+    matches = [item for item in records if item.get(b"f") == b"txt"
+               and item.get(b"n") == os.fsencode(executable)]
+    if observed_pid != pid or len(matches) != 1:
+        raise ValueError("simulator process executable vnode is missing or ambiguous")
+    record = matches[0]
+    try:
+        device = int(record[b"D"], 0)
+        inode = int(record[b"i"])
+        size = int(record[b"s"])
+    except (KeyError, ValueError) as error:
+        raise ValueError("simulator process executable vnode identity is missing") from error
+    if device < 0 or inode <= 0 or size <= 0:
+        raise ValueError("simulator process executable vnode identity is invalid")
+    return {"pid": pid, "path": str(executable), "device": device,
+            "inode": inode, "size": size}
+
+
+def apple_process_vnode(pid, executable, archive):
+    setup_command(archive, "apple-process-vnode",
+                  ["/usr/sbin/lsof", "-a", "-p", str(pid), "-d", "txt", "-F0pfiDns"],
+                  timeout=5)
+    return parse_apple_process_vnode((archive / "setup/apple-process-vnode.stdout.bin").read_bytes(),
+                                     pid, executable)
+
+
+def apple_process_image(executable, pid, expected_sha, expected_size, before, archive):
     if pid <= 0:
         raise ValueError("simulator OS launch PID is invalid")
     path = apple_process_path(pid)
-    if path != executable or not path.is_file():
+    if path != executable:
         raise ValueError("simulator launch PID does not identify installed process image")
+    vnode = apple_process_vnode(pid, executable, archive)
+    if (vnode["device"], vnode["inode"], vnode["size"]) != \
+            (before["device"], before["inode"], expected_size):
+        raise ValueError("simulator process executable vnode differs from selected link")
+    if apple_file_identity(path) != before:
+        raise ValueError("installed simulator image changed after prelaunch check")
     observed_sha = capture.digest(path)
-    validate_process_image(observed_sha, capture.digest(executable))
+    validate_process_image(observed_sha, expected_sha)
+    if apple_file_identity(path) != before or apple_process_path(pid) != executable:
+        raise ValueError("simulator process image changed or exited during observation")
     return {"pid": pid, "path": str(path), "sha256": observed_sha,
-            "method": "simctl-launch-pid/proc_pidpath"}
+            "size": expected_size, "device": vnode["device"], "inode": vnode["inode"],
+            "method": "simctl-launch-pid/proc_pidpath/lsof-text-vnode"}
 
 
 def run_simulator(args, inventory, harness, producer, nonce):
@@ -304,8 +374,16 @@ def run_simulator(args, inventory, harness, producer, nonce):
     installed_app = Path(container)
     installed = installed_app / harness.name
     installed_bundle = validate_installed_bundle(Path(app), installed_app)
-    if not installed.is_file() or capture.digest(installed) != capture.digest(harness):
+    selected_sha = capture.digest(harness)
+    selected_size = harness.stat().st_size
+    if (selected_sha != inventory["linked_sha256"] or selected_size <= 0
+            or installed_bundle != inventory["bundle_sha256"]
+            or installed_bundle.get(harness.name) != selected_sha
+            or not installed.is_file() or capture.digest(installed) != selected_sha):
         raise ValueError("installed simulator executable differs from selected link")
+    prelaunch_image = apple_file_identity(installed)
+    if prelaunch_image["size"] != selected_size:
+        raise ValueError("installed simulator executable size differs from selected link")
     data_container = Path(setup_command(args.archive, "apple-data-container",
         ["xcrun", "simctl", "get_app_container", args.udid, bundle, "data"]).stdout.strip())
     if not data_container.is_absolute() or not data_container.is_dir() or data_container.is_symlink():
@@ -327,13 +405,16 @@ def run_simulator(args, inventory, harness, producer, nonce):
         while time.monotonic() < deadline:
             path = apple_process_path(pid)
             if path == installed:
-                image = apple_process_image(installed, pid)
+                image = apple_process_image(installed, pid, selected_sha, selected_size,
+                                            prelaunch_image, args.archive)
                 break
             if path is not None:
                 raise ValueError("simulator launch PID identifies another process image")
             time.sleep(0.005)
         if image is None:
             raise ValueError("simulator launch PID process image was not observable")
+        if validate_installed_bundle(Path(app), installed_app) != inventory["bundle_sha256"]:
+            raise ValueError("post-launch simulator package differs from selected inventory")
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             path = apple_process_path(pid)
@@ -366,13 +447,19 @@ def run_simulator(args, inventory, harness, producer, nonce):
     if not stdout_path.is_file() or not stderr_path.is_file():
         raise ValueError("simulator redirected producer output is missing")
     simulator_protocol_bytes(stdout, launch_stdout, bundle, image["pid"])
+    if apple_file_identity(installed) != prelaunch_image or capture.digest(installed) != selected_sha:
+        raise ValueError("post-launch installed simulator executable changed")
+    postlaunch_bundle = validate_installed_bundle(Path(app), installed_app)
+    if postlaunch_bundle != inventory["bundle_sha256"]:
+        raise ValueError("post-launch simulator package differs from selected inventory")
     ended = time.monotonic_ns()
     return stdout, stderr, {"command": launch, "launch_exit_code": 0,
                             "app_exit_code": None,
                             "image": image, "runtime": device, "xcode": xcode.strip(),
                             "bundle_id": bundle,
                             "installed_image_sha256": capture.digest(installed),
-                            "installed_bundle_sha256": installed_bundle,
+                            "installed_image_size": apple_file_identity(installed)["size"],
+                            "installed_bundle_sha256": postlaunch_bundle,
                             "linked_sha256": inventory["linked_sha256"],
                             "launch": {"pid": image["pid"], "method": "simctl-redirected-files",
                                        "stdout_sha256": capture.digest(args.archive / "setup/apple-launch.stdout.bin")},
@@ -501,11 +588,20 @@ def run(args):
                 raise ValueError("simulator OS launch receipt bytes changed")
             if launch.get("pid") != process["image"]["pid"]:
                 raise ValueError("simulator launch PID differs from observed process image")
+            if (process["image"].get("method") != "simctl-launch-pid/proc_pidpath/lsof-text-vnode"
+                    or not isinstance(process["image"].get("device"), int)
+                    or not isinstance(process["image"].get("inode"), int)
+                    or process["image"]["inode"] <= 0):
+                raise ValueError("simulator process executable vnode observation is missing")
             if not isinstance(output, dict) or output.get("stdout_sha256") != hashlib.sha256(stdout).hexdigest() \
                     or output.get("stderr_sha256") != hashlib.sha256(stderr).hexdigest():
                 raise ValueError("simulator redirected producer output bytes changed")
             if process.get("linked_sha256") != inventory["linked_sha256"] \
-                    or process.get("installed_bundle_sha256") != inventory["bundle_sha256"]:
+                    or process.get("installed_bundle_sha256") != inventory["bundle_sha256"] \
+                    or process.get("installed_image_sha256") != inventory["linked_sha256"] \
+                    or process["image"].get("sha256") != inventory["linked_sha256"] \
+                    or process.get("installed_image_size") != harness.stat().st_size \
+                    or process["image"].get("size") != harness.stat().st_size:
                 raise ValueError("simulator installed package or link differs from inventory")
             protocol_bytes = simulator_protocol_bytes(
                 stdout, launch_file.read_bytes(), process["bundle_id"], process["image"]["pid"])

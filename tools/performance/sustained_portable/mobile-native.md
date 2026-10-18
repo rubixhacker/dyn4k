@@ -80,8 +80,18 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
 
 The launcher checks Xcode 26.4.1, host architecture, simulator family,
 selected and installed app package bytes, the linked executable, and the
-observed `proc_pidpath` at the PID returned by `simctl launch`. It checks the
-selected Xcode's `simctl help launch` for separate app stdout and stderr file
+observed `proc_pidpath` at the PID returned by `simctl launch`. It also checks
+the OS text mapping's device, inode, and size through `lsof -d txt`. The
+installed executable's SHA-256, size, and file identity must still match the
+selected link during observation. A second package scan after launch must
+match the build inventory. A missing or ambiguous text mapping fails closed.
+The `lsof` bytes remain in `setup/apple-process-vnode.stdout.bin`. The command
+and its stderr remain in the matching setup records. Apple's distributed
+[lsof manual](https://github.com/apple-open-source/macos/blob/master/lsof/lsof/lsof.man)
+describes the PID, descriptor, device, inode, size, and name fields.
+
+The launcher checks the selected Xcode's `simctl help launch` for separate app
+stdout and stderr file
 redirection. The app writes to unique files in its data container. The OS
 launch receipt remains in `setup/apple-launch.stdout.bin`; the app streams
 are copied to `stdout.bin` and `stderr.bin`. A missing, ambiguous, spoofed,
@@ -90,12 +100,13 @@ capture. The app exit code is unavailable from this detached launch and is
 recorded as such. Apple directs users to the installed tool's help for its
 current behavior in the [Xcode command-line reference](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference).
 
-The separate redirect behavior and process lifetime still need an observed
-short capture on each matching hosted Mac simulator family. The Linux host
-cannot run `xcrun`. If a hosted `simctl` lacks the redirect flags, writes app
-bytes into the launch receipt, or ends the app before `proc_pidpath` can
-observe the PID, the adapter fails closed. Preserve the raw archive and
-report the exact unsupported behavior before changing the method.
+The separate redirect behavior, `lsof` text mapping fields, and process
+lifetime still need an observed short capture on each matching hosted Mac
+simulator family. The Linux host cannot run `xcrun`. If a hosted `simctl` lacks
+the redirect flags, writes app
+bytes into the launch receipt, or ends the app before `proc_pidpath` and
+`lsof` can observe the PID, the adapter fails closed. Preserve the raw archive
+and report the exact unsupported behavior before changing the method.
 Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and
 `watchosDeviceArm64` app builds preserve source scope. Device deployment
 requires a selected physical device and signing identity. Their runtime
