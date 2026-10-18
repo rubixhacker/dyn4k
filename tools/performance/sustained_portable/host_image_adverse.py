@@ -11,6 +11,19 @@ import time
 import capture
 
 
+class AdverseStepError(ValueError):
+    def __init__(self, stage, error):
+        super().__init__(f"{stage}: {error}")
+        self.stage = stage
+
+
+def checked(stage, action):
+    try:
+        return action()
+    except (OSError, ValueError) as error:
+        raise AdverseStepError(stage, error) from error
+
+
 def path_swap_control():
     if sys.platform == "win32":
         source = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
@@ -21,10 +34,12 @@ def path_swap_control():
     with tempfile.TemporaryDirectory(prefix="dyn4k-image-adverse-") as temporary:
         executable = Path(temporary) / source.name
         moved = Path(temporary) / ("original-" + source.name)
-        shutil.copy2(source, executable)
-        original_sha = capture.digest(executable)
-        process = subprocess.Popen([str(executable), *arguments], stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
+        checked("copy_image", lambda: shutil.copyfile(source, executable))
+        if os.name == "posix":
+            checked("make_executable", lambda: os.chmod(executable, 0o700))
+        original_sha = checked("hash_image", lambda: capture.digest(executable))
+        process = checked("launch_image", lambda: subprocess.Popen(
+            [str(executable), *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
         receipt = {"host": sys.platform, "pid": process.pid,
                    "original_sha256": original_sha, "swap": "unattempted",
                    "mapped_image_identity": "unobserved"}
@@ -32,8 +47,10 @@ def path_swap_control():
             time.sleep(0.1)
             if process.poll() is not None:
                 raise ValueError("adverse executable exited before path swap")
-            receipt["before"] = capture.observed_process_image(process.pid, executable)
-            capture.require_process_image(receipt["before"], original_sha)
+            receipt["before"] = checked("observe_before", lambda:
+                                        capture.observed_process_image(process.pid, executable))
+            checked("validate_before", lambda:
+                    capture.require_process_image(receipt["before"], original_sha))
             try:
                 os.replace(executable, moved)
                 executable.write_bytes(b"DYN4K_PATH_SWAP_DECOY")
@@ -42,7 +59,8 @@ def path_swap_control():
                 receipt["swap"] = "blocked_by_os"
                 receipt["swap_error"] = str(error)
             selected = moved if receipt["swap"] == "applied" else executable
-            receipt["after"] = capture.observed_process_image(process.pid, selected)
+            receipt["after"] = checked("observe_after", lambda:
+                                       capture.observed_process_image(process.pid, selected))
             reported_path = receipt["after"].get("path")
             if reported_path is None:
                 receipt["reported_path_sha256_after"] = None
@@ -89,6 +107,8 @@ def main():
     except (OSError, ValueError) as error:
         result = {"host": sys.platform, "swap": "unavailable", "error": str(error),
                   "mapped_image_identity": "unobserved"}
+        if isinstance(error, AdverseStepError):
+            result["error_stage"] = error.stage
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))

@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import struct
 import subprocess
@@ -218,9 +218,14 @@ class PortableCaptureTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mapped PE code differs"):
             host_image.compare_pe_code(image, layout,
                 lambda address, size: (b"z" * size if address != base else read(address, size)), base)
-        with self.assertRaisesRegex(ValueError, "mapped PE header differs"):
+        with self.assertRaisesRegex(ValueError, "mapped PE header differs.*offset 0x0"):
             host_image.compare_pe_code(image, layout,
                 lambda address, size: (b"z" * size if address == base else read(address, size)), base)
+
+    def test_windows_source_archive_entry_uses_jar_separators(self):
+        relative = PureWindowsPath("commonMain", "kotlin", "org", "dyn4j", "Vector2.kt")
+        self.assertEqual(capture.source_archive_name(relative),
+                         "commonMain/org/dyn4j/Vector2.kt")
 
     def test_windows_diagnostic_path_failure_preserves_live_code_gate(self):
         image = self.windows_pe_fixture()
@@ -303,7 +308,7 @@ class PortableCaptureTest(unittest.TestCase):
             metadata = directory / f"{stem}.module"
             sources = directory / f"{stem}-sources.jar"
             source_root = capture.ROOT / label / "src"
-            entries = {str(path.relative_to(source_root)).replace("/kotlin/", "/"): path
+            entries = {capture.source_archive_name(path.relative_to(source_root)): path
                        for path in source_root.rglob("*.kt")
                        if path.relative_to(source_root).parts[0] in ("commonMain", "nativeMain",
                                                                     "linuxMain", "linuxX64Main")}
@@ -650,6 +655,35 @@ class PortableCaptureTest(unittest.TestCase):
         self.assertEqual(result["swap"], "applied")
         self.assertEqual(result["mapped_image_identity"], "matched_original")
         self.assertEqual(result["stale_pid"], "rejected")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_does_not_copy_system_file_metadata(self):
+        with mock.patch.object(host_image_adverse.shutil, "copy2",
+                               side_effect=PermissionError(1, "copy metadata denied")):
+            result = host_image_adverse.path_swap_control()
+        self.assertEqual(result["swap"], "applied")
+        self.assertEqual(result["mapped_image_identity"], "matched_original")
+        self.assertEqual(result["stale_pid"], "rejected")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_retains_failing_step(self):
+        failures = ((host_image_adverse.shutil, "copyfile", "copy_image", "copy denied"),
+                    (host_image_adverse.subprocess, "Popen", "launch_image", "launch denied"),
+                    (capture, "observed_process_image", "observe_before",
+                     "live mapped PE header differs at offset 0x10"))
+        for module, function, stage, message in failures:
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "path-swap.json"
+                error = ValueError(message) if stage == "observe_before" else PermissionError(1, message)
+                with mock.patch.object(module, function, side_effect=error), \
+                        mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                        redirect_stdout(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        host_image_adverse.main()
+                receipt = json.loads(output.read_text())
+                self.assertEqual(receipt["mapped_image_identity"], "unobserved")
+                self.assertEqual(receipt["error_stage"], stage)
+                self.assertIn(message, receipt["error"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
     def test_path_swap_writes_receipt_when_diagnostic_path_is_absent(self):

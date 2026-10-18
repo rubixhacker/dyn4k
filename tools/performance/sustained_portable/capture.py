@@ -106,6 +106,10 @@ def validate_klib(path, label, target):
         raise ValueError(f"{label} KLIB identity differs from exact target or compiler")
 
 
+def source_archive_name(relative):
+    return relative.as_posix().replace("/kotlin/", "/")
+
+
 def validate_publication(root, label, target, selected_sha):
     module = f"{label}-{target.lower()}"
     directory = root / "io" / "github" / "rubixhacker" / module / ARTIFACT_VERSION
@@ -142,7 +146,7 @@ def validate_publication(root, label, target, selected_sha):
         sets.add("linuxMain")
     if target == "macosArm64":
         sets.add("appleMain")
-    expected = {str(path.relative_to(source_root)).replace("/kotlin/", "/"): path
+    expected = {source_archive_name(path.relative_to(source_root)): path
                 for path in source_root.rglob("*.kt")
                 if path.relative_to(source_root).parts[0] in sets}
     try:

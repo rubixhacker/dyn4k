@@ -187,8 +187,15 @@ def pe_executable_sections(image):
 
 def compare_pe_code(image, layout, read_memory, base):
     mapped_header = read_memory(base, layout["header_size"])
-    if mapped_header != image[:layout["header_size"]]:
-        raise ValueError("live mapped PE header differs from selected executable")
+    selected_header = image[:layout["header_size"]]
+    if len(mapped_header) != len(selected_header):
+        raise ValueError("live mapped PE header differs from selected executable in length")
+    if mapped_header != selected_header:
+        offset = next(index for index, pair in enumerate(zip(selected_header, mapped_header))
+                      if pair[0] != pair[1])
+        raise ValueError("live mapped PE header differs from selected executable "
+                         f"at offset 0x{offset:x}: selected=0x{selected_header[offset]:02x}, "
+                         f"mapped=0x{mapped_header[offset]:02x}")
     matched = 0
     digest = hashlib.sha256()
     for section in layout["sections"]:
