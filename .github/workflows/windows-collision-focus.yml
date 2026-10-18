@@ -37,11 +37,13 @@ jobs:
           $native = Join-Path $evidence 'native'
           $java = Join-Path $evidence 'java'
           New-Item -ItemType Directory -Force -Path $native, $java | Out-Null
-          $nativeExit = -1
+          $gradleExit = $null
           $javaExit = -1
+          $collectionStatus = 0
+          $validationStatus = 0
           $nativeStarted = $false
           $nativeLog = Join-Path $native 'gradle-console.log'
-          $nativeExitFile = Join-Path $native 'gradle-exit-code.txt'
+          $gradleExitFile = Join-Path $native 'gradle-exit-code.txt'
           $javaLog = Join-Path $java 'java-console.log'
           $javaExitFile = Join-Path $java 'java-exit-code.txt'
           $collectionErrors = [System.Collections.Generic.List[string]]::new()
@@ -60,10 +62,27 @@ jobs:
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest' `
               --no-daemon --rerun-tasks --console=plain 2>&1 | Tee-Object -FilePath $nativeLog
-            $nativeExit = $LASTEXITCODE
+            $gradleExit = [string]$LASTEXITCODE
           } catch {
-            $_ | Out-String | Add-Content -Path $nativeLog
-            $nativeExit = 1
+            try { $_ | Out-String | Add-Content -Path $nativeLog -ErrorAction Stop }
+            catch {
+              $collectionErrors.Add("Gradle console collection failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
+            if ($null -eq $gradleExit) {
+              if ($nativeStarted -and $null -ne $LASTEXITCODE) {
+                $gradleExit = [string]$LASTEXITCODE
+              } else {
+                $gradleExit = 'NOT_RUN'
+              }
+            }
+          }
+          if ($null -eq $gradleExit) { $gradleExit = 'NOT_RUN' }
+          try {
+            Set-Content -Path $gradleExitFile -Value $gradleExit
+          } catch {
+            $collectionErrors.Add("Gradle exit code record failed: $($_.ToString())")
+            $collectionStatus = 1
           }
 
           try {
@@ -71,6 +90,7 @@ jobs:
             $xmlFiles = @(Get-ChildItem $results -Filter 'TEST-*.xml' -File -ErrorAction Stop)
           } catch {
             $collectionErrors.Add("Native XML listing failed: $($_.ToString())")
+            $collectionStatus = 1
           }
           if ($null -ne $xmlFiles) {
             foreach ($file in $xmlFiles) {
@@ -78,12 +98,13 @@ jobs:
                 Copy-Item -LiteralPath $file.FullName -Destination $native -ErrorAction Stop
               } catch {
                 $collectionErrors.Add("Native XML copy failed for $($file.Name): $($_.ToString())")
+                $collectionStatus = 1
               }
             }
           }
           if ($xmlFiles.Count -ne 7) {
             $collectionErrors.Add("Expected seven same-run XML reports; found $($xmlFiles.Count)")
-            $nativeExit = 1
+            $collectionStatus = 1
           }
 
           try {
@@ -113,10 +134,21 @@ jobs:
               2>&1 | Tee-Object -FilePath $javaLog
             $javaExit = $LASTEXITCODE
           } catch {
-            $_ | Out-String | Add-Content -Path $javaLog
+            $javaError = $_.ToString()
+            try { $_ | Out-String | Add-Content -Path $javaLog -ErrorAction Stop }
+            catch {
+              $collectionErrors.Add("Java console collection failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
+            $collectionErrors.Add("Pinned Java control failed: $javaError")
             $javaExit = 1
           } finally {
-            Set-Content -Path $javaExitFile -Value $javaExit
+            try {
+              Set-Content -Path $javaExitFile -Value $javaExit
+            } catch {
+              $collectionErrors.Add("Java exit code record failed: $($_.ToString())")
+              $collectionStatus = 1
+            }
           }
 
           try {
@@ -124,16 +156,22 @@ jobs:
             $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
             $validationLog = Join-Path $evidence 'trace-validation.log'
             & python tools/compatibility/windows_collision_focus.py `
-              --native-directory $native --java-tsv $javaTsv --native-tsv $nativeTsv `
+              validate --native-directory $native --java-tsv $javaTsv --native-tsv $nativeTsv `
               2>&1 | Tee-Object -FilePath $validationLog
             $validationExit = $LASTEXITCODE
             if ($validationExit -ne 0) {
               $collectionErrors.Add("Shared XML and TSV validation failed with exit $validationExit")
-              $nativeExit = 1
+              $validationStatus = 1
             }
           } catch {
             $collectionErrors.Add("Shared XML and TSV validation could not run: $($_.ToString())")
-            $nativeExit = 1
+            $validationStatus = 1
+          }
+          try {
+            Set-Content -Path (Join-Path $evidence 'validation-status.txt') -Value $validationStatus
+          } catch {
+            $collectionErrors.Add("Validation status record failed: $($_.ToString())")
+            $collectionStatus = 1
           }
 
           try {
@@ -150,11 +188,21 @@ jobs:
             ) | Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')
           } catch {
             $collectionErrors.Add("Runner identity collection failed: $($_.ToString())")
+            $collectionStatus = 1
           }
 
-          Set-Content -Path $nativeExitFile -Value $nativeExit
+          try {
+            Set-Content -Path (Join-Path $evidence 'collection-status.txt') -Value $collectionStatus
+          } catch {
+            $collectionErrors.Add("Collection status record failed: $($_.ToString())")
+            $collectionStatus = 1
+          }
           if ($collectionErrors.Count -gt 0) {
-            $collectionErrors | Set-Content -Path (Join-Path $evidence 'collection-errors.txt')
+            try {
+              $collectionErrors | Set-Content -Path (Join-Path $evidence 'collection-errors.txt')
+            } catch {
+              $collectionStatus = 1
+            }
           }
           $inventory = Join-Path $evidence 'sha256-inventory.txt'
           try {
@@ -166,13 +214,41 @@ jobs:
               } | Set-Content -Path $inventory
           } catch {
             $collectionErrors.Add("SHA-256 inventory failed: $($_.ToString())")
-            $collectionErrors | Set-Content -Path (Join-Path $evidence 'collection-errors.txt')
-            $nativeExit = 1
-            Set-Content -Path $nativeExitFile -Value $nativeExit
+            $collectionStatus = 1
+            try {
+              $collectionErrors | Set-Content -Path (Join-Path $evidence 'collection-errors.txt') -ErrorAction Stop
+              Set-Content -Path (Join-Path $evidence 'collection-status.txt') -Value $collectionStatus -ErrorAction Stop
+              Set-Content -Path (Join-Path $evidence 'validation-status.txt') -Value $validationStatus -ErrorAction Stop
+              Get-ChildItem $evidence -Recurse -File -ErrorAction Stop | Where-Object FullName -ne $inventory |
+                Sort-Object FullName | ForEach-Object {
+                  $relative = [IO.Path]::GetRelativePath($evidence, $_.FullName)
+                  $hash = (Get-FileHash -Algorithm SHA256 $_.FullName -ErrorAction Stop).Hash.ToLowerInvariant()
+                  "$hash  $relative"
+                } | Set-Content -Path $inventory -ErrorAction Stop
+            } catch {
+              $collectionErrors.Add("SHA-256 inventory retry failed: $($_.ToString())")
+              $collectionStatus = 1
+              try {
+                $collectionErrors | Set-Content -Path (Join-Path $evidence 'collection-errors.txt') -ErrorAction Stop
+                Set-Content -Path (Join-Path $evidence 'collection-status.txt') -Value $collectionStatus -ErrorAction Stop
+              } catch { }
+            }
           }
 
-          if ($nativeExit -ne 0 -or $javaExit -ne 0 -or $collectionErrors.Count -gt 0) {
-            throw "Focused controls failed: native=$nativeExit java=$javaExit"
+          $statusLog = Join-Path $evidence 'final-status.log'
+          $statusExit = 1
+          try {
+            & python tools/compatibility/windows_collision_focus.py status `
+              --gradle-exit-code $gradleExit --java-exit-code $javaExit `
+              --collection-status $collectionStatus --validation-status $validationStatus `
+              2>&1 | Tee-Object -FilePath $statusLog
+            $statusExit = $LASTEXITCODE
+          } catch {
+            $collectionErrors.Add("Final status decision failed: $($_.ToString())")
+            $statusExit = 1
+          }
+          if ($statusExit -ne 0) {
+            throw "Focused controls failed: gradle=$gradleExit java=$javaExit collection=$collectionStatus validation=$validationStatus"
           }
       - name: Upload Windows collision evidence
         if: always()
