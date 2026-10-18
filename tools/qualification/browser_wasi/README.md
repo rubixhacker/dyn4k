@@ -1,8 +1,15 @@
 # Browser and Wasmtime qualification
 
-This runner checks the staged `dyn4k-core` and `dyn4k` publications on the assigned web runtimes. Each applicable lane must execute all 2,460 core and 58 facade cases from the committed `full-common-corpus.json`. It checks the manifest against the committed original map, reviewed pair file, and current test source tree. A separate consumer resolves both staged modules and steps a world. Its test checks shared body identity, collision detection, and contact callbacks.
+This runner checks the staged `dyn4k-core` and `dyn4k` publications on the assigned web runtimes. Each applicable lane must execute all 2,460 core and 58 facade cases from the committed `full-common-corpus.json`. It checks the manifest against the committed original map, reviewed pair file, and current test source tree. Candidate preflight also compares production and consumer source bytes with their committed Git blobs. A separate consumer resolves both staged modules and steps a world. Its test checks shared body identity, collision detection, and contact callbacks.
 
-Run against a clean candidate commit with JDK 21. The source-bound manifest, corpus, test tree, and staged publications must all identify that candidate; any source change requires a newly generated and reviewed manifest and fresh candidate-bound evidence. Stage the three target publications and root metadata:
+Run against a clean candidate commit with JDK 21. First check its committed corpus, test sources, reviewed map, and consumer pins:
+
+```sh
+python3 tools/qualification/browser_wasi/runner.py candidate \
+  --root "$PWD" --candidate-sha "$SHA"
+```
+
+This preflight does not execute a runtime lane. A clean production-source successor can retain the same manifest when its test inventory and reviewed map are unchanged. Changed test sources require a regenerated and reviewed manifest. Changed mappings also require reviewed map and pair pins. A changed generator or consumer contract requires verifier review and updated code-owned digests. Every new candidate needs fresh staged artifacts and runtime evidence bound to its exact SHA. Stage the three target publications and root metadata:
 
 ```sh
 python3 tools/qualification/browser_wasi/runner.py stage \
