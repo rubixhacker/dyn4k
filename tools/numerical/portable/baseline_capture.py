@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import declared_cases
 from receipt import Rejected, digest, inspect, records
-from run import (MATRIX_METHODS, PORTABLE, ROOT, _java_classpath, _provider_classes,
+from run import (MATRIX_METHODS, PORTABLE, ROOT, _provider_classes,
                  clean_identity, extract_xml, git, method_case_ids, runtime_identity)
 
 
@@ -25,7 +25,13 @@ PINNED_JAR_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162
 PINNED_SOURCE_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
 BASELINE_PROJECT = PORTABLE / "baseline"
 ATTESTATION_SCHEMA = "portable-baseline-attestation/1"
-WORKER_PROOF_SCHEMA = "portable-baseline-worker/2"
+WORKER_PROOF_SCHEMA = "portable-baseline-worker/3"
+CLASSPATH_ENTRY_NAMES = (
+    "gradle-worker.jar", "test", "main", "dyn4j-6.0.0.jar",
+    "kotlin-test-junit-2.4.20.jar", "kotlin-test-2.4.20.jar",
+    "kotlin-stdlib-2.4.20.jar", "annotations-13.0.jar",
+    "junit-4.13.2.jar", "hamcrest-core-1.3.jar",
+)
 TAP_CLASS_NAMES = frozenset({
     "org/dyn4j/geometry/RotationOperationTap.class",
     "org/dyn4j/geometry/RotationOperationTap$Call.class",
@@ -230,11 +236,95 @@ def _worker_classpath(command, proof_dir, expected, capture):
     identity = {"original_path": original, "sha256": hashlib.sha256(data).hexdigest()}
     if not capture and identity != expected:
         raise Rejected("baseline archived worker argument file differs")
-    replay = ["@" + str(archive) if token == arguments[0] else token for token in command]
-    entries, archived = _java_classpath(replay)
-    if archived != [archive.resolve()]:
-        raise Rejected("baseline worker argument archive differs")
+    tokens = []
+    for token in command[1:]:
+        tokens.extend(shlex.split(data.decode("utf-8")) if token == arguments[0] else [token])
+    classpaths = [tokens[index + 1] for index, token in enumerate(tokens[:-1])
+                  if token in ("-cp", "-classpath", "--class-path")]
+    if len(classpaths) != 1:
+        raise Rejected("baseline worker classpath is absent or ambiguous")
+    raw_entries = classpaths[0].split(os.pathsep)
+    entries = [Path(raw) for raw in raw_entries]
+    if not all(path.is_absolute() and ".." not in path.parts and str(path) == raw
+               for path, raw in zip(entries, raw_entries)):
+        raise Rejected("baseline worker classpath path is not canonical")
     return entries, identity
+
+
+def _entry_files(root):
+    if root.is_symlink() or not root.is_dir():
+        raise Rejected("baseline classpath entry is absent or linked")
+    files = {}
+    for path in root.rglob("*"):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise Rejected("baseline classpath entry contains a link or special file")
+        if path.is_file():
+            files[str(path.relative_to(root))] = path.read_bytes()
+    return files
+
+
+def _classpath_archive(entries, proof_dir, expected, capture, stub_origin, jar_origin,
+                       pinned, tap, jar):
+    if len(entries) != len(CLASSPATH_ENTRY_NAMES) or [path.name for path in entries] != list(
+            CLASSPATH_ENTRY_NAMES) or str(entries[1]) != str(Path(stub_origin).with_name("test")) or \
+            str(entries[2]) != stub_origin or str(entries[3]) != jar_origin:
+        raise Rejected("baseline JVM classpath entry order differs")
+    archive = proof_dir / "classpath-entries"
+    if proof_dir.is_symlink() or proof_dir.parent.is_symlink() or archive.is_symlink():
+        raise Rejected("baseline classpath archive is linked")
+    if capture:
+        archive.mkdir(parents=True, exist_ok=False)
+    if not archive.is_dir() or (not capture and {path.name for path in archive.iterdir()} != {
+            f"{index:02d}" for index in range(len(entries))}):
+        raise Rejected("baseline classpath archive entry set differs")
+    inventory = []
+    for index, entry in enumerate(entries):
+        target = archive / f"{index:02d}"
+        kind = "directory" if index in (1, 2) else "file"
+        if capture:
+            target.mkdir()
+            if kind == "directory":
+                files = _entry_files(entry)
+                for name, data in files.items():
+                    destination = target / "tree" / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(data)
+            else:
+                if entry.is_symlink() or not entry.is_file():
+                    raise Rejected("baseline classpath file is absent or linked")
+                (target / "payload").write_bytes(entry.read_bytes())
+        if target.is_symlink() or not target.is_dir():
+            raise Rejected("baseline classpath archive entry is absent or linked")
+        if kind == "directory":
+            if {path.name for path in target.iterdir()} != {"tree"}:
+                raise Rejected("baseline classpath archive directory differs")
+            files = _entry_files(target / "tree")
+            payload = target / "tree"
+        else:
+            if {path.name for path in target.iterdir()} != {"payload"}:
+                raise Rejected("baseline classpath archive file differs")
+            data = _archived_bytes(target / "payload", proof_dir)
+            files = {"payload": data}
+            payload = target / "payload"
+        row = {"path": str(entry), "kind": kind,
+               "files": {name: hashlib.sha256(data).hexdigest()
+                         for name, data in sorted(files.items())}}
+        inventory.append(row)
+        classes = _provider_classes(payload)
+        if index == 2:
+            if classes != tap:
+                raise Rejected("baseline archived main output has unexpected dyn4j classes")
+        elif index == 3:
+            if files["payload"] != jar.read_bytes() or classes != pinned:
+                raise Rejected("baseline archived pinned JAR differs")
+        elif classes:
+            raise Rejected("baseline archived classpath has an unexpected dyn4j provider")
+    if not capture and inventory != expected:
+        raise Rejected("baseline archived classpath entry inventory differs")
+    if {path.name for path in archive.iterdir()} != {
+            f"{index:02d}" for index in range(len(entries))}:
+        raise Rejected("baseline classpath archive entry set differs")
+    return inventory
 
 
 def _loaded_baseline_classes(log, pinned, tap, jar_origin, tap_origin):
@@ -314,12 +404,11 @@ def baseline_runtime(log, jar, proof_dir, recorded=None):
             [str(entry) for entry in entries].count(jar_origin) != 1 or \
             entries.index(Path(stub_origin)) >= entries.index(Path(jar_origin)):
         raise Rejected("baseline JVM classpath provider order differs")
-    if recorded_dependency is None:
-        for entry in entries:
-            classes = _provider_classes(entry)
-            if classes and not ((str(entry) == stub_origin and classes == tap) or
-                                (str(entry) == jar_origin and classes == pinned)):
-                raise Rejected("baseline JVM classpath has an unexpected dyn4j provider")
+    inventory = _classpath_archive(
+        entries, proof_dir,
+        recorded_dependency.get("classpath_entries") if recorded_dependency is not None else None,
+        capture=recorded is None, stub_origin=stub_origin, jar_origin=jar_origin,
+        pinned=pinned, tap=tap, jar=jar)
     providers = [
         {"kind": "baseline-operation-tap", "path": stub_origin,
          "sha256": hashlib.sha256(b"".join(tap[name] for name in sorted(tap))).hexdigest(),
@@ -339,7 +428,7 @@ def baseline_runtime(log, jar, proof_dir, recorded=None):
                            "classpath": [str(entry) for entry in entries],
                            "providers": providers, "dependency_sha256": digest(jar),
                            "loaded_classes": loaded, "argument_file": argument,
-                           "tap_classes": tap_hashes}}
+                           "tap_classes": tap_hashes, "classpath_entries": inventory}}
 
 
 def baseline_inventory(raw, xml):

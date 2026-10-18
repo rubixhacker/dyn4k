@@ -26,15 +26,24 @@ class BaselineCaptureSeamTest(unittest.TestCase):
             root = Path(directory)
             baseline = root / "baseline"
             stub = baseline / "build/classes/kotlin/main"
-            jar = root / "dyn4j.jar"
+            jar = root / "dyn4j-6.0.0.jar"
             with zipfile.ZipFile(jar, "w") as archive:
                 archive.writestr("org/dyn4j/geometry/Vector2.class", b"pinned")
             for name in baseline_capture.TAP_CLASS_NAMES:
                 file = stub / name
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(name.encode())
+            test_classes = stub.with_name("test")
+            (test_classes / "portable").mkdir(parents=True)
+            (test_classes / "portable/PortableMatrixTest.class").write_bytes(b"test")
+            worker = root / "gradle-worker.jar"
+            libraries = [root / name for name in baseline_capture.CLASSPATH_ENTRY_NAMES[4:]]
+            for file in [worker, *libraries]:
+                with zipfile.ZipFile(file, "w") as archive:
+                    archive.writestr("fixture/Example.class", b"fixture")
+            entries = [worker, test_classes, stub, jar, *libraries]
             argument = root / "original-worker-args.txt"
-            argument.write_text(f"-cp\n{stub}:{jar}\n")
+            argument.write_text("-cp\n" + os.pathsep.join(map(str, entries)) + "\n")
             log = root / "worker.log"
             log.write_text(f"Starting process 'Gradle Test Executor 1'. Command: "
                            f"{sys.executable} @{argument} Worker\n"
@@ -57,20 +66,35 @@ class BaselineCaptureSeamTest(unittest.TestCase):
                 file = extra_provider / "org/dyn4j/geometry/Vector2.class"
                 file.parent.mkdir(parents=True)
                 file.write_bytes(b"other")
-                argument.write_text(f"-cp\n{stub}:{extra_provider}:{jar}\n")
-                with self.assertRaisesRegex(Exception, "unexpected dyn4j provider"):
+                argument.write_text("-cp\n" + os.pathsep.join(map(str, [
+                    worker, test_classes, stub, extra_provider, jar, *libraries])) + "\n")
+                with self.assertRaisesRegex(Exception, "classpath entry order differs"):
                     baseline_capture.baseline_runtime(log, jar, root / "extra-provider-proof")
-                argument.write_text(f"-cp\n{stub}:{jar}\n")
+                argument.write_text("-cp\n" + os.pathsep.join(map(str, entries)) + "\n")
                 recorded = baseline_capture.baseline_runtime(log, jar, proof)
-                shutil.rmtree(stub)
+                shutil.rmtree(baseline / "build")
                 argument.unlink()
                 self.assertEqual(recorded, baseline_capture.baseline_runtime(
                     log, jar, proof, recorded))
+                moved = root / "moved-proof"
+                proof.rename(moved)
+                proof = moved
+                self.assertEqual(recorded, baseline_capture.baseline_runtime(
+                    log, jar, proof, recorded))
                 archived_argument = proof / "worker-args-0.txt"
+                added_argument = "-cp\n" + os.pathsep.join(map(str, [
+                    worker, test_classes, stub, extra_provider, jar, *libraries])) + "\n"
+                archived_argument.write_text(added_argument)
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["argument_file"]["sha256"] = hashlib.sha256(
+                    added_argument.encode()).hexdigest()
+                resealed["dependency"]["classpath"].insert(3, str(extra_provider))
+                with self.assertRaisesRegex(Exception, "classpath entry order differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, resealed)
                 archived_argument.write_text("-cp\nmissing\n")
                 with self.assertRaisesRegex(Exception, "archived worker argument file differs"):
                     baseline_capture.baseline_runtime(log, jar, proof, recorded)
-                archived_argument.write_text(f"-cp\n{stub}:{jar}\n")
+                archived_argument.write_text("-cp\n" + os.pathsep.join(map(str, entries)) + "\n")
                 tap = proof / "tap-classes/org/dyn4j/geometry/RotationOperationTap.class"
                 tap.write_bytes(b"changed")
                 with self.assertRaisesRegex(Exception, "archived operation tap class hash differs"):
@@ -89,6 +113,28 @@ class BaselineCaptureSeamTest(unittest.TestCase):
                 changed["dependency"]["classpath"].reverse()
                 with self.assertRaisesRegex(Exception, "recorded classpath differs"):
                     baseline_capture.baseline_runtime(log, jar, proof, changed)
+                test_payload = proof / "classpath-entries/01/tree/portable/PortableMatrixTest.class"
+                test_payload.write_bytes(b"changed")
+                with self.assertRaisesRegex(Exception, "classpath entry inventory differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                test_payload.write_bytes(b"test")
+                test_payload.unlink()
+                with self.assertRaisesRegex(Exception, "classpath entry inventory differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                test_payload.write_bytes(b"test")
+                injected = proof / "classpath-entries/01/tree/org/dyn4j/geometry/Vector2.class"
+                injected.parent.mkdir(parents=True)
+                injected.write_bytes(b"third provider")
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["classpath_entries"][1]["files"][
+                    "org/dyn4j/geometry/Vector2.class"] = hashlib.sha256(
+                        b"third provider").hexdigest()
+                with self.assertRaisesRegex(Exception, "unexpected dyn4j provider"):
+                    baseline_capture.baseline_runtime(log, jar, proof, resealed)
+                injected.unlink()
+                injected.symlink_to(test_payload)
+                with self.assertRaisesRegex(Exception, "link or special file"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
 
     def test_fixture_hash_binds_baseline_operation_tap(self):
         with tempfile.TemporaryDirectory() as directory:
