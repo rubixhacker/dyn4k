@@ -3,9 +3,13 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -83,6 +87,109 @@ class HostCapacityControlTest(unittest.TestCase):
             except SystemExit as exc:
                 code = exc.code
         return code, json.loads(output.getvalue())
+
+    def public_capture_with_delayed_child(self, child_source):
+        if sys.platform != "linux":
+            self.skipTest("local process oracle requires Linux /proc and wait4")
+        capture_archive = self.root / "capture"
+        capture_key = self.root / "capture.key"
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                         cwd=control.ROOT, text=True).strip()
+        source_bytes = Path(control.__file__).read_bytes()
+        committed_bytes = control.source_at_commit(commit)
+        source_check = (contextlib.nullcontext() if source_bytes == committed_bytes else
+                        patch.object(control, "source_at_commit", return_value=source_bytes))
+
+        def linux_image(pid):
+            executable = os.readlink(f"/proc/{pid}/exe")
+            return {"pid": pid, "observed_ns": time.monotonic_ns(),
+                    "method": "macos_libproc", "executable_path": executable,
+                    "sha256": control.sha256(executable)}
+
+        stop_calls = []
+
+        def simulated_terminal_stop(process, system, pid, handle):
+            stop_calls.append(pid)
+            marker = json.loads((capture_archive / "stdout.raw").read_text())
+            if marker != {"ready_pid": pid, "touched_bytes": 16 * 1024 * 1024}:
+                raise ValueError("stop before stdout readiness")
+            requested = time.monotonic_ns()
+            os.kill(pid, signal.SIGTERM)
+            dispatched = time.monotonic_ns()
+            observed_pid, status, usage = os.wait4(pid, 0)
+            if observed_pid != pid:
+                raise ValueError("wait4 child PID differs")
+            process.returncode = os.waitstatus_to_exitcode(status)
+            return {"stop_requested_ns": requested, "stop_dispatched_ns": dispatched,
+                    "stop_method": "posix_sigterm_wait4_v1", "stop_result": "os_success",
+                    "terminal_wait_status": status, "terminal_exit_code": process.returncode,
+                    "terminal_peak_bytes": usage.ru_maxrss * 1024,
+                    "terminal_observed_ns": time.monotonic_ns()}
+
+        output = io.StringIO()
+        with patch.object(control, "CHILD_SOURCE", child_source), \
+             patch.object(control.platform, "system", return_value="Darwin"), \
+             patch.object(control, "observe_process_image", side_effect=linux_image), \
+             patch.object(control, "peak_rss_bytes", return_value=1), \
+             patch.object(control, "capture_stop", side_effect=simulated_terminal_stop), \
+             source_check, \
+             patch.object(sys, "argv", ["host_capacity_control.py", "capture", "--archive",
+                                       str(capture_archive), "--key-output", str(capture_key),
+                                       "--expected-source-commit", commit]), \
+             contextlib.redirect_stdout(output):
+            try:
+                control.main()
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+        receipt = json.loads((capture_archive / "receipt.json").read_text())
+        self.assertEqual(control.signature(receipt, capture_key.read_bytes()),
+                         receipt["signature"])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(receipt["pid"], 0)
+        return code, json.loads(output.getvalue()), receipt, stop_calls
+
+    def test_public_capture_waits_for_complete_pid_and_flushed_stdout(self):
+        ready_write = "Path(sys.argv[1]).write_text(str(os.getpid()))"
+        delayed = control.CHILD_SOURCE.replace(
+            ready_write, "Path(sys.argv[1]).touch()\ntime.sleep(0.15)\n" +
+            "Path(sys.argv[1]).write_text(str(os.getpid())[:1])\ntime.sleep(0.15)\n" +
+            ready_write + "\ntime.sleep(0.15)")
+        code, result, receipt, stops = self.public_capture_with_delayed_child(delayed)
+        self.assertEqual(0, code, result)
+        self.assertEqual("observed", receipt["status"])
+        self.assertEqual([receipt["pid"]], stops)
+        self.assertEqual("unpassed", result["qualification"])
+
+    def test_public_capture_waits_after_pid_write_for_stdout_flush(self):
+        ready_write = "Path(sys.argv[1]).write_text(str(os.getpid()))"
+        delayed = control.CHILD_SOURCE.replace(ready_write, ready_write + "\ntime.sleep(0.2)")
+        code, result, receipt, stops = self.public_capture_with_delayed_child(delayed)
+        self.assertEqual(0, code, result)
+        self.assertEqual("observed", receipt["status"])
+        self.assertEqual([receipt["pid"]], stops)
+
+    def test_public_capture_rejects_genuine_wrong_pid_after_flushed_marker(self):
+        delayed = control.CHILD_SOURCE.replace(
+            "Path(sys.argv[1]).write_text(str(os.getpid()))",
+            "Path(sys.argv[1]).touch()\ntime.sleep(0.15)\n" +
+            "Path(sys.argv[1]).write_text(str(os.getpid() + 1))\ntime.sleep(0.15)")
+        code, result, receipt, stops = self.public_capture_with_delayed_child(delayed)
+        self.assertEqual(1, code)
+        self.assertEqual("failed", receipt["status"])
+        self.assertIn("ready PID differs", receipt["error"])
+        self.assertEqual([], stops)
+        self.assertEqual("unpassed", result["qualification"])
+
+    def test_public_capture_rejects_wrong_stdout_marker_and_reaps_child(self):
+        marker = 'print(json.dumps({"ready_pid": os.getpid(), "touched_bytes": len(data)}), flush=True)'
+        wrong = control.CHILD_SOURCE.replace(marker, marker.replace("os.getpid()", "os.getpid() + 1"))
+        code, result, receipt, stops = self.public_capture_with_delayed_child(wrong)
+        self.assertEqual(1, code)
+        self.assertEqual("failed", receipt["status"])
+        self.assertIn("ready marker differs", receipt["error"])
+        self.assertEqual([], stops)
+        self.assertEqual("unpassed", result["qualification"])
 
     def test_public_replay_accepts_test_only_receipt_without_host_source_paths(self):
         self.seal(self.record)

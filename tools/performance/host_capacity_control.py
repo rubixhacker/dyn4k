@@ -216,12 +216,22 @@ def capture(archive, key_path, expected_commit):
             require(sha256(archive / "executable.bin") == image["sha256"],
                     "archived executable differs from observed process")
             deadline = time.monotonic() + 5
-            while not (archive / "ready.pid").is_file() and time.monotonic() < deadline:
+            while True:
                 require(process.poll() is None, "diagnostic child exited before ready")
+                stdout_bytes = (archive / "stdout.raw").read_bytes()
+                if b"\n" in stdout_bytes:
+                    require(stdout_bytes.endswith(b"\n") and
+                            stdout_bytes.count(b"\n") == 1 and
+                            json.loads(stdout_bytes) ==
+                            {"ready_pid": pid, "touched_bytes": 16 * 1024 * 1024},
+                            "diagnostic child ready marker differs")
+                    ready = archive / "ready.pid"
+                    if ready.is_file():
+                        require(ready.read_bytes() == str(pid).encode(),
+                                "diagnostic child ready PID differs")
+                        break
+                require(time.monotonic() < deadline, "diagnostic child readiness timed out")
                 time.sleep(0.02)
-            require((archive / "ready.pid").is_file() and
-                    (archive / "ready.pid").read_text() == str(pid),
-                    "diagnostic child ready PID differs")
             if system == "Windows":
                 windows_handle = windows_peak_handle(pid)
             record["sample_bytes"] = peak_rss_bytes(pid, system)

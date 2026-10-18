@@ -8,11 +8,11 @@ The `performance-host-capacity-control.yml` workflow has one `macos-26` job and 
 
 On macOS, the producer sends SIGTERM to the exact child and reads its terminal `wait4` status and `ru_maxrss` through `wait4_peak_rss`. It compares the terminal value with the live `/bin/ps` RSS sample in bytes. A smaller terminal value is inconclusive for the proposed byte interpretation. On Windows, it calls the production `windows_dispatch_stop` helper on the original child handle. It waits for exit code 1, then calls `windows_terminal_peak` on the retained exact-PID handle. A failed native dispatch or unavailable post-stop counter is inconclusive. The Windows metric is peak working set bytes; the macOS metric is peak RSS bytes.
 
-The five-minute workflow timeout bounds the job. The child normally sleeps for 30 seconds. The producer stops it after the ready and memory samples. Both upload steps run after a capture failure. Once archive creation begins, the producer retains available raw files. It writes a signed failure receipt when cleanup returns.
+The five-minute workflow timeout bounds the job. The child normally sleeps for 30 seconds. The producer waits up to five seconds for the complete PID and flushed stdout marker. It stops the child after the ready and memory samples. Both upload steps run after a capture failure. Once archive creation begins, the producer retains available raw files. It writes a signed failure receipt when cleanup returns.
 
 The receipt identifies the candidate source, executed tool bytes, host, PID, observed executable, and sample. It records the stop request, native result, terminal status, and peak bytes. It hashes stdout, stderr, the child source, ready marker, archived executable, and executed producer script. A generated test-only HMAC key stays outside the raw archive. The workflow uploads that key as a separate artifact. This key aids replay integrity. It is not an approved production signing authority or numeric policy.
 
-After independent review and publication, dispatch the workflow from its published branch or tag:
+The [GitHub `workflow_dispatch` rule](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch) requires this workflow file on the repository's default `main` branch before manual dispatch works. Publishing only a branch or tag does not enable dispatch. After independent review and publication on `main`, dispatch the exact candidate branch or tag:
 
 ```sh
 gh workflow run performance-host-capacity-control.yml --ref PUBLISHED_BRANCH_OR_TAG
