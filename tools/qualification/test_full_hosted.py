@@ -13,7 +13,7 @@ import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest import mock
 
 import full_hosted
@@ -174,7 +174,7 @@ class FullHostedTests(unittest.TestCase):
                                 "candidate"], check=True)
                 candidate = subprocess.check_output(
                     ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
-                fragment = (repository / "tools/qualification/safari-karma-reporter.js").read_text()
+                fragment = full_hosted.safari_reporter.committed_fragment(repository, candidate)
 
                 def generated_config(project, package, mode):
                     build_root = consumer if project == "consumer" else repository
@@ -196,11 +196,11 @@ class FullHostedTests(unittest.TestCase):
                                 "preprocessors": {runner: ["webpack", "sourcemap"],
                                                   selected: ["webpack", "sourcemap"]},
                                 "proxies": {}, "webpackCopy": []}
-                    (folder / "karma.conf.js").write_text(
+                    config_prefix = (
                         "\nmodule.exports = function(config) {\n\nconfig.set("
                         + json.dumps(settings) + ");"
-                        + full_hosted.safari_reporter.APPROVED_GENERATOR_TAIL
-                        + fragment + "\n}\n")
+                        + full_hosted.safari_reporter.APPROVED_GENERATOR_TAIL).encode("utf-8")
+                    (folder / "karma.conf.js").write_bytes(config_prefix + fragment + b"\n}\n")
                     product, selected_product, _, _ = full_hosted.safari_product_paths(
                         root, mode, project)
                     product.parent.mkdir(parents=True, exist_ok=True)
@@ -223,7 +223,7 @@ class FullHostedTests(unittest.TestCase):
                     calls.append(destination.name)
                     if destination.name == "source":
                         for module in ("dyn4k-core", "dyn4k"):
-                            self.assertEqual(fragment.encode(),
+                            self.assertEqual(fragment,
                                 (repository / module / "karma.config.d"
                                  / "qualification-safari-reporter.js").read_bytes())
                             if configuration != "missing" or module == "dyn4k-core":
@@ -232,7 +232,7 @@ class FullHostedTests(unittest.TestCase):
                         self.assertFalse((consumer / "karma.config.d").exists())
                     elif destination.name == "consumer":
                         staged = consumer / "karma.config.d/qualification-safari-reporter.js"
-                        self.assertEqual(fragment.encode(), staged.read_bytes())
+                        self.assertEqual(fragment, staged.read_bytes())
                         self.assertFalse((repository / "dyn4k-core/karma.config.d").exists())
                         self.assertFalse((repository / "dyn4k/karma.config.d").exists())
                         generated_config("consumer", "dyn4k-staged-portable-consumer-test",
@@ -279,16 +279,29 @@ class FullHostedTests(unittest.TestCase):
                                  calls)
                 self.assertEqual("FAILED", receipt["status"])
                 for lane in receipt["configurations"]:
-                    self.assertIn(("Safari generated Karma config is absent"
-                                   if configuration in ("missing", "symlink") else
-                                   "staged Safari consumer reporter changed"
-                                   if configuration == "production" else
-                                   "fixture stops after Safari consumer capture"), lane["reason"])
+                    if configuration == "symlink":
+                        self.assertTrue(lane["reason"].startswith(
+                            "Safari generated Karma config is absent or unsafe:") or
+                            lane["reason"].startswith("unsafe Safari path or file type:"),
+                            lane["reason"])
+                        self.assertEqual("CLEAN", lane["safari_reporter_stage"]
+                                         ["source"]["status"])
+                        self.assertTrue((repository / "build/js/packages"
+                                         / "dyn4k-dyn4k-core-test").is_symlink())
+                        self.assertFalse((output / lane["configuration"] / "karma-config"
+                                          / "dyn4k-core/karma.conf.js").exists())
+                    else:
+                        self.assertIn(("Safari generated Karma config is absent"
+                                       if configuration == "missing" else
+                                       "staged Safari consumer reporter changed"
+                                       if configuration == "production" else
+                                       "fixture stops after Safari consumer capture"),
+                                      lane["reason"])
                     for module in (() if configuration == "symlink" else
                                    ("dyn4k-core",) if configuration == "missing" else
                                    ("dyn4k-core", "dyn4k") if configuration == "production"
                                    else ("dyn4k-core", "dyn4k", "consumer")):
-                        self.assertIn(fragment.encode(),
+                        self.assertIn(fragment,
                             (output / lane["configuration"] / "karma-config"
                              / module / "karma.conf.js").read_bytes())
                     if configuration == "production":
@@ -745,6 +758,11 @@ class FullHostedTests(unittest.TestCase):
         self.assertEqual(PureWindowsPath(r"C:\runner\work\staging"), path)
         with self.assertRaisesRegex(ValueError, "original path"):
             full_hosted.original_path("mingwX64", "relative/staging")
+        safari = "/Users/runner/work/dyn4k/dyn4k/dyn4k-core/build/test.js"
+        self.assertEqual(PurePosixPath(safari), full_hosted.original_path("jsSafari", safari))
+        with self.assertRaisesRegex(ValueError, "original path"):
+            full_hosted.original_path("tvosSimulatorArm64",
+                                      r"C:\Users\runneradmin\AppData\Local\Temp\gradle-home")
 
     def test_reviewed_manifest_selects_all_common_core_and_facade_cases(self):
         manifest_path = Path(__file__).resolve().parents[2] / full_hosted.MANIFEST
@@ -1170,6 +1188,20 @@ class FullHostedTests(unittest.TestCase):
                                   wraps=full_hosted.artifact.capture_staging) as capture, \
                 mock.patch.dict(os.environ, runner):
             emitted = full_hosted.run(target, candidate, alias_output)
+            if os.name == "nt":
+                self.assertEqual("FAILED", emitted["status"])
+                self.assertEqual(2, len(emitted["configurations"]))
+                for lane in emitted["configurations"]:
+                    self.assertEqual("original path is not absolute or safe",
+                                     lane.get("reason"))
+                    self.assertIn("source", lane)
+                    self.assertIn("consumer", lane)
+                    self.assertIn("graph_process", lane)
+                    self.assertNotIn("consumer_graph", lane)
+                with self.assertRaisesRegex(ValueError,
+                                            "full hosted receipt is not a completed target"):
+                    full_hosted.verify_raw_files(output, emitted)
+                return
             self.assertEqual("FULL_COMMON_PASSED", emitted["status"], emitted.get("reason"))
             self.assertEqual(str(output), emitted["archive_root"])
             self.assertEqual(2, len(emitted["configurations"]))
@@ -2294,7 +2326,8 @@ class FullHostedTests(unittest.TestCase):
                         try:
                             if mutation == "unrelated":
                                 product_file.rename(unrelated)
-                                product["path"] = str(Path(product["path"]).with_name(
+                                product["path"] = str(full_hosted.original_path(
+                                    "jsSafari", product["path"]).with_name(
                                     "unrelated-test.js"))
                                 product["archive_path"] = unrelated.relative_to(self.root).as_posix()
                             elif mutation == "changed-input":
