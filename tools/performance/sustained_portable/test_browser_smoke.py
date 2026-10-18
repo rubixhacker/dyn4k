@@ -453,6 +453,23 @@ class BrowserProcessObservationTest(unittest.TestCase):
         self.assertIn(f"--user-data-dir={self.profile}", record["argv"])
         self.assertEqual(record["page_url"], self.page_url)
 
+    def test_live_running_to_sleeping_transition_keeps_process_identity(self):
+        original = browser_process.process_stat
+        reads = 0
+
+        def changing_state(root, pid):
+            nonlocal reads
+            result = original(root, pid)
+            if pid == 102:
+                reads += 1
+                result["state"] = "R" if reads == 1 else "S"
+            return result
+
+        observer = self.observer()
+        with mock.patch.object(browser_process, "process_stat", side_effect=changing_state):
+            observer.sample()
+        self.assertEqual(next(iter(observer.observed.values()))["pid"], 102)
+
     def test_missing_ambiguous_mismatched_and_raced_processes_reject(self):
         self.write_process(102, 101, 10002)
         observer = self.observer()

@@ -90,7 +90,10 @@ class ChromeObserver:
         if before["state"] in ("Z", "X"):
             raise ValueError("browser process is no longer live")
         after = process_stat(self.proc_root, pid)
-        if before != after:
+        if after["state"] in ("Z", "X") or any(
+            before[key] != after[key]
+            for key in ("pid", "ppid", "pgrp", "session", "start_ticks")
+        ):
             raise ValueError("browser process changed during observation")
         if after["session"] != self.wrapper["session"]:
             raise ValueError("browser process is outside launched session")
