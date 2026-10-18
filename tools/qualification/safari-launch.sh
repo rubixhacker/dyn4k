@@ -24,7 +24,8 @@ if [[ -n "${DYN4K_SAFARI_LAUNCH_CONTEXT:-}" ]]; then
     done
     samples_completed=$(/usr/bin/grep -c '^sample=' "$context/process-$$.txt" || true)
     /usr/bin/printf 'samples_completed=%s\nsampler_exit=%s\n' \
-      "$samples_completed" "$sampler_status" > "$context/sample-state-$$.txt"
+      "$samples_completed" "$sampler_status" > "$context/sample-state-$$.tmp"
+    /bin/mv "$context/sample-state-$$.tmp" "$context/sample-state-$$.txt"
     exit "$sampler_status"
   ) > "$context/process-$$.txt" 2>&1 &
   sampler_pid=$!

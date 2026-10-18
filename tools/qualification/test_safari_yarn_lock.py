@@ -785,37 +785,8 @@ class SafariYarnLockTests(unittest.TestCase):
 
     def test_safari_reporter_splits_service_messages_without_dropping_them(self):
         source = Path(__file__).with_name("safari-karma-reporter.js")
-        script = "\n".join((
-            "const assert = require('node:assert/strict');",
-            "const fs = require('node:fs');",
-            "const vm = require('node:vm');",
-            "const output = [];",
-            "function OriginalReporter(decorate) {",
-            "  decorate(this);",
-            "  this.emit = message => this.write(message);",
-            "}",
-            "OriginalReporter.$inject = ['baseReporterDecorator'];",
-            "const plugin = {'reporter:karma-kotlin-reporter': ['type', OriginalReporter]};",
-            "const config = {plugins: [plugin]};",
-            "vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {config, Buffer});",
-            "const Reporter = plugin['reporter:karma-kotlin-reporter'][1];",
-            "assert.deepEqual(Reporter.$inject, OriginalReporter.$inject);",
-            "const reporter = new Reporter(instance => {",
-            "  instance.write = message => output.push(message);",
-            "});",
-            "reporter.emit(\"##teamcity[testStarted name='one']\");",
-            "reporter.emit(\"##teamcity[testFinished name='one']\\n\");",
-            "assert.deepEqual(output, [\"##teamcity[testStarted name='one']\\n\",",
-            "                          \"##teamcity[testFinished name='one']\\n\"]);",
-            "assert.throws(() => reporter.emit('x'.repeat(262145)), /service message exceeds/);",
-            "assert.equal(output.length, 2);",
-            "for (let i = 0; i < 12000; i++) reporter.emit(",
-            "  `##teamcity[testStarted name='case-${i}' payload='${'x'.repeat(80)}']`);",
-            "assert.equal(output.length, 12002);",
-            "assert.ok(output.every(line => line.endsWith('\\n')));",
-            "assert.ok(Buffer.byteLength(output.join(''), 'utf8') > 1048576);",
-        ))
-        result = subprocess.run(["node", "-e", script, str(source)],
+        control = Path(__file__).with_name("safari-reporter-control.js")
+        result = subprocess.run(["node", str(control), str(source)],
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(0, result.returncode, result.stderr)
 
@@ -2211,7 +2182,13 @@ class SafariYarnLockTests(unittest.TestCase):
         fake_open.chmod(0o755)
         controlled = self.root / "controlled-pending-launch.sh"
         controlled.write_text(launcher.replace("/usr/bin/open", bash_path(fake_open))
-                              .replace("/bin/sleep 2", "/bin/sleep 0.01"))
+                              .replace("/bin/sleep 2", "/bin/sleep 0.01")
+                              .replace("/usr/bin/printf 'samples_completed=%s",
+                                       "record_sample 'samples_completed=%s")
+                              .replace("set -euo pipefail\n",
+                                       "set -euo pipefail\n"
+                                       "record_sample() { /bin/sleep 0.15; "
+                                       "/usr/bin/printf \"$@\"; }\n"))
         redirect = self.root / "redirect.html"
         redirect.write_text("redirect\n")
         context = self.root / "pending-launch-context"
@@ -2227,8 +2204,10 @@ class SafariYarnLockTests(unittest.TestCase):
             outcome = list(context.glob("launch-outcome-*.txt"))
             self.assertEqual(1, len(state))
             self.assertIn("samples_completed=5", state[0].read_text())
+            self.assertEqual([], list(context.glob("sample-state-*.tmp")))
             self.assertEqual(1, len(outcome))
             self.assertEqual("open_state=pending\n", outcome[0].read_text())
+            self.assertIsNone(process.poll())
         finally:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
