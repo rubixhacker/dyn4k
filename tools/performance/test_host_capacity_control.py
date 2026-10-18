@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import Mock, patch
+import zlib
 
 import yaml
 
@@ -116,6 +117,112 @@ class HostCapacityControlTest(unittest.TestCase):
         executed = self.root / "executed.py"
         executed.write_bytes(substituted)
         return repository, executed, original_commit, substituted_commit, original_blob, substituted_blob
+
+    def corrupt_intermediate_tree(self, repository, original_commit,
+                                  original_blob, substituted_blob):
+        tree_id = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse",
+             f"{original_commit}:tools/performance"], text=True).strip()
+        object_path = repository / ".git/objects" / tree_id[:2] / tree_id[2:]
+        raw = zlib.decompress(object_path.read_bytes())
+        header, tree = raw.split(b"\0", 1)
+        self.assertEqual(b"tree " + str(len(tree)).encode(), header)
+        entry = b"100644 host_capacity_control.py\0"
+        old = entry + bytes.fromhex(original_blob)
+        new = entry + bytes.fromhex(substituted_blob)
+        self.assertEqual(1, tree.count(old))
+        corrupt = tree.replace(old, new)
+        object_path.chmod(0o600)
+        object_path.write_bytes(zlib.compress(header + b"\0" + corrupt))
+        self.assertEqual(substituted_blob, subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "rev-parse",
+             f"{original_commit}:{control.SOURCE_PATH}"], text=True).strip())
+
+    def test_public_replay_rejects_corrupt_path_tree_locally_and_via_alternate(self):
+        (repository, executed, original_commit, _,
+         original_blob, substituted_blob) = self.replacement_fixture()
+        self.corrupt_intermediate_tree(repository, original_commit,
+                                       original_blob, substituted_blob)
+        substituted = executed.read_bytes()
+        (self.archive / "tool-executed.py").write_bytes(substituted)
+        record = copy.deepcopy(self.record)
+        record.update(source_commit=original_commit, tool_sha256=digest(substituted),
+                      tool_working_sha256=digest(substituted))
+        self.seal(record)
+        alternate = self.root / "alternate-repository"
+        alternate.mkdir()
+        subprocess.run(["git", "-C", str(alternate), "init", "-q"], check=True)
+        for root, environment in ((repository, {}),
+                                  (alternate, {"GIT_ALTERNATE_OBJECT_DIRECTORIES":
+                                               str(repository / ".git/objects")})):
+            with self.subTest(object_store=str(root)):
+                output = io.StringIO()
+                with patch.dict(os.environ, environment), \
+                     patch.object(control, "ROOT", root), \
+                     patch.object(control, "__file__", str(executed)), \
+                     patch.object(sys, "argv", ["host_capacity_control.py", "verify",
+                                               "--archive", str(self.archive),
+                                               "--trusted-key", str(self.key_path),
+                                               "--expected-source-commit", original_commit]), \
+                     contextlib.redirect_stdout(output):
+                    with self.assertRaises(SystemExit) as exit_status:
+                        control.main()
+                self.assertEqual(1, exit_status.exception.code)
+                result = json.loads(output.getvalue())
+                self.assertEqual("unpassed", result["qualification"])
+                self.assertIn("source tree object identity differs", result["reason"])
+
+    def test_public_capture_rejects_corrupt_path_tree_before_archive_creation(self):
+        (repository, executed, original_commit, _,
+         original_blob, substituted_blob) = self.replacement_fixture()
+        self.corrupt_intermediate_tree(repository, original_commit,
+                                       original_blob, substituted_blob)
+        capture_archive = self.root / "corrupt-tree-capture"
+        capture_key = self.root / "corrupt-tree.key"
+        output = io.StringIO()
+        with patch.object(control, "ROOT", repository), \
+             patch.object(control, "__file__", str(executed)), \
+             patch.object(control.platform, "system", return_value="Darwin"), \
+             patch.object(sys, "argv", ["host_capacity_control.py", "capture",
+                                       "--archive", str(capture_archive),
+                                       "--key-output", str(capture_key),
+                                       "--expected-source-commit", original_commit]), \
+             contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as exit_status:
+                control.main()
+        self.assertEqual(1, exit_status.exception.code)
+        self.assertIn("source tree object identity differs",
+                      json.loads(output.getvalue())["reason"])
+        self.assertFalse(capture_archive.exists())
+        self.assertFalse(capture_key.exists())
+
+    def test_public_replay_accepts_canonical_windows_crlf_from_healthy_alternate(self):
+        repository, _, original_commit, _, _, _ = self.replacement_fixture()
+        original = (repository / control.SOURCE_PATH).read_bytes()
+        crlf = original.replace(b"\n", b"\r\n")
+        executed = self.root / "windows-executed.py"
+        executed.write_bytes(crlf)
+        (self.archive / "tool-executed.py").write_bytes(crlf)
+        record = copy.deepcopy(self.record)
+        record.update(source_commit=original_commit, tool_sha256=digest(original),
+                      tool_working_sha256=digest(crlf), tool_encoding="git_crlf")
+        self.seal(record)
+        alternate = self.root / "healthy-alternate"
+        alternate.mkdir()
+        subprocess.run(["git", "-C", str(alternate), "init", "-q"], check=True)
+        output = io.StringIO()
+        with patch.dict(os.environ, {"GIT_ALTERNATE_OBJECT_DIRECTORIES":
+                                     str(repository / ".git/objects")}), \
+             patch.object(control, "ROOT", alternate), \
+             patch.object(control, "__file__", str(executed)), \
+             patch.object(sys, "argv", ["host_capacity_control.py", "verify",
+                                       "--archive", str(self.archive),
+                                       "--trusted-key", str(self.key_path),
+                                       "--expected-source-commit", original_commit]), \
+             contextlib.redirect_stdout(output):
+            control.main()
+        self.assertEqual("verified", json.loads(output.getvalue())["diagnostic"])
+        self.assertEqual("unpassed", json.loads(output.getvalue())["qualification"])
 
     def test_public_replay_accepts_canonical_commit_without_replacement(self):
         repository, _, original_commit, _, _, _ = self.replacement_fixture()

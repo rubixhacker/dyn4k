@@ -69,11 +69,34 @@ def source_at_commit(commit):
         require(identity == oid, f"source {kind} object identity differs")
         return raw
 
-    object_bytes("commit", commit)
-    blob = subprocess.check_output(
-        git + ["rev-parse", "--verify", f"{commit}:{SOURCE_PATH}"], cwd=ROOT).strip()
-    require(bool(re.fullmatch(rb"[0-9a-f]{40}", blob)), "source blob ID is invalid")
-    return object_bytes("blob", blob.decode())
+    commit_body = object_bytes("commit", commit)
+    tree_line = commit_body.split(b"\n", 1)[0]
+    require(tree_line.startswith(b"tree ") and
+            bool(re.fullmatch(rb"[0-9a-f]{40}", tree_line[5:])),
+            "source commit tree ID is invalid")
+    oid = tree_line[5:].decode()
+    parts = SOURCE_PATH.split("/")
+    for index, part in enumerate(parts):
+        tree = object_bytes("tree", oid)
+        entries = []
+        offset = 0
+        while offset < len(tree):
+            space = tree.find(b" ", offset)
+            nul = tree.find(b"\0", space + 1) if space >= 0 else -1
+            require(space > offset and nul > space + 1 and nul + 21 <= len(tree),
+                    "source tree entry is malformed")
+            mode = tree[offset:space]
+            name = tree[space + 1:nul]
+            require(mode in (b"40000", b"100644", b"100755", b"120000", b"160000")
+                    and b"/" not in name, "source tree entry mode or name is invalid")
+            if name == part.encode():
+                entries.append((mode, tree[nul + 1:nul + 21].hex()))
+            offset = nul + 21
+        require(len(entries) == 1, "source tree path entry differs")
+        mode, oid = entries[0]
+        expected_modes = (b"100644", b"100755") if index == len(parts) - 1 else (b"40000",)
+        require(mode in expected_modes, "source tree path mode differs")
+    return object_bytes("blob", oid)
 
 
 def source_encoding(executed, committed):
