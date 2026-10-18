@@ -112,6 +112,26 @@ def probe_fixture(directory):
                 "", encoding="utf-8")
 
 
+def windows_probe_fixture(directory):
+    probe_fixture(directory)
+    checkout = "D:\\a\\dyn4k\\dyn4k"
+    output = "D:\\a\\_temp\\windows-collision-focus\\corrected-probe"
+    compiler = "C:\\Users\\runneradmin\\.konan\\kotlin-native-prebuilt-windows-x86_64-2.4.20\\bin\\kotlinc-native.bat"
+    sources = [checkout + "\\" + path.replace("/", "\\") for path in
+               (V["ENGINE_SOURCES"][1], V["ENGINE_SOURCES"][2], V["PROBE_SOURCE"])]
+    for name, flags in (("debug-g", ["-g"]), ("default", []), ("optimized-opt", ["-opt"])):
+        mode = directory / name
+        output_base = output + "\\" + name + "\\sqrt-operation-probe"
+        arguments = ["-Xmulti-platform", f"-Xcommon-sources={sources[0]}", *sources,
+                     "-target", "mingw_x64", *flags, "-o", output_base]
+        command = {"mode": name, "executable": compiler, "arguments": arguments}
+        (mode / "compiler-command.json").write_text(json.dumps(command), encoding="utf-8")
+        (mode / "compiler-receipt.json").write_text(json.dumps({
+            "state": "EXITED", "childExitCode": 0, "command": [compiler, *arguments]}), encoding="utf-8")
+        (mode / "run-receipt.json").write_text(json.dumps({
+            "state": "EXITED", "childExitCode": 0, "command": [output_base + ".exe"]}), encoding="utf-8")
+
+
 class CorrectedControlTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -290,6 +310,96 @@ class CorrectedControlTest(unittest.TestCase):
         probe_fixture(missing_default)
         shutil.rmtree(missing_default / "default")
         self.reject(lambda: V["corrected_probe_modes"](missing_default))
+
+    def test_windows_probe_paths_and_adverse(self):
+        windows_probe_fixture(self.root)
+        self.assertEqual(len(V["corrected_probe_modes"](self.root)), 3)
+
+        changes = (
+            ("compiler root", "executable", "C:\\Users\\runneradmin", "C:\\Other\\runneradmin"),
+            ("compiler extra root", "executable", "runneradmin\\.konan", "runneradmin\\other\\.konan"),
+            ("compiler differs by mode", "executable", "runneradmin", "otheradmin"),
+            ("compiler alias component", "executable", "runneradmin", "runneradmin."),
+            ("source root", "arguments[3]", "D:\\a\\dyn4k\\dyn4k", "E:\\a\\dyn4k\\dyn4k"),
+            ("source suffix", "arguments[4]", "SqrtOperationNativeProbe.kt", "Other.kt"),
+            ("source traversal", "arguments[4]", "windows_collision\\SqrtOperationNativeProbe.kt",
+             "windows_collision\\..\\SqrtOperationNativeProbe.kt"),
+            ("output root", "arguments[-1]", "windows-collision-focus", "other-focus"),
+            ("output mode", "arguments[-1]", "\\debug-g\\", "\\default\\"),
+        )
+        for index, (label, field, before, after) in enumerate(changes):
+            with self.subTest(label=label):
+                root = self.root / f"adverse-{index}"
+                root.mkdir()
+                windows_probe_fixture(root)
+                mode = root / "debug-g"
+                command_file = mode / "compiler-command.json"
+                command = json.loads(command_file.read_text(encoding="utf-8"))
+                if field == "executable":
+                    command[field] = command[field].replace(before, after)
+                else:
+                    argument_index = int(field.removeprefix("arguments[").removesuffix("]"))
+                    command["arguments"][argument_index] = command["arguments"][argument_index].replace(before, after)
+                command_file.write_text(json.dumps(command), encoding="utf-8")
+                receipt_file = mode / "compiler-receipt.json"
+                receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+                receipt["command"] = [command["executable"], *command["arguments"]]
+                receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
+                self.reject(lambda root=root: V["corrected_probe_modes"](root))
+
+        for index, (before, after) in enumerate((("windows-collision-focus", "other-focus"),
+                                                  ("\\debug-g\\", "\\default\\"))):
+            root = self.root / f"run-adverse-{index}"
+            root.mkdir()
+            windows_probe_fixture(root)
+            receipt_file = root / "debug-g" / "run-receipt.json"
+            receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+            receipt["command"][0] = receipt["command"][0].replace(before, after)
+            receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
+            self.reject(lambda root=root: V["corrected_probe_modes"](root))
+
+        changed_pe = self.root / "changed-pe"
+        changed_pe.mkdir()
+        windows_probe_fixture(changed_pe)
+        (changed_pe / "debug-g" / "sqrt-operation-probe.exe").write_bytes(b"changed")
+        self.reject(lambda: V["corrected_probe_modes"](changed_pe))
+
+        changed_receipt = self.root / "changed-receipt"
+        changed_receipt.mkdir()
+        windows_probe_fixture(changed_receipt)
+        receipt_file = changed_receipt / "debug-g" / "compiler-receipt.json"
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+        receipt["command"][4] = receipt["command"][4].replace("NearestSqrtPlatform.kt", "Other.kt")
+        receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
+        self.reject(lambda: V["corrected_probe_modes"](changed_receipt))
+
+        alternate_checkout = self.root / "alternate-checkout"
+        alternate_checkout.mkdir()
+        windows_probe_fixture(alternate_checkout)
+        for name in ("debug-g", "default", "optimized-opt"):
+            mode = alternate_checkout / name
+            command_file = mode / "compiler-command.json"
+            command = json.loads(command_file.read_text(encoding="utf-8"))
+            command["arguments"] = [argument.replace("D:\\a\\dyn4k\\dyn4k", "D:\\a\\other\\other")
+                                    for argument in command["arguments"]]
+            command_file.write_text(json.dumps(command), encoding="utf-8")
+            receipt_file = mode / "compiler-receipt.json"
+            receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+            receipt["command"] = [command["executable"], *command["arguments"]]
+            receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
+        self.reject(lambda: V["corrected_probe_modes"](alternate_checkout))
+
+    def test_java_output_path_across_hosts(self):
+        java = self.root / "java"
+        java.mkdir()
+        V["corrected_java_output"](f"-OutputDirectory {java}", java)
+        V["corrected_java_output"]("-OutputDirectory D:\\a\\_temp\\windows-collision-focus\\java", java)
+        for wrong in ("-OutputDirectory D:\\a\\other\\windows-collision-focus\\java",
+                      "-OutputDirectory D:\\a\\_temp\\other-focus\\java",
+                      "-OutputDirectory D:\\a\\_temp\\windows-collision-focus\\other",
+                      "-OutputDirectory D:\\a\\_temp\\windows-collision-focus\\..\\java",
+                      "-OutputDirectory relative\\java"):
+            self.reject(lambda wrong=wrong: V["corrected_java_output"](wrong, java))
 
     def test_workflow_route_contract_and_adverse(self):
         workflow = (REPO / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")

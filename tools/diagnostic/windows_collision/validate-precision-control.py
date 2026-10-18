@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 sys.dont_write_bytecode = True
@@ -433,6 +433,70 @@ def corrected_probe_rows(text):
     return observed
 
 
+def command_path(raw):
+    if not isinstance(raw, str) or not raw or "\x00" in raw:
+        raise ValueError("corrected probe command path is malformed")
+    if re.match(r"^[A-Za-z]:\\", raw):
+        components = raw.split("\\")[1:]
+        if "/" in raw or any(not part or part in (".", "..") or part.endswith((".", " ")) or
+                             re.search(r'[<>:"|?*]', part) for part in components):
+            raise ValueError("corrected probe Windows command path is malformed")
+        return "windows", tuple(part.casefold() for part in PureWindowsPath(raw).parts)
+    if raw.startswith("/"):
+        components = raw.split("/")[1:]
+        if "\\" in raw or any(not part or part in (".", "..") for part in components):
+            raise ValueError("corrected probe POSIX command path is malformed")
+        return "posix", PurePosixPath(raw).parts
+    raise ValueError("corrected probe command path is not absolute")
+
+
+def command_source_root(raw, relative):
+    kind, parts = command_path(raw)
+    suffix = tuple(part.casefold() for part in PureWindowsPath(relative).parts) if kind == "windows" else \
+        PurePosixPath(relative).parts
+    if len(parts) <= len(suffix) or parts[-len(suffix):] != suffix:
+        raise ValueError(f"corrected probe source suffix differs: {relative}")
+    root = parts[:-len(suffix)]
+    local = command_path(str(REPO / relative))
+    if kind == "posix":
+        if (kind, parts) != local:
+            raise ValueError(f"corrected probe source root differs: {relative}")
+    elif (kind, parts) != local and \
+            (len(root) != 4 or root[1:] != ("a", "dyn4k", "dyn4k")):
+        raise ValueError(f"corrected probe Windows checkout root differs: {relative}")
+    return kind, root
+
+
+def command_output_root(raw, mode, local_mode, source_root):
+    kind, parts = command_path(raw)
+    if kind == "posix":
+        if (kind, parts) != command_path(str(local_mode / "sqrt-operation-probe")):
+            raise ValueError(f"{mode} compiler output differs from retained mode")
+        return kind, parts[:-2]
+    suffix = ("windows-collision-focus", "corrected-probe", mode, "sqrt-operation-probe")
+    if len(parts) <= len(suffix) or parts[-len(suffix):] != suffix:
+        raise ValueError(f"{mode} Windows compiler output suffix differs")
+    root = parts[:-len(suffix)]
+    local = command_path(str(local_mode / "sqrt-operation-probe"))
+    if (kind, parts) != local and (len(root) != 3 or root[1:] != ("a", "_temp")):
+        raise ValueError(f"{mode} Windows runner temp root differs")
+    if source_root[0] != kind or source_root[1][0] != root[0]:
+        raise ValueError(f"{mode} source and output drives differ")
+    return kind, root
+
+
+def corrected_java_output(raw, local_directory):
+    prefix = "-OutputDirectory "
+    if not isinstance(raw, str) or not raw.startswith(prefix):
+        raise ValueError("corrected Java output option differs")
+    kind, parts = command_path(raw[len(prefix):])
+    if (kind, parts) == command_path(str(local_directory)):
+        return
+    if kind != "windows" or len(parts) != 5 or parts[1:] != (
+            "a", "_temp", "windows-collision-focus", "java"):
+        raise ValueError("corrected Java output root or suffix differs")
+
+
 def corrected_probe_modes(directory):
     root = Path(directory)
     modes = (("debug-g", ("-g",)), ("default", ()), ("optimized-opt", ("-opt",)))
@@ -441,6 +505,7 @@ def corrected_probe_modes(directory):
     if {path.name for path in root.iterdir() if path.is_dir()} != {name for name, _ in modes}:
         raise ValueError("corrected probe mode set differs")
     results = {}
+    compiler_path = source_root = output_root = None
     for name, flags in modes:
         mode = root / name
         for phase in ("compiler", "run"):
@@ -456,26 +521,50 @@ def corrected_probe_modes(directory):
             results[f"{name}-{phase}-receipt"] = receipt
         command = json.loads((mode / "compiler-command.json").read_text(encoding="utf-8"))
         arguments = command.get("arguments")
-        if command.get("mode") != name or Path(command.get("executable", "")).name.lower() != "kotlinc-native.bat":
+        if command.get("mode") != name:
             raise ValueError(f"{name} compiler identity differs")
-        if not isinstance(arguments, list) or len(arguments) != 9 + len(flags):
+        actual_compiler = command_path(command.get("executable"))
+        kind, parts = actual_compiler
+        if kind == "windows":
+            if len(parts) != 7 or parts[1] != "users" or parts[-4:] != (
+                    ".konan", "kotlin-native-prebuilt-windows-x86_64-2.4.20", "bin", "kotlinc-native.bat"):
+                raise ValueError(f"{name} Windows compiler distribution differs")
+        elif parts[-2:] != ("bin", "kotlinc-native.bat"):
+            raise ValueError(f"{name} compiler identity differs")
+        if compiler_path is None:
+            compiler_path = actual_compiler
+        elif actual_compiler != compiler_path:
+            raise ValueError(f"{name} compiler differs from the other modes")
+        if not isinstance(arguments, list) or len(arguments) != 9 + len(flags) or \
+                any(not isinstance(argument, str) for argument in arguments):
             raise ValueError(f"{name} compiler argument count differs")
         common, native, probe = arguments[2:5]
         if arguments[:2] != ["-Xmulti-platform", f"-Xcommon-sources={common}"] or \
                 arguments[5:7] != ["-target", "mingw_x64"] or \
-                arguments[7:-2] != list(flags) or arguments[-2] != "-o" or \
-                Path(arguments[-1]).resolve() != (mode / "sqrt-operation-probe").resolve():
+                arguments[7:-2] != list(flags) or arguments[-2] != "-o":
             raise ValueError(f"{name} compiler mode, target, or output differs")
         for actual, expected in zip((common, native, probe), (ENGINE_SOURCES[1], ENGINE_SOURCES[2], PROBE_SOURCE), strict=True):
-            if Path(actual).resolve() != (REPO / expected).resolve():
-                raise ValueError(f"{name} compiler source differs: {expected}")
+            actual_root = command_source_root(actual, expected)
+            if source_root is None:
+                source_root = actual_root
+            elif actual_root != source_root:
+                raise ValueError(f"{name} compiler source root differs: {expected}")
+        if source_root[0] != kind:
+            raise ValueError(f"{name} compiler and source path forms differ")
+        actual_output_root = command_output_root(arguments[-1], name, mode, source_root)
+        if output_root is None:
+            output_root = actual_output_root
+        elif actual_output_root != output_root:
+            raise ValueError(f"{name} output root differs from the other modes")
         if results[f"{name}-compiler-receipt"].get("command") != [command["executable"], *arguments]:
             raise ValueError(f"{name} compiler receipt command differs")
         executable = mode / "sqrt-operation-probe.exe"
         expected_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
         if (mode / "executable-sha256.txt").read_text(encoding="utf-8").strip() != f"{expected_hash}  {executable.name}":
             raise ValueError(f"{name} executable hash differs")
-        if results[f"{name}-run-receipt"].get("command") != [str(executable)]:
+        run_command = results[f"{name}-run-receipt"].get("command")
+        if not isinstance(run_command, list) or len(run_command) != 1 or \
+                command_path(run_command[0]) != command_path(arguments[-1] + ".exe"):
             raise ValueError(f"{name} executed PE differs from retained PE")
         results[name] = corrected_probe_rows((mode / "probe-stdout.tsv").read_text(encoding="utf-8"))
     return {name: results[name] for name, _ in modes}
@@ -517,9 +606,9 @@ def validate_corrected(args):
     if len(java_command) != 5 or java_command[0] != ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1" or \
             not java_command[1].startswith("-JdkHome ") or \
             not java_command[2].endswith("dyn4j-6.0.0.jar") or \
-            not java_command[3].startswith("-BaselineSource ") or \
-            java_command[4] != f"-OutputDirectory {java_directory}":
+            not java_command[3].startswith("-BaselineSource "):
         raise ValueError("corrected pinned Java command is partial or differs")
+    corrected_java_output(java_command[4], java_directory)
     if not (java_directory / "java-stdout.log").read_bytes():
         raise ValueError("corrected pinned Java stdout is empty")
     if (java_directory.parent / "baseline-source-revision.txt").read_text(encoding="utf-8").strip() != \
