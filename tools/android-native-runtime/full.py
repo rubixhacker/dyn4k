@@ -70,7 +70,7 @@ def manifest_at(root, source_sha):
                                              manifest["original_mappings"], True, root)
     if regenerated != manifest:
         raise ValueError("source-derived corpus or mapping differs")
-    if manifest["counts"]["mapped_original_methods"] != 2253 or manifest["counts"]["supplemental_methods"] != 259:
+    if manifest["counts"]["mapped_original_methods"] != 2253 or manifest["counts"]["supplemental_methods"] != 265:
         raise ValueError("reviewed common corpus totals differ")
     return manifest, digest_bytes(raw)
 
@@ -408,9 +408,9 @@ def validate_result(result, root):
             if lane.get("case_count") != count:
                 raise ValueError(f"{key} case count differs")
             total += count
-    if total != 2 * (2454 + 58) or result.get("total_common_cases") != total:
+    if total != 2 * (2460 + 58) or result.get("total_common_cases") != total:
         raise ValueError("full native corpus total differs")
-    if result.get("mapped_common_executions") != 2 * 2253 or result.get("supplemental_common_executions") != 2 * 259:
+    if result.get("mapped_common_executions") != 2 * 2253 or result.get("supplemental_common_executions") != 2 * 265:
         raise ValueError("mapped or supplemental case totals differ")
     return {"status": "CONSISTENCY_ONLY", "total_common_cases": total,
             "consumer_assertions": 2 * len(ASSERTIONS)}
@@ -489,7 +489,7 @@ def run_live(root, output):
         result["total_common_cases"] = sum(lane["case_count"] for key, lane in result["lanes"].items()
                                            if not key.startswith("consumer-"))
         result["mapped_common_executions"] = 2 * 2253
-        result["supplemental_common_executions"] = 2 * 259
+        result["supplemental_common_executions"] = 2 * 265
         result["status"] = "RUNTIME_PASSED"
         result["replay"] = validate_result(result, root)
     except (OSError, ValueError, KeyError, UnicodeError, IndexError, TypeError) as error:

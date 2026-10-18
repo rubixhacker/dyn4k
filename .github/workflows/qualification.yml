@@ -373,6 +373,7 @@ jobs:
             $results = 'dyn4k-core/build/test-results/mingwX64Test'
             if (Test-Path $results) {
               Copy-Item -Recurse -Force $results (Join-Path $diagnostics 'prior-xml')
+              Remove-Item -LiteralPath $results -Recurse -Force
             }
             & .\gradlew.bat :dyn4k-core:mingwX64Test `
               --tests 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest' `
@@ -398,8 +399,50 @@ jobs:
                 throw "Focused native XML is missing original fixture: $fixture"
               }
             }
-            $records = @(Select-String -Path $xml.FullName -Pattern 'DYN4K_COLLISION_DIAGNOSTIC\s+v2')
+            $diagnosticXml = @($xml | Where-Object {
+              $_.Name -like '*WindowsCollisionIntermediateDiagnosticTest.xml'
+            })
+            if ($diagnosticXml.Count -ne 1) {
+              throw "Expected one same-run diagnostic XML report; found $($diagnosticXml.Count)"
+            }
+            [xml]$suite = Get-Content -Raw -LiteralPath $diagnosticXml[0].FullName
+            $methods = @('capsuleSlice', 'circlePolygon', 'circleSegment',
+              'circleSlice', 'polygonCapsule', 'polygonPolygon')
+            $testcases = @($suite.testsuite.testcase)
+            if ($testcases.Count -ne 6) { throw "Expected six diagnostic testcases; found $($testcases.Count)" }
+            foreach ($method in $methods) {
+              if (@($testcases | Where-Object { $_.name -eq "${method}[mingwX64]" }).Count -ne 1) {
+                throw "Missing or repeated same-run diagnostic testcase: $method"
+              }
+            }
+            $records = @(Select-String -LiteralPath $diagnosticXml[0].FullName `
+              -Pattern 'DYN4K_COLLISION_DIAGNOSTIC\s+v2')
             if ($records.Count -ne 72) { throw "Expected 72 native v2 records; found $($records.Count)" }
+            $sequences = @{}
+            foreach ($fixture in @('CapsuleSlice', 'CirclePolygon', 'CircleSegment',
+                'CircleSlice', 'PolygonCapsule', 'PolygonPolygon')) {
+              $sequences[$fixture] = [System.Collections.Generic.HashSet[int]]::new()
+            }
+            $recordPattern = 'DYN4K_COLLISION_DIAGNOSTIC\tv2\tprovider=dyn4k\tfixture=(\w+)\tmethod=[^\t]+\tphase=[^\t]+\torder=[^\t]+\tstep=(\d+)\t'
+            foreach ($record in $records) {
+              $parsed = [regex]::Match($record.Line, $recordPattern)
+              if (-not $parsed.Success) { throw 'Malformed same-run v2 diagnostic record.' }
+              $fixture = $parsed.Groups[1].Value
+              $step = [int]$parsed.Groups[2].Value
+              if (-not $sequences.ContainsKey($fixture) -or -not $sequences[$fixture].Add($step)) {
+                throw "Unknown or duplicate diagnostic fixture-step: $fixture/$step"
+              }
+            }
+            foreach ($fixture in $sequences.Keys) {
+              if ($sequences[$fixture].Count -ne 12) {
+                throw "Expected 12 unique steps for $fixture; found $($sequences[$fixture].Count)"
+              }
+              foreach ($step in 0..11) {
+                if (-not $sequences[$fixture].Contains($step)) {
+                  throw "Missing diagnostic fixture-step: $fixture/$step"
+                }
+              }
+            }
             exit $nativeExit
           } catch {
             if (-not (Test-Path $exitPath)) { Set-Content -Path $exitPath -Value 1 }

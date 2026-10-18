@@ -80,7 +80,7 @@ def read_corpus(repository):
     if corpus.get("kind") != "full-common-corpus" or corpus.get("policy") != "production":
         raise ValueError("production common corpus is required")
     counts = corpus.get("counts", {})
-    expected_counts = {"total_methods": 2515, "mapped_original_methods": 2253,
+    expected_counts = {"total_methods": 2521, "mapped_original_methods": 2253,
                        "mapped_original_identities": 2353,
                        "related_supplemental_methods": 5,
                        "jvm_only_original_identities": 32,
@@ -94,7 +94,7 @@ def read_corpus(repository):
     scanned = full_corpus.scan_sources(repository)
     indexed = {(case["module"], case["classname"], case["method"]): case
                for case in scanned}
-    if len(indexed) != 2515 or len(corpus["cases"]) != 2515:
+    if len(indexed) != 2521 or len(corpus["cases"]) != 2521:
         raise ValueError("common test source inventory differs")
     for case in corpus["cases"]:
         key = (case["module"], case["classname"], case["method"])
@@ -159,7 +159,7 @@ def build_manifest(repository):
                        "evidence_sources": list(GATE_SOURCES[name])}
                 for name in GATE_DESCRIPTIONS},
             "global_gates": list(GLOBAL_GATES),
-            "counts": {"portable_methods": 2512, "jvm_only_facade_methods": 3,
+            "counts": {"portable_methods": 2518, "jvm_only_facade_methods": 3,
                        "mapped_original_identities": 2353,
                        "body_related_supplements": 5,
                        "jvm_only_original_dispositions": 32}}

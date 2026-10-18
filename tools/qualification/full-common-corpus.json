@@ -7572,6 +7572,126 @@
       "source_set": "commonTest"
     },
     {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 18,
+      "method": "capsuleSlice",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 19,
+      "method": "circlePolygon",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 20,
+      "method": "circleSegment",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 21,
+      "method": "circleSlice",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 22,
+      "method": "polygonCapsule",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
+      "classname": "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+      "hosts": [
+        "jvm",
+        "linuxX64",
+        "jsNode",
+        "wasmJsNode",
+        "wasmWasiNode",
+        "androidHost"
+      ],
+      "kind": "supplemental",
+      "line": 23,
+      "method": "polygonPolygon",
+      "module": "dyn4k-core",
+      "originals": [],
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "related_original": null,
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12",
+      "source_set": "commonTest"
+    },
+    {
       "classname": "org.dyn4j.coverage.PortableFoundationCoverageTest",
       "hosts": [
         "jvm",
@@ -54899,8 +55019,8 @@
     "platform_only_methods": 3,
     "related_supplemental_methods": 5,
     "reviewed_source_linked_methods": 2258,
-    "supplemental_methods": 259,
-    "total_methods": 2515,
+    "supplemental_methods": 265,
+    "total_methods": 2521,
     "unresolved_mappings": 0
   },
   "jvm_only": [
@@ -83944,6 +84064,14 @@
       "sha256": "be48b94932bfc9b68f0a05acdb1240c91a08a2eaacdc87102b8d190ed463e65d"
     },
     {
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt",
+      "sha256": "eecc14c9b5277fdb24b2fed858368dc2c13dc96f60adf6e657638926e258ad12"
+    },
+    {
+      "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionTrace.kt",
+      "sha256": "c8e4558bc2b5826a7ea873d6b16f23a50a52476a5a40e6265a5fb28c66ea6794"
+    },
+    {
       "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/PortableFoundationCoverageTest.kt",
       "sha256": "5b119c2992551a454623f1eda1fe354981b57a9ac5a64b7a1f8257a55b91818b"
     },
@@ -84712,6 +84840,6 @@
       "sha256": "818b0df9cd86106c9dd9bb1255dc1e1bb29ca490ad6af0d1833f1d1172077ad6"
     }
   ],
-  "source_tree_sha256": "3d53d642e253335d9c4048402469dbf0d4b9900766ac1338e4851ee1ca5978e9",
+  "source_tree_sha256": "a4af51a710584d268232f9bbecdbe360539f19587d0c8d377570e36abab1f75d",
   "unresolved": []
 }

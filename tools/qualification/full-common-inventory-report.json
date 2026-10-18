@@ -6,14 +6,14 @@
     "platform_only_methods": 3,
     "related_supplemental_methods": 5,
     "reviewed_source_linked_methods": 2258,
-    "supplemental_methods": 259,
-    "total_methods": 2515,
+    "supplemental_methods": 265,
+    "total_methods": 2521,
     "unresolved_mappings": 0
   },
-  "expected_host_executions": 15075,
+  "expected_host_executions": 15111,
   "groups": [
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "jvm",
       "id": "core-jvm",
       "module": "dyn4k-core"
@@ -25,7 +25,7 @@
       "module": "dyn4k"
     },
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "linuxX64",
       "id": "core-linuxX64",
       "module": "dyn4k-core"
@@ -37,7 +37,7 @@
       "module": "dyn4k"
     },
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "jsNode",
       "id": "core-jsNode",
       "module": "dyn4k-core"
@@ -49,7 +49,7 @@
       "module": "dyn4k"
     },
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "wasmJsNode",
       "id": "core-wasmJsNode",
       "module": "dyn4k-core"
@@ -61,7 +61,7 @@
       "module": "dyn4k"
     },
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "wasmWasiNode",
       "id": "core-wasmWasiNode",
       "module": "dyn4k-core"
@@ -73,7 +73,7 @@
       "module": "dyn4k"
     },
     {
-      "expected": 2454,
+      "expected": 2460,
       "host": "androidHost",
       "id": "core-androidHost",
       "module": "dyn4k-core"
@@ -87,13 +87,13 @@
   ],
   "inventory_status": "MAPPED",
   "kind": "full-common-corpus-inventory",
-  "manifest_sha256": "cf226243d8320ef1425852531d7dbe3cddaab762215b325d411971dc2b6b1b7f",
+  "manifest_sha256": "6d2f1e7b5d80ceec03a529c7bf7b6592fa5e6633a018a042309cfd2692b30b38",
   "map_file_sha256": "d20877be61398e65037b0ec3d61134d9922248f608c7901ffe589fed8dff5496",
   "original_source_files": 190,
   "qualification_status": "NOT_RUN",
   "review_reports": 16,
   "schema": 1,
-  "source_files": 193,
-  "source_tree_sha256": "9abc9cc73c1c90fe0f5b22cb76f3596fe6ce920c937b1066deb23c0a53a0fb80",
+  "source_files": 201,
+  "source_tree_sha256": "a4af51a710584d268232f9bbecdbe360539f19587d0c8d377570e36abab1f75d",
   "unresolved": []
 }

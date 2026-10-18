@@ -36,7 +36,7 @@ INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json"
           "consumers/qualification/portable/build.gradle.kts")
 SOURCE_TASK = {target: f"{target}Test" for target in NATIVE}
 SOURCE_TASK["jsSafari"] = "jsBrowserTest"
-REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2454, "dyn4k": 58}
+REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2460, "dyn4k": 58}
 PINNED_GRADLE = "9.5.0"
 PINNED_KGP = "2.4.20"
 PINNED_AGP = "9.3.1"
