@@ -621,6 +621,27 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(len(result["unpassed_obligations"]), 7486)
         self.assertIsNone(result["governing_summary"])
 
+        for revision in ("abc", None, "0" * 40):
+            with self.subTest(malformed_revision=revision):
+                malformed = copy.deepcopy(recorded)
+                malformed["candidate_source"]["revision"] = revision
+                result = validate(malformed, expected, root, head)
+                self.assertEqual(result["source_scope"], "invalid-unpassed")
+                self.assertFalse(result["passed"])
+                self.assertEqual(result["obligation_counts"]["passed"], 0)
+                self.assertEqual(result["obligation_counts"]["unpassed"], 7486)
+                self.assertTrue(all(row["status"] == "invalid-unpassed"
+                                    for row in result["unpassed_obligations"]))
+                self.assertIsNone(result["governing_summary"])
+                self.assertTrue(any("revision" in message for message in result["invalid"]))
+
+        wrong_historical_tree = copy.deepcopy(recorded)
+        wrong_historical_tree["candidate_source"]["tree"] = "0" * 40
+        result = validate(wrong_historical_tree, expected, root, head)
+        self.assertEqual(result["source_scope"], "invalid-unpassed")
+        self.assertEqual(result["obligation_counts"]["passed"], 0)
+        self.assertIsNone(result["governing_summary"])
+
     def test_original_source_fixture_binds_its_revision_and_tree(self):
         root = Path(__file__).resolve().parents[2]
         recorded = json.loads((root / "tools/compatibility/declaration-ledger.json").read_text())

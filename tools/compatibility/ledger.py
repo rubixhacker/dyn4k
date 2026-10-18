@@ -398,9 +398,21 @@ def candidate_source_binding(source: dict, requested_revision: str, root: Path) 
         requested_tree = candidate_coverage.git(root, "rev-parse", f"{requested_revision}^{{tree}}")
     except (OSError, subprocess.CalledProcessError):
         return "invalid", "requested candidate revision cannot be verified"
-    if source.get("revision") != requested_revision:
+    recorded_revision = source.get("revision")
+    if not isinstance(recorded_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", recorded_revision):
+        return "invalid", "candidate source revision is invalid"
+    try:
+        recorded_commit = candidate_coverage.git(root, "rev-parse", f"{recorded_revision}^{{commit}}")
+        recorded_tree = candidate_coverage.git(root, "rev-parse", f"{recorded_revision}^{{tree}}")
+    except (OSError, subprocess.CalledProcessError):
+        return "invalid", "candidate source revision cannot be verified"
+    if recorded_commit != recorded_revision:
+        return "invalid", "candidate source revision is not a commit"
+    if source.get("tree") != recorded_tree:
+        return "invalid", "candidate source tree differs from recorded revision tree"
+    if recorded_revision != requested_revision:
         return ("historical", "historical candidate source revision differs from requested HEAD: "
-                f"recorded={source.get('revision')}, requested={requested_revision}")
+                f"recorded={recorded_revision}, requested={requested_revision}")
     if source.get("tree") != requested_tree:
         return "invalid", "candidate source tree differs from requested HEAD tree"
     return "bound", None
