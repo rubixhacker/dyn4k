@@ -961,6 +961,11 @@ def test_products(project, target, configuration, process, safari_input=None, na
             with os.scandir(root) as entries:
                 for entry in entries:
                     if entry.name.endswith("-test.js"):
+                        if entry.name == "kotlin-kotlin-test.js":
+                            helper = safari_file_observation(root / entry.name, project, 0)
+                            if helper["status"] != "REGULAR":
+                                raise ValueError("Safari Kotlin test runtime helper is unsafe")
+                            continue
                         products.append(root / entry.name)
                         if len(products) == 2:
                             break

@@ -654,6 +654,72 @@ class FullHostedTests(unittest.TestCase):
             project, "jsSafari", "production", process, str(production),
             "dyn4k-core")["karma_input"]["path"])
 
+    def test_safari_product_selects_app_with_kotlin_test_runtime_helper(self):
+        for configuration in ("development", "production"):
+            for name in ("dyn4k-core", "dyn4k"):
+                with self.subTest(configuration=configuration, name=name):
+                    repository = self.root / configuration / name / "repository"
+                    project = repository / name
+                    compiler, karma, _, _ = full_hosted.safari_product_paths(
+                        project, configuration, name)
+                    compiler.parent.mkdir(parents=True)
+                    karma.parent.mkdir(parents=True, exist_ok=True)
+                    started = time.time_ns()
+                    compiler.write_bytes(b"app test bundle")
+                    if karma != compiler:
+                        karma.write_bytes(b"app test bundle")
+                    helper = compiler.with_name("kotlin-kotlin-test.js")
+                    helper.write_bytes(b"Kotlin test runtime helper")
+                    self.assertEqual({f"dyn4k-{name}-test.js", "kotlin-kotlin-test.js"},
+                                     {path.name for path in compiler.parent.iterdir()})
+                    process = {"started_ns": started,
+                               "finished_ns": time.time_ns() + 10**9}
+                    selected = full_hosted.test_products(
+                        project, "jsSafari", configuration, process, str(karma), name)
+                    self.assertEqual(str(compiler), selected["path"])
+                    self.assertEqual(full_hosted.sha256(compiler), selected["sha256"])
+
+                    extra = compiler.with_name("unrelated-test.js")
+                    extra.write_bytes(b"extra app")
+                    with self.assertRaisesRegex(ValueError, "exactly one"):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+                    extra.unlink()
+
+                    helper.unlink()
+                    helper.symlink_to(compiler)
+                    with self.assertRaisesRegex(ValueError, "runtime helper.*unsafe"):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+                    helper.unlink()
+
+                    helper.mkdir()
+                    with self.assertRaisesRegex(ValueError, "runtime helper.*unsafe"):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+                    helper.rmdir()
+                    helper.write_bytes(b"Kotlin test runtime helper")
+
+                    compiler.write_bytes(b"substituted app")
+                    if karma == compiler:
+                        os.utime(compiler, ns=(started - 1, started - 1))
+                        reason = "predates invocation"
+                    else:
+                        reason = "bytes differ"
+                    with self.assertRaisesRegex(ValueError, reason):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+
+                    compiler.unlink()
+                    compiler.symlink_to(karma if karma != compiler else helper)
+                    with self.assertRaisesRegex(ValueError, "path is unsafe"):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+                    compiler.unlink()
+                    with self.assertRaisesRegex(ValueError, "exactly one"):
+                        full_hosted.test_products(project, "jsSafari", configuration,
+                                                  process, str(karma), name)
+
     def test_product_diagnostic_inventory_has_a_fixed_entry_limit(self):
         project = self.root / "dyn4k-core"
         folder = project / "build/bin/macosArm64/debugTest"
