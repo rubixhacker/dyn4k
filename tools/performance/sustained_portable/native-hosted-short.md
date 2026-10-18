@@ -32,8 +32,10 @@ Java baseline on these Native hosts. A missing executable or publication fails
 before capture. A failed direct capture does not suppress the compatibility
 attempt.
 
-Read a macOS or Windows `observed_image.identity_kind` value of
-`reported_path_only` as a path observation. It is not mapped executable byte
-proof. Until the Native adapter can verify the running image on the real host,
-the capture must exit unpassed. A valid short protocol also leaves sustained
-performance, memory, allocation, reference, and release qualification open.
+The observer can report `mapped_executable_vnode` on macOS and
+`mapped_executable_code` on Windows. Capture validation accepts these identity
+kinds when they match the selected executable. A `reported_path_only` value
+records a path; capture validation rejects it as process-image proof. These
+observation routes do not establish a sustained performance pass. The policy
+still has 0 of 28 validated sustained reference environments. Memory,
+allocation, reference, and release qualification also remain open.
