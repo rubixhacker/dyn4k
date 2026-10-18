@@ -48,6 +48,51 @@ KARMA_HELPER_SHA256 = {
     "context": "0451957d938729d37d045f2eb855ea0b2afa50815ff2ed9488dd18e7135fc69d",
     "debug": "695977572217887870de5bf75b6c4ba3be2b6780e20a0f2dd83af1c8660ce03e",
 }
+KARMA_REPORTER_SHA256 = "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"
+COLLISION_DIAGNOSTIC_CLASS = (
+    "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest"
+)
+COLLISION_DIAGNOSTIC_METHODS = {
+    "CapsuleSlice": ("capsuleSlice", "detectGjk"),
+    "CirclePolygon": ("circlePolygon", "detectGjk"),
+    "CircleSegment": ("circleSegment", "detectGjk"),
+    "CircleSlice": ("circleSlice", "detectGjk"),
+    "PolygonCapsule": ("polygonCapsule", "detectSat"),
+    "PolygonPolygon": ("polygonPolygon", "detectSat"),
+}
+COLLISION_DIAGNOSTIC_PREFIX_FIELDS = (
+    "provider", "fixture", "method", "phase", "order", "step", "algorithm",
+    "a.transform", "b.transform", "a.center.local", "b.center.local",
+    "a.center.world", "b.center.world", "hit", "booleanHit",
+    "penetration.normal", "penetration.depth", "selection", "clipped",
+    "manifold.normal", "manifold.count", "a.shape.local", "b.shape.local",
+    "a.polygon.edgeArithmetic", "b.polygon.edgeArithmetic", "a.foci.world",
+    "b.foci.world", "a.axes.withB", "b.axes.withA",
+    "gjk.initial.centerDirection", "gjk.initial.effectiveDirection",
+    "clip.probe.feature.a", "clip.probe.feature.b",
+) + tuple(f"support.{i}.{field}" for i in range(6) for field in (
+    "direction", "a", "b.negated", "minkowski"))
+COLLISION_DIAGNOSTIC_SAT_FIELDS = (
+    "sat.replay.hit", "sat.replay.matchesResult", "sat.candidates",
+    "sat.winner.source", "sat.winner.index",
+)
+COLLISION_DIAGNOSTIC_SAT_HIT_FIELDS = (
+    "sat.winner.preOrientation", "sat.winner.centerDot",
+    "sat.winner.orientationFlip", "sat.winner.finalAxis", "sat.winner.depth",
+)
+COLLISION_DIAGNOSTIC_EPA_FIELDS = (
+    "epa.replay.identity", "epa.replay.simplex", "epa.replay.iteration",
+    "epa.replay.stop", "epa.replay.epsilon", "epa.replay.maxIterations",
+    "epa.iteration.schema", "epa.iteration.records",
+    "epa.queue.reconstructedMatches", "epa.edge.a", "epa.edge.b",
+    "epa.edge.normal", "epa.edge.distance", "epa.terminal.support",
+    "epa.terminal.projection", "epa.terminal.delta",
+    "epa.replay.normalMatchesResult", "epa.replay.depthMatchesResult",
+)
+COLLISION_DIAGNOSTIC_EPA_SCHEMA = (
+    "index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:support:"
+    "projection:delta:stop:equalDistanceEdgeIds:mirrorMatches"
+)
 
 
 def common_corpus_cases(root: Path, candidate_sha: str, module: str) -> set[tuple[str, str]]:
@@ -116,11 +161,88 @@ def source_cases(source_root: Path) -> set[tuple[str, str]]:
     return cases
 
 
+def verify_collision_diagnostics(suite: ET.Element) -> dict[str, object]:
+    output = suite.findtext("system-out") or ""
+    rows = [line for line in output.splitlines()
+            if "DYN4K_COLLISION_DIAGNOSTIC" in line]
+    if len(rows) != 72:
+        raise ValueError(f"collision diagnostic row count differs: {len(rows)}")
+    expected: dict[tuple[str, str, str, str, str], str] = {}
+    for fixture, (_, detect_method) in COLLISION_DIAGNOSTIC_METHODS.items():
+        for step in range(12):
+            method = detect_method if step < 4 else "getClipManifold"
+            phase = ("center" if step < 2 or 4 <= step < 8 else "shifted")
+            order = "forward" if step % 2 == 0 else "reverse"
+            algorithm = (("gjk" if detect_method == "detectGjk" else "sat")
+                         if step < 4 else "gjk" if step % 4 < 2 else "sat")
+            expected[(fixture, method, phase, order, str(step))] = algorithm
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for row in rows:
+        parts = row.split("\t")
+        if parts[:2] != ["[log] DYN4K_COLLISION_DIAGNOSTIC", "v2"]:
+            raise ValueError("collision diagnostic version or row prefix differs")
+        if any("=" not in item for item in parts[2:]):
+            raise ValueError("collision diagnostic field is incomplete")
+        pairs = [item.split("=", 1) for item in parts[2:]]
+        keys = [key for key, _ in pairs]
+        fields = dict(pairs)
+        if len(keys) != len(fields) or any(not key for key in keys):
+            raise ValueError("collision diagnostic has duplicate or empty field names")
+        identity = tuple(fields.get(key, "") for key in
+                         ("fixture", "method", "phase", "order", "step"))
+        algorithm = expected.get(identity)
+        if algorithm is None or identity in seen or fields.get("algorithm") != algorithm:
+            raise ValueError("collision diagnostic identity differs or repeats")
+        seen.add(identity)
+        if (fields.get("provider") != "dyn4k" or fields.get("hit") not in ("true", "false")
+                or fields.get("epa.iteration.schema") != COLLISION_DIAGNOSTIC_EPA_SCHEMA
+                or fields.get("epa.replay.depthMatchesResult") not in ("true", "false", "na")):
+            raise ValueError("collision diagnostic required values differ")
+        if identity[1] == "getClipManifold":
+            if (fields.get("booleanHit") != "na" or
+                    fields.get("clipped") not in ("true", "false") or
+                    fields.get("manifold.count") not in ("0", "1", "2")):
+                raise ValueError("collision diagnostic manifold values differ")
+            point_count = int(fields["manifold.count"])
+            if (fields["clipped"] == "true") != (point_count > 0):
+                raise ValueError("collision diagnostic manifold point count differs")
+        else:
+            if (fields.get("booleanHit") not in ("true", "false") or
+                    fields.get("clipped") != "na" or fields.get("manifold.count") != "na"):
+                raise ValueError("collision diagnostic detect values differ")
+            point_count = 0
+        sat_fields: tuple[str, ...] = ()
+        if algorithm == "sat":
+            if fields.get("sat.replay.hit") not in ("true", "false"):
+                raise ValueError("collision diagnostic SAT replay result differs")
+            sat_fields = COLLISION_DIAGNOSTIC_SAT_FIELDS
+            if fields["sat.replay.hit"] == "true":
+                sat_fields += COLLISION_DIAGNOSTIC_SAT_HIT_FIELDS
+        point_fields = tuple(f"manifold.point.{i}.{part}" for i in range(point_count)
+                             for part in ("position", "depth", "id"))
+        if keys != list(COLLISION_DIAGNOSTIC_PREFIX_FIELDS + sat_fields +
+                        COLLISION_DIAGNOSTIC_EPA_FIELDS + point_fields):
+            raise ValueError("collision diagnostic v2 row fields differ")
+        if any(not value for key, value in pairs if key not in (
+                "epa.replay.simplex", "epa.iteration.records", "sat.candidates")):
+            raise ValueError("collision diagnostic v2 row has empty required content")
+        for i in range(point_count):
+            point_id = fields[f"manifold.point.{i}.id"]
+            if point_id != "distance" and re.fullmatch(
+                    r"indexed:\d+:\d+:\d+:(?:true|false)", point_id) is None:
+                raise ValueError("collision diagnostic manifold point identity differs")
+    if seen != set(expected):
+        raise ValueError("collision diagnostic identities are incomplete")
+    return {"diagnostic_rows": len(rows),
+            "diagnostic_sha256": hashlib.sha256("\n".join(rows).encode()).hexdigest()}
+
+
 def verify_reports(
     report_dir: Path,
     expected: set[tuple[str, str]],
     task_name: str,
     runtime_marker: str,
+    require_collision_diagnostics: bool = False,
 ) -> dict[str, object]:
     selected = re.fullmatch(r"(ChromeHeadless|Firefox)(\d+)", runtime_marker)
     if selected is None:
@@ -129,12 +251,15 @@ def verify_reports(
     if not files:
         raise ValueError(f"missing XML reports: {report_dir}")
     observed: list[tuple[str, str]] = []
+    diagnostic_suites: list[ET.Element] = []
     failures = 0
     skipped = 0
     for path in files:
         suite = ET.parse(path).getroot()
         if suite.tag != "testsuite":
             raise ValueError(f"invalid test suite: {path}")
+        if suite.attrib.get("name") == f"{task_name}.{COLLISION_DIAGNOSTIC_CLASS}":
+            diagnostic_suites.append(suite)
         cases = suite.findall("testcase")
         counts = {key: int(suite.attrib[key]) for key in ("tests", "failures", "errors", "skipped")}
         actual_failures = sum(case.find("failure") is not None for case in cases)
@@ -171,9 +296,18 @@ def verify_reports(
             f"missing or unexpected tests: missing={sorted(expected - set(observed))[:5]} "
             f"unexpected={sorted(set(observed) - expected)[:5]}"
         )
-    return {"expected": len(expected), "executed": len(observed), "failures": 0,
-            "skipped": 0, "cases": sorted([list(case) for case in observed]),
-            "report_files": [str(path) for path in files]}
+    result: dict[str, object] = {
+        "expected": len(expected), "executed": len(observed), "failures": 0,
+        "skipped": 0, "cases": sorted([list(case) for case in observed]),
+        "report_files": [str(path) for path in files],
+    }
+    diagnostic_cases = {(COLLISION_DIAGNOSTIC_CLASS, method)
+                        for method, _ in COLLISION_DIAGNOSTIC_METHODS.values()}
+    if require_collision_diagnostics:
+        if not diagnostic_cases.issubset(expected) or len(diagnostic_suites) != 1:
+            raise ValueError("collision diagnostic six-case suite is incomplete")
+        result.update(verify_collision_diagnostics(diagnostic_suites[0]))
+    return result
 
 
 def verify_wasmtime_output(
@@ -421,6 +555,8 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             ("raw_stderr", "raw_stderr_sha256"),
             ("linked_executable", "linked_sha256"),
             ("karma_config", "karma_config_sha256"),
+            ("karma_reporter_attestation", "karma_reporter_attestation_sha256"),
+            ("karma_reporter_retained", "karma_reporter_sha256"),
             ("browser_attestation", "browser_attestation_sha256"),
             ("result_json", "result_json_sha256"),
         ):
@@ -450,7 +586,10 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 required.add("raw_console")
             else:
                 required.update(("browser_attestation", "karma_port", "karma_config",
-                                 "karma_config_sha256"))
+                                 "karma_config_sha256", "karma_reporter_attestation",
+                                 "karma_reporter_attestation_sha256",
+                                 "karma_reporter_retained", "karma_reporter_sha256",
+                                 "karma_reporter_source", "karma_reporter_source_sha256"))
             if not required.issubset(module) or (lane.get("target") != "wasmWasi"
                                                  and not module.get("raw_xml")):
                 raise ValueError("passing module has missing raw evidence digest")
@@ -600,6 +739,21 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 if (not runner_input.is_file()
                         or sha256(runner_input) != KARMA_HELPER_SHA256["runner"]):
                     raise ValueError(f"passing {name} Karma helper bytes differ")
+                reporter_source = runner_input.with_name("karma-kotlin-reporter.js").resolve()
+                reporter_attestation = lane_dir / name / "reporter-producer.json"
+                reporter_retained = lane_dir / name / "karma-kotlin-reporter.js"
+                if (module["karma_reporter_attestation"] != str(reporter_attestation)
+                        or module["karma_reporter_retained"] != str(reporter_retained)
+                        or module["karma_reporter_source"] != str(reporter_source)
+                        or module["karma_reporter_source_sha256"] != KARMA_REPORTER_SHA256
+                        or module["karma_reporter_sha256"] != KARMA_REPORTER_SHA256
+                        or not started <= reporter_attestation.stat().st_mtime_ns <= finished
+                        or json.loads(reporter_attestation.read_text()) != {
+                            "path": str(reporter_source), "sha256": KARMA_REPORTER_SHA256,
+                        } or not reporter_source.is_file()
+                        or sha256(reporter_source) != KARMA_REPORTER_SHA256
+                        or sha256(reporter_retained) != KARMA_REPORTER_SHA256):
+                    raise ValueError(f"passing {name} Kotlin reporter producer differs")
                 package_dir = package_root / f"build/{'js' if target == 'js' else 'wasm'}" / "packages" / package
                 expected_config = {
                     "singleRun": True,
@@ -642,7 +796,8 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 marker = ("ChromeHeadless" if lane["runtime"] == "chromium" else
                           "Firefox") + lane["expected_runtime_version"].split(".")[0]
                 observed = verify_reports(Path(module["raw_xml"][0]["path"]).parent,
-                                          expected, f"{target}BrowserTest", marker)
+                                          expected, f"{target}BrowserTest", marker,
+                                          require_collision_diagnostics=name == "dyn4k-core")
                 if {str(path) for path in observed["report_files"]} != {
                         item["path"] for item in module["raw_xml"]}:
                     raise ValueError(f"passing {name} XML inventory differs")
@@ -654,7 +809,10 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                     module.get("browser_token"), lane["runtime"])
                 if launches != module.get("browser_processes"):
                     raise ValueError(f"passing {name} browser process record differs")
-            for field in ("expected", "executed", "failures", "skipped", "cases"):
+            compared = ("expected", "executed", "failures", "skipped", "cases")
+            if target != "wasmWasi" and name == "dyn4k-core":
+                compared += ("diagnostic_rows", "diagnostic_sha256")
+            for field in compared:
                 if module.get(field) != observed[field]:
                     raise ValueError(f"passing {name} raw case result differs: {field}")
     return lane
@@ -850,6 +1008,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             module_output.mkdir(exist_ok=True)
             env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"))
             attestation = module_output / "browser-launches.jsonl"
+            reporter_attestation = module_output / "reporter-producer.json"
             token = secrets.token_hex(16)
             launcher = root / "tools/qualification/browser_wasi/browser_launcher.py"
             if runtime == "chromium":
@@ -859,7 +1018,8 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             if runtime != "wasmtime":
                 env.update(DYN4K_BROWSER_SELECTED_BINARY=str(binary),
                            DYN4K_BROWSER_ATTESTATION=str(attestation),
-                           DYN4K_BROWSER_TOKEN=token, DYN4K_BROWSER_RUNTIME=runtime)
+                           DYN4K_BROWSER_TOKEN=token, DYN4K_BROWSER_RUNTIME=runtime,
+                           DYN4K_BROWSER_REPORTER_ATTESTATION=str(reporter_attestation))
             gradle = gradle_command(root, module, target, configuration)
             report_dir = project / "build/test-results" / f"{target}BrowserTest"
             if target != "wasmWasi" and report_dir.exists():
@@ -914,6 +1074,29 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                     shutil.copy2(karma_generated, frozen_karma)
                     evidence.update(karma_config=str(frozen_karma),
                                     karma_config_sha256=sha256(frozen_karma))
+                    if (not reporter_attestation.is_file() or not
+                            started_ns <= reporter_attestation.stat().st_mtime_ns <= finished_ns):
+                        raise ValueError("browser Kotlin reporter producer attestation is missing")
+                    attested = json.loads(reporter_attestation.read_text())
+                    reporter_source = Path(str(attested.get("path", ""))).resolve()
+                    if (attested != {"path": str(reporter_source),
+                                     "sha256": KARMA_REPORTER_SHA256}
+                            or not reporter_source.is_file()
+                            or sha256(reporter_source) != KARMA_REPORTER_SHA256):
+                        raise ValueError("browser Kotlin reporter producer bytes differ")
+                    retained_reporter = module_output / "karma-kotlin-reporter.js"
+                    shutil.copy2(reporter_source, retained_reporter)
+                    if (sha256(retained_reporter) != KARMA_REPORTER_SHA256
+                            or sha256(reporter_source) != KARMA_REPORTER_SHA256):
+                        raise ValueError("browser Kotlin reporter producer changed during capture")
+                    evidence.update(
+                        karma_reporter_attestation=str(reporter_attestation),
+                        karma_reporter_attestation_sha256=sha256(reporter_attestation),
+                        karma_reporter_source=str(reporter_source),
+                        karma_reporter_source_sha256=KARMA_REPORTER_SHA256,
+                        karma_reporter_retained=str(retained_reporter),
+                        karma_reporter_sha256=sha256(retained_reporter),
+                    )
                     marker = f"qualification test input: {linked}"
                     markers = [line for line in built.stdout.splitlines()
                                if line.startswith("qualification test input:")]
@@ -958,7 +1141,10 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                         evidence.update(browser_attestation=str(attestation),
                                         browser_attestation_sha256=sha256(attestation))
                     marker = ("ChromeHeadless" if runtime == "chromium" else "Firefox") + expected_version.split(".")[0]
-                    evidence.update(verify_reports(xml_dir, expected, f"{target}BrowserTest", marker))
+                    evidence.update(verify_reports(
+                        xml_dir, expected, f"{target}BrowserTest", marker,
+                        require_collision_diagnostics=module == "dyn4k-core",
+                    ))
                     launches = verify_browser_launches(attestation, binary, token, runtime)
                     for launch in launches:
                         runtime_version(Path(str(launch["process_executable"])), target, runtime,

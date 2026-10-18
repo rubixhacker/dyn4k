@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,38 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_scoped_browser_xml_rejects_lost_duplicated_and_truncated_diagnostics(self):
+        source = os.environ.get("DYN4K_BROWSER_WASI_SCOPED_XML")
+        if source is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_SCOPED_XML to a passing diagnostic XML")
+        source_path = Path(source)
+        self.assertTrue(source_path.is_file(), source_path)
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / source_path.name
+            shutil.copy2(source_path, report)
+            suite = ET.parse(report).getroot()
+            cases = {
+                ("org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+                 case.attrib["name"].split("[", 1)[0])
+                for case in suite.findall("testcase")
+            }
+            task = suite.attrib["name"].split(".", 1)[0]
+            marker = "ChromeHeadless119"
+            verify_reports(report.parent, cases, task, marker,
+                           require_collision_diagnostics=True)
+            original = suite.find("system-out").text
+            rows = original.splitlines()
+            self.assertEqual(72, len(rows))
+            for mutation in (rows[:1] + rows[2:], rows + rows[:1],
+                             [rows[0].rsplit("\t", 1)[0], *rows[1:]]):
+                suite.find("system-out").text = "\n".join(mutation) + "\n"
+                ET.ElementTree(suite).write(report, encoding="unicode")
+                with self.assertRaisesRegex(ValueError, "diagnostic"):
+                    verify_reports(report.parent, cases, task, marker,
+                                   require_collision_diagnostics=True)
+
     def test_wasmtime_retained_executable_replays_after_source_changes(self):
         from runner import capture_linked_executable, verify_linked_source_digest, sha256
 
@@ -102,7 +135,12 @@ class BrowserReporterStageTest(unittest.TestCase):
             "  const count = Math.min(length, 4096);",
             "  bytes.push(Buffer.from(data.subarray(offset, offset + count)));",
             "  return count;",
-            "}};",
+            "},",
+            "realpathSync: path => path,",
+            "readFileSync: () => Buffer.from('reporter fixture'),",
+            "writeFileSync: (path, value) => { attestation = JSON.parse(value); },",
+            "};",
+            "let attestation;",
             "function OriginalReporter(decorate) {",
             "  decorate(this);",
             "  this.emit = message => this.write(message);",
@@ -110,9 +148,17 @@ class BrowserReporterStageTest(unittest.TestCase):
             "OriginalReporter.$inject = ['baseReporterDecorator'];",
             "const plugin = {'reporter:karma-kotlin-reporter': ['type', OriginalReporter]};",
             "const config = {plugins: [plugin]};",
+            "const fakeRequire = name => name === 'node:fs' ? fakeFs :",
+            "  name === 'node:crypto' ? {createHash: () => ({update() {return this;},",
+            "  digest: () => '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347'})} : require(name);",
+            "fakeRequire.cache = {'/fixture/reporter.js':",
+            "  {filename: '/fixture/reporter.js', exports: plugin}};",
             "vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'),",
-            "  {config, Buffer, process: {stdout: {fd: 1}},",
-            "   require: name => name === 'node:fs' ? fakeFs : require(name)});",
+            "  {config, Buffer, process: {stdout: {fd: 1},",
+            "   env: {DYN4K_BROWSER_REPORTER_ATTESTATION: '/fixture/attestation'}},",
+            "   require: fakeRequire});",
+            "assert.deepEqual(attestation, {path: '/fixture/reporter.js',",
+            "  sha256: '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347'});",
             "const Reporter = plugin['reporter:karma-kotlin-reporter'][1];",
             "assert.deepEqual(Reporter.$inject, OriginalReporter.$inject);",
             "const instance = new Reporter(reporter => {",
@@ -135,6 +181,60 @@ class BrowserReporterStageTest(unittest.TestCase):
         result = subprocess.run(["node", "-e", script, str(reporter)],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_browser_reporter_attests_loaded_file_and_rejects_changed_or_absent_bytes(self):
+        root = Path(__file__).resolve().parents[3]
+        js_producer = (root / "build/js/node_modules/kotlin-web-helpers/dist"
+                       / "karma-kotlin-reporter.js")
+        wasm_config = (root / "build/wasm/packages/dyn4k-dyn4k-core-test/karma.conf.js")
+        if not js_producer.is_file() or not wasm_config.is_file():
+            self.skipTest("cached JS and Wasm JS Kotlin browser reporters are unavailable")
+        runner = re.search(r'"([^"]*/kotlin-web-helpers/dist/kotlin-test-karma-runner.js)"',
+                           wasm_config.read_text())
+        self.assertIsNotNone(runner)
+        wasm_producer = Path(runner.group(1)).with_name("karma-kotlin-reporter.js")
+        self.assertTrue(wasm_producer.is_file(), wasm_producer)
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const fs = require('node:fs');",
+            "const crypto = require('node:crypto');",
+            "const path = require('node:path');",
+            "const vm = require('node:vm');",
+            "const [wrapper, producer, folder] = process.argv.slice(1);",
+            "const plugin = require(producer);",
+            "const originalKey = require.resolve(producer);",
+            "delete require.cache[originalKey];",
+            "const loaded = path.join(folder, 'karma-kotlin-reporter.js');",
+            "fs.copyFileSync(producer, loaded);",
+            "require.cache[loaded] = {filename: loaded, exports: plugin};",
+            "const wrapperCode = fs.readFileSync(wrapper, 'utf8');",
+            "function invoke(label) {",
+            "  const attestation = path.join(folder, label + '.json');",
+            "  vm.runInNewContext(wrapperCode, {config: {plugins: [plugin]}, Buffer, require,",
+            "    process: {env: {DYN4K_BROWSER_REPORTER_ATTESTATION: attestation},",
+            "      stdout: {fd: 1}}});",
+            "  return attestation;",
+            "}",
+            "const valid = invoke('valid');",
+            "const expected = crypto.createHash('sha256').update(fs.readFileSync(loaded)).digest('hex');",
+            "assert.deepEqual(JSON.parse(fs.readFileSync(valid)),",
+            "  {path: fs.realpathSync(loaded), sha256: expected});",
+            "fs.appendFileSync(loaded, 'tampered');",
+            "assert.throws(() => invoke('changed'), /producer bytes differ/);",
+            "assert.equal(fs.existsSync(path.join(folder, 'changed.json')), false);",
+            "fs.unlinkSync(loaded);",
+            "assert.throws(() => invoke('absent'));",
+            "assert.equal(fs.existsSync(path.join(folder, 'absent.json')), false);",
+        ))
+        for producer in (js_producer, wasm_producer):
+            with tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run(
+                    ["node", "-e", script, str(Path(__file__).with_name(
+                        "browser-karma-reporter.js")), str(producer), directory],
+                    capture_output=True, text=True, timeout=10,
+                )
+            with self.subTest(producer=producer):
+                self.assertEqual(0, result.returncode, result.stderr)
 
 
 class SourceCasesTest(unittest.TestCase):
@@ -345,6 +445,64 @@ class SourceCasesTest(unittest.TestCase):
                                 if key not in ("result_json", "result_json_sha256")})
             module["result_json_sha256"] = sha256(result)
         write_json(copied / "lane.json", sealed_lane(lane))
+
+    def test_public_browser_receipt_rejects_resealed_diagnostic_and_producer_mutations(self):
+        from runner import sha256
+        import xml.etree.ElementTree as ET
+
+        original = os.environ.get("DYN4K_BROWSER_WASI_PUBLIC_RECEIPT")
+        if original is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_PUBLIC_RECEIPT to a passing browser lane")
+        source = Path(original).parent
+        self.assertTrue((source / "lane.json").is_file(), source)
+        root = Path(__file__).resolve().parents[3]
+
+        def public_audit(receipt: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(root / "tools/qualification/browser_wasi/runner.py"),
+                 "audit", "--receipt", str(receipt)],
+                capture_output=True, text=True, check=False,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            baseline = public_audit(source / "lane.json")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+            for mutation in ("deleted_row", "duplicate_row", "truncated_row",
+                             "changed_producer", "absent_producer"):
+                case_dir = Path(directory) / mutation
+                case_dir.mkdir()
+                lane, copied = self.copy_lane(source, str(case_dir))
+                module = lane["modules"]["dyn4k-core"]
+                if mutation.endswith("row"):
+                    report = next(Path(item["path"]) for item in module["raw_xml"]
+                                  if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
+                    suite = ET.parse(report).getroot()
+                    output = suite.find("system-out")
+                    rows = output.text.splitlines()
+                    self.assertEqual(72, len(rows))
+                    if mutation == "deleted_row":
+                        rows.pop(0)
+                    elif mutation == "duplicate_row":
+                        rows.append(rows[0])
+                    else:
+                        rows[0] = rows[0].rsplit("\t", 1)[0]
+                    output.text = "\n".join(rows) + "\n"
+                    ET.ElementTree(suite).write(report, encoding="unicode")
+                    for item in module["raw_xml"]:
+                        if item["path"] == str(report):
+                            item["sha256"] = sha256(report)
+                elif mutation == "changed_producer":
+                    retained = Path(module["karma_reporter_retained"])
+                    retained.write_bytes(retained.read_bytes() + b"tampered")
+                    module["karma_reporter_sha256"] = sha256(retained)
+                else:
+                    module["karma_reporter_source"] += ".missing"
+                self.save_copied_lane(lane, copied)
+                rejected = public_audit(copied / "lane.json")
+                with self.subTest(mutation=mutation):
+                    self.assertEqual(1, rejected.returncode, rejected.stderr)
+                    self.assertIn("diagnostic" if mutation.endswith("row") else
+                                  "reporter", rejected.stderr.lower())
 
     @staticmethod
     def public_historical_audit(
