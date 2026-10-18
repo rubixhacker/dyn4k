@@ -37,6 +37,8 @@ PHYSICS_CONSUMER_SHA256 = "e5a5a5f1a8e1e7cf3286d0f7be92795e14ad153ea4b1b5117fb7f
 CONSUMER_BUILD_SHA256 = "ff37cf87e35a9346f0d25fcb85d9e3db0747f15561c3d985552dd4512ddfbbb7"
 CONSUMER_SETTINGS_SHA256 = "842383eb0023b5edd4ca9d2394ed3d81b1fcf0ced275ff24842aa9844f9d8a63"
 CONSUMER_YARN_LOCK_SHA256 = "521d87b1dc27f4f3ef947115945bd01eefcae1ae6fbfdede75c8f9e15f059263"
+CONSUMER_YARN_LOCK_FIXTURE = Path("tools/qualification/browser_wasi/fixtures/consumer-yarn.lock")
+CONSUMER_LOCK_SOURCE_BASE = "d7a06e57fa7d940e81b3fe90b54d64fd4f3610b9"
 RUNTIME_VERSIONS = {
     "chromium": {"minimum": "119.0.6045.105", "current": "155.0.8059.84"},
     "firefox": {"minimum": "120.0.1", "current": "158.0"},
@@ -517,6 +519,55 @@ def is_pinned_consumer_lock(root: Path, problem: str) -> bool:
             and sha256(lock) == CONSUMER_YARN_LOCK_SHA256)
 
 
+def reviewed_consumer_lock(root: Path, expected_sha: str) -> bytes | None:
+    if expected_sha == CONSUMER_LOCK_SOURCE_BASE:
+        return None
+    descendant = command(["git", "merge-base", "--is-ancestor",
+                          CONSUMER_LOCK_SOURCE_BASE, expected_sha], root)
+    if descendant.returncode:
+        return None
+    fixture = root / CONSUMER_YARN_LOCK_FIXTURE
+    if not fixture.is_file() or fixture.is_symlink():
+        raise ValueError("reviewed consumer lock fixture is absent or not regular")
+    raw = fixture.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != CONSUMER_YARN_LOCK_SHA256:
+        raise ValueError("reviewed consumer lock fixture bytes differ")
+    tree = command(["git", "ls-tree", expected_sha, "--",
+                    str(CONSUMER_YARN_LOCK_FIXTURE)], root)
+    match = re.fullmatch(
+        r"100644 blob ([0-9a-f]+)\t" + re.escape(str(CONSUMER_YARN_LOCK_FIXTURE)) + r"\n",
+        tree.stdout) if tree.returncode == 0 else None
+    if match is None:
+        raise ValueError("reviewed consumer lock fixture is not committed as a regular file")
+    object_format = command(["git", "rev-parse", "--show-object-format"], root)
+    if object_format.returncode or object_format.stdout.strip() not in ("sha1", "sha256"):
+        raise ValueError("candidate Git object format is unavailable")
+    blob = b"blob " + str(len(raw)).encode() + b"\0" + raw
+    if hashlib.new(object_format.stdout.strip(), blob).hexdigest() != match.group(1):
+        raise ValueError("committed reviewed consumer lock fixture bytes differ")
+    return raw
+
+
+def prepare_consumer_lock(root: Path, expected_sha: str) -> None:
+    raw = reviewed_consumer_lock(root, expected_sha)
+    if raw is None:
+        return
+    lock = root / CONSUMER / "kotlin-js-store/yarn.lock"
+    if lock.parent.is_symlink() or lock.is_symlink():
+        raise ValueError("generated consumer lock path is symlinked")
+    if lock.exists():
+        if not lock.is_file() or sha256(lock) != CONSUMER_YARN_LOCK_SHA256:
+            raise ValueError("generated consumer lock differs from reviewed bytes")
+        return
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    if lock.parent.is_symlink():
+        raise ValueError("generated consumer lock parent is symlinked")
+    with lock.open("xb") as stream:
+        stream.write(raw)
+    if sha256(lock) != CONSUMER_YARN_LOCK_SHA256:
+        raise ValueError("generated consumer lock copy differs from reviewed bytes")
+
+
 def candidate_identity(root: Path, expected_sha: str) -> None:
     if not full_corpus.SHA40.fullmatch(expected_sha):
         raise ValueError("candidate SHA is invalid")
@@ -536,6 +587,7 @@ def candidate_identity(root: Path, expected_sha: str) -> None:
                 and not is_pinned_consumer_lock(root, problem)]
     if problems:
         raise ValueError(f"source checkout is dirty: {problems[:5]}")
+    reviewed_consumer_lock(root, expected_sha)
     object_format = command(["git", "rev-parse", "--show-object-format"], root)
     if object_format.returncode or object_format.stdout.strip() not in ("sha1", "sha256"):
         raise ValueError("candidate Git object format is unavailable")
@@ -625,13 +677,16 @@ def stage(root: Path, sha: str, output: Path) -> int:
     result: dict[str, object] = {"candidate_sha": sha, "status": "FAILED"}
     try:
         candidate_identity(root, sha)
+        prepare_consumer_lock(root, sha)
+        candidate_identity(root, sha)
         for module in MODULES:
             common_corpus_cases(root, sha, module)
         tasks = [f":{module}:publish{publication}PublicationToStagingRepository"
                  for module in MODULES
                  for publication in ("KotlinMultiplatform", "Js", "WasmJs", "WasmWasi")]
         args = [str(root / "gradlew"), *tasks, "--rerun-tasks", "--console=plain", "--no-daemon"]
-        env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"))
+        env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"),
+                   YARN_OFFLINE="true")
         completed = command(args, root, env)
         log = output / "stage-console.log"
         log.write_text(completed.stdout + completed.stderr)
@@ -1120,6 +1175,8 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                                "configuration": configuration, "status": "FAILED"}
     try:
         candidate_identity(root, sha)
+        prepare_consumer_lock(root, sha)
+        candidate_identity(root, sha)
         lane["artifact_hashes"] = verified_stage(root, sha, receipt)
         if target == "js" and runtime == "firefox":
             verify_firefox_launcher_graph(root)
@@ -1148,7 +1205,8 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 )
             module_output = output / module
             module_output.mkdir(exist_ok=True)
-            env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"))
+            env = dict(os.environ, JAVA_HOME=os.environ.get("JAVA_HOME", "/tmp/dyn4k-tools/jdk21"),
+                       YARN_OFFLINE="true")
             attestation = module_output / "browser-launches.jsonl"
             reporter_attestation = module_output / "reporter-producer.json"
             token = secrets.token_hex(16)

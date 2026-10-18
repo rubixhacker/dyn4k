@@ -382,11 +382,93 @@ class SourceCasesTest(unittest.TestCase):
             checkout = self.clone_candidate(directory, "resealed", current)
             accepted = self.public_candidate(checkout, current)
             self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+    def test_fresh_checkout_stages_and_prepares_lane_with_reviewed_consumer_lock(self):
+        import runner
+
+        current = self.current_revision()
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "clean-consumer", current)
+            lock = checkout / "consumers/qualification/browser-wasi/kotlin-js-store/yarn.lock"
+            self.assertFalse(lock.exists())
+            accepted = self.public_candidate(checkout, current)
+            self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+            original_command = runner.command
+            gradle_environment = []
+
+            def observed_command(args, cwd, env=None):
+                if args[0] == str(checkout / "gradlew"):
+                    gradle_environment.append(env)
+                    return subprocess.CompletedProcess(args, 0, "cached stage probe\n", "")
+                return original_command(args, cwd, env)
+
+            stage_output = Path(directory) / "stage"
+            with mock.patch("runner.command", side_effect=observed_command), \
+                    mock.patch("runner.staged_files", return_value={}):
+                self.assertEqual(0, runner.stage(checkout, current, stage_output))
+            self.assertTrue(lock.is_file())
+            self.assertEqual(runner.CONSUMER_YARN_LOCK_SHA256, runner.sha256(lock))
+            self.assertEqual("true", gradle_environment[0]["YARN_OFFLINE"])
+            self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+
+            lock.unlink()
+            with mock.patch("runner.verified_stage", side_effect=ValueError("stop before runtime")):
+                self.assertEqual(1, runner.run_lane(
+                    checkout, current, stage_output / "stage.json",
+                    Path(directory) / "lane", "js", "chromium", "minimum",
+                    "development", Path("/unneeded/browser"), "119.0.6045.105"))
+            self.assertEqual(runner.CONSUMER_YARN_LOCK_SHA256, runner.sha256(lock))
+
             result = json.loads(accepted.stdout)
             self.assertEqual("VERIFIED", result["status"])
             self.assertEqual(2526, result["suite_methods"])
             self.assertEqual("edac14e1a000821b30cdd4bb3f07c82d78e33f305399a09849078dac210eb2ed",
                              result["manifest_sha256"])
+
+    def test_public_candidate_rejects_generated_and_source_lock_mutations(self):
+        current = self.current_revision()
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "lock-adverse", current)
+            fixture = checkout / "tools/qualification/browser_wasi/fixtures/consumer-yarn.lock"
+            lock = checkout / "consumers/qualification/browser-wasi/kotlin-js-store/yarn.lock"
+            self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+
+            lock.parent.mkdir(parents=True)
+            lock.write_bytes(fixture.read_bytes() + b"\n# wrong byte\n")
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("untracked candidate input", rejected.stderr)
+            lock.unlink()
+
+            lock.symlink_to(fixture)
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("untracked candidate input", rejected.stderr)
+            lock.unlink()
+
+            lock.write_bytes(fixture.read_bytes())
+            duplicate = lock.with_name("yarn.lock.copy")
+            duplicate.write_bytes(lock.read_bytes())
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("yarn.lock.copy", rejected.stderr)
+            duplicate.unlink()
+            self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+
+            fixture.write_bytes(fixture.read_bytes() + b"\n# source tamper\n")
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--assume-unchanged", str(fixture)], check=True)
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("reviewed consumer lock fixture bytes differ", rejected.stderr)
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--no-assume-unchanged", str(fixture)], check=True)
+            changed_sha = self.commit_candidate(
+                checkout, "tools/qualification/browser_wasi/fixtures/consumer-yarn.lock")
+            rejected = self.public_candidate(checkout, changed_sha)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("reviewed consumer lock fixture bytes differ", rejected.stderr)
 
     def test_public_candidate_rejects_committed_generator_mutation(self):
         current = self.current_revision()

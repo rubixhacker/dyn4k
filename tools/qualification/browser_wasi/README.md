@@ -11,6 +11,8 @@ python3 tools/qualification/browser_wasi/runner.py candidate \
 
 This preflight does not execute a runtime lane. A clean production-source successor can retain the same manifest when its test inventory and reviewed map are unchanged. Changed test sources require a regenerated and reviewed manifest. Changed mappings also require reviewed map and pair pins. A changed generator or consumer contract requires verifier review and updated code-owned digests. Every new candidate needs fresh staged artifacts and runtime evidence bound to its exact SHA. Stage the three target publications and root metadata:
 
+The standalone browser/WASI consumer has its own ignored `kotlin-js-store/yarn.lock`. A clean checkout has no generated consumer lock. The runner verifies the committed `fixtures/consumer-yarn.lock` against both the candidate Git tree and the reviewed SHA-256, then copies those bytes to the consumer store before staging or running a lane. An existing generated lock must match exactly; wrong bytes, symlinks, and extra untracked inputs fail candidate preflight. Stage and lane Gradle commands set `YARN_OFFLINE=true`, so `kotlinUpgradeYarnLock` and `kotlinWasmUpgradeYarnLock` use the reviewed lock and cached packages. A checkout without the committed fixture cannot qualify as a new candidate. This fixture pins the consumer's dependency graph separately from the root `kotlin-js-store/yarn.lock`.
+
 ```sh
 python3 tools/qualification/browser_wasi/runner.py stage \
   --root "$PWD" --candidate-sha "$SHA" --output /tmp/dyn4k-browser-stage
