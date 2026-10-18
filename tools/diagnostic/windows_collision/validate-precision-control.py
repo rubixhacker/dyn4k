@@ -1,6 +1,9 @@
 import argparse
+import hashlib
 import json
 import re
+import runpy
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -10,6 +13,54 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "compatibility"))
 import windows_collision_focus as focus
+
+
+REPO = Path(__file__).resolve().parents[3]
+SCALAR = runpy.run_path(str(Path(__file__).with_name("validate-scalar-control.py")))
+ENGINE_SOURCES = (
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Vector2.kt",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/NearestSqrt.kt",
+    "dyn4k-core/src/nativeMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+    "dyn4k-core/src/jvmMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+    "dyn4k-core/src/androidMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+    "dyn4k-core/src/jsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+    "dyn4k-core/src/wasmJsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+    "dyn4k-core/src/wasmWasiMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
+)
+PROBE_SOURCE = "tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt"
+PROBE_INPUTS = (
+    ("CirclePolygon.edge3", 4598175219545276415, 4602678819172646911),
+    ("CapsuleSlice.epa4", 4607182418800017407, 4607182418800017407),
+    ("CirclePolygon.epa3", 4607182418800017407, 4607182418800017407),
+    ("CircleSegment.epa2", 4607182418800017407, 4607182418800017407),
+    ("CircleSlice.epa35", 4607182418800017407, 4607182418800017407),
+    ("PolygonCapsule.sat1", 4607182418800017407, 4607182418800017407),
+    ("PolygonCapsule.sat4", 4607182418800017407, 4607182418800017407),
+)
+PROBE_NEIGHBORS = (
+    (4602678819172646909, 4602678819172646910, 4602678819172646910,
+     4602678819172646911, 4602678819172646911, 4602678819172646912,
+     4602678819172646912, 4602678819172646913, 4602678819172646913),
+    (4607182418800017405, 4607182418800017406, 4607182418800017406,
+     4607182418800017407, 4607182418800017407, 4607182418800017408,
+     4607182418800017408, 4607182418800017409, 4607182418800017409),
+)
+PROBE_EDGES = (
+    (1, 2188749418902061056), (2, 2190614870947216333),
+    (4503599627370495, 2305843009213693951),
+    (4503599627370496, 2305843009213693952),
+    (4598175219545276416, 4602678819172646912),
+    (4607182418800017408, 4607182418800017408),
+    (9218868437227405311, 6913025428013711359),
+)
+CORRECTED_GRADLE_COMMAND = (
+    ".\\gradlew.bat", ":dyn4k-core:mingwX64Test",
+    "--tests org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest",
+    *(f"--tests org.dyn4j.coverage.collision.shapes.a.{fixture}Test"
+      for fixture in ("CapsuleSlice", "CirclePolygon", "CircleSegment", "CircleSlice",
+                      "PolygonCapsule", "PolygonPolygon")),
+    "--no-daemon --rerun-tasks --console=plain --info",
+)
 
 
 CONTROL_SUITE = "org.dyn4j.collision.narrowphase.WindowsCollisionPrecisionControlTest"
@@ -251,6 +302,237 @@ def validate(args):
           f"controlledRows={len(trace_rows)} scalarIDs={len(scalars)} stateRows={len(states)}")
 
 
+def corrected_xml_cases(native_directory):
+    reports = sorted(Path(native_directory).glob("TEST-*.xml"))
+    if {path.name for path in reports} != set(focus.SUITES.values()) or len(reports) != 7:
+        raise ValueError("corrected route requires exactly seven same-run XML suites")
+    result = []
+    for suite, filename in focus.SUITES.items():
+        root = ET.parse(Path(native_directory) / filename).getroot()
+        expected_cases = focus.DIAGNOSTIC_CASES if suite.endswith("WindowsCollisionIntermediateDiagnosticTest") else focus.ORIGINAL_CASES[suite]
+        cases = root.findall("testcase")
+        if root.tag != "testsuite" or root.attrib.get("name") != f"mingwX64Test.{suite}":
+            raise ValueError(f"corrected suite identity differs: {suite}")
+        if len(cases) != len(expected_cases) or {case.attrib.get("name") for case in cases} != expected_cases:
+            raise ValueError(f"corrected case set incomplete or duplicated: {suite}")
+        for counter, expected in (("tests", len(expected_cases)), ("failures", 0), ("errors", 0), ("skipped", 0)):
+            if root.attrib.get(counter) != str(expected):
+                raise ValueError(f"corrected {suite} {counter} counter differs")
+        for case in cases:
+            if any(case.find(tag) is not None for tag in ("failure", "error", "skipped")):
+                raise ValueError(f"corrected case did not pass: {suite}.{case.attrib.get('name')}")
+            result.append(f"{suite}.{case.attrib['name']}")
+    if len(result) != 30:
+        raise ValueError("corrected route has an incomplete 30-case XML set")
+    return result
+
+
+def corrected_scalar_rows(native_text, java_text):
+    SCALAR["validate_source_vectors"]()
+    SCALAR["validate"](native_text, java_text)
+    native = native_text.splitlines()
+    java = java_text.splitlines()
+    compared = []
+    fields = ("provider", "id", *SCALAR_INPUT_FIELDS, *SCALAR_RESULT_FIELDS, "normalized")
+    for native_line, java_line in zip(native, java, strict=True):
+        n = keyed_line(native_line, "DYN4K_COLLISION_SCALAR", fields)
+        j = keyed_line(java_line, "DYN4K_COLLISION_SCALAR", fields)
+        if n["provider"] != "kotlin-native" or j["provider"] != "java" or n["id"] != j["id"]:
+            raise ValueError("corrected scalar provider or ID differs")
+        for field in (*SCALAR_INPUT_FIELDS, *SCALAR_RESULT_FIELDS):
+            if raw_bits(n[field], f"Native {n['id']}.{field}") != raw_bits(j[field], f"Java {n['id']}.{field}"):
+                raise ValueError(f"corrected Native/Java scalar bits differ: {n['id']}.{field}")
+        normalized_bits = []
+        for row in (n, j):
+            normalized = row["normalized"].split(",")
+            if len(normalized) != 2:
+                raise ValueError("corrected normalized scalar pair is incomplete")
+            normalized_bits.append(tuple(raw_bits(value, f"{row['provider']} normalized") for value in normalized))
+        if normalized_bits[0] != normalized_bits[1]:
+            raise ValueError(f"corrected Native/Java normalized bits differ: {n['id']}")
+        compared.append(n["id"])
+    if tuple(compared) != SCALAR_IDS:
+        raise ValueError("corrected scalar row order differs")
+    return compared
+
+
+def corrected_source_hashes(directory, source_sha):
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        raise ValueError("candidate source SHA is malformed")
+    head = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                          capture_output=True, check=True, timeout=10, text=True).stdout.strip()
+    if head != source_sha:
+        raise ValueError("candidate source SHA differs from checkout")
+    lines = (Path(directory) / "source-sha256.txt").read_text(encoding="utf-8").splitlines()
+    paths = (*ENGINE_SOURCES, PROBE_SOURCE)
+    if len(lines) != len(paths):
+        raise ValueError("corrected source hash receipt is incomplete")
+    for line, relative in zip(lines, paths, strict=True):
+        current = (REPO / relative).read_bytes()
+        committed_blob = subprocess.run(["git", "-C", str(REPO), "rev-parse", f"{source_sha}:{relative}"],
+                                        capture_output=True, check=True, timeout=10, text=True).stdout.strip()
+        checkout_blob = subprocess.run(["git", "-C", str(REPO), "hash-object", f"--path={relative}", relative],
+                                       capture_output=True, check=True, timeout=10, text=True).stdout.strip()
+        expected = hashlib.sha256(current).hexdigest()
+        if checkout_blob != committed_blob or line != f"{expected}  {relative}":
+            raise ValueError(f"corrected source differs from committed object or receipt: {relative}")
+    return len(paths)
+
+
+def corrected_probe_rows(text):
+    def signed_bits(value):
+        if not re.fullmatch(r"-?[0-9]+", value):
+            raise ValueError("corrected probe raw bits are malformed")
+        parsed = int(value)
+        if not -(1 << 63) <= parsed < (1 << 63):
+            raise ValueError("corrected probe raw bits exceed binary64 width")
+        return parsed
+
+    rows = text.splitlines()
+    if len(rows) != 33:
+        raise ValueError(f"corrected probe output is partial or extra: rows={len(rows)}")
+    observed = []
+    for row, (case_id, sum_bits, root_bits) in zip(rows[:7], PROBE_INPUTS, strict=True):
+        parts = row.split("\t")
+        if len(parts) != 7 or parts[:3] != ["input", case_id, str(sum_bits)]:
+            raise ValueError(f"corrected probe input identity differs: {case_id}")
+        baseline, forced_up, corrected_forced, corrected = (signed_bits(part) for part in parts[3:])
+        if forced_up != root_bits + 1 or corrected_forced != root_bits or corrected != root_bits:
+            raise ValueError(f"corrected probe root bits differ: {case_id}")
+        observed.append({"id": case_id, "sumBits": sum_bits, "baselineRootBits": baseline,
+                         "correctedRootBits": corrected})
+    centers = (PROBE_INPUTS[0][1], PROBE_INPUTS[1][1])
+    for center, expected_roots in enumerate(PROBE_NEIGHBORS):
+        for index, expected in enumerate(expected_roots):
+            parts = rows[7 + center * 9 + index].split("\t")
+            if len(parts) != 6 or parts[:5] != ["neighbor", str(center), str(index - 4),
+                                                   str(centers[center] + index - 4), str(expected)]:
+                raise ValueError(f"corrected probe neighbor differs: {center}.{index}")
+            signed_bits(parts[5])
+    for index, (bits, expected) in enumerate(PROBE_EDGES):
+        parts = rows[25 + index].split("\t")
+        if len(parts) != 4 or parts[:3] != ["edge", str(bits), str(expected)]:
+            raise ValueError(f"corrected probe edge differs: {index}")
+        signed_bits(parts[3])
+    if rows[32] != "PASS inputs=7 neighbors=18 edges=7 specials=6 fallback=6 forcedDirections=both":
+        raise ValueError("corrected probe completion marker differs")
+    return observed
+
+
+def corrected_probe_modes(directory):
+    root = Path(directory)
+    if (root / "probe-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
+        raise ValueError("corrected probe runner did not complete")
+    if {path.name for path in root.iterdir() if path.is_dir()} != {"debug-g", "optimized-opt"}:
+        raise ValueError("corrected probe mode set differs")
+    results = {}
+    for name, flag in (("debug-g", "-g"), ("optimized-opt", "-opt")):
+        mode = root / name
+        for phase in ("compiler", "run"):
+            if (mode / f"{phase}-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
+                raise ValueError(f"{name} {phase} did not exit zero")
+            receipt = json.loads((mode / f"{phase}-receipt.json").read_text(encoding="utf-8"))
+            if receipt.get("state") != "EXITED" or receipt.get("childExitCode") != 0:
+                raise ValueError(f"{name} {phase} receipt is not a successful child exit")
+            if not (mode / ("compiler-stdout.log" if phase == "compiler" else "probe-stdout.tsv")).is_file():
+                raise ValueError(f"{name} {phase} stdout missing")
+            if not (mode / ("compiler-stderr.log" if phase == "compiler" else "probe-stderr.log")).is_file():
+                raise ValueError(f"{name} {phase} stderr missing")
+            results[f"{name}-{phase}-receipt"] = receipt
+        command = json.loads((mode / "compiler-command.json").read_text(encoding="utf-8"))
+        arguments = command.get("arguments")
+        if command.get("mode") != name or Path(command.get("executable", "")).name.lower() != "kotlinc-native.bat":
+            raise ValueError(f"{name} compiler identity differs")
+        if not isinstance(arguments, list) or len(arguments) != 10:
+            raise ValueError(f"{name} compiler argument count differs")
+        common, native, probe = arguments[2:5]
+        if arguments[:2] != ["-Xmulti-platform", f"-Xcommon-sources={common}"] or \
+                arguments[5:9] != ["-target", "mingw_x64", flag, "-o"] or \
+                Path(arguments[9]).resolve() != (mode / "sqrt-operation-probe").resolve():
+            raise ValueError(f"{name} compiler mode, target, or output differs")
+        for actual, expected in zip((common, native, probe), (ENGINE_SOURCES[1], ENGINE_SOURCES[2], PROBE_SOURCE), strict=True):
+            if Path(actual).resolve() != (REPO / expected).resolve():
+                raise ValueError(f"{name} compiler source differs: {expected}")
+        if results[f"{name}-compiler-receipt"].get("command") != [command["executable"], *arguments]:
+            raise ValueError(f"{name} compiler receipt command differs")
+        executable = mode / "sqrt-operation-probe.exe"
+        expected_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
+        if (mode / "executable-sha256.txt").read_text(encoding="utf-8").strip() != f"{expected_hash}  {executable.name}":
+            raise ValueError(f"{name} executable hash differs")
+        if results[f"{name}-run-receipt"].get("command") != [str(executable)]:
+            raise ValueError(f"{name} executed PE differs from retained PE")
+        results[name] = corrected_probe_rows((mode / "probe-stdout.tsv").read_text(encoding="utf-8"))
+    return {name: results[name] for name in ("debug-g", "optimized-opt")}
+
+
+def validate_corrected(args):
+    native = Path(args.native_directory)
+    probe = Path(args.probe_directory)
+    if (native / "gradle-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
+        raise ValueError("corrected focused Gradle test did not exit zero")
+    gradle_receipt = json.loads((native / "gradle-receipt.json").read_text(encoding="utf-8"))
+    gradle_command = (native / "gradle-command.txt").read_text(encoding="utf-8").splitlines()
+    if tuple(gradle_command) != CORRECTED_GRADLE_COMMAND or \
+            gradle_receipt.get("state") != "EXITED" or gradle_receipt.get("childExitCode") != 0 or \
+            gradle_receipt.get("command") != ["cmd.exe", "/d", "/s", "/c", " ".join(gradle_command)]:
+        raise ValueError("corrected focused Gradle command or child receipt differs")
+    for name in ("gradle-stdout.log", "gradle-stderr.log", "gradle-console.log"):
+        if not (native / name).is_file():
+            raise ValueError(f"corrected focused Gradle output missing: {name}")
+    if not (native / "gradle-stdout.log").read_bytes():
+        raise ValueError("corrected focused Gradle stdout is empty")
+    if (native / "test-pe-collector-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
+        raise ValueError("corrected debugTest PE collection did not exit zero")
+    test_pe = native / "test-pe" / "test.exe"
+    if (test_pe.parent / "test-executable-status.txt").read_text(encoding="utf-8").strip() != "OK":
+        raise ValueError("corrected debugTest PE status differs")
+    test_hash = hashlib.sha256(test_pe.read_bytes()).hexdigest()
+    if (test_pe.parent / "test-executable-sha256.txt").read_text(encoding="utf-8").strip() != f"{test_hash}  test.exe":
+        raise ValueError("corrected debugTest PE hash differs")
+    cases = corrected_xml_cases(native)
+    source_count = corrected_source_hashes(probe, args.source_sha)
+    java_directory = Path(args.java_trace).parent
+    if (java_directory / "java-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
+        raise ValueError("corrected pinned Java control did not exit zero")
+    for name in ("java-command.txt", "java-stdout.log", "java-stderr.log", "java-console.log"):
+        if not (java_directory / name).is_file():
+            raise ValueError(f"corrected pinned Java output missing: {name}")
+    java_command = (java_directory / "java-command.txt").read_text(encoding="utf-8").splitlines()
+    if len(java_command) != 5 or java_command[0] != ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1" or \
+            not java_command[1].startswith("-JdkHome ") or \
+            not java_command[2].endswith("dyn4j-6.0.0.jar") or \
+            not java_command[3].startswith("-BaselineSource ") or \
+            java_command[4] != f"-OutputDirectory {java_directory}":
+        raise ValueError("corrected pinned Java command is partial or differs")
+    if not (java_directory / "java-stdout.log").read_bytes():
+        raise ValueError("corrected pinned Java stdout is empty")
+    if (java_directory.parent / "baseline-source-revision.txt").read_text(encoding="utf-8").strip() != \
+            "058bf6d982a0fb89b54050f929f6ea9dae53b714":
+        raise ValueError("corrected pinned Java source revision differs")
+    java_stdout = (java_directory / "java-stdout.log").read_text(encoding="utf-8")
+    if "PINNED_DYN4J_CONTROL jarSha256=204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e " \
+            "sourceRevision=058bf6d982a0fb89b54050f929f6ea9dae53b714" not in java_stdout:
+        raise ValueError("corrected pinned Java JAR or source receipt differs")
+    java_trace = Path(args.java_trace).read_text(encoding="utf-8")
+    native_trace = native / "mingwX64-collision-diagnostics.tsv"
+    _, _, native_rows, java_rows = focus.validate(native, args.java_trace, native_trace)
+    if native_rows != 72 or java_rows != 72 or not java_trace.strip():
+        raise ValueError("corrected trace rows incomplete")
+    scalars = corrected_scalar_rows(Path(args.native_scalars).read_text(encoding="utf-8"),
+                                    Path(args.java_scalars).read_text(encoding="utf-8"))
+    version = (Path(args.native_scalars).parent / "kotlin-native-version.txt").read_text(encoding="utf-8")
+    if SCALAR["VERSION_TOKEN"].search(version) is None:
+        raise ValueError("corrected Kotlin/Native compiler version differs")
+    modes = corrected_probe_modes(probe)
+    result = {"route": "corrected-production", "sourceSha": args.source_sha,
+              "originalAndDiagnosticPasses": len(cases), "nativeTraceRows": native_rows,
+              "javaTraceRows": java_rows, "scalarIDs": scalars, "engineSourceHashes": source_count - 1,
+              "debugTestPeSha256": test_hash, "probeModes": modes}
+    Path(args.result).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print("CORRECTED_COLLISION_RECORDS_OK xmlCases=30 originalFailures=0 "
+          "nativeRows=72 javaRows=72 scalarIDs=7 probeModes=2 engineSources=8")
+
+
 def xml_error_self_test():
     controlled = ET.Element("testsuite")
     for name in (*CONTROL_METHODS, "scalarVectorsPc53", "tracePc53"):
@@ -410,14 +692,25 @@ def main():
     command.add_argument("--controlled-trace", required=True)
     command.add_argument("--result", required=True)
     command.add_argument("--source-sha", required=True)
+    corrected = commands.add_parser("validate-corrected")
+    corrected.add_argument("--native-directory", required=True)
+    corrected.add_argument("--java-trace", required=True)
+    corrected.add_argument("--native-scalars", required=True)
+    corrected.add_argument("--java-scalars", required=True)
+    corrected.add_argument("--probe-directory", required=True)
+    corrected.add_argument("--result", required=True)
+    corrected.add_argument("--source-sha", required=True)
     commands.add_parser("self-test")
     args = parser.parse_args()
     try:
         if args.command == "self-test":
             self_test()
+        elif args.command == "validate-corrected":
+            validate_corrected(args)
         else:
             validate(args)
-    except (AssertionError, ET.ParseError, OSError, ValueError) as error:
+    except (AssertionError, ET.ParseError, OSError, ValueError, subprocess.SubprocessError,
+            KeyError, TypeError) as error:
         print(f"PRECISION_CONTROL_VALIDATION_FAILED {error}", file=sys.stderr)
         return 1
     return 0

@@ -2,6 +2,15 @@ name: Windows collision focus
 
 on:
   workflow_dispatch:
+    inputs:
+      route:
+        description: Focused evidence predicate
+        required: true
+        type: choice
+        default: historical-pc53
+        options:
+          - historical-pc53
+          - corrected-production
 
 permissions:
   contents: read
@@ -34,11 +43,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
+          $route = '${{ inputs.route }}'
+          if ($route -notin @('historical-pc53', 'corrected-production')) { throw "Unknown collision route: $route" }
           $evidence = Join-Path $env:RUNNER_TEMP 'windows-collision-focus'
           $native = Join-Path $evidence 'native'
           $precision = Join-Path $native 'pc53'
           $java = Join-Path $evidence 'java'
           New-Item -ItemType Directory -Force -Path $native, $precision, $java | Out-Null
+          Set-Content -Path (Join-Path $evidence 'route.txt') -Value $route
           $diagnosticDeadlineEpoch = [DateTimeOffset]::UtcNow.AddMinutes(60).ToUnixTimeSeconds()
           Set-Content -Path (Join-Path $evidence 'diagnostic-deadline-epoch.txt') -Value $diagnosticDeadlineEpoch
           $gradleExit = $null
@@ -64,7 +76,7 @@ jobs:
 
           try {
             if (Test-Path $results) { Remove-Item -LiteralPath $results -Recurse -Force }
-            @(
+            $gradleCommand = @(
               '.\gradlew.bat'
               ':dyn4k-core:mingwX64Test'
               '--tests org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest'
@@ -75,9 +87,23 @@ jobs:
               '--tests org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest'
               '--tests org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest'
               '--no-daemon --rerun-tasks --console=plain --info'
-            ) | Set-Content -Path $gradleCommandFile
+            )
+            $gradleCommand | Set-Content -Path $gradleCommandFile
             $nativeStarted = $true
-            & .\gradlew.bat :dyn4k-core:mingwX64Test `
+            if ($route -eq 'corrected-production') {
+              $gradleStdout = Join-Path $native 'gradle-stdout.log'
+              $gradleStderr = Join-Path $native 'gradle-stderr.log'
+              & python .\tools\diagnostic\windows_collision\collect-test-pe.py run-bounded `
+                --timeout-seconds 2400 --deadline-epoch $diagnosticDeadlineEpoch `
+                --stdout $gradleStdout --stderr $gradleStderr `
+                --receipt (Join-Path $native 'gradle-receipt.json') `
+                -- cmd.exe /d /s /c ($gradleCommand -join ' ')
+              $gradleExit = [string]$LASTEXITCODE
+              Get-Content -LiteralPath $gradleStdout, $gradleStderr -ErrorAction SilentlyContinue |
+                Set-Content -Path $nativeLog
+              Get-Content -LiteralPath $nativeLog
+            } else {
+              & .\gradlew.bat :dyn4k-core:mingwX64Test `
               --tests 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest' `
@@ -86,7 +112,8 @@ jobs:
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest' `
               --no-daemon --rerun-tasks --console=plain --info 2>&1 | Tee-Object -FilePath $nativeLog
-            $gradleExit = [string]$LASTEXITCODE
+              $gradleExit = [string]$LASTEXITCODE
+            }
           } catch {
             try { $_ | Out-String | Add-Content -Path $nativeLog -ErrorAction Stop }
             catch {
@@ -153,6 +180,7 @@ jobs:
           }
           Set-Content -Path (Join-Path $native 'test-pe-collector-exit-code.txt') -Value $testPeExit
 
+          if ($route -eq 'historical-pc53') {
           $precisionCommand = @(
             '.\gradlew.bat', ':dyn4k-core:mingwX64Test',
             '--tests', 'org.dyn4j.collision.narrowphase.WindowsCollisionPrecisionControlTest',
@@ -197,6 +225,7 @@ jobs:
             $collectionErrors.Add("Controlled test PE collection failed: $($_.ToString())")
             $collectionStatus = 1
           }
+          }
 
           try {
             $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0.jar'
@@ -219,11 +248,27 @@ jobs:
               throw "Baseline source revision mismatch: $sourceRevision"
             }
             Set-Content -Path (Join-Path $evidence 'baseline-source-revision.txt') -Value $sourceRevision
-            & .\tools\diagnostic\windows_collision\run-java-control.ps1 `
-              -JdkHome $env:JAVA_HOME -BaselineJar $jar `
-              -BaselineSource $source -OutputDirectory $java `
-              2>&1 | Tee-Object -FilePath $javaLog
-            $javaExit = $LASTEXITCODE
+            if ($route -eq 'corrected-production') {
+              $javaStdout = Join-Path $java 'java-stdout.log'
+              $javaStderr = Join-Path $java 'java-stderr.log'
+              @('.\tools\diagnostic\windows_collision\run-java-control.ps1',
+                "-JdkHome $env:JAVA_HOME", "-BaselineJar $jar", "-BaselineSource $source", "-OutputDirectory $java") |
+                Set-Content -Path (Join-Path $java 'java-command.txt')
+              & .\tools\diagnostic\windows_collision\run-java-control.ps1 `
+                -JdkHome $env:JAVA_HOME -BaselineJar $jar `
+                -BaselineSource $source -OutputDirectory $java `
+                1> $javaStdout 2> $javaStderr
+              $javaExit = $LASTEXITCODE
+              Get-Content -LiteralPath $javaStdout, $javaStderr `
+                -ErrorAction SilentlyContinue | Set-Content -Path $javaLog
+              Get-Content -LiteralPath $javaLog
+            } else {
+              & .\tools\diagnostic\windows_collision\run-java-control.ps1 `
+                -JdkHome $env:JAVA_HOME -BaselineJar $jar `
+                -BaselineSource $source -OutputDirectory $java `
+                2>&1 | Tee-Object -FilePath $javaLog
+              $javaExit = $LASTEXITCODE
+            }
           } catch {
             $javaError = $_.ToString()
             try { $_ | Out-String | Add-Content -Path $javaLog -ErrorAction Stop }
@@ -349,6 +394,89 @@ jobs:
             $collectionStatus = 1
           }
 
+          $correctedProbe = Join-Path $evidence 'corrected-probe'
+          $correctedProbeExit = 'NOT_RUN'
+          if ($route -eq 'corrected-production') {
+            New-Item -ItemType Directory -Force -Path $correctedProbe | Out-Null
+            $engineSources = @(
+              'dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Vector2.kt'
+              'dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/NearestSqrt.kt'
+              'dyn4k-core/src/nativeMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'dyn4k-core/src/jvmMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'dyn4k-core/src/androidMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'dyn4k-core/src/jsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'dyn4k-core/src/wasmJsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'dyn4k-core/src/wasmWasiMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+              'tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt'
+            )
+            try {
+              $hashLines = foreach ($relativeSource in $engineSources) {
+                $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PWD $relativeSource) -ErrorAction Stop).Hash.ToLowerInvariant()
+                "$hash  $relativeSource"
+              }
+              $hashLines | Set-Content -Path (Join-Path $correctedProbe 'source-sha256.txt')
+              $commonSource = Join-Path $PWD $engineSources[1]
+              $nativeSource = Join-Path $PWD $engineSources[2]
+              $probeSource = Join-Path $PWD $engineSources[8]
+              if (-not (Test-Path -LiteralPath $konanc -PathType Leaf)) { throw 'Pinned Kotlin/Native compiler is unavailable' }
+              $correctedFailures = [System.Collections.Generic.List[string]]::new()
+              foreach ($probeMode in @(@{ Name = 'debug-g'; Flag = '-g' }, @{ Name = 'optimized-opt'; Flag = '-opt' })) {
+                $probeModeDirectory = Join-Path $correctedProbe $probeMode.Name
+                New-Item -ItemType Directory -Force -Path $probeModeDirectory | Out-Null
+                $outputBase = Join-Path $probeModeDirectory 'sqrt-operation-probe'
+                $probePe = "$outputBase.exe"
+                $arguments = @('-Xmulti-platform', "-Xcommon-sources=$commonSource", $commonSource, $nativeSource, $probeSource,
+                  '-target', 'mingw_x64', $probeMode.Flag, '-o', $outputBase)
+                [pscustomobject]@{ mode = $probeMode.Name; executable = $konanc; arguments = $arguments } |
+                  ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $probeModeDirectory 'compiler-command.json')
+                $compileExit = 1
+                try {
+                  & python .\tools\diagnostic\windows_collision\collect-test-pe.py run-bounded `
+                    --timeout-seconds 240 --deadline-epoch $diagnosticDeadlineEpoch `
+                    --stdout (Join-Path $probeModeDirectory 'compiler-stdout.log') `
+                    --stderr (Join-Path $probeModeDirectory 'compiler-stderr.log') `
+                    --receipt (Join-Path $probeModeDirectory 'compiler-receipt.json') `
+                    -- $konanc @arguments
+                  $compileExit = $LASTEXITCODE
+                } catch {
+                  $_ | Out-String | Set-Content -Path (Join-Path $probeModeDirectory 'compiler-error.log')
+                }
+                Set-Content -Path (Join-Path $probeModeDirectory 'compiler-exit-code.txt') -Value $compileExit
+                if (Test-Path -LiteralPath $probePe -PathType Leaf) {
+                  $peHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $probePe).Hash.ToLowerInvariant()
+                  Set-Content -Path (Join-Path $probeModeDirectory 'executable-sha256.txt') -Value "$peHash  sqrt-operation-probe.exe"
+                } else {
+                  Set-Content -Path (Join-Path $probeModeDirectory 'executable-status.txt') -Value 'UNAVAILABLE: compiler did not produce a PE'
+                }
+                if ($compileExit -ne 0 -or -not (Test-Path -LiteralPath $probePe -PathType Leaf)) {
+                  $correctedFailures.Add("$($probeMode.Name): compiler exit $compileExit or PE unavailable")
+                  Set-Content -Path (Join-Path $probeModeDirectory 'run-exit-code.txt') -Value 'NOT_RUN'
+                  continue
+                }
+                $probeRunExit = 1
+                try {
+                  & python .\tools\diagnostic\windows_collision\collect-test-pe.py run-bounded `
+                    --timeout-seconds 30 --deadline-epoch $diagnosticDeadlineEpoch `
+                    --stdout (Join-Path $probeModeDirectory 'probe-stdout.tsv') `
+                    --stderr (Join-Path $probeModeDirectory 'probe-stderr.log') `
+                    --receipt (Join-Path $probeModeDirectory 'run-receipt.json') `
+                    -- $probePe
+                  $probeRunExit = $LASTEXITCODE
+                } catch {
+                  $_ | Out-String | Set-Content -Path (Join-Path $probeModeDirectory 'run-error.log')
+                }
+                Set-Content -Path (Join-Path $probeModeDirectory 'run-exit-code.txt') -Value $probeRunExit
+                if ($probeRunExit -ne 0) { $correctedFailures.Add("$($probeMode.Name): probe exit $probeRunExit") }
+              }
+              $correctedProbeExit = if ($correctedFailures.Count -eq 0) { '0' } else { '1' }
+              if ($correctedFailures.Count -gt 0) { $correctedFailures | Set-Content -Path (Join-Path $correctedProbe 'probe-errors.txt') }
+            } catch {
+              $correctedProbeExit = '1'
+              $_ | Out-String | Set-Content -Path (Join-Path $correctedProbe 'probe-launch-error.log')
+            }
+            Set-Content -Path (Join-Path $correctedProbe 'probe-exit-code.txt') -Value $correctedProbeExit
+          }
+
           try {
             $javaTsv = Join-Path $java 'dyn4j-6.0.0-windows-control.tsv'
             $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
@@ -365,6 +493,7 @@ jobs:
             $collectionErrors.Add("Shared XML and TSV validation could not run: $($_.ToString())")
             $validationStatus = 1
           }
+          if ($route -eq 'historical-pc53') {
           try {
             $precisionValidation = Join-Path $precision 'precision-validation.log'
             $candidateSource = (& git rev-parse HEAD).Trim()
@@ -385,6 +514,29 @@ jobs:
             $validationStatus = 1
           }
           Set-Content -Path (Join-Path $precision 'precision-validation-exit-code.txt') -Value $precisionValidationExit
+          } else {
+            try {
+              $candidateSource = (& git rev-parse HEAD).Trim()
+              $correctedValidation = Join-Path $correctedProbe 'corrected-validation.log'
+              & python tools/diagnostic/windows_collision/validate-precision-control.py validate-corrected `
+                --native-directory $native --java-trace $javaTsv `
+                --native-scalars (Join-Path $scalar 'native-scalar.tsv') `
+                --java-scalars (Join-Path $scalar 'java-scalar.tsv') `
+                --probe-directory $correctedProbe --source-sha $candidateSource `
+                --result (Join-Path $correctedProbe 'corrected-result.json') `
+                2>&1 | Tee-Object -FilePath $correctedValidation
+              $correctedValidationExit = $LASTEXITCODE
+              if ($null -eq $correctedValidationExit -or $correctedValidationExit -ne 0) {
+                $collectionErrors.Add("Corrected production validation failed with exit $correctedValidationExit")
+                $validationStatus = 1
+              }
+            } catch {
+              $correctedValidationExit = 1
+              $collectionErrors.Add("Corrected production validation could not run: $($_.ToString())")
+              $validationStatus = 1
+            }
+            Set-Content -Path (Join-Path $correctedProbe 'corrected-validation-exit-code.txt') -Value $correctedValidationExit
+          }
           try {
             Set-Content -Path (Join-Path $evidence 'validation-status.txt') -Value $validationStatus
           } catch {
@@ -419,6 +571,7 @@ jobs:
             'tools/diagnostic/windows_collision/run-mode-controls.ps1'
             'tools/diagnostic/windows_collision/validate-mode-control.py'
             'tools/diagnostic/windows_collision/validate-precision-control.py'
+            'tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt'
             'tools/compatibility/windows_collision_focus.py'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt'
             'dyn4k-core/diagnostic/windows-collision/WindowsCollisionPrecisionControlTest.kt'
@@ -507,8 +660,11 @@ jobs:
             $collectionErrors.Add("Final status decision failed: $($_.ToString())")
             $statusExit = 1
           }
-          if ($statusExit -ne 0 -or $scalarExit -ne 0 -or $precisionExit -ne '0') {
-            throw "Focused controls failed: gradle=$gradleExit precision=$precisionExit java=$javaExit scalar=$scalarExit collection=$collectionStatus validation=$validationStatus"
+          $routeControlExit = if ($route -eq 'historical-pc53') { $precisionExit -eq '0' -and $precisionValidationExit -eq 0 } else {
+            $correctedProbeExit -eq '0' -and $correctedValidationExit -eq 0
+          }
+          if ($statusExit -ne 0 -or $scalarExit -ne 0 -or -not $routeControlExit) {
+            throw "Focused controls failed: route=$route gradle=$gradleExit precision=$precisionExit correctedProbe=$correctedProbeExit java=$javaExit scalar=$scalarExit collection=$collectionStatus validation=$validationStatus"
           }
       - name: Upload Windows collision evidence
         if: always()
