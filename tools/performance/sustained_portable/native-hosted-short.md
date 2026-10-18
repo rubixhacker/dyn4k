@@ -6,6 +6,11 @@ one build mode. Select `macosArm64` for `macos-26` or `mingwX64` for
 selected target and root publications from `GITHUB_SHA`, then builds a consumer
 inventory from that staged repository. The job runs the direct Kotlin and
 compatibility scenarios with 3 warm-up steps and 30 measured steps each.
+The workflow invokes the tracked `native_hosted_short_runner.py` from its
+checked-out workspace. The runner checks the checkout SHA, its own path, and
+worktree status before staging. Its command and failure receipts stay in the
+uploaded artifact. The short workflow keeps its run expression below the
+hosted parser limit.
 
 Download the `performance-native-host-short-*` artifact even when the job
 fails. `route-result.json` names every command and scenario result. The

@@ -11,7 +11,9 @@ import unittest
 
 
 WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-native-host-short.yml"
+RUNNER = Path(__file__).with_name("native_hosted_short_runner.py")
 RAW_LIMIT = 64 * 1024 * 1024
+RUN_EXPRESSION_LIMIT = 21000
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
     "MA0KLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tDQoNCkJ1aWxkIHRp"
@@ -24,10 +26,56 @@ WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "bWQ2NA0KDQo=")
 
 
+def run_expression_upper_bounds(source):
+    lines = source.splitlines()
+    index = 0
+    while index < len(lines):
+        match = re.match(r"^(\s*)run:\s*(.*)$", lines[index])
+        if match is None:
+            index += 1
+            continue
+        line_number = index + 1
+        value = match.group(2)
+        if not value:
+            index += 1
+            continue
+        if value.startswith(("|", ">")):
+            key_indent = len(match.group(1))
+            block = []
+            index += 1
+            while index < len(lines):
+                line = lines[index]
+                if line.strip() and len(line) - len(line.lstrip()) <= key_indent:
+                    break
+                block.append(line)
+                index += 1
+            content_indent = min((len(line) - len(line.lstrip())
+                                  for line in block if line.strip()), default=key_indent + 1)
+            yield line_number, sum(len(line[content_indent:]) + 1 for line in block)
+        else:
+            yield line_number, len(value)
+            index += 1
+
+
+class WorkflowExpressionLimit(unittest.TestCase):
+    def test_native_run_is_below_limit_and_all_workflows_are_audited(self):
+        workflows = sorted(WORKFLOW.parent.glob("*.yml")) + sorted(WORKFLOW.parent.glob("*.yaml"))
+        self.assertTrue(workflows)
+        checked = 0
+        violations = []
+        for workflow in workflows:
+            for line, upper_bound in run_expression_upper_bounds(workflow.read_text()):
+                checked += 1
+                if workflow == WORKFLOW:
+                    self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
+                if upper_bound >= RUN_EXPRESSION_LIMIT:
+                    violations.append((workflow.name, line, upper_bound))
+        self.assertGreater(checked, 0)
+        self.assertEqual(violations, [("windows-collision-focus.yml", 43, 31130)])
+
+
 def workflow_nodes():
-    source = WORKFLOW.read_text()
-    body = source.split("          python -B - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-    tree = ast.parse("\n".join(line[10:] for line in body.splitlines()) + "\n")
+    tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
     raw = next(node for node in tree.body
                if isinstance(node, ast.FunctionDef) and node.name == "raw_file")
     sidecar = next((node for node in tree.body
@@ -91,7 +139,7 @@ class HostedRawFileContract(unittest.TestCase):
         self.scope = {"hashlib": hashlib, "json": json, "Path": Path, "sys": sys}
         functions = [self.raw_node] + ([self.sidecar_node] if self.sidecar_node else [])
         exec(compile(ast.Module(body=functions, type_ignores=[]),
-                     str(WORKFLOW), "exec"), self.scope)
+                     str(RUNNER), "exec"), self.scope)
 
     def test_growing_zero_size_file_has_bounded_incomplete_hash(self):
         growing = GrowingFile()
@@ -146,13 +194,13 @@ class HostedRawFileContract(unittest.TestCase):
                               inventory=evidence / "inventory.json", staging=evidence / "stage",
                               target="macosArm64", build="development", sha="local-control")
             exec(compile(ast.Module(body=[self.route_node], type_ignores=[]),
-                         str(WORKFLOW), "exec"), self.scope)
+                         str(RUNNER), "exec"), self.scope)
             self.scope["image_control"] = False
             with self.assertRaisesRegex(RuntimeError, "Native host controls failed"):
                 exec(compile(ast.Module(body=[self.guard_node], type_ignores=[]),
-                             str(WORKFLOW), "exec"), self.scope)
+                             str(RUNNER), "exec"), self.scope)
             exec(compile(ast.Module(body=[self.receipt_node], type_ignores=[]),
-                         str(WORKFLOW), "exec"), self.scope)
+                         str(RUNNER), "exec"), self.scope)
             self.assertEqual(labels, ["captures/direct_kotlin-command",
                                       "captures/memory/direct_kotlin-command",
                                       "captures/compatibility-command",
@@ -181,6 +229,9 @@ class HostedRawFileContract(unittest.TestCase):
         self.assertIn("workflow_dispatch:", source)
         self.assertNotIn("  push:", source)
         self.assertIn("if: always()", source)
+        self.assertIn('run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"', source)
+        self.assertNotIn("python -B - <<'PY'", source)
+        self.assertIn('if Path(__file__).resolve() != selected_runner:', RUNNER.read_text())
         self.assertIn("macos-26", source)
         self.assertIn("windows-2025", source)
         self.assertIn("Xcode_26.4.1", source)
@@ -236,10 +287,10 @@ class HostedRawFileContract(unittest.TestCase):
                               staging=evidence / "stage", target="macosArm64",
                               build="development", sha="local-control", image_control=True)
             exec(compile(ast.Module(body=[self.route_node], type_ignores=[]),
-                         str(WORKFLOW), "exec"), self.scope)
+                         str(RUNNER), "exec"), self.scope)
             with self.assertRaisesRegex(RuntimeError, "Native host controls failed"):
                 exec(compile(ast.Module(body=[self.guard_node], type_ignores=[]),
-                             str(WORKFLOW), "exec"), self.scope)
+                             str(RUNNER), "exec"), self.scope)
             self.assertEqual([label for label, _, _ in calls], [
                 "captures/direct_kotlin-command", "captures/memory/direct_kotlin-command",
                 "captures/compatibility-command", "captures/memory/compatibility-command"])
@@ -282,7 +333,7 @@ class HostedRawFileContract(unittest.TestCase):
                                       staging=evidence / "stage", target=target, build=build,
                                       sha="local-control", image_control=False)
                     exec(compile(ast.Module(body=[self.route_node], type_ignores=[]),
-                                 str(WORKFLOW), "exec"), self.scope)
+                                 str(RUNNER), "exec"), self.scope)
                     self.assertEqual(len(calls), 4)
                     for label, argv, timeout in calls:
                         self.assertEqual(timeout, 120)
@@ -303,7 +354,7 @@ class HostedRawFileContract(unittest.TestCase):
             scope = {"gradle": output.decode(errors="replace"), "re": re}
             try:
                 exec(compile(ast.Module(body=[self.gradle_node], type_ignores=[]),
-                             str(WORKFLOW), "exec"), scope)
+                             str(RUNNER), "exec"), scope)
             except RuntimeError as error:
                 self.assertEqual(str(error), "selected Gradle is not 9.5.0")
                 return False
