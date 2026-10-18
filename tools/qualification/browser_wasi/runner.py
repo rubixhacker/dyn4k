@@ -523,10 +523,8 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             linked = Path(module["linked_executable"]).resolve()
             if linked != (lane_dir / name / f"linked-executable{source.suffix}"):
                 raise ValueError(f"passing {name} retained linked executable differs")
-            if (module.get("linked_source_sha256") != module.get("linked_sha256")
-                    or not source.is_file()
-                    or sha256(source) != module["linked_source_sha256"]):
-                raise ValueError(f"passing {name} linked source digest differs")
+            verify_linked_source_digest(source, linked, module.get("linked_source_sha256"),
+                                        module.get("linked_sha256"), target)
             if target == "wasmWasi":
                 if not all(key in module for key in ("raw_stdout", "raw_stderr")):
                     raise ValueError(f"passing {name} has no separate Wasmtime streams")
@@ -725,6 +723,38 @@ def linked_file(project: Path, target: str, configuration: str, module: str) -> 
             f"test{kind}Executable" / suffix / f"{basename}{extension}")
 
 
+def capture_linked_executable(source: Path, retained: Path) -> str:
+    if not source.is_file():
+        raise ValueError(f"missing linked test executable: {source}")
+    before = sha256(source)
+    shutil.copy2(source, retained)
+    copied = sha256(retained)
+    if before != copied or sha256(source) != copied:
+        raise ValueError("linked source and retained executable digest differ during capture")
+    return copied
+
+
+def verify_linked_source_digest(source: Path, retained: Path, source_digest: object,
+                                retained_digest: object, target: str) -> None:
+    if (not isinstance(source_digest, str) or source_digest != retained_digest
+            or not retained.is_file() or sha256(retained) != retained_digest):
+        raise ValueError("linked source and retained executable digest differ")
+    if target != "wasmWasi" and (not source.is_file() or sha256(source) != source_digest):
+        raise ValueError("linked source digest differs")
+
+
+def verify_firefox_launcher_graph(root: Path) -> None:
+    declaration = 'devNpm("karma-firefox-launcher", "^2.1.3")'
+    for module in MODULES:
+        if declaration not in (root / module / "build.gradle.kts").read_text():
+            raise ValueError(f"Firefox launcher is not declared by {module}")
+    lock = (root / "kotlin-js-store/yarn.lock").read_text()
+    for selector in ("karma-firefox-launcher@^2.1.3:", "is-wsl@^2.2.0:",
+                     "is-docker@^2.0.0:", "which@^3.0.0:"):
+        if selector not in lock:
+            raise ValueError(f"Firefox launcher lock graph lacks {selector}")
+
+
 def gradle_test_task(module: str, target: str, configuration: str) -> str:
     prefix = ":" if module == "consumer" else f":{module}:"
     if target != "wasmWasi":
@@ -791,6 +821,8 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
     try:
         candidate_identity(root, sha)
         lane["artifact_hashes"] = verified_stage(root, sha, receipt)
+        if target == "js" and runtime == "firefox":
+            verify_firefox_launcher_graph(root)
         lane.update(candidate_root=str(root), staging_receipt=str(receipt),
                     staging_receipt_sha256=sha256(receipt),
                     manifest_sha256=sha256(root / full_corpus.MANIFEST_PATH),
@@ -888,11 +920,11 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                     if markers != ([marker] if configuration == "production" else []):
                         raise ValueError(f"browser configuration did not select input: {linked}")
                 frozen_linked = module_output / f"linked-executable{linked.suffix}"
-                shutil.copy2(linked, frozen_linked)
+                linked_digest = capture_linked_executable(linked, frozen_linked)
                 evidence.update(linked_source=str(linked),
-                                linked_source_sha256=sha256(linked),
+                                linked_source_sha256=linked_digest,
                                 linked_executable=str(frozen_linked),
-                                linked_sha256=sha256(frozen_linked))
+                                linked_sha256=linked_digest)
                 if target == "wasmWasi":
                     invocation = [str(binary), "run", "-W", "gc=y", "-W", "exceptions=y",
                                   "-W", "function-references=y", "--invoke", "startUnitTests",

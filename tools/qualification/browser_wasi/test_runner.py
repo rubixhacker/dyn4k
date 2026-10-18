@@ -15,6 +15,59 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_wasmtime_retained_executable_replays_after_source_changes(self):
+        from runner import capture_linked_executable, verify_linked_source_digest, sha256
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "shared.wasm"
+            retained = Path(directory) / "lane" / "linked-executable.wasm"
+            retained.parent.mkdir()
+            source.write_bytes(b"producer A")
+            digest = capture_linked_executable(source, retained)
+            self.assertEqual(sha256(source), digest)
+            self.assertEqual(sha256(retained), digest)
+
+            source.write_bytes(b"later producer B")
+            verify_linked_source_digest(source, retained, digest, digest, "wasmWasi")
+            retained.write_bytes(b"wrong producer B")
+            with self.assertRaisesRegex(ValueError, "linked .*digest"):
+                verify_linked_source_digest(source, retained, digest, digest, "wasmWasi")
+
+    def test_capture_rejects_source_change_during_retention(self):
+        from runner import capture_linked_executable
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "shared.wasm"
+            retained = Path(directory) / "linked-executable.wasm"
+            source.write_bytes(b"producer A")
+            original_copy = shutil.copy2
+
+            def changed_copy(from_path, to_path):
+                original_copy(from_path, to_path)
+                source.write_bytes(b"producer B")
+
+            with mock.patch("runner.shutil.copy2", side_effect=changed_copy):
+                with self.assertRaisesRegex(ValueError, "linked .*digest"):
+                    capture_linked_executable(source, retained)
+
+    def test_firefox_launcher_graph_is_committed_for_root_js_builds(self):
+        from runner import verify_firefox_launcher_graph
+
+        root = Path(__file__).resolve().parents[3]
+        verify_firefox_launcher_graph(root)
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory)
+            for relative in ("dyn4k-core/build.gradle.kts", "dyn4k/build.gradle.kts",
+                             "kotlin-js-store/yarn.lock"):
+                path = copied / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((root / relative).read_bytes())
+            lock = copied / "kotlin-js-store/yarn.lock"
+            lock.write_text(lock.read_text().replace("karma-firefox-launcher@^2.1.3:",
+                                                    "karma-firefox-launcher@^0.0.0:"))
+            with self.assertRaisesRegex(ValueError, "Firefox launcher"):
+                verify_firefox_launcher_graph(copied)
+
     def test_browser_port_stages_line_reporter_and_cleans_both_fragments(self):
         reporter = Path(__file__).with_name("browser-karma-reporter.js")
         with tempfile.TemporaryDirectory() as directory:
