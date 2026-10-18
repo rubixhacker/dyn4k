@@ -119,13 +119,40 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                f"I/ActivityManager( 1485): Force stopping {package} appid=10058 user=0: "
                "finished inst\n"
                f"I/ActivityManager( 1485): Killing 3378:{package}/u0a58 (adj 0): stop {package}\n")
-        self.assertEqual(run_full.validate_api21_process_log(log, package, "x86"), "3378")
+        added = (f"I/ActivityManager( 1485): Start proc {package} for added application "
+                 f"{package}: pid=3378 uid=10058 gids={{50058, 9997}} abi=x86\n")
+        self.assertEqual(run_full.validate_api21_process_log(log, package, "x86", "3334"), "3378")
+        with self.assertRaisesRegex(ValueError, "instrumentation process"):
+            run_full.validate_api21_process_log(log, package, "x86", "not-a-pid")
         for bad in (log.replace("pid=3378", "pid=3379"),
                     log.replace("finished inst", "crash"),
+                    log.replace("appid=10058 user=0: finished inst",
+                                "appid=10059 user=0: finished inst"),
                     log.replace("abi=x86\n", "abi=arm64-v8a\n"),
+                    log.replace("pid=3334", "pid=3335"),
+                    log.replace(f"Killing 3334:{package}", f"Killing 3335:{package}"),
+                    log.replace(added, ""),
+                    log.replace(added, added + added),
+                    log.replace(added, added.replace("abi=x86", "abi=arm64-v8a") + added),
+                    log.replace(added, added.replace("pid=3378", "pid=3379") + added),
+                    log + f"I/ActivityManager( 1485): Killing 9999:{package}/u0a58 "
+                          f"(adj 0): crash {package}\n",
                     log + log):
             with self.subTest(bad=bad[-100:]), self.assertRaisesRegex(ValueError, "instrumentation process"):
-                run_full.validate_api21_process_log(bad, package, "x86")
+                run_full.validate_api21_process_log(bad, package, "x86", "3334")
+
+    def test_api21_process_list_requires_one_exact_application_pid(self):
+        package = "io.github.rubixhacker.dyn4k.full"
+        header = "USER PID PPID VSIZE RSS WCHAN PC NAME\n"
+        row = f"u0_a58 3334 123 540000 32000 ffffffff 00000000 {package}\n"
+        unrelated = "u0_a59 1111 123 540000 32000 ffffffff 00000000 other.app\n"
+        self.assertEqual(run_full.api21_process_pid(header + unrelated + row, package), "3334")
+        self.assertIsNone(run_full.api21_process_pid(header + unrelated, package, required=False))
+        for bad in ("/system/bin/sh: pidof: not found\n", header + unrelated,
+                    header + row + row,
+                    header + row.replace("3334", "not-a-pid")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "API 21 app process"):
+                run_full.api21_process_pid(bad, package)
 
     def test_accepts_exact_case_id_set(self):
         result = full_evidence.validate_full_installed(RAW, {CASE, CONSUMER}, 0)

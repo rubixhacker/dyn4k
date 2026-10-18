@@ -131,23 +131,71 @@ def validate_runtime(identity, expected_api, expected_abi, boot_completed):
         raise ValueError(f"wrong installed runtime: {identity}")
 
 
-def validate_api21_process_log(log, package, expected_abi):
+def validate_api21_process_log(log, package, expected_abi, before_pid):
     escaped = re.escape(package)
+    activities = list(re.finditer(
+        rf"(?m)^[A-Z]/ActivityManager\(\s*\d+\): Start proc {escaped} for activity "
+        rf"{escaped}/\.FullActivity: [^\n]*$", log))
     starts = list(re.finditer(
-        rf"(?m)^I/ActivityManager\(\s*\d+\): Start proc {escaped} for added application "
-        rf"{escaped}: pid=(\d+) uid=\d+ gids=\{{[\d, ]*\}} abi={re.escape(expected_abi)}$",
+        rf"(?m)^[A-Z]/ActivityManager\(\s*\d+\): Start proc {escaped} for added application "
+        rf"{escaped}: [^\n]*$",
         log))
     finishes = list(re.finditer(
         rf"(?m)^I/ActivityManager\(\s*\d+\): Force stopping {escaped} "
-        r"appid=\d+ user=\d+: finished inst$", log))
-    if len(starts) != 1 or len(finishes) != 1 or starts[0].start() >= finishes[0].start():
+        r"appid=(\d+) user=\d+: finished inst$", log))
+    if len(activities) != 1 or len(starts) != 1 or len(finishes) != 1 or \
+            not isinstance(before_pid, str) or not before_pid.isdigit() or \
+            activities[0].start() >= starts[0].start() or \
+            starts[0].start() >= finishes[0].start():
         raise ValueError("instrumentation process identity or normal shutdown missing")
-    kills = re.findall(
-        rf"(?m)^I/ActivityManager\(\s*\d+\): Killing (\d+):{escaped}/\S+ "
-        rf"\(adj \d+\): stop {escaped}$", log[finishes[0].end():])
-    if kills != [starts[0].group(1)]:
+    activity = re.fullmatch(
+        rf"I/ActivityManager\(\s*\d+\): Start proc {escaped} for activity "
+        rf"{escaped}/\.FullActivity: pid=(\d+) uid=(\d+) gids=\{{[\d, ]*\}} abi=(\S+)",
+        activities[0].group().rstrip("\r"))
+    if not activity or activity.group(1) != before_pid or activity.group(3) != expected_abi:
         raise ValueError("instrumentation process identity or normal shutdown missing")
-    return starts[0].group(1)
+    started = re.fullmatch(
+        rf"I/ActivityManager\(\s*\d+\): Start proc {escaped} for added application "
+        rf"{escaped}: pid=(\d+) uid=(\d+) gids=\{{[\d, ]*\}} abi=(\S+)",
+        starts[0].group().rstrip("\r"))
+    if not started or started.group(3) != expected_abi or \
+            started.group(2) != activity.group(2) or \
+            finishes[0].group(1) != started.group(2):
+        raise ValueError("instrumentation process identity or normal shutdown missing")
+    kill_line = (rf"(?m)^[A-Z]/ActivityManager\(\s*\d+\): Killing "
+                 rf"[^\n]*:{escaped}/[^\n]*$")
+
+    def killed_pid(section):
+        lines = re.findall(kill_line, section)
+        if len(lines) != 1:
+            raise ValueError("instrumentation process identity or normal shutdown missing")
+        killed = re.fullmatch(
+            rf"I/ActivityManager\(\s*\d+\): Killing (\d+):{escaped}/\S+ "
+            rf"\(adj \d+\): stop {escaped}", lines[0].rstrip("\r"))
+        if not killed:
+            raise ValueError("instrumentation process identity or normal shutdown missing")
+        return killed.group(1)
+
+    if killed_pid(log[activities[0].end():starts[0].start()]) != before_pid or \
+            re.search(kill_line, log[starts[0].end():finishes[0].start()]) or \
+            killed_pid(log[finishes[0].end():]) != started.group(1):
+        raise ValueError("instrumentation process identity or normal shutdown missing")
+    return started.group(1)
+
+
+def api21_process_pid(process_list, package, required=True):
+    lines = process_list.splitlines()
+    if not lines or lines[0].split()[:2] != ["USER", "PID"] or \
+            lines[0].split()[-1:] != ["NAME"]:
+        raise ValueError("API 21 app process list is invalid")
+    selected = [line.split() for line in lines[1:] if line.split() and line.split()[-1] == package]
+    if len(selected) > 1 or (required and len(selected) != 1):
+        raise ValueError("API 21 app process identity is missing or ambiguous")
+    if not selected:
+        return None
+    if len(selected[0]) < 3 or not selected[0][1].isdigit() or int(selected[0][1]) <= 0:
+        raise ValueError("API 21 app process PID is invalid")
+    return selected[0][1]
 
 
 def build_artifacts(app, provider_artifacts):
@@ -291,7 +339,11 @@ def run(args):
         command(adb + ["logcat", "-c"])
         command(adb + ["shell", "am", "start", "-W", "-n", package + "/.FullActivity"],
                 output / "launch.txt")
-        before_pid = command(adb + ["shell", "pidof", package], output / "process-before.txt").strip()
+        before_pid = (api21_process_pid(command(adb + ["shell", "ps"],
+                                                output / "process-before.txt"), package)
+                      if args.expected_api == "21" else
+                      command(adb + ["shell", "pidof", package],
+                              output / "process-before.txt").strip())
         if not before_pid:
             raise ValueError("full app process absent before instrumentation")
         runners = command(adb + ["shell", "pm", "list", "instrumentation"],
@@ -313,11 +365,16 @@ def run(args):
         expected.add("external-kotlin:io.github.rubixhacker.dyn4k.full.FullKotlinJourney#run")
         result["cases"] = validate_full_installed(executed.stdout, expected, executed.returncode)
         log = command(adb + ["logcat", "-d"], output / "logcat.txt")
-        instrumentation_pid = (validate_api21_process_log(log, package, args.expected_abi)
+        instrumentation_pid = (validate_api21_process_log(log, package, args.expected_abi, before_pid)
                                if args.expected_api == "21" else
                                validate_full_process_log(log, package))
-        after_pid = command(adb + ["shell", "pidof", package],
-                            output / "process-after.txt", check=False).strip()
+        after_pid = (api21_process_pid(command(adb + ["shell", "ps"],
+                                               output / "process-after.txt"), package, required=False)
+                     if args.expected_api == "21" else
+                     command(adb + ["shell", "pidof", package],
+                             output / "process-after.txt", check=False).strip())
+        if args.expected_api == "21" and after_pid is not None:
+            raise ValueError("API 21 app process remains after instrumentation shutdown")
         result["process"] = {"before": before_pid, "instrumentation": instrumentation_pid,
                              "after": after_pid or None}
         verify_candidate(root, prepared)
