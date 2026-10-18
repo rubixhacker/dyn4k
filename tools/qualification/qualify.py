@@ -11,6 +11,7 @@ import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
+import tarfile
 from pathlib import Path
 
 
@@ -19,6 +20,7 @@ SHA64 = re.compile(r"^[0-9a-f]{64}$")
 VERSION = "0.1.0-alpha.1"
 GROUP = "io.github.rubixhacker"
 MODULES = ("dyn4k-core", "dyn4k")
+APPROVED_COMPLETE_SUITE_SHA256 = "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"
 
 
 def matrix():
@@ -88,7 +90,7 @@ def target_binary_path(module, target):
     return f'{GROUP.replace(".", "/")}/{publication}/{VERSION}/{publication}-{VERSION}{extension}'
 
 
-def full_suite_cases(suite_manifest):
+def full_suite_cases(suite_manifest, lane_id=None):
     if not isinstance(suite_manifest, dict) or suite_manifest.get("kind") != "complete-port":
         raise ValueError("frozen complete suite manifest is unavailable")
     if suite_manifest.get("schema") != 1 or not suite_manifest.get("id"):
@@ -111,7 +113,94 @@ def full_suite_cases(suite_manifest):
         covered.add(item["area"])
     if len(set(identities)) != len(identities) or covered != areas:
         raise ValueError("complete suite cases are duplicate or incomplete")
-    return identities
+    lanes = suite_manifest.get("lanes")
+    if lane_id is None or lanes is None:
+        return identities
+    lane = lanes.get(lane_id) if isinstance(lanes, dict) else None
+    if not isinstance(lane, dict):
+        raise ValueError("complete suite lane is missing")
+    scopes = lane.get("case_scopes")
+    if (not isinstance(scopes, list) or not scopes
+            or len(scopes) != len(set(scopes))
+            or not set(scopes) <= {"portable", "jvm-only"}):
+        raise ValueError("complete suite lane case scopes are invalid")
+    selected = [item["id"] for item in cases if item.get("scope") in scopes]
+    if not selected or {item["area"] for item in cases if item.get("scope") in scopes} != areas:
+        raise ValueError("complete suite lane cases are incomplete")
+    return selected
+
+
+def validate_complete_suite_bindings(suite_manifest, repository):
+    import full_corpus
+
+    if (not isinstance(suite_manifest, dict) or suite_manifest.get("kind") != "complete-port"
+            or suite_manifest.get("schema") != 1):
+        raise ValueError("complete suite manifest identity is invalid")
+    corpus = load_json_strict(repository / full_corpus.MANIFEST_PATH)
+    bindings = suite_manifest.get("bindings")
+    expected = {
+        "corpus_sha256": digest(repository / full_corpus.MANIFEST_PATH),
+        "source_tree_sha256": corpus["source_tree_sha256"],
+        "original_map_sha256": digest(repository / full_corpus.MAP_PATH),
+        "reviewed_pairs_sha256": digest(repository / full_corpus.PAIR_PATH),
+        "original_revision": full_corpus.ORIGINAL_REVISION,
+    }
+    if not isinstance(bindings, dict) or bindings != expected:
+        raise ValueError("complete suite reviewed corpus binding differs")
+    if corpus.get("policy") != "production" or corpus.get("unresolved"):
+        raise ValueError("complete suite reviewed corpus is unresolved")
+    cases = suite_manifest.get("cases")
+    if not isinstance(cases, list) or len(cases) != len(corpus["cases"]):
+        raise ValueError("complete suite case inventory differs from reviewed corpus")
+    by_id = {item.get("id"): item for item in cases if isinstance(item, dict)}
+    if len(by_id) != len(cases):
+        raise ValueError("complete suite has duplicate case identities")
+    for source in corpus["cases"]:
+        identity = f'{source["module"]}:{source["classname"]}#{source["method"]}'
+        item = by_id.get(identity)
+        scope = "portable" if source["source_set"] == "commonTest" else "jvm-only"
+        if (not isinstance(item, dict) or item.get("scope") != scope
+                or item.get("module") != source["module"]
+                or item.get("classname") != source["classname"]
+                or item.get("method") != source["method"]
+                or item.get("kind") != source["kind"]
+                or item.get("originals") != source["originals"]
+                or item.get("source") != {"path": source["path"],
+                                          "sha256": source["sha256"],
+                                          "line": source["line"]}):
+            raise ValueError(f"complete suite case differs from reviewed corpus: {identity}")
+    counts = suite_manifest.get("counts", {})
+    if (sum(item.get("scope") == "portable" for item in cases) != 2512
+            or sum(item.get("scope") == "jvm-only" for item in cases) != 3
+            or counts.get("portable_methods") != 2512
+            or counts.get("jvm_only_facade_methods") != 3):
+        raise ValueError("complete suite reviewed method counts differ")
+    lanes = suite_manifest.get("lanes")
+    expected_lanes = {case["id"]: case for case in expand(matrix())}
+    if not isinstance(lanes, dict) or set(lanes) != set(expected_lanes):
+        raise ValueError("complete suite 112 lane identities differ")
+    independent = suite_manifest.get("independent_gates")
+    global_gates = suite_manifest.get("global_gates")
+    if (not isinstance(independent, dict) or not independent
+            or not isinstance(global_gates, list) or not global_gates
+            or len(global_gates) != len(set(global_gates))
+            or not set(global_gates) <= set(independent)):
+        raise ValueError("complete suite independent gate inventory is invalid")
+    for lane_id, case in expected_lanes.items():
+        lane = lanes[lane_id]
+        required_scopes = ["portable", "jvm-only"] if case["target"] == "jvm" else ["portable"]
+        if (not isinstance(lane, dict)
+                or any(lane.get(key) != case[key] for key in
+                       ("target", "runtime", "version", "configuration"))
+                or lane.get("case_scopes") != required_scopes
+                or not isinstance(lane.get("required_gates"), list)
+                or not lane["required_gates"]
+                or len(lane["required_gates"]) != len(set(lane["required_gates"]))
+                or not set(lane["required_gates"]) <= set(independent)):
+            raise ValueError(f"complete suite lane contract differs: {lane_id}")
+        full_suite_cases(suite_manifest, lane_id)
+    if manifest_digest(suite_manifest) != APPROVED_COMPLETE_SUITE_SHA256:
+        raise ValueError("complete suite differs from independently reviewed manifest")
 
 
 def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
@@ -146,7 +235,7 @@ def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
     if evidence.get("exit_code") != 0 or not isinstance(evidence.get("command"), list):
         problems.append("successful executable command is missing")
     try:
-        cases = full_suite_cases(suite_manifest)
+        cases = full_suite_cases(suite_manifest, case["id"])
     except ValueError as error:
         problems.append(str(error))
         cases = []
@@ -215,6 +304,19 @@ def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
             problems.append("failed or skipped tests")
     if evidence.get("consumer") != "PASSED":
         problems.append("staged external consumer did not pass")
+    if isinstance(suite_manifest, dict) and isinstance(suite_manifest.get("lanes"), dict):
+        lane_spec = suite_manifest["lanes"].get(case["id"], {})
+        required_gates = set(lane_spec.get("required_gates", [])) | set(
+            suite_manifest.get("global_gates", []))
+        gate_results = evidence.get("gate_results")
+        if (not required_gates or not isinstance(gate_results, dict)
+                or set(gate_results) != required_gates):
+            problems.append("complete suite independent gate results are missing or unexpected")
+        elif any(not isinstance(gate_results[gate], dict)
+                 or gate_results[gate].get("status") != "PASSED"
+                 or not SHA64.fullmatch(str(gate_results[gate].get("receipt_sha256", "")))
+                 for gate in required_gates):
+            problems.append("complete suite independent gate did not pass with a bound receipt")
     result.update(status="FAILED" if problems else "PASSED",
                   reason="; ".join(problems) if problems else "all required evidence present")
     return result
@@ -685,6 +787,92 @@ def validate_hosted_probe(probe, candidate_sha, repository=None):
     return probe
 
 
+def full_hosted_lane(receipt, receipt_sha256, suite_manifest=None):
+    target = "js" if receipt["target"] == "jsSafari" else receipt["target"]
+    matches = [row for row in matrix() if row["target"] == target
+               and (row["runtime"] == "Safari" if target == "js"
+                    else True)]
+    if len(matches) != 1:
+        raise ValueError("full hosted target does not select one runtime family")
+    family = matches[0]
+    runtime = receipt["runtime"]
+    if receipt["target"] == "mingwX64":
+        version = str(runtime.get("os_version", ""))
+        if not version.startswith("10.0.26100"):
+            raise ValueError("full hosted Windows Server runtime differs")
+    elif receipt["target"] == "jsSafari":
+        version = str(runtime.get("safari_version", ""))
+    elif "Simulator" in receipt["target"] or receipt["target"] == "iosX64":
+        selected = receipt.get("selected_simulator")
+        if not isinstance(selected, dict) or not selected.get("udid"):
+            raise ValueError("full hosted simulator observation is missing")
+        import hosted
+        simulator_family = hosted.NATIVE_TARGETS[receipt["target"]][2]
+        if (selected not in runtime.get("simulators", {}).get(simulator_family, [])
+                or any(config.get("simulator_udid") != selected["udid"]
+                       for config in receipt["configurations"])):
+            raise ValueError("full hosted executed simulator differs from selected device")
+        version = str(selected.get("runtime", ""))
+        if not version:
+            raise ValueError("full hosted simulator runtime is missing")
+    else:
+        version = str(runtime.get("os_version", ""))
+    if not version:
+        raise ValueError("full hosted runtime version is missing")
+    cases = expand([family])
+    current = {case["configuration"]: case["id"] for case in cases
+               if case["version"] == "current"}
+    ids = [current[config["configuration"]] for config in receipt["configurations"]]
+    if len(set(ids)) != 2:
+        raise ValueError("full hosted configurations do not select distinct lanes")
+    observed_cases = []
+    for lane_id, config in zip(ids, receipt["configurations"]):
+        source = config["source"]
+        common = {group["module"]: group["case_ids"] for group in source}
+        if (set(common) != set(MODULES) or len(common["dyn4k-core"]) != 2454
+                or len(common["dyn4k"]) != 58
+                or len(config["consumer"]["case_ids"]) != 3):
+            raise ValueError("full hosted reviewed common or consumer case count differs")
+        suite_ids = sorted(f"{module}:{case_id}" for module, case_ids in common.items()
+                           for case_id in case_ids)
+        if suite_manifest is not None and suite_ids != sorted(
+                full_suite_cases(suite_manifest, lane_id)):
+            raise ValueError("full hosted common cases differ from selected complete suite lane")
+        observed_cases.append({"lane_id": lane_id,
+                               "configuration": config["configuration"],
+                               "common_case_ids": common,
+                               "suite_case_ids": suite_ids,
+                               "consumer_case_ids": config["consumer"]["case_ids"],
+                               "complete_lane_status": "NOT_RUN"})
+    return {"target": target, "runtime": family["runtime"],
+            "runtime_version": version, "version": "current",
+            "runtime_identity": manifest_digest({
+                "runtime": runtime, "runner_os": receipt["runner_os"],
+                "runner_arch": receipt["runner_arch"],
+                "runner_name": receipt["runner_name"],
+                "selected_simulator": receipt.get("selected_simulator")}),
+            "configuration_lanes": ids,
+            "observed_cases": observed_cases,
+            "manifest_sha256": receipt["manifest_sha256"],
+            "source_tree_sha256": receipt["source_tree_sha256"],
+            "map_sha256": receipt["map_sha256"],
+            "reviewed_pairs_sha256": receipt["reviewed_pairs_sha256"],
+            "artifact_hashes": receipt["artifact_hashes"],
+            "receipt_sha256": receipt_sha256,
+            "status": "FULL_COMMON_PASSED",
+            "reason": "reviewed common corpus and bounded staged consumer only"}
+
+
+def reject_unverified_production_gates(results, suite_manifest):
+    if not isinstance(suite_manifest, dict) or not suite_manifest.get("bindings"):
+        return results
+    for result in results:
+        if result["status"] == "PASSED":
+            result.update(status="FAILED",
+                          reason="independent gate receipt archives require separate verification")
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -697,6 +885,7 @@ def main():
     record.add_argument("--availability", type=Path)
     record.add_argument("--hosted-probe", action="append", type=Path, default=[])
     record.add_argument("--raw-bundle", action="append", type=Path, default=[])
+    record.add_argument("--full-hosted-bundle", action="append", type=Path, default=[])
     record.add_argument("--output", type=Path, required=True)
     execute = sub.add_parser("execute")
     execute.add_argument("--candidate-sha", required=True)
@@ -781,6 +970,11 @@ def main():
          str(full_manifest_path.relative_to(repository))],
         capture_output=True, check=False).returncode == 0
     suite_manifest = load_json_strict(full_manifest_path) if tracked_manifest and full_manifest_path.is_file() else None
+    if suite_manifest is not None:
+        try:
+            validate_complete_suite_bindings(suite_manifest, repository)
+        except (OSError, KeyError, TypeError, ValueError) as error:
+            parser.error(str(error))
     cases = expand(matrix())
     availability = load_json_strict(args.availability) if args.availability else {}
     valid_availability = {row["target"] for row in matrix()} | {
@@ -803,6 +997,61 @@ def main():
     results = [evaluate(case, evidence.get(case["id"]), args.candidate_sha,
                         candidate_manifest, suite_manifest, audit_data)
                for case in cases]
+    full_hosted = []
+    if args.full_hosted_bundle:
+        import artifact
+        for bundle in args.full_hosted_bundle:
+            try:
+                receipt = artifact.verify_full_hosted(bundle, args.candidate_sha, repository)
+                receipt_sha256 = receipt.pop("_verified_receipt_sha256")
+                transport_sha256 = receipt.pop("_verified_transport_sha256", None)
+                scoped = full_hosted_lane(receipt, receipt_sha256, suite_manifest)
+                if transport_sha256:
+                    scoped["transport_sha256"] = transport_sha256
+                if any(set(item["configuration_lanes"]) & set(scoped["configuration_lanes"])
+                       for item in full_hosted):
+                    raise ValueError("duplicate full hosted lane receipt")
+                if audit_data:
+                    audited = target_binary_hashes(audit_data.get("artifacts", []))
+                    if audited.get(scoped["target"]) != scoped["artifact_hashes"]:
+                        raise ValueError("full hosted binaries differ from staged audit")
+                    scoped["audit_manifest_sha256"] = manifest_digest(audit_data)
+                    scoped["audit_status"] = "PASSED"
+                else:
+                    scoped["audit_status"] = "NOT_RUN"
+                if candidate_manifest:
+                    lanes = candidate_manifest.get("lanes")
+                    for lane_id in scoped["configuration_lanes"]:
+                        selected = lanes.get(lane_id) if isinstance(lanes, dict) else None
+                        if (not isinstance(selected, dict)
+                                or selected.get("runtime_version") != scoped["runtime_version"]
+                                or selected.get("runtime_identity") != scoped["runtime_identity"]
+                                or selected.get("artifact_hashes") != scoped["artifact_hashes"]):
+                            raise ValueError("full hosted selected candidate lane differs")
+                    scoped["candidate_manifest_sha256"] = manifest_digest(candidate_manifest)
+                    scoped["candidate_manifest_status"] = "BOUND"
+                else:
+                    scoped["candidate_manifest_status"] = "NOT_RUN"
+                scoped["complete_suite_status"] = "NOT_RUN" if suite_manifest is None else "UNPASSED"
+                scoped["release_gate_status"] = "NOT_RUN"
+                full_hosted.append(scoped)
+            except (OSError, KeyError, TypeError, ValueError, ET.ParseError,
+                    tarfile.TarError) as error:
+                parser.error(f"full hosted receipt failed: {error}")
+    by_result_id = {item["id"]: item for item in results}
+    for scoped in full_hosted:
+        for lane_id in scoped["configuration_lanes"]:
+            result = by_result_id[lane_id]
+            if result["status"] != "PASSED":
+                continue
+            lane_evidence = evidence.get(lane_id, {})
+            gates = lane_evidence.get("gate_results", {})
+            staged_consumer = gates.get("staged-consumer", {}) if isinstance(gates, dict) else {}
+            if (lane_evidence.get("full_hosted_receipt_sha256") != scoped["receipt_sha256"]
+                    or staged_consumer.get("receipt_sha256") != scoped["receipt_sha256"]):
+                result.update(status="FAILED",
+                              reason="complete lane evidence does not bind verified full hosted receipt")
+    reject_unverified_production_gates(results, suite_manifest)
     hosted_probes = []
     if len(args.raw_bundle) != len(args.hosted_probe):
         parser.error("each hosted probe needs its matching raw XML bundle")
@@ -827,7 +1076,8 @@ def main():
     report = {"candidate_sha": args.candidate_sha, "total": len(results),
               "counts": {status: sum(item["status"] == status for item in results)
                          for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")},
-              "lanes": results, "bounded_hosted_probes": hosted_probes}
+              "lanes": results, "bounded_hosted_probes": hosted_probes,
+              "full_hosted_receipts": full_hosted}
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["counts"]))
     return 0 if report["counts"]["PASSED"] == len(results) else 1
