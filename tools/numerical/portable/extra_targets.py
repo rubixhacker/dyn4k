@@ -121,13 +121,15 @@ def verify_segments(manifest_path, output, replay_source=None):
     route = ROUTES.get(manifest.get("route"))
     if route is None or manifest.get("target") != route.target:
         raise Rejected("segment target differs")
-    current = git("rev-parse", "HEAD").decode().strip()
+    current = git("--no-replace-objects", "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
     source = replay_source or current
-    if not re.fullmatch(r"[0-9a-f]{40}", source):
+    if not re.fullmatch(r"[0-9a-f]{40}", source) or git(
+            "--no-replace-objects", "cat-file", "-t", source).decode().strip() != "commit":
         raise Rejected("replay source must be an exact commit")
     if (manifest.get("candidate_commit") != source or
             manifest.get("source_sha256") != hashlib.sha256(git(
-                "-c", "core.autocrlf=false", "archive", "--format=tar", source)).hexdigest()):
+                "--no-replace-objects", "-c", "core.autocrlf=false", "archive", "--format=tar",
+                source)).hexdigest()):
         raise Rejected("segment source differs")
     for key in ("artifact", "linked_executable"):
         value = manifest[key]
@@ -255,14 +257,14 @@ def git(*args):
 
 
 def source_identity():
-    dirty = git("status", "--porcelain", "--untracked-files=all").decode().strip()
-    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard", "--",
+    dirty = git("--no-replace-objects", "status", "--porcelain", "--untracked-files=all").decode().strip()
+    ignored = git("--no-replace-objects", "ls-files", "--others", "--ignored", "--exclude-standard", "--",
                   "tools/numerical/portable/src").decode().splitlines()
     if dirty or ignored:
         raise Rejected("source tree is dirty or contains ignored portable source")
-    return (git("rev-parse", "HEAD").decode().strip(),
-            hashlib.sha256(git("-c", "core.autocrlf=false", "archive", "--format=tar",
-                               "HEAD")).hexdigest())
+    return (git("--no-replace-objects", "rev-parse", "--verify", "HEAD^{commit}").decode().strip(),
+            hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false",
+                               "archive", "--format=tar", "HEAD")).hexdigest())
 
 
 def artifact(target):

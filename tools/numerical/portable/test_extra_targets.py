@@ -397,6 +397,69 @@ class ExtraTargetSeamTest(unittest.TestCase):
             wrong_segment = json.loads(json.dumps(manifest))
             wrong_segment["segments"][0]["plain_sha256"] = "0" * 64
             self.assertNotEqual(check(wrong_segment, autocrlf_env).returncode, 0)
+            replacement_repo = root / "replacement-repo"
+            subprocess.run(["git", "init", "-q", str(replacement_repo)], check=True)
+            (replacement_repo / "source.txt").write_text("original\n")
+            subprocess.run(["git", "-C", str(replacement_repo), "add", "source.txt"], check=True)
+            author = ["-c", "user.name=Test", "-c", "user.email=test@example.com"]
+            subprocess.run(["git", "-C", str(replacement_repo), *author, "commit", "-qm",
+                            "original"], check=True)
+            original = subprocess.check_output(
+                ["git", "-C", str(replacement_repo), "rev-parse", "HEAD"]).decode().strip()
+            (replacement_repo / "source.txt").write_text("replacement\n")
+            subprocess.run(["git", "-C", str(replacement_repo), "add", "source.txt"], check=True)
+            subprocess.run(["git", "-C", str(replacement_repo), *author, "commit", "-qm",
+                            "replacement"], check=True)
+            replacement = subprocess.check_output(
+                ["git", "-C", str(replacement_repo), "rev-parse", "HEAD"]).decode().strip()
+            subprocess.run(["git", "-C", str(replacement_repo), "checkout", "-q", "--detach",
+                            original], check=True)
+            subprocess.run(["git", "-C", str(replacement_repo), "replace", original,
+                            replacement], check=True)
+            canonical_bytes = subprocess.check_output(
+                ["git", "-C", str(replacement_repo), "--no-replace-objects", "-c",
+                 "core.autocrlf=false", "archive", "--format=tar", original])
+            substituted_bytes = subprocess.check_output(
+                ["git", "-C", str(replacement_repo), "-c", "core.autocrlf=false",
+                 "archive", "--format=tar", original])
+            self.assertNotEqual(canonical_bytes, substituted_bytes)
+            replaced_manifest = json.loads(json.dumps(manifest))
+            replaced_manifest.update(candidate_commit=original,
+                                     source_sha256=hashlib.sha256(canonical_bytes).hexdigest())
+            tree = subprocess.check_output(
+                ["git", "-C", str(replacement_repo), "--no-replace-objects", "rev-parse",
+                 f"{original}^{{tree}}"]).decode().strip()
+            tree_manifest = json.loads(json.dumps(replaced_manifest))
+            tree_manifest.update(candidate_commit=tree, source_sha256=hashlib.sha256(
+                subprocess.check_output(["git", "-C", str(replacement_repo),
+                                         "--no-replace-objects", "-c", "core.autocrlf=false",
+                                         "archive", "--format=tar", tree])).hexdigest())
+            for autocrlf in ("false", "true"):
+                environment = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                               "GIT_CONFIG_VALUE_0": autocrlf}
+                with patch.object(extra_targets, "ROOT", replacement_repo), patch.dict(
+                        os.environ, environment):
+                    manifest_path.write_text(json.dumps(replaced_manifest))
+                    assembled.unlink(missing_ok=True)
+                    current_result = extra_targets.verify_segments(manifest_path, assembled)
+                    self.assertEqual(current_result["cases"], 332)
+                    subprocess.run(["git", "-C", str(replacement_repo), "checkout", "-q",
+                                    "--detach", replacement], check=True)
+                    assembled.unlink()
+                    historical = extra_targets.verify_segments(manifest_path, assembled, original)
+                    self.assertEqual(historical["trace_sha256"], current_result["trace_sha256"])
+                    self.assertTrue(historical["historical_replay"])
+                    subprocess.run(["git", "-C", str(replacement_repo), "checkout", "-q",
+                                    "--detach", original], check=True)
+                    altered = json.loads(json.dumps(replaced_manifest))
+                    altered["source_sha256"] = hashlib.sha256(substituted_bytes).hexdigest()
+                    manifest_path.write_text(json.dumps(altered))
+                    assembled.unlink()
+                    with self.assertRaisesRegex(Rejected, "segment source differs"):
+                        extra_targets.verify_segments(manifest_path, assembled)
+                    manifest_path.write_text(json.dumps(tree_manifest))
+                    with self.assertRaisesRegex(Rejected, "exact commit"):
+                        extra_targets.verify_segments(manifest_path, assembled, tree)
             manifest_path.write_text(json.dumps(manifest))
             assembled.unlink(missing_ok=True)
             archival = subprocess.run([sys.executable, str(Path(extra_targets.__file__).resolve()),
@@ -889,6 +952,23 @@ class ExtraTargetSeamTest(unittest.TestCase):
                     os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
                                  "GIT_CONFIG_VALUE_0": "true"}):
                 self.assertEqual(extra_targets.source_identity(), (commit, canonical))
+            (root / "source.txt").write_text("replacement\n")
+            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
+                            "user.email=test@example.com", "commit", "-qm", "replacement"], check=True)
+            replacement = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
+            subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", commit], check=True)
+            subprocess.run(["git", "-C", str(root), "replace", commit, replacement], check=True)
+            substituted = hashlib.sha256(subprocess.check_output(
+                ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
+                 commit])).hexdigest()
+            self.assertNotEqual(canonical, substituted)
+            for autocrlf in ("false", "true"):
+                with patch.object(extra_targets, "ROOT", root), patch.dict(
+                        os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                     "GIT_CONFIG_VALUE_0": autocrlf}):
+                    self.assertEqual(extra_targets.source_identity(), (commit, canonical))
 
 
 if __name__ == "__main__":
