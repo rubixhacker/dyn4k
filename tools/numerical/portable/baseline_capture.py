@@ -275,6 +275,19 @@ def _has_versioned_dyn4j_class(path):
     return False
 
 
+def _reject_manifest_classpath(path):
+    if not zipfile.is_zipfile(path):
+        return
+    with zipfile.ZipFile(path) as archive:
+        manifests = [item for item in archive.infolist()
+                     if item.filename.upper() == "META-INF/MANIFEST.MF"]
+        if len(manifests) > 1:
+            raise Rejected("baseline archived classpath JAR has duplicate manifests")
+        if manifests and any(line.lower().startswith(b"class-path:")
+                             for line in archive.read(manifests[0]).splitlines()):
+            raise Rejected("baseline archived classpath JAR expands manifest Class-Path")
+
+
 def _classpath_archive(entries, proof_dir, expected, capture, stub_origin, jar_origin,
                        pinned, tap, jar):
     if len(entries) != len(CLASSPATH_ENTRY_NAMES) or [path.name for path in entries] != list(
@@ -325,6 +338,8 @@ def _classpath_archive(entries, proof_dir, expected, capture, stub_origin, jar_o
         classes = _provider_classes(payload)
         if kind == "file" and _has_versioned_dyn4j_class(payload):
             raise Rejected("baseline archived classpath has a versioned dyn4j provider")
+        if kind == "file":
+            _reject_manifest_classpath(payload)
         if index == 2:
             if classes != tap:
                 raise Rejected("baseline archived main output has unexpected dyn4j classes")

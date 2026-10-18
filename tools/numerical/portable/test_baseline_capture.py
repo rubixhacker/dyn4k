@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -167,6 +168,38 @@ class BaselineCaptureSeamTest(unittest.TestCase):
                 with zipfile.ZipFile(library, "w") as archive:
                     archive.writestr("META-INF/MANIFEST.MF", manifest)
                     archive.writestr("META-INF/versions/9/fixture/Example.class", b"fixture")
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["classpath_entries"][4]["files"][
+                    "payload"] = digest(library)
+                self.assertEqual(resealed, baseline_capture.baseline_runtime(
+                    log, jar, proof, resealed))
+                for manifest in (
+                    "Manifest-Version: 1.0\nClass-Path: extra.jar\n\n",
+                    "Manifest-Version: 1.0\ncLaSs-PaTh: extra.jar \n more.jar\n\n",
+                ):
+                    with self.subTest(manifest=manifest):
+                        with zipfile.ZipFile(library, "w") as archive:
+                            archive.writestr("META-INF/MANIFEST.MF", manifest)
+                            archive.writestr("fixture/Example.class", b"fixture")
+                        resealed = json.loads(json.dumps(recorded))
+                        resealed["dependency"]["classpath_entries"][4]["files"][
+                            "payload"] = digest(library)
+                        with self.assertRaisesRegex(Exception, "manifest Class-Path"):
+                            baseline_capture.baseline_runtime(log, jar, proof, resealed)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    with zipfile.ZipFile(library, "w") as archive:
+                        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
+                        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["classpath_entries"][4]["files"][
+                    "payload"] = digest(library)
+                with self.assertRaisesRegex(Exception, "duplicate manifests"):
+                    baseline_capture.baseline_runtime(log, jar, proof, resealed)
+                with zipfile.ZipFile(library, "w") as archive:
+                    archive.writestr("META-INF/MANIFEST.MF",
+                                     "Manifest-Version: 1.0\nX-Class-Path: note\n\n")
+                    archive.writestr("fixture/Example.class", b"fixture")
                 resealed = json.loads(json.dumps(recorded))
                 resealed["dependency"]["classpath_entries"][4]["files"][
                     "payload"] = digest(library)
