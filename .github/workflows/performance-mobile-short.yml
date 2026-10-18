@@ -1,0 +1,230 @@
+name: Mobile Native short performance producer
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Simulator target for this bounded capture
+        type: choice
+        required: true
+        options:
+          - iosSimulatorArm64
+          - tvosSimulatorArm64
+          - watchosSimulatorArm64
+          - iosX64
+      build:
+        description: Consumer link mode
+        type: choice
+        required: true
+        options:
+          - development
+          - optimized
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ${{ inputs.target == 'iosX64' && 'macos-26-intel' || 'macos-26' }}
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      PYTHONDONTWRITEBYTECODE: '1'
+      TARGET: ${{ inputs.target }}
+      BUILD: ${{ inputs.build }}
+    steps:
+      - name: Prepare evidence directory
+        run: |
+          evidence="$RUNNER_TEMP/performance-mobile-short"
+          printf 'EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          mkdir -p "$evidence/setup" "$evidence/build" "$evidence/captures"
+          printf 'source_sha=%s\ntarget=%s\nbuild=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$GITHUB_SHA" "$TARGET" "$BUILD" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > "$evidence/route.txt"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify checkout and record host
+        id: host
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test -d "$DEVELOPER_DIR"
+          case "$TARGET" in
+            iosX64) test "$(uname -m)" = x86_64 ;;
+            iosSimulatorArm64|tvosSimulatorArm64|watchosSimulatorArm64)
+              test "$(uname -m)" = arm64 ;;
+            *) exit 1 ;;
+          esac
+          {
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'host='; hostname
+            printf 'uname='; uname -a
+            printf 'macos='; sw_vers -productVersion
+            printf 'developer_dir=%s\n' "$DEVELOPER_DIR"
+            xcodebuild -version
+            xcrun swift --version
+            java -version
+            ./gradlew --version
+            python3 --version
+          } > "$EVIDENCE/setup/host-toolchains.stdout.txt" 2> "$EVIDENCE/setup/host-toolchains.stderr.txt"
+          grep -Fx 'Xcode 26.4.1' "$EVIDENCE/setup/host-toolchains.stdout.txt"
+      - name: Stage exact target and root publications
+        id: stage
+        run: |
+          python3 -B tools/qualification/stage.py \
+            --candidate-sha "$GITHUB_SHA" --target "$TARGET" \
+            --output "$GITHUB_WORKSPACE/build/staging-repository/.qualification/mobile-short/receipt.json" \
+            --console "$GITHUB_WORKSPACE/build/staging-repository/.qualification/mobile-short/stage.log" \
+            > "$EVIDENCE/build/stage.stdout.txt" 2> "$EVIDENCE/build/stage.stderr.txt"
+          cp "$GITHUB_WORKSPACE/build/staging-repository/.qualification/mobile-short/receipt.json" \
+            "$EVIDENCE/build/stage-receipt.json"
+          cp "$GITHUB_WORKSPACE/build/staging-repository/.qualification/mobile-short/stage.log" \
+            "$EVIDENCE/build/stage.log"
+      - name: Build selected consumer inventory
+        id: build
+        run: |
+          STAGED_REPO_URI="$(python3 -c 'from pathlib import Path; import os; print((Path(os.environ["GITHUB_WORKSPACE"]) / "build/staging-repository").resolve().as_uri())')"
+          ./gradlew -p consumers/performance/portable --no-daemon --console=plain --rerun-tasks \
+            "-PperformanceRepository=$STAGED_REPO_URI" \
+            "-PportableMobileTarget=$TARGET" "-PportableMobileBuild=$BUILD" \
+            portableMobileBuildInventory \
+            > "$EVIDENCE/build/consumer.stdout.txt" 2> "$EVIDENCE/build/consumer.stderr.txt"
+          INVENTORY="$GITHUB_WORKSPACE/consumers/performance/portable/build/portable-inventory/$TARGET-$BUILD.json"
+          test -f "$INVENTORY"
+          cp "$INVENTORY" "$EVIDENCE/build/inventory.json"
+      - name: Select and boot matching simulator
+        id: simulator
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          root = Path(os.environ["EVIDENCE"]) / "setup"
+          target = os.environ["TARGET"]
+          family, kind = {
+              "iosSimulatorArm64": ("iOS", "iPhone"),
+              "iosX64": ("iOS", "iPhone"),
+              "tvosSimulatorArm64": ("tvOS", "Apple-TV"),
+              "watchosSimulatorArm64": ("watchOS", "Apple-Watch"),
+          }[target]
+          commands = []
+
+          def execute(label, *argv):
+              try:
+                  result = subprocess.run(argv, capture_output=True, timeout=180)
+                  status = {"argv": argv, "exit_code": result.returncode}
+                  stdout, stderr = result.stdout, result.stderr
+              except (OSError, subprocess.TimeoutExpired) as error:
+                  status = {"argv": argv, "error": str(error)}
+                  stdout = error.stdout or b"" if isinstance(error, subprocess.TimeoutExpired) else b""
+                  stderr = error.stderr or b"" if isinstance(error, subprocess.TimeoutExpired) else b""
+              (root / f"{label}.stdout.bin").write_bytes(stdout)
+              (root / f"{label}.stderr.bin").write_bytes(stderr)
+              (root / f"{label}.json").write_text(json.dumps(status, indent=2) + "\n")
+              commands.append(status)
+              if status.get("exit_code") != 0:
+                  raise RuntimeError(f"{label} failed: {status}")
+              return stdout
+
+          try:
+              listing = json.loads(execute("simctl-list-before", "xcrun", "simctl", "list", "-j", "devices", "available"))
+              candidates = []
+              for runtime, devices in listing.get("devices", {}).items():
+                  match = re.fullmatch(r"com\.apple\.CoreSimulator\.SimRuntime\." + family + r"-(\d+)-(\d+)", runtime)
+                  if not match:
+                      continue
+                  for device in devices:
+                      device_type = device.get("deviceTypeIdentifier", "")
+                      if (device.get("isAvailable") is True and device.get("state") in ("Booted", "Shutdown")
+                              and device_type.startswith("com.apple.CoreSimulator.SimDeviceType." + kind)
+                              and device.get("udid")):
+                          candidates.append((int(match[1]), int(match[2]), device))
+              if not candidates:
+                  raise RuntimeError(f"no available {family} {kind} simulator for {target}")
+              _, _, device = max(candidates, key=lambda item: (item[0], item[1], item[2]["state"] == "Booted"))
+              udid = device["udid"]
+              if device["state"] != "Booted":
+                  execute("simctl-boot", "xcrun", "simctl", "boot", udid)
+              execute("simctl-bootstatus", "xcrun", "simctl", "bootstatus", udid, "-b")
+              after = json.loads(execute("simctl-list-after", "xcrun", "simctl", "list", "-j", "devices", "available"))
+              booted = [item for devices in after.get("devices", {}).values() for item in devices
+                        if item.get("udid") == udid and item.get("state") == "Booted"]
+              if len(booted) != 1:
+                  raise RuntimeError("selected simulator is not booted")
+              receipt = {"target": target, "family": family, "udid": udid,
+                         "runtime": next(runtime for runtime, devices in after["devices"].items()
+                                         if any(item.get("udid") == udid for item in devices)),
+                         "device": booted[0], "commands": commands}
+              (root / "simulator.json").write_text(json.dumps(receipt, indent=2) + "\n")
+              with open(os.environ["GITHUB_ENV"], "a") as env:
+                  env.write(f"SIMULATOR_UDID={udid}\n")
+          except Exception as error:
+              (root / "simulator-failure.json").write_text(json.dumps({"target": target,
+                  "error": str(error), "commands": commands}, indent=2) + "\n")
+              raise
+          PY
+      - name: Capture direct and compatibility scenarios
+        id: capture
+        run: |
+          INVENTORY="$GITHUB_WORKSPACE/consumers/performance/portable/build/portable-inventory/$TARGET-$BUILD.json"
+          failed=0
+          for api in direct_kotlin compatibility; do
+            archive="$EVIDENCE/captures/$api"
+            if python3 -B tools/performance/sustained_portable/mobile_capture.py \
+              --inventory "$INVENTORY" --target "$TARGET" --build "$BUILD" \
+              --scenario "separated.default.small.30hz.$api" \
+              --udid "$SIMULATOR_UDID" --archive "$archive" --steps 30 --warmup 3 \
+              > "$EVIDENCE/captures/$api.stdout.txt" 2> "$EVIDENCE/captures/$api.stderr.txt"; then
+              printf '0\n' > "$EVIDENCE/captures/$api.exit-code"
+            else
+              printf '1\n' > "$EVIDENCE/captures/$api.exit-code"
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Record route outcome
+        if: always()
+        env:
+          EVIDENCE: ${{ runner.temp }}/performance-mobile-short
+          HOST_OUTCOME: ${{ steps.host.outcome }}
+          STAGE_OUTCOME: ${{ steps.stage.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SIMULATOR_OUTCOME: ${{ steps.simulator.outcome }}
+          CAPTURE_OUTCOME: ${{ steps.capture.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["EVIDENCE"])
+          root.mkdir(parents=True, exist_ok=True)
+          staged = Path(os.environ["GITHUB_WORKSPACE"]) / "build/staging-repository/.qualification/mobile-short"
+          for name, output in (("receipt.json", "stage-receipt.json"), ("stage.log", "stage.log")):
+              source = staged / name
+              if source.is_file():
+                  destination = root / "build" / output
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  destination.write_bytes(source.read_bytes())
+          result = {"source_sha": os.environ["GITHUB_SHA"], "target": os.environ["TARGET"],
+                    "build": os.environ["BUILD"], "qualification": "unpassed",
+                    "steps": {name: os.environ[name.upper() + "_OUTCOME"] for name in
+                              ("host", "stage", "build", "simulator", "capture")},
+                    "scenarios": {api: "recorded" if (root / "captures" / api / "result.json").is_file()
+                                  else "not_run_or_no_receipt" for api in ("direct_kotlin", "compatibility")}}
+          (root / "route-result.json").write_text(json.dumps(result, indent=2) + "\n")
+          PY
+      - name: Upload raw route evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-mobile-short-${{ github.sha }}-${{ inputs.target }}-${{ inputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/performance-mobile-short/
+          include-hidden-files: true
+          if-no-files-found: warn
