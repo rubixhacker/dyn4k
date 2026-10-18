@@ -490,7 +490,10 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.expected_cases(reduced, "dyn4k-core")
 
     def test_graph_accepts_exact_staged_bytes_from_gradle_cache(self):
-        target = "macosArm64"
+        target = "mingwX64" if os.name == "nt" else "macosArm64"
+        other_target = "macosArm64" if target == "mingwX64" else "mingwX64"
+        core_name = qualify.target_publication_name("dyn4k-core", target)
+        other_core_name = qualify.target_publication_name("dyn4k-core", other_target)
         staging = self.root / "staging-repository"
         graph_folder = self.root / "graph"
         graph_folder.mkdir()
@@ -544,13 +547,14 @@ class FullHostedTests(unittest.TestCase):
             (lambda value: value["artifacts"].append({**value["artifacts"][0],
                 "component": f"{qualify.GROUP}:unexpected:{qualify.VERSION}"}),
              "staged target"),
-            (lambda value: value["artifacts"][0].update(file="/tmp/../outside.klib"),
+            (lambda value: value["artifacts"][0].update(
+                file=str(self.root / "outside" / ".." / "outside.klib")),
              "original path"),
-            (lambda value: value["artifacts"][0].update(file="/tmp/copied.klib",
+            (lambda value: value["artifacts"][0].update(file=str(self.root / "copied.klib"),
                                                         name="copied.klib"),
              "artifact differs"),
             (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
-                "dyn4k-core-macosarm64", "dyn4k-core-mingwx64")), "artifact differs"),
+                core_name, other_core_name)), "artifact differs"),
             (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
                 Path(value["artifacts"][0]["file"]).parts[-2], "f" * 40)), "cache digest"),
             (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
@@ -563,6 +567,61 @@ class FullHostedTests(unittest.TestCase):
                 f"{qualify.GROUP}:dyn4k-core:{qualify.VERSION}"), "dependency graph"),
             (lambda value: value["components"].append(value["components"][0]),
              "dependency graph"),
+        )
+        for change, error in mutations:
+            with self.subTest(error=error):
+                changed = json.loads(json.dumps(graph))
+                change(changed)
+                with self.assertRaisesRegex(ValueError, error):
+                    observe(changed)
+
+    def test_windows_graph_requires_windows_cache_path_identity(self):
+        target = "mingwX64"
+        staging = r"C:\staging-repository"
+        home = PureWindowsPath(r"C:\Users\runner\.gradle")
+        captured = self.root / "windows-staged"
+        graph_folder = self.root / "windows-graph"
+        graph_folder.mkdir()
+        hashes = {}
+        artifacts = []
+        for module in qualify.MODULES:
+            name = qualify.target_publication_name(module, target)
+            binary = captured / qualify.target_binary_path(module, target)
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes((module + " staged Windows bytes").encode())
+            hashes[module] = full_hosted.sha256(binary)
+            cache = (home / "caches/modules-2/files-2.1" / qualify.GROUP / name /
+                     qualify.VERSION / hashlib.sha1(binary.read_bytes()).hexdigest() /
+                     f"{module}-{target}Main-{qualify.VERSION}.klib")
+            artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
+                              "file": str(cache), "name": cache.name,
+                              "size": binary.stat().st_size, "sha256": hashes[module]})
+        graph = {"configuration": f"{target}CompileKlibraries",
+                 "gradle_user_home": str(home),
+                 "components": [item["component"] for item in artifacts] +
+                 [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
+                 "artifacts": artifacts}
+
+        def observe(value):
+            (graph_folder / "stdout.txt").write_text(
+                "DYN4K_RESOLVED_GRAPH=" + json.dumps(value) + "\n")
+            return full_hosted.parse_graph(graph_folder, {"exit_code": 0}, target,
+                                           hashes, staging, home, captured)
+
+        self.assertEqual(graph, observe(graph))
+        mutations = (
+            (lambda value: value["artifacts"][0].update(file="/tmp/copied.klib"),
+             "original path"),
+            (lambda value: value["artifacts"][0].update(file=str(home / "caches" /
+                                                         ".." / "escape.klib")),
+             "original path"),
+            (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
+                PureWindowsPath(value["artifacts"][0]["file"]).parts[-2], "f" * 40)),
+             "cache digest"),
+            (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
+                str(home), r"D:\other-gradle-home")), "Gradle user home"),
+            (lambda value: value["artifacts"][0].update(component="wrong:module:1"),
+             "lacks staged target"),
         )
         for change, error in mutations:
             with self.subTest(error=error):
