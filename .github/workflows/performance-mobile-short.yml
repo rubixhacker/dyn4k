@@ -184,7 +184,8 @@ jobs:
               > "$EVIDENCE/captures/$api.stdout.txt" 2> "$EVIDENCE/captures/$api.stderr.txt"; then
               printf '0\n' > "$EVIDENCE/captures/$api.exit-code"
             else
-              printf '1\n' > "$EVIDENCE/captures/$api.exit-code"
+              status=$?
+              printf '%s\n' "$status" > "$EVIDENCE/captures/$api.exit-code"
               failed=1
             fi
           done
