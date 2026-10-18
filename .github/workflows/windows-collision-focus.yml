@@ -45,6 +45,7 @@ jobs:
           $nativeStarted = $false
           $nativeLog = Join-Path $native 'gradle-console.log'
           $gradleExitFile = Join-Path $native 'gradle-exit-code.txt'
+          $gradleCommandFile = Join-Path $native 'gradle-command.txt'
           $javaLog = Join-Path $java 'java-console.log'
           $javaExitFile = Join-Path $java 'java-exit-code.txt'
           $scalar = Join-Path $evidence 'scalar'
@@ -58,6 +59,18 @@ jobs:
 
           try {
             if (Test-Path $results) { Remove-Item -LiteralPath $results -Recurse -Force }
+            @(
+              '.\gradlew.bat'
+              ':dyn4k-core:mingwX64Test'
+              '--tests org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.CircleSliceTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest'
+              '--tests org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest'
+              '--no-daemon --rerun-tasks --console=plain --info'
+            ) | Set-Content -Path $gradleCommandFile
             $nativeStarted = $true
             & .\gradlew.bat :dyn4k-core:mingwX64Test `
               --tests 'org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest' `
@@ -67,7 +80,7 @@ jobs:
               --tests 'org.dyn4j.coverage.collision.shapes.a.CircleSliceTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest' `
               --tests 'org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest' `
-              --no-daemon --rerun-tasks --console=plain 2>&1 | Tee-Object -FilePath $nativeLog
+              --no-daemon --rerun-tasks --console=plain --info 2>&1 | Tee-Object -FilePath $nativeLog
             $gradleExit = [string]$LASTEXITCODE
           } catch {
             try { $_ | Out-String | Add-Content -Path $nativeLog -ErrorAction Stop }
@@ -112,6 +125,27 @@ jobs:
             $collectionErrors.Add("Expected seven same-run XML reports; found $($xmlFiles.Count)")
             $collectionStatus = 1
           }
+
+          $testPeDirectory = Join-Path $native 'test-pe'
+          $testPeStdout = Join-Path $native 'test-pe-collector-stdout.log'
+          $testPeStderr = Join-Path $native 'test-pe-collector-stderr.log'
+          try {
+            & python .\tools\diagnostic\windows_collision\collect-test-pe.py collect `
+              --test-directory (Join-Path $PWD 'dyn4k-core/build/bin/mingwX64/debugTest') `
+              --output-directory $testPeDirectory --gradle-log $nativeLog `
+              --gradle-command $gradleCommandFile --build-file (Join-Path $PWD 'dyn4k-core/build.gradle.kts') `
+              1> $testPeStdout 2> $testPeStderr
+            $testPeExit = $LASTEXITCODE
+            if ($null -eq $testPeExit -or $testPeExit -ne 0) {
+              $collectionErrors.Add("debugTest PE collection failed with exit $testPeExit")
+              $collectionStatus = 1
+            }
+          } catch {
+            $testPeExit = 1
+            $collectionErrors.Add("debugTest PE collection could not run: $($_.ToString())")
+            $collectionStatus = 1
+          }
+          Set-Content -Path (Join-Path $native 'test-pe-collector-exit-code.txt') -Value $testPeExit
 
           try {
             $jar = Join-Path $env:RUNNER_TEMP 'dyn4j-6.0.0.jar'
@@ -232,6 +266,38 @@ jobs:
             Set-Content -Path (Join-Path $scalar 'native-executable-status.txt') -Value 'UNAVAILABLE: scalar compiler did not produce an executable'
           }
 
+          $modes = Join-Path $evidence 'modes'
+          $modeStdout = Join-Path $modes 'mode-control-stdout.log'
+          $modeStderr = Join-Path $modes 'mode-control-stderr.log'
+          $modeValidation = Join-Path $modes 'mode-validation.log'
+          New-Item -ItemType Directory -Force -Path $modes | Out-Null
+          $modeExit = 1
+          try {
+            $modePwsh = Get-Command pwsh.exe -ErrorAction Stop
+            & $modePwsh.Source -NoProfile -File .\tools\diagnostic\windows_collision\run-mode-controls.ps1 `
+              -OutputDirectory $modes 1> $modeStdout 2> $modeStderr
+            $modeExit = $LASTEXITCODE
+            if ($null -eq $modeExit) { $modeExit = 1 }
+          } catch {
+            $collectionErrors.Add("Native mode control could not run: $($_.ToString())")
+            $_ | Out-String | Set-Content -Path $modeStderr
+          }
+          Set-Content -Path (Join-Path $modes 'mode-control-exit-code.txt') -Value $modeExit
+          try {
+            & python .\tools\diagnostic\windows_collision\validate-mode-control.py validate `
+              --directory $modes 2>&1 | Tee-Object -FilePath $modeValidation
+            $modeValidationExit = $LASTEXITCODE
+            if ($null -eq $modeValidationExit) { $modeValidationExit = 1 }
+          } catch {
+            $modeValidationExit = 1
+            $_ | Out-String | Set-Content -Path $modeValidation
+          }
+          Set-Content -Path (Join-Path $modes 'mode-validation-exit-code.txt') -Value $modeValidationExit
+          if ($modeExit -ne 0 -or $modeValidationExit -ne 0) {
+            $collectionErrors.Add("Native mode controls failed: runner=$modeExit validator=$modeValidationExit")
+            $collectionStatus = 1
+          }
+
           try {
             $javaTsv = Join-Path $java 'dyn4j-6.0.0-windows-control.tsv'
             $nativeTsv = Join-Path $native 'mingwX64-collision-diagnostics.tsv'
@@ -278,6 +344,9 @@ jobs:
             'tools/diagnostic/windows_collision/run-scalar-control.ps1'
             'tools/diagnostic/windows_collision/validate-scalar-control.py'
             '.github/workflows/windows-collision-focus.yml'
+            'tools/diagnostic/windows_collision/collect-test-pe.py'
+            'tools/diagnostic/windows_collision/run-mode-controls.ps1'
+            'tools/diagnostic/windows_collision/validate-mode-control.py'
           )
           $controlSourceHashes = [System.Collections.Generic.List[string]]::new()
           foreach ($relativeSource in $controlSources) {
