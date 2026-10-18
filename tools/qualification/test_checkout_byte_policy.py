@@ -102,6 +102,22 @@ def changed_paths(candidate, checkout, relative_paths):
 
 
 class CheckoutBytePolicyTests(unittest.TestCase):
+    def test_license_byte_policy_is_root_anchored(self):
+        paths = ["LICENSE.md", "docs/LICENSE.md", "tools/LICENSE.md", "foo/bar/LICENSE.md"]
+        output = subprocess.check_output(
+            ["git", "-C", str(REPOSITORY), "check-attr", "text", "--", *paths],
+            text=True,
+        )
+        self.assertEqual(
+            [
+                "LICENSE.md: text: unset",
+                "docs/LICENSE.md: text: unspecified",
+                "tools/LICENSE.md: text: unspecified",
+                "foo/bar/LICENSE.md: text: unspecified",
+            ],
+            output.splitlines(),
+        )
+
     def test_fresh_git_autocrlf_true_checkout_preserves_hash_guarded_source_inputs(self):
         candidate = subprocess.check_output(
             ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"], text=True
