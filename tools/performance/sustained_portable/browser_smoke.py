@@ -14,7 +14,7 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 
-from browser_process import ChromeObserver, boottime_ns
+from browser_process import ChromeObserver, ClientOriginGuard, boottime_ns
 import capture
 
 JS_SCRIPTS = (
@@ -36,6 +36,22 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, request, client_address, server):
         super().__init__(request, client_address, server, directory=str(server.directory_path))
 
+    def setup(self):
+        super().setup()
+        self.connection_origin = {}
+        self.connection_origin_error = None
+        if not self.server.origin_required:
+            return
+        if not self.server.origin_ready.wait(timeout=2):
+            self.connection_origin_error = "browser request origin guard was not ready"
+            return
+        try:
+            if self.server.origin_guard is None:
+                raise ValueError("browser request origin guard is missing")
+            self.connection_origin = self.server.origin_guard.observe_socket(self.connection)
+        except (OSError, ValueError) as error:
+            self.connection_origin_error = str(error)
+
     def read_resource(self, selected):
         with selected.open("rb") as stream:
             return stream.read()
@@ -44,8 +60,19 @@ class Handler(SimpleHTTPRequestHandler):
         with self.server.resource_lock:
             self.server.resource_errors.append(message)
 
+    def prove_origin(self):
+        if self.connection_origin_error is None:
+            return self.connection_origin
+        with self.server.resource_lock:
+            self.server.origin_errors.append(self.connection_origin_error)
+        self.send_error(403)
+        return None
+
     def do_GET(self):
         if self.path == "/":
+            origin = self.prove_origin()
+            if origin is None:
+                return
             page = self.server.page
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -53,14 +80,22 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(page)
             with self.server.resource_lock:
+                observed_ns = boottime_ns()
                 if self.server.page_served_boottime_ns is None:
-                    self.server.page_served_boottime_ns = boottime_ns()
+                    self.server.page_served_boottime_ns = observed_ns
+                if self.server.origin_required:
+                    self.server.request_origins.append({
+                        "kind": "page", "name": "/", "sha256": hashlib.sha256(page).hexdigest(),
+                        "bytes": len(page), "time_ns": observed_ns, "origin": origin})
         else:
             name = unquote(urlsplit(self.path).path).lstrip("/")
             if name not in self.server.expected_bundle:
                 if name != "favicon.ico":
                     self.resource_error(f"unknown resource: {name}")
                 self.send_error(404)
+                return
+            origin = self.prove_origin()
+            if origin is None:
                 return
             selected = (self.server.directory_path / name).resolve()
             if not selected.is_relative_to(self.server.directory_path.resolve()) or not selected.is_file():
@@ -93,6 +128,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self.server.served_bytes[name] = len(payload)
                 self.server.resource_responses.append(
                     {"name": name, "sha256": actual, "bytes": len(payload)})
+                if self.server.origin_required:
+                    self.server.request_origins.append({
+                        "kind": "resource", "name": name, "sha256": actual,
+                        "bytes": len(payload), "time_ns": observed_ns, "origin": origin})
                 if self.server.first_resource_boottime_ns is None:
                     self.server.first_resource_boottime_ns = observed_ns
                 self.server.last_resource_boottime_ns = observed_ns
@@ -100,6 +139,9 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path not in ("/complete", "/error"):
             self.send_error(404)
+            return
+        origin = self.prove_origin()
+        if origin is None:
             return
         size = int(self.headers.get("Content-Length", "0"))
         if size < 1 or size > 4_000_000:
@@ -110,7 +152,20 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.server.completed.is_set():
                 self.server.received = {"kind": self.path[1:], "payload": payload}
                 self.server.completion_boottime_ns = boottime_ns()
+                if self.server.origin_required:
+                    with self.server.resource_lock:
+                        self.server.request_origins.append({
+                            "kind": self.path[1:], "name": self.path,
+                            "sha256": hashlib.sha256(payload).hexdigest(),
+                            "bytes": len(payload),
+                            "time_ns": self.server.completion_boottime_ns,
+                            "origin": origin})
                 self.server.completed.set()
+            else:
+                with self.server.resource_lock:
+                    self.server.origin_errors.append("browser completion was repeated")
+                self.send_error(409)
+                return
         self.send_response(204)
         self.end_headers()
 
@@ -126,7 +181,8 @@ def required_resources(target):
     raise ValueError(f"unsupported browser target: {target}")
 
 
-def browser_server(directory, page, bundle, target, handler=Handler):
+def browser_server(directory, page, bundle, target, handler=Handler,
+                   origin_required=True):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     server.directory_path = Path(directory)
     server.page = page
@@ -144,6 +200,11 @@ def browser_server(directory, page, bundle, target, handler=Handler):
     server.completion_lock = threading.Lock()
     server.completed = threading.Event()
     server.received = None
+    server.origin_required = origin_required
+    server.origin_ready = threading.Event()
+    server.origin_guard = None
+    server.origin_errors = []
+    server.request_origins = []
     return server
 
 
@@ -214,6 +275,96 @@ def validate_loaded_resources(server):
         "resource_responses": responses,
         "resource_errors": errors,
     }
+
+
+def snapshot_request_origins(server):
+    try:
+        with server.resource_lock:
+            records = list(server.request_origins)
+            errors = list(server.origin_errors)
+    except (AttributeError, TypeError) as error:
+        raise ValueError("browser request origin state is incomplete") from error
+    return {"request_origins": records, "origin_errors": errors}
+
+
+def validate_origin_stream(server, state):
+    records = state["request_origins"]
+    errors = state["origin_errors"]
+    if not server.origin_required or type(records) is not list or type(errors) is not list:
+        raise ValueError("browser request origin state is malformed")
+    if not all(type(error) is str for error in errors):
+        raise ValueError("browser request origin errors are malformed")
+    if errors:
+        raise ValueError("browser request origin rejection: " + "; ".join(errors))
+    page = []
+    resources = []
+    completion = []
+    for index, record in enumerate(records):
+        if type(record) is not dict or record.keys() != {
+            "kind", "name", "sha256", "bytes", "time_ns", "origin"
+        }:
+            raise ValueError(f"browser request origin record {index} is malformed")
+        if (type(record["kind"]) is not str or type(record["name"]) is not str or
+            type(record["sha256"]) is not str or not re.fullmatch(
+                r"[0-9a-f]{64}", record["sha256"]
+            ) or type(record["bytes"]) is not int or record["bytes"] <= 0 or
+            type(record["time_ns"]) is not int or record["time_ns"] <= 0 or
+            type(record["origin"]) is not dict):
+            raise ValueError(f"browser request origin record {index} has invalid values")
+        origin = record["origin"]
+        if (origin.keys() != {
+            "client_pid", "client_start_ticks", "client_socket_inode",
+            "client_address", "client_port", "server_address", "server_port",
+            "client_ancestry", "observed_boottime_ns", "method"
+        } or any(type(origin[key]) is not int or origin[key] <= 0 for key in (
+            "client_pid", "client_start_ticks", "client_socket_inode", "client_port",
+            "server_port", "observed_boottime_ns"
+        )) or origin["client_address"] != "127.0.0.1" or
+            origin["server_address"] != "127.0.0.1" or
+            origin["server_port"] != server.server_port or
+            origin["method"] != "linux_procfs_tcp_fd" or
+            type(origin["client_ancestry"]) is not list or
+            not origin["client_ancestry"] or
+            not all(type(item) is dict and item.keys() == {"pid", "start_ticks"} and
+                    type(item["pid"]) is int and item["pid"] > 0 and
+                    type(item["start_ticks"]) is int and item["start_ticks"] > 0
+                    for item in origin["client_ancestry"]) or
+            origin["client_ancestry"][0] != {
+                "pid": origin["client_pid"],
+                "start_ticks": origin["client_start_ticks"]
+            } or origin["observed_boottime_ns"] > record["time_ns"]):
+            raise ValueError(f"browser request origin record {index} has invalid socket proof")
+        if record["kind"] == "page":
+            page.append(record)
+        elif record["kind"] == "resource":
+            resources.append(record)
+        elif record["kind"] in ("complete", "error"):
+            completion.append(record)
+        else:
+            raise ValueError(f"browser request origin record {index} has invalid kind")
+    expected_page_sha = hashlib.sha256(server.page).hexdigest()
+    if not page or any(item["name"] != "/" or
+                           item["sha256"] != expected_page_sha or
+                           item["bytes"] != len(server.page) for item in page):
+        raise ValueError("browser page response lacks request origin proof")
+    if page[0]["time_ns"] != server.page_served_boottime_ns:
+        raise ValueError("browser page origin time differs from served page")
+    projected = [{"name": item["name"], "sha256": item["sha256"],
+                  "bytes": item["bytes"]} for item in resources]
+    if projected != server.resource_responses:
+        raise ValueError("browser resource responses lack matching request origins")
+    if len(completion) != 1 or server.received is None:
+        raise ValueError("browser completion lacks unique request origin proof")
+    final = completion[0]
+    if (final["kind"] != server.received["kind"] or
+        final["name"] != "/" + final["kind"] or
+        final["sha256"] != hashlib.sha256(server.received["payload"]).hexdigest() or
+        final["bytes"] != len(server.received["payload"]) or
+        final["time_ns"] != server.completion_boottime_ns):
+        raise ValueError("browser completion differs from request origin record")
+    if any(item["time_ns"] > final["time_ns"] for item in page + resources):
+        raise ValueError("browser request origins follow completion")
+    return state
 
 
 def browser_page(target, args):
@@ -311,10 +462,17 @@ def run(args):
     observer = None
     process_image = None
     process_error = None
+    origin_error = None
+    origin_state = {"request_origins": [], "origin_errors": []}
     completed = False
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True)
+        try:
+            server.origin_guard = ClientOriginGuard(process.pid)
+        except (OSError, ValueError) as error:
+            origin_error = str(error)
+        server.origin_ready.set()
         try:
             observer = ChromeObserver(process.pid, profile, command[-1], browser_binary,
                                       browser_sha, launched_boottime_ns)
@@ -332,16 +490,23 @@ def run(args):
             if process.poll() is not None or time.monotonic() >= deadline:
                 break
         completed = server.completed.is_set()
-        if completed and observer is not None and process_error is None:
+        try:
+            origin_state = snapshot_request_origins(server)
+            validate_origin_stream(server, origin_state)
+        except ValueError as error:
+            origin_error = str(error)
+        if completed and observer is not None and process_error is None and origin_error is None:
             try:
                 process_image = observer.finish(
                     server.page_served_boottime_ns,
                     server.first_resource_boottime_ns,
                     server.last_resource_boottime_ns,
-                    server.completion_boottime_ns, nonce)
+                    server.completion_boottime_ns, nonce,
+                    origin_state["request_origins"])
             except (OSError, ValueError) as error:
                 process_error = str(error)
     finally:
+        server.origin_ready.set()
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
         if process is not None:
@@ -372,9 +537,12 @@ def run(args):
             "producer_bytes": len(raw),
             "completion_sha256": capture.digest(args.archive / "completion.raw"),
             "resource_validation_error": str(error),
+            **origin_state,
         }
         if process_error is not None:
             failure["process_validation_error"] = process_error
+        if origin_error is not None:
+            failure["origin_validation_error"] = origin_error
         (args.archive / "capture.json").write_text(json.dumps(failure, indent=2) + "\n")
         raise
     receipt = {
@@ -404,6 +572,8 @@ def run(args):
         "stderr_sha256": capture.digest(args.archive / "stderr.raw"),
         "stderr_bytes": len(stderr),
         "browser_process_image": process_image,
+        **origin_state,
+        **({"origin_validation_error": origin_error} if origin_error is not None else {}),
         "memory_attribution": "missing", "allocation": "missing", "plateau": "missing",
         "required_non_jvm_gates": {
             "absolute_p99_seconds": manifest["budgets"]["absolute_p99_seconds"][str(scenario["rate_hz"])],
@@ -416,6 +586,8 @@ def run(args):
         raise ValueError("browser completion timed out; raw archive retained")
     if received["kind"] == "error":
         raise ValueError(f"browser script error: {received['payload'][:200]!r}")
+    if origin_error is not None:
+        raise ValueError(origin_error)
     if process_error is not None or process_image is None:
         receipt["process_validation_error"] = process_error or "browser process image missing"
         (args.archive / "capture.json").write_text(json.dumps(receipt, indent=2) + "\n")

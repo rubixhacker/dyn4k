@@ -39,9 +39,17 @@ requires all five JS scripts, including DOM compatibility, or the Wasm entry,
 binary, custom formatters, import-object, and builtins modules. An unknown
 resource request or a missing required dependency rejects the capture.
 The controller terminates the wrapper after receipt, so its recorded exit is
-a controlled stop. The Flatpak wrapper does not expose a trusted browser
-process-image receipt. Incomplete or rejected browser runs retain their raw
-archives. Earlier virtual-clock failures are preserved.
+a controlled stop. On this Linux host the launcher separately observes the
+live Chrome PID through its unique profile and page arguments, wrapper
+ancestry, start time, and mapped `/proc/<pid>/exe` digest. For every accepted
+page, bundle, and completion request, the server resolves the client TCP
+socket inode to its owning process fd and records that process's ancestry to
+the selected Chrome PID. Missing or foreign socket owners reject the request;
+the archive records the origin proof and any rejection. The wrapper PID is
+not described as the browser image. This proof requires an accessible Linux
+`/proc` TCP and fd view and does not establish a browser process identity on
+other hosts. Incomplete or rejected browser runs retain their raw archives.
+Earlier virtual-clock failures are preserved.
 
 Wasm WASI receives the fixed launch fields on one tab-delimited stdin line.
 The archive retains that line. The other targets receive the fields as

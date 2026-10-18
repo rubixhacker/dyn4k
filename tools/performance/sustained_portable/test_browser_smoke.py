@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import browser_smoke
 import browser_process
@@ -44,7 +44,7 @@ class BrowserResourceBindingTest(unittest.TestCase):
 
     def serve(self, handler=browser_smoke.Handler, target="wasmJs"):
         server = browser_smoke.browser_server(self.root, b"<html></html>", self.bundle,
-                                              target, handler)
+                                              target, handler, origin_required=False)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(server.server_close)
@@ -178,6 +178,31 @@ class BrowserResourceBindingTest(unittest.TestCase):
         self.assertEqual(server.served_bytes,
                          {name: len(("original:" + name).encode()) for name in WASM_FILES})
 
+    def test_independent_client_cannot_fetch_guarded_page(self):
+        wrapper = subprocess.Popen(["/usr/bin/sleep", "5"])
+        self.addCleanup(wrapper.wait)
+        self.addCleanup(wrapper.terminate)
+        server = browser_smoke.browser_server(self.root, b"<html>secret</html>",
+                                              self.bundle, "wasmJs", origin_required=True)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        server.origin_guard = browser_process.ClientOriginGuard(wrapper.pid)
+        server.origin_ready.set()
+        for request in (
+            f"http://127.0.0.1:{server.server_port}/",
+            f"http://127.0.0.1:{server.server_port}/{WASM_FILES[0]}",
+            Request(f"http://127.0.0.1:{server.server_port}/complete",
+                    data=b"DYN4K\tCOMPLETE\tspoofed\n", method="POST"),
+        ):
+            with self.subTest(request=request):
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(request, timeout=2)
+                self.assertEqual(error.exception.code, 403)
+                error.exception.close()
+        self.assertEqual(server.request_origins, [])
+        self.assertEqual(len(server.origin_errors), 3)
+
 
 class BrowserResourceRecordTest(unittest.TestCase):
     def server(self):
@@ -293,6 +318,59 @@ class BrowserResourceRecordTest(unittest.TestCase):
                     browser_smoke.validate_loaded_resources(server)
 
 
+class BrowserOriginRecordTest(unittest.TestCase):
+    def state(self):
+        page = b"<html>fixture</html>"
+        resource = b"script"
+        completion = b"DYN4K\tCOMPLETE\tfixture\n"
+        server = SimpleNamespace(
+            origin_required=True, server_port=34567, page=page,
+            page_served_boottime_ns=100, completion_boottime_ns=300,
+            resource_responses=[{"name": "fixture.js",
+                                 "sha256": hashlib.sha256(resource).hexdigest(),
+                                 "bytes": len(resource)}],
+            received={"kind": "complete", "payload": completion},
+        )
+        origin = {
+            "client_pid": 102, "client_start_ticks": 10,
+            "client_socket_inode": 123, "client_address": "127.0.0.1",
+            "client_port": 43210, "server_address": "127.0.0.1",
+            "server_port": server.server_port,
+            "client_ancestry": [{"pid": 102, "start_ticks": 10}],
+            "observed_boottime_ns": 90, "method": "linux_procfs_tcp_fd",
+        }
+        def event(kind, name, payload, observed):
+            return {"kind": kind, "name": name,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "bytes": len(payload), "time_ns": observed,
+                    "origin": dict(origin)}
+        return server, {"origin_errors": [], "request_origins": [
+            event("page", "/", page, 100),
+            event("resource", "fixture.js", resource, 200),
+            event("complete", "/complete", completion, 300),
+        ]}
+
+    def test_page_resource_completion_require_matching_socket_proofs(self):
+        server, state = self.state()
+        self.assertIs(browser_smoke.validate_origin_stream(server, state), state)
+        for change in ("missing_resource", "wrong_completion", "foreign_port",
+                       "forged_pid", "origin_error"):
+            with self.subTest(change=change):
+                server, state = self.state()
+                if change == "missing_resource":
+                    state["request_origins"].pop(1)
+                elif change == "wrong_completion":
+                    state["request_origins"][-1]["sha256"] = "0" * 64
+                elif change == "foreign_port":
+                    state["request_origins"][0]["origin"]["server_port"] += 1
+                elif change == "forged_pid":
+                    state["request_origins"][0]["origin"]["client_pid"] = True
+                else:
+                    state["origin_errors"].append("foreign client socket")
+                with self.assertRaises(ValueError):
+                    browser_smoke.validate_origin_stream(server, state)
+
+
 class BrowserRunFailureReceiptTest(unittest.TestCase):
     def test_missing_internal_map_retains_raw_and_structured_receipt(self):
         class FinishedProcess:
@@ -382,6 +460,7 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
                                                      "compile_configuration": "development"}), \
                      mock.patch.object(browser_smoke, "browser_server",
                                        side_effect=faulty_server), \
+                     mock.patch.object(browser_smoke, "validate_origin_stream"), \
                      mock.patch.object(browser_smoke, "ChromeObserver", Observer):
                     expected = ("not uniquely observed" if missing == "process"
                                 else "resource state is incomplete")
@@ -441,17 +520,39 @@ class BrowserProcessObservationTest(unittest.TestCase):
             100, self.profile, self.page_url, self.selected, digest,
             10001 * browser_process.TICK_NS, proc_root=self.proc)
 
+    def request_origins(self, page, client=102, chain=None):
+        if chain is None:
+            chain = [{"pid": 102, "start_ticks": 10002},
+                     {"pid": 101, "start_ticks": 10001},
+                     {"pid": 100, "start_ticks": 10000}]
+        return [{"time_ns": page + offset,
+                 "origin": {"client_start_ticks": 10002 if client == 102 else 10003,
+                            "observed_boottime_ns": page + offset,
+                            "client_ancestry": chain}}
+                for offset in range(4)]
+
     def test_profile_tree_mapped_image_and_exchange_are_bound(self):
         observer = self.observer()
         observer.sample()
         page = 10003 * browser_process.TICK_NS
         record = observer.finish(page, page + 1, page + 2, page + 3,
-                                 "nonce")
+                                 "nonce", self.request_origins(page))
         self.assertEqual(record["pid"], 102)
         self.assertEqual([item["pid"] for item in record["ancestry"]], [101, 100])
         self.assertEqual(record["mapped_image"]["sha256"], observer.selected_sha256)
         self.assertIn(f"--user-data-dir={self.profile}", record["argv"])
         self.assertEqual(record["page_url"], self.page_url)
+        self.assertEqual(record["request_origin_count"], 4)
+
+    def test_independent_http_client_cannot_bind_to_chrome_image(self):
+        observer = self.observer()
+        observer.sample()
+        page = 10003 * browser_process.TICK_NS
+        foreign = [{"pid": 999, "start_ticks": 10003},
+                   {"pid": 100, "start_ticks": 10000}]
+        with self.assertRaisesRegex(ValueError, "outside selected Chrome process tree"):
+            observer.finish(page, page + 1, page + 2, page + 3,
+                            "nonce", self.request_origins(page, client=999, chain=foreign))
 
     def test_live_running_to_sleeping_transition_keeps_process_identity(self):
         original = browser_process.process_stat
@@ -474,7 +575,7 @@ class BrowserProcessObservationTest(unittest.TestCase):
         self.write_process(102, 101, 10002)
         observer = self.observer()
         with self.assertRaisesRegex(ValueError, "not uniquely observed"):
-            observer.finish(1, 2, 3, 4, "nonce")
+            observer.finish(1, 2, 3, 4, "nonce", [])
 
         self.write_process(102, 101, 10002, chrome=True)
         self.write_process(103, 101, 10003, chrome=True)
@@ -494,7 +595,7 @@ class BrowserProcessObservationTest(unittest.TestCase):
         observer.sample()
         self.write_process(102, 101, 10004, chrome=True)
         with self.assertRaises(ValueError):
-            observer.finish(1, 2, 3, 4, "nonce")
+            observer.finish(1, 2, 3, 4, "nonce", [])
 
     def test_live_selected_path_swap_rejects_mapped_image(self):
         selected = self.root / "live/chrome"

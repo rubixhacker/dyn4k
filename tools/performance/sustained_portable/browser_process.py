@@ -1,6 +1,8 @@
 import hashlib
 import os
 from pathlib import Path
+import select
+import socket
 import time
 
 
@@ -50,6 +52,114 @@ def verify_mapped_image(proc_root, pid, selected, expected_sha256):
     return {"path": mapped_path, "sha256": mapped_sha,
             "device": mapped_identity[0], "inode": mapped_identity[1],
             "bytes": mapped_identity[2]}
+
+
+class ClientOriginGuard:
+    def __init__(self, wrapper_pid, proc_root=Path("/proc")):
+        self.proc_root = Path(proc_root)
+        self.wrapper = process_stat(self.proc_root, wrapper_pid)
+        if self.wrapper["state"] in ("Z", "X"):
+            raise ValueError("browser wrapper exited before request observation")
+
+    def _client_inode(self, connection):
+        peer = connection.getpeername()
+        local = connection.getsockname()
+        if len(peer) != 2 or len(local) != 2:
+            raise ValueError("browser request is not an IPv4 TCP connection")
+        try:
+            peer_address = int.from_bytes(socket.inet_aton(peer[0]), "little")
+            local_address = int.from_bytes(socket.inet_aton(local[0]), "little")
+            lines = (self.proc_root / "net/tcp").read_text().splitlines()[1:]
+            matches = []
+            for line in lines:
+                fields = line.split()
+                client_address, client_port = fields[1].split(":")
+                server_address, server_port = fields[2].split(":")
+                if (int(client_address, 16), int(client_port, 16),
+                    int(server_address, 16), int(server_port, 16), fields[3]) == (
+                    peer_address, peer[1], local_address, local[1], "01"
+                ):
+                    matches.append(fields[9])
+        except (IndexError, OSError, ValueError) as error:
+            raise ValueError("browser client socket table is unavailable or malformed") from error
+        if len(matches) != 1 or not matches[0].isdecimal() or matches[0] == "0":
+            raise ValueError("browser client socket is missing or ambiguous")
+        return matches[0], peer, local
+
+    def _owner(self, inode):
+        owners = {}
+        target = f"socket:[{inode}]"
+        for proc in self.proc_root.iterdir():
+            if not proc.name.isdecimal():
+                continue
+            try:
+                descriptors = list((proc / "fd").iterdir())
+            except OSError:
+                continue
+            for descriptor in descriptors:
+                try:
+                    link = os.readlink(descriptor)
+                except OSError:
+                    continue
+                if link != target:
+                    continue
+                try:
+                    pid = int(proc.name)
+                    before = process_stat(self.proc_root, pid)
+                    handle = os.pidfd_open(pid)
+                    try:
+                        liveness = select.poll()
+                        liveness.register(handle, select.POLLIN)
+                        if os.readlink(descriptor) != target:
+                            raise ValueError("browser client socket owner changed during observation")
+                        after = process_stat(self.proc_root, pid)
+                        if before["state"] in ("Z", "X") or after["state"] in ("Z", "X") or any(
+                            before[key] != after[key]
+                            for key in ("pid", "ppid", "pgrp", "session", "start_ticks")
+                        ) or liveness.poll(0):
+                            raise ValueError("browser client socket owner raced or exited")
+                    finally:
+                        os.close(handle)
+                    owners[pid] = after
+                except ValueError:
+                    raise
+                except OSError as error:
+                    raise ValueError("browser client socket owner raced during observation") from error
+        if len(owners) != 1:
+            raise ValueError("browser client socket owner is missing or ambiguous")
+        return next(iter(owners.values()))
+
+    def _ancestry(self, owner):
+        chain = [{"pid": owner["pid"], "start_ticks": owner["start_ticks"]}]
+        current = owner
+        seen = set()
+        while current["pid"] != self.wrapper["pid"]:
+            if current["pid"] in seen or len(chain) >= 32:
+                raise ValueError("browser client ancestry is cyclic or too deep")
+            seen.add(current["pid"])
+            current = process_stat(self.proc_root, current["ppid"])
+            if current["state"] in ("Z", "X"):
+                raise ValueError("browser client ancestor exited during observation")
+            chain.append({"pid": current["pid"], "start_ticks": current["start_ticks"]})
+        if current["start_ticks"] != self.wrapper["start_ticks"]:
+            raise ValueError("browser wrapper PID changed during request")
+        return chain
+
+    def observe_socket(self, connection):
+        inode, peer, local = self._client_inode(connection)
+        owner = self._owner(inode)
+        chain = self._ancestry(owner)
+        observed = boottime_ns()
+        if owner["start_ticks"] * TICK_NS > observed:
+            raise ValueError("browser client process started after its request")
+        return {
+            "client_pid": owner["pid"], "client_start_ticks": owner["start_ticks"],
+            "client_socket_inode": int(inode),
+            "client_address": peer[0], "client_port": peer[1],
+            "server_address": local[0], "server_port": local[1],
+            "client_ancestry": chain, "observed_boottime_ns": observed,
+            "method": "linux_procfs_tcp_fd",
+        }
 
 
 class ChromeObserver:
@@ -159,7 +269,7 @@ class ChromeObserver:
                 raise ValueError(f"browser process observation raced: {pid}") from error
 
     def finish(self, page_ns, first_resource_ns, last_resource_ns,
-               completion_ns, nonce):
+               completion_ns, nonce, request_origins):
         self.sample()
         if len(self.observed) != 1:
             raise ValueError("browser process image was not uniquely observed")
@@ -176,6 +286,20 @@ class ChromeObserver:
             raise ValueError("browser process and resource exchange times disagree")
         if record["start_boottime_floor_ns"] > page_ns:
             raise ValueError("browser process started after its page request")
+        if type(request_origins) is not list or not request_origins:
+            raise ValueError("browser request origin proof is missing")
+        browser_key = {"pid": record["pid"], "start_ticks": record["start_ticks"]}
+        wrapper_key = {"pid": self.wrapper["pid"],
+                       "start_ticks": self.wrapper["start_ticks"]}
+        for request in request_origins:
+            origin = request["origin"]
+            chain = origin["client_ancestry"]
+            if browser_key not in chain or chain[-1] != wrapper_key:
+                raise ValueError("browser HTTP client is outside selected Chrome process tree")
+            if (origin["client_start_ticks"] * TICK_NS > request["time_ns"] or
+                not self.launched_boottime_ns <= origin["observed_boottime_ns"] <=
+                request["time_ns"] <= record["last_seen_boottime_ns"]):
+                raise ValueError("browser HTTP client observation is outside launch interval")
         image = verify_mapped_image(self.proc_root, record["pid"],
                                     self.selected_binary, self.selected_sha256)
         if image != record["mapped_image"]:
@@ -190,6 +314,8 @@ class ChromeObserver:
             "last_resource_boottime_ns": last_resource_ns,
             "completion_boottime_ns": completion_ns,
             "completion_nonce_sha256": hashlib.sha256(nonce.encode()).hexdigest(),
+            "request_origin_method": "linux_procfs_tcp_fd",
+            "request_origin_count": len(request_origins),
             "selected_image_path": str(self.selected_binary),
             "selected_image_sha256": self.selected_sha256,
         }
