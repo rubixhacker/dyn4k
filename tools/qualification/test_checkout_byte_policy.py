@@ -35,6 +35,19 @@ BASELINE_NUMERICAL_VERIFIER_INPUTS = {
     "tools/numerical/portable/receipt.py",
 }
 
+COMPATIBILITY_VERIFIER_INPUTS = {
+    "tools/compatibility/PinnedCorpusReport.java",
+    "tools/compatibility/fixtures/java_source_projection/frozen-adverse-audit.json",
+    "tools/compatibility/fixtures/java_source_projection/extra/Names.java",
+    "tools/compatibility/fixtures/java_source_projection/org/dyn4j/geometry/simplify/NodeDispatchProbe.java",
+    "tools/compatibility/exception-public-api-projection.json",
+    "tools/compatibility/fixtures/exception_serialization/verify.py",
+    "tools/compatibility/fixtures/exception_serialization/ExceptionSerializationProbe.java",
+    "tools/baseline/fixtures/CopyExceptionAmbiguity.java",
+    "tools/baseline/fixtures/ExtraMethodsAuditFixture.java",
+    "tools/baseline/fixtures/ExtraMethodsProbe.java",
+}
+
 
 def hash_guarded_source_paths():
     corpus = json.loads((REPOSITORY / full_hosted.MANIFEST).read_bytes())
@@ -53,6 +66,7 @@ def hash_guarded_source_paths():
     paths.add(independent_gates.PROSPECTIVE_POLICY_PATH)
     paths.update(BASELINE_NUMERICAL_VERIFIER_INPUTS)
     paths.update(SUSTAINED_VERIFIER_INPUTS)
+    paths.update(COMPATIBILITY_VERIFIER_INPUTS)
     paths.update(verify_candidate_archive.SOURCE_FILES)
 
     tracked = subprocess.check_output(
@@ -69,28 +83,37 @@ def hash_guarded_source_paths():
 
 
 class CheckoutBytePolicyTests(unittest.TestCase):
-    def test_git_autocrlf_true_preserves_hash_guarded_source_inputs(self):
+    def test_fresh_git_autocrlf_true_checkout_preserves_hash_guarded_source_inputs(self):
         candidate = subprocess.check_output(
             ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"], text=True
         ).strip()
         relative_paths = sorted(hash_guarded_source_paths())
         with tempfile.TemporaryDirectory(prefix="dyn4k-autocrlf-") as temporary:
-            prefix = str(Path(temporary)) + "/"
-            request = b"\0".join(path.encode("utf-8") for path in relative_paths) + b"\0"
+            checkout = Path(temporary) / "checkout"
             subprocess.run(
                 ["git", "-C", str(REPOSITORY), "-c", "core.autocrlf=true",
-                 "checkout-index", "--force", "-z", "--stdin", f"--prefix={prefix}"],
-                input=request,
+                 "worktree", "add", "--detach", "--force", str(checkout), candidate],
                 check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-            changed = []
-            for path in relative_paths:
-                expected = subprocess.check_output(
-                    ["git", "-C", str(REPOSITORY), "show", f"{candidate}:{path}"]
+            try:
+                changed = []
+                for path in relative_paths:
+                    expected = subprocess.check_output(
+                        ["git", "-C", str(REPOSITORY), "show", f"{candidate}:{path}"]
+                    )
+                    actual = (checkout / path).read_bytes()
+                    if actual != expected:
+                        changed.append(path)
+            finally:
+                subprocess.run(
+                    ["git", "-C", str(REPOSITORY), "worktree", "remove", "--force",
+                     str(checkout)],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-                actual = (Path(temporary) / path).read_bytes()
-                if actual != expected:
-                    changed.append(path)
 
         if changed:
             self.fail(

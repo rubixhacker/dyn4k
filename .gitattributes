@@ -30,3 +30,15 @@ consumers/performance/build.gradle.kts -text
 consumers/performance/src/main/java/performance/ProviderIdentity.java -text
 consumers/performance/src/main/kotlin/performance/DirectFixture.kt -text
 consumers/performance/src/main/kotlin/performance/DirectPilot.kt -text
+
+# Preserve the exact source bytes checked by the compatibility archive verifier.
+tools/compatibility/PinnedCorpusReport.java -text
+tools/compatibility/fixtures/java_source_projection/frozen-adverse-audit.json -text
+tools/compatibility/fixtures/java_source_projection/extra/Names.java -text
+tools/compatibility/fixtures/java_source_projection/org/dyn4j/geometry/simplify/NodeDispatchProbe.java -text
+tools/compatibility/exception-public-api-projection.json -text
+tools/compatibility/fixtures/exception_serialization/verify.py -text
+tools/compatibility/fixtures/exception_serialization/ExceptionSerializationProbe.java -text
+tools/baseline/fixtures/CopyExceptionAmbiguity.java -text
+tools/baseline/fixtures/ExtraMethodsAuditFixture.java -text
+tools/baseline/fixtures/ExtraMethodsProbe.java -text
