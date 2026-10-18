@@ -58,6 +58,49 @@ class CaptureSourceGuardTest(unittest.TestCase):
         self.assertEqual((output / "source.tar").read_bytes(), canonical)
         self.assertFalse((output / "receipt.json").exists())
 
+    def test_capture_source_tar_ignores_same_type_commit_replacement(self):
+        original = capture_actual.git("rev-parse", "HEAD").decode().strip()
+        source = self.root / "tools/numerical/portable/src/commonTest/kotlin/portable/Tracked.kt"
+        source.write_text("package portable\nclass Substitute\n")
+        subprocess.run(("git", "add", "."), cwd=self.root, check=True)
+        subprocess.run(("git", "-c", "user.name=Capture Test", "-c",
+                        "user.email=capture-test@example.invalid", "commit", "-qm",
+                        "substitute"), cwd=self.root, check=True)
+        substitute = capture_actual.git("rev-parse", "HEAD").decode().strip()
+        subprocess.run(("git", "checkout", "-q", original), cwd=self.root, check=True)
+        subprocess.run(("git", "replace", original, substitute), cwd=self.root, check=True)
+        canonical = capture_actual.git("--no-replace-objects", "-c",
+                                       "core.autocrlf=false", "archive", "--format=tar",
+                                       original)
+        substituted = capture_actual.git("-c", "core.autocrlf=false", "archive",
+                                         "--format=tar", original)
+        self.assertNotEqual(canonical, substituted)
+        temporary = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home())))
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name) / "capture"
+        jdk = Path(temporary.name) / "jdk"
+        (jdk / "bin").mkdir(parents=True)
+        (jdk / "bin/java").write_bytes(b"test executable")
+        real_run = subprocess.run
+
+        def stop_before_execution(command, *args, **kwargs):
+            if command[0] == "git":
+                return real_run(command, *args, **kwargs)
+            return SimpleNamespace(returncode=1)
+
+        with patch.object(capture_actual, "JDK21", jdk), \
+                patch.object(capture_actual, "expected_case_ids", return_value={"method": []}), \
+                patch.object(capture_actual.subprocess, "run", side_effect=stop_before_execution):
+            with self.assertRaisesRegex(CaptureRejected, "publication failed"):
+                capture_actual.run_capture("method", output)
+        self.assertEqual((output / "source.tar").read_bytes(), canonical)
+        self.assertFalse((output / "receipt.json").exists())
+        source.write_text("package portable\nclass Substitute\n")
+        subprocess.run(("git", "add", "."), cwd=self.root, check=True)
+        self.assertEqual(capture_actual.git("status", "--porcelain"), b"")
+        with self.assertRaisesRegex(CaptureRejected, "target source is not clean"):
+            capture_actual.clean_source()
+
     def test_only_exact_generated_roots_are_exempt(self):
         for relative in ("build/cache/generated.bin", ".gradle/cache/state.bin",
                          "dyn4k-core/build/classes/Generated.class",

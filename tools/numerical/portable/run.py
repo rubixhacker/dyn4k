@@ -111,17 +111,19 @@ def git(*args):
 
 
 def clean_identity():
-    status = git("status", "--porcelain", "--untracked-files=all").decode()
+    status = git("--no-replace-objects", "status", "--porcelain",
+                 "--untracked-files=all").decode()
     dirty = status.splitlines()
-    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    ignored = git("--no-replace-objects", "ls-files", "--others", "--ignored",
+                  "--exclude-standard", "-z")
     dirty.extend("ignored " + os.fsdecode(path) for path in ignored.split(b"\0")
                  if path and path not in GENERATED_FILES
                  and not path.startswith(GENERATED_PREFIXES))
     if dirty:
         raise Rejected("source tree is dirty: " + ", ".join(dirty[:5]))
-    return (git("rev-parse", "HEAD").decode().strip(),
-            hashlib.sha256(git("-c", "core.autocrlf=false", "archive", "--format=tar",
-                               "HEAD")).hexdigest())
+    return (git("--no-replace-objects", "rev-parse", "HEAD").decode().strip(),
+            hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false",
+                               "archive", "--format=tar", "HEAD")).hexdigest())
 
 
 def artifacts(host):
