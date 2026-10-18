@@ -1,7 +1,9 @@
 # Prospective portable numerical policy
 
-Status: **ADOPTED, TARGET QUALIFICATION UNPASSED**. The delegated choice was
-[recorded before implementation](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193).
+Status: **CONDITIONAL RULE IMPLEMENTED, TARGET QUALIFICATION UNPASSED**. The
+[initial numerical policy](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193)
+and [conditional orthogonality decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438)
+were recorded before their respective implementations.
 This document covers 318 cases outside the 14 frozen comparisons. The
 machine-readable [catalog](../../tools/numerical/portable/prospective_policy_catalog.json)
 binds every case to its pinned reference SHA-256 and every observed record leaf
@@ -66,7 +68,7 @@ check.
 | `exact_step` | Require finite binary64 `1/hz` in each step callback and the declared step count. |
 | `reject_nonfinite` | Reject a new NaN or infinity. Retain the known Angle reference failure separately as failed physical behavior. |
 | `bounded_position`, `bounded_velocity`, `bounded_angular_velocity` | Bound each position component by 5e-6 m, each velocity by 5e-6/`dt` m/s and angular velocity by 3.490658503988659e-5/`dt` rad/s. For the ten free-motion cases, use 2e-9 m and 2e-7 rad with the same `dt` propagation. Boundary geometry positions use the tighter represented-gap rule below. |
-| `derived_transform`, `derived_rotation` | First check each run's translation aliases and matrix `[c,-s,x,s,c,y]`; check `c²+s²` against 1 with 32 binary64 ulps and wrapped angle against `acos(c)` with sign from `s`. Then use the position/angular budgets across runs; compare angles modulo 2π. |
+| `derived_transform`, `derived_rotation` | First check each run's translation aliases and matrix `[c,-s,x,s,c,y]`; check `c²+s²` against 1 with the conditional source-derived `U(step × R)` binary64-ulps envelope below and wrapped angle against `acos(c)` with sign from `s`. Then use the unchanged position/angular budgets across runs; compare angles modulo 2π. |
 | `bounded_geometry_distance`, `bounded_contact_depth` | Require exact detected/separated branches. Use 1.0536712127723509e-8 m for ordinary GJK distance and 5e-6 m for dynamic contact depth. Boundary cases use the smaller of 8 ulps at the represented coordinate and one quarter of the nonzero represented gap. Zero gap uses the 8-ulp term. |
 | `bounded_direction` | Require the same normal orientation and at most 3.490658503988659e-5 Euclidean component error; independently check unit length within 32 ulps where a normal is defined. |
 | `bounded_toi_distance`, `bounded_toi_time` | Require the same callback sequence, finite distance within 4.806217383937352e-6 m, and normalized impact time within `min(0.001, 4.806217383937352e-6 / represented_sweep_distance_m)`. Require time in [0,1]. |
@@ -80,6 +82,53 @@ Angle joint's zero reaction force, require finite numerical zero before a
 force tolerance. Computed and alias finite zero accepts either sign. Explicit
 signed zero in input and setup remains exact. Finite configured numbers accept
 equivalent JSON number spellings such as `60` and `60.0`.
+
+### Conditional transform orthogonality
+
+The original fixed 32-ulp transform check produced 41 `FAILED_DERIVED`
+reference self-check results. It remains historical evidence. The
+conditional decision selects a source opportunity cap `R` per case and
+`N=step × R` for a state at that step. The catalog lists every one of the
+318 case caps: one case has `R=1`, 140 have `R=5`, 92 have `R=7`, 61 have
+`R=9`, and 24 have `R=11`. The comparator checks each entry against the
+pinned case family, joint type and an immutable map digest. The largest
+`N` is 6600. The 14 frozen cases retain their separate policy.
+
+Let `u=2^-53`, `q=ulp(1)=2u`, `gamma3=3u/(1-3u)`, and
+`delta=4√2u+8u²`. Set `a=√(1+delta)(1+√2 gamma3)` and
+`b=√(1-delta)(1-√2 gamma3)`. The permitted squared-norm error is
+`U(N)q`, where
+`U(N)=ceil(max((1+gamma3)a^(2N)-1, 1-(1-gamma3)b^(2N))/q)`.
+The implementation encloses square roots with integer arithmetic at
+100 decimal places and rounds all accumulated powers outward. This makes
+the ceiling safe at `N=4200`, where `U=29700` and the unrounded value is
+about 29699.9848. `U(0)=2`, `U(1)=9`, `U(2)=16`, and `U(6600)=46671`.
+The per-step cap comes from one integration rotation and at most two
+position iterations. Each iteration has at most two contact-point
+rotations per body plus the source-derived joint solver opportunities.
+These are upper bounds, not counts inferred from candidate errors.
+
+The pinned [incremental rotate source](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Transform.java#L101-L150)
+uses two products and an add or subtract per component, then clamps each
+component to `[-1,1]`. The [TOI world path](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/world/AbstractPhysicsWorld.java#L1685-L1709)
+instead invokes [direct-trig `Transform.lerp`](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Transform.java#L674-L715).
+A finite, verified lerp result resets orientation error. Its own rounded
+norm evaluation has a five-ulp envelope. An unverified or nonfinite
+interpolated angle blocks the premise.
+
+This bound assumes each target's `sin` and `cos` is within `2u` absolute
+error at every actual computed angle, normal orientation intermediates
+obey round-to-nearest binary64, subnormal and zero products are handled as
+audited, and FMA or reassociation stays within the three-operation error
+envelope. The 13-value spacing probe does not prove those premises.
+The optional `portable-rotation-audit/1` structural verifier checks exact
+binary64 call records, angle or `Rotation` pair inputs, sequence, body/step
+chains, rotation caps, clamp results, accepted TOI reset bodies, finite
+fields and normal arithmetic envelopes. It reports each producer, trig,
+rounding, subnormal, zero-product and FMA premise as `UNPASSED`. Its
+supplied bytes are not yet sealed to a target process or checked by an
+independent trig interval oracle. A valid synthetic audit cannot grant a
+target pass.
 
 These formulas follow the [body's symplectic Euler velocity update and
 position integration](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/dynamics/AbstractPhysicsBody.java#L726-L827).
@@ -165,7 +214,8 @@ an individual case `PASSED_CASE_POLICY`.
 
 Unit controls exercise every distinct numeric rule inside, at, and beyond its
 bound; free-motion caps, geometry represented gaps, TOI time range, normal
-orientation and unit length, 32-ulp transform checks, mode changes, branch
+orientation and unit length, conditional transform checks at `N=1`, `N=2`
+and `N=4200`, direct-reset checks, mode changes, branch
 flips, explicit input negative zero, computed zero, NaN/infinity, missing and
 extra cases/paths/receipts, and stale source, artifact, runtime, fixture and
 trace identities. The target's own trace demonstrates its serialized binary64
@@ -176,18 +226,20 @@ a separate error suite remains necessary.
 
 ## Reference self-check and remaining work
 
-Applying the adopted comparator to each pinned reference slice against itself
-gave 272 within policy, 41 `FAILED_DERIVED`, four `UNPASSED_PREMISE`, and one
-`FAILED_PHYSICAL`. All 41 derived failures are the adopted
-`c²+s²` within 32 ulps invariant on joint trajectories. Disabling only that
-check in a read-only diagnostic raised the within-policy count to 313; the
-adopted check remains enabled. The four boundary cases have nonzero declared
-deltas that round to zero in their represented setup. These source self-checks
-are controls, not target comparisons or qualifications. The Angle failure and
-the separate default sleep/wake failure remain failed.
+The historical fixed-32 self-check gave 272 within policy, 41
+`FAILED_DERIVED`, four `UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`.
+With the recorded conditional U(N) rule, the pinned 318 reference slices
+compared with themselves yield **313 within the numeric envelope**, four
+`UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`. The four boundary cases have
+nonzero declared deltas that round to zero in their represented setup.
+The Angle case still becomes nonfinite. Every reference self-check case
+retains `qualification: UNPASSED`; no candidate target was compared.
 
-The coordinator must resolve the 41 source-positive-control conflicts on the
-[numerical acceptance ticket](https://github.com/rubixhacker/dyn4k/issues/7)
-before those cases can pass this policy. The 14 frozen replay and seven-host
-runtime qualification remain separate evidence. No target comparison was run
-for this document.
+The original portable owner must provide reviewed target arithmetic
+instrumentation and an execution-time seal of the raw call stream, executed
+test payload, classpath or binary, runtime, artifacts, trace, XML and logs.
+An independent high-precision interval oracle must then check each actual
+angle and result, including zero/subnormal behavior and compiler
+contraction. Until that evidence exists, `compare_host` keeps
+`PASSED_CASE_POLICY` at zero even when a probe XML and receipt agree.
+The 14 frozen replay and seven-host runtime qualification remain separate.

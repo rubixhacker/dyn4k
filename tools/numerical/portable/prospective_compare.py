@@ -8,6 +8,7 @@ from itertools import zip_longest
 from pathlib import Path
 
 from cases import declared_cases
+from orthogonality import orthogonality_ulps, source_rotation_cap, validate_rotation_audit
 from reference_diagnostic import structural_differences, value_differences
 from receipt import Rejected, digest, exact, records
 
@@ -27,6 +28,7 @@ APPROVED_RULE_IDS = frozenset((
     "exact_step", "exact_structure", "reject_nonfinite"))
 APPROVED_RULES_SHA256 = "dd9099d762ef22c9b6782a96c61afb80d023b56ae09ce3a6d925c782f1573441"
 APPROVED_PATH_MAP_SHA256 = "da62dab0720ad551f6cf3d802cd3d2419f889ab88f63f5fd56268fb0417c269e"
+APPROVED_ROTATION_CAPS_SHA256 = "3777a4121028ce3f8005450ee36163cb3731efbe7c090632b7d067b8419d6127"
 PROBE_METHOD = "geometryCollisionBoundaryAndScale"
 PROBE_VALUES = {
     "schema": "portable-binary64-probe/1",
@@ -53,8 +55,10 @@ def load_policy_catalog(path=None):
 
 
 def verify_policy_catalog(catalog, manifest, cases, frozen_ids):
-    if catalog.get("schema") != "portable-prospective-policy-adopted/1" or \
-            catalog.get("decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193" or \
+    if catalog.get("schema") != "portable-prospective-policy-conditional/2" or \
+            catalog.get("decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438" or \
+            catalog.get("prior_decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193" or \
+            catalog.get("orthogonality_policy") != "source-derived-u-n/1" or \
             catalog.get("qualification") != "UNPASSED":
         raise Rejected("prospective policy catalog adoption or qualification differs")
     if catalog.get("baseline_trace_sha256") != manifest.get("trace_sha256"):
@@ -68,6 +72,15 @@ def verify_policy_catalog(catalog, manifest, cases, frozen_ids):
     if len(expected) != 318 or set(catalog.get("cases", {})) != set(expected) or \
             set(manifest.get("case_sha256", {})) != {case["id"] for case in cases}:
         raise Rejected("prospective policy case identity differs")
+    caps = catalog.get("rotation_caps")
+    if not isinstance(caps, dict) or set(caps) != set(expected) or any(
+            type(caps[case_id]) is not int or caps[case_id] != source_rotation_cap(case)
+            for case_id, case in expected.items()):
+        raise Rejected("prospective source rotation cap differs")
+    cap_payload = json.dumps(caps, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode()
+    if hashlib.sha256(cap_payload).hexdigest() != APPROVED_ROTATION_CAPS_SHA256:
+        raise Rejected("prospective rotation cap inventory differs")
     paths = catalog.get("paths")
     path_sets = catalog.get("path_sets")
     proposals = catalog.get("rule_proposals")
@@ -348,7 +361,7 @@ def _sweep_distance(case, header, previous_state):
     return sweep
 
 
-def _transform_invariant(transform):
+def _transform_invariant(transform, limit_ulps):
     if not isinstance(transform, dict):
         raise Difference("FAILED_DERIVED", "transform is missing")
     required = ("getCost", "getSint", "getRotationAngle", "getTranslation",
@@ -365,7 +378,7 @@ def _transform_invariant(transform):
             not _numeric_identity(a, b) for a, b in zip(
                 [x, y, c, -s, x, s, c, y], [*translation, *values])):
         raise Difference("FAILED_DERIVED", "transform aliases differ")
-    if abs(c * c + s * s - 1.0) > 32 * math.ulp(1.0):
+    if abs(c * c + s * s - 1.0) > limit_ulps * math.ulp(1.0):
         raise Difference("FAILED_DERIVED", "transform rotation is not orthogonal")
     angle = _finite_number(transform["getRotationAngle"], "transform.angle")
     expected = math.copysign(math.acos(max(-1.0, min(1.0, c))), s)
@@ -373,13 +386,15 @@ def _transform_invariant(transform):
         raise Difference("FAILED_DERIVED", "transform angle differs from cosine and sine")
 
 
-def _same_run_state(row, header, previous_state):
+def _same_run_state(row, header, previous_state, rotation_cap):
     state = row["state"]
+    current_limit = orthogonality_ulps(row["step"] * rotation_cap)
+    previous_limit = orthogonality_ulps((row["step"] - 1) * rotation_cap)
     for index, body in enumerate(state["bodies"]):
         prior_body = (header["initial"]["bodies"][index] if previous_state is None
                       else previous_state["bodies"][index])
-        for name in ("transform", "previousTransform"):
-            _transform_invariant(body[name])
+        _transform_invariant(body["transform"], current_limit)
+        _transform_invariant(body["previousTransform"], previous_limit)
         expected_previous = prior_body["transform"]
         if any(not _numeric_identity(a, b) for a, b in zip(
                 body["previousTransform"]["getValues"], expected_previous["getValues"])):
@@ -552,10 +567,15 @@ def _policy_limit(rule, path, location, case, header, previous_state,
     raise Difference("FAILED_POLICY", f"unhandled rule: {rule}")
 
 
-def compare_policy_case(reference, candidate, case, catalog):
+def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None):
     result = {"case_id": case["id"], "status": "FAILED_COVERAGE", "qualification": "UNPASSED",
               "records": 0, "states": 0, "rule_checks": {}, "bounded_checks": 0,
-              "exact_numeric_values": 0, "different_numeric_values": 0}
+              "exact_numeric_values": 0, "different_numeric_values": 0,
+              "target_arithmetic": "UNPASSED_UNBOUND_AUDIT",
+              "target_premises": {name: "UNPASSED" for name in
+                                  ("producer", "trig", "rounding", "subnormal",
+                                   "zero_product", "fma")},
+              "rotation_audit": "UNPASSED_NOT_EXECUTED"}
     expected_paths = {catalog["paths"][index]["path"]: catalog["paths"][index]
                       for index in catalog["path_sets"][catalog["cases"][case["id"]]["path_set"]]}
     observed_paths = set()
@@ -566,10 +586,13 @@ def compare_policy_case(reference, candidate, case, catalog):
     current_step = 0
     last_order = -1
     events = 0
+    actions_seen = []
+    candidate_states = {}
     first_kind = None
     last_kind = None
     reference_modes = None
     candidate_modes = None
+    rotation_cap = None
 
     def walk(left, right, path, body_index=None, location=None):
         if isinstance(left, dict) and "nonfinite" in left:
@@ -655,6 +678,10 @@ def compare_policy_case(reference, candidate, case, catalog):
                 result["different_numeric_values"] += 1
 
     try:
+        rotation_cap = catalog["rotation_caps"][case["id"]]
+        if type(rotation_cap) is not int or rotation_cap not in (1, 5, 7, 9, 11) or \
+                case["steps"] * rotation_cap > 6600:
+            raise Difference("FAILED_POLICY", "case rotation cap is invalid")
         if not expected_paths or any(entry["rule"] not in catalog["rule_proposals"] or
                                      entry["rule"] == "bounded_scalar" for entry in expected_paths.values()):
             raise Difference("FAILED_POLICY", "case has missing or unknown rules")
@@ -708,15 +735,17 @@ def compare_policy_case(reference, candidate, case, catalog):
                                          "P-J-Angle-ratio-limits-off--1.0" else "FAILED_NONFINITE",
                                          "pinned reference has nonfinite physical state")
                     current_reference = left["state"]
+                    candidate_states[step] = right["state"]
                     _same_run_configuration(left, header, reference_modes)
                     _same_run_configuration(right, header, candidate_modes)
-                    _same_run_state(left, header, previous_reference) if all(
+                    _same_run_state(left, header, previous_reference, rotation_cap) if all(
                         "transform" in body for body in left["state"]["bodies"]) else None
-                    _same_run_state(right, header, previous_candidate) if all(
+                    _same_run_state(right, header, previous_candidate, rotation_cap) if all(
                         "transform" in body for body in right["state"]["bodies"]) else None
                 else:
                     events += 1
                     if kind == "action":
+                        actions_seen.append(step)
                         _advance_modes(left, case, reference_modes)
                         _advance_modes(right, case, candidate_modes)
             elif kind == "case-end":
@@ -736,6 +765,15 @@ def compare_policy_case(reference, candidate, case, catalog):
                 result["records"] == 0 or result["states"] != case["steps"] or
                 observed_paths != set(expected_paths)):
             raise Difference("FAILED_COVERAGE", "case path or state coverage differs")
+        if case.get("expected_actions") is not None and actions_seen != case["expected_actions"]:
+            raise Difference("FAILED_COVERAGE", "case action schedule differs")
+        if rotation_audit is not None:
+            try:
+                validate_rotation_audit(rotation_audit, case, header, candidate_states,
+                                        rotation_cap)
+            except (KeyError, TypeError, ValueError, OverflowError) as error:
+                raise Difference("UNPASSED_PREMISE", str(error)) from error
+            result["rotation_audit"] = "STRUCTURE_PASSED_ORACLE_UNPASSED"
         result["status"] = "PASSED_NUMERICAL_POLICY"
     except Difference as error:
         result["status"] = error.status

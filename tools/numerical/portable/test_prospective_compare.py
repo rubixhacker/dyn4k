@@ -1,5 +1,6 @@
 import json
 import math
+import struct
 import tempfile
 import unittest
 from copy import deepcopy
@@ -106,12 +107,26 @@ class ProspectiveComparisonTest(unittest.TestCase):
 
     def test_policy_catalog_covers_every_prospective_case_and_path(self):
         from cases import declared_cases
+        from orthogonality import orthogonality_ulps, source_rotation_cap
         catalog = load_policy_catalog()
         cases = declared_cases()
         frozen = {case["id"] for case in cases if case["require_frozen_projection"]}
         manifest = self.policy_manifest(catalog, frozen)
         verify_policy_catalog(catalog, manifest, cases, frozen)
         self.assertEqual(len(catalog["cases"]), 318)
+        self.assertEqual(len(catalog["rotation_caps"]), 318)
+        self.assertEqual({cap: list(catalog["rotation_caps"].values()).count(cap)
+                          for cap in (1, 5, 7, 9, 11)},
+                         {1: 1, 5: 140, 7: 92, 9: 61, 11: 24})
+        self.assertTrue(all(catalog["rotation_caps"][case["id"]] == source_rotation_cap(case)
+                            for case in cases if case["id"] in catalog["cases"]))
+        self.assertEqual([(n, orthogonality_ulps(n)) for n in
+                          (0, 1, 2, 5, 150, 300, 600, 1200, 1500, 3000,
+                           4200, 5400, 6000, 6600)],
+                         [(0, 2), (1, 9), (2, 16), (5, 37), (150, 1063),
+                          (300, 2123), (600, 4245), (1200, 8487), (1500, 10609),
+                          (3000, 21215), (4200, 29700), (5400, 38186),
+                          (6000, 42428), (6600, 46671)])
         self.assertEqual(catalog["baseline_trace_sha256"],
                          "f31dc4a0a63e96a7212a58df02c7f1be539756532603e5f5b51e528dd7b84d07")
         self.assertTrue(all(catalog["paths"][index]["rule"]
@@ -169,6 +184,17 @@ class ProspectiveComparisonTest(unittest.TestCase):
         altered = json.loads(json.dumps(catalog))
         altered["qualification"] = "PASSED"
         with self.assertRaisesRegex(Exception, "qualification"):
+            verify_policy_catalog(altered, manifest, cases, frozen)
+        for mutate in (lambda value: value.pop("motion-forces-60"),
+                       lambda value: value.update({"motion-forces-60": 5}),
+                       lambda value: value.update({"motion-forces-60": True})):
+            altered = deepcopy(catalog)
+            mutate(altered["rotation_caps"])
+            with self.assertRaisesRegex(Exception, "rotation cap"):
+                verify_policy_catalog(altered, manifest, cases, frozen)
+        altered = deepcopy(catalog)
+        altered["decision"] = altered["prior_decision"]
+        with self.assertRaisesRegex(Exception, "adoption"):
             verify_policy_catalog(altered, manifest, cases, frozen)
 
     def test_reference_path_inventory_rejects_an_added_channel(self):
@@ -674,8 +700,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 1.0 + ulps * math.ulp(1.0), 0.0]
             self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
                              expected)
-        for ulps, expected in ((16, "PASSED_NUMERICAL_POLICY"),
-                               (17, "FAILED_DERIVED")):
+        for ulps, expected in ((4, "PASSED_NUMERICAL_POLICY"),
+                               (5, "FAILED_DERIVED")):
             candidate = json.loads(json.dumps(rows))
             body = candidate[2]["state"]["bodies"][0]
             body["transform"].update(transform(c=1.0 + ulps * math.ulp(1.0)))
@@ -701,6 +727,331 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 transform(x=factor * 5e-6))
             self.assertEqual(self.policy_result(rows, candidate, case, catalog)["status"],
                              expected)
+
+    def test_conditional_orthogonality_uses_two_step_source_cap(self):
+        rows, case, _ = self.policy_rows()
+        case.update(id="motion-forces-60", family="free-motion", steps=2,
+                    expected_actions=[])
+        for row in rows:
+            row["id"] = case["id"]
+        rows[0].update(family=case["family"], steps=2)
+
+        def transform(c=1.0, s=0.0):
+            return {"getCost": c, "getSint": s,
+                    "getRotationAngle": math.copysign(math.acos(c), s),
+                    "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                    "getTranslationY": 0.0, "getValues": [c, -s, 0.0, s, c, 0.0]}
+
+        rows[0]["initial"]["bodies"] = [rows[0]["initial"]["bodies"][0]]
+        rows[0]["initial"]["bodies"][0]["transform"] = transform()
+        rows[0]["setup"]["bodies"][0]["transform"] = transform()
+        body = rows[2]["state"]["bodies"][0]
+        body.update(transform=transform(), previousTransform=transform(),
+                    velocity=[0.0, 0.0], angularVelocity=0.0,
+                    linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+                    kineticEnergy=0.0)
+        second_event = deepcopy(rows[1])
+        second_event["step"] = 2
+        second_state = deepcopy(rows[2])
+        second_state["step"] = 2
+        rows[3:3] = [second_event, second_state]
+        rows[-1].update(steps=2, events=2)
+        catalog = self.small_policy(rows, {
+            "state.state.bodies[].transform.getCost": "derived_transform",
+            "state.state.bodies[].transform.getValues[]": "derived_transform",
+            "event.step.begin.payload": "exact_step"})
+        catalog["cases"] = {case["id"]: {"path_set": 0}}
+        catalog["rotation_caps"] = {case["id"]: 1}
+        q = math.ulp(1.0)
+        for error_ulps, status in ((14, "PASSED_NUMERICAL_POLICY"),
+                                   (16, "PASSED_NUMERICAL_POLICY"),
+                                   (18, "FAILED_DERIVED")):
+            with self.subTest(error_ulps=error_ulps):
+                same = deepcopy(rows)
+                same[4]["state"]["bodies"][0]["transform"] = transform(
+                    s=math.sqrt(error_ulps * q))
+                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                                 status)
+        for component_ulps, status in ((7, "PASSED_NUMERICAL_POLICY"),
+                                       (8, "PASSED_NUMERICAL_POLICY"),
+                                       (9, "FAILED_DERIVED")):
+            with self.subTest(negative_component_ulps=component_ulps):
+                same = deepcopy(rows)
+                same[4]["state"]["bodies"][0]["transform"] = transform(
+                    c=1.0 - component_ulps * q)
+                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                                 status)
+        same = deepcopy(rows)
+        same[2]["state"]["bodies"][0]["transform"] = transform(s=2 ** -24)
+        self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                         "FAILED_DERIVED")
+        for initial, status in ((transform(), "PASSED_NUMERICAL_POLICY"),
+                                (transform(s=math.sqrt(2 * q)),
+                                 "PASSED_NUMERICAL_POLICY"),
+                                (transform(s=math.sqrt(3 * q)), "FAILED_DERIVED"),
+                                (transform(c=1.0 - q), "PASSED_NUMERICAL_POLICY"),
+                                (transform(c=1.0 - 2 * q), "FAILED_DERIVED")):
+            with self.subTest(zero_rotation_initial=initial["getValues"]):
+                same = deepcopy(rows)
+                same[0]["initial"]["bodies"][0]["transform"] = initial
+                same[2]["state"]["bodies"][0]["previousTransform"] = initial
+                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                                 status)
+
+    def test_policy_case_requires_declared_action_steps_even_in_identical_runs(self):
+        rows, case, _ = self.policy_rows()
+        case["expected_actions"] = [1]
+        catalog = self.small_policy(rows, {"event.step.begin.payload": "exact_step"})
+        self.assertEqual(self.policy_result(rows, rows, case, catalog)["status"],
+                         "FAILED_COVERAGE")
+        extra = deepcopy(rows)
+        extra.insert(2, {"kind": "action", "id": "one", "step": 1, "order": 1,
+                         "name": "force-and-torque", "payload": 0.0})
+        extra[3]["order"] = 2
+        extra[-1]["events"] = 2
+        case["expected_actions"] = []
+        extra_catalog = self.small_policy(extra, {"event.step.begin.payload": "exact_step"})
+        self.assertEqual(self.policy_result(extra, extra, case, extra_catalog)["status"],
+                         "FAILED_COVERAGE")
+        case["expected_actions"] = [1]
+        reordered = deepcopy(extra)
+        reordered[1], reordered[2] = reordered[2], reordered[1]
+        reordered_catalog = self.small_policy(reordered,
+                                              {"event.step.begin.payload": "exact_step"})
+        self.assertEqual(self.policy_result(reordered, reordered, case,
+                                            reordered_catalog)["status"],
+                         "FAILED_COVERAGE")
+
+    def test_public_case_seam_uses_high_precision_4200_rotation_ceiling(self):
+        rows, case, _ = self.policy_rows()
+        case.update(id="joint-Angle-initial", steps=600, expected_actions=[])
+        case["input"] = {"jointType": "Angle", "mode": "initial"}
+        rows[0].update(id=case["id"], steps=600, input=case["input"])
+
+        def transform(s=0.0):
+            return {"getCost": 1.0, "getSint": s, "getRotationAngle": 0.0,
+                    "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                    "getTranslationY": 0.0,
+                    "getValues": [1.0, -s, 0.0, s, 1.0, 0.0]}
+
+        rows[0]["initial"]["bodies"] = [{"transform": transform()}]
+        rows[0]["setup"]["bodies"][0]["transform"] = transform()
+        state = rows[2]["state"]["bodies"][0]
+        state.update(transform=transform(), previousTransform=transform(),
+                     velocity=[0.0, 0.0], angularVelocity=0.0,
+                     linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+                     kineticEnergy=0.0)
+        rows = [rows[0]] + [record for step in range(1, 601)
+                            for record in ({**deepcopy(rows[1]), "step": step},
+                                           {**deepcopy(rows[2]), "step": step})] + [
+                                {"kind": "case-end", "id": case["id"],
+                                 "steps": 600, "events": 600}]
+        for row in rows[1:-1]:
+            row["id"] = case["id"]
+        catalog = self.small_policy(rows, {"event.step.begin.payload": "exact_step"})
+        catalog["cases"] = {case["id"]: {"path_set": 0}}
+        catalog["rotation_caps"] = {case["id"]: 7}
+        q = math.ulp(1.0)
+        for error_ulps, status in ((29699, "PASSED_NUMERICAL_POLICY"),
+                                   (29700, "PASSED_NUMERICAL_POLICY"),
+                                   (29701, "FAILED_DERIVED")):
+            with self.subTest(error_ulps=error_ulps):
+                same = deepcopy(rows)
+                last = same[-2]["state"]["bodies"][0]
+                last["transform"] = transform(math.sqrt(error_ulps * q))
+                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                                 status)
+
+    def test_rotation_audit_structure_clamp_reset_and_count_controls(self):
+        rows, case, _ = self.policy_rows()
+
+        def transform(c=1.0, s=0.0):
+            return {"getCost": c, "getSint": s, "getRotationAngle": 0.0,
+                    "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                    "getTranslationY": 0.0, "getValues": [c, -s, 0.0, s, c, 0.0]}
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        rows[0]["initial"]["bodies"] = [rows[0]["initial"]["bodies"][0]]
+        rows[0]["initial"]["bodies"][0]["transform"] = transform()
+        rows[0]["setup"]["bodies"][0]["transform"] = transform()
+        rows[2]["state"]["bodies"][0].update(
+            transform=transform(), previousTransform=transform(),
+            velocity=[0.0, 0.0], angularVelocity=0.0,
+            linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+            kineticEnergy=0.0)
+        catalog = self.small_policy(rows, {"event.step.begin.payload": "exact_step"})
+        one = [bits(1.0), bits(0.0)]
+        call = {"sequence": 0, "step": 1, "body_id": "b0", "kind": "rotate",
+                "branch": "integrate", "input_kind": "angle", "angle_bits": bits(0.0),
+                "pre": one, "trig": one, "raw": one, "post": one,
+                "clamp": [False, False]}
+        audit = {"schema": "portable-rotation-audit/1", "case_id": "one",
+                 "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+                 "declared_calls": 1, "accepted_toi_resets": [], "calls": [call]}
+        result = self.policy_result(rows, rows, case, catalog, rotation_audit=audit)
+        self.assertEqual(result["status"], "PASSED_NUMERICAL_POLICY", result)
+        self.assertEqual(result["target_arithmetic"], "UNPASSED_UNBOUND_AUDIT")
+        self.assertEqual(result["target_premises"], {
+            name: "UNPASSED" for name in
+            ("producer", "trig", "rounding", "subnormal", "zero_product", "fma")})
+        pair_input = deepcopy(audit)
+        pair_call = pair_input["calls"][0]
+        pair_call["input_kind"] = "pair"
+        pair_call["rotation_input"] = one
+        pair_call.pop("angle_bits")
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=pair_input)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        pair_call["rotation_input"] = [bits(-1.0), bits(0.0)]
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=pair_input)["status"],
+                         "UNPASSED_PREMISE")
+
+        mutations = []
+        missing = deepcopy(audit)
+        missing["calls"] = []
+        mutations.append(missing)
+        extra = deepcopy(audit)
+        extra["declared_calls"] = 2
+        extra["calls"].append({**deepcopy(call), "sequence": 1})
+        mutations.append(extra)
+        reordered = deepcopy(audit)
+        reordered["calls"][0]["sequence"] = 1
+        mutations.append(reordered)
+        malformed = deepcopy(audit)
+        malformed["calls"] = [None]
+        mutations.append(malformed)
+        zero_product = deepcopy(audit)
+        zero_product["calls"][0]["raw"][1] = bits(math.ulp(1.0))
+        mutations.append(zero_product)
+        signed_zero = deepcopy(audit)
+        signed_zero["calls"][0]["pre"][1] = bits(-0.0)
+        mutations.append(signed_zero)
+        bad_clamp = deepcopy(audit)
+        bad_clamp["calls"][0].update(trig=[bits(1.0 + math.ulp(1.0)), bits(0.0)],
+                                      raw=[bits(1.0 + math.ulp(1.0)), bits(0.0)],
+                                      clamp=[True, False],
+                                      post=[bits(1.0 + math.ulp(1.0)), bits(0.0)])
+        mutations.append(bad_clamp)
+        missing_reset = deepcopy(audit)
+        missing_reset["accepted_toi_resets"] = [[1, "b0"]]
+        mutations.append(missing_reset)
+        nonfinite = deepcopy(audit)
+        nonfinite["calls"][0]["angle_bits"] = bits(math.inf)
+        mutations.append(nonfinite)
+        subnormal = deepcopy(audit)
+        subnormal["calls"][0]["trig"][1] = bits(math.ulp(0.0))
+        mutations.append(subnormal)
+        for index, changed in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                                    rotation_audit=changed)["status"],
+                                 "UNPASSED_PREMISE")
+
+        clamped = deepcopy(audit)
+        clamped["calls"][0].update(trig=[bits(1.0 + math.ulp(1.0)), bits(0.0)],
+                                     raw=[bits(1.0 + math.ulp(1.0)), bits(0.0)],
+                                     clamp=[True, False])
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=clamped)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        reset = deepcopy(audit)
+        reset["accepted_toi_resets"] = [[1, "b0"]]
+        reset["calls"][0] = {"sequence": 0, "step": 1, "body_id": "b0",
+                             "kind": "lerp-reset", "branch": "toi",
+                             "alpha_bits": bits(0.0), "start_angle_bits": bits(0.0),
+                             "end_angle_bits": bits(0.0), "diff_bits": bits(0.0),
+                             "angle_bits": bits(0.0), "pre": one, "trig": one,
+                             "post": one}
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=reset)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        for error_ulps, status in ((3, "PASSED_NUMERICAL_POLICY"),
+                                   (5, "PASSED_NUMERICAL_POLICY"),
+                                   (7, "UNPASSED_PREMISE")):
+            with self.subTest(direct_reset_ulps=error_ulps):
+                same = deepcopy(rows)
+                changed = deepcopy(reset)
+                s = math.sqrt(error_ulps * math.ulp(1.0))
+                same[2]["state"]["bodies"][0]["transform"] = transform(s=s)
+                changed["calls"][0]["trig"] = [bits(1.0), bits(s)]
+                changed["calls"][0]["post"] = [bits(1.0), bits(s)]
+                self.assertEqual(self.policy_result(same, same, case, catalog,
+                                                    rotation_audit=changed)["status"], status)
+        extra_reset = deepcopy(reset)
+        extra_reset["declared_calls"] = 2
+        extra_reset["calls"].append({**deepcopy(reset["calls"][0]), "sequence": 1})
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=extra_reset)["status"],
+                         "UNPASSED_PREMISE")
+        reset["calls"][0]["kind"] = "rotate"
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=reset)["status"],
+                         "UNPASSED_PREMISE")
+
+    def test_ccd_toi_reset_requires_the_accepted_source_branch(self):
+        from cases import declared_cases
+        case = next(row for row in declared_cases() if row["id"] == "ccd-circle-ALL-30")
+        rows, _, _ = self.policy_rows()
+
+        def transform():
+            return {"getCost": 1.0, "getSint": 0.0, "getRotationAngle": 0.0,
+                    "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                    "getTranslationY": 0.0,
+                    "getValues": [1.0, -0.0, 0.0, 0.0, 1.0, 0.0]}
+
+        rows[0].update(id=case["id"], family=case["family"], profile=case["profile"],
+                       hz=case["hz"], steps=case["steps"], input=case["input"],
+                       dt=1 / case["hz"])
+        rows[0]["initial"]["bodies"] = [{"transform": transform()}]
+        rows[0]["setup"]["bodies"][0]["transform"] = transform()
+        rows[1]["payload"] = 1 / case["hz"]
+        rows[2]["state"]["bodies"][0].update(
+            transform=transform(), previousTransform=transform(),
+            velocity=[0.0, 0.0], angularVelocity=0.0,
+            linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+            kineticEnergy=0.0)
+        stream = [rows[0]]
+        for step in range(1, case["steps"] + 1):
+            event = deepcopy(rows[1])
+            state = deepcopy(rows[2])
+            event.update(id=case["id"], step=step)
+            state.update(id=case["id"], step=step)
+            stream.append(event)
+            if step == 1:
+                stream.append({"kind": "event", "id": case["id"], "step": 1,
+                               "order": 1, "name": "toi.payload.bodies", "payload": 0.5})
+                state["order"] = 2
+            stream.append(state)
+        stream.append({"kind": "case-end", "id": case["id"],
+                       "steps": case["steps"], "events": case["steps"] + 1})
+        catalog = self.small_policy(stream, {"event.step.begin.payload": "exact_step"})
+        catalog["cases"] = {case["id"]: {"path_set": 0}}
+        catalog["rotation_caps"] = {case["id"]: 5}
+        one = ["3ff0000000000000", "0000000000000000"]
+        reset_call = {"sequence": 0, "step": 1, "body_id": "b0",
+                      "kind": "lerp-reset", "branch": "toi",
+                      "alpha_bits": one[1], "start_angle_bits": one[1],
+                      "end_angle_bits": one[1], "diff_bits": one[1],
+                      "angle_bits": one[1], "pre": one, "trig": one, "post": one}
+        audit = {"schema": "portable-rotation-audit/1", "case_id": case["id"],
+                 "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+                 "declared_calls": 1, "accepted_toi_resets": [[1, "b0"]],
+                 "calls": [reset_call]}
+        self.assertEqual(self.policy_result(stream, stream, case, catalog,
+                                            rotation_audit=audit)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        for changed in (dict(audit, calls=[], declared_calls=0),
+                        dict(audit, calls=[dict(reset_call, kind="rotate")])):
+            self.assertEqual(self.policy_result(stream, stream, case, catalog,
+                                                rotation_audit=changed)["status"],
+                             "UNPASSED_PREMISE")
+        vetoed = dict(audit, accepted_toi_resets=[], calls=[], declared_calls=0)
+        self.assertEqual(self.policy_result(stream, stream, case, catalog,
+                                            rotation_audit=vetoed)["status"],
+                         "PASSED_NUMERICAL_POLICY")
 
     def test_geometry_represented_gap_and_toi_range_premises(self):
         rows, case, _ = self.policy_rows()
@@ -859,6 +1210,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
         rows[2]["state"]["bodies"][0]["kineticEnergy"] = {"nonfinite": "Infinity"}
         catalog = self.small_policy(rows, {"event.step.begin.payload": "exact_step"})
         catalog["cases"] = {case_id: catalog["cases"].pop("one")}
+        catalog["rotation_caps"] = {case_id: 7}
         self.assertEqual(self.policy_result(rows, rows, case, catalog)["status"],
                          "FAILED_PHYSICAL")
     def policy_rows(self):
@@ -883,10 +1235,11 @@ class ProspectiveComparisonTest(unittest.TestCase):
             "state.state.bodies[].position[]": "bounded_position",
             "event.step.begin.payload": "exact_step"})
 
-    def policy_result(self, reference, candidate, case, catalog):
+    def policy_result(self, reference, candidate, case, catalog, rotation_audit=None):
         self.reference.write_text(''.join(json.dumps(row) + "\n" for row in reference))
         self.candidate.write_text(''.join(json.dumps(row) + "\n" for row in candidate))
-        return compare_policy_case(self.reference, self.candidate, case, catalog)
+        return compare_policy_case(self.reference, self.candidate, case, catalog,
+                                   rotation_audit=rotation_audit)
 
     @staticmethod
     def small_policy(rows, rules):
@@ -902,6 +1255,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
                  for name, types in sorted(observed.items())]
         return {"cases": {"one": {"path_set": 0}}, "paths": paths,
                 "path_sets": [list(range(len(paths)))],
+                "rotation_caps": {"one": 1},
                 "rule_proposals": load_policy_catalog()["rule_proposals"]}
 
     @staticmethod
