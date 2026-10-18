@@ -4,3 +4,29 @@ dyn4k/src/** -text
 tools/qualification/** -text
 build.gradle.kts -text
 consumers/qualification/portable/build.gradle.kts -text
+
+# Preserve numerical verifier sources and approved inputs.
+tools/numerical/portable/** -text
+tools/numerical/candidate/nominal_zero.py -text
+tools/numerical/fixtures.json -text
+tools/numerical/compare.py -text
+tools/numerical/physical.py -text
+tools/numerical/weld-pulley-physical-declaration.json -text
+tools/numerical/weld-pulley-physical-manifest.json -text
+tools/numerical/weld_pulley_quality.py -text
+
+# Preserve sustained verifier sources and approved inputs.
+tools/performance/sustained_archive.py -text
+tools/performance/manifest.py -text
+tools/performance/measure.py -text
+tools/performance/analyze.py -text
+tools/performance/candidate_runner.py -text
+tools/performance/stress_monitor.py -text
+tools/performance/candidate_pilot.py -text
+tools/performance/provider_probe.py -text
+tools/performance/BaselinePilot.java -text
+docs/research/performance-manifest-v1.json -text
+consumers/performance/build.gradle.kts -text
+consumers/performance/src/main/java/performance/ProviderIdentity.java -text
+consumers/performance/src/main/kotlin/performance/DirectFixture.kt -text
+consumers/performance/src/main/kotlin/performance/DirectPilot.kt -text
