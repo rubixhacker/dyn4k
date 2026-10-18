@@ -5,6 +5,7 @@ tools/qualification/** -text
 build.gradle.kts -text
 consumers/qualification/portable/build.gradle.kts -text
 consumers/qualification/portable/settings.gradle.kts -text
+LICENSE.md -text
 
 # Preserve numerical verifier sources and approved inputs.
 tools/numerical/portable/** -text

@@ -48,6 +48,10 @@ COMPATIBILITY_VERIFIER_INPUTS = {
     "tools/baseline/fixtures/ExtraMethodsProbe.java",
 }
 
+WHOLE_HOSTED_EXACT_SOURCE_INPUTS = {
+    "LICENSE.md",
+}
+
 
 def hash_guarded_source_paths():
     corpus = json.loads((REPOSITORY / full_hosted.MANIFEST).read_bytes())
@@ -67,6 +71,7 @@ def hash_guarded_source_paths():
     paths.update(BASELINE_NUMERICAL_VERIFIER_INPUTS)
     paths.update(SUSTAINED_VERIFIER_INPUTS)
     paths.update(COMPATIBILITY_VERIFIER_INPUTS)
+    paths.update(WHOLE_HOSTED_EXACT_SOURCE_INPUTS)
     paths.update(verify_candidate_archive.SOURCE_FILES)
 
     tracked = subprocess.check_output(
