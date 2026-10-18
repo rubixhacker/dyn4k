@@ -220,36 +220,61 @@ def candidate_source_contract(repository, candidate_sha):
     source_files = {}
     if (repository / ".git").exists():
         # Read Git blobs directly; archive substitutions and line endings can change source bytes.
+        revision = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "rev-parse",
+             "--show-object-format", f"{candidate_sha}^{{tree}}"], stderr=subprocess.PIPE)
+        object_format, _, root_tree = revision.partition(b"\n")
+        root_tree = root_tree.strip()
+        if (object_format != b"sha1"
+                or re.fullmatch(rb"[0-9a-f]{40}", candidate_sha.encode("ascii")) is None
+                or re.fullmatch(rb"[0-9a-f]{40}", root_tree) is None):
+            raise ValueError("candidate source requires full SHA-1 commit and tree IDs")
         tree = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "ls-tree", "-r", "-z", "--full-tree",
+            ["git", "--no-replace-objects", "-C", str(repository), "ls-tree", "-r", "-t", "-z", "--full-tree",
              candidate_sha, "--", "dyn4k-core/src", "dyn4k/src"], stderr=subprocess.PIPE)
         blobs = []
+        trees = []
         for entry in tree.split(b"\0"):
             if not entry:
                 continue
             metadata, name = entry.split(b"\t", 1)
             mode, kind, oid = metadata.split()
             path = os.fsdecode(name)
+            if kind == b"tree":
+                if mode != b"040000" or re.fullmatch(rb"[0-9a-f]{40}", oid) is None:
+                    raise ValueError(f"candidate source tree is invalid: {path}")
+                trees.append((path, oid))
             if path.endswith((".kt", ".java")):
                 if mode not in (b"100644", b"100755") or kind != b"blob":
                     raise ValueError(f"candidate source is not a regular file: {path}")
                 blobs.append((path, oid))
+        objects = ([(path, oid, b"blob") for path, oid in blobs]
+                   + [("candidate commit", candidate_sha.encode("ascii"), b"commit"),
+                      ("root tree", root_tree, b"tree")]
+                   + [(path, oid, b"tree") for path, oid in trees])
         contents = subprocess.check_output(
             ["git", "--no-replace-objects", "-C", str(repository), "cat-file", "--batch"],
-            input=b"".join(oid + b"\n" for _, oid in blobs), stderr=subprocess.PIPE)
+            input=b"".join(oid + b"\n" for _, oid, _ in objects), stderr=subprocess.PIPE)
         stream = io.BytesIO(contents)
-        for path, oid in blobs:
+        for path, oid, kind in objects:
+            label = f"candidate source {kind.decode('ascii')}"
             header = stream.readline().rstrip(b"\n")
-            prefix = oid + b" blob "
+            prefix = oid + b" " + kind + b" "
             size_field = header[len(prefix):]
             if (not header.startswith(prefix)
                     or re.fullmatch(rb"0|[1-9][0-9]*", size_field) is None):
-                raise ValueError(f"candidate source blob is invalid: {path}")
+                raise ValueError(f"{label} is invalid: {path}")
             size = int(size_field)
             source = stream.read(size)
             if len(source) != size or stream.read(1) != b"\n":
-                raise ValueError(f"candidate source blob is incomplete: {path}")
-            source_files[path] = source
+                raise ValueError(f"{label} is incomplete: {path}")
+            identity = hashlib.sha1(kind + b" " + str(size).encode("ascii") + b"\0" + source)
+            if identity.hexdigest().encode("ascii") != oid:
+                raise ValueError(f"{label} identity differs: {path}")
+            if kind == b"blob":
+                source_files[path] = source
+            elif kind == b"commit" and source.split(b"\n", 1)[0] != b"tree " + root_tree:
+                raise ValueError("candidate source commit tree differs")
         if stream.read(1):
             raise ValueError("candidate source blob response has unexpected data")
     else:

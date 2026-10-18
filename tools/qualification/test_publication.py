@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -339,6 +340,64 @@ class PublicationAuditTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "source bytes differ"):
                             qualify.validate_source_archive(archive_path, expected)
 
+    def test_candidate_source_contract_rejects_corrupt_loose_blob(self):
+        original = b"package api\nclass Original\n"
+        altered = b"package api\nclass OriginaX\n"
+        self.assertEqual(len(original), len(altered))
+        with (tempfile.TemporaryDirectory() as temporary,
+              tempfile.TemporaryDirectory() as output):
+            root = Path(temporary)
+            for module in qualify.MODULES:
+                path = root / module / "src/commonMain/kotlin/api/Type.kt"
+                path.parent.mkdir(parents=True)
+                path.write_bytes(original)
+            (root / ".gitattributes").write_bytes(b"*.kt -text\n")
+            subprocess.run(["git", "init", "-q", "--object-format=sha1", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", ".gitattributes",
+                            *qualify.MODULES], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
+                            "-c", "user.email=fixture@example.invalid", "commit", "-qm",
+                            "candidate"], check=True)
+            candidate = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                                text=True).strip()
+            source_path = "dyn4k-core/src/commonMain/kotlin/api/Type.kt"
+            blob_oid = subprocess.check_output([
+                "git", "-C", str(root), "rev-parse", f"{candidate}:{source_path}"],
+                text=True).strip()
+            contract = qualify.candidate_source_contract(root, candidate)
+            expected = qualify.expected_source_entries(contract, "dyn4k-core", "jvm")
+            original_sha = hashlib.sha256(original).hexdigest()
+            self.assertEqual({"commonMain/api/Type.kt": original_sha}, expected)
+            self.assertEqual(expected, qualify.expected_source_entries(
+                contract, "dyn4k", "jvm"))
+            git_directory = Path(subprocess.check_output([
+                "git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+                text=True).strip())
+            object_path = git_directory / "objects" / blob_oid[:2] / blob_oid[2:]
+            header = b"blob " + str(len(original)).encode() + b"\0"
+            self.assertEqual(header + original, zlib.decompress(object_path.read_bytes()))
+            object_path.chmod(0o644)
+            object_path.write_bytes(zlib.compress(header + altered))
+            self.assertEqual(b"", subprocess.check_output([
+                "git", "-C", str(root), "status", "--porcelain"]))
+            qualify.require_clean_checkout(root, candidate)
+            fsck = subprocess.run(["git", "-C", str(root), "fsck", "--no-reflogs", "--strict"],
+                                  capture_output=True, text=True)
+            self.assertNotEqual(0, fsck.returncode)
+            with self.assertRaisesRegex(ValueError, "candidate source blob identity differs"):
+                qualify.candidate_source_contract(root, candidate)
+            archive_path = Path(output) / "sources.jar"
+            for name, source in (("original", original), ("altered", altered)):
+                with self.subTest(artifact=name):
+                    with zipfile.ZipFile(archive_path, "w") as jar:
+                        jar.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
+                        jar.writestr("commonMain/api/Type.kt", source)
+                    if name == "original":
+                        qualify.validate_source_archive(archive_path, expected)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "source bytes differ"):
+                            qualify.validate_source_archive(archive_path, expected)
+
     def test_candidate_source_contract_rejects_malformed_git_output(self):
         root = self.REPOSITORY
         candidate = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -370,7 +429,9 @@ class PublicationAuditTests(unittest.TestCase):
                     if command[-2:] != ["cat-file", "--batch"]:
                         return output
                     if mutation == "truncated":
-                        return output[:-1]
+                        header, separator, body = output.partition(b"\n")
+                        size = int(header.rsplit(b" ", 1)[1])
+                        return header + separator + body[:size]
                     if mutation == "trailing_data":
                         return output + b"x"
                     header, separator, body = output.partition(b"\n")
