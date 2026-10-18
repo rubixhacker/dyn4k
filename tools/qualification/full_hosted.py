@@ -46,6 +46,41 @@ INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json"
 SOURCE_TASK = {target: f"{target}Test" for target in NATIVE}
 SOURCE_TASK["jsSafari"] = "jsBrowserTest"
 REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2465, "dyn4k": 58}
+SAFARI_DIAGNOSTIC_CLASS = "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest"
+SAFARI_DIAGNOSTIC_CASES = {
+    "capsuleSlice": ("CapsuleSlice", "gjk"),
+    "circlePolygon": ("CirclePolygon", "gjk"),
+    "circleSegment": ("CircleSegment", "gjk"),
+    "circleSlice": ("CircleSlice", "gjk"),
+    "polygonCapsule": ("PolygonCapsule", "sat"),
+    "polygonPolygon": ("PolygonPolygon", "sat"),
+}
+SAFARI_DIAGNOSTIC_PREFIX_KEYS = (
+    "provider", "fixture", "method", "phase", "order", "step", "algorithm",
+    "a.transform", "b.transform", "a.center.local", "b.center.local",
+    "a.center.world", "b.center.world", "hit", "booleanHit",
+    "penetration.normal", "penetration.depth", "selection", "clipped",
+    "manifold.normal", "manifold.count")
+SAFARI_DIAGNOSTIC_TRACE_KEYS = (
+    "a.shape.local", "b.shape.local", "a.polygon.edgeArithmetic",
+    "b.polygon.edgeArithmetic", "a.foci.world", "b.foci.world",
+    "a.axes.withB", "b.axes.withA", "gjk.initial.centerDirection",
+    "gjk.initial.effectiveDirection", "clip.probe.feature.a",
+    "clip.probe.feature.b") + tuple(
+        f"support.{index}.{field}" for index in range(6)
+        for field in ("direction", "a", "b.negated", "minkowski"))
+SAFARI_DIAGNOSTIC_SAT_KEYS = (
+    "sat.replay.hit", "sat.replay.matchesResult", "sat.candidates",
+    "sat.winner.source", "sat.winner.index", "sat.winner.preOrientation",
+    "sat.winner.centerDot", "sat.winner.orientationFlip", "sat.winner.finalAxis",
+    "sat.winner.depth")
+SAFARI_DIAGNOSTIC_EPA_KEYS = (
+    "epa.replay.identity", "epa.replay.simplex", "epa.replay.iteration",
+    "epa.replay.stop", "epa.replay.epsilon", "epa.replay.maxIterations",
+    "epa.iteration.schema", "epa.iteration.records", "epa.queue.reconstructedMatches",
+    "epa.edge.a", "epa.edge.b", "epa.edge.normal", "epa.edge.distance",
+    "epa.terminal.support", "epa.terminal.projection", "epa.terminal.delta",
+    "epa.replay.normalMatchesResult", "epa.replay.depthMatchesResult")
 PINNED_GRADLE = "9.5.0"
 PINNED_KGP = "2.4.20"
 PINNED_AGP = "9.3.1"
@@ -263,11 +298,95 @@ def expected_cases(manifest, module):
     return set(cases)
 
 
+def safari_diagnostic_identities():
+    expected = set()
+    for fixture, detector in SAFARI_DIAGNOSTIC_CASES.values():
+        for step in range(12):
+            phase = "center" if step in (0, 1, 4, 5, 6, 7) else "shifted"
+            order = "forward" if step % 2 == 0 else "reverse"
+            method = ("detectGjk" if detector == "gjk" else "detectSat") \
+                if step < 4 else "getClipManifold"
+            algorithm = detector if step < 4 else ("gjk" if step % 4 < 2 else "sat")
+            expected.add((fixture, method, phase, order, step, algorithm))
+    return expected
+
+
+def check_safari_diagnostic_suite(suite):
+    expected_methods = set(SAFARI_DIAGNOSTIC_CASES)
+    cases = suite.findall("testcase")
+    diagnostic_cases = [case for case in cases if case.get("classname") ==
+                        f"jsBrowserTest.{SAFARI_DIAGNOSTIC_CLASS}"]
+    if {case.get("name", "").split("[", 1)[0] for case in diagnostic_cases} != expected_methods \
+            or len(diagnostic_cases) != len(expected_methods):
+        raise ValueError("Safari diagnostic case identities differ")
+    output_nodes = list(suite.iter("system-out"))
+    if len(output_nodes) != 1 or output_nodes[0] is not suite.find("system-out"):
+        raise ValueError("Safari diagnostic output is outside its case suite")
+    output = output_nodes[0].text
+    if not output or len(output.encode("utf-8")) > 72 * 262144:
+        raise ValueError("Safari diagnostic output is absent or exceeds the message bound")
+    rows = output.splitlines(keepends=True)
+    if len(rows) != 72:
+        raise ValueError(f"Safari diagnostic row count differs: {len(rows)}")
+    expected_rows = safari_diagnostic_identities()
+    observed = set()
+    for row in rows:
+        if not row.startswith("[log] DYN4K_COLLISION_DIAGNOSTIC\tv2\t") \
+                or not row.endswith("\n") or len(row.encode("utf-8")) > 262144:
+            raise ValueError("Safari diagnostic row is missing, truncated, or malformed")
+        fields = row.removeprefix("[log] ").removesuffix("\n").split("\t")
+        if fields[:2] != ["DYN4K_COLLISION_DIAGNOSTIC", "v2"]:
+            raise ValueError("Safari diagnostic version differs")
+        pairs = [field.split("=", 1) for field in fields[2:]]
+        if any(len(pair) != 2 for pair in pairs):
+            raise ValueError("Safari diagnostic field is incomplete")
+        values = dict(pairs)
+        try:
+            step = int(values["step"])
+            count = values["manifold.count"]
+            points = 0 if count == "na" else int(count)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Safari diagnostic step or manifold count is invalid") from error
+        if (not 0 <= points <= 2 or str(step) != values["step"]
+                or (count != "na" and str(points) != count)):
+            raise ValueError("Safari diagnostic step or manifold count is invalid")
+        keys = (SAFARI_DIAGNOSTIC_PREFIX_KEYS + SAFARI_DIAGNOSTIC_TRACE_KEYS
+                + (SAFARI_DIAGNOSTIC_SAT_KEYS if values.get("algorithm") == "sat" else ())
+                + SAFARI_DIAGNOSTIC_EPA_KEYS + tuple(
+                    f"manifold.point.{index}.{field}" for index in range(points)
+                    for field in ("position", "depth", "id")))
+        if ([pair[0] for pair in pairs] != list(keys)
+                or any(not value for key, value in pairs
+                       if key not in ("epa.replay.simplex", "epa.iteration.records"))
+                or values["provider"] != "dyn4k"
+                or values["hit"] not in ("true", "false")
+                or values["epa.replay.depthMatchesResult"] not in ("true", "false", "na")):
+            raise ValueError("Safari diagnostic row fields are incomplete or changed")
+        for index in range(points):
+            if not re.fullmatch(r"(?:distance|indexed:\d+:\d+:\d+:(?:true|false))",
+                                values[f"manifold.point.{index}.id"]):
+                raise ValueError("Safari diagnostic manifold point identity is truncated")
+        identity = (values["fixture"], values["method"], values["phase"],
+                    values["order"], step, values["algorithm"])
+        if identity not in expected_rows or identity in observed:
+            raise ValueError("Safari diagnostic row identity is missing, extra, or duplicate")
+        if (step < 4 and (values["booleanHit"] not in ("true", "false")
+                          or values["clipped"] != "na" or count != "na")
+                or step >= 4 and (values["booleanHit"] != "na"
+                                  or values["clipped"] not in ("true", "false")
+                                  or count == "na")):
+            raise ValueError("Safari diagnostic phase fields differ")
+        observed.add(identity)
+    if observed != expected_rows:
+        raise ValueError("Safari diagnostic rows are incomplete")
+
+
 def read_reports(paths, expected, target, started_ns, finished_ns, safari_version=None):
     if not paths:
         raise ValueError("required XML reports are missing")
     seen = Counter()
     reports = []
+    diagnostic_suites = 0
     for path in paths:
         stat = path.stat()
         if not started_ns <= stat.st_mtime_ns <= finished_ns:
@@ -279,6 +398,14 @@ def read_reports(paths, expected, target, started_ns, finished_ns, safari_versio
         if not math.isfinite(float(suite.get("time", "nan"))):
             raise ValueError(f"invalid XML suite duration: {path}")
         cases = list(suite.iter("testcase"))
+        if target == "jsSafari" and (SAFARI_DIAGNOSTIC_CLASS, "capsuleSlice") in expected:
+            if any(case.get("classname") == f"jsBrowserTest.{SAFARI_DIAGNOSTIC_CLASS}"
+                   for case in cases):
+                diagnostic_suites += 1
+                check_safari_diagnostic_suite(suite)
+            elif any("DYN4K_COLLISION_DIAGNOSTIC" in (node.text or "")
+                     for node in suite.iter("system-out")):
+                raise ValueError("Safari diagnostic output is outside its case suite")
         actual = {"tests": len(cases),
                   "failures": sum(case.find("failure") is not None for case in cases),
                   "errors": sum(case.find("error") is not None for case in cases),
@@ -316,6 +443,9 @@ def read_reports(paths, expected, target, started_ns, finished_ns, safari_versio
         missing = sorted(expected - set(seen))[:3]
         extra = sorted(set(seen) - expected)[:3]
         raise ValueError(f"missing, extra, or duplicate cases: missing={missing}; extra={extra}")
+    if target == "jsSafari" and (SAFARI_DIAGNOSTIC_CLASS, "capsuleSlice") in expected \
+            and diagnostic_suites != 1:
+        raise ValueError("Safari diagnostic case suite is absent or duplicated")
     return {"expected": len(expected), "executed": sum(seen.values()),
             "case_ids": [f"{name}#{method}" for name, method in sorted(seen)],
             "reports": reports}

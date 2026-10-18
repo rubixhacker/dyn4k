@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -11,6 +12,7 @@ import time
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from pathlib import Path, PureWindowsPath
 from unittest import mock
 
@@ -83,6 +85,17 @@ class FullHostedTests(unittest.TestCase):
                 ET.SubElement(case, "ignored")
         self.path.write_bytes(ET.tostring(suite))
         return time.time_ns()
+
+    @staticmethod
+    def safari_diagnostic_rows():
+        # Exact system-out from the retained 5758 JS browser XML (source XML SHA-256
+        # 95e8a8e550b3cf6172f97cc74453595da3e0d9d68e43a31fed9be5acf1285a56).
+        fixture = (Path(__file__).parent / "fixtures/safari-v2-diagnostics.b85").read_bytes()
+        output = zlib.decompress(base64.b85decode(b"".join(fixture.splitlines())))
+        if hashlib.sha256(output).hexdigest() != \
+                "b3b22a31a8d4b9581bb44c4763474eb0c857e075564b763cbb6fd92c631bcf54":
+            raise ValueError("real browser diagnostic fixture bytes differ")
+        return output.decode("utf-8").splitlines(keepends=True)
 
     def test_native_full_report_requires_exact_source_cases(self):
         name = "macosArm64Test.org.dyn4j.geometry.ExampleTest"
@@ -1722,6 +1735,9 @@ class FullHostedTests(unittest.TestCase):
                                    skipped="0", time="1")
                 for classname, method in cases:
                     ET.SubElement(suite, "testcase", classname=classname, name=method, time="0.1")
+                if safari and module == "dyn4k-core":
+                    ET.SubElement(suite, "system-out").text = "".join(
+                        self.safari_diagnostic_rows())
                 report = write(folder / "xml" / module / "TEST-all.xml", ET.tostring(suite))
                 checked = full_hosted.read_reports(
                     [report], full_hosted.expected_cases(manifest, module), target,
@@ -2007,6 +2023,77 @@ class FullHostedTests(unittest.TestCase):
         self.assertEqual([2465, 58], [item["executed"]
                          for item in receipt["configurations"][0]["source"]])
         self.assertEqual(3, receipt["configurations"][0]["consumer"]["executed"])
+
+    def test_public_safari_directory_and_tar_bind_all_real_diagnostic_identities(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        rows = self.safari_diagnostic_rows()
+        self.assertEqual(72, len(rows))
+        self.assertEqual(72, len(set(rows)))
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        archive = self.root.parent / (self.root.name + "-diagnostic.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        for index, lane in enumerate(receipt["configurations"]):
+            report = self.root / lane["configuration"] / "xml/dyn4k-core/TEST-all.xml"
+            original = report.read_bytes()
+            modified_ns = report.stat().st_mtime_ns
+            for mutation in ("deleted", "duplicate", "truncated", "truncated-tail",
+                             "wrong-fixture",
+                             "wrong-method", "wrong-phase", "wrong-order", "wrong-step"):
+                with self.subTest(configuration=lane["configuration"], mutation=mutation):
+                    changed = json.loads(json.dumps(receipt))
+                    suite = ET.fromstring(original)
+                    output = suite.find("system-out")
+                    actual = output.text.splitlines(keepends=True)
+                    self.assertEqual(72, len(actual))
+                    if mutation == "deleted":
+                        del actual[17]
+                    elif mutation == "duplicate":
+                        actual[17] = actual[16]
+                    elif mutation == "truncated":
+                        actual[17] = actual[17].split("\tepa.replay.depthMatchesResult=", 1)[0]
+                    elif mutation == "truncated-tail":
+                        actual[4] = actual[4].rsplit("manifold.point.0.id=", 1)[0] + \
+                            "manifold.point.0.id=indexed:3\n"
+                    else:
+                        old, new = {
+                            "wrong-fixture": ("fixture=CirclePolygon", "fixture=CircleSlice"),
+                            "wrong-method": ("method=detectGjk", "method=detectSat"),
+                            "wrong-phase": ("phase=center", "phase=shifted"),
+                            "wrong-order": ("order=forward", "order=reverse"),
+                            "wrong-step": ("step=0", "step=1"),
+                        }[mutation]
+                        actual[12 if mutation == "wrong-fixture" else 0] = actual[
+                            12 if mutation == "wrong-fixture" else 0].replace(old, new, 1)
+                    output.text = "".join(actual)
+                    report.write_bytes(ET.tostring(suite))
+                    os.utime(report, ns=(modified_ns, modified_ns))
+                    record = changed["configurations"][index]["source"][0]["reports"][0]
+                    record["sha256"] = full_hosted.sha256(report)
+                    changed["files"] = full_hosted.archive_inventory(self.root)
+                    try:
+                        with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                            full_hosted.verify_raw_files(
+                                self.root, changed, manifest, consumer,
+                                candidate_repository=self.candidate_repository)
+                        if mutation in ("deleted", "duplicate", "truncated", "truncated-tail"):
+                            (self.root / "receipt.json").write_text(json.dumps(changed))
+                            full_hosted.package_archive(self.root, archive)
+                            with mock.patch.object(full_hosted, "load_corpus",
+                                                   return_value=manifest):
+                                with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                                    full_hosted.verify_transport_archive(
+                                        archive, changed["candidate_sha"], "jsSafari",
+                                        candidate_repository=self.candidate_repository)
+                    finally:
+                        report.write_bytes(original)
+                        os.utime(report, ns=(modified_ns, modified_ns))
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
 
     def test_public_safari_archive_rejects_resealed_product_substitutions(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
