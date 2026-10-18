@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import re
+import xml.etree.ElementTree as ET
 from copy import deepcopy
 from itertools import zip_longest
 from pathlib import Path
@@ -26,6 +27,23 @@ APPROVED_RULE_IDS = frozenset((
     "exact_step", "exact_structure", "reject_nonfinite"))
 APPROVED_RULES_SHA256 = "dd9099d762ef22c9b6782a96c61afb80d023b56ae09ce3a6d925c782f1573441"
 APPROVED_PATH_MAP_SHA256 = "da62dab0720ad551f6cf3d802cd3d2419f889ab88f63f5fd56268fb0417c269e"
+PROBE_METHOD = "geometryCollisionBoundaryAndScale"
+PROBE_VALUES = {
+    "schema": "portable-binary64-probe/1",
+    "ulpOneBits": "3cb0000000000000",
+    "nextUpOneBits": "3ff0000000000001",
+    "nextDownOneBits": "3fefffffffffffff",
+    "negativeZeroBits": "8000000000000000",
+    "positiveZeroBits": "0000000000000000",
+    "negativeZeroReciprocalBits": "fff0000000000000",
+    "ulpMillionBits": "3de0000000000000",
+    "boundaryOriginZeroGapBits": "3d71980000000000",
+    "boundaryPositiveMillionGapBits": "0000000000000000",
+    "boundaryNegativeMillionGapBits": "0000000000000000",
+    "maximumFinite": True,
+    "positiveInfinityFinite": False,
+    "nanFinite": False,
+}
 
 
 def load_policy_catalog(path=None):
@@ -763,6 +781,83 @@ def verify_candidate_identity(receipt, publication, commit, source_sha256,
         raise Rejected("candidate runtime executable differs")
 
 
+def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
+                         runtime_proof):
+    lane = Path(lane)
+    path = lane / "numeric-probe-receipt.json"
+    if not path.exists():
+        return False
+    if not path.is_file():
+        raise Rejected("numeric probe receipt is not a file")
+    receipt = json.loads(path.read_text())
+    required = {"schema", "candidate_commit", "source_sha256", "trace_sha256",
+                "artifact_sha256", "runtime", "method", "xml_sha256",
+                "gradle_log_sha256", "probe"}
+    if not isinstance(receipt, dict) or set(receipt) != required or \
+            receipt["schema"] != "portable-binary64-probe-receipt/1":
+        raise Rejected("numeric probe receipt schema differs")
+    if receipt["candidate_commit"] != commit or receipt["source_sha256"] != source_sha256:
+        raise Rejected("numeric probe source identity differs")
+    if receipt["trace_sha256"] != trace_sha256:
+        raise Rejected("numeric probe trace identity differs")
+    if not artifacts or receipt["artifact_sha256"] != {
+            name: digest(file) for name, file in artifacts.items()}:
+        raise Rejected("numeric probe artifact identity differs")
+    executable = Path(runtime_proof.get("executable", ""))
+    if (receipt["runtime"] != runtime_proof or not executable.is_file() or
+            digest(executable) != runtime_proof.get("executable_sha256")):
+        raise Rejected("numeric probe runtime identity differs")
+    if receipt["method"] != PROBE_METHOD:
+        raise Rejected("numeric probe method differs")
+    xml_path = lane / "xml" / f"{PROBE_METHOD}.xml"
+    log_path = lane / f"gradle-{PROBE_METHOD}.log"
+    if not xml_path.is_file() or digest(xml_path) != receipt["xml_sha256"]:
+        raise Rejected("numeric probe XML differs")
+    if not log_path.is_file() or digest(log_path) != receipt["gradle_log_sha256"]:
+        raise Rejected("numeric probe process log differs")
+    try:
+        suite = ET.parse(xml_path).getroot()
+    except ET.ParseError as error:
+        raise Rejected("numeric probe XML is invalid") from error
+    if suite.tag != "testsuite" or any(
+            suite.get(field) != value for field, value in
+            (("tests", "1"), ("skipped", "0"), ("failures", "0"), ("errors", "0"))):
+        raise Rejected("numeric probe test execution differs")
+    tests = suite.findall("testcase")
+    if (len(tests) != 1 or tests[0].get("classname") != "portable.PortableMatrixTest" or
+            tests[0].get("name") != PROBE_METHOD):
+        raise Rejected("numeric probe test method differs")
+    output = suite.findtext("system-out")
+    if output is None:
+        raise Rejected("numeric probe target output is missing")
+    markers = [line.split("NUMERICAL_PROBE_JSON ", 1)[1]
+               for line in output.splitlines() if line.startswith("NUMERICAL_PROBE_JSON ")]
+    if len(markers) != 1:
+        raise Rejected("numeric probe target marker count differs")
+    try:
+        payload = json.loads(markers[0], parse_constant=lambda value: (_ for _ in ()).throw(
+            Rejected(f"numeric probe nonfinite token: {value}")))
+    except (ValueError, TypeError) as error:
+        raise Rejected("numeric probe target payload is invalid") from error
+    if payload != PROBE_VALUES or receipt["probe"] != PROBE_VALUES:
+        raise Rejected("numeric probe target arithmetic differs")
+    inputs = []
+    for line in output.splitlines():
+        if line.startswith("NUMERICAL_JSON "):
+            try:
+                row = json.loads(line.split("NUMERICAL_JSON ", 1)[1])
+            except ValueError as error:
+                raise Rejected("numeric probe target input JSON is invalid") from error
+            if row.get("kind") == "inputs" and row.get("id") == "geometry-boundary-s1-o3-d3":
+                inputs.append(row)
+    if (len(inputs) != 1 or not isinstance(inputs[0].get("input"), dict) or
+            type(inputs[0]["input"].get("signedZero")) is not float or
+            inputs[0]["input"]["signedZero"] != 0.0 or
+            math.copysign(1.0, inputs[0]["input"]["signedZero"]) != -1.0):
+        raise Rejected("numeric probe signed-zero trace transport differs")
+    return True
+
+
 def verify_candidate_inventory(lane, expected_ids, hosts):
     lane = Path(lane)
     if lane.name not in hosts:
@@ -771,7 +866,9 @@ def verify_candidate_inventory(lane, expected_ids, hosts):
     cases = lane / "cases"
     if not cases.is_dir() or {path.name for path in cases.iterdir()} != expected_files:
         raise Rejected("candidate case file set differs")
-    if {path.name for path in lane.glob("*receipt*.json")} != {"receipt.json"}:
+    probe = lane / "numeric-probe-receipt.json"
+    expected_receipts = {"receipt.json"} | ({probe.name} if probe.is_file() else set())
+    if {path.name for path in lane.glob("*receipt*.json")} != expected_receipts:
         raise Rejected("candidate receipt set differs")
     root = lane.parent
     if list(root.glob("*receipt*.json")):
@@ -779,7 +876,7 @@ def verify_candidate_inventory(lane, expected_ids, hosts):
     for path in root.glob("*/*receipt*.json"):
         if path.parent.name not in hosts:
             raise Rejected("candidate receipt has an undeclared producer")
-        if path.name != "receipt.json":
+        if path.name not in {"receipt.json", "numeric-probe-receipt.json"}:
             raise Rejected("candidate receipt set differs")
 
 
@@ -829,6 +926,9 @@ def compare_host(baseline, lane, frozen_ids):
     identity = Identity(commit, source_sha256, receipt["artifact_sha256"], runtime_proof)
     verify_receipt(receipt, Path(lane) / "trace.jsonl", cases, identity, target_artifacts)
     verify_case_slices(Path(lane), expected)
+    probe_verified = verify_numeric_probe(lane, commit, source_sha256,
+                                          receipt["trace_sha256"],
+                                          target_artifacts, runtime_proof)
     prospective = [case for case in cases if case["id"] not in frozen_ids]
     results = []
     for case in prospective:
@@ -837,18 +937,20 @@ def compare_host(baseline, lane, frozen_ids):
         candidate = Path(lane) / "cases" / f"{case_id}.jsonl"
         verify_reference_inventory(reference, case_id, catalog)
         compared = compare_policy_case(reference, candidate, case, catalog)
-        if compared["status"] == "PASSED_NUMERICAL_POLICY":
+        if compared["status"] == "PASSED_NUMERICAL_POLICY" and probe_verified:
             compared["qualification"] = "PASSED_CASE_POLICY"
         results.append(compared)
     if len(results) != len(expected - set(frozen_ids)):
         raise Rejected("prospective case coverage differs")
     failed = sum(row["status"].startswith("FAILED") for row in results)
     unpassed = sum(row["status"].startswith("UNPASSED") for row in results)
-    passed = sum(row["status"] == "PASSED_NUMERICAL_POLICY" for row in results)
+    passed = sum(row["qualification"] == "PASSED_CASE_POLICY" for row in results)
     summary = {"status": ("FAILED_PHYSICAL" if any(row["status"] == "FAILED_PHYSICAL"
                             for row in results) else
-                          "UNPASSED" if failed or unpassed else "PASSED_NUMERICAL_POLICY"),
+                          "UNPASSED" if failed or unpassed or not probe_verified else
+                          "PASSED_NUMERICAL_POLICY"),
                "qualification": "UNPASSED",
+               "numeric_probe": "PASSED" if probe_verified else "UNPASSED_NOT_EXECUTED",
                "baseline_jar_sha256": manifest["baseline_jar_sha256"],
                "baseline_trace_sha256": manifest["trace_sha256"],
                "baseline_fixture_source_sha256": manifest["fixture_source_sha256"],

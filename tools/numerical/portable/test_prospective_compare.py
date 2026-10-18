@@ -2,7 +2,10 @@ import json
 import math
 import tempfile
 import unittest
+from copy import deepcopy
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 from prospective_compare import (compare_case, verify_baseline_manifest,
                                  verify_baseline_bytes, verify_reference_case,
@@ -10,6 +13,7 @@ from prospective_compare import (compare_case, verify_baseline_manifest,
                                  reference_path_inventory, verify_reference_inventory,
                                  compare_policy_case, verify_candidate_identity)
 from prospective_compare import verify_candidate_inventory
+from prospective_compare import verify_numeric_probe, compare_host
 from receipt import digest
 
 
@@ -256,11 +260,179 @@ class ProspectiveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "receipt"):
             verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
         (lane / "receipt-copy.json").unlink()
+        (lane / "numeric-probe-receipt.json").write_text("{}\n")
+        verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
+        (lane / "numeric-probe-copy-receipt.json").write_text("{}\n")
+        with self.assertRaisesRegex(Exception, "receipt"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
+        (lane / "numeric-probe-copy-receipt.json").unlink()
         rogue = self.root / "unexpected"
         rogue.mkdir()
         (rogue / "receipt.json").write_text("{}\n")
         with self.assertRaisesRegex(Exception, "producer"):
             verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
+
+    def numeric_probe_fixture(self):
+        lane = self.root / "jvm"
+        (lane / "xml").mkdir(parents=True)
+        executable = self.root / "java"
+        artifact = self.root / "target.jar"
+        executable.write_bytes(b"target runtime")
+        artifact.write_bytes(b"target artifact")
+        runtime = {"host": "jvm", "executable": str(executable),
+                   "executable_sha256": digest(executable), "version": "test",
+                   "method_executions": 15}
+        proof = {"schema": "portable-binary64-probe/1",
+                 "ulpOneBits": "3cb0000000000000",
+                 "nextUpOneBits": "3ff0000000000001",
+                 "nextDownOneBits": "3fefffffffffffff",
+                 "negativeZeroBits": "8000000000000000",
+                 "positiveZeroBits": "0000000000000000",
+                 "negativeZeroReciprocalBits": "fff0000000000000",
+                 "ulpMillionBits": "3de0000000000000",
+                 "boundaryOriginZeroGapBits": "3d71980000000000",
+                 "boundaryPositiveMillionGapBits": "0000000000000000",
+                 "boundaryNegativeMillionGapBits": "0000000000000000",
+                 "maximumFinite": True, "positiveInfinityFinite": False,
+                 "nanFinite": False}
+        payload = json.dumps(proof, separators=(",", ":"), sort_keys=True)
+        method = "geometryCollisionBoundaryAndScale"
+        xml = lane / "xml" / f"{method}.xml"
+        xml.write_text('<testsuite tests="1" skipped="0" failures="0" errors="0">'
+                       '<testcase classname="portable.PortableMatrixTest" name="' + method + '"/>'
+                       '<system-out><![CDATA[NUMERICAL_PROBE_JSON ' + payload + '\n'
+                       'NUMERICAL_JSON {"kind":"inputs","id":"geometry-boundary-s1-o3-d3",'
+                       '"input":{"signedZero":-0.0}}\n'
+                       ']]></system-out></testsuite>')
+        log = lane / f"gradle-{method}.log"
+        log.write_text("Starting process target runtime\n")
+        receipt = {"schema": "portable-binary64-probe-receipt/1",
+                   "candidate_commit": "commit", "source_sha256": "source",
+                   "trace_sha256": "trace",
+                   "artifact_sha256": {"target": digest(artifact)},
+                   "runtime": runtime, "method": method,
+                   "xml_sha256": digest(xml), "gradle_log_sha256": digest(log),
+                   "probe": proof}
+        path = lane / "numeric-probe-receipt.json"
+        path.write_text(json.dumps(receipt))
+        return lane, receipt, runtime, {"target": artifact}, xml, log
+
+    def test_target_comparator_requires_exact_runtime_probe_before_case_pass(self):
+        lane, _, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+        self.assertTrue(verify_numeric_probe(lane, "commit", "source", "trace",
+                                             artifacts, runtime))
+        (lane / "numeric-probe-receipt.json").unlink()
+        self.assertFalse(verify_numeric_probe(lane, "commit", "source", "trace",
+                                              artifacts, runtime))
+
+    def test_compare_host_never_marks_case_pass_without_verified_probe(self):
+        lane, _, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+        baseline = self.root / "baseline"
+        baseline.mkdir()
+        (baseline / "verified.json").write_text(json.dumps({
+            "baseline_jar_sha256": "jar", "trace_sha256": "trace",
+            "fixture_source_sha256": "fixture", "case_sha256": {"one": "case"}}))
+        (lane / "receipt.json").write_text(json.dumps({
+            "artifact_sha256": {"target": digest(artifacts["target"])},
+            "trace_sha256": "candidate-trace"}))
+        (self.root / "publication.log").write_text("published\n")
+        (self.root / "publication.json").write_text(json.dumps({
+            "candidate_commit": "commit", "source_sha256": "source",
+            "publication_log_sha256": digest(self.root / "publication.log"),
+            "artifact_sha256": {"target.jar": digest(artifacts["target"])}}))
+        case = {"id": "one", "steps": 1, "family": "free-motion"}
+        numerical = {"id": "one", "status": "PASSED_NUMERICAL_POLICY",
+                     "qualification": "UNPASSED", "different_numeric_values": 0}
+        with ExitStack() as stack:
+            for name in ("verify_candidate_inventory", "verify_baseline_manifest",
+                         "verify_baseline_bytes", "verify_policy_catalog",
+                         "verify_candidate_identity", "verify_reference_inventory"):
+                stack.enter_context(patch("prospective_compare." + name))
+            stack.enter_context(patch("prospective_compare.declared_cases", return_value=[case]))
+            stack.enter_context(patch("prospective_compare.load_policy_catalog", return_value={}))
+            stack.enter_context(patch("prospective_compare.compare_policy_case",
+                                      return_value=numerical))
+            stack.enter_context(patch("baseline_capture.fixture_source_sha256",
+                                      return_value="fixture"))
+            stack.enter_context(patch("baseline_capture.verify_case_slices"))
+            stack.enter_context(patch("receipt.verify"))
+            stack.enter_context(patch("run.HOST_TASKS", {"jvm": "jvmTest"}))
+            stack.enter_context(patch("run.MATRIX_METHODS", tuple(str(i) for i in range(15))))
+            stack.enter_context(patch("run.STAGED", self.root))
+            stack.enter_context(patch("run.artifacts", return_value=artifacts))
+            stack.enter_context(patch("run.clean_identity", return_value=("commit", "source")))
+            stack.enter_context(patch("run.runtime", return_value=runtime))
+            for valid, expected in ((False, 0), (True, 1)):
+                with patch("prospective_compare.verify_numeric_probe", return_value=valid):
+                    result = compare_host(baseline, lane, set())
+                self.assertEqual(result["passed_case_policy"], expected)
+                self.assertEqual(result["results"][0]["qualification"],
+                                 "PASSED_CASE_POLICY" if valid else "UNPASSED")
+                self.assertEqual(result["numeric_probe"],
+                                 "PASSED" if valid else "UNPASSED_NOT_EXECUTED")
+
+    def test_target_probe_rejects_stale_identity_output_and_nonfinite(self):
+        lane, original, runtime, artifacts, xml, log = self.numeric_probe_fixture()
+        path = lane / "numeric-probe-receipt.json"
+        for field, value in (("candidate_commit", "stale"), ("source_sha256", "stale"),
+                             ("trace_sha256", "stale"),
+                             ("artifact_sha256", {}), ("runtime", {}),
+                             ("xml_sha256", "0" * 64), ("gradle_log_sha256", "0" * 64),
+                             ("method", "other"), ("schema", "other")):
+            changed = deepcopy(original)
+            changed[field] = value
+            path.write_text(json.dumps(changed))
+            with self.subTest(field=field), self.assertRaises(Exception):
+                verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+        for field, value in (("ulpOneBits", "3cb0000000000001"),
+                             ("nextUpOneBits", "3ff0000000000002"),
+                             ("nextDownOneBits", "3feffffffffffffe"),
+                             ("negativeZeroBits", "0000000000000000"),
+                             ("positiveZeroBits", "8000000000000000"),
+                             ("negativeZeroReciprocalBits", "7ff0000000000000"),
+                             ("ulpMillionBits", "3de0000000000001"),
+                             ("boundaryOriginZeroGapBits", "3d71980000000001"),
+                             ("boundaryPositiveMillionGapBits", "3d71980000000000"),
+                             ("boundaryNegativeMillionGapBits", "3d71980000000000"),
+                             ("maximumFinite", False),
+                             ("positiveInfinityFinite", True), ("nanFinite", True)):
+            changed = deepcopy(original)
+            changed["probe"][field] = value
+            path.write_text(json.dumps(changed))
+            with self.subTest(field=field), self.assertRaises(Exception):
+                verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+        path.write_text(json.dumps(original))
+        text = xml.read_text()
+        for changed in (text.replace("NUMERICAL_PROBE_JSON", "MISSING_PROBE"),
+                        text.replace("NUMERICAL_PROBE_JSON", "NUMERICAL_PROBE_JSON NaN\nNUMERICAL_PROBE_JSON"),
+                        text.replace("NUMERICAL_PROBE_JSON", "NUMERICAL_PROBE_JSON {}\nNUMERICAL_PROBE_JSON"),
+                        text.replace("3ff0000000000001", "3ff0000000000002"),
+                        text.replace('failures="0"', 'failures="1"'),
+                        text.replace('signedZero":-0.0', 'signedZero":0.0'),
+                        text.replace('signedZero":-0.0', 'signedZero":-1.0')):
+            xml.write_text(changed)
+            altered = deepcopy(original)
+            altered["xml_sha256"] = digest(xml)
+            path.write_text(json.dumps(altered))
+            with self.assertRaises(Exception):
+                verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+        changed = deepcopy(original)
+        changed["probe"]["nextUpOneBits"] = "3ff0000000000002"
+        xml.write_text(text.replace("3ff0000000000001", "3ff0000000000002"))
+        changed["xml_sha256"] = digest(xml)
+        path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(Exception, "arithmetic"):
+            verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+        xml.write_text(text)
+        path.write_text(json.dumps(original))
+        log.write_text("stale process\n")
+        with self.assertRaises(Exception):
+            verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+        log.write_text("Starting process target runtime\n")
+        runtime_file = Path(runtime["executable"])
+        runtime_file.write_bytes(b"different runtime")
+        with self.assertRaisesRegex(Exception, "runtime"):
+            verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
 
     def test_policy_seam_requires_case_envelope_and_complete_paths(self):
         rows, case, catalog = self.policy_rows()

@@ -128,6 +128,21 @@ The comparator checks the adopted rule and path map digest, all 318 catalog
 entries, the pinned source, fixture, JAR, trace and per-case hashes, actual
 candidate source and artifact hashes, runtime executable and 15 method logs,
 the sealed 332-case receipt, case slices, and producer and receipt inventory.
+Before a target case receives `PASSED_CASE_POLICY`, the host comparator also
+requires `numeric-probe-receipt.json` from that same lane. The receipt binds
+the candidate commit, source archive and trace hashes, staged artifact hashes, executed
+runtime identity and executable hash, and archived XML and Gradle log hashes
+for `geometryCollisionBoundaryAndScale`. The XML must report one successful
+execution of that method and contain exactly one target-emitted
+`NUMERICAL_PROBE_JSON` record. Its exact binary64 bit patterns cover spacing
+around 1, signed zero and its reciprocal, spacing at 1e6 m, and represented
+geometry gaps at zero and both signed 1e6 m origins. The record also checks
+finite classification for the largest finite value, infinity and NaN. The
+XML's existing `NUMERICAL_JSON` input record must carry an explicit negative
+zero through the recorder. Missing probe evidence leaves every otherwise
+passing target case `UNPASSED`; a present but stale or contradictory receipt
+is rejected. The current matrix test and host runner do not emit this marker
+and receipt, so this repair does not establish a target pass.
 It checks the target's decoded boundary setup against the input expression
 `origin.x + scale*(1.5 + delta)` from the
 [portable fixture](../../tools/numerical/portable/src/commonTest/kotlin/portable/PortableMatrixTest.kt),
@@ -146,8 +161,9 @@ orientation and unit length, 32-ulp transform checks, mode changes, branch
 flips, explicit input negative zero, computed zero, NaN/infinity, missing and
 extra cases/paths/receipts, and stale source, artifact, runtime, fixture and
 trace identities. The target's own trace demonstrates its serialized binary64
-values and represented geometry; an independent target `nextafter` probe is
-still unavailable. The 318 cases do not cover exception parity generally, so
+values and represented geometry. The exact-runtime `nextafter` receipt
+contract is enforced, but no target execution has supplied it. The 318 cases
+do not cover exception parity generally, so
 a separate error suite remains necessary.
 
 ## Reference self-check and remaining work
