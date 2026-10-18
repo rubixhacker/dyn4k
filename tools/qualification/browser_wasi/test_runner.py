@@ -16,6 +16,31 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_real_wasm_negative_zero_requires_negative_raw_bits(self):
+        from runner import verify_collision_diagnostics
+        import xml.etree.ElementTree as ET
+
+        receipt = os.environ.get("DYN4K_BROWSER_WASI_SIGNED_ZERO_WASM_RECEIPT")
+        if receipt is None:
+            self.skipTest("set retained Wasm JS receipt for signed-zero control")
+        lane = json.loads(Path(receipt).read_text())
+        report = next(Path(item["path"]) for item in lane["modules"]["dyn4k-core"]["raw_xml"]
+                      if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
+        suite = ET.parse(report).getroot()
+        self.assertEqual(72, verify_collision_diagnostics(suite)["diagnostic_rows"])
+        output = suite.find("system-out")
+        rows = output.text.splitlines()
+        fields = rows[0].split("\t")
+        transform = next(i for i, field in enumerate(fields)
+                         if field.startswith("a.transform="))
+        original = "-0.0@-9223372036854775808"
+        self.assertIn(original, fields[transform])
+        fields[transform] = fields[transform].replace(original, "-0.0@0", 1)
+        rows[0] = "\t".join(fields)
+        output.text = "\n".join(rows) + "\n"
+        with self.assertRaisesRegex(ValueError, "raw bits"):
+            verify_collision_diagnostics(suite)
+
     def test_only_exact_generated_consumer_lock_is_accepted(self):
         import runner
 
@@ -549,6 +574,54 @@ class SourceCasesTest(unittest.TestCase):
                     self.assertEqual(1, rejected.returncode, rejected.stderr)
                     self.assertIn("diagnostic" if diagnostic_mutation else
                                   "reporter", rejected.stderr.lower())
+
+    def test_public_signed_zero_replay_accepts_js_and_wasm_and_rejects_resealed_wasm(self):
+        from runner import sha256
+        import xml.etree.ElementTree as ET
+
+        wasm_receipt = os.environ.get("DYN4K_BROWSER_WASI_SIGNED_ZERO_WASM_RECEIPT")
+        wasm_replay = os.environ.get("DYN4K_BROWSER_WASI_SIGNED_ZERO_WASM_REPLAY_ROOT")
+        js_receipt = os.environ.get("DYN4K_BROWSER_WASI_SIGNED_ZERO_JS_RECEIPT")
+        js_replay = os.environ.get("DYN4K_BROWSER_WASI_SIGNED_ZERO_JS_REPLAY_ROOT")
+        if any(value is None for value in (wasm_receipt, wasm_replay, js_receipt, js_replay)):
+            self.skipTest("set real JS/Wasm receipts and exact source replay checkouts")
+        with tempfile.TemporaryDirectory() as directory:
+            for target, receipt, replay in (("js", js_receipt, js_replay),
+                                            ("wasmJs", wasm_receipt, wasm_replay)):
+                with mock.patch.dict(os.environ, {"DYN4K_BROWSER_WASI_REPLAY_ROOT": replay}):
+                    accepted = self.public_historical_audit(
+                        Path(receipt), Path(directory) / f"{target}-auditor")
+                self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+            lane, copied = self.copy_lane(Path(wasm_receipt).parent, directory)
+            module = lane["modules"]["dyn4k-core"]
+            report_item = next(item for item in module["raw_xml"]
+                               if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
+            report = Path(report_item["path"])
+            timestamp = report.stat()
+            suite = ET.parse(report).getroot()
+            output = suite.find("system-out")
+            rows = output.text.splitlines()
+            fields = rows[0].split("\t")
+            transform = next(i for i, field in enumerate(fields)
+                             if field.startswith("a.transform="))
+            original = "-0.0@-9223372036854775808"
+            self.assertIn(original, fields[transform])
+            fields[transform] = fields[transform].replace(original, "-0.0@0", 1)
+            rows[0] = "\t".join(fields)
+            output.text = "\n".join(rows) + "\n"
+            ET.ElementTree(suite).write(report, encoding="unicode")
+            os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
+            report_item["sha256"] = sha256(report)
+            module["diagnostic_sha256"] = hashlib.sha256(
+                "\n".join(rows).encode()).hexdigest()
+            self.save_copied_lane(lane, copied)
+            with mock.patch.dict(os.environ,
+                                 {"DYN4K_BROWSER_WASI_REPLAY_ROOT": wasm_replay}):
+                rejected = self.public_historical_audit(
+                    copied / "lane.json", Path(directory) / "mutant-auditor")
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("raw bits", rejected.stderr)
 
     def test_public_wasmtime_receipt_rejects_events_moved_to_stderr(self):
         from runner import sha256

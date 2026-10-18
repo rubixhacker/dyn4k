@@ -210,7 +210,8 @@ def verify_collision_value(key: str, value: str) -> None:
         if decimal == "NaN":
             if bits & 0x7ff0000000000000 != 0x7ff0000000000000 or bits & 0xfffffffffffff == 0:
                 raise ValueError(f"collision diagnostic {key} has invalid NaN bits")
-        elif raw != bits and not (float(decimal) == 0 and bits in (0, -(1 << 63))):
+        # Kotlin/JS prints negative zero as "0"; Wasm keeps the minus sign.
+        elif raw != bits and not (decimal == "0" and bits == -(1 << 63)):
             raise ValueError(f"collision diagnostic {key} has mismatched raw bits")
 
 
