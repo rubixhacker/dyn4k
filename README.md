@@ -15,4 +15,5 @@ Full engine coverage and target qualification remain open. Public repository:
 - [Domain language](CONTEXT.md)
 - [GitHub issue tracker](docs/agents/issue-tracker.md)
 - [Foundation build and verification](docs/implementation/foundation.md)
+- [Consumer migration and usage guide](docs/guide/migration.md)
 
