@@ -11,6 +11,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from unittest.mock import patch
 
 import artifact
 import qualify
@@ -23,7 +24,7 @@ def fixture_original_path(path, windows_host=None):
     if windows_host:
         source = PureWindowsPath(path)
         return "/fixture/" + "/".join((source.drive.rstrip(":"), *source.parts[1:]))
-    return str(path)
+    return str(Path(path).resolve())
 
 
 class RawArtifactTests(unittest.TestCase):
@@ -466,6 +467,20 @@ class RawArtifactTests(unittest.TestCase):
         for unsafe in (r"D:relative\stage", r"\stage", r"D:\a\..\stage"):
             with self.subTest(path=unsafe), self.assertRaisesRegex(ValueError, "invalid"):
                 artifact._full_original_path("mingwX64", unsafe)
+
+    def test_full_hosted_fixture_replays_through_var_path_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            real_var = root / "private/var"
+            real_var.mkdir(parents=True)
+            (root / "var").symlink_to(real_var, target_is_directory=True)
+            self.assertEqual(str((real_var / "candidate/build/staging-repository").resolve()),
+                             fixture_original_path(root / "var/candidate/build/staging-repository"))
+            bundle = root / "var/full"
+            bundle.mkdir()
+            sha = self._full_hosted_fixture(bundle)
+            self.assertEqual("FULL_COMMON_PASSED", artifact.verify_full_hosted(
+                bundle, sha, Path(__file__).resolve().parents[2])["status"])
 
     def test_runner_contract_public_directory_and_tar_clis(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -914,13 +929,21 @@ class RawArtifactTests(unittest.TestCase):
                  "lanes": lanes,
                  "counts": {"PASSED": 0, "FAILED": 0, "UNAVAILABLE": 0, "NOT_RUN": 112}}))
             (repository / "provider.log").write_text("duplicate org.dyn4j provider\n")
-            missing_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
-                                                    repository / "ubuntu-missing")
-            self.assertEqual("PROBE_FAILED", missing_ubuntu["status"])
-            self.assertIn("core-jvm", missing_ubuntu["reason"])
-            write_group("core-jvm")
-            complete_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
-                                                     repository / "ubuntu-complete")
+            ubuntu_runtime = {"system": "Linux", "machine": "x86_64",
+                              "kernel_release": "6.0.0", "distribution": "ubuntu",
+                              "os_version": "24.04", "runner_image_os": "",
+                              "runner_image_version": "", "github_actions": False,
+                              "java_version": "21.0.8"}
+            with (patch.object(artifact.platform, "freedesktop_os_release",
+                               side_effect=OSError("Linux os-release is absent")),
+                  patch.object(artifact, "ubuntu_runtime", return_value=ubuntu_runtime)):
+                missing_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
+                                                        repository / "ubuntu-missing")
+                self.assertEqual("PROBE_FAILED", missing_ubuntu["status"])
+                self.assertIn("core-jvm", missing_ubuntu["reason"])
+                write_group("core-jvm")
+                complete_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
+                                                         repository / "ubuntu-complete")
             self.assertEqual("PROBE_PASSED", complete_ubuntu["status"])
             self.assertEqual("Linux", complete_ubuntu["runtime"]["system"])
             self.assertEqual(6686, complete_ubuntu["executed"])

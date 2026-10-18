@@ -393,7 +393,8 @@ class QualificationTests(unittest.TestCase):
             result_file = Path(root) / "lane.json"
             result_file.write_text(json.dumps({"candidate_sha": "a" * 40}))
             observed = qualify.execute_plan(
-                {case["id"]: {"command": ["/bin/true"], "result_file": str(result_file)}},
+                {case["id"]: {"command": [sys.executable, "-c", "pass"],
+                              "result_file": str(result_file)}},
                 "a" * 40, Path(root) / "execution.json")
             self.assertIn("error", observed[case["id"]])
             self.assertFalse(result_file.exists())
