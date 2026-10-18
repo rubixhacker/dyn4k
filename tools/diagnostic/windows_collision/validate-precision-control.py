@@ -530,6 +530,30 @@ def corrected_java_output(raw, local_directory, temp_root=None):
         raise ValueError("corrected Java output root or suffix differs")
 
 
+def corrected_java_home(command_option, identity_file, source_sha):
+    identity = {}
+    for line in identity_file.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or not key or not value or key in identity:
+            raise ValueError("corrected runner runtime identity is missing or duplicated")
+        identity[key] = value
+    if identity.get("candidate") != source_sha:
+        raise ValueError("corrected runner identity candidate differs")
+    java_home = identity.get("java_home")
+    version = identity.get("java_version", "")
+    match = re.fullmatch(r'(?:openjdk|java) version "([0-9]+)(?:\.[0-9]+)*(?:[-+][A-Za-z0-9.+-]+)?"(?: .*)?',
+                         version)
+    if not java_home or not match or match.group(1) != "21":
+        raise ValueError("corrected runner Java home or major version differs")
+    prefix = "-JdkHome "
+    if not command_option.startswith(prefix):
+        raise ValueError("corrected Java JdkHome option differs")
+    command_home = command_option[len(prefix):]
+    if not command_home or command_home != java_home or command_home.strip() != command_home:
+        raise ValueError("corrected Java JdkHome differs from runner identity")
+    command_path(java_home)
+
+
 def corrected_probe_modes(directory, run_root=None):
     root = Path(directory)
     modes = (("debug-g", ("-g",)), ("default", ()), ("optimized-opt", ("-opt",)))
@@ -642,9 +666,9 @@ def validate_corrected(args):
         if not (java_directory / name).is_file():
             raise ValueError(f"corrected pinned Java output missing: {name}")
     java_command = (java_directory / "java-command.txt").read_text(encoding="utf-8").splitlines()
-    if len(java_command) != 5 or java_command[0] != ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1" or \
-            not java_command[1].startswith("-JdkHome "):
+    if len(java_command) != 5 or java_command[0] != ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1":
         raise ValueError("corrected pinned Java command is partial or differs")
+    corrected_java_home(java_command[1], native.parent / "runner-runtime-identity.txt", args.source_sha)
     temp_root = run_temp_root(run_root, java_directory)
     for argument, option, filename in ((java_command[2], "-BaselineJar ", "dyn4j-6.0.0.jar"),
                                        (java_command[3], "-BaselineSource ", "dyn4j-6.0.0-source")):

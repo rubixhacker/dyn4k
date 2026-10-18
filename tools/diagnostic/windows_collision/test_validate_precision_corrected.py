@@ -235,6 +235,8 @@ class CorrectedControlTest(unittest.TestCase):
         (scalar / "kotlin-native-version.txt").write_text("Kotlin/Native 2.4.20\n", encoding="utf-8")
         java_dir = self.root / "java"
         java_dir.mkdir()
+        java_home = ("C:\\hostedtoolcache\\windows\\Java_Temurin-Hotspot_jdk\\21.0.12-101.0\\x64"
+                     if windows_drive else "/pinned/jdk21")
         (self.root / "baseline-source-revision.txt").write_text(
             "058bf6d982a0fb89b54050f929f6ea9dae53b714\n", encoding="utf-8")
         java_trace = java_dir / "java-trace.tsv"
@@ -244,7 +246,7 @@ class CorrectedControlTest(unittest.TestCase):
         java_output = temp_root + ("\\windows-collision-focus\\java" if windows_drive else "/java")
         (java_dir / "java-command.txt").write_text("\n".join((
             ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1",
-            "-JdkHome /pinned/jdk21", f"-BaselineJar {temp_root}" +
+            f"-JdkHome {java_home}", f"-BaselineJar {temp_root}" +
             ("\\dyn4j-6.0.0.jar" if windows_drive else "/dyn4j-6.0.0.jar"),
             f"-BaselineSource {temp_root}" +
             ("\\dyn4j-6.0.0-source" if windows_drive else "/dyn4j-6.0.0-source"),
@@ -264,11 +266,17 @@ class CorrectedControlTest(unittest.TestCase):
         (probe / "source-sha256.txt").write_text(
             "\n".join(f"{hashlib.sha256((REPO / path).read_bytes()).hexdigest()}  {path}" for path in paths) + "\n",
             encoding="utf-8")
+        source_sha = subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                                             text=True).strip()
+        (self.root / "runner-runtime-identity.txt").write_text("\n".join((
+            f"candidate={source_sha}", "runner_os=Windows", "runner_arch=X64",
+            "image_os=win25-vs2026", "image_version=20261007.264.1", f"java_home={java_home}",
+            'java_version=openjdk version "21.0.12.1" 2026-08-18 LTS',
+            "gradle_version=Gradle 9.5.0", "powershell=7.6.6")) + "\n", encoding="utf-8")
         args = SimpleNamespace(native_directory=str(native), java_trace=str(java_trace),
                                native_scalars=str(scalar / "native-scalar.tsv"),
                                java_scalars=str(scalar / "java-scalar.tsv"), probe_directory=str(probe),
-                               source_sha=subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"],
-                                                                  text=True).strip(),
+                               source_sha=source_sha,
                                result=str(self.root / "result.json"))
         return args, test_pe, gradle_command
 
@@ -354,6 +362,45 @@ class CorrectedControlTest(unittest.TestCase):
     def test_full_route_accepts_consistent_other_windows_drive(self):
         args, _, _ = self.route_fixture(windows_drive="E")
         with patch.object(FOCUS, "validate", return_value=(7, 6, 72, 72)):
+            V["validate_corrected"](args)
+
+    def test_full_route_binds_java_home_to_runner_identity(self):
+        args, _, _ = self.route_fixture(windows_drive="D")
+        command_file = self.root / "java" / "java-command.txt"
+        identity_file = self.root / "runner-runtime-identity.txt"
+        original_command = command_file.read_text(encoding="utf-8")
+        original_identity = identity_file.read_text(encoding="utf-8")
+        home = "C:\\hostedtoolcache\\windows\\Java_Temurin-Hotspot_jdk\\21.0.12-101.0\\x64"
+        with patch.object(FOCUS, "validate", return_value=(7, 6, 72, 72)):
+            V["validate_corrected"](args)
+            for label, changed in (
+                    ("wrong command", original_command.replace(home, "C:\\other\\jdk21")),
+                    ("empty command", original_command.replace(home, "")),
+                    ("relative command", original_command.replace(home, "jdk21")),
+                    ("duplicate command", original_command.replace(f"-JdkHome {home}",
+                      f"-JdkHome {home}\n-JdkHome {home}")),
+            ):
+                with self.subTest(label=label):
+                    command_file.write_text(changed, encoding="utf-8")
+                    self.reject(lambda: V["validate_corrected"](args))
+                    command_file.write_text(original_command, encoding="utf-8")
+            for label, changed in (
+                    ("wrong identity", original_identity.replace(home, "C:\\other\\jdk21")),
+                    ("empty identity", original_identity.replace(home, "")),
+                    ("relative identity", original_identity.replace(home, "jdk21")),
+                    ("duplicate identity", original_identity + f"java_home={home}\n"),
+                    ("wrong major", original_identity.replace('version "21.0.12.1"', 'version "22.0.1"')),
+                    ("duplicate version", original_identity + 'java_version=openjdk version "21.0.12.1"\n'),
+            ):
+                with self.subTest(label=label):
+                    identity_file.write_text(changed, encoding="utf-8")
+                    self.reject(lambda: V["validate_corrected"](args))
+                    identity_file.write_text(original_identity, encoding="utf-8")
+            command_file.write_text(original_command.replace(home, "jdk21"), encoding="utf-8")
+            identity_file.write_text(original_identity.replace(home, "jdk21"), encoding="utf-8")
+            self.reject(lambda: V["validate_corrected"](args))
+            command_file.write_text(original_command.replace(home, "C:\\other\\jdk21"), encoding="utf-8")
+            identity_file.write_text(original_identity.replace(home, "C:\\other\\jdk21"), encoding="utf-8")
             V["validate_corrected"](args)
 
     def test_probe_modes_and_adverse(self):
