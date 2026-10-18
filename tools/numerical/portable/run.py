@@ -122,15 +122,25 @@ def stage(output, commit, source_sha256):
     return manifest
 
 
-def runtime(host, log_path):
+def runtime(host, log_path, execution_log=None):
     if host == "linux-x64":
         binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
         if len(binaries) != 1:
             raise Rejected(f"expected one Linux x64 test binary, found {len(binaries)}")
         binary = binaries[0].resolve()
+        if execution_log is None or not Path(execution_log).is_file():
+            raise Rejected("executed native test binary log is absent")
+        executed = []
+        with Path(execution_log).open(encoding="utf-8") as stream:
+            for line in stream:
+                found = re.search(r'\bexecve\("([^"]+\.kexe)".*\)\s+=\s+0$', line)
+                if found:
+                    executed.append(Path(found.group(1)).resolve())
+        if not executed or any(path != binary for path in executed):
+            raise Rejected("executed native test binary does not match linked binary")
         return {"host": host, "os": platform.platform(), "machine": platform.machine(),
                 "device": False, "executable": str(binary), "executable_sha256": digest(binary),
-                "version": platform.platform()}
+                "version": platform.platform(), "process_executions": len(executed)}
     needle = "Starting process 'command '" if host.startswith("node-") else "Starting process 'Gradle Test Executor"
     commands = []
     with Path(log_path).open(encoding="utf-8") as stream:
@@ -342,11 +352,21 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                 command.extend(("-PportableJvm8=true",
                                 "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
             log_path = lane / f"gradle-{method}.log"
+            execution_log = None
+            if host == "linux-x64":
+                tracer = shutil.which("strace")
+                if tracer is None:
+                    raise Rejected("strace is unavailable for native process binding")
+                execution_log = lane / f"native-exec-{method}.log"
+                command = [tracer, "-f", "-e", "trace=execve", "-o",
+                           str(execution_log), *command]
             with log_path.open("x", encoding="utf-8") as log:
                 completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
                                            stderr=subprocess.STDOUT, check=False)
             method_result = {"method": method, "gradle_exit": completed.returncode,
                              "log_sha256": digest(log_path)}
+            if execution_log is not None and execution_log.is_file():
+                method_result["execution_log_sha256"] = digest(execution_log)
             methods.append(method_result)
             if completed.returncode:
                 outcome["gradle_exit"] = completed.returncode
@@ -370,7 +390,7 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                 raise Rejected(f"case appears in more than one test method: {sorted(duplicate)[:5]}")
             raw_counts["per_case"].update(row_counts["per_case"])
             try:
-                runtimes.append(runtime(host, log_path))
+                runtimes.append(runtime(host, log_path, execution_log))
             except Rejected as error:
                 method_result["reason"] = str(error)
                 outcome["status"] = "FAILED"

@@ -8,6 +8,24 @@ import run
 
 
 class ExtractionTest(unittest.TestCase):
+    def test_native_receipt_requires_executed_test_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "build/bin/linuxX64/debugTest/test.kexe"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"native-test-binary")
+            log = root / "gradle.log"
+            log.write_text("native test passed\n")
+            execution = root / "native-exec.log"
+            execution.write_text(f'123 execve("{binary}", ["test.kexe"], 0x1) = 0\n')
+            with patch.object(run, "PORTABLE", root):
+                result = run.runtime("linux-x64", log, execution)
+                self.assertEqual(result["executable_sha256"], run.digest(binary))
+                self.assertEqual(result["executable"], str(binary.resolve()))
+                execution.write_text('123 execve("/tmp/other.kexe", [], 0x1) = 0\n')
+                with self.assertRaisesRegex(Exception, "executed native test binary"):
+                    run.runtime("linux-x64", log, execution)
+
     def test_comparison_coverage_lists_every_unreferenced_case(self):
         coverage = run.comparison_coverage()
         self.assertEqual(coverage["declared_cases"], 332)
