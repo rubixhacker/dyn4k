@@ -1025,9 +1025,10 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
 def run(target, candidate_sha, output):
     repository = Path(__file__).resolve().parents[2]
     output.mkdir(parents=True, exist_ok=True)
+    output = output.resolve()
     receipt = {"schema": 2, "kind": "hosted-full-common-corpus", "candidate_sha": candidate_sha,
                "target": target, "status": "NOT_RUN", "configurations": [],
-               "archive_root": str(output.resolve()),
+               "archive_root": str(output),
                "repository_root": str(repository),
                "github_run_id": os.environ.get("GITHUB_RUN_ID"),
                "github_job": os.environ.get("GITHUB_JOB"),
