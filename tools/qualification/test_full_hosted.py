@@ -400,6 +400,7 @@ class FullHostedTests(unittest.TestCase):
         else:
             evidence = self.root / "synthetic-joined"
             evidence.mkdir()
+        evidence = evidence.resolve()
         actual_repository = Path(__file__).resolve().parents[2]
         repository = evidence / "checkout"
         repository.mkdir()
