@@ -31,7 +31,6 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.sqrt
 import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
 
@@ -51,7 +50,7 @@ open class Vector2 : Copyable<Vector2> {
     override fun copy() = Vector2(x, y)
     open fun distance(x: Double, y: Double): Double {
         val dx = this.x - x; val dy = this.y - y
-        return sqrt(dx * dx + dy * dy)
+        return nearestSqrt(dx * dx + dy * dy)
     }
     open fun distance(point: Vector2) = distance(point.x, point.y)
     open fun distanceSquared(x: Double, y: Double): Double {
@@ -82,7 +81,7 @@ open class Vector2 : Copyable<Vector2> {
     open fun set(x: Double, y: Double): Vector2 { this.x = x; this.y = y; return this }
     open fun getXComponent() = Vector2(x, 0.0)
     open fun getYComponent() = Vector2(0.0, y)
-    open fun getMagnitude() = sqrt(x * x + y * y)
+    open fun getMagnitude() = nearestSqrt(x * x + y * y)
     open fun getMagnitudeSquared() = x * x + y * y
     open fun setMagnitude(magnitude: Double): Vector2 {
         if (abs(magnitude) <= Epsilon.E) return zero()
@@ -171,7 +170,7 @@ open class Vector2 : Copyable<Vector2> {
         return Vector2(x * reciprocal, y * reciprocal)
     }
     open fun normalize(): Double {
-        val magnitude = sqrt(x * x + y * y)
+        val magnitude = nearestSqrt(x * x + y * y)
         if (magnitude <= Epsilon.E) return 0.0
         val reciprocal = 1.0 / magnitude
         x *= reciprocal; y *= reciprocal
