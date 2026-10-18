@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import fnmatch
 import hashlib
 import itertools
@@ -486,10 +487,20 @@ def source_bytes(repository, relative):
             descriptor = directory.open_file(relative.name)
             try:
                 before = os.fstat(descriptor)
-                data = os.read(descriptor, MAX_FILE_BYTES + 1)
-                after = os.fstat(descriptor)
-                if len(data) > MAX_FILE_BYTES:
+                if before.st_size > MAX_FILE_BYTES:
                     raise ValueError(f"oversized diagnostic source: {relative}")
+                chunks = []
+                read_bytes = 0
+                while read_bytes < before.st_size:
+                    chunk = os.read(descriptor, min(64 * 1024, before.st_size - read_bytes))
+                    if not chunk:
+                        raise ValueError(f"incomplete diagnostic source: {relative}")
+                    chunks.append(chunk)
+                    read_bytes += len(chunk)
+                if os.read(descriptor, 1):
+                    raise ValueError(f"source path identity changed: {relative}")
+                data = b"".join(chunks)
+                after = os.fstat(descriptor)
                 if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                         after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
                     raise ValueError(f"source path identity changed: {relative}")
@@ -649,18 +660,68 @@ def _run_lock_task_windows(repository, output, command):
     process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE,
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    job = None
+    if os.name == "nt":
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateJobObjectW.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p)
+        kernel.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+        kernel.AssignProcessToJobObject.restype = ctypes.c_int
+        kernel.TerminateJobObject.argtypes = (ctypes.c_void_p, ctypes.c_uint)
+        kernel.TerminateJobObject.restype = ctypes.c_int
+        kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
+        kernel.CloseHandle.restype = ctypes.c_int
+        job = kernel.CreateJobObjectW(None, None)
+        if not job or not kernel.AssignProcessToJobObject(job, process._handle):
+            if job:
+                kernel.CloseHandle(job)
+            try:
+                killed = subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        timeout=MAX_DRAIN_SECONDS, check=False)
+                if killed.returncode != 0 and process.poll() is None:
+                    process.kill()
+            except (OSError, subprocess.TimeoutExpired):
+                if process.poll() is None:
+                    process.kill()
+            try:
+                process.wait(timeout=MAX_DRAIN_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=MAX_DRAIN_SECONDS)
+            process.stdout.close()
+            process.stderr.close()
+            raise OSError("cannot bind Safari diagnostic process tree to Windows job")
+
+    def terminate_tree():
+        if job is not None and kernel.TerminateJobObject(job, 1):
+            return
+        try:
+            killed = subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    timeout=MAX_DRAIN_SECONDS, check=False)
+            if killed.returncode != 0 and process.poll() is None:
+                process.kill()
+        except (OSError, subprocess.TimeoutExpired):
+            if process.poll() is None:
+                process.kill()
+
     seen = {"stdout": 0, "stderr": 0}
     kept = {"stdout": 0, "stderr": 0}
+    reader_errors = []
     timed_out = False
     with (output / "stdout.txt").open("wb") as stdout, \
             (output / "stderr.txt").open("wb") as stderr:
         def drain(name, source, destination):
-            while chunk := source.read(64 * 1024):
-                seen[name] += len(chunk)
-                writable = min(len(chunk), max(0, MAX_FILE_BYTES - kept[name]))
-                if writable:
-                    destination.write(chunk[:writable])
-                    kept[name] += writable
+            try:
+                while chunk := source.read(64 * 1024):
+                    seen[name] += len(chunk)
+                    writable = min(len(chunk), max(0, MAX_FILE_BYTES - kept[name]))
+                    if writable:
+                        destination.write(chunk[:writable])
+                        kept[name] += writable
+            except Exception as error:
+                reader_errors.append(f"{name}: {type(error).__name__}: {error}")
 
         threads = [threading.Thread(target=drain, args=(name, source, destination),
                                     daemon=True)
@@ -672,12 +733,7 @@ def _run_lock_task_windows(repository, output, command):
             process.wait(timeout=MAX_PROCESS_SECONDS)
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               timeout=MAX_DRAIN_SECONDS, check=False)
-            except (OSError, subprocess.TimeoutExpired):
-                process.kill()
+            terminate_tree()
             try:
                 process.wait(timeout=MAX_DRAIN_SECONDS)
             except subprocess.TimeoutExpired:
@@ -685,10 +741,16 @@ def _run_lock_task_windows(repository, output, command):
                 process.wait(timeout=MAX_DRAIN_SECONDS)
         for thread in threads:
             thread.join(timeout=MAX_DRAIN_SECONDS)
-        stream_incomplete = any(thread.is_alive() for thread in threads)
-    if not stream_incomplete:
+        stream_incomplete = bool(reader_errors) or any(thread.is_alive() for thread in threads)
+        if stream_incomplete and not timed_out:
+            terminate_tree()
+            for thread in threads:
+                thread.join(timeout=MAX_DRAIN_SECONDS)
+    if not any(thread.is_alive() for thread in threads):
         process.stdout.close()
         process.stderr.close()
+    if job is not None:
+        kernel.CloseHandle(job)
     finished = time.time_ns()
     return {"command": command, "pid": process.pid, "exit_code": process.returncode,
             "started_ns": started, "finished_ns": finished,

@@ -625,6 +625,60 @@ class SafariYarnLockTests(unittest.TestCase):
         for module in ("dyn4k-core", "dyn4k"):
             self.assertFalse((self.repository / module / "karma.config.d").exists())
 
+    def test_public_hosted_capture_rejects_incomplete_pipe_even_with_lock_signature(self):
+        class BrokenStream:
+            def __init__(self, first):
+                self.first = first
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return self.first
+                raise OSError("injected pipe read failure")
+
+            def close(self):
+                pass
+
+        class Process:
+            pid = 123
+            returncode = 1
+
+            def __init__(self):
+                self.stdout = BrokenStream(
+                    b"> Task :dyn4k-core:jsTestPackageJson\n"
+                    b"> Task :dyn4k:jsTestPackageJson\n"
+                    b"> Task :kotlinNpmInstall\n"
+                    b"> Task :kotlinStoreYarnLock FAILED\n")
+                self.stderr = BrokenStream(LOCK_FAILURE.encode())
+
+            def wait(self, timeout):
+                return self.returncode
+
+        def partial(repository, output, command):
+            self.generated(safari=True)
+            proxy = mock.Mock(wraps=os)
+            proxy.name = "posix"
+            with mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0, create=True), \
+                    mock.patch.object(subprocess, "Popen", return_value=Process()), \
+                    mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess(
+                        ["taskkill"], 0)), \
+                    mock.patch.object(safari_yarn_lock, "os", proxy):
+                return safari_yarn_lock._run_lock_task_windows(repository, output, command)
+
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--output", str(self.output), "--configuration", "development"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=partial), \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        receipt = json.loads((self.output / "receipt.json").read_text())
+        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
     def test_hosted_capture_rejects_reporter_source_changed_during_task(self):
         def changed(repository, output, command):
             self.generated(safari=True)

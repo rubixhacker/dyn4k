@@ -415,23 +415,29 @@ def _stage_windows(repository, projects, content, output, result):
         for project in projects:
             relative = Path(project)
             root = LockedDirectory(repository, relative)
-            directory = None
             try:
                 stage_path = root.path / "karma.config.d"
                 stage_path.mkdir()
-                directory = root.child("karma.config.d")
-                created.append((relative, root, directory))
-                with (stage_path / STAGED_NAME).open("xb") as staged:
-                    staged.write(content)
-                result["projects"][relative.as_posix()] = "STAGED"
             except BaseException:
-                if directory is None:
-                    root.close()
+                root.close()
                 raise
+            created.append((relative, root, None))
+            directory = root.child("karma.config.d")
+            created[-1] = (relative, root, directory)
+            with (stage_path / STAGED_NAME).open("xb") as staged:
+                staged.write(content)
+            result["projects"][relative.as_posix()] = "STAGED"
         yield result
     finally:
         for relative, root, directory in reversed(created):
             key = relative.as_posix()
+            if directory is None:
+                result["status"] = "CHANGED"
+                result["projects"][key] = "LEFTOVER"
+                result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                           "error": "staging directory handle unavailable"})
+                root.close()
+                continue
             try:
                 try:
                     descriptor = directory.open_file(STAGED_NAME)

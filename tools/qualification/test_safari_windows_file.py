@@ -9,6 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import safari_reporter
+import safari_yarn_lock
+
 
 class Function:
     def __init__(self, implementation):
@@ -19,6 +22,99 @@ class Function:
 
 
 class SafariWindowsFileTests(unittest.TestCase):
+    def test_generated_input_rejects_stable_short_read_and_accepts_repeated_reads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "source"
+            path = repository / "build/js/yarn.lock"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"abcdef")
+
+            class Directory:
+                def __init__(self, root, relative):
+                    self.path = root / relative
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    pass
+
+                def open_file(self, name):
+                    return os.open(self.path / name, os.O_RDONLY)
+
+            proxy = mock.Mock(wraps=os)
+            proxy.name = "nt"
+            fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+            output = Path(temporary) / "capture"
+            with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}), \
+                    mock.patch.object(safari_yarn_lock, "os", proxy):
+                with mock.patch.object(proxy, "read", side_effect=[b"abc", b"", b"abc", b"def", b""]):
+                    with self.assertRaisesRegex(ValueError, "incomplete diagnostic source"):
+                        safari_yarn_lock.copy_file(repository, Path("build/js/yarn.lock"),
+                                                   output, "generated")
+                    self.assertFalse((output / "generated/build/js/yarn.lock").exists())
+                    archived = safari_yarn_lock.copy_file(
+                        repository, Path("build/js/yarn.lock"), output, "generated")
+                    self.assertEqual(b"abcdef", (output / archived["path"]).read_bytes())
+
+    def test_staging_handle_failure_records_leftover_instead_of_clean(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "source"
+            (repository / "dyn4k-core").mkdir(parents=True)
+            result = {"status": "CLEAN", "projects": {}, "forensic": []}
+
+            class Directory:
+                def __init__(self, source, relative):
+                    self.path = source / relative
+
+                def child(self, name):
+                    raise OSError("simulated handle-open failure after mkdir")
+
+                def close(self):
+                    pass
+
+            fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+            with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}):
+                with self.assertRaisesRegex(OSError, "handle-open failure"):
+                    with safari_reporter._stage_windows(
+                            repository, (Path("dyn4k-core"),), b"fragment", root, result):
+                        pass
+            self.assertEqual("CHANGED", result["status"])
+            self.assertEqual("LEFTOVER", result["projects"]["dyn4k-core"])
+            self.assertTrue((repository / "dyn4k-core/karma.config.d").is_dir())
+
+    def test_windows_stage_normal_cleanup_removes_owned_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "source"
+            (repository / "dyn4k-core").mkdir(parents=True)
+            result = {"status": "CLEAN", "projects": {}, "forensic": []}
+
+            class Directory:
+                def __init__(self, source, relative):
+                    self.path = source / relative
+
+                def child(self, name):
+                    return Directory(self.path, Path(name))
+
+                def open_file(self, name):
+                    return os.open(self.path / name, os.O_RDONLY)
+
+                def close(self):
+                    pass
+
+            fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+            with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}):
+                with safari_reporter._stage_windows(
+                        repository, (Path("dyn4k-core"),), b"fragment", root, result):
+                    staged = repository / "dyn4k-core/karma.config.d" \
+                        / safari_reporter.STAGED_NAME
+                    self.assertEqual(b"fragment", staged.read_bytes())
+            self.assertEqual("CLEAN", result["status"])
+            self.assertEqual("CLEAN", result["projects"]["dyn4k-core"])
+            self.assertFalse((repository / "dyn4k-core/karma.config.d").exists())
+
     def test_locked_chain_and_file_refuse_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
