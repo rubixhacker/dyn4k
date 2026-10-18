@@ -21,8 +21,8 @@ import qualify
 import artifact
 
 
-APPROVED_MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
-APPROVED_MANIFEST_REVISION = "44053b62f49c9f12f3be7540f93164a446bd0e61"
+APPROVED_MANIFEST_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94"
+APPROVED_MANIFEST_REVISION = "e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3"
 MANIFEST_PATH = "tools/qualification/full-suite-manifest.json"
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -69,13 +69,20 @@ JOINT_PHYSICAL_STEPS = 36000
 PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
 PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
-PROSPECTIVE_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
+PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
 APPROVED_PROSPECTIVE_CHECKERS = {
-    "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
+    "prospective_compare.py": "5ab8be61c17565d1feb4a23ceb588981f12d9e69213e0af97425a5f2a50f0ed9",
     "cases.py": "273c8246850d6995f0b3db1dac2d6f52d1c3154af1deaa48fbde25dc41f184c1",
     "orthogonality.py": "946bea6b9662a8f6e763ee9ce19374fa2b0b822a16a8e74ec355603576a5a15e",
     "reference_diagnostic.py": "f3e40a4671c8e07d5d0071f11818f9235d7a0f4a8ddfd784cb01604b0bb4b967",
     "receipt.py": "36c6c18255274195f58e4361e91d5fd7a5fc77eb9d5df01acc4abc0d36c75b0c",
+}
+APPROVED_P2_PRODUCERS = {
+    "actual_arithmetic.py": "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
+    "baseline_capture.py": "914e775309ffaa2ae4ea1690a22f83c055f422d7579e334e27d2fdf03d4e5a8f",
+    "capture_actual.py": "2366b83a3314c72d208d49642609734536ae212c65db23025a7431dc636363b0",
+    "rotation_oracle.py": "a95e4fba5883728dfe936c752daacd5a1fe0bb484dff4b14ddc9935b4a322ac6",
+    "run.py": "2bd20f332a15621b10f634dee7cf3551310e0dbe8b6465f4c55d7e5a5d420d7e",
 }
 ROTATION_ORACLE_REVISION = "8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb"
 ROTATION_ORACLE_SHA256 = "29de6401ef9253bee669714fdf31bade9291b4ee77d2aacaa34d62907f1bc238"
@@ -667,10 +674,141 @@ def _prospective_case_status(rule, arithmetic):
     return "PASSED" if arithmetic == "PASSED" else "NOT_RUN"
 
 
+def _p2_scope(scope, candidate_sha, source_sha256, artifact_sha256, root):
+    required = {"candidate_sha", "target", "runtime", "runtime_identity",
+                "artifact_hashes", "source_sha256", "baseline_attestation_path",
+                "baseline_attestation_sha256"}
+    if not isinstance(scope, dict):
+        raise IncompleteEvidence("independent numerical P2 JVM scope is missing")
+    missing = required - set(scope)
+    if missing:
+        raise IncompleteEvidence("independent numerical P2 scope field is missing: "
+                                 + ", ".join(sorted(missing)))
+    if (set(scope) != required or scope["candidate_sha"] != candidate_sha
+            or scope["target"] != "jvm" or scope["runtime"] != "Java"
+            or not isinstance(scope["runtime_identity"], str)
+            or not scope["runtime_identity"]
+            or scope["source_sha256"] != source_sha256
+            or not isinstance(scope["artifact_hashes"], dict)
+            or set(scope["artifact_hashes"]) != set(qualify.MODULES)
+            or scope["artifact_hashes"]["dyn4k-core"] != artifact_sha256
+            or any(not SHA64.fullmatch(str(value)) for value in
+                   scope["artifact_hashes"].values())
+            or not SHA64.fullmatch(str(scope["baseline_attestation_sha256"]))):
+        raise ValueError("independent numerical P2 source, JVM artifact, or attestation scope differs")
+    sidecar = Path(scope["baseline_attestation_path"])
+    if (not sidecar.is_absolute() or not sidecar.is_file() or sidecar.is_symlink()
+            or sidecar.resolve().is_relative_to(root.resolve())):
+        raise IncompleteEvidence("external numerical baseline attestation file is absent")
+    if hashlib.sha256(sidecar.read_bytes()).hexdigest() != scope["baseline_attestation_sha256"]:
+        raise ValueError("external numerical baseline attestation differs from independent audit")
+    return sidecar
+
+
+def _p2_directory(root, relative):
+    _file_path_name(relative)
+    directory = root.joinpath(*relative.split("/"))
+    if not directory.is_dir() or directory.is_symlink():
+        raise IncompleteEvidence(f"prospective raw directory is missing: {relative}")
+    if not directory.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"prospective raw directory escapes archive: {relative}")
+    return directory
+
+
+def _p2_summary(summary, expected, methods, case_methods):
+    rows = summary.get("results") if isinstance(summary, dict) else None
+    evidence = summary.get("operation_evidence") if isinstance(summary, dict) else None
+    if (not isinstance(rows, list) or len(rows) != PROSPECTIVE_CASE_COUNT
+            or not isinstance(evidence, dict) or set(evidence) != set(methods)
+            or not isinstance(case_methods, dict) or set(case_methods) != set(expected)
+            or summary.get("operation_binding") != "VERIFIED_ARITHMETIC_BINDING"):
+        raise ValueError("reviewed P2 verifier omitted raw operation or case coverage")
+    identities = [row.get("id") for row in rows if isinstance(row, dict)]
+    if identities != list(expected):
+        raise ValueError("reviewed P2 comparison case identities or order differ")
+    cases = {}
+    for row in rows:
+        case_id = row["id"]
+        method = row.get("operation_method")
+        if (method != case_methods[case_id] or method not in evidence or
+                row.get("operation_receipt_sha256") != evidence[method].get("receipt_sha256") or
+                not SHA64.fullmatch(str(row["operation_receipt_sha256"]))):
+            raise ValueError(f"reviewed P2 operation method or receipt differs: {case_id}")
+        rule = row.get("status")
+        arithmetic = ("PASSED" if row.get("target_arithmetic") ==
+                      "PASSED_BOUND_OPERATION_EVIDENCE" else "NOT_RUN")
+        if not isinstance(rule, str):
+            raise ValueError(f"reviewed P2 policy status is absent: {case_id}")
+        status = _prospective_case_status(rule, arithmetic)
+        if status == "PASSED" and row.get("qualification") != "PASSED_CASE_POLICY":
+            raise ValueError(f"reviewed P2 policy qualification differs: {case_id}")
+        cases[case_id] = {"rule": rule, "arithmetic": arithmetic,
+                          "status": status, "method": method,
+                          "receipt_sha256": row["operation_receipt_sha256"]}
+    overall = ("FAILED" if any(item["status"] == "FAILED" for item in cases.values()) else
+               "PASSED" if all(item["status"] == "PASSED" for item in cases.values()) else
+               "NOT_RUN")
+    return {"status": overall, "required_cases": PROSPECTIVE_CASE_COUNT,
+            "methods_verified": len(evidence), "cases": cases,
+            "reason": "reviewed P2 raw arithmetic and adopted case policy replayed"}
+
+
+def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
+                    source_sha256, artifact_sha256):
+    _prospective_checker_binding(repository, candidate_sha)
+    _source_binding(repository, candidate_sha,
+                    {f"tools/numerical/portable/{name}": value
+                     for name, value in APPROVED_P2_PRODUCERS.items()},
+                    "reviewed P2 raw producer")
+    baseline = _p2_directory(root, bridge["baseline"])
+    candidate = _p2_directory(root, bridge["candidate"])
+    arithmetic = _p2_directory(root, bridge["arithmetic"])
+    if not (candidate / "jvm").is_dir():
+        raise IncompleteEvidence("prospective JVM candidate lane is missing")
+    portable = Path(__file__).resolve().parents[1] / "numerical/portable"
+    previous = sys.dont_write_bytecode
+    modules = ("prospective_compare", "actual_arithmetic", "baseline_capture", "run",
+               "cases", "orthogonality", "reference_diagnostic", "receipt",
+               "rotation_oracle")
+    prior = {name: sys.modules.pop(name, None) for name in modules}
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(portable))
+    try:
+        from prospective_compare import compare_host
+        from cases import declared_cases
+        from actual_arithmetic import expected_case_ids
+        frozen = {case["id"] for case in declared_cases()} - set(approved_prospective_cases(str(repository)))
+        case_order = [case["id"] for case in declared_cases() if case["id"] not in frozen]
+        case_methods = {case_id: method for method, ids in expected_case_ids().items()
+                        for case_id in ids if case_id not in frozen}
+        with tempfile.TemporaryDirectory(prefix="dyn4k-p2-replay-") as temporary:
+            copied = Path(temporary)
+            shutil.copytree(candidate, copied / "candidate")
+            shutil.copytree(arithmetic, copied / "arithmetic")
+            summary = compare_host(baseline, copied / "candidate/jvm", frozen,
+                                   baseline_attestation=sidecar,
+                                   arithmetic_captures=copied / "arithmetic")
+    finally:
+        sys.path.pop(0)
+        sys.dont_write_bytecode = previous
+        for name in modules:
+            sys.modules.pop(name, None)
+            if prior[name] is not None:
+                sys.modules[name] = prior[name]
+    if (summary.get("candidate_source_sha256") != source_sha256
+            or summary.get("candidate_artifact_sha256", {}).get("target") != artifact_sha256
+            or summary.get("baseline_attestation_sha256") !=
+            hashlib.sha256(sidecar.read_bytes()).hexdigest()):
+        raise ValueError("reviewed P2 comparison source, artifact, or baseline differs")
+    return summary, case_order, case_methods
+
+
 def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
-                                      artifact_sha256, source_sha256):
+                                      artifact_sha256, source_sha256, scope=None):
     bridge = receipt.get("prospective_bridge")
-    if not isinstance(bridge, dict) or set(bridge) != {"inventory", "inventory_sha256"}:
+    if (not isinstance(bridge, dict) or not {"inventory", "inventory_sha256"} <= set(bridge)
+            or set(bridge) - {"inventory", "inventory_sha256", "baseline", "candidate",
+                              "arithmetic"}):
         raise ValueError("prospective bridge inventory is missing or malformed")
     raw = _file_path(root, bridge["inventory"]).read_bytes()
     if hashlib.sha256(raw).hexdigest() != bridge["inventory_sha256"]:
@@ -708,9 +846,25 @@ def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
                 or method_receipt.get("source_archive_sha256") != source_sha256
                 or method_receipt.get("artifact_sha256") != artifact_sha256):
             raise ValueError(f"prospective bridge method is misbound: {item['method']}")
-    return {"status": "NOT_RUN", "required_cases": PROSPECTIVE_CASE_COUNT,
-            "transport_receipts": len(paths),
-            "reason": "15 method receipts are bound, but approved raw bridge verification and external baseline attestation are absent"}
+    if scope is None:
+        return {"status": "NOT_RUN", "required_cases": PROSPECTIVE_CASE_COUNT,
+                "transport_receipts": len(paths),
+                "reason": "independent numerical P2 JVM scope and external baseline attestation are absent"}
+    missing = {"baseline", "candidate", "arithmetic"} - set(bridge)
+    if missing:
+        raise IncompleteEvidence("prospective bridge raw archive field is missing: "
+                                 + ", ".join(sorted(missing)))
+    sidecar = _p2_scope(scope, candidate_sha, source_sha256, artifact_sha256, root)
+    if inventory["baseline_attestation_sha256"] != scope["baseline_attestation_sha256"]:
+        raise ValueError("prospective bridge baseline attestation differs from independent audit")
+    summary, case_order, case_methods = _verify_p2_host(
+        root, bridge, sidecar, repository, candidate_sha, source_sha256, artifact_sha256)
+    if summary.get("candidate_artifact_sha256", {}).get("metadata") != \
+            scope["artifact_hashes"]["dyn4k"]:
+        raise ValueError("reviewed P2 metadata JAR differs from independent JVM audit")
+    if set(case_order) != set(inventory["case_ids"]):
+        raise ValueError("reviewed P2 source method/case inventory differs from bridge")
+    return _p2_summary(summary, case_order, PROSPECTIVE_BRIDGE_METHODS, case_methods)
 
 
 def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
@@ -1445,7 +1599,7 @@ def _java_full_ci(root, receipt, gate, candidate_sha, repository,
 
 
 def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, repository,
-                       physical_only=False):
+                       physical_only=False, prospective_scope=None):
     numerical_dir = Path(__file__).resolve().parents[1] / "numerical"
     compare, physical = _numerical_modules(numerical_dir)
     catalog = _json(numerical_dir / "fixtures.json")
@@ -1509,9 +1663,12 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, r
     if "prospective_bridge" in receipt:
         if "prospective_cases" in receipt:
             raise ValueError("prospective bridge and per-case arithmetic routes are ambiguous")
+        p2_artifact = (prospective_scope.get("artifact_hashes", {}).get("dyn4k-core")
+                       if isinstance(prospective_scope, dict) else None)
         subgates["prospective-rule-arithmetic"] = verify_pending_prospective_bridge(
             root, receipt, repository, candidate_sha,
-            expected_artifact_hashes["dyn4k-core"], source_sha)
+            p2_artifact or expected_artifact_hashes["dyn4k-core"], source_sha,
+            prospective_scope)
     else:
         subgates["prospective-rule-arithmetic"] = verify_prospective_case_subgates(
             root, receipt, repository, candidate_sha, expected_artifact_hashes, source_sha)
@@ -1647,7 +1804,8 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
     if expected_producer_scopes is None:
         expected_producer_scopes = {}
     if (not isinstance(expected_producer_scopes, dict)
-            or set(expected_producer_scopes) - (set(names) & PRODUCER_SCOPED_GATES)):
+            or set(expected_producer_scopes) - (set(names) &
+                (PRODUCER_SCOPED_GATES | {"numerical-parity"}))):
         raise ValueError("independent producing scope map has an unknown gate")
     for gate in names:
         gates[gate] = evaluate_gate(gate, archives.get(gate), candidate_sha,
@@ -1838,7 +1996,9 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             policy = _policy_binding(repository, candidate_sha)
             reason = _numerical_entries(
                 root, receipt, candidate_sha, expected_artifact_hashes, repository,
-                physical_only=gate == "physical-correctness")
+                physical_only=gate == "physical-correctness",
+                prospective_scope=(expected_producer_scopes or {}).get("numerical-parity")
+                if gate == "numerical-parity" else None)
             if gate == "physical-correctness":
                 status = physical_status(reason)
                 return _result(gate, status,

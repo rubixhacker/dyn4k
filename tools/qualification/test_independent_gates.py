@@ -24,10 +24,10 @@ sys.path.pop(0)
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "e35e3f1ec357b1c44b6d2b742e0d88bc2e91f767"
-MANIFEST_REV = "44053b62f49c9f12f3be7540f93164a446bd0e61"
-OLD_MANIFEST_REV = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
-MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
-OLD_MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
+MANIFEST_REV = "e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3"
+OLD_MANIFEST_REV = "44053b62f49c9f12f3be7540f93164a446bd0e61"
+MANIFEST_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94"
+OLD_MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
 LANE = "jvm:Java:minimum:no-optimize"
 
 
@@ -52,7 +52,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
             for label, manifest in (("old", old),
-                                    ("altered", {**self.manifest, "id": "altered"})):
+                                    ("altered", {**self.manifest, "id": "altered"}),
+                                    ("wrong-inventory", {**self.manifest,
+                                                         "cases": self.manifest["cases"][:-1]})):
                 path.write_text(json.dumps(manifest))
                 with self.subTest(manifest=label), self.assertRaisesRegex(
                         ValueError, "manifest differs from independently approved complete suite"):
@@ -487,6 +489,185 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"prospective_compare.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(ROOT, current)
+
+    def test_reviewed_p2_source_blobs_are_pinned_to_approved_revision(self):
+        revision = independent_gates.PROSPECTIVE_CHECKER_REVISION
+        self.assertEqual("82e8a46448d4d6107e69de28cfa9df183292baf3", revision)
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                          cwd=ROOT, text=True).strip()
+        independent_gates._prospective_checker_binding(ROOT, current)
+        independent_gates._source_binding(
+            ROOT, current,
+            {f"tools/numerical/portable/{name}": value
+             for name, value in independent_gates.APPROVED_P2_PRODUCERS.items()},
+            "reviewed P2 raw producer")
+        for name, approved in independent_gates.APPROVED_P2_PRODUCERS.items():
+            path = f"tools/numerical/portable/{name}"
+            self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
+        with mock.patch.dict(independent_gates.APPROVED_P2_PRODUCERS,
+                             {"actual_arithmetic.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._source_binding(
+                    ROOT, current,
+                    {f"tools/numerical/portable/{name}": value
+                     for name, value in independent_gates.APPROVED_P2_PRODUCERS.items()},
+                    "reviewed P2 raw producer")
+
+    def test_p2_318_case_policy_requires_attested_method_and_policy_results(self):
+        methods = independent_gates.PROSPECTIVE_BRIDGE_METHODS
+        ids = independent_gates.approved_prospective_cases(str(ROOT))
+        evidence = {method: {"receipt_sha256": hashlib.sha256(method.encode()).hexdigest()}
+                    for method in methods}
+        rows = [{"id": case_id, "status": "PASSED_NUMERICAL_POLICY",
+                 "qualification": "PASSED_CASE_POLICY",
+                 "target_arithmetic": "PASSED_BOUND_OPERATION_EVIDENCE",
+                 "operation_method": methods[index % len(methods)],
+                 "operation_receipt_sha256": evidence[methods[index % len(methods)]]["receipt_sha256"]}
+                for index, case_id in enumerate(ids)]
+        summary = {"operation_binding": "VERIFIED_ARITHMETIC_BINDING",
+                   "operation_evidence": evidence, "results": rows}
+        case_methods = {row["id"]: row["operation_method"] for row in rows}
+        def checked(value):
+            return independent_gates._p2_summary(value, ids, methods, case_methods)
+        qualified = checked(summary)
+        self.assertEqual("PASSED", qualified["status"])
+        self.assertEqual(318, len(qualified["cases"]))
+        with self.assertRaisesRegex(ValueError, "receipt differs"):
+            checked(
+                {**summary, "results": [{**rows[0], "operation_receipt_sha256": "0" * 64},
+                                          *rows[1:]]})
+        with self.assertRaisesRegex(ValueError, "case identities or order differ"):
+            checked({**summary, "results": [rows[0], *rows[:-1]]})
+        with self.assertRaisesRegex(ValueError, "order differ"):
+            checked({**summary, "results": [rows[1], rows[0], *rows[2:]]})
+        with self.assertRaisesRegex(ValueError, "method or receipt differs"):
+            checked({**summary, "results": [{**rows[0],
+                       "operation_method": methods[1],
+                       "operation_receipt_sha256": evidence[methods[1]]["receipt_sha256"]},
+                       *rows[1:]]})
+        failed = checked(
+            {**summary, "results": [{**rows[0], "status": "FAILED_NUMERICAL_POLICY"},
+                                      *rows[1:]]})
+        self.assertEqual("FAILED", failed["status"])
+        incomplete = checked(
+            {**summary, "results": [{**rows[0], "target_arithmetic": "UNPASSED"},
+                                      *rows[1:]]})
+        self.assertEqual("NOT_RUN", incomplete["status"])
+
+    def test_p2_bridge_conditional_adapter_requires_external_scope_and_raw_routes(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        source_sha = independent_gates.verified_numerical_source_sha256(ROOT, candidate)
+        artifact_sha = "a" * 64
+        methods = independent_gates.PROSPECTIVE_BRIDGE_METHODS
+        ids = independent_gates.approved_prospective_cases(str(ROOT))
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "archive"
+            root.mkdir()
+            sidecar = parent / "attestation.json"
+            sidecar.write_text('{"schema":"synthetic-test-only"}')
+            attest_sha = hashlib.sha256(sidecar.read_bytes()).hexdigest()
+            entries = []
+            for method in methods:
+                path = root / f"{method}.json"
+                path.write_text(json.dumps({
+                    "schema": "portable-arithmetic-capture-receipt/3",
+                    "method": method, "candidate_commit": candidate,
+                    "source_archive_sha256": source_sha,
+                    "artifact_sha256": artifact_sha}))
+                entries.append({"method": method, "receipt": path.name,
+                                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+            inventory = {"schema": "prospective-arithmetic-bridge/1",
+                         "candidate_sha": candidate, "source_sha256": source_sha,
+                         "artifact_sha256": artifact_sha, "case_ids": list(ids),
+                         "methods": entries, "baseline_attestation_sha256": attest_sha}
+            inventory_path = root / "bridge.json"
+            inventory_path.write_text(json.dumps(inventory))
+            bridge = {"inventory": inventory_path.name,
+                      "inventory_sha256": hashlib.sha256(inventory_path.read_bytes()).hexdigest(),
+                      "baseline": "baseline", "candidate": "candidate",
+                      "arithmetic": "arithmetic"}
+            receipt = {"prospective_bridge": bridge}
+            scope = {"candidate_sha": candidate, "target": "jvm", "runtime": "Java",
+                     "runtime_identity": "pinned-jdk21", "artifact_hashes": {
+                         "dyn4k-core": artifact_sha, "dyn4k": "c" * 64},
+                     "source_sha256": source_sha,
+                     "baseline_attestation_path": str(sidecar),
+                     "baseline_attestation_sha256": attest_sha}
+            self.assertEqual("NOT_RUN", independent_gates.verify_pending_prospective_bridge(
+                root, receipt, ROOT, candidate, artifact_sha, source_sha)["status"])
+            with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
+                                        "prospective raw directory is missing"):
+                independent_gates.verify_pending_prospective_bridge(
+                    root, receipt, ROOT, candidate, artifact_sha, source_sha, scope)
+            for directory in ("baseline", "candidate", "arithmetic"):
+                (root / directory).mkdir()
+            with mock.patch.object(independent_gates, "_verify_p2_host",
+                                   return_value=({"operation_binding":
+                                                  "VERIFIED_ARITHMETIC_BINDING",
+                                                  "candidate_artifact_sha256": {
+                                                      "target": artifact_sha,
+                                                      "metadata": "c" * 64},
+                                                  "operation_evidence": {
+                                                      method: {"receipt_sha256": "d" * 64}
+                                                      for method in methods},
+                                                  "results": [
+                                                      {"id": case_id,
+                                                       "status": "PASSED_NUMERICAL_POLICY",
+                                                       "qualification": "PASSED_CASE_POLICY",
+                                                       "target_arithmetic":
+                                                       "PASSED_BOUND_OPERATION_EVIDENCE",
+                                                       "operation_method": methods[0],
+                                                       "operation_receipt_sha256": "d" * 64}
+                                                      for case_id in ids]}, list(ids),
+                                                 {case_id: methods[0] for case_id in ids})):
+                self.assertEqual("PASSED", independent_gates.verify_pending_prospective_bridge(
+                    root, receipt, ROOT, candidate, artifact_sha, source_sha, scope)["status"])
+                with self.assertRaisesRegex(ValueError, "metadata JAR differs"):
+                    independent_gates.verify_pending_prospective_bridge(
+                        root, receipt, ROOT, candidate, artifact_sha, source_sha,
+                        {**scope, "artifact_hashes": {**scope["artifact_hashes"],
+                                                     "dyn4k": "0" * 64}})
+            for bad in ({**scope, "source_sha256": "0" * 64},
+                        {**scope, "artifact_hashes": {**scope["artifact_hashes"],
+                                                     "dyn4k-core": "0" * 64}},
+                        {**scope, "baseline_attestation_sha256": "0" * 64}):
+                with self.assertRaises(ValueError):
+                    independent_gates.verify_pending_prospective_bridge(
+                        root, receipt, ROOT, candidate, artifact_sha, source_sha, bad)
+            with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
+                                        "baseline_attestation_path"):
+                independent_gates.verify_pending_prospective_bridge(
+                    root, receipt, ROOT, candidate, artifact_sha, source_sha,
+                    {key: value for key, value in scope.items()
+                     if key != "baseline_attestation_path"})
+
+    @unittest.skipUnless(Path("/var/home/stewart/dyn4k-evidence/portable-p2-bridge-6040b402-free-motion-check/capture.xml").is_file(),
+                         "retained real arithmetic capture is absent")
+    def test_retained_real_p2_method_replays_raw_operations_but_not_full_gate(self):
+        source = Path("/var/home/stewart/dyn4k-evidence/portable-p2-bridge-6040b402-free-motion-check")
+        sys.path.insert(0, str(ROOT / "tools/numerical/portable"))
+        try:
+            from actual_arithmetic import CaptureRejected, expected_case_ids, verify_capture
+            raw = (source / "capture.xml").read_bytes()
+            summary = verify_capture(raw, "captureFreeMotion",
+                                     expected_case_ids()["captureFreeMotion"])
+            self.assertEqual("VERIFIED_ARITHMETIC_BINDING", summary["status"])
+            self.assertEqual(10, summary["cases"])
+            self.assertEqual(6900, summary["steps"])
+            self.assertEqual(0, summary["pair_inputs_unbound"])
+            with self.assertRaises(CaptureRejected):
+                verify_capture(raw.replace(b"NUMERICAL_JSON ", b"NUMERICAL_JSONX ", 1),
+                               "captureFreeMotion", expected_case_ids()["captureFreeMotion"])
+            failed = Path("/var/home/stewart/dyn4k-evidence/portable-p2-bridge-6040b402-angle-check-with-sdk/capture.xml")
+            if failed.is_file():
+                with self.assertRaisesRegex(CaptureRejected, "nonfinite binary64 field"):
+                    verify_capture(failed.read_bytes(), "captureAngleFailure",
+                                   expected_case_ids()["captureAngleFailure"])
+        finally:
+            sys.path.pop(0)
 
     def test_prospective_arithmetic_requires_raw_target_process_and_oracle_pin(self):
         case = "geometry-boundary-s0-o0-d0"
