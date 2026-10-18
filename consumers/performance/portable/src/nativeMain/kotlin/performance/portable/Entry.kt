@@ -1,18 +1,63 @@
 package performance.portable
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.convert
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
+import kotlinx.cinterop.set
+import kotlinx.cinterop.toKString
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.OsFamily
+import kotlin.native.Platform
 import kotlin.native.runtime.GC
 import kotlin.native.runtime.NativeRuntimeApi
 import kotlin.time.TimeSource
-import platform.posix.F_OK
-import platform.posix.access
+import platform.posix.close
 import platform.posix.fclose
 import platform.posix.fopen
+import platform.posix.fstat
 import platform.posix.fputs
+import platform.posix.open
+import platform.posix.read
 import platform.posix.rename
+import platform.posix.stat
 import platform.posix.usleep
+
+private const val DARWIN_O_NOFOLLOW = 0x00000100
+private const val DARWIN_O_NONBLOCK = 0x00000004
+private const val LINUX_O_NOFOLLOW = 0x00020000
+private const val LINUX_O_NONBLOCK = 0x00000800
+
+@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
+private fun validSimulatorRelease(release: String, nonce: String): Boolean {
+    val flags = when (Platform.osFamily) {
+        OsFamily.IOS, OsFamily.TVOS, OsFamily.WATCHOS, OsFamily.MACOSX ->
+            DARWIN_O_NOFOLLOW or DARWIN_O_NONBLOCK
+        OsFamily.LINUX, OsFamily.ANDROID -> LINUX_O_NOFOLLOW or LINUX_O_NONBLOCK
+        else -> error("simulator attestation requires a POSIX no-follow open")
+    }
+    val descriptor = open(release, flags)
+    if (descriptor < 0) return false
+    try {
+        return memScoped {
+            val details = alloc<stat>()
+            if (fstat(descriptor, details.ptr) != 0 ||
+                (details.st_mode.toInt() and 0xF000) != 0x8000 ||
+                details.st_size != nonce.length.toLong()
+            ) return@memScoped false
+            val bytes = allocArray<ByteVar>(nonce.length + 1)
+            val count = read(descriptor, bytes, nonce.length.convert())
+            bytes[nonce.length] = 0.toByte()
+            count == nonce.length.toLong() && bytes.toKString() == nonce
+        }
+    } finally {
+        close(descriptor)
+    }
+}
 
 @OptIn(ExperimentalForeignApi::class)
 private fun awaitSimulatorAttestation(nonce: String, dataContainer: String) {
@@ -32,7 +77,7 @@ private fun awaitSimulatorAttestation(nonce: String, dataContainer: String) {
     }
     require(rename(pending, ready) == 0) { "simulator attestation ready file cannot publish" }
     val started = TimeSource.Monotonic.markNow()
-    while (access(release, F_OK) != 0) {
+    while (!validSimulatorRelease(release, nonce)) {
         require(started.elapsedNow().inWholeSeconds < 60) { "simulator attestation timed out" }
         usleep(5_000u)
     }

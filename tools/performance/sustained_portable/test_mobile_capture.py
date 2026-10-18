@@ -1,10 +1,13 @@
 import copy
 import json
 import io
+import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -800,6 +803,77 @@ class MobileCaptureAdverseTest(unittest.TestCase):
     def test_receipt_rejects_missing_completion(self):
         with self.assertRaisesRegex(ValueError, "completion"):
             mobile_capture.validate_completion(b"DYN4K\tRUN\tdirect_kotlin\n", "abc")
+
+
+class NativeSimulatorBarrierExecutionTest(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_BARRIER_EXECUTABLE") and
+                         os.environ.get("DYN4K_NATIVE_BARRIER_SOURCE"),
+                         "set the linked Native producer and its exact source SHA")
+    def test_release_requires_exact_regular_file_before_either_api_runs(self):
+        executable = Path(os.environ["DYN4K_NATIVE_BARRIER_EXECUTABLE"]).resolve(strict=True)
+        source = os.environ["DYN4K_NATIVE_BARRIER_SOURCE"]
+        root = Path(__file__).resolve().parents[3]
+        tree = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", f"{source}:consumers/performance/portable"],
+            text=True).strip()
+        manifest = json.loads(mobile_capture.capture.MANIFEST.read_text())
+        hashes = {"core": "a" * 64, "kotlin": "b" * 64}
+        for api in ("direct_kotlin", "compatibility"):
+            scenario = mobile_capture.capture.scenario_from_manifest(
+                manifest, f"separated.default.small.30hz.{api}")
+            for release_kind in ("wrong", "symlink"):
+                with self.subTest(api=api, release_kind=release_kind), \
+                     tempfile.TemporaryDirectory() as directory:
+                    nonce = "c" * 32
+                    data = Path(directory)
+                    ready = data / f"dyn4k-performance-{nonce}.ready"
+                    release = data / f"dyn4k-performance-{nonce}.release"
+                    arguments = [str(executable), scenario["id"], "separated", "default", "small",
+                                 "30", "30", "3", "timing", api, source, hashes["core"],
+                                 hashes["kotlin"], "development", nonce,
+                                 "--simulator-attestation-barrier", directory]
+                    process = subprocess.Popen(arguments, stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE)
+                    try:
+                        deadline = time.monotonic() + 10
+                        while not ready.is_file() and time.monotonic() < deadline:
+                            time.sleep(0.005)
+                        self.assertEqual(ready.read_bytes(), nonce.encode())
+                        self.assertIsNone(process.poll())
+                        self.assertEqual(select.select([process.stdout], [], [], 0.05)[0], [])
+                        if release_kind == "wrong":
+                            release.write_bytes(b"wrong")
+                        else:
+                            target = data / "target"
+                            target.write_bytes(nonce.encode())
+                            release.symlink_to(target)
+                        self.assertEqual(select.select([process.stdout], [], [], 0.25)[0], [],
+                                         "Native producer left barrier before valid release")
+                        self.assertIsNone(process.poll())
+                        release.unlink()
+                        release.write_bytes(nonce.encode())
+                        stdout, stderr = process.communicate(timeout=10)
+                        self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
+                        self.assertEqual(stderr, b"")
+                        clocks, rows, provider, run = mobile_capture.capture.validate_protocol(
+                            stdout, scenario, source, tree, hashes, "development", nonce,
+                            30, 3, "timing")
+                        self.assertEqual((len(clocks["warmup"]), len(clocks["measure"]), len(rows)),
+                                         (3, 30, 30))
+                        self.assertLessEqual(clocks["warmup"][-1][2], clocks["measure"][0][1])
+                        self.assertEqual(provider[2], source)
+                        self.assertEqual(run[-1], "unpassed")
+                        self.assertEqual(mobile_capture.capture.validate_protocol(
+                            stdout, scenario, source, tree, hashes, "development", nonce,
+                            30, 3, "timing")[1], rows)
+                        with self.assertRaisesRegex(ValueError, "provider"):
+                            mobile_capture.capture.validate_protocol(
+                                stdout, scenario, "0" * 40, tree, hashes, "development", nonce,
+                                30, 3, "timing")
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                            process.communicate()
 
 
 if __name__ == "__main__":
