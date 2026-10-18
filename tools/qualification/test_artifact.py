@@ -454,21 +454,11 @@ class RawArtifactTests(unittest.TestCase):
                 relative = Path("tools/qualification") / name
                 shutil.copy2(source / relative, repository / relative)
             runner = Path("tools/qualification/full_hosted.py")
-            if (source / runner).is_file():
-                shutil.copy2(source / runner, repository / runner)
-            else:
-                raw = subprocess.check_output([
-                    "git", "-C", str(source), "show",
-                    f"9dc192dd0f5060b7c88c57b55622eb70291bf0e0:{runner.as_posix()}"])
-                (repository / runner).write_bytes(raw)
+            self.assertTrue((source / runner).is_file())
+            shutil.copy2(source / runner, repository / runner)
             manifest = Path("tools/qualification/full-suite-manifest.json")
-            if (source / manifest).is_file():
-                shutil.copy2(source / manifest, repository / manifest)
-            else:
-                raw = subprocess.check_output([
-                    "git", "-C", str(source), "show",
-                    f"6f983ad3a36bdc549c32f5d0883b0a47b28e1963:{manifest.as_posix()}"])
-                (repository / manifest).write_bytes(raw)
+            self.assertTrue((source / manifest).is_file())
+            shutil.copy2(source / manifest, repository / manifest)
             subprocess.run(["git", "-C", str(repository), "add", "--",
                             "tools/qualification/qualify.py", "tools/qualification/artifact.py",
                             runner.as_posix(), manifest.as_posix()], check=True)

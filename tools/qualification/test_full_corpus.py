@@ -1,7 +1,9 @@
 import csv
 import hashlib
 import json
+import os
 import subprocess
+import tarfile
 import tempfile
 import time
 import unittest
@@ -120,6 +122,41 @@ class FullCorpusGateTest(unittest.TestCase):
         self.assertEqual("PASSED", result["status"])
         self.assertEqual(37, result["total_cases"])
         self.assertEqual(1, result["platform_only_cases"])
+
+    def test_extracted_archive_relocates_all_bound_bytes_and_rejects_changes(self):
+        archive = self.root / "archive"
+        full_corpus.package_archive(self.root, archive, self.manifest, self.mappings,
+                                    self.sha, self.binding, self.reports)
+        moved = self.root / "relocated"
+        tar = self.root / "archive.tar.gz"
+        with tarfile.open(tar, "w:gz", format=tarfile.PAX_FORMAT) as output:
+            output.add(archive, arcname=".")
+        moved.mkdir()
+        with tarfile.open(tar, "r:gz") as source:
+            source.extractall(moved, filter="data")
+        for item in self.binding["artifacts"]:
+            self.assertTrue((moved / "evidence" / item["path"]).is_file())
+        for bound in self.binding["reports"].values():
+            for name in bound:
+                self.assertTrue((moved / "evidence" / name).is_file())
+        for path in [self.log, *self.artifacts,
+                     *(path for paths in self.reports.values() for path in paths)]:
+            path.unlink()
+        relocated = full_corpus.verify_archive(moved, self.root, self.sha,
+                                               require_checkout=False)
+        self.assertEqual("PASSED", relocated["status"], relocated["problems"])
+        self.assertEqual("UNPASSED", full_corpus.verify_archive(
+            moved, self.root, "b" * 40, require_checkout=False)["status"])
+        report = moved / "evidence" / self.reports["core-jvm"][0].relative_to(self.root)
+        original = report.read_bytes()
+        report.write_bytes(original + b"changed")
+        self.assertEqual("UNPASSED", full_corpus.verify_archive(
+            moved, self.root, self.sha, require_checkout=False)["status"])
+        report.write_bytes(original)
+        artifact = moved / "evidence" / self.binding["artifacts"][0]["path"]
+        artifact.unlink()
+        self.assertEqual("UNPASSED", full_corpus.verify_archive(
+            moved, self.root, self.sha, require_checkout=False)["status"])
 
     def test_fake_gradle_command_and_missing_or_changed_log_fail(self):
         baseline = list(self.binding["command"])
@@ -366,10 +403,13 @@ class FullCorpusGateTest(unittest.TestCase):
 
     def test_untracked_common_main_is_rejected_before_and_after_run_and_by_verify(self):
         repository = Path(__file__).resolve().parents[2]
-        upstream = Path("/tmp/dyn4k-upstream-6.0.0")
+        upstream = Path(os.environ["DYN4K_UPSTREAM_SOURCE"])
+        revision = subprocess.check_output(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                                           text=True).strip()
+        self.assertEqual(full_corpus.ORIGINAL_REVISION, revision)
         with tempfile.TemporaryDirectory(dir=repository) as directory:
             clone = Path(directory) / "candidate"
-            subprocess.run(["git", "clone", "--quiet", "--no-local", str(repository),
+            subprocess.run(["git", "clone", "--quiet", "--depth=1", repository.as_uri(),
                             str(clone)], check=True)
             candidate = subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"],
                                                 text=True).strip()

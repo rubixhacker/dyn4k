@@ -10,6 +10,7 @@ on:
         default: false
   push:
     branches:
+      - main
       - codex/port-qualification-harness
       - codex/dyn4k-port
       - codex/port-publication-assembly
@@ -19,12 +20,17 @@ jobs:
   staged-jvm-and-linux:
     if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     runs-on: ubuntu-latest
+    env:
+      DYN4K_UPSTREAM_SOURCE: /tmp/dyn4j-source
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: |
+            8
+            21
       - uses: android-actions/setup-android@v3
         with:
           packages: >-
@@ -32,8 +38,91 @@ jobs:
             platforms;android-36
             build-tools;36.0.0
       - uses: gradle/actions/setup-gradle@v4
+      - name: Provision pinned upstream source
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git init "$DYN4K_UPSTREAM_SOURCE"
+          git -C "$DYN4K_UPSTREAM_SOURCE" remote add origin https://github.com/dyn4j/dyn4j.git
+          git -C "$DYN4K_UPSTREAM_SOURCE" fetch --depth=1 origin 058bf6d982a0fb89b54050f929f6ea9dae53b714
+          git -C "$DYN4K_UPSTREAM_SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$DYN4K_UPSTREAM_SOURCE" rev-parse HEAD)" = 058bf6d982a0fb89b54050f929f6ea9dae53b714
       - name: Harness regression tests
         run: python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
+      - name: Run complete source-derived common corpus
+        if: always()
+        timeout-minutes: 90
+        run: |
+          mkdir -p "$RUNNER_TEMP/full-common"
+          python3 tools/qualification/full_corpus.py run \
+            --candidate-sha "$GITHUB_SHA" \
+            --manifest tools/qualification/full-common-corpus.json \
+            --mapping tools/qualification/full-common-original-map.tsv \
+            --upstream "$DYN4K_UPSTREAM_SOURCE" \
+            --binding "$RUNNER_TEMP/full-common/binding.json" \
+            --output "$RUNNER_TEMP/full-common/result.json" \
+            --log "$RUNNER_TEMP/full-common/gradle.log" -- \
+            ./gradlew --no-daemon --max-workers=1 --rerun-tasks --continue --console=plain \
+            :dyn4k-core:jvmTest :dyn4k:jvmTest \
+            :dyn4k-core:linuxX64Test :dyn4k:linuxX64Test \
+            :dyn4k-core:jsNodeTest :dyn4k:jsNodeTest \
+            :dyn4k-core:wasmJsNodeTest :dyn4k:wasmJsNodeTest \
+            :dyn4k-core:wasmWasiNodeTest :dyn4k:wasmWasiNodeTest \
+            :dyn4k-core:testAndroidHostTest :dyn4k:testAndroidHostTest
+      - name: Verify complete common corpus
+        if: always()
+        run: >-
+          python3 tools/qualification/full_corpus.py verify
+          --candidate-sha "$GITHUB_SHA"
+          --manifest tools/qualification/full-common-corpus.json
+          --mapping tools/qualification/full-common-original-map.tsv
+          --upstream "$DYN4K_UPSTREAM_SOURCE"
+          --binding "$RUNNER_TEMP/full-common/binding.json"
+          --output "$RUNNER_TEMP/full-common/verified.json"
+      - name: Archive and check complete common raw evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/full-common/raw/dyn4k-core" "$RUNNER_TEMP/full-common/raw/dyn4k"
+          for module in dyn4k-core dyn4k; do
+            if test -d "$module/build/test-results"; then
+              cp -a "$module/build/test-results" "$RUNNER_TEMP/full-common/raw/$module/"
+            fi
+          done
+          cp tools/qualification/full-common-corpus.json tools/qualification/full-common-original-map.tsv tools/qualification/full-common-reviewed-pairs.tsv "$RUNNER_TEMP/full-common/raw/"
+          if test -d "$DYN4K_UPSTREAM_SOURCE/.git"; then
+            git -C "$DYN4K_UPSTREAM_SOURCE" rev-parse HEAD > "$RUNNER_TEMP/full-common/raw/upstream-revision.txt"
+          fi
+          python3 tools/qualification/full_corpus.py package-archive \
+            --candidate-sha "$GITHUB_SHA" \
+            --manifest tools/qualification/full-common-corpus.json \
+            --mapping tools/qualification/full-common-original-map.tsv \
+            --upstream "$DYN4K_UPSTREAM_SOURCE" \
+            --binding "$RUNNER_TEMP/full-common/binding.json" \
+            --archive "$RUNNER_TEMP/full-common"
+          tar -C "$RUNNER_TEMP/full-common" -czf "$RUNNER_TEMP/full-common-$GITHUB_SHA.tar.gz" .
+          tar -tzf "$RUNNER_TEMP/full-common-$GITHUB_SHA.tar.gz" > "$RUNNER_TEMP/full-common-$GITHUB_SHA.members"
+          sha256sum "$RUNNER_TEMP/full-common-$GITHUB_SHA.tar.gz" > "$RUNNER_TEMP/full-common-$GITHUB_SHA.sha256"
+          sha256sum -c "$RUNNER_TEMP/full-common-$GITHUB_SHA.sha256"
+          mkdir -p "$RUNNER_TEMP/full-common-transport-check"
+          tar -C "$RUNNER_TEMP/full-common-transport-check" -xzf "$RUNNER_TEMP/full-common-$GITHUB_SHA.tar.gz"
+          diff -qr "$RUNNER_TEMP/full-common" "$RUNNER_TEMP/full-common-transport-check"
+          python3 tools/qualification/full_corpus.py verify-archive \
+            --candidate-sha "$GITHUB_SHA" \
+            --upstream "$DYN4K_UPSTREAM_SOURCE" \
+            --archive "$RUNNER_TEMP/full-common-transport-check" \
+            --output "$RUNNER_TEMP/full-common-transport-verified.json"
+      - name: Upload complete common raw evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-common-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/full-common-${{ github.sha }}.tar.gz
+            ${{ runner.temp }}/full-common-${{ github.sha }}.sha256
+            ${{ runner.temp }}/full-common-${{ github.sha }}.members
+            ${{ runner.temp }}/full-common-transport-verified.json
+            ${{ runner.temp }}/full-common/
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Stage all target publications
         run: >-
           python3 tools/qualification/stage.py
@@ -180,6 +269,52 @@ jobs:
             ${{ runner.temp }}/artifact-audit.json
             build/staging-repository/.qualification/ubuntu/
           if-no-files-found: error
+      - name: Run full staged Java compatibility closure
+        if: always()
+        timeout-minutes: 90
+        run: >-
+          python3 tools/compatibility/full_ci.py
+          --candidate-sha "$GITHUB_SHA"
+          --staging-repository build/staging-repository
+          --jdk8 "$JAVA_HOME_8_X64"
+          --jdk21 "$JAVA_HOME_21_X64"
+          --output "$RUNNER_TEMP/full-ci"
+      - name: Seal full Java compatibility archive
+        if: always()
+        run: >-
+          python3 tools/compatibility/full_ci.py seal
+          --candidate-sha "$GITHUB_SHA"
+          --output "$RUNNER_TEMP/full-ci"
+      - name: Verify full Java compatibility archive
+        if: always()
+        run: >-
+          python3 tools/compatibility/full_ci.py verify
+          --candidate-sha "$GITHUB_SHA"
+          --output "$RUNNER_TEMP/full-ci"
+      - name: Archive and check full Java compatibility raw evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/full-ci"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/full-ci-$GITHUB_SHA.tar.gz" full-ci
+          tar -tzf "$RUNNER_TEMP/full-ci-$GITHUB_SHA.tar.gz" > "$RUNNER_TEMP/full-ci-$GITHUB_SHA.members"
+          sha256sum "$RUNNER_TEMP/full-ci-$GITHUB_SHA.tar.gz" > "$RUNNER_TEMP/full-ci-$GITHUB_SHA.sha256"
+          sha256sum -c "$RUNNER_TEMP/full-ci-$GITHUB_SHA.sha256"
+          mkdir -p "$RUNNER_TEMP/full-ci-transport-check"
+          tar -C "$RUNNER_TEMP/full-ci-transport-check" -xzf "$RUNNER_TEMP/full-ci-$GITHUB_SHA.tar.gz"
+          python3 tools/compatibility/full_ci.py verify \
+            --candidate-sha "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/full-ci-transport-check/full-ci"
+      - name: Upload full Java compatibility raw archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-ci-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/full-ci-${{ github.sha }}.tar.gz
+            ${{ runner.temp }}/full-ci-${{ github.sha }}.sha256
+            ${{ runner.temp }}/full-ci-${{ github.sha }}.members
+          include-hidden-files: true
+          if-no-files-found: error
 
   hosted-publications:
     strategy:
@@ -209,6 +344,17 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
+      - name: Provision pinned upstream source
+        env:
+          DYN4K_UPSTREAM_SOURCE: ${{ runner.temp }}/dyn4j-source
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git init "$DYN4K_UPSTREAM_SOURCE"
+          git -C "$DYN4K_UPSTREAM_SOURCE" remote add origin https://github.com/dyn4j/dyn4j.git
+          git -C "$DYN4K_UPSTREAM_SOURCE" fetch --depth=1 origin 058bf6d982a0fb89b54050f929f6ea9dae53b714
+          git -C "$DYN4K_UPSTREAM_SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$DYN4K_UPSTREAM_SOURCE" rev-parse HEAD)" = 058bf6d982a0fb89b54050f929f6ea9dae53b714
+          printf 'DYN4K_UPSTREAM_SOURCE=%s\n' "$DYN4K_UPSTREAM_SOURCE" >> "$GITHUB_ENV"
       - name: Harness regression tests
         run: |
           if [[ "${{ matrix.host }}" == windows ]]; then
