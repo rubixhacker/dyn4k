@@ -2210,12 +2210,12 @@ class FullHostedTests(unittest.TestCase):
                 archive, receipt["candidate_sha"], "jsSafari",
                 candidate_repository=self.candidate_repository)
 
-    def test_public_safari_rejects_resealed_nonzero_underflow(self):
+    def test_public_safari_rejects_resealed_noncanonical_zero(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
         rows = self.safari_diagnostic_rows()
         self.assertEqual(72, len(rows))
         self.assertEqual(72, len(set(rows)))
-        archive = self.root.parent / (self.root.name + "-underflow.tar")
+        archive = self.root.parent / (self.root.name + "-noncanonical-zero.tar")
         self.addCleanup(archive.unlink, missing_ok=True)
         full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
                                      candidate_repository=self.candidate_repository)
@@ -2231,8 +2231,11 @@ class FullHostedTests(unittest.TestCase):
             original = report.read_bytes()
             modified_ns = report.stat().st_mtime_ns
             self.assertEqual("".join(rows), ET.fromstring(original).findtext("system-out"))
-            for bits in ("0", "-9223372036854775808"):
-                with self.subTest(configuration=lane["configuration"], bits=bits):
+            for value in ("1e-999@0", "1e-999@-9223372036854775808",
+                          "0e999@0", "0e999@-9223372036854775808",
+                          "0.0@0", "0.0@-9223372036854775808",
+                          "0e-999@0", "-0.0@-9223372036854775808"):
+                with self.subTest(configuration=lane["configuration"], value=value):
                     changed = json.loads(json.dumps(receipt))
                     suite = ET.fromstring(original)
                     output = suite.find("system-out")
@@ -2242,7 +2245,7 @@ class FullHostedTests(unittest.TestCase):
                     transform = next(i for i, field in enumerate(fields)
                                      if field.startswith("a.transform="))
                     values = fields[transform].split("=", 1)[1].split(",")
-                    values[values.index("0@0")] = f"1e-999@{bits}"
+                    values[values.index("0@0")] = value
                     fields[transform] = "a.transform=" + ",".join(values)
                     actual[0] = "\t".join(fields)
                     self.assertEqual(72, len(set(actual)))
@@ -2369,6 +2372,9 @@ class FullHostedTests(unittest.TestCase):
         for value in ("-0@0", "-0.0@0", "-0e2@0", "1@1",
                       "1e-999@0", "1e-999@-9223372036854775808",
                       "-1e-999@0", "-1e-999@-9223372036854775808",
+                      "0e999@0", "0e999@-9223372036854775808",
+                      "0.0@0", "0.0@-9223372036854775808",
+                      "0e-999@0", "-0.0@-9223372036854775808",
                       "1e999@9218868437227405312",
                       "-1e999@-4503599627370496"):
             with self.subTest(value=value):
