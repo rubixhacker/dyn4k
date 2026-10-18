@@ -40,8 +40,8 @@ RUNTIME_VERSIONS = {
     "wasmtime": {"minimum": "37.0.3", "current": "49.0.3"},
 }
 KARMA_EXECUTABLE_SUFFIX_SHA256 = {
-    "js": "b9eaea550a4e6a3be9a8a6e22cd35dbc778ca4384af9fd98a75d9fda29e65064",
-    "wasmJs": "2f7aebd80087d79b5093a8cf05008be537c17f0cc4dc27a5c342d0a618ba439d",
+    "js": "8a10ec56447ae4ca31d5995c05d6a249df639a98629119fa6d0761856c277d21",
+    "wasmJs": "eafc366e9f363a4fdb247daab007ee69b3c7268dfa1d281a1bddd7efd7d82b4e",
 }
 KARMA_HELPER_SHA256 = {
     "runner": "15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18",
@@ -838,7 +838,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 karma_port = None
             else:
                 with isolated_karma_port(
-                    project, root / "tools/qualification/safari-karma-reporter.js"
+                    project, root / "tools/qualification/browser_wasi/browser-karma-reporter.js"
                 ) as karma_port:
                     built = command(gradle, root, env)
             finished_ns = time.time_ns()

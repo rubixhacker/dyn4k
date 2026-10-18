@@ -16,7 +16,7 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 class BrowserReporterStageTest(unittest.TestCase):
     def test_browser_port_stages_line_reporter_and_cleans_both_fragments(self):
-        reporter = Path(__file__).resolve().parents[1] / "safari-karma-reporter.js"
+        reporter = Path(__file__).with_name("browser-karma-reporter.js")
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)
             with isolated_karma_port(project, reporter) as port:
@@ -34,6 +34,54 @@ class BrowserReporterStageTest(unittest.TestCase):
                 with isolated_karma_port(project, project / "missing-reporter.js"):
                     pass
             self.assertFalse((project / "karma.config.d").exists())
+
+    def test_browser_reporter_writes_all_messages_before_process_exit(self):
+        reporter = Path(__file__).with_name("browser-karma-reporter.js")
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const fs = require('node:fs');",
+            "const vm = require('node:vm');",
+            "const bytes = [];",
+            "let calls = 0;",
+            "const fakeFs = {writeSync(fd, data, offset, length) {",
+            "  assert.equal(fd, 1);",
+            "  if (calls++ === 0) { const error = new Error('busy'); error.code = 'EAGAIN'; throw error; }",
+            "  const count = Math.min(length, 4096);",
+            "  bytes.push(Buffer.from(data.subarray(offset, offset + count)));",
+            "  return count;",
+            "}};",
+            "function OriginalReporter(decorate) {",
+            "  decorate(this);",
+            "  this.emit = message => this.write(message);",
+            "}",
+            "OriginalReporter.$inject = ['baseReporterDecorator'];",
+            "const plugin = {'reporter:karma-kotlin-reporter': ['type', OriginalReporter]};",
+            "const config = {plugins: [plugin]};",
+            "vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'),",
+            "  {config, Buffer, process: {stdout: {fd: 1}},",
+            "   require: name => name === 'node:fs' ? fakeFs : require(name)});",
+            "const Reporter = plugin['reporter:karma-kotlin-reporter'][1];",
+            "assert.deepEqual(Reporter.$inject, OriginalReporter.$inject);",
+            "const instance = new Reporter(reporter => {",
+            "  reporter.write = () => { throw new Error('asynchronous adapter used'); };",
+            "});",
+            "const messages = Array.from({length: 72}, (_, i) =>",
+            "  `##teamcity[testStdOut out='v2-${i}-${'x'.repeat(15000)}']`);",
+            "messages.forEach(message => instance.emit(message));",
+            "const output = Buffer.concat(bytes).toString('utf8');",
+            "assert.equal(output, messages.map(message => message + '\\n').join(''));",
+            "assert.ok(Buffer.byteLength(output, 'utf8') > 1048576);",
+            "assert.ok(output.split('\\n').slice(0, -1).every(line =>",
+            "  Buffer.byteLength(line, 'utf8') < 262144));",
+            "assert.throws(() => instance.emit('x'.repeat(262145)), /exceeds/);",
+            "assert.equal(Buffer.concat(bytes).toString('utf8'), output);",
+            "fakeFs.writeSync = () => 0;",
+            "assert.throws(() => instance.emit(\"##teamcity[testFinished name='x']\"),",
+            "  /write made no progress/);",
+        ))
+        result = subprocess.run(["node", "-e", script, str(reporter)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 class SourceCasesTest(unittest.TestCase):
@@ -796,7 +844,7 @@ class SourceCasesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            reporter = Path(__file__).resolve().parents[1] / "safari-karma-reporter.js"
+            reporter = Path(__file__).with_name("browser-karma-reporter.js")
             with isolated_karma_port(root, reporter) as port:
                 source = root / "karma.config.d/qualification-port.js"
                 self.assertIn(f"port: {port}", source.read_text())
