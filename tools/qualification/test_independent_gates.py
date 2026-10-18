@@ -728,11 +728,17 @@ class IndependentGateSeamTests(unittest.TestCase):
             self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
                 ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
         for reviewed, blobs in (
+                (independent_gates.P2_NUMERICAL_ARCHIVE_OWNER_REVISION,
+                 independent_gates.APPROVED_P2_PRE_ARITHMETIC_PRODUCERS),
                 (independent_gates.P2_NUMERICAL_ARCHIVE_REVISION,
                  independent_gates.APPROVED_P2_PRE_ARITHMETIC_PRODUCERS),
                 (independent_gates.P2_CANONICAL_ARCHIVE_OWNER_REVISION,
                  independent_gates.APPROVED_P2_OWNER_CANONICAL_PRODUCERS),
                 (independent_gates.P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION,
+                 independent_gates.APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS),
+                (independent_gates.P2_ORIGINAL_OBJECT_OWNER_REVISION,
+                 independent_gates.APPROVED_P2_ORIGINAL_OBJECT_OWNER_PRODUCERS),
+                (independent_gates.P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION,
                  independent_gates.APPROVED_P2_PRODUCERS)):
             for name, approved in blobs.items():
                 path = f"tools/numerical/portable/{name}"
@@ -804,6 +810,53 @@ class IndependentGateSeamTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "predates reviewed P2 raw producer"):
             independent_gates._p2_producer_binding(
                 ROOT, independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION)
+
+    def test_p2_original_object_producer_accepts_only_reviewed_revision_bytes(self):
+        owner = "081b7c0be3bf92ffee28668538e61e2fade24081"
+        assembled = "8163c24141e49fea7570ffd139fc9a3ad6aca077"
+        self.assertEqual("7641de9f0e544a8a29d5d583b91d0fb40029115b",
+                         independent_gates.P2_NUMERICAL_ARCHIVE_OWNER_REVISION)
+        self.assertEqual(owner, independent_gates.P2_ORIGINAL_OBJECT_OWNER_REVISION)
+        self.assertEqual(assembled, independent_gates.P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION)
+        previous = {
+            "run.py": "d789ab13f68c81c8351a6b91450adf91a7961327f93fbb6969a5ead7de7cf2d0",
+            "capture_actual.py": "aa95aa348dc0d78cab30afaf5f4ea4b64d36ab5e3d1e3e0aa35a12a6c6f44e0e",
+            "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
+        }
+        reviewed = {
+            "run.py": "fd584dee2d88f60d5e3c8abd4b8d040c70365a9024d690d0ba307e039addd233",
+            "capture_actual.py": "68080114fe5e9f68d97514a8605e167a5e47328d36948cd239c1d4ca74ab6158",
+            "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
+        }
+        windows = ((f"{owner}^", previous), (owner, reviewed),
+                   (f"{assembled}^", previous), (assembled, reviewed))
+        for revision, expected in windows:
+            with self.subTest(revision=revision):
+                for name, approved in expected.items():
+                    relative = f"tools/numerical/portable/{name}"
+                    committed = subprocess.check_output(
+                        ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                        cwd=ROOT)
+                    self.assertEqual(approved, hashlib.sha256(committed).hexdigest())
+                for autocrlf in ("false", "true"):
+                    with mock.patch.dict(os.environ, {
+                            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                            "GIT_CONFIG_VALUE_0": autocrlf}):
+                        bound = independent_gates._p2_producer_binding(ROOT, revision)
+                        self.assertEqual({name: bound[name] for name in expected}, expected)
+        for blobs, revision, stale in (
+                (independent_gates.APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS,
+                 f"{assembled}^", reviewed),
+                (independent_gates.APPROVED_P2_ORIGINAL_OBJECT_OWNER_PRODUCERS,
+                 owner, previous),
+                (independent_gates.APPROVED_P2_PRODUCERS,
+                 assembled, previous)):
+            for name, wrong_digest in stale.items():
+                with self.subTest(stale_revision=revision, file=name), mock.patch.dict(
+                        blobs, {name: wrong_digest}):
+                    with self.assertRaisesRegex(ValueError,
+                                                "reviewed P2 raw producer blob differs"):
+                        independent_gates._p2_producer_binding(ROOT, revision)
 
     def test_p2_318_case_policy_requires_attested_method_and_policy_results(self):
         methods = independent_gates.PROSPECTIVE_BRIDGE_METHODS
