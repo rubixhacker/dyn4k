@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -281,6 +282,71 @@ class FullHostedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reviewed common corpus count"):
             full_hosted.expected_cases(reduced, "dyn4k-core")
 
+    def test_graph_accepts_exact_staged_bytes_from_gradle_cache(self):
+        target = "macosArm64"
+        staging = self.root / "staging-repository"
+        graph_folder = self.root / "graph"
+        graph_folder.mkdir()
+        hashes = {}
+        artifacts = []
+        for module in qualify.MODULES:
+            name = qualify.target_publication_name(module, target)
+            binary = staging / qualify.target_binary_path(module, target)
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes((module + " staged bytes").encode())
+            hashes[module] = full_hosted.sha256(binary)
+            cache = (self.root / "gradle-home/caches/modules-2/files-2.1" /
+                     qualify.GROUP / name / qualify.VERSION /
+                     hashlib.sha1(binary.read_bytes()).hexdigest() /
+                     f"{module}-{target}Main-{qualify.VERSION}.klib")
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(binary, cache)
+            artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
+                              "file": str(cache), "name": cache.name,
+                              "size": cache.stat().st_size, "sha256": full_hosted.sha256(cache)})
+        graph = {"configuration": f"{target}CompileKlibraries",
+                 "components": [item["component"] for item in artifacts] +
+                 [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES] +
+                 ["org.jetbrains.kotlin:kotlin-stdlib:2.4.20", "root project :"],
+                 "artifacts": artifacts}
+
+        def observe(value):
+            (graph_folder / "stdout.txt").write_text(
+                "DYN4K_RESOLVED_GRAPH=" + json.dumps(value) + "\n")
+            return full_hosted.parse_graph(graph_folder, {"exit_code": 0}, target,
+                                           hashes, staging)
+
+        self.assertEqual(graph, observe(graph))
+        mutations = (
+            (lambda value: value["artifacts"][0].update(sha256="0" * 64), "artifact differs"),
+            (lambda value: value["artifacts"][0].update(component="wrong:module:1"),
+             "lacks staged target"),
+            (lambda value: value["components"].append(
+                f"{qualify.GROUP}:unexpected:{qualify.VERSION}"), "dependency graph"),
+            (lambda value: value["artifacts"].append({**value["artifacts"][0],
+                "component": f"{qualify.GROUP}:unexpected:{qualify.VERSION}"}),
+             "staged target"),
+            (lambda value: value["artifacts"][0].update(file="/tmp/../outside.klib"),
+             "original path"),
+            (lambda value: value["artifacts"][0].update(file="/tmp/copied.klib",
+                                                        name="copied.klib"),
+             "artifact differs"),
+            (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
+                "dyn4k-core-macosarm64", "dyn4k-core-mingwx64")), "artifact differs"),
+            (lambda value: value["artifacts"][0].update(name="wrong.klib"),
+             "artifact identity"),
+            (lambda value: value["components"].remove(
+                f"{qualify.GROUP}:dyn4k-core:{qualify.VERSION}"), "dependency graph"),
+            (lambda value: value["components"].append(value["components"][0]),
+             "dependency graph"),
+        )
+        for change, error in mutations:
+            with self.subTest(error=error):
+                changed = json.loads(json.dumps(graph))
+                change(changed)
+                with self.assertRaisesRegex(ValueError, error):
+                    observe(changed)
+
     def test_corpus_input_audit_uses_hosted_generated_output_allowlist(self):
         import full_corpus
 
@@ -498,10 +564,16 @@ class FullHostedTests(unittest.TestCase):
                 for module in qualify.MODULES:
                     name = qualify.target_publication_name(module, target)
                     binary = repository / "build/staging-repository" / qualify.target_binary_path(module, target)
+                    cached = (evidence / "gradle-home/caches/modules-2/files-2.1" /
+                              qualify.GROUP / name / qualify.VERSION /
+                              hashlib.sha1(binary.read_bytes()).hexdigest() /
+                              f"{module}-{target}Main-{qualify.VERSION}.klib")
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(binary, cached)
                     artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
-                                      "file": str(binary), "name": binary.name,
-                                      "size": binary.stat().st_size,
-                                      "sha256": full_hosted.sha256(binary)})
+                                      "file": str(cached), "name": cached.name,
+                                      "size": cached.stat().st_size,
+                                      "sha256": full_hosted.sha256(cached)})
                 graph = {"configuration": f"{target}CompileKlibraries",
                          "components": [item["component"] for item in artifacts] +
                          [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
@@ -531,7 +603,8 @@ class FullHostedTests(unittest.TestCase):
                 mock.patch.object(full_hosted.hosted, "gradle_wrapper",
                                   return_value=str(repository / "gradlew")), \
                 mock.patch.object(full_hosted.hosted, "tool_version", return_value="9.5.0"), \
-                mock.patch.object(full_hosted, "run_command", side_effect=synthetic_command), \
+                mock.patch.object(full_hosted, "run_command",
+                                  side_effect=synthetic_command) as command_runner, \
                 mock.patch.object(full_hosted.artifact, "capture_staging",
                                   wraps=full_hosted.artifact.capture_staging) as capture, \
                 mock.patch.dict(os.environ, runner):
@@ -557,6 +630,41 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(output, archive)
             transported = full_hosted.verify_transport_archive(archive, candidate, target)
             self.assertEqual(receipt, transported)
+
+            def corrupt_cached_command(command, cwd, destination, invocation_id=None):
+                process = synthetic_command(command, cwd, destination, invocation_id)
+                if destination.name == "graph":
+                    line = next(line for line in (destination / "stdout.txt").read_text().splitlines()
+                                if line.startswith("DYN4K_RESOLVED_GRAPH="))
+                    observed = json.loads(line.removeprefix("DYN4K_RESOLVED_GRAPH="))
+                    Path(observed["artifacts"][0]["file"]).write_bytes(b"wrong cached bytes")
+                return process
+
+            shutil.rmtree(repository / "build/staging-repository")
+            command_runner.side_effect = corrupt_cached_command
+            failed_cache = full_hosted.run(target, candidate, evidence / "adverse-cache-producer")
+            self.assertEqual("FAILED", failed_cache["status"])
+            self.assertTrue(failed_cache["configurations"], failed_cache.get("reason"))
+            self.assertEqual("resolved dependency changed after graph observation",
+                             failed_cache["configurations"][0]["reason"])
+            command_runner.side_effect = synthetic_command
+
+            adverse_cache = evidence / "adverse-cache-bytes"
+            shutil.copytree(output, adverse_cache)
+            cache_receipt = qualify.load_json_strict(adverse_cache / "receipt.json")
+            resolved = (adverse_cache /
+                        cache_receipt["configurations"][0]["resolved_artifacts"][0]["archive_path"])
+            modified_ns = resolved.stat().st_mtime_ns
+            resolved.write_bytes(b"wrong cached artifact bytes")
+            os.utime(resolved, ns=(modified_ns, modified_ns))
+            cache_receipt["files"] = full_hosted.archive_inventory(adverse_cache)
+            (adverse_cache / "receipt.json").write_text(json.dumps(cache_receipt, sort_keys=True))
+            with self.assertRaisesRegex(ValueError, "resolved dependency artifact bytes"):
+                full_hosted.verify_raw_files(adverse_cache, cache_receipt)
+            adverse_cache_archive = evidence / "adverse-cache-bytes.tar"
+            full_hosted.package_archive(adverse_cache, adverse_cache_archive)
+            with self.assertRaisesRegex(ValueError, "resolved dependency artifact bytes"):
+                full_hosted.verify_transport_archive(adverse_cache_archive, candidate, target)
 
             wrong_root = evidence / "different-root"
             wrong_receipt = json.loads(json.dumps(receipt))
@@ -739,7 +847,8 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(adverse_capability, capability_archive)
             with self.assertRaisesRegex(ValueError, metadata_rejection) as capability_tar_error:
                 full_hosted.verify_transport_archive(capability_archive, candidate, target)
-            for rejected_bundle in (adverse_dokka, adverse_dokka_archive,
+            for rejected_bundle in (adverse_cache, adverse_cache_archive,
+                                    adverse_dokka, adverse_dokka_archive,
                                     unlisted_dokka, unlisted_archive,
                                     adverse, adverse_archive,
                                     adverse_capability, capability_archive):
@@ -770,6 +879,7 @@ class FullHostedTests(unittest.TestCase):
                                                    for module in qualify.MODULES},
                 "consumer_cases_per_configuration": len(consumer_cases),
                 "positive_archive_sha256": full_hosted.sha256(archive),
+                "cache_bytes_archive_sha256": full_hosted.sha256(adverse_cache_archive),
                 "process_order_archive_sha256": full_hosted.sha256(order_archive),
                 "process_order_rejection": order_record.stderr.strip().splitlines()[-1],
                 "process_order_qualification_report_written": adverse_order_report.exists(),

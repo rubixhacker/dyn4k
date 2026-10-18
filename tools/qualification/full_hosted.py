@@ -498,23 +498,43 @@ def parse_graph(folder, process, target, hashes, staging):
     required = {f"{qualify.GROUP}:{qualify.target_publication_name(module, artifact_target)}:{qualify.VERSION}"
                 for module in qualify.MODULES}
     artifacts = graph.get("artifacts")
-    if not isinstance(artifacts, list) or not required.issubset(
-            {item.get("component") for item in artifacts}):
+    if not isinstance(artifacts, list) or not all(isinstance(item, dict) for item in artifacts):
+        raise ValueError("external consumer graph artifacts are invalid")
+    components = graph.get("components")
+    if not isinstance(components, list) or not all(isinstance(item, str) for item in components) \
+            or len(components) != len(set(components)):
+        raise ValueError("external consumer dependency graph is invalid")
+    for item in artifacts:
+        path = original_path(target, item.get("file", ""))
+        if (path.name != item.get("name") or not isinstance(item.get("size"), int)
+                or isinstance(item["size"], bool) or item["size"] <= 0
+                or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", "")))):
+            raise ValueError("external consumer graph artifact identity is invalid")
+    staged_prefix = f"{qualify.GROUP}:"
+    if not required.issubset({item.get("component") for item in artifacts}):
         raise ValueError("external consumer graph lacks staged target components")
+    if Counter(item["component"] for item in artifacts
+               if str(item.get("component", "")).startswith(staged_prefix)) != Counter(required):
+        raise ValueError("external consumer graph has extra or duplicate staged target artifacts")
+    root_components = {f"{qualify.GROUP}:{module}:{qualify.VERSION}"
+                       for module in qualify.MODULES}
+    if ({item for item in components if item.startswith(staged_prefix)}
+            != required | root_components):
+        raise ValueError("external consumer dependency graph lacks or adds staged targets")
     for module in qualify.MODULES:
         name = qualify.target_publication_name(module, artifact_target)
         matches = [item for item in artifacts if item.get("component") ==
                    f"{qualify.GROUP}:{name}:{qualify.VERSION}"]
         expected_file = original_path(target, staging) / qualify.target_binary_path(
             module, artifact_target)
+        resolved_file = original_path(target, matches[0]["file"])
+        cache_parts = resolved_file.parts
+        cached = (len(cache_parts) >= 8 and cache_parts[-8:-2] ==
+                  ("caches", "modules-2", "files-2.1", qualify.GROUP, name, qualify.VERSION)
+                  and re.fullmatch(r"[0-9a-f]{40}", cache_parts[-2]))
         if (len(matches) != 1 or matches[0].get("sha256") != hashes[module]
-                or matches[0].get("size", 0) <= 0
-                or original_path(target, matches[0].get("file", "")) != expected_file):
+                or (resolved_file != expected_file and not cached)):
             raise ValueError("external consumer resolved artifact differs from staging")
-    root_components = {f"{qualify.GROUP}:{module}:{qualify.VERSION}"
-                       for module in qualify.MODULES}
-    if not (required | root_components).issubset(set(graph.get("components", []))):
-        raise ValueError("external consumer dependency graph lacks staged targets")
     return graph
 
 
