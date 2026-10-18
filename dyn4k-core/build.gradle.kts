@@ -1068,6 +1068,7 @@ kotlin {
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
+        jsTest.dependencies { implementation(devNpm("karma-safari-launcher", "1.0.0")) }
         if (providers.gradleProperty("windowsCollisionPrecisionDiagnostic").orNull == "true") {
             named("mingwX64Test") {
                 kotlin.srcDir("diagnostic/windows-collision")

@@ -74,6 +74,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies { api(project(":dyn4k-core")) }
         commonTest.dependencies { implementation(kotlin("test")) }
+        jsTest.dependencies { implementation(devNpm("karma-safari-launcher", "1.0.0")) }
     }
 }
 
