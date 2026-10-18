@@ -1,0 +1,6 @@
+# Preserve committed bytes for source and qualification inputs.
+dyn4k-core/src/** -text
+dyn4k/src/** -text
+tools/qualification/** -text
+build.gradle.kts -text
+consumers/qualification/portable/build.gradle.kts -text
