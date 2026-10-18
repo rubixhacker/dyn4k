@@ -46,8 +46,7 @@ def check_timestep(row):
         raise compare.Rejected("nominal timestep schema differs")
     for field, expected in TIMESTEP_VALUES.items():
         value = step[field]
-        if type(value) is not float or not math.isfinite(value) or \
-                struct.pack(">d", value) != struct.pack(">d", expected):
+        if type(value) not in (int, float) or not math.isfinite(value) or value != expected:
             raise compare.Rejected("nominal timestep " + field + " differs")
     return len(TIMESTEP_VALUES)
 

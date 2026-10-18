@@ -2,6 +2,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -58,7 +59,25 @@ def keys(value, expected, label):
 
 
 def exact(left, right, label):
-    require(compare.same_value(left, right), label)
+    require(same_run_value(left, right), label)
+
+
+def same_run_value(left, right):
+    if type(left) in (int, float) or type(right) in (int, float):
+        if type(left) not in (int, float) or type(right) not in (int, float):
+            return False
+        try:
+            return math.isfinite(left) and math.isfinite(right) and left == right
+        except OverflowError:
+            return False
+    if type(left) is dict or type(right) is dict:
+        return (type(left) is dict and type(right) is dict and
+                left.keys() == right.keys() and
+                all(same_run_value(left[key], right[key]) for key in left))
+    if type(left) is list or type(right) is list:
+        return (type(left) is list and type(right) is list and len(left) == len(right) and
+                all(same_run_value(a, b) for a, b in zip(left, right)))
+    return type(left) is type(right) and left == right
 
 
 def numerical(left, right, label):

@@ -1,7 +1,9 @@
 import copy
 import gzip
+import hashlib
 import json
 import math
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +19,7 @@ import receipt
 
 TRACE = Path("/tmp/dyn4k-root-world-configured-f9920e9/baseline-trace/"
              "Q-sleep-wake-outer30-repeat1-0.jsonl.gz")
+ZERO_PROBE = Path("/tmp/dyn4k-root-exact-zero-probe")
 
 
 @unittest.skipUnless(TRACE.is_file(), "approved configured baseline trace unavailable")
@@ -60,8 +63,9 @@ class ExactConsistencyAdverseTest(unittest.TestCase):
 
     def test_fixed_floor_group_rejects_pose_mutation(self):
         exact.numeric_vector([-0.0, -0.25], [0.0, -0.25], "floor pose")
+        exact.exact([-0.0, -0.25], [0.0, -0.25], "translation alias")
         with self.assertRaisesRegex(compare.Rejected, "translation alias"):
-            exact.exact([-0.0, -0.25], [0.0, -0.25], "translation alias")
+            exact.exact([-0.01, -0.25], [0.0, -0.25], "translation alias")
         self.reject_snapshot(self.first_state["state"], "step", self.input["state"], "floor",
             lambda row: row["bodies"][0]["transform"]["getTranslation"].__setitem__(1, -0.24),
             "translation alias|floor pose")
@@ -118,12 +122,43 @@ class ExactConsistencyAdverseTest(unittest.TestCase):
         changed = copy.deepcopy(self.before)
         old = changed["bodies"][1]["force"][0]
         changed["bodies"][1]["force"][0] = -0.0 if math.copysign(1, old) > 0 else 0.0
-        with self.assertRaisesRegex(compare.Rejected, "duplicate getForce"):
-            exact.snapshot(changed, "before", self.pre_action["state"])
+        exact.snapshot(changed, "before", self.pre_action["state"])
         endpoint = copy.deepcopy(self.endpoint)
         endpoint["state"]["bodies"][1]["force"][0] = -0.0
+        exact.endpoint(endpoint, self.endpoint_state, 30, 4)
+        endpoint["state"]["bodies"][1]["force"][0] = 0.01
         with self.assertRaisesRegex(compare.Rejected, "endpoint numeric copy"):
             exact.endpoint(endpoint, self.endpoint_state, 30, 4)
+        endpoint = copy.deepcopy(self.endpoint)
+        del endpoint["state"]["bodies"][1]["force"]
+        with self.assertRaisesRegex(compare.Rejected, "endpoint numeric copy"):
+            exact.endpoint(endpoint, self.endpoint_state, 30, 4)
+        changed = copy.deepcopy(self.before)
+        changed["bodies"][1]["properties"]["getForce"][0] = math.nan
+        with self.assertRaises(compare.Rejected):
+            exact.snapshot(changed, "before", self.pre_action["state"])
+        changed = copy.deepcopy(self.before)
+        del changed["bodies"][1]["properties"]["getForce"]
+        with self.assertRaises(compare.Rejected):
+            exact.snapshot(changed, "before", self.pre_action["state"])
+
+    @unittest.skipUnless((ZERO_PROBE / "mutated.json").is_file(), "root zero probe unavailable")
+    def test_approved_root_zero_mutant_and_object_order(self):
+        expected = {"original": "3f078971b9d8ba429754fceb9ea65c0924442bae58601bce2e4c814063481b8d",
+                    "mutated": "3d7da2c389fa9ed80a1f151b8f98860bb69ff076393d87640e5fdf8ca5a415fc"}
+        for name, digest in expected.items():
+            raw = (ZERO_PROBE / (name + ".json")).read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
+            exact.snapshot(json.loads(raw), "initial")
+        approved = ZERO_PROBE / "approved.mjs"
+        self.assertEqual(hashlib.sha256(approved.read_bytes()).hexdigest(),
+                         "803f78a03aca84b4177de0d22d6d4f3b2bef79ce258e16d8028e65fcaeb7346a")
+        result = subprocess.run(["node", str(ZERO_PROBE / "run.mjs")], capture_output=True,
+                                text=True, check=True)
+        self.assertEqual(json.loads(result.stdout), [{"case": "original", "passed": True},
+                                                     {"case": "mutated", "passed": True}])
+        reversed_keys = dict(reversed(list(self.endpoint["state"].items())))
+        exact.exact(reversed_keys, self.endpoint_state["state"], "endpoint key order")
 
     def test_timestep_group_rejects_metadata_mutation(self):
         step = self.first_event["payload"][0]

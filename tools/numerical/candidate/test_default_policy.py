@@ -44,6 +44,12 @@ class DefaultPolicyTest(unittest.TestCase):
                        "method": "org.dyn4j.world.listener.StepListener." + method + "(",
                        "payload": [payload, {"world": "frozen"}]}
                 self.assertEqual(default_policy.check_timestep(row, hz), 5)
+                integer_token = copy.deepcopy(row)
+                integer_token["payload"][0]["getInverseDeltaTime"] = hz
+                integer_token["payload"][0]["getPreviousInverseDeltaTime"] = 60 if initial else hz
+                integer_token["payload"][0]["getDeltaTimeRatio"] = int(first_ratio) if initial else 1
+                if not initial or first_ratio in (1.0, 2.0):
+                    self.assertEqual(default_policy.check_timestep(integer_token, hz), 5)
                 for field in default_policy.TIMESTEP_FIELDS:
                     changed = copy.deepcopy(row)
                     changed["payload"][0][field] = math.nextafter(payload[field], math.inf)
@@ -51,6 +57,12 @@ class DefaultPolicyTest(unittest.TestCase):
                             self.assertRaises(compare.Rejected):
                         default_policy.check_timestep(changed, hz)
                 for bad in (math.nan, math.inf, -math.inf, 0):
+                    changed = copy.deepcopy(row)
+                    changed["payload"][0]["getDeltaTime"] = bad
+                    with self.subTest(hz=hz, step=step_number, bad=bad), \
+                            self.assertRaises(compare.Rejected):
+                        default_policy.check_timestep(changed, hz)
+                for bad in (True, "0.03333333333333333"):
                     changed = copy.deepcopy(row)
                     changed["payload"][0]["getDeltaTime"] = bad
                     with self.subTest(hz=hz, step=step_number, bad=bad), \

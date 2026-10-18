@@ -91,6 +91,12 @@ class NominalPositiveZeroTest(unittest.TestCase):
                                    {"world": "L-free-s1.0-o0.0,0.0-hz60"}]}
                 trace.write_text(json.dumps(row) + "\n")
                 self.assertEqual(nominal_zero.audit_trace(trace, 0, 1)["exact_timestep_checks"], 5)
+                integer_token = copy.deepcopy(row)
+                integer_token["payload"][0]["getInverseDeltaTime"] = 60
+                integer_token["payload"][0]["getPreviousInverseDeltaTime"] = 60
+                integer_token["payload"][0]["getDeltaTimeRatio"] = 1
+                trace.write_text(json.dumps(integer_token) + "\n")
+                self.assertEqual(nominal_zero.audit_trace(trace, 0, 1)["exact_timestep_checks"], 5)
                 for field, value in values.items():
                     changed = copy.deepcopy(row)
                     changed["payload"][0][field] = math.nextafter(value, math.inf)
@@ -103,6 +109,13 @@ class NominalPositiveZeroTest(unittest.TestCase):
                     changed["payload"][0]["getDeltaTime"] = nonfinite
                     trace.write_text(json.dumps(changed) + "\n")
                     with self.subTest(method=method, nonfinite=nonfinite), self.assertRaises(
+                            compare.Rejected):
+                        nominal_zero.audit_trace(trace, 0, 1)
+                for wrong_type in (True, "0.016666666666666666"):
+                    changed = copy.deepcopy(row)
+                    changed["payload"][0]["getDeltaTime"] = wrong_type
+                    trace.write_text(json.dumps(changed) + "\n")
+                    with self.subTest(method=method, wrong_type=wrong_type), self.assertRaises(
                             compare.Rejected):
                         nominal_zero.audit_trace(trace, 0, 1)
 

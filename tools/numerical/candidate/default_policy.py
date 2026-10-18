@@ -1,7 +1,6 @@
 import hashlib
 import json
 import math
-import struct
 import sys
 from collections import Counter
 from fractions import Fraction
@@ -102,8 +101,7 @@ def check_timestep(row, hz):
                 {30: 2.0, 60: 1.0, 120: 0.5}[hz] if step_number == 1 else 1.0)
     for field, value in zip(TIMESTEP_FIELDS, expected):
         actual = values[field]
-        if type(actual) is not float or not math.isfinite(actual) or \
-                struct.pack(">d", actual) != struct.pack(">d", value):
+        if type(actual) not in (int, float) or not math.isfinite(actual) or actual != value:
             raise compare.Rejected("default timestep " + field + " differs")
     return 5
 
