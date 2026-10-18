@@ -2,7 +2,9 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,8 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import declared_cases
 from receipt import Rejected, digest, inspect, records
-from run import (MATRIX_METHODS, PORTABLE, ROOT, clean_identity, extract_xml, git,
-                 method_case_ids, runtime, runtime_identity)
+from run import (MATRIX_METHODS, PORTABLE, ROOT, _java_classpath, _loaded_java_classes,
+                 _provider_classes, clean_identity, extract_xml, git, method_case_ids,
+                 runtime_identity)
 
 
 PINNED_JAR_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
@@ -138,8 +141,12 @@ def verify_baseline_jar(path):
 
 
 def fixture_source_sha256():
+    tap = BASELINE_PROJECT / "src/main/kotlin/org/dyn4j/geometry/RotationOperationTap.kt"
+    if not tap.is_file():
+        raise Rejected("baseline operation tap source is absent")
     names = sorted(path for directory in (PORTABLE / "src/commonMain/kotlin",
-                                           PORTABLE / "src/commonTest/kotlin")
+                                           PORTABLE / "src/commonTest/kotlin",
+                                           BASELINE_PROJECT / "src/main/kotlin")
                    for path in directory.rglob("*.kt"))
     names += [BASELINE_PROJECT / "build.gradle.kts", BASELINE_PROJECT / "settings.gradle.kts"]
     result = hashlib.sha256()
@@ -149,6 +156,69 @@ def fixture_source_sha256():
         result.update(path.read_bytes())
         result.update(b"\0")
     return result.hexdigest()
+
+
+def baseline_runtime(log, jar, proof_dir=None):
+    commands = []
+    with Path(log).open(encoding="utf-8") as stream:
+        for line in stream:
+            if "Starting process 'Gradle Test Executor" in line and " Command: " in line:
+                commands.append(shlex.split(line.rsplit(" Command: ", 1)[1]))
+    if len(commands) != 1:
+        raise Rejected("baseline JVM worker command is absent or ambiguous")
+    command = commands[0]
+    executable = Path(command[0]).resolve()
+    if not executable.is_file():
+        raise Rejected("baseline JVM executable is absent")
+    version = subprocess.run((str(executable), "-version"), capture_output=True,
+                             text=True, check=False)
+    version_text = (version.stdout + version.stderr).strip().splitlines()
+    if version.returncode or not version_text or 'version "21.' not in version_text[0]:
+        raise Rejected("baseline JVM worker is not Java 21")
+    entries, argfiles = _java_classpath(command)
+    jar = Path(jar).resolve()
+    verify_baseline_jar(jar)
+    pinned = _provider_classes(jar)
+    stub_root = (BASELINE_PROJECT / "build/classes/kotlin/main").resolve()
+    stub = _provider_classes(stub_root)
+    prefix = "org/dyn4j/geometry/RotationOperationTap"
+    if not stub or "org/dyn4j/geometry/RotationOperationTap.class" not in stub or \
+            any(not (name == prefix + ".class" or name.startswith(prefix + "$"))
+                for name in stub) or set(stub) & set(pinned):
+        raise Rejected("baseline operation tap classes differ")
+    providers = []
+    for entry in entries:
+        classes = _provider_classes(entry)
+        if not classes:
+            continue
+        if entry == jar and classes == pinned:
+            kind = "pinned-dyn4j"
+        elif entry == stub_root and classes == stub:
+            kind = "baseline-operation-tap"
+        else:
+            raise Rejected("baseline JVM classpath has an unexpected dyn4j provider")
+        providers.append({"kind": kind, "path": str(entry),
+                          "sha256": digest(entry) if entry.is_file() else hashlib.sha256(
+                              b"".join(classes[name] for name in sorted(classes))).hexdigest(),
+                          "classes": len(classes)})
+    if [item["kind"] for item in providers] != ["baseline-operation-tap", "pinned-dyn4j"]:
+        raise Rejected("baseline JVM classpath provider order differs")
+    loaded = _loaded_java_classes(log, pinned | stub, jar, True)
+    archived = []
+    if proof_dir is not None:
+        proof_dir = Path(proof_dir)
+        proof_dir.mkdir(parents=True, exist_ok=True)
+        for index, path in enumerate(argfiles):
+            target = proof_dir / f"worker-args-{index}.txt"
+            shutil.copyfile(path, target)
+            archived.append({"path": str(target), "sha256": digest(target)})
+    return {"host": "jvm", "os": platform.platform(), "machine": platform.machine(),
+            "device": False, "executable": str(executable),
+            "executable_sha256": digest(executable), "version": version_text[0],
+            "process_executions": 1, "worker_command": command,
+            "dependency": {"classpath": [str(entry) for entry in entries],
+                           "providers": providers, "dependency_sha256": digest(jar),
+                           "loaded_classes": loaded, "argument_files": archived}}
 
 
 def baseline_inventory(raw, xml):
@@ -369,9 +439,8 @@ def verify_archive(output, write_verified=True):
     observed_processes = []
     for method in result["methods"]:
         recorded = method.get("process")
-        process = runtime("jvm", lane / f"gradle-{method['method']}.log",
-                          dependency=output / "dyn4j-6.0.0.jar",
-                          require_loaded=recorded is not None)
+        process = baseline_runtime(lane / f"gradle-{method['method']}.log",
+                                   output / "dyn4j-6.0.0.jar")
         if any(recorded_runtime.get(key) != value for key, value in
                runtime_identity(process).items()):
             raise Rejected("baseline method runtime identity differs")
@@ -477,8 +546,8 @@ def capture(output, baseline_jar):
             if raw["per_case"].keys() & counts["per_case"].keys():
                 raise Rejected("baseline case appears in more than one method")
             raw["per_case"].update(counts["per_case"])
-            executed = runtime("jvm", log, dependency=jar,
-                               proof_dir=lane / "process-proof" / method)
+            executed = baseline_runtime(log, jar,
+                                        proof_dir=lane / "process-proof" / method)
             method_result["process"] = executed
             runtimes.append(runtime_identity(executed))
         result["xml"] = xml

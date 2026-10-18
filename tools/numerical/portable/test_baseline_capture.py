@@ -2,9 +2,11 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import baseline_capture
@@ -17,6 +19,56 @@ from receipt import digest
 
 
 class BaselineCaptureSeamTest(unittest.TestCase):
+    def test_baseline_runtime_rejects_another_dyn4j_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline"
+            stub = baseline / "build/classes/kotlin/main"
+            jar = root / "dyn4j.jar"
+            jar.write_bytes(b"pinned")
+            extra = root / "extra"
+            log = root / "worker.log"
+            log.write_text(f"Starting process 'Gradle Test Executor 1'. Command: "
+                           f"{sys.executable} -cp test Worker\n")
+            classes = {jar: {"org/dyn4j/geometry/Vector2.class": b"pinned"},
+                       stub: {"org/dyn4j/geometry/RotationOperationTap.class": b"tap"},
+                       extra: {"org/dyn4j/geometry/Vector2.class": b"other"}}
+            with patch.object(baseline_capture, "BASELINE_PROJECT", baseline), \
+                    patch.object(baseline_capture, "verify_baseline_jar"), \
+                    patch.object(baseline_capture, "_java_classpath",
+                                 return_value=([stub, jar], [])) as classpath, \
+                    patch.object(baseline_capture, "_provider_classes",
+                                 side_effect=lambda path: classes.get(path, {})), \
+                    patch.object(baseline_capture, "_loaded_java_classes",
+                                 return_value={"org/dyn4j/geometry/Vector2.class": str(jar)}), \
+                    patch.object(baseline_capture.subprocess, "run",
+                                 return_value=SimpleNamespace(returncode=0, stdout="",
+                                                              stderr='openjdk version "21.0.12"\n')):
+                self.assertEqual([item["kind"] for item in
+                                  baseline_capture.baseline_runtime(log, jar)["dependency"]["providers"]],
+                                 ["baseline-operation-tap", "pinned-dyn4j"])
+                classpath.return_value = ([stub, extra, jar], [])
+                with self.assertRaisesRegex(Exception, "unexpected dyn4j provider"):
+                    baseline_capture.baseline_runtime(log, jar)
+
+    def test_fixture_hash_binds_baseline_operation_tap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            portable = Path(directory)
+            baseline = portable / "baseline"
+            tap = baseline / "src/main/kotlin/org/dyn4j/geometry/RotationOperationTap.kt"
+            tap.parent.mkdir(parents=True)
+            tap.write_text("object RotationOperationTap {}\n")
+            for name in ("build.gradle.kts", "settings.gradle.kts"):
+                (baseline / name).write_text(name)
+            with patch.object(baseline_capture, "PORTABLE", portable), \
+                    patch.object(baseline_capture, "BASELINE_PROJECT", baseline):
+                original = baseline_capture.fixture_source_sha256()
+                tap.write_text("object RotationOperationTap { fun currentCapture() = null }\n")
+                self.assertNotEqual(original, baseline_capture.fixture_source_sha256())
+                tap.unlink()
+                with self.assertRaisesRegex(Exception, "operation tap source is absent"):
+                    baseline_capture.fixture_source_sha256()
+
     def test_recorder_revision_ignores_same_type_commit_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "source"

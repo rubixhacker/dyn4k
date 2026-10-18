@@ -18,6 +18,12 @@ kotlin {
 }
 
 sourceSets {
-    main { kotlin.srcDir("../src/commonMain/kotlin") }
-    test { kotlin.srcDir("../src/commonTest/kotlin") }
+    main {
+        kotlin.srcDir("../src/commonMain/kotlin")
+        kotlin.srcDir("src/main/kotlin")
+    }
+    test {
+        kotlin.srcDir("../src/commonTest/kotlin")
+        kotlin.include("portable/PortableMatrixTest.kt")
+    }
 }
