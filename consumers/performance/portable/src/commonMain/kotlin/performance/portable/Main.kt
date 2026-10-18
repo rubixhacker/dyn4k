@@ -1,14 +1,19 @@
 package performance.portable
 
 import kotlin.time.TimeSource
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 
 private val origin = TimeSource.Monotonic.markNow()
 
 private fun nowNs(): Long = origin.elapsedNow().inWholeNanoseconds
 
-private fun pace(startNs: Long, step: Int, hz: Int): Long {
+private suspend fun pace(startNs: Long, step: Int, hz: Int, pause: suspend (Int) -> Unit): Long {
     val deadline = startNs + step * 1_000_000_000L / hz
     while (nowNs() < deadline) {
+        val remainingMs = ((deadline - nowNs()) / 1_000_000L).toInt()
+        pause((remainingMs - 1).coerceAtLeast(0))
     }
     return (nowNs() - deadline).coerceAtLeast(0)
 }
@@ -31,12 +36,25 @@ private fun expectedCount(family: String, size: String): Int {
     return counts[index]
 }
 
-private fun phase(fixture: Fixture, steps: Int, warmup: Boolean): Pair<Long, Int> {
+private fun calibratedResolutionNs(): Long {
+    var minimum = Long.MAX_VALUE
+    repeat(64) {
+        val started = nowNs()
+        var ended: Long
+        do { ended = nowNs() } while (ended <= started)
+        minimum = minOf(minimum, ended - started)
+    }
+    return minimum
+}
+
+private suspend fun phase(
+    fixture: Fixture, steps: Int, warmup: Boolean, pause: suspend (Int) -> Unit,
+): Pair<Long, Int> {
     val phase = if (warmup) "warmup" else "measure"
     var active = 0
     val started = nowNs()
     for (step in 0 until steps) {
-        val late = pace(started, step, fixture.hz)
+        val late = pace(started, step, fixture.hz, pause)
         val began = nowNs()
         fixture.mutate(step)
         val mutated = nowNs()
@@ -54,11 +72,12 @@ private fun phase(fixture: Fixture, steps: Int, warmup: Boolean): Pair<Long, Int
                 fixture.contactBegins, fixture.contactEnds, fixture.toiEvents,
                 pairs.first, pairs.second, pairs.third)
         }
+        pause(0)
     }
     return Pair(nowNs() - started, active)
 }
 
-internal fun runPortable(args: Array<String>) {
+internal suspend fun runPortable(args: Array<String>, pause: suspend (Int) -> Unit = {}) {
     require(args.size == 14) {
         "scenario family variant size hz steps warmup mode api source core kotlin build nonce"
     }
@@ -83,18 +102,29 @@ internal fun runPortable(args: Array<String>) {
     require(build == "development" || build == "optimized")
     require(scenario == "$family.$variant.$size.${hz}hz.$api")
     require(source.matches(Regex("[0-9a-f]{40}")))
+    require(source == BuildIdentity.sourceSha) { "launched source differs from linked producer" }
     require(core.matches(Regex("[0-9a-f]{64}")))
     require(kotlin.matches(Regex("[0-9a-f]{64}")))
     require(nonce.matches(Regex("[0-9a-f]{32}")))
     val count = expectedCount(family, size)
     emit("PROVIDER", api, source, core, kotlin, scenario, build, nonce)
+    emit("RESOLUTION", calibratedResolutionNs(), 64)
+    emit("LINK", BuildIdentity.sourceSha, BuildIdentity.producerTree)
     var warmed: Fixture? = Fixture(family, variant, count, hz, api)
     emit("CONSTRUCTION", warmed!!.world.getBodyCount(), warmed.world.getJointCount())
-    phase(warmed, warmup, true)
+    phase(warmed, warmup, true, pause)
     warmed = null
     emit("RESET", "after_warmup", warmup)
     val measured = Fixture(family, variant, count, hz, api)
-    val (wallNs, activeSteps) = phase(measured, steps, false)
+    val (wallNs, activeSteps) = phase(measured, steps, false, pause)
     emit("RUN", api, mode, steps, warmup, wallNs, activeSteps,
         "memory_attribution_missing", "plateau_missing", "unpassed")
+    emit("COMPLETE", nonce)
+}
+
+internal fun startPortable(args: Array<String>, pause: suspend (Int) -> Unit = {}) {
+    suspend { runPortable(args, pause) }.startCoroutine(object : Continuation<Unit> {
+        override val context = EmptyCoroutineContext
+        override fun resumeWith(result: Result<Unit>) { result.getOrThrow() }
+    })
 }

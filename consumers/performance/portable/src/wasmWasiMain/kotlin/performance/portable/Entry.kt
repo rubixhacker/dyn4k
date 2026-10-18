@@ -1,3 +1,3 @@
 package performance.portable
 
-fun main() = runPortable(readln().split('\t').toTypedArray())
+fun main() = startPortable(readln().split('\t').toTypedArray())

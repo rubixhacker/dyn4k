@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -47,71 +48,146 @@ def scenario_from_manifest(manifest, scenario_id):
     return scenario
 
 
-def validate_protocol(raw, scenario, source_sha, hashes, build, nonce, steps, warmup, mode):
+def source_tree():
+    return subprocess.check_output(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD:consumers/performance/portable"],
+        text=True).strip()
+
+
+def bundle_hashes(harness):
+    return {
+        str(path.relative_to(harness.parent)): digest(path)
+        for path in sorted(harness.parent.rglob("*")) if path.is_file()
+    }
+
+
+def validate_inventory(path, target, build, source_sha, producer_tree, manifest, harness,
+                       core, kotlin, bundle):
+    inventory = json.loads(path.read_text())
+    expected = {
+        "format": "portable-build-inventory-v1", "target": target, "build": build,
+        "source_sha": source_sha, "producer_tree": producer_tree,
+        "manifest_sha256": digest(manifest), "harness": str(harness),
+        "bundle_sha256": bundle, "gradle": "9.5.0", "kgp": "2.4.20",
+    }
+    if any(inventory.get(key) != value for key, value in expected.items()):
+        raise ValueError("build inventory differs from selected source, build, or bundle")
+    tracked = subprocess.check_output(
+        ["git", "-C", str(ROOT), "ls-tree", "-r", "--name-only", "HEAD",
+         "consumers/performance/portable", "tools/performance/sustained_portable"],
+        text=True).splitlines()
+    source_files = {name: digest(ROOT / name) for name in tracked}
+    if inventory.get("source_files") != source_files:
+        raise ValueError("build inventory source file hashes differ from checkout")
+    artifacts = inventory.get("resolved_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError("build inventory has no resolved compilation artifacts")
+    for artifact in artifacts:
+        actual = required_file(artifact["path"], "resolved compilation artifact")
+        if digest(actual) != artifact["sha256"]:
+            raise ValueError("resolved compilation artifact changed after build")
+    for label, selected in (("dyn4k-core", core), ("dyn4k", kotlin)):
+        selected_hash = digest(selected)
+        matches = [item for item in artifacts if item["sha256"] == selected_hash and
+                   ((label == "dyn4k-core" and ":dyn4k-core-" in item["module"]) or
+                    (label == "dyn4k" and ":dyn4k-" in item["module"] and
+                     ":dyn4k-core-" not in item["module"]))]
+        if len(matches) != 1:
+            raise ValueError(f"selected {label} is not the Gradle-resolved build input")
+    return inventory
+
+
+def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, nonce, steps, warmup, mode):
     records = []
     for line in raw.decode("utf-8").splitlines():
         if not line.startswith("DYN4K\t"):
             raise ValueError(f"unexpected producer output: {line[:100]}")
         records.append(line.split("\t")[1:])
-    kinds = [row[0] for row in records]
-    if any(kinds.count(kind) != 1 for kind in ("PROVIDER", "CONSTRUCTION", "RESET", "RUN")):
-        raise ValueError("missing or duplicate provider, construction, reset, or run")
-    if set(kinds) != {"PROVIDER", "CONSTRUCTION", "CLOCK", "RESET", "STEP", "RUN"}:
-        raise ValueError("unknown or missing producer record type")
-    construction = next(row for row in records if row[0] == "CONSTRUCTION")
-    if len(construction) != 3 or int(construction[1]) < scenario["dynamic_bodies"] or int(construction[2]) < 0:
-        raise ValueError("construction does not match manifest fixture")
-    provider = next(row for row in records if row[0] == "PROVIDER")
+    def next_record(index, kind):
+        if index >= len(records) or records[index][0] != kind:
+            raise ValueError(f"expected {kind} at producer record {index}")
+        return records[index]
+
+    dynamic = scenario["dynamic_bodies"]
+    family = scenario["family"]
+    bodies = dynamic * 2 if family == "joint" else dynamic + (2 if family == "ccd" else 1 if family in ("pile", "lifecycle") else 0)
+    joints = dynamic if family == "joint" else (dynamic + 9) // 10 if family == "lifecycle" else 0
+    provider = next_record(0, "PROVIDER")
     if provider != ["PROVIDER", scenario["api"], source_sha, hashes["core"],
                     hashes["kotlin"], scenario["id"], build, nonce]:
         raise ValueError("provider does not match exact selected inputs")
-    reset = next(row for row in records if row[0] == "RESET")
+    resolution = next_record(1, "RESOLUTION")
+    if len(resolution) != 3 or int(resolution[1]) <= 0 or int(resolution[2]) < 64:
+        raise ValueError("clock resolution calibration is missing or nonpositive")
+    if next_record(2, "LINK") != ["LINK", source_sha, producer_tree]:
+        raise ValueError("linked producer identity differs from selected source")
+    construction = next_record(3, "CONSTRUCTION")
+    if construction != ["CONSTRUCTION", str(bodies), str(joints)]:
+        raise ValueError("construction does not match manifest fixture")
+    clocks = {"warmup": [], "measure": []}
+    previous_end = -1
+    cursor = 4
+    for step in range(warmup):
+        row = next_record(cursor, "CLOCK")
+        if len(row) != 5 or row[1:3] != ["warmup", str(step)]:
+            raise ValueError("warmup clock stream is incomplete")
+        begin, end = map(int, row[3:])
+        if begin < previous_end or end <= begin:
+            raise ValueError("warmup clock stream is not positive and monotonic")
+        clocks["warmup"].append((step, begin, end))
+        previous_end = end
+        cursor += 1
+    reset = next_record(cursor, "RESET")
     if reset != ["RESET", "after_warmup", str(warmup)]:
         raise ValueError("fixture reset marker does not match warm-up")
-    run = next(row for row in records if row[0] == "RUN")
+    cursor += 1
+    step_rows = []
+    previous_events = (0, 0, 0)
+    for step in range(steps):
+        clock = next_record(cursor, "CLOCK")
+        if len(clock) != 5 or clock[1:3] != ["measure", str(step)]:
+            raise ValueError("measure clock stream is incomplete")
+        begin, end = map(int, clock[3:])
+        if begin < previous_end or end <= begin:
+            raise ValueError("measure clock stream is not positive and monotonic")
+        clocks["measure"].append((step, begin, end))
+        previous_end = end
+        cursor += 1
+        row = next_record(cursor, "STEP")
+        if len(row) != 16 or row[1] != str(step):
+            raise ValueError("malformed or out-of-order activity row")
+        elapsed, mutation, lateness, body_count, joint_count, awake = map(int, row[2:8])
+        if elapsed != end - begin or mutation < 0 or mutation > elapsed or lateness < 0:
+            raise ValueError("invalid step timing or clock disagreement")
+        if (body_count, joint_count) != (bodies, joints) or not 0 <= awake <= dynamic:
+            raise ValueError("invalid fixture activity")
+        for value in row[8:10]:
+            speed = float(value)
+            if not math.isfinite(speed) or speed < 0:
+                raise ValueError("non-finite or negative physical activity")
+        events = tuple(map(int, row[10:13]))
+        if any(value < prior for value, prior in zip(events, previous_events)):
+            raise ValueError("event counters decreased")
+        previous_events = events
+        pairs = tuple(map(int, row[13:16]))
+        sampled = step % scenario["rate_hz"] == 0 or step == steps - 1
+        if sampled:
+            broad, active, points = pairs
+            if broad < 0 or active < 0 or points < 0 or active > broad or points < active:
+                raise ValueError("invalid sampled pair counts")
+        elif pairs != (-1, -1, -1):
+            raise ValueError("unsampled pair counts must be -1")
+        step_rows.append(row)
+        cursor += 1
+    run = next_record(cursor, "RUN")
+    if len(run) != 10 or next_record(cursor + 1, "COMPLETE") != ["COMPLETE", nonce] or cursor + 1 != len(records) - 1:
+        raise ValueError("run requires a final matching completion marker")
     if run[:5] != ["RUN", scenario["api"], mode, str(steps), str(warmup)]:
         raise ValueError("run summary does not match selected inputs")
     if run[7:] != ["memory_attribution_missing", "plateau_missing", "unpassed"]:
         raise ValueError("run summary omitted unfinished evidence")
-    if int(run[5]) <= 0 or not 0 <= int(run[6]) <= steps:
+    if int(run[5]) < sum(end - begin for _, begin, end in clocks["measure"]) or not 0 <= int(run[6]) <= steps:
         raise ValueError("run summary has invalid elapsed time or activity count")
-    if kinds.index("PROVIDER") >= kinds.index("CONSTRUCTION") or kinds.index("CONSTRUCTION") >= kinds.index("RESET") or kinds.index("RESET") >= kinds.index("RUN"):
-        raise ValueError("producer phase order is invalid")
-    clocks = {"warmup": [], "measure": []}
-    for row in records:
-        if row[0] == "CLOCK":
-            if len(row) != 5 or row[1] not in clocks:
-                raise ValueError("malformed clock record")
-            step, begin, end = map(int, row[2:])
-            if begin < 0 or end < begin:
-                raise ValueError("invalid monotonic clock interval")
-            clocks[row[1]].append((step, begin, end))
-    for phase, expected in (("warmup", warmup), ("measure", steps)):
-        rows = clocks[phase]
-        if len(rows) != expected or [row[0] for row in rows] != list(range(expected)):
-            raise ValueError(f"{phase} clock stream is incomplete")
-        if any(rows[i][1] < rows[i - 1][2] for i in range(1, len(rows))):
-            raise ValueError(f"{phase} clock stream is not monotonic")
-    reset_index = kinds.index("RESET")
-    run_index = kinds.index("RUN")
-    for index, row in enumerate(records):
-        if row[0] == "CLOCK" and (index < reset_index) != (row[1] == "warmup"):
-            raise ValueError("clock stream is in the wrong phase")
-        if row[0] == "STEP" and not reset_index < index < run_index:
-            raise ValueError("activity row is outside measured phase")
-    step_rows = [row for row in records if row[0] == "STEP"]
-    if len(step_rows) != steps:
-        raise ValueError("step activity stream is incomplete")
-    for index, row in enumerate(step_rows):
-        if len(row) != 16 or int(row[1]) != index:
-            raise ValueError("malformed or out-of-order activity row")
-        elapsed, mutation, lateness, bodies, joints, awake = map(int, row[2:8])
-        if elapsed < 0 or mutation < 0 or mutation > elapsed or lateness < 0:
-            raise ValueError("invalid step timing")
-        if bodies < scenario["dynamic_bodies"] or joints < 0 or not 0 <= awake <= scenario["dynamic_bodies"]:
-            raise ValueError("invalid fixture activity")
-        if elapsed != clocks["measure"][index][2] - clocks["measure"][index][1]:
-            raise ValueError("clock and step elapsed time disagree")
     if int(run[6]) != sum(int(row[7]) > 0 for row in step_rows):
         raise ValueError("run activity count disagrees with steps")
     return clocks, step_rows, provider, run
@@ -152,10 +228,7 @@ def capture(args):
         raise ValueError("JS harness must be a JavaScript entry")
     elif args.target in ("wasmJs", "wasmWasi") and harness.suffix != ".mjs":
         raise ValueError("Wasm harness must be a module entry")
-    bundle = {
-        str(path.relative_to(harness.parent)): digest(path)
-        for path in sorted(harness.parent.rglob("*")) if path.is_file()
-    }
+    bundle = bundle_hashes(harness)
     if args.target.startswith("wasm") and not any(name.endswith(".wasm") for name in bundle):
         raise ValueError("Wasm harness has no adjacent Wasm binary")
     expected_build_path = {
@@ -168,6 +241,10 @@ def capture(args):
         "manifest": digest(manifest_path), "runtime": digest(runtime),
         "harness": digest(harness), "core": digest(core), "kotlin": digest(kotlin),
     }
+    producer_tree = source_tree()
+    inventory_path = required_file(args.inventory, "build inventory")
+    inventory = validate_inventory(inventory_path, args.target, args.build, args.source_sha,
+                                   producer_tree, manifest_path, harness, core, kotlin, bundle)
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
     args.archive.mkdir(parents=True)
@@ -199,10 +276,15 @@ def capture(args):
     (args.archive / "stdout.raw").write_bytes(stdout)
     (args.archive / "stderr.raw").write_bytes(stderr)
     (args.archive / "stdin.raw").write_bytes(stdin_bytes)
+    (args.archive / "build-inventory.json").write_bytes(inventory_path.read_bytes())
     process_record = {
         "qualification": "unpassed", "protocol": "portable-development-v1",
         "target": args.target, "build": args.build, "mode": args.mode,
         "scenario": scenario, "source_sha": args.source_sha,
+        "producer_tree": producer_tree,
+        "build_inventory_sha256": digest(args.archive / "build-inventory.json"),
+        "build_inventory": {"gradle": inventory["gradle"], "kgp": inventory["kgp"],
+                            "compile_configuration": inventory["compile_configuration"]},
         "command": command, "inputs": {
             label: {"path": str(path), "sha256": hashes[label]}
             for label, path in (("manifest", manifest_path), ("runtime", runtime),
@@ -233,7 +315,7 @@ def capture(args):
         raise ValueError("observed process image does not match runtime; raw archive retained")
     try:
         clocks, steps, provider, run = validate_protocol(
-            stdout, scenario, args.source_sha, hashes, args.build, nonce,
+            stdout, scenario, args.source_sha, producer_tree, hashes, args.build, nonce,
             args.steps, args.warmup, args.mode)
     except ValueError as error:
         process_record["protocol_error"] = str(error)
@@ -272,6 +354,7 @@ def main():
     parser.add_argument("--harness", required=True)
     parser.add_argument("--core", required=True)
     parser.add_argument("--kotlin", required=True)
+    parser.add_argument("--inventory", required=True)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
     args = parser.parse_args()

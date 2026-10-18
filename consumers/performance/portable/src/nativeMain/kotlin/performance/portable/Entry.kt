@@ -1,3 +1,3 @@
 package performance.portable
 
-fun main(args: Array<String>) = runPortable(args)
+fun main(args: Array<String>) = startPortable(args)
