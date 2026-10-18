@@ -19,6 +19,13 @@ CHANNELS = ("transform.getTranslation.0", "transform.getTranslation.1",
             "previousTransform.getTranslation.0", "previousTransform.getTranslation.1",
             "velocity.0", "velocity.1", "angularVelocity", "rotationIncrementSum", "atRest")
 NOMINAL_ZERO_FIELDS = ("force", "torque", "accumulatedForce", "accumulatedTorque")
+NOMINAL_TIMESTEP = {
+    "getDeltaTime": float.fromhex("0x1.1111111111111p-6"),
+    "getPrevousDeltaTime": float.fromhex("0x1.1111111111111p-6"),
+    "getInverseDeltaTime": float.fromhex("0x1.e000000000000p+5"),
+    "getPreviousInverseDeltaTime": float.fromhex("0x1.e000000000000p+5"),
+    "getDeltaTimeRatio": float.fromhex("0x1.0000000000000p+0"),
+}
 RULE_PATHS = {
     "transform.getTranslation.0": "state.state.bodies[].transform.getTranslation[]",
     "transform.getTranslation.1": "state.state.bodies[].transform.getTranslation[]",
@@ -37,6 +44,58 @@ def channel(body, name):
     for part in name.split("."):
         value = value[int(part)] if isinstance(value, list) else value[part]
     return value
+
+
+def fixture_with_nominal_timestep_rule(fixture):
+    if fixture.get("key") != "nominal-free-motion":
+        raise Rejected("nominal timestep rule requires the nominal free-motion fixture")
+    return {**fixture, "exact_numeric": [*fixture.get("exact_numeric", []),
+            *(f"event.payload[].{name}" for name in NOMINAL_TIMESTEP)]}
+
+
+def nominal_timestep_diagnostic(reference, portable, expected_callbacks=108001):
+    baseline = (row for row in reference_records(reference)
+                if row.get("kind") == "event" and row.get("listener") == "StepListener")
+    candidate = (row.get("frozenEvent") for row in
+                 records(portable, allow_tagged_nonfinite=True)
+                 if row.get("kind") == "event" and row.get("name", "").startswith("step."))
+    sentinel = object()
+    result = {"status": "PASSED", "callbacks": 0, "value_checks": 0,
+              "update_performed_callbacks": 0, "first_failures": [],
+              "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6243538631"}
+
+    def fail(message):
+        if len(result["first_failures"]) < 20:
+            result["first_failures"].append({"callback": result["callbacks"], "reason": message})
+        result["status"] = "FAILED"
+
+    try:
+        for left, right in zip_longest(baseline, candidate, fillvalue=sentinel):
+            result["callbacks"] += 1
+            if left is sentinel or right is sentinel or not isinstance(right, dict):
+                fail("StepListener callback is missing")
+                continue
+            if any(not exact(left.get(field), right.get(field))
+                   for field in ("step", "order", "method", "listener")):
+                fail("StepListener callback identity differs")
+            if "updatePerformed(" in left.get("method", ""):
+                result["update_performed_callbacks"] += 1
+            for name, required in NOMINAL_TIMESTEP.items():
+                result["value_checks"] += 1
+                for label, event in (("baseline", left), ("portable", right)):
+                    payload = event.get("payload")
+                    value = (payload[0].get(name) if isinstance(payload, list) and payload and
+                             isinstance(payload[0], dict) else None)
+                    if (type(value) not in (int, float) or not math.isfinite(value) or
+                            not exact(value, required)):
+                        fail(f"{label} {name} differs from fixed exact value")
+        if result["callbacks"] != expected_callbacks or \
+                result["value_checks"] != expected_callbacks * len(NOMINAL_TIMESTEP) or \
+                result["update_performed_callbacks"] != 1:
+            fail("nominal StepListener callback coverage differs")
+    except (Rejected, OSError, EOFError, KeyError, TypeError, ValueError) as error:
+        fail(str(error))
+    return result
 
 
 def structural_differences(reference, candidate, path="", limit=100):
@@ -345,6 +404,8 @@ def diagnostic(fixture_key, reference, portable):
         raise Rejected("fixture key is absent or duplicated")
     fixture = fixtures[0]
     approved_fixture = approved.load_fixture(fixture_key)
+    if fixture_key == "nominal-free-motion":
+        approved_fixture = fixture_with_nominal_timestep_rule(approved_fixture)
     if digest(reference) != fixture["reference"]["gzip_sha256"]:
         raise Rejected("frozen reference gzip SHA-256 differs")
     with gzip.open(reference, "rb") as stream:
@@ -358,6 +419,8 @@ def diagnostic(fixture_key, reference, portable):
     auxiliary = auxiliary_record_diagnostic(reference, portable)
     nominal_zero = (nominal_zero_diagnostic(reference, portable)
                     if fixture_key == "nominal-free-motion" else None)
+    nominal_timestep = (nominal_timestep_diagnostic(reference, portable)
+                        if fixture_key == "nominal-free-motion" else None)
     ref = iter(reference_records(reference))
     wanted = portable_case_id(fixture_key)
     port = (row for row in records(portable, allow_tagged_nonfinite=True) if row.get("id") == wanted)
@@ -459,7 +522,8 @@ def diagnostic(fixture_key, reference, portable):
                                                   "channel": name, "reason": str(error)})
     status = ("FAILED_APPROVED_PROJECTION" if projected["status"] == "FAILED" or
               approved_failure_count or signed_zero_differences or
-              (nominal_zero is not None and nominal_zero["status"] != "PASSED") else
+              (nominal_zero is not None and nominal_zero["status"] != "PASSED") or
+              (nominal_timestep is not None and nominal_timestep["status"] != "PASSED") else
               "UNPASSED_RULES" if projected["status"] == "UNPASSED" else
               "PASSED_APPROVED_PROJECTION")
     return {"status": status,
@@ -474,6 +538,7 @@ def diagnostic(fixture_key, reference, portable):
             "frozen_event_projection": frozen_events,
             "auxiliary_record_projection": auxiliary,
             "nominal_zero_invariant": nominal_zero,
+            "nominal_timestep_invariant": nominal_timestep,
             "state_steps_compared": checked, "exact_values": exact_values,
             "differing_values": differing_values, "max_absolute_differences": maxima,
             "event_records": events, "first_differences": first_differences,

@@ -9,12 +9,47 @@ from reference_diagnostic import (strict_comparison, structural_differences,
                                   step_event_diagnostic, frozen_event_diagnostic,
                                   projected_records, auxiliary_record_diagnostic)
 from reference_diagnostic import nominal_zero_diagnostic
+from reference_diagnostic import (fixture_with_nominal_timestep_rule,
+                                  nominal_timestep_diagnostic)
 from reference_diagnostic import projected_comparison
 from reference_diagnostic import compare_stream
 import compare as approved
 
 
 class FrozenComparatorSeamTest(unittest.TestCase):
+    def test_adopted_nominal_timestep_rule_and_adverse_getters(self):
+        fixture = fixture_with_nominal_timestep_rule(approved.load_fixture("nominal-free-motion"))
+        values = {"getDeltaTime": 1 / 60, "getPrevousDeltaTime": 1 / 60,
+                  "getInverseDeltaTime": 60.0, "getPreviousInverseDeltaTime": 60.0,
+                  "getDeltaTimeRatio": 1.0}
+        event = {"kind": "event", "listener": "StepListener", "step": 1, "order": 0,
+                 "method": "StepListener.begin(TimeStep)", "payload": [values]}
+        self.assertEqual(compare_stream(fixture, [event], [event])["status"], "PASSED")
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "reference.jsonl.gz"
+            candidate = Path(directory) / "candidate.jsonl"
+            rows = [event, {**event, "order": 1,
+                            "method": "StepListener.updatePerformed(TimeStep)"}]
+            with gzip.open(reference, "wt") as stream:
+                for row in rows:
+                    stream.write(json.dumps(row) + "\n")
+
+            def check(events):
+                candidate.write_text("".join(json.dumps({"kind": "event", "name": "step.callback",
+                    "frozenEvent": row}) + "\n" for row in events))
+                return nominal_timestep_diagnostic(reference, candidate, expected_callbacks=2)
+
+            self.assertEqual(check(rows)["status"], "PASSED")
+            self.assertEqual(check(rows)["value_checks"], 10)
+            changed = json.loads(json.dumps(rows))
+            changed[0]["payload"][0]["getInverseDeltaTime"] = 60
+            self.assertEqual(check(changed)["status"], "PASSED")
+            changed[0]["payload"][0]["getInverseDeltaTime"] = 59.0
+            self.assertEqual(check(changed)["status"], "FAILED")
+            changed[0]["payload"][0]["getInverseDeltaTime"] = {"nonfinite": "Infinity"}
+            self.assertEqual(check(changed)["status"], "FAILED")
+            self.assertEqual(check(rows[:1])["status"], "FAILED")
+
     def test_nominal_timestep_metadata_remains_unpassed_without_a_rule(self):
         fixture = approved.load_fixture("nominal-free-motion")
         values = {"getDeltaTime": 1 / 60, "getPrevousDeltaTime": 1 / 60,
