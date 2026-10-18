@@ -42,7 +42,7 @@ New-Item -ItemType Directory -Force -Path $classes | Out-Null
 & $javac -Xlint:-options --release 8 -cp $jar -d $classes (Join-Path $PSScriptRoot 'WindowsCollisionScalarJavaControl.java')
 if ($LASTEXITCODE -ne 0) { throw "javac failed: $LASTEXITCODE" }
 $javaRaw = Join-Path $OutputDirectory 'java-scalar.tsv'
-& $java -Djava.io.tmpdir=$OutputDirectory -cp "$classes;$jar" org.dyn4j.collision.narrowphase.WindowsCollisionScalarJavaControl | Tee-Object -FilePath $javaRaw
+& $java "-Djava.io.tmpdir=$OutputDirectory" -cp "$classes;$jar" org.dyn4j.collision.narrowphase.WindowsCollisionScalarJavaControl | Tee-Object -FilePath $javaRaw
 if ($LASTEXITCODE -ne 0) { throw "Java scalar control failed: $LASTEXITCODE" }
 
 & python $validator validate --native $nativeRaw --java $javaRaw
