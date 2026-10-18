@@ -151,12 +151,65 @@ class FullHostedTests(unittest.TestCase):
         process = {"started_ns": 0, "finished_ns": time.time_ns()}
         self.assertEqual(full_hosted.sha256(binary), full_hosted.test_products(
             self.root, "mingwX64", "optimized-opt", process)["sha256"])
+        diagnostic = self.root / "product-inventory.json"
+        products = full_hosted.collect_test_products(
+            {"core": self.root}, "mingwX64", "optimized-opt", process,
+            diagnostic, self.root)
+        self.assertEqual(full_hosted.sha256(binary), products["core"]["sha256"])
+        self.assertFalse(diagnostic.exists())
         with self.assertRaisesRegex(ValueError, "exactly one"):
             full_hosted.test_products(self.root, "mingwX64", "debug-g", process)
         with self.assertRaisesRegex(ValueError, "predates"):
             full_hosted.test_products(self.root, "mingwX64", "optimized-opt",
                                       {"started_ns": time.time_ns() + 1,
                                        "finished_ns": time.time_ns() + 2})
+
+    def test_missing_mac_product_retains_bounded_inventory_without_accepting_it(self):
+        project = self.root / "dyn4k-core"
+        product = project / "build/bin/macosArm64/debugTest/test"
+        product.parent.mkdir(parents=True)
+        product.write_bytes(b"observed-layout-placeholder")
+        output = self.root / "failed-archive"
+        output.mkdir()
+        (output / "receipt.json").write_text("{}")
+        diagnostic = output / "debug-g/product-inventory-source.json"
+        process = {"started_ns": 1, "finished_ns": time.time_ns() + 10**9,
+                   "invocation_id": "synthetic-invocation", "exit_code": 0}
+        with self.assertRaisesRegex(ValueError, "product inventory"):
+            full_hosted.collect_test_products(
+                {"dyn4k-core": project}, "macosArm64", "debug-g", process,
+                diagnostic, output)
+        evidence = json.loads(diagnostic.read_text())
+        self.assertEqual("macosArm64", evidence["target"])
+        self.assertEqual("synthetic-invocation", evidence["invocation_id"])
+        files = evidence["projects"]["dyn4k-core"]["entries"]
+        self.assertEqual(1, len([item for item in files if item["kind"] == "file"]))
+        self.assertEqual("build/bin/macosArm64/debugTest/test",
+                         next(item["path"] for item in files if item["kind"] == "file"))
+        archive = self.root / "diagnostic.tar"
+        full_hosted.package_archive(output, archive)
+        with tarfile.open(archive) as packed:
+            self.assertIn("debug-g/product-inventory-source.json", packed.getnames())
+
+    def test_product_diagnostic_inventory_has_a_fixed_entry_limit(self):
+        project = self.root / "dyn4k-core"
+        folder = project / "build/bin/macosArm64/debugTest"
+        folder.mkdir(parents=True)
+        for index in range(130):
+            (folder / f"artifact-{index:03d}").write_bytes(b"product")
+        inventory = full_hosted.product_inventory(project, "macosArm64")
+        self.assertTrue(inventory["truncated"])
+        self.assertEqual(128, len(inventory["entries"]))
+        crowded = self.root / "crowded"
+        binary = crowded / "build/bin/macosArm64/debugTest/test"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"candidate")
+        for index in range(130):
+            (crowded / "build/bin" / f"a{index:03d}").mkdir()
+        prioritized = full_hosted.product_inventory(crowded, "macosArm64")
+        self.assertTrue(prioritized["truncated"])
+        self.assertIn(binary.relative_to(crowded).as_posix(),
+                      {item["path"] for item in prioritized["entries"]})
 
     def test_windows_original_paths_are_portable_for_offline_verification(self):
         path = full_hosted.original_path("mingwX64", r"C:\runner\work\staging")
@@ -321,6 +374,8 @@ class FullHostedTests(unittest.TestCase):
         shutil.copy2(actual_repository / "gradlew", repository / "gradlew")
         (repository / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
         subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        subprocess.run(["git", "-C", str(repository), "config", "core.autocrlf", "false"],
+                       check=True)
         subprocess.run(["git", "-C", str(repository), "add", ".gitattributes", "LICENSE.md", "gradlew",
                         "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
                         "consumers/qualification/portable/build.gradle.kts"], check=True)
@@ -437,7 +492,9 @@ class FullHostedTests(unittest.TestCase):
             self.assertEqual(receipt, transported)
 
             clean = evidence / "clean-checkout"
-            subprocess.run(["git", "clone", "-q", "--no-local", str(repository), str(clean)],
+            subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "-q",
+                            "--no-local", str(repository), str(clean)], check=True)
+            subprocess.run(["git", "-C", str(clean), "config", "core.autocrlf", "false"],
                            check=True)
             subprocess.run(["git", "-C", str(clean), "checkout", "-q", "--detach", candidate],
                            check=True)
@@ -671,9 +728,10 @@ class FullHostedTests(unittest.TestCase):
         for source in manifest["source_files"]:
             full_hosted.archive_copy(repository / source["path"], self.root,
                                      f"sources/{source['path']}")
-        self.candidate_repository = Path(tempfile.mkdtemp(prefix="candidate-",
-                                                          dir=self.root.parent))
-        self.addCleanup(shutil.rmtree, self.candidate_repository)
+        candidate_directory = tempfile.TemporaryDirectory(prefix="candidate-",
+                                                          dir=self.root.parent)
+        self.addCleanup(candidate_directory.cleanup)
+        self.candidate_repository = Path(candidate_directory.name)
         checkout_patch = mock.patch.object(full_hosted, "candidate_checkout",
                                            return_value=self.candidate_repository)
         checkout_patch.start()
@@ -685,6 +743,8 @@ class FullHostedTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(repository / relative, destination)
         subprocess.run(["git", "init", "-q", str(self.candidate_repository)], check=True)
+        subprocess.run(["git", "-C", str(self.candidate_repository), "config",
+                        "core.autocrlf", "false"], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "add", "LICENSE.md",
                         "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
                         "consumers/qualification/portable/build.gradle.kts"], check=True)
@@ -782,6 +842,15 @@ class FullHostedTests(unittest.TestCase):
             receipt["configurations"].append(lane)
         receipt["files"] = full_hosted.archive_inventory(self.root)
         return receipt, manifest, consumer_manifest
+
+    def test_windows_fixture_source_archive_matches_candidate_with_autocrlf(self):
+        config = self.root / "global-gitconfig"
+        config.write_text("[core]\n\tautocrlf = true\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            receipt, manifest, consumer = self.full_archive()
+            full_hosted.verify_raw_files(
+                self.root, receipt, manifest, consumer,
+                candidate_repository=self.candidate_repository)
 
     def test_resealed_wrong_or_missing_toolchain_fails_directory_and_tar(self):
         receipt, manifest, consumer = self.full_archive()

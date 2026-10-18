@@ -7,6 +7,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -346,6 +347,66 @@ def test_products(project, target, configuration, process):
         raise ValueError("test executable predates invocation")
     return {"path": str(product), "sha256": sha256(product),
             "size": stat.st_size, "modified_ns": stat.st_mtime_ns}
+
+
+def product_inventory(project, target):
+    root = project / "build/bin"
+    result = {"root": str(root), "requested_target": str(root / target),
+              "present": root.is_dir() and not root.is_symlink(),
+              "entries": [], "truncated": False}
+    if not result["present"]:
+        return result
+    hash_budget = 256 * 1024 * 1024
+    def scan(directory):
+        nonlocal hash_budget
+        children = sorted(directory.iterdir(),
+                          key=lambda path: (path.name != target, path.name)
+                          if directory == root else (False, path.name))
+        for path in children:
+            if len(result["entries"]) == 128:
+                result["truncated"] = True
+                return
+            metadata = path.lstat()
+            kind = ("file" if stat.S_ISREG(metadata.st_mode) else
+                    "directory" if stat.S_ISDIR(metadata.st_mode) else
+                    "symlink" if stat.S_ISLNK(metadata.st_mode) else "other")
+            entry = {"path": path.relative_to(project).as_posix(), "kind": kind,
+                     "size": metadata.st_size, "mode": stat.S_IMODE(metadata.st_mode),
+                     "modified_ns": metadata.st_mtime_ns}
+            if kind == "file" and metadata.st_size <= hash_budget:
+                entry["sha256"] = sha256(path)
+                hash_budget -= metadata.st_size
+            result["entries"].append(entry)
+            if kind == "directory":
+                scan(path)
+                if result["truncated"]:
+                    return
+    scan(root)
+    return result
+
+
+def collect_test_products(projects, target, configuration, process, diagnostic, archive_root):
+    products = {}
+    errors = []
+    for name, project in projects.items():
+        try:
+            products[name] = test_products(project, target, configuration, process)
+        except ValueError as error:
+            errors.append(f"{name}: {error}")
+    if errors:
+        diagnostic.parent.mkdir(parents=True, exist_ok=True)
+        record = {"schema": 1, "target": target, "configuration": configuration,
+                  "invocation_id": process["invocation_id"],
+                  "started_ns": process["started_ns"],
+                  "finished_ns": process["finished_ns"],
+                  "exit_code": process["exit_code"],
+                  "projects": {name: product_inventory(project, target)
+                               for name, project in projects.items()}}
+        diagnostic.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+        relative = diagnostic.relative_to(archive_root).as_posix()
+        raise ValueError("; ".join(errors) +
+                         f"; product inventory {relative} SHA-256 {sha256(diagnostic)}")
+    return products
 
 
 def init_script(target, configuration, simulator_udid=None):
@@ -1043,10 +1104,10 @@ def run(target, candidate_sha, output):
                                                       lane["invocation_id"])
                 require_test_tasks(lane["source_process"], folder / "source", target, config,
                                    qualify.MODULES)
-                lane["source_executables"] = {
-                    module: test_products(repository / module, target, config,
-                                          lane["source_process"])
-                    for module in qualify.MODULES}
+                lane["source_executables"] = collect_test_products(
+                    {module: repository / module for module in qualify.MODULES},
+                    target, config, lane["source_process"],
+                    folder / "product-inventory-source.json", output)
                 for module, product in lane["source_executables"].items():
                     name = f"{config}/executables/{module}/{Path(product['path']).name}"
                     archive_copy(Path(product["path"]), output, name)
@@ -1067,8 +1128,9 @@ def run(target, candidate_sha, output):
                                                         folder / "consumer", lane["invocation_id"])
                 require_test_tasks(lane["consumer_process"], folder / "consumer", target, config,
                                    ("",))
-                lane["consumer_executable"] = test_products(consumer, target, config,
-                                                               lane["consumer_process"])
+                lane["consumer_executable"] = collect_test_products(
+                    {"consumer": consumer}, target, config, lane["consumer_process"],
+                    folder / "product-inventory-consumer.json", output)["consumer"]
                 product = lane["consumer_executable"]
                 name = f"{config}/executables/consumer/{Path(product['path']).name}"
                 archive_copy(Path(product["path"]), output, name)
