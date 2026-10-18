@@ -41,7 +41,7 @@ RUNTIME_VERSIONS = {
     "wasmtime": {"minimum": "37.0.3", "current": "49.0.3"},
 }
 KARMA_EXECUTABLE_SUFFIX_SHA256 = {
-    "js": "8a10ec56447ae4ca31d5995c05d6a249df639a98629119fa6d0761856c277d21",
+    "js": "30e32fd8e9d76f66150967c36e0757749a0723eebccf936752b200d21892457e",
     "wasmJs": "eafc366e9f363a4fdb247daab007ee69b3c7268dfa1d281a1bddd7efd7d82b4e",
 }
 KARMA_HELPER_SHA256 = {
