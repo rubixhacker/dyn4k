@@ -61,10 +61,23 @@ def _finite(value, allow_tagged_nonfinite=False):
         for child in value:
             _finite(child, allow_tagged_nonfinite)
     if isinstance(value, dict):
-        if "nonfinite" in value and not allow_tagged_nonfinite:
-            raise Rejected(f"nonfinite recorded value: {value['nonfinite']}")
+        if "nonfinite" in value:
+            if not allow_tagged_nonfinite:
+                raise Rejected(f"nonfinite recorded value: {value['nonfinite']}")
+            if set(value) != {"nonfinite"} or value["nonfinite"] not in (
+                    "Infinity", "-Infinity", "NaN"):
+                raise Rejected("invalid tagged nonfinite value")
+            return
         for child in value.values():
             _finite(child, allow_tagged_nonfinite)
+
+
+def _tagged(value):
+    if isinstance(value, dict):
+        return "nonfinite" in value or any(_tagged(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_tagged(child) for child in value)
+    return False
 
 
 def records(path, allow_tagged_nonfinite=False):
@@ -289,7 +302,7 @@ def validate_state(state, body_ids, joint_ids):
                 "state joint channel is absent")
 
 
-def inspect(path, cases):
+def inspect(path, cases, allow_tagged_nonfinite=False):
     expected = {case["id"]: case for case in cases}
     if not expected or len(expected) != len(cases):
         raise Rejected("empty or duplicate case declaration")
@@ -313,9 +326,14 @@ def inspect(path, cases):
     frozen_id = None
     body_ids = []
     joint_ids = []
-    for row in records(path):
+    known_nonfinite_cases = set()
+    for row in records(path, allow_tagged_nonfinite=allow_tagged_nonfinite):
         kind = row.get("kind")
         case_id = row.get("id")
+        if _tagged(row):
+            if case_id != "P-J-Angle-ratio-limits-off--1.0" or kind != "state":
+                raise Rejected(f"unexpected nonfinite case: {case_id}")
+            known_nonfinite_cases.add(case_id)
         if kind == "inputs":
             if current is not None or case_id not in expected or case_id in seen:
                 raise Rejected("unexpected, duplicate, or interleaved case")
@@ -472,7 +490,8 @@ def inspect(path, cases):
     if current is not None or seen != set(expected) or total_states == 0:
         raise Rejected(f"missing cases: {sorted(set(expected) - seen)}")
     return {"expected_cases": len(expected), "executed_cases": len(seen), "states": total_states,
-            "events": total_events, "endpoints": total_endpoints, "skipped": 0}
+            "events": total_events, "endpoints": total_endpoints, "skipped": 0,
+            "known_nonfinite_cases": sorted(known_nonfinite_cases)}
 
 
 def compare_exact(reference, candidate, cases):
@@ -489,7 +508,7 @@ def compare_exact(reference, candidate, cases):
 
 
 def seal(trace, cases, identity, artifacts):
-    counts = inspect(trace, cases)
+    counts = inspect(trace, cases, allow_tagged_nonfinite=True)
     if set(artifacts) != set(identity.artifact_sha256):
         raise Rejected("artifact set differs")
     for name, path in artifacts.items():

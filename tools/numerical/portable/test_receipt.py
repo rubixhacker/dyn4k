@@ -193,6 +193,38 @@ class ReceiptContractTest(unittest.TestCase):
                              ["state"]["x"], {"nonfinite": "-Infinity"})
             self.assertRaises(receipt.Rejected, receipt.inspect, self.write(folder, "empty.jsonl", []), CASES)
 
+    def test_known_angle_nonfinite_is_retained_but_other_cases_reject_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            case = {"id": "P-J-Angle-ratio-limits-off--1.0", "family": "joints-limits-motors",
+                    "profile": "baseline-failed", "hz": 60, "steps": 1, "input": {},
+                    "min_step_events": 0}
+            rows = [
+                {"kind": "inputs", "id": case["id"], "family": case["family"],
+                 "profile": case["profile"], "hz": 60, "steps": 1,
+                 "dt": 1 / 60, "input": {}},
+                {"kind": "state", "id": case["id"], "step": 1, "order": 0,
+                 "state": {"energy": {"nonfinite": "Infinity"}}},
+                {"kind": "case-end", "id": case["id"], "steps": 1, "events": 0},
+            ]
+            trace = self.write(folder, "angle.jsonl", rows)
+            self.assertRaises(receipt.Rejected, receipt.inspect, trace, [case])
+            observed = receipt.inspect(trace, [case], allow_tagged_nonfinite=True)
+            self.assertEqual(observed["known_nonfinite_cases"], [case["id"]])
+            rows[0]["input"] = {"unexpected": {"nonfinite": "NaN"}}
+            case["input"] = rows[0]["input"]
+            with self.assertRaisesRegex(receipt.Rejected, "unexpected nonfinite"):
+                receipt.inspect(self.write(folder, "input.jsonl", rows), [case],
+                                allow_tagged_nonfinite=True)
+            rows[0]["input"] = {}
+            case["input"] = {}
+            other = {**case, "id": "other"}
+            for row in rows:
+                row["id"] = "other"
+            with self.assertRaisesRegex(receipt.Rejected, "unexpected nonfinite"):
+                receipt.inspect(self.write(folder, "other.jsonl", rows), [other],
+                                allow_tagged_nonfinite=True)
+
     def test_configured_endpoints_do_not_advance_temporal_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)

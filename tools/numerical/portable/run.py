@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cases import declared_cases
 from exact_consistency import audit_trace
 from physical import nominal_free, sleep_wake_rows
+from prospective_compare import compare_host
 from reference_diagnostic import diagnostic, portable_case_id
 from receipt import Identity, Rejected, digest, records, seal
 
@@ -321,7 +322,7 @@ def check_exact_consistency(lane):
     return result
 
 
-def execute(host, output, commit, source_sha256, reference_dirs):
+def execute(host, output, commit, source_sha256, reference_dirs, prospective_baseline=None):
     lane = output / host
     lane.mkdir(parents=True, exist_ok=False)
     target_artifacts = artifacts(host)
@@ -333,7 +334,12 @@ def execute(host, output, commit, source_sha256, reference_dirs):
                "qualification": "UNPASSED", "frozen_comparison": "NOT_RUN",
                "candidate_commit": commit, "source_sha256": source_sha256,
                "artifact_sha256": artifact_sha256,
-               "comparison_coverage": comparison_coverage()}
+               "comparison_coverage": comparison_coverage(),
+               "prospective_reference": {
+                   "status": "NOT_RUN" if prospective_baseline else "UNAVAILABLE_REFERENCE",
+                   "qualification": "UNPASSED", "cases": 0,
+                   "reason": ("Host trace is not sealed" if prospective_baseline else
+                              "No verified pinned baseline archive was supplied")}}
     trace = None
     try:
         attributes = {key: 0 for key in ("tests", "skipped", "failures", "errors")}
@@ -444,12 +450,30 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         (lane / "receipt.json").write_text(json.dumps(sealed, indent=2, sort_keys=True) + "\n")
         outcome.update({"xml": attributes, "counts": sealed["counts"], "trace_sha256": sealed["trace_sha256"],
                         "artifact_sha256": identity.artifact_sha256})
+        outcome["angle_physical"] = {
+            "status": "FAILED_PHYSICAL" if sealed["counts"]["known_nonfinite_cases"] else "NO_NONFINITE",
+            "known_nonfinite_cases": sealed["counts"]["known_nonfinite_cases"]}
+        if sealed["counts"]["known_nonfinite_cases"]:
+            outcome["status"] = "FAILED"
+            outcome.setdefault("failure_reasons", []).append("Angle nonfinite physical case failed")
+        if prospective_baseline is not None:
+            prospective = compare_host(prospective_baseline, lane,
+                                       outcome["comparison_coverage"]["frozen_case_ids"])
+            outcome["prospective_reference"] = {
+                key: value for key, value in prospective.items() if key != "results"}
+            if prospective["failed"]:
+                outcome["status"] = "FAILED"
+                outcome.setdefault("failure_reasons", []).append(
+                    "prospective baseline comparison failed")
         if physical["status"] != "PASSED" or sleep["status"] != "PHYSICAL_PASSED":
             outcome["status"] = "FAILED"
-            outcome["reason"] = "physical diagnostic failed"
+            outcome.setdefault("failure_reasons", []).append("physical diagnostic failed")
         if exact_consistency["status"] != "PASSED":
             outcome["status"] = "FAILED"
-            outcome["reason"] = "exact consistency diagnostic failed"
+            outcome.setdefault("failure_reasons", []).append(
+                "exact consistency diagnostic failed")
+        if "failure_reasons" in outcome:
+            outcome["reason"] = "; ".join(outcome["failure_reasons"])
     except (Rejected, OSError, ValueError, KeyError) as error:
         outcome["status"] = "FAILED"
         outcome["reason"] = str(error)
@@ -466,6 +490,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
     parser.add_argument("--reference-dir", type=Path, action="append", default=[])
+    parser.add_argument("--prospective-baseline", type=Path)
     args = parser.parse_args()
     output = Path(args.output).resolve()
     if output.exists():
@@ -487,7 +512,8 @@ def main():
             print(json.dumps(summary, sort_keys=True))
             return 1
         reference_dirs = args.reference_dir or [Path("/tmp/dyn4k-configured-control/baseline-trace")]
-        results = [execute(host, output, commit, source_sha256, reference_dirs) for host in args.hosts]
+        results = [execute(host, output, commit, source_sha256, reference_dirs,
+                           args.prospective_baseline) for host in args.hosts]
         for host in HOST_TASKS:
             if host not in args.hosts:
                 results.append(absent_lane(output, host, commit, source_sha256, "NOT_RUN",
