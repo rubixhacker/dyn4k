@@ -50,6 +50,7 @@ jobs:
           import platform
           import re
           import shutil
+          import signal
           import subprocess
           import sys
 
@@ -68,29 +69,72 @@ jobs:
           def execute(label, argv, timeout=300):
               output = evidence / label
               output.parent.mkdir(parents=True, exist_ok=True)
-              record = {"argv": [str(part) for part in argv], "timeout_seconds": timeout}
+              stdout_path = output.with_suffix(".stdout.bin")
+              stderr_path = output.with_suffix(".stderr.bin")
+              record = {"argv": [str(part) for part in argv], "timeout_seconds": timeout,
+                        "stdout": str(stdout_path.relative_to(evidence)),
+                        "stderr": str(stderr_path.relative_to(evidence))}
               try:
-                  result = subprocess.run(record["argv"], cwd=root, capture_output=True,
-                                          timeout=timeout, check=False)
-                  stdout, stderr = result.stdout, result.stderr
-                  record["exit_code"] = result.returncode
-              except subprocess.TimeoutExpired as error:
-                  stdout, stderr = error.stdout or b"", error.stderr or b""
-                  record.update(exit_code=None, error="timeout")
+                  with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+                      options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                                 if os.name == "nt" else {"start_new_session": True})
+                      process = subprocess.Popen(record["argv"], cwd=root,
+                                                 stdout=stdout, stderr=stderr, **options)
+                      record["pid"] = process.pid
+                      try:
+                          record["exit_code"] = process.wait(timeout=timeout)
+                          record["termination"] = "natural"
+                      except subprocess.TimeoutExpired:
+                          record["error"] = "timeout"
+                          try:
+                              if os.name == "nt":
+                                  kill_stdout = output.with_suffix(".termination.stdout.bin")
+                                  kill_stderr = output.with_suffix(".termination.stderr.bin")
+                                  record["tree_kill_stdout"] = str(kill_stdout.relative_to(evidence))
+                                  record["tree_kill_stderr"] = str(kill_stderr.relative_to(evidence))
+                                  with kill_stdout.open("wb") as out, kill_stderr.open("wb") as err:
+                                      killer = subprocess.Popen(
+                                          ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                          stdout=out, stderr=err)
+                                      try:
+                                          record["tree_kill_exit_code"] = killer.wait(timeout=20)
+                                      except subprocess.TimeoutExpired:
+                                          killer.kill()
+                                          killer.wait(timeout=5)
+                                          record["tree_kill_error"] = "taskkill deadline"
+                              else:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                                  record["process_group_signal"] = "SIGKILL"
+                          except (OSError, subprocess.TimeoutExpired) as error:
+                              record["tree_kill_error"] = str(error)
+                          try:
+                              record["exit_code"] = process.wait(timeout=10)
+                          except subprocess.TimeoutExpired:
+                              process.kill()
+                              try:
+                                  record["exit_code"] = process.wait(timeout=5)
+                              except subprocess.TimeoutExpired:
+                                  record["exit_code"] = None
+                              record["tree_kill_error"] = "wrapper required direct kill"
+                          record["termination"] = (
+                              "deadline_tree_signaled" if not record.get("tree_kill_error")
+                              and (record.get("process_group_signal") == "SIGKILL" or
+                                   record.get("tree_kill_exit_code") == 0)
+                              else "deadline_tree_unverified")
               except OSError as error:
-                  stdout, stderr = b"", str(error).encode()
-                  record.update(exit_code=None, error="launch failed")
-              output.with_suffix(".stdout.bin").write_bytes(stdout)
-              output.with_suffix(".stderr.bin").write_bytes(stderr)
+                  with stderr_path.open("ab") as stderr:
+                      stderr.write((str(error) + "\n").encode())
+                  record.update(exit_code=None, error="launch or termination failed",
+                                termination="unverified")
               output.with_suffix(".json").write_text(json.dumps(record, indent=2) + "\n")
               route["commands"][label] = record
-              return record["exit_code"] == 0, stdout, stderr
+              return record.get("exit_code") == 0 and "error" not in record, stdout_path, stderr_path
 
           def require(label, argv, timeout=300):
               passed, stdout, stderr = execute(label, argv, timeout)
               if not passed:
                   raise RuntimeError(label + " failed; see retained command output")
-              return stdout + stderr
+              return stdout.read_bytes() + stderr.read_bytes() if label.startswith("setup/") else b""
 
           try:
               actual_sha = require("setup/checkout", ["git", "rev-parse", "HEAD"]).decode().strip()

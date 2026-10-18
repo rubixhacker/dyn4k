@@ -15,6 +15,12 @@ executable and artifact identities. `captures/` retains each API's raw process
 archive, stdout, stderr, exit status, and capture receipt. The staged
 repository is uploaded with the route evidence.
 
+Each command writes stdout and stderr directly to files. On a deadline, the
+runner terminates its POSIX process group or uses Windows `taskkill /T /F` for
+the command tree. This includes Gradle started by the staging helper. The
+command receipt records the deadline and termination result. Treat
+`deadline_tree_unverified` as a failed cleanup observation.
+
 The capture adapter gets its source SHA, executable runtime and harness, and
 both artifact identities from the exact consumer inventory. It does not use a
 Java baseline on these Native hosts. A missing executable or publication fails
