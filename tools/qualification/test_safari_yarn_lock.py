@@ -61,11 +61,24 @@ def commit_crlf_source_fixture(repository):
 
 def git_bash_from_git(git_command):
     git_executable = Path(git_command).absolute()
-    if git_executable.parent.name.lower() not in ("bin", "cmd"):
+    directory = git_executable.parent
+    if git_executable.name.lower() != "git.exe":
         raise ValueError("Git Bash fixture requires Git for Windows")
-    candidate = git_executable.parent.parent / "bin/bash.exe"
+    if directory.name.lower() == "bin" and directory.parent.name.lower() in (
+            "mingw64", "mingw32"):
+        installation = directory.parent.parent
+    elif directory.name.lower() == "cmd" or (
+            directory.name.lower() == "bin"
+            and directory.parent.name.lower() != "usr"):
+        installation = directory.parent
+    else:
+        raise ValueError("Git Bash fixture requires Git for Windows")
+    candidate = installation / "bin/bash.exe"
     if not git_executable.is_file() or not candidate.is_file():
         raise FileNotFoundError("Git Bash fixture executable is missing")
+    if (not git_executable.resolve().is_relative_to(installation.resolve())
+            or not candidate.resolve().is_relative_to(installation.resolve())):
+        raise ValueError("Git Bash fixture executable leaves Git installation")
     return candidate
 
 
@@ -2629,6 +2642,43 @@ class SafariYarnLockTests(unittest.TestCase):
         git_bash.unlink()
         with self.assertRaisesRegex(FileNotFoundError, "executable is missing"):
             git_bash_from_git(git_command)
+
+    def test_git_bash_from_mingw_git_uses_same_installation(self):
+        installation = self.root / "Git"
+        bash = installation / "bin/bash.exe"
+        bash.parent.mkdir(parents=True)
+        bash.write_bytes(b"Git Bash fixture")
+        other = self.root / "Other/bin"
+        other.mkdir(parents=True)
+        (other / "bash.exe").write_bytes(b"unrelated Bash")
+
+        for architecture in ("mingw64", "mingw32"):
+            with self.subTest(architecture=architecture):
+                git = installation / architecture / "bin/git.exe"
+                git.parent.mkdir(parents=True)
+                git.write_bytes(b"Git for Windows fixture")
+                with mock.patch.dict(os.environ, {"PATH": str(other)}):
+                    self.assertEqual(bash, git_bash_from_git(git))
+
+        real_resolve = Path.resolve
+
+        def escaped_bash(path, *args, **kwargs):
+            if path == bash:
+                return other / "bash.exe"
+            return real_resolve(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "resolve", escaped_bash):
+            with self.assertRaisesRegex(ValueError, "leaves Git installation"):
+                git_bash_from_git(installation / "mingw64/bin/git.exe")
+
+        bash.unlink()
+        with self.assertRaisesRegex(FileNotFoundError, "executable is missing"):
+            git_bash_from_git(installation / "mingw64/bin/git.exe")
+        unexpected_git = installation / "usr/bin/git.exe"
+        unexpected_git.parent.mkdir(parents=True)
+        unexpected_git.write_bytes(b"unexpected layout")
+        with self.assertRaisesRegex(ValueError, "Git for Windows"):
+            git_bash_from_git(unexpected_git)
 
     def test_wrapper_failure_context_bounds_diagnostic_and_redacts_fixture_text(self):
         context = self.root / "diagnostic-context"
