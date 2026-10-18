@@ -164,12 +164,13 @@ def runtime(host, log_path, execution_log=None):
     return result
 
 
-def extract_xml(host, output, method=None):
-    directory = PORTABLE / "build/test-results" / HOST_TASKS[host]
-    matching = sorted(directory.glob("TEST-*PortableMatrixTest*.xml"))
-    if len(matching) != 1:
-        raise Rejected(f"expected one matrix XML for {host}, found {len(matching)}")
-    source = matching[0]
+def extract_xml(host, output, method=None, source=None):
+    if source is None:
+        directory = PORTABLE / "build/test-results" / HOST_TASKS[host]
+        matching = sorted(directory.glob("TEST-*PortableMatrixTest*.xml"))
+        if len(matching) != 1:
+            raise Rejected(f"expected one matrix XML for {host}, found {len(matching)}")
+        source = matching[0]
     with source.open("rb") as stream:
         stream.readline()
         suite = stream.readline().decode()
