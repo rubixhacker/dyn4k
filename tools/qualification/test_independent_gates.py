@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import unittest
@@ -559,6 +560,60 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate,
                     {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
+
+    def test_prospective_export_uses_approved_bytes_with_autocrlf_true(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        receipt = {"prospective_catalog_sha256": independent_gates.PROSPECTIVE_POLICY_SHA256,
+                   "prospective_cases": [
+                       {"id": case, "reference": "missing.jsonl", "candidate": "missing.jsonl",
+                        "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
+                       for case in independent_gates.approved_prospective_cases(str(ROOT))]}
+        exported = []
+        original_extractall = tarfile.TarFile.extractall
+
+        def observe(package, path, *args, **kwargs):
+            original_extractall(package, path, *args, **kwargs)
+            checker = Path(path) / "tools/numerical/portable/prospective_compare.py"
+            exported.append(hashlib.sha256(checker.read_bytes()).hexdigest())
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
+                "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                "GIT_CONFIG_VALUE_0": "true"}), mock.patch.object(
+                    tarfile.TarFile, "extractall", observe):
+            with self.assertRaisesRegex(ValueError, "raw archive file is missing"):
+                independent_gates.verify_prospective_case_subgates(
+                    Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
+                    independent_gates.verified_numerical_source_sha256(ROOT, candidate))
+        self.assertEqual([independent_gates.APPROVED_PROSPECTIVE_CHECKERS[
+            "prospective_compare.py"]], exported)
+
+    def test_prospective_export_rejects_altered_approved_bytes(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        receipt = {"prospective_catalog_sha256": independent_gates.PROSPECTIVE_POLICY_SHA256,
+                   "prospective_cases": [
+                       {"id": case, "reference": "missing.jsonl", "candidate": "missing.jsonl",
+                        "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
+                       for case in independent_gates.approved_prospective_cases(str(ROOT))]}
+        original_extractall = tarfile.TarFile.extractall
+
+        for relative in ("tools/numerical/portable/prospective_compare.py",
+                         "tools/numerical/compare.py", "tools/numerical/fixtures.json"):
+            with self.subTest(exported=relative):
+                def alter(package, path, *args, **kwargs):
+                    original_extractall(package, path, *args, **kwargs)
+                    checker = Path(path) / relative
+                    checker.write_bytes(checker.read_bytes() + b"\n")
+
+                with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+                        tarfile.TarFile, "extractall", alter):
+                    with self.assertRaisesRegex(ValueError,
+                                                f"prospective exported checker differs: {relative}"):
+                        independent_gates.verify_prospective_case_subgates(
+                            Path(temporary), receipt, ROOT, candidate,
+                            {"dyn4k-core": "a" * 64},
+                            independent_gates.verified_numerical_source_sha256(ROOT, candidate))
 
     def test_prospective_checker_pins_historical_and_assembled_source(self):
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],
@@ -1732,6 +1787,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                     gate = rejected["gates"]["unchanged-java-corpus"]
                     self.assertEqual("FAILED", gate["status"])
                     self.assertIn("reviewed full_ci/strict raw verifier rejected archive", gate["reason"])
+
+    def test_reviewed_full_ci_replay_uses_canonical_export_with_autocrlf_true(self):
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1",
+                                       "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                       "GIT_CONFIG_VALUE_0": "true"}):
+            self.test_reviewed_full_ci_archive_replays_unchanged_and_strict_java_gates()
 
     @unittest.skipUnless(
         Path("/tmp/dyn4k-merge-complete-corpus-rotation-migration-journeys-0681a8cd/summary.json").is_file()

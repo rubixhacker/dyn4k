@@ -332,6 +332,8 @@ def _prospective_checker_binding(repository, candidate_sha):
             or hashlib.sha256((Path(__file__).resolve().parents[2] / catalog).read_bytes()).hexdigest()
             != PROSPECTIVE_POLICY_SHA256):
         raise ValueError(f"prospective policy/checker blob differs: {catalog}")
+    return {f"{source_dir}/{name}": value for name, value in approved.items()} | {
+        catalog: PROSPECTIVE_POLICY_SHA256}
 
 
 def _missing_numerical_subgates(repository):
@@ -949,15 +951,26 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
         raise ValueError("318 prospective rule/arithmetic raw case identities are missing or duplicated")
     if receipt.get("prospective_catalog_sha256") != PROSPECTIVE_POLICY_SHA256:
         raise ValueError("adopted prospective catalog identity differs")
-    _prospective_checker_binding(repository, candidate_sha)
+    approved_export = _prospective_checker_binding(repository, candidate_sha)
+    for relative in ("tools/numerical/compare.py", "tools/numerical/fixtures.json"):
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+        approved_export[relative] = hashlib.sha256(committed).hexdigest()
     portable = "tools/numerical/portable"
     archive = subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "archive", candidate_sha,
+        ["git", "-c", "core.autocrlf=false", "--no-replace-objects",
+         "-C", str(repository), "archive", candidate_sha,
          portable, "tools/numerical/compare.py", "tools/numerical/fixtures.json"],
         stderr=subprocess.PIPE)
     with tempfile.TemporaryDirectory(prefix="dyn4k-prospective-checker-") as temporary:
         with tarfile.open(fileobj=io.BytesIO(archive)) as package:
             package.extractall(temporary, filter="data")
+        for relative, expected_sha in approved_export.items():
+            exported = Path(temporary) / relative
+            if (not exported.is_file() or exported.is_symlink()
+                    or hashlib.sha256(exported.read_bytes()).hexdigest() != expected_sha):
+                raise ValueError(f"prospective exported checker differs: {relative}")
         package_path = str(Path(temporary) / portable)
         names = ("prospective_compare", "cases", "orthogonality", "reference_diagnostic",
                  "receipt", "compare")
@@ -1648,7 +1661,8 @@ def _java_full_ci(root, receipt, gate, candidate_sha, repository,
         raise ValueError("Java corpus resolved publications differ from independent staging audit")
     with tempfile.TemporaryDirectory(prefix="dyn4k-reviewed-full-ci-") as temporary:
         source_archive = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "archive", REVIEWED_FULL_CI_REVISION,
+            ["git", "-c", "core.autocrlf=false", "--no-replace-objects",
+             "-C", str(repository), "archive", REVIEWED_FULL_CI_REVISION,
              "tools/compatibility", "tools/baseline", "dyn4k-core/src/jvmConsumer/java"],
             stderr=subprocess.PIPE)
         with tarfile.open(fileobj=io.BytesIO(source_archive)) as package:
