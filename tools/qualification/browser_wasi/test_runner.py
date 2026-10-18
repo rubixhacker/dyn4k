@@ -21,8 +21,8 @@ class BrowserReporterStageTest(unittest.TestCase):
 
         accepted = (
             "0@0", "0@-9223372036854775808",
-            "-0.0@-9223372036854775808", "0e999@0",
-            "-0e-999@-9223372036854775808",
+            "0.0@0", "-0@-9223372036854775808",
+            "-0.0@-9223372036854775808",
             "4.9E-324@1", "-4.9E-324@-9223372036854775807",
             "Infinity@9218868437227405312", "-Infinity@-4503599627370496",
             "NaN@9221120237041090561", "NaN@-2251799813685247",
@@ -35,7 +35,13 @@ class BrowserReporterStageTest(unittest.TestCase):
             ("-1e-999@-9223372036854775808", "underflows"),
             ("1e999@9218868437227405312", "overflows"),
             ("-1e999@-4503599627370496", "overflows"),
-            ("1@0", "raw bits"), ("-0.0@0", "raw bits"),
+            ("0e999@0", "zero spelling"),
+            ("-0e999@-9223372036854775808", "zero spelling"),
+            ("0.000@0", "zero spelling"),
+            ("-0.000@-9223372036854775808", "zero spelling"),
+            ("1@0", "raw bits"), ("-0@0", "raw bits"),
+            ("-0.0@0", "raw bits"),
+            ("0.0@-9223372036854775808", "raw bits"),
             ("inf@9218868437227405312", "numeric syntax"),
             ("NaN@9218868437227405312", "NaN bits"),
         )
@@ -537,6 +543,36 @@ class SourceCasesTest(unittest.TestCase):
             module["result_json_sha256"] = sha256(result)
         write_json(copied / "lane.json", sealed_lane(lane))
 
+    @classmethod
+    def copy_resealed_diagnostic_depth(cls, source: Path, case: Path, value: str) -> Path:
+        from runner import sha256
+        import xml.etree.ElementTree as ET
+
+        lane, copied = cls.copy_lane(source, str(case))
+        module = lane["modules"]["dyn4k-core"]
+        report_item = next(item for item in module["raw_xml"]
+                           if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
+        report = Path(report_item["path"])
+        timestamp = report.stat()
+        suite = ET.parse(report).getroot()
+        output = suite.find("system-out")
+        rows = output.text.splitlines()
+        if len(rows) != 72:
+            raise ValueError("retained browser diagnostic row count differs")
+        fields = rows[0].split("\t")
+        depth = next(i for i, field in enumerate(fields)
+                     if field.startswith("penetration.depth="))
+        fields[depth] = f"penetration.depth={value}"
+        rows[0] = "\t".join(fields)
+        output.text = "\n".join(rows) + "\n"
+        ET.ElementTree(suite).write(report, encoding="unicode")
+        os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
+        report_item["sha256"] = sha256(report)
+        module["diagnostic_sha256"] = hashlib.sha256(
+            "\n".join(rows).encode()).hexdigest()
+        cls.save_copied_lane(lane, copied)
+        return copied / "lane.json"
+
     def test_public_browser_receipt_rejects_resealed_diagnostic_and_producer_mutations(self):
         from runner import sha256
         import xml.etree.ElementTree as ET
@@ -652,9 +688,6 @@ class SourceCasesTest(unittest.TestCase):
             self.assertIn("raw bits", rejected.stderr)
 
     def test_public_finite_decimal_range_rejects_resealed_real_wasm(self):
-        from runner import sha256
-        import xml.etree.ElementTree as ET
-
         receipt = os.environ.get("DYN4K_BROWSER_WASI_RANGE_WASM_RECEIPT")
         replay = os.environ.get("DYN4K_BROWSER_WASI_RANGE_WASM_REPLAY_ROOT")
         artifacts = os.environ.get("DYN4K_BROWSER_WASI_RANGE_ARTIFACTS")
@@ -675,30 +708,9 @@ class SourceCasesTest(unittest.TestCase):
             ):
                 case = evidence / name
                 case.mkdir()
-                lane, copied = self.copy_lane(source, str(case))
-                module = lane["modules"]["dyn4k-core"]
-                report_item = next(item for item in module["raw_xml"]
-                                   if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
-                report = Path(report_item["path"])
-                timestamp = report.stat()
-                suite = ET.parse(report).getroot()
-                output = suite.find("system-out")
-                rows = output.text.splitlines()
-                self.assertEqual(72, len(rows))
-                fields = rows[0].split("\t")
-                depth = next(i for i, field in enumerate(fields)
-                             if field.startswith("penetration.depth="))
-                fields[depth] = f"penetration.depth={value}"
-                rows[0] = "\t".join(fields)
-                output.text = "\n".join(rows) + "\n"
-                ET.ElementTree(suite).write(report, encoding="unicode")
-                os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
-                report_item["sha256"] = sha256(report)
-                module["diagnostic_sha256"] = hashlib.sha256(
-                    "\n".join(rows).encode()).hexdigest()
-                self.save_copied_lane(lane, copied)
+                copied_receipt = self.copy_resealed_diagnostic_depth(source, case, value)
                 audited = self.public_historical_audit(
-                    copied / "lane.json", case / "auditor")
+                    copied_receipt, case / "auditor")
                 (case / "audit-result.json").write_text(json.dumps({
                     "returncode": audited.returncode,
                     "stdout": audited.stdout,
@@ -707,6 +719,39 @@ class SourceCasesTest(unittest.TestCase):
                 with self.subTest(value=value):
                     self.assertEqual(1, audited.returncode, audited.stderr)
                     self.assertIn("finite decimal", audited.stderr)
+
+    def test_public_zero_spelling_rejects_resealed_real_wasm(self):
+        receipt = os.environ.get("DYN4K_BROWSER_WASI_ZERO_WASM_RECEIPT")
+        replay = os.environ.get("DYN4K_BROWSER_WASI_ZERO_WASM_REPLAY_ROOT")
+        artifacts = os.environ.get("DYN4K_BROWSER_WASI_ZERO_ARTIFACTS")
+        if any(value is None for value in (receipt, replay, artifacts)):
+            self.skipTest("set real Wasm receipt, exact replay root, and zero artifacts")
+        source = Path(receipt).parent
+        evidence = Path(artifacts)
+        evidence.mkdir(parents=True, exist_ok=False)
+        with mock.patch.dict(os.environ, {"DYN4K_BROWSER_WASI_REPLAY_ROOT": replay}):
+            baseline = self.public_historical_audit(
+                Path(receipt), evidence / "baseline-auditor")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+            for name, value in (
+                ("positive-exponent", "0e999@0"),
+                ("negative-exponent", "-0e999@-9223372036854775808"),
+                ("positive-precision", "0.000@0"),
+                ("negative-precision", "-0.000@-9223372036854775808"),
+            ):
+                case = evidence / name
+                case.mkdir()
+                copied_receipt = self.copy_resealed_diagnostic_depth(source, case, value)
+                audited = self.public_historical_audit(
+                    copied_receipt, case / "auditor")
+                (case / "audit-result.json").write_text(json.dumps({
+                    "returncode": audited.returncode,
+                    "stdout": audited.stdout,
+                    "stderr": audited.stderr,
+                }, indent=2) + "\n")
+                with self.subTest(value=value):
+                    self.assertEqual(1, audited.returncode, audited.stderr)
+                    self.assertIn("zero spelling", audited.stderr)
 
     def test_public_wasmtime_receipt_rejects_events_moved_to_stderr(self):
         from runner import sha256

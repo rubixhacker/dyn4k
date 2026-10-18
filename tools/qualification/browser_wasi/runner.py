@@ -210,9 +210,12 @@ def verify_collision_value(key: str, value: str) -> None:
         parsed = float(decimal)
         if math.isinf(parsed) and decimal not in ("Infinity", "-Infinity"):
             raise ValueError(f"collision diagnostic {key} finite decimal overflows Double")
-        if parsed == 0 and any(digit in "123456789" for digit in
-                               re.split(r"[eE]", decimal, maxsplit=1)[0]):
-            raise ValueError(f"collision diagnostic {key} finite decimal underflows Double")
+        if parsed == 0:
+            if any(digit in "123456789" for digit in
+                   re.split(r"[eE]", decimal, maxsplit=1)[0]):
+                raise ValueError(f"collision diagnostic {key} finite decimal underflows Double")
+            if decimal not in ("0", "0.0", "-0", "-0.0"):
+                raise ValueError(f"collision diagnostic {key} has non-source zero spelling")
         raw = struct.unpack(">q", struct.pack(">d", parsed))[0]
         if decimal == "NaN":
             if bits & 0x7ff0000000000000 != 0x7ff0000000000000 or bits & 0xfffffffffffff == 0:
