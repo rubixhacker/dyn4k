@@ -12,6 +12,7 @@ import sys
 import urllib.parse
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
+from datetime import date
 from itertools import chain
 from pathlib import Path
 
@@ -398,10 +399,21 @@ def _executed_node_bundle(host, execution_log, executable):
 def _java_version_line(probe):
     if probe.returncode:
         raise Rejected("Java version probe failed")
+    build = r'[0-9]+(?:\.[0-9]+)*(?:_[0-9]+)?(?:[+-][0-9A-Za-z._-]+)?'
+    vendor = r'(?: \([A-Za-z][A-Za-z0-9._-]*\)| [A-Za-z][A-Za-z0-9._-]*-[0-9][A-Za-z0-9.+_-]*)?'
+    runtime_line = rf'(?:OpenJDK|Java\(TM\) SE) Runtime Environment{vendor}\s*\(build {build}\)'
+    vm_line = (rf'(?:OpenJDK|Java HotSpot\(TM\)) (?:64-Bit|32-Bit) Server VM{vendor}'
+               rf'\s*\(build {build}(?:, [A-Za-z][A-Za-z ,]*)?\)')
     versions = []
     for line in (probe.stdout + probe.stderr).splitlines():
-        if re.fullmatch(r'(?:openjdk|java) version "\d+(?:\.\d+){2,3}(?:_\d+)?"'
-                        r'(?: \d{4}-\d{2}-\d{2}(?: LTS)?)?', line):
+        matched = re.fullmatch(r'(?:openjdk|java) version "\d+(?:\.\d+){2,3}(?:_\d+)?"'
+                               r'(?: (?P<date>\d{4}-\d{2}-\d{2})(?: LTS)?)?', line)
+        if matched:
+            if matched.group("date"):
+                try:
+                    date.fromisoformat(matched.group("date"))
+                except ValueError as error:
+                    raise Rejected("malformed Java version date") from error
             versions.append(line)
         elif line.startswith(("openjdk version", "java version")):
             raise Rejected("malformed Java version line")
@@ -411,8 +423,7 @@ def _java_version_line(probe):
                     re.fullmatch(r'\[\d+(?:\.\d+)?s\]\[info\]\[class,load\] .+', line):
                 continue
             raise Rejected("unexpected Java version preamble")
-        elif not line.startswith(("OpenJDK Runtime Environment", "OpenJDK 64-Bit Server VM",
-                                  "Java(TM) SE Runtime Environment", "Java HotSpot(TM)")):
+        elif not re.fullmatch(runtime_line, line) and not re.fullmatch(vm_line, line):
             raise Rejected("unexpected Java version output")
     if not versions:
         raise Rejected("Java version line is absent")

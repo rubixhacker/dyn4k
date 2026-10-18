@@ -396,6 +396,17 @@ class ExtractionTest(unittest.TestCase):
                 run._java_version_line(subprocess.CompletedProcess(
                     ["java", "-version"], exit_code, stdout="", stderr=output))
 
+    def test_java_version_probe_rejects_reviewed_malformed_output(self):
+        malformed = (
+            'openjdk version "21.0.12.1" 2026-99-99 LTS\n',
+            'openjdk version "21.0.12.1"\nOpenJDK Runtime Environment garbage\n',
+            'openjdk version "21.0.12.1"\nOpenJDK 64-Bit Server VM garbage\n',
+        )
+        for output in malformed:
+            with self.subTest(output=output), self.assertRaises(run.Rejected):
+                run._java_version_line(subprocess.CompletedProcess(
+                    ["java", "-version"], 0, stdout="", stderr=output))
+
     def test_real_java_8_version_banner_keeps_worker_identity(self):
         executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
         if not executable.is_file():
