@@ -384,7 +384,7 @@ def _verify_full_hosted_directory(bundle, candidate_sha, repository):
     if {name for name in recorded if name.startswith("sources/")} != expected_source_paths:
         raise ValueError("full hosted archived source inventory differs")
     expected_cases = {}
-    for module, count in (("dyn4k-core", 2460), ("dyn4k", 58)):
+    for module, count in (("dyn4k-core", 2465), ("dyn4k", 58)):
         ids = {(case["classname"], case["method"]) for case in manifest["cases"]
                if case["module"] == module and case["source_set"] == "commonTest"}
         if len(ids) != count:

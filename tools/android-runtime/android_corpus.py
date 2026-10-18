@@ -44,7 +44,7 @@ def load_suite(root):
     suite = json.loads(path.read_text())
     full_suite_manifest.validate_manifest(suite, root)
     portable = [case for case in suite["cases"] if case["scope"] == "portable"]
-    if len(portable) != 2518 or sum(case["module"] == "dyn4k-core" for case in portable) != 2460:
+    if len(portable) != 2523 or sum(case["module"] == "dyn4k-core" for case in portable) != 2465:
         raise ValueError("full Android common inventory has wrong method counts")
     return suite, {"path": str(path), "sha256": sha256(path),
                    "original_map_sha256": suite["bindings"]["original_map_sha256"],

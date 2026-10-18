@@ -167,7 +167,7 @@ class FullHostedTests(unittest.TestCase):
     def test_reviewed_manifest_selects_all_common_core_and_facade_cases(self):
         manifest_path = Path(__file__).resolve().parents[2] / full_hosted.MANIFEST
         manifest = json.loads(manifest_path.read_text())
-        self.assertEqual(2460, len(full_hosted.expected_cases(manifest, "dyn4k-core")))
+        self.assertEqual(2465, len(full_hosted.expected_cases(manifest, "dyn4k-core")))
         self.assertEqual(58, len(full_hosted.expected_cases(manifest, "dyn4k")))
         removed = next(case for case in manifest["cases"]
                        if case["module"] == "dyn4k-core" and case["source_set"] == "commonTest")
@@ -189,7 +189,7 @@ class FullHostedTests(unittest.TestCase):
 
         with mock.patch.object(qualify, "require_clean_checkout"), mock.patch.object(
                 full_corpus, "candidate_input_problems", side_effect=corpus_audit):
-            self.assertEqual(2460, len(full_hosted.expected_cases(
+            self.assertEqual(2465, len(full_hosted.expected_cases(
                 full_hosted.load_corpus(repository, sha), "dyn4k-core")))
 
     def test_run_binds_candidate_to_real_staged_publication_audit(self):
@@ -313,8 +313,9 @@ class FullHostedTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(actual_repository / relative, destination)
         shutil.copy2(actual_repository / "gradlew", repository / "gradlew")
+        (repository / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
         subprocess.run(["git", "init", "-q", str(repository)], check=True)
-        subprocess.run(["git", "-C", str(repository), "add", "LICENSE.md", "gradlew",
+        subprocess.run(["git", "-C", str(repository), "add", ".gitattributes", "LICENSE.md", "gradlew",
                         "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
                         "consumers/qualification/portable/build.gradle.kts"], check=True)
         subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",

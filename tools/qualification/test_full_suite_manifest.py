@@ -19,11 +19,11 @@ class FullSuiteManifestTest(unittest.TestCase):
     def test_every_lane_selects_complete_portable_suite_and_jvm_only_cases(self):
         full_suite_manifest.validate_manifest(self.manifest, ROOT)
         self.assertEqual(112, len(self.manifest["lanes"]))
-        self.assertEqual(2521, len(self.manifest["cases"]))
+        self.assertEqual(2526, len(self.manifest["cases"]))
         linux = full_suite_manifest.select_lane(self.manifest, "linuxX64:Linux x64:minimum:debug-g", ROOT)
         jvm = full_suite_manifest.select_lane(self.manifest, "jvm:Java:minimum:no-optimize", ROOT)
-        self.assertEqual(2518, len(linux["case_ids"]))
-        self.assertEqual(2521, len(jvm["case_ids"]))
+        self.assertEqual(2523, len(linux["case_ids"]))
+        self.assertEqual(2526, len(jvm["case_ids"]))
         self.assertEqual(set(linux["case_ids"]), set(jvm["case_ids"]) -
                          {case["id"] for case in self.manifest["cases"] if case["scope"] == "jvm-only"})
         self.assertEqual(len(linux["case_ids"]), len(set(linux["case_ids"])))
@@ -63,6 +63,20 @@ class FullSuiteManifestTest(unittest.TestCase):
                             case["scope"] == "portable" and
                             case["kind"] == "supplemental" and
                             not case["originals"] for case in diagnostic))
+
+    def test_five_rotation_observation_isolation_cases_are_portable_supplements(self):
+        cases = [case for case in self.manifest["cases"] if
+                 case["classname"] == "org.dyn4j.geometry.RotationObservationIsolationTest"]
+        self.assertEqual({"failedWorldObservationCannotBeClearedByAnotherStep",
+                          "foreignWorldStepFailsCaptureAfterBothWorldsComplete",
+                          "nestedObservationRestoresOuterScope",
+                          "observedRotationMatchesOrdinaryRotation",
+                          "stepCallbackCannotConsumeOperationRecordsBeforeStepEnds"},
+                         {case["method"] for case in cases})
+        self.assertEqual(5, len(cases))
+        self.assertTrue(all(case["scope"] == "portable" and
+                            case["kind"] == "supplemental" and
+                            not case["originals"] for case in cases))
 
     def test_missing_area_case_extra_case_and_duplicate_case_fail(self):
         for mutation in ("area", "missing", "extra", "duplicate"):

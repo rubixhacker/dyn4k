@@ -19,6 +19,12 @@ class SourceCasesTest(unittest.TestCase):
     REVIEWED_ASSEMBLY = "0533142a1358b2eebb3c3f36ae3dc1a8b01d9667"
 
     @staticmethod
+    def current_revision() -> str:
+        source_root = Path(__file__).resolve().parents[3]
+        return subprocess.check_output(
+            ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+
+    @staticmethod
     def clone_candidate(directory: str, name: str, revision: str) -> Path:
         source_root = Path(__file__).resolve().parents[3]
         checkout = Path(directory) / name
@@ -38,38 +44,34 @@ class SourceCasesTest(unittest.TestCase):
         return subprocess.check_output(
             ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
 
-    def test_public_candidate_accepts_exact_assembled_source(self):
+    def test_public_candidate_rejects_pre_reseal_assembled_source(self):
         with tempfile.TemporaryDirectory() as directory:
             checkout = self.clone_candidate(directory, "assembled", self.REVIEWED_ASSEMBLY)
-            accepted = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
-            self.assertEqual(0, accepted.returncode, accepted.stderr)
-            result = json.loads(accepted.stdout)
-            self.assertEqual("VERIFIED", result["status"])
-            self.assertEqual(self.REVIEWED_ASSEMBLY, result["candidate_sha"])
-            self.assertEqual(2521, result["suite_methods"])
-            self.assertEqual("e18d4ecb2898fbd3e1e0d8133ef725860e234c3d510e365641542f5b3572eefa",
-                             result["manifest_sha256"])
+            historical = json.loads((checkout / "tools/qualification/full-common-corpus.json").read_text())
+            self.assertEqual(2521, historical["counts"]["total_methods"])
+            rejected = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("corpus count differs", rejected.stderr)
             dishonest = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
             self.assertEqual(1, dishonest.returncode)
             self.assertIn("source SHA differs", dishonest.stderr)
 
     def test_public_candidate_accepts_current_resealed_source(self):
-        source_root = Path(__file__).resolve().parents[3]
-        current = subprocess.check_output(
-            ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+        current = self.current_revision()
         with tempfile.TemporaryDirectory() as directory:
             checkout = self.clone_candidate(directory, "resealed", current)
             accepted = self.public_candidate(checkout, current)
             self.assertEqual(0, accepted.returncode, accepted.stderr)
             result = json.loads(accepted.stdout)
             self.assertEqual("VERIFIED", result["status"])
-            self.assertEqual(2521, result["suite_methods"])
-            self.assertEqual("3275e1140f6ae535487fa2896dfa2ab8a2e6e3d64bac0c02a28b8ea62d756cf7",
+            self.assertEqual(2526, result["suite_methods"])
+            self.assertEqual("edac14e1a000821b30cdd4bb3f07c82d78e33f305399a09849078dac210eb2ed",
                              result["manifest_sha256"])
 
     def test_public_candidate_rejects_committed_generator_mutation(self):
+        current = self.current_revision()
         with tempfile.TemporaryDirectory() as directory:
-            checkout = self.clone_candidate(directory, "generator", self.REVIEWED_ASSEMBLY)
+            checkout = self.clone_candidate(directory, "generator", current)
             relative = "tools/qualification/full_corpus.py"
             generator = checkout / relative
             generator.write_bytes(generator.read_bytes() + b"\n# adverse generator mutation\n")
@@ -79,13 +81,14 @@ class SourceCasesTest(unittest.TestCase):
             self.assertIn("reviewed corpus generator differs", rejected.stderr)
 
     def test_public_candidate_rejects_committed_corpus_map_and_test_source_mutations(self):
+        current = self.current_revision()
         with tempfile.TemporaryDirectory() as directory:
             for name, relative in (
                 ("manifest", "tools/qualification/full-common-corpus.json"),
                 ("map", "tools/qualification/full-common-original-map.tsv"),
                 ("test-source", "dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/world/core/PhysicsWorldCoreCoverageTest.kt"),
             ):
-                checkout = self.clone_candidate(directory, name, self.REVIEWED_ASSEMBLY)
+                checkout = self.clone_candidate(directory, name, current)
                 changed = checkout / relative
                 self.assertTrue(changed.is_file(), changed)
                 if name == "manifest":
@@ -112,19 +115,20 @@ class SourceCasesTest(unittest.TestCase):
         )
 
     def test_public_candidate_accepts_exact_reviewed_source_and_rejects_mutants(self):
+        current = self.current_revision()
         with tempfile.TemporaryDirectory() as directory:
-            checkout = self.clone_candidate(directory, "reviewed-candidate", self.REVIEWED_ASSEMBLY)
-            exact = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            checkout = self.clone_candidate(directory, "reviewed-candidate", current)
+            exact = self.public_candidate(checkout, current)
             self.assertEqual(0, exact.returncode, exact.stderr)
             verified = json.loads(exact.stdout)
             self.assertEqual("VERIFIED", verified["status"])
-            self.assertEqual(self.REVIEWED_ASSEMBLY, verified["candidate_sha"])
-            self.assertEqual(2521, verified["suite_methods"])
+            self.assertEqual(current, verified["candidate_sha"])
+            self.assertEqual(2526, verified["suite_methods"])
 
             generated = checkout / "consumers/qualification/browser-wasi/build/generated.txt"
             generated.parent.mkdir(parents=True)
             generated.write_text("generated output")
-            with_output = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            with_output = self.public_candidate(checkout, current)
             self.assertEqual(0, with_output.returncode, with_output.stderr)
 
             stale = self.public_candidate(checkout, "0" * 40)
@@ -133,12 +137,12 @@ class SourceCasesTest(unittest.TestCase):
 
             production = next((checkout / "dyn4k-core/src/commonMain/kotlin").rglob("*.kt"))
             production.write_bytes(production.read_bytes() + b"\n// source mutation\n")
-            changed = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            changed = self.public_candidate(checkout, current)
             self.assertEqual(1, changed.returncode)
             self.assertIn("dirty", changed.stderr)
             subprocess.run(["git", "-C", str(checkout), "update-index",
                             "--assume-unchanged", str(production)], check=True)
-            hidden_change = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            hidden_change = self.public_candidate(checkout, current)
             self.assertEqual(1, hidden_change.returncode, hidden_change.stderr)
             self.assertIn("committed source bytes differ", hidden_change.stderr)
             subprocess.run(["git", "-C", str(checkout), "update-index",
@@ -150,7 +154,7 @@ class SourceCasesTest(unittest.TestCase):
             ignored.write_text("package ignored\nclass UntrackedCandidateInput\n")
             (checkout / ".git/info/exclude").write_text(
                 "/dyn4k-core/src/commonMain/kotlin/**/UntrackedCandidateInput.kt\n")
-            untracked = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            untracked = self.public_candidate(checkout, current)
             self.assertEqual(1, untracked.returncode)
             self.assertIn("untracked candidate input", untracked.stderr)
             ignored.unlink()
@@ -165,7 +169,7 @@ class SourceCasesTest(unittest.TestCase):
             old_manifest["counts"]["total_methods"] = current_manifest["counts"]["total_methods"]
             (checkout / "tools/qualification/full-common-corpus.json").write_text(
                 json.dumps(old_manifest, sort_keys=True))
-            old_corpus = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            old_corpus = self.public_candidate(checkout, current)
             self.assertEqual(1, old_corpus.returncode)
             self.assertTrue(
                 "dirty" in old_corpus.stderr or "corpus" in old_corpus.stderr,
@@ -176,11 +180,11 @@ class SourceCasesTest(unittest.TestCase):
 
             with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
                 with self.assertRaisesRegex(ValueError, "candidate commit bytes differ"):
-                    candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
+                    candidate_identity(checkout, current)
                 with mock.patch("runner.full_corpus.committed_bytes",
                                 side_effect=lambda root, sha, path: (root / path).read_bytes()):
                     with self.assertRaisesRegex(ValueError, "corpus differs from source tree"):
-                        candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
+                        candidate_identity(checkout, current)
 
             subprocess.run(["git", "-C", str(checkout), "restore",
                             "tools/qualification/full-common-corpus.json"], check=True)
@@ -190,7 +194,7 @@ class SourceCasesTest(unittest.TestCase):
                 b"io.github.rubixhacker:dyn4k-core:0.1.0-alpha.0"))
             with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
                 with self.assertRaisesRegex(ValueError, "consumer dependency pins differ"):
-                    candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
+                    candidate_identity(checkout, current)
 
     @staticmethod
     def copy_lane(source: Path, directory: str) -> tuple[dict, Path]:
@@ -353,7 +357,7 @@ class SourceCasesTest(unittest.TestCase):
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
         core = common_corpus_cases(root, candidate, "dyn4k-core")
         facade = common_corpus_cases(root, candidate, "dyn4k")
-        self.assertEqual(2460, len(core))
+        self.assertEqual(2465, len(core))
         self.assertEqual(58, len(facade))
         self.assertIn(("org.dyn4j.coverage.world.core.PhysicsWorldCoreCoverageTest",
                        "addBody"), core)
@@ -545,9 +549,9 @@ class SourceCasesTest(unittest.TestCase):
             for name in ("dyn4k-core", "dyn4k", "consumer"):
                 folder = lane_dir / name
                 folder.mkdir()
-                evidence = {"status": "PASSED", "expected": 2460 if name == "dyn4k-core"
+                evidence = {"status": "PASSED", "expected": 2465 if name == "dyn4k-core"
                             else 58 if name == "dyn4k" else 1,
-                            "executed": 2460 if name == "dyn4k-core"
+                            "executed": 2465 if name == "dyn4k-core"
                             else 58 if name == "dyn4k" else 1,
                             "failures": 0, "skipped": 0}
                 for field, filename in (("gradle_console", "gradle-console.log"),

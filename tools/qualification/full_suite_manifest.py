@@ -80,21 +80,22 @@ def read_corpus(repository):
     if corpus.get("kind") != "full-common-corpus" or corpus.get("policy") != "production":
         raise ValueError("production common corpus is required")
     counts = corpus.get("counts", {})
-    expected_counts = {"total_methods": 2521, "mapped_original_methods": 2253,
+    expected_counts = {"total_methods": 2526, "mapped_original_methods": 2253,
                        "mapped_original_identities": 2353,
                        "related_supplemental_methods": 5,
                        "jvm_only_original_identities": 32,
+                       "supplemental_methods": 270,
                        "platform_only_methods": 3, "unresolved_mappings": 0}
     if any(counts.get(key) != value for key, value in expected_counts.items()):
         raise ValueError("frozen common corpus counts differ")
     source_files = corpus.get("source_files", [])
     scanned_files = full_corpus.scan_test_tree(repository)
-    if source_files != scanned_files:
+    if len(source_files) != 202 or source_files != scanned_files:
         raise ValueError("common test source hash differs")
     scanned = full_corpus.scan_sources(repository)
     indexed = {(case["module"], case["classname"], case["method"]): case
                for case in scanned}
-    if len(indexed) != 2521 or len(corpus["cases"]) != 2521:
+    if len(indexed) != 2526 or len(corpus["cases"]) != 2526:
         raise ValueError("common test source inventory differs")
     for case in corpus["cases"]:
         key = (case["module"], case["classname"], case["method"])
@@ -159,7 +160,7 @@ def build_manifest(repository):
                        "evidence_sources": list(GATE_SOURCES[name])}
                 for name in GATE_DESCRIPTIONS},
             "global_gates": list(GLOBAL_GATES),
-            "counts": {"portable_methods": 2518, "jvm_only_facade_methods": 3,
+            "counts": {"portable_methods": 2523, "jvm_only_facade_methods": 3,
                        "mapped_original_identities": 2353,
                        "body_related_supplements": 5,
                        "jvm_only_original_dispositions": 32}}

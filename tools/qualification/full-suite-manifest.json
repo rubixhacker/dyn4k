@@ -10,8 +10,8 @@
     "compatibility"
   ],
   "bindings": {
-    "corpus_sha256": "3275e1140f6ae535487fa2896dfa2ab8a2e6e3d64bac0c02a28b8ea62d756cf7",
-    "source_tree_sha256": "96648f77ddd594bfed09500ae2fd6b44eaa8a35379a8dc876ad5c2e8af07261d",
+    "corpus_sha256": "edac14e1a000821b30cdd4bb3f07c82d78e33f305399a09849078dac210eb2ed",
+    "source_tree_sha256": "48fb46ea9eb95b061da6c4815675eb52bb76447d43eed24f5cb9d4c89477f0b8",
     "original_map_sha256": "d20877be61398e65037b0ec3d61134d9922248f608c7901ffe589fed8dff5496",
     "reviewed_pairs_sha256": "f92af322e9e02fba179737bc9401e5bf50a40c39dd62bf8c847ce1dc0e6b8e60",
     "original_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714"
@@ -39352,6 +39352,81 @@
       ]
     },
     {
+      "id": "dyn4k-core:org.dyn4j.geometry.RotationObservationIsolationTest#failedWorldObservationCannotBeClearedByAnotherStep",
+      "module": "dyn4k-core",
+      "classname": "org.dyn4j.geometry.RotationObservationIsolationTest",
+      "method": "failedWorldObservationCannotBeClearedByAnotherStep",
+      "area": "geometry",
+      "scope": "portable",
+      "kind": "supplemental",
+      "source": {
+        "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/RotationObservationIsolationTest.kt",
+        "sha256": "0b04893c06d13434e10e6c005cb452a0d6c4a42ae1f7e5066ba264e9f912ff53",
+        "line": 62
+      },
+      "originals": []
+    },
+    {
+      "id": "dyn4k-core:org.dyn4j.geometry.RotationObservationIsolationTest#foreignWorldStepFailsCaptureAfterBothWorldsComplete",
+      "module": "dyn4k-core",
+      "classname": "org.dyn4j.geometry.RotationObservationIsolationTest",
+      "method": "foreignWorldStepFailsCaptureAfterBothWorldsComplete",
+      "area": "geometry",
+      "scope": "portable",
+      "kind": "supplemental",
+      "source": {
+        "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/RotationObservationIsolationTest.kt",
+        "sha256": "0b04893c06d13434e10e6c005cb452a0d6c4a42ae1f7e5066ba264e9f912ff53",
+        "line": 45
+      },
+      "originals": []
+    },
+    {
+      "id": "dyn4k-core:org.dyn4j.geometry.RotationObservationIsolationTest#nestedObservationRestoresOuterScope",
+      "module": "dyn4k-core",
+      "classname": "org.dyn4j.geometry.RotationObservationIsolationTest",
+      "method": "nestedObservationRestoresOuterScope",
+      "area": "geometry",
+      "scope": "portable",
+      "kind": "supplemental",
+      "source": {
+        "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/RotationObservationIsolationTest.kt",
+        "sha256": "0b04893c06d13434e10e6c005cb452a0d6c4a42ae1f7e5066ba264e9f912ff53",
+        "line": 31
+      },
+      "originals": []
+    },
+    {
+      "id": "dyn4k-core:org.dyn4j.geometry.RotationObservationIsolationTest#observedRotationMatchesOrdinaryRotation",
+      "module": "dyn4k-core",
+      "classname": "org.dyn4j.geometry.RotationObservationIsolationTest",
+      "method": "observedRotationMatchesOrdinaryRotation",
+      "area": "geometry",
+      "scope": "portable",
+      "kind": "supplemental",
+      "source": {
+        "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/RotationObservationIsolationTest.kt",
+        "sha256": "0b04893c06d13434e10e6c005cb452a0d6c4a42ae1f7e5066ba264e9f912ff53",
+        "line": 16
+      },
+      "originals": []
+    },
+    {
+      "id": "dyn4k-core:org.dyn4j.geometry.RotationObservationIsolationTest#stepCallbackCannotConsumeOperationRecordsBeforeStepEnds",
+      "module": "dyn4k-core",
+      "classname": "org.dyn4j.geometry.RotationObservationIsolationTest",
+      "method": "stepCallbackCannotConsumeOperationRecordsBeforeStepEnds",
+      "area": "geometry",
+      "scope": "portable",
+      "kind": "supplemental",
+      "source": {
+        "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/RotationObservationIsolationTest.kt",
+        "sha256": "0b04893c06d13434e10e6c005cb452a0d6c4a42ae1f7e5066ba264e9f912ff53",
+        "line": 77
+      },
+      "originals": []
+    },
+    {
       "id": "dyn4k-core:org.dyn4j.geometry.SegmentTest#contains",
       "module": "dyn4k-core",
       "classname": "org.dyn4j.geometry.SegmentTest",
@@ -40442,8 +40517,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 162
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 190
       },
       "originals": []
     },
@@ -40457,8 +40532,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 180
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 208
       },
       "originals": []
     },
@@ -40472,8 +40547,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 199
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 227
       },
       "originals": []
     },
@@ -40487,8 +40562,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 217
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 245
       },
       "originals": []
     },
@@ -40502,8 +40577,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 27
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 53
       },
       "originals": []
     },
@@ -40517,8 +40592,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 145
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 173
       },
       "originals": []
     },
@@ -40532,8 +40607,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 53
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 79
       },
       "originals": []
     },
@@ -40547,8 +40622,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 132
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 160
       },
       "originals": []
     },
@@ -40562,8 +40637,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 111
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 137
       },
       "originals": []
     },
@@ -40577,8 +40652,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/CollisionWorldLiveViewErrorsTest.kt",
-        "sha256": "82cfd7158ac2d8a84c915bbcb1a44464215df1073f33132618397b1ba91ae1f2",
-        "line": 90
+        "sha256": "97abe03d4e7e3db9d1e7d536657e4bb8f3897eaae042d6669482531322500ee8",
+        "line": 116
       },
       "originals": []
     },
@@ -40592,8 +40667,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 204
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 208
       },
       "originals": []
     },
@@ -40607,7 +40682,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
         "line": 21
       },
       "originals": []
@@ -40622,8 +40697,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 70
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 74
       },
       "originals": []
     },
@@ -40637,8 +40712,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 192
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 196
       },
       "originals": []
     },
@@ -40652,8 +40727,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 111
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 115
       },
       "originals": []
     },
@@ -40667,8 +40742,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 152
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 156
       },
       "originals": []
     },
@@ -40682,8 +40757,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 182
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 186
       },
       "originals": []
     },
@@ -40697,8 +40772,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/GraphContactJourneyTest.kt",
-        "sha256": "d0cbdf11312bc225c06d092ae64b1ee5ff76b4ab1337ac8216fc4bbe444f36ca",
-        "line": 37
+        "sha256": "0a2ae1e9130d522e8938d1fab4a4974920ea84083d2464856209fed30787b34a",
+        "line": 41
       },
       "originals": []
     },
@@ -40712,8 +40787,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 363
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 369
       },
       "originals": []
     },
@@ -40727,8 +40802,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 515
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 521
       },
       "originals": []
     },
@@ -40742,7 +40817,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 86
       },
       "originals": []
@@ -40757,7 +40832,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 241
       },
       "originals": []
@@ -40772,8 +40847,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 389
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 395
       },
       "originals": []
     },
@@ -40787,7 +40862,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 110
       },
       "originals": []
@@ -40802,7 +40877,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 68
       },
       "originals": []
@@ -40817,8 +40892,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 486
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 492
       },
       "originals": []
     },
@@ -40832,8 +40907,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 455
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 461
       },
       "originals": []
     },
@@ -40847,7 +40922,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 164
       },
       "originals": []
@@ -40862,8 +40937,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 316
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 322
       },
       "originals": []
     },
@@ -40877,7 +40952,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 216
       },
       "originals": []
@@ -40892,7 +40967,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 189
       },
       "originals": []
@@ -40907,8 +40982,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 337
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 343
       },
       "originals": []
     },
@@ -40922,7 +40997,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 97
       },
       "originals": []
@@ -40937,8 +41012,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 406
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 412
       },
       "originals": []
     },
@@ -40952,7 +41027,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 145
       },
       "originals": []
@@ -40967,7 +41042,7 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
         "line": 127
       },
       "originals": []
@@ -40982,8 +41057,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 498
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 504
       },
       "originals": []
     },
@@ -40997,8 +41072,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 426
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 432
       },
       "originals": []
     },
@@ -41012,8 +41087,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 290
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 296
       },
       "originals": []
     },
@@ -41027,8 +41102,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 274
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 280
       },
       "originals": []
     },
@@ -41042,8 +41117,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 258
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 264
       },
       "originals": []
     },
@@ -41057,8 +41132,8 @@
       "kind": "supplemental",
       "source": {
         "path": "dyn4k-core/src/commonTest/kotlin/org/dyn4j/world/PhysicsWorldJourneyTest.kt",
-        "sha256": "f691f00635e7fe331d5a770ec1d4e2afb653b457423bceeba0412fc797664053",
-        "line": 348
+        "sha256": "ffba0fa6f76d945bf6523829a64eb7285c9c33fa77f74697982afa8e49837cec",
+        "line": 354
       },
       "originals": []
     },
@@ -44321,7 +44396,7 @@
     "independent-review"
   ],
   "counts": {
-    "portable_methods": 2518,
+    "portable_methods": 2523,
     "jvm_only_facade_methods": 3,
     "mapped_original_identities": 2353,
     "body_related_supplements": 5,

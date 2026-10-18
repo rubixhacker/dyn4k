@@ -514,9 +514,9 @@ def validate_complete_suite_bindings(suite_manifest, repository):
                                           "line": source["line"]}):
             raise ValueError(f"complete suite case differs from reviewed corpus: {identity}")
     counts = suite_manifest.get("counts", {})
-    if (sum(item.get("scope") == "portable" for item in cases) != 2518
+    if (sum(item.get("scope") == "portable" for item in cases) != 2523
             or sum(item.get("scope") == "jvm-only" for item in cases) != 3
-            or counts.get("portable_methods") != 2518
+            or counts.get("portable_methods") != 2523
             or counts.get("jvm_only_facade_methods") != 3):
         raise ValueError("complete suite reviewed method counts differ")
     lanes = suite_manifest.get("lanes")
@@ -1302,7 +1302,7 @@ def full_hosted_lane(receipt, receipt_sha256, suite_manifest=None):
     for lane_id, config in zip(ids, receipt["configurations"]):
         source = config["source"]
         common = {group["module"]: group["case_ids"] for group in source}
-        if (set(common) != set(MODULES) or len(common["dyn4k-core"]) != 2460
+        if (set(common) != set(MODULES) or len(common["dyn4k-core"]) != 2465
                 or len(common["dyn4k"]) != 58
                 or len(config["consumer"]["case_ids"]) != 3):
             raise ValueError("full hosted reviewed common or consumer case count differs")
