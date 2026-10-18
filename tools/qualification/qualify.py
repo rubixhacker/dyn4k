@@ -860,7 +860,7 @@ def audit_staging(root, candidate_sha, targets=None, license_file=Path("LICENSE.
                 if not path.is_file():
                     continue
                 sha = digest(path)
-                artifacts.append({"path": str(path.relative_to(root)), "sha256": sha})
+                artifacts.append({"path": path.relative_to(root).as_posix(), "sha256": sha})
                 checksum = path.with_name(path.name + ".sha256")
                 if not checksum.is_file() or checksum.read_text().strip().lower() != sha:
                     errors.append(f"{path.name}: SHA-256 sidecar missing or incorrect")
@@ -871,8 +871,8 @@ def audit_staging(root, candidate_sha, targets=None, license_file=Path("LICENSE.
             import stage
             if receipt_path is None or console_path is None:
                 raise ValueError("staging receipt and console are both required")
-            stage_receipt = str(receipt_path.resolve().relative_to(root.resolve()))
-            stage_console = str(console_path.resolve().relative_to(root.resolve()))
+            stage_receipt = receipt_path.resolve().relative_to(root.resolve()).as_posix()
+            stage_console = console_path.resolve().relative_to(root.resolve()).as_posix()
             receipt = load_json_strict(receipt_path)
             stage.verify_receipt(receipt, console_path, candidate_sha, tuple(sorted(selected)))
             artifacts.append({"path": stage_receipt, "sha256": digest(receipt_path)})

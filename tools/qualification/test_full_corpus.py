@@ -407,9 +407,16 @@ class FullCorpusGateTest(unittest.TestCase):
         revision = subprocess.check_output(["git", "-C", str(upstream), "rev-parse", "HEAD"],
                                            text=True).strip()
         self.assertEqual(full_corpus.ORIGINAL_REVISION, revision)
-        with tempfile.TemporaryDirectory(dir=repository) as directory:
+        with tempfile.TemporaryDirectory() as directory:
+            upstream_fixture = Path(directory) / "upstream"
+            subprocess.run(["git", "clone", "--quiet", "--depth=1", "-c", "core.autocrlf=false",
+                            upstream.resolve().as_uri(), str(upstream_fixture)], check=True)
+            cloned_revision = subprocess.check_output(
+                ["git", "-C", str(upstream_fixture), "rev-parse", "HEAD"], text=True).strip()
+            self.assertEqual(full_corpus.ORIGINAL_REVISION, cloned_revision)
             clone = Path(directory) / "candidate"
-            subprocess.run(["git", "clone", "--quiet", "--depth=1", repository.as_uri(),
+            subprocess.run(["git", "clone", "--quiet", "--depth=1", "-c", "core.autocrlf=false",
+                            repository.as_uri(),
                             str(clone)], check=True)
             candidate = subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"],
                                                 text=True).strip()
@@ -463,7 +470,7 @@ class FullCorpusGateTest(unittest.TestCase):
             def verify():
                 return full_corpus.verify_reports(
                     clone, manifest, candidate, binding, reports, mapping=mapping,
-                    upstream=upstream, require_checkout=True)
+                    upstream=upstream_fixture, require_checkout=True)
             positive = verify()
             self.assertEqual("PASSED", positive["status"], positive["problems"])
             self.assertEqual(sum(len(full_corpus.expected_cases(manifest, group))
@@ -476,7 +483,7 @@ class FullCorpusGateTest(unittest.TestCase):
                     "--candidate-sha", candidate,
                     "--manifest", str(clone / full_corpus.MANIFEST_PATH),
                     "--mapping", str(clone / full_corpus.MAP_PATH),
-                    "--upstream", str(upstream), "--binding", str(binding_file),
+                    "--upstream", str(upstream_fixture), "--binding", str(binding_file),
                     "--output", str(result_file), "--log", str(run_log), "--",
                     *full_corpus.GRADLE_COMMAND]
             original_run = subprocess.run

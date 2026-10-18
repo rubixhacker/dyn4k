@@ -703,6 +703,46 @@ class PublicationAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "staging receipt repository differs"):
                 stage.verify_receipt(receipt, downloaded_console, candidate, targets, root)
 
+    def test_staged_audit_paths_are_portable_and_reject_drive_and_share_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            targets = ("jvm",)
+            staging = self.stage(root, targets)
+            stage_dir = staging / ".qualification/test"
+            stage_dir.mkdir(parents=True)
+            tasks = stage.publication_tasks(targets)
+            console = stage_dir / "stage.log"
+            console.write_text("".join(f"> Task {task}\n" for task in tasks) + "BUILD SUCCESSFUL\n")
+            receipt_path = stage_dir / "receipt.json"
+            receipt_path.write_text(json.dumps({
+                "candidate_sha": "a" * 40, "repository": str(self.REPOSITORY),
+                "targets": list(targets), "tasks": tasks,
+                "command": self.publication_command(tasks), "status": "PASSED", "exit_code": 0,
+                "console_sha256": hashlib.sha256(console.read_bytes()).hexdigest()}))
+            audit = qualify.audit_staging(staging, "a" * 40, targets, root / "LICENSE.md",
+                                          receipt_path, console)
+            self.assertEqual("PASSED", audit["status"], audit["errors"])
+            self.assertEqual(".qualification/test/receipt.json", audit["stage_receipt"])
+            self.assertEqual(".qualification/test/stage.log", audit["stage_console"])
+            self.assertTrue(all("\\" not in item["path"] for item in audit["artifacts"]))
+            qualify.verify_audit_against_staging(audit, root)
+
+            for relative in (r"C:\agent\dyn4k\receipt.json",
+                             r"\\server\share\receipt.json",
+                             r".qualification\test\receipt.json",
+                             ".qualification/../receipt.json"):
+                with self.subTest(stage_receipt=relative):
+                    changed = {**audit, "stage_receipt": relative}
+                    with self.assertRaises(ValueError):
+                        qualify.verify_audit_against_staging(changed, root)
+            for relative in (r"C:\agent\dyn4k\artifact.jar",
+                             r"\\server\share\artifact.jar"):
+                with self.subTest(artifact=relative):
+                    changed = {**audit, "artifacts": [dict(item) for item in audit["artifacts"]]}
+                    changed["artifacts"][0]["path"] = relative
+                    with self.assertRaisesRegex(ValueError, "staged audit differs"):
+                        qualify.verify_audit_against_staging(changed, root)
+
     def test_downloaded_bundle_rejects_unc_share_aliases_with_refreshed_pin(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
