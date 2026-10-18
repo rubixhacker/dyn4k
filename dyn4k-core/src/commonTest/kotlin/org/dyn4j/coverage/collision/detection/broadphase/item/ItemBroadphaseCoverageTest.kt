@@ -60,7 +60,7 @@ private class Body : AbstractCollisionBody<Fixture> {
     constructor() : super()
     constructor(radius: Double) : this() { addFixture(Circle(radius)) }
     private constructor(source: Body) : super(source)
-    override fun addFixture(convex: org.dyn4j.geometry.Convex): Fixture = Fixture(convex).also { addFixture(it) }
+    override fun addFixture(convex: org.dyn4j.geometry.Convex?): Fixture = Fixture(convex).also { addFixture(it) }
     override fun getLocalCenter() = Vector2()
     override fun copy() = Body(this)
 }

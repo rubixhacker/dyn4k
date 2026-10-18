@@ -52,7 +52,7 @@ import org.dyn4j.geometry.Vector2
 private class Body : AbstractCollisionBody<Fixture> {
     constructor() : super()
     constructor(shape: Convex) : this() { addFixture(shape) }
-    override fun addFixture(convex: Convex): Fixture = Fixture(convex).also { addFixture(it) }
+    override fun addFixture(convex: Convex?): Fixture = Fixture(convex).also { addFixture(it) }
     override fun getLocalCenter() = Vector2()
     override fun copy() = Body().also { copy ->
         for (fixture in getFixtures()) copy.addFixture(fixture.copy())
