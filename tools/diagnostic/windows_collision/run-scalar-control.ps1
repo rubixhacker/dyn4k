@@ -23,7 +23,10 @@ $konanc = Join-Path $KonancHome 'bin/kotlinc-native.bat'
 $javac = Join-Path $JdkHome 'bin/javac.exe'
 $java = Join-Path $JdkHome 'bin/java.exe'
 $version = (& $konanc -version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $version -notmatch '2\.4\.20') { throw "Kotlin/Native version mismatch: $version" }
+if ($LASTEXITCODE -ne 0 -or $version -notmatch '(?<![\w.+-])2\.4\.20(?![\w.+-])') { throw "Kotlin/Native version mismatch: $version" }
+$validator = Join-Path $PSScriptRoot 'validate-scalar-control.py'
+& python $validator self-test
+if ($LASTEXITCODE -ne 0) { throw "Scalar validator self-test failed: $LASTEXITCODE" }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $env:TEMP = $OutputDirectory
 $env:TMP = $OutputDirectory
@@ -42,19 +45,7 @@ $javaRaw = Join-Path $OutputDirectory 'java-scalar.tsv'
 & $java -Djava.io.tmpdir=$OutputDirectory -cp "$classes;$jar" org.dyn4j.collision.narrowphase.WindowsCollisionScalarJavaControl | Tee-Object -FilePath $javaRaw
 if ($LASTEXITCODE -ne 0) { throw "Java scalar control failed: $LASTEXITCODE" }
 
-$nativeIds = @((Get-Content $nativeRaw) | ForEach-Object {
-    if ($_ -notmatch "`tid=([^`t]+)") { throw 'Native scalar row is missing an id' }
-    $Matches[1]
-})
-$javaIds = @((Get-Content $javaRaw) | ForEach-Object {
-    if ($_ -notmatch "`tid=([^`t]+)") { throw 'Java scalar row is missing an id' }
-    $Matches[1]
-})
-if ($nativeIds.Count -ne 7 -or $javaIds.Count -ne 7 -or @($nativeIds | Sort-Object -Unique).Count -ne 7) {
-    throw "Scalar identity mismatch: native=$($nativeIds.Count) java=$($javaIds.Count)"
-}
-for ($index = 0; $index -lt 7; $index++) {
-    if ($nativeIds[$index] -ne $javaIds[$index]) { throw "Scalar identity mismatch at row $index" }
-}
+& python $validator validate --native $nativeRaw --java $javaRaw
+if ($LASTEXITCODE -ne 0) { throw "Scalar output validation failed: $LASTEXITCODE" }
 Write-Output "PINNED_SCALAR_CONTROL sourceRevision=$actualSourceRevision jarSha256=$actualJarSha256 konanc=$version rows=7"
 Get-FileHash -Algorithm SHA256 -Path @("${nativeBase}.exe", $nativeRaw, $javaRaw)
