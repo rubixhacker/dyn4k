@@ -26,7 +26,7 @@ class FullHostedTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.path = self.root / "TEST-one.xml"
         self.expected = {("org.dyn4j.geometry.ExampleTest", "works")}
 
@@ -300,6 +300,25 @@ class FullHostedTests(unittest.TestCase):
                     self.assertEqual("FAILED", archived["status"])
                     self.assertEqual("UNAVAILABLE", archived["configurations"][0]
                                      ["source_xml_diagnostic"]["status"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX output alias control")
+    def test_failed_safari_identity_rejects_unresolved_output_alias(self):
+        repository = self.root / "aliased-source"
+        expected, _, process = self.failed_safari_source_reports(repository)
+        output = self.root / "aliased-output"
+        folder = output / "development"
+        folder.mkdir(parents=True)
+        alias = self.root / "output-alias"
+        alias.symlink_to(output, target_is_directory=True)
+        lane = {}
+        with mock.patch.object(full_hosted, "expected_cases",
+                               side_effect=lambda unused, module: expected[module]):
+            with self.assertRaisesRegex(ValueError,
+                                        "Safari diagnostic case identities differ"):
+                full_hosted.copy_reports(repository, "jsSafari", alias / "development", process,
+                                         {}, "26.6.2", diagnostic=lane)
+        self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
+        self.assertFalse((folder / "diagnostic").exists())
 
     @unittest.skipIf(os.name == "nt", "POSIX directory exchange control")
     def test_failed_safari_identity_rejects_exchanged_diagnostic_parent(self):
