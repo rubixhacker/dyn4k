@@ -46,6 +46,10 @@ INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json"
           "consumers/qualification/portable/settings.gradle.kts")
 SOURCE_TASK = {target: f"{target}Test" for target in NATIVE}
 SOURCE_TASK["jsSafari"] = "jsBrowserTest"
+MAX_FAILED_SOURCE_XML_FILES = 16
+MAX_FAILED_SOURCE_XML_ENTRIES = 128
+MAX_FAILED_SOURCE_XML_BYTES = 32 * 1024 * 1024
+MAX_FAILED_SOURCE_XML_TOTAL = 64 * 1024 * 1024
 REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2465, "dyn4k": 58}
 SAFARI_DIAGNOSTIC_CLASS = "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest"
 SAFARI_DIAGNOSTIC_CASES = {
@@ -1305,13 +1309,116 @@ def parse_graph(folder, process, target, hashes, staging, expected_home, staged_
     return graph
 
 
-def copy_reports(repository, target, destination, process, expected, safari_version=None):
+def retain_failed_safari_source_xml(repository, destination, process, validation_error):
+    started, finished = process.get("started_ns"), process.get("finished_ns")
+    command = process.get("command")
+    if (type(started) is not int or type(finished) is not int or started <= 0
+            or not started <= finished or type(process.get("pid")) is not int
+            or process["pid"] <= 0 or process.get("exit_code") != 0
+            or not re.fullmatch(r"[0-9a-f]{32}", str(process.get("invocation_id", "")))
+            or not isinstance(command, list)
+            or not {"--rerun-tasks", ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest"}
+            .issubset(command)
+            or f"-PqualificationInvocationId={process['invocation_id']}" not in command):
+        raise ValueError("failed Safari source XML has no completed source process anchor")
+    snapshots = []
+    total = 0
+
+    def scan(module, directory, open_file):
+        nonlocal total
+        names = []
+        with os.scandir(directory) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > MAX_FAILED_SOURCE_XML_ENTRIES:
+                    raise ValueError("failed Safari source XML directory is crowded")
+                if entry.name.startswith("TEST-") and entry.name.endswith(".xml"):
+                    relative_path(f"diagnostic/source-xml/{module}/{entry.name}")
+                    names.append(entry.name)
+                    if len(names) > MAX_FAILED_SOURCE_XML_FILES:
+                        raise ValueError("failed Safari source XML count exceeds bound")
+        if not names:
+            raise ValueError("failed Safari source XML is absent")
+        for name in sorted(names):
+            descriptor = open_file(name)
+            with os.fdopen(descriptor, "rb") as stream:
+                before = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(before.st_mode)
+                        or before.st_size > MAX_FAILED_SOURCE_XML_BYTES
+                        or not started <= before.st_mtime_ns <= finished):
+                    raise ValueError("failed Safari source XML is unsafe, oversized, or stale")
+                total += before.st_size
+                if total > MAX_FAILED_SOURCE_XML_TOTAL:
+                    raise ValueError("failed Safari source XML total exceeds bound")
+                raw = stream.read(MAX_FAILED_SOURCE_XML_BYTES + 1)
+                after = os.fstat(stream.fileno())
+                identity = lambda item: (item.st_dev, item.st_ino, item.st_size,
+                                         item.st_mtime_ns, item.st_ctime_ns)
+                if len(raw) != before.st_size or identity(before) != identity(after):
+                    raise ValueError("failed Safari source XML changed while reading")
+            snapshots.append((module, name, raw, before))
+
+    for module in qualify.MODULES:
+        relative = Path(module) / "build/test-results/jsBrowserTest"
+        if os.name == "nt":
+            from safari_windows_file import LockedDirectory
+            with LockedDirectory(repository, relative) as directory:
+                scan(module, directory.path, directory.open_file)
+        else:
+            directory = safari_reporter.open_directory_no_follow(repository, relative)
+            try:
+                scan(module, directory, lambda name: os.open(
+                    name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory))
+            finally:
+                os.close(directory)
+
+    root = destination / "diagnostic/source-xml"
+    if root.exists() or root.is_symlink():
+        raise ValueError("failed Safari source XML diagnostic path already exists")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=".source-xml-", dir=root.parent))
+    reports = []
+    try:
+        for module, name, raw, before in snapshots:
+            retained = temporary / module / name
+            retained.parent.mkdir(parents=True, exist_ok=True)
+            retained.write_bytes(raw)
+            os.utime(retained, ns=(before.st_mtime_ns, before.st_mtime_ns))
+            reports.append({"module": module,
+                            "path": f"diagnostic/source-xml/{module}/{name}",
+                            "source_path": str(repository / module / "build/test-results"
+                                               / "jsBrowserTest" / name),
+                            "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
+                            "modified_ns": before.st_mtime_ns,
+                            "source_device": before.st_dev, "source_inode": before.st_ino})
+        os.replace(temporary, root)
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+    return {"status": "UNVERIFIED", "validation_error": str(validation_error),
+            "source_pid": process["pid"], "invocation_id": process["invocation_id"],
+            "source_started_ns": started, "source_finished_ns": finished,
+            "reports": reports}
+
+
+def copy_reports(repository, target, destination, process, expected, safari_version=None,
+                 diagnostic=None):
     reports = []
     for module in qualify.MODULES:
         paths = sorted((repository / module / "build/test-results" /
                         SOURCE_TASK[target]).glob("TEST-*.xml"))
-        checked = read_reports(paths, expected_cases(expected, module), target,
-                               process["started_ns"], process["finished_ns"], safari_version)
+        module_cases = expected_cases(expected, module)
+        try:
+            checked = read_reports(paths, module_cases, target,
+                                   process["started_ns"], process["finished_ns"], safari_version)
+        except (ValueError, ET.ParseError) as error:
+            if target == "jsSafari" and diagnostic is not None:
+                try:
+                    diagnostic["source_xml_diagnostic"] = retain_failed_safari_source_xml(
+                        repository, destination, process, error)
+                except (OSError, ValueError) as retention_error:
+                    diagnostic["source_xml_diagnostic"] = {
+                        "status": "UNAVAILABLE", "reason": str(retention_error),
+                        "validation_error": str(error)}
+            raise
         for item, path in zip(checked["reports"], paths):
             relative = Path("xml") / module / path.name
             to = destination / relative
@@ -2007,7 +2114,7 @@ def run(target, candidate_sha, output):
                     archive_test_product(product, output, config, module, target)
                 lane["source"] = copy_reports(repository, target, folder,
                                                lane["source_process"], manifest,
-                                               runtime.get("safari_version"))
+                                               runtime.get("safari_version"), diagnostic=lane)
                 consumer = repository / "consumers/qualification/portable"
                 for old in (consumer / "build/test-results" / SOURCE_TASK[target]).glob("TEST-*.xml"):
                     old.unlink()

@@ -142,6 +142,130 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.read_reports([self.path], self.expected, "jsSafari", 0, end,
                                      "26.6.3")
 
+    def failed_safari_source_reports(self, repository):
+        started = time.time_ns()
+        expected = {}
+        paths = {}
+        for module in qualify.MODULES:
+            report = (repository / module / "build/test-results/jsBrowserTest/TEST-all.xml")
+            report.parent.mkdir(parents=True)
+            if module == "dyn4k-core":
+                classname = full_hosted.SAFARI_DIAGNOSTIC_CLASS
+                methods = tuple(full_hosted.SAFARI_DIAGNOSTIC_CASES)
+                expected[module] = {(classname, method) for method in methods}
+                suite = ET.Element("testsuite", tests=str(len(methods)), failures="0",
+                                   errors="0", skipped="0", time="1")
+                for method in methods:
+                    actual = "capsuleSliceUnexpected" if method == "capsuleSlice" else method
+                    ET.SubElement(suite, "testcase", classname=f"jsBrowserTest.{classname}",
+                                  name=f"{actual}[js, browser, Safari26.6.2, MacOS10.15.7]",
+                                  time="0.1")
+                ET.SubElement(suite, "system-out").text = "".join(
+                    self.safari_diagnostic_rows())
+            else:
+                classname = "org.dyn4j.geometry.ExampleTest"
+                expected[module] = {(classname, "works")}
+                suite = ET.Element("testsuite", tests="1", failures="0", errors="0",
+                                   skipped="0", time="1")
+                ET.SubElement(suite, "testcase", classname=f"jsBrowserTest.{classname}",
+                              name="works[js, browser, Safari26.6.2, MacOS10.15.7]",
+                              time="0.1")
+            report.write_bytes(ET.tostring(suite))
+            paths[module] = report
+        process = {"command": ["gradlew", "--rerun-tasks", ":dyn4k-core:jsBrowserTest",
+                               ":dyn4k:jsBrowserTest",
+                               "-PqualificationInvocationId=" + "1" * 32],
+                   "pid": os.getpid(), "exit_code": 0,
+                   "invocation_id": "1" * 32, "started_ns": started,
+                   "finished_ns": time.time_ns()}
+        return expected, paths, process
+
+    def test_failed_safari_identity_retains_unverified_source_xml_in_archive(self):
+        for configuration in full_hosted.CONFIGS["jsSafari"]:
+            with self.subTest(configuration=configuration):
+                repository = self.root / f"source-{configuration}"
+                expected, paths, process = self.failed_safari_source_reports(repository)
+                output = self.root / f"output-{configuration}"
+                folder = output / configuration
+                folder.mkdir(parents=True)
+                lane = {"configuration": configuration, "source_process": process}
+                with mock.patch.object(full_hosted, "expected_cases",
+                                       side_effect=lambda unused, module: expected[module]):
+                    with self.assertRaisesRegex(ValueError,
+                                                "Safari diagnostic case identities differ"):
+                        full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
+                                                 "26.6.2", diagnostic=lane)
+                diagnostic = lane["source_xml_diagnostic"]
+                self.assertEqual("UNVERIFIED", diagnostic["status"])
+                self.assertEqual("Safari diagnostic case identities differ",
+                                 diagnostic["validation_error"])
+                self.assertEqual(process["pid"], diagnostic["source_pid"])
+                self.assertEqual(process["invocation_id"], diagnostic["invocation_id"])
+                self.assertEqual(set(paths), {item["module"] for item in diagnostic["reports"]})
+                for item in diagnostic["reports"]:
+                    retained = folder / item["path"]
+                    original = paths[item["module"]]
+                    self.assertEqual(original.read_bytes(), retained.read_bytes())
+                    self.assertEqual(full_hosted.sha256(original), item["sha256"])
+                    self.assertEqual(original.stat().st_mtime_ns, item["modified_ns"])
+                    self.assertTrue(item["path"].startswith("diagnostic/source-xml/"))
+                lane.update(status="FAILED", reason=diagnostic["validation_error"])
+                receipt = {"schema": 2, "kind": "hosted-full-common-corpus",
+                           "candidate_sha": "a" * 40, "target": "jsSafari", "status": "FAILED",
+                           "configurations": [lane]}
+                receipt["files"] = full_hosted.archive_inventory(output)
+                (output / "receipt.json").write_text(json.dumps(receipt))
+                archive = self.root / f"failed-{configuration}.tar"
+                full_hosted.package_archive(output, archive)
+                with tarfile.open(archive, "r") as packed:
+                    archived = json.load(packed.extractfile("receipt.json"))
+                    self.assertEqual("FAILED", archived["status"])
+                    self.assertEqual("UNVERIFIED", archived["configurations"][0]
+                                     ["source_xml_diagnostic"]["status"])
+                    for item in diagnostic["reports"]:
+                        member = packed.extractfile(f"{configuration}/{item['path']}")
+                        self.assertEqual(paths[item["module"]].read_bytes(), member.read())
+                with self.assertRaisesRegex(ValueError, "not a completed target"):
+                    full_hosted.verify_transport_archive(archive, "a" * 40, "jsSafari")
+
+    def test_failed_safari_identity_diagnostic_rejects_unsafe_source_xml(self):
+        for mutation in ("stale", "symlink", "oversized", "crowded",
+                         "failed-process", "missing-invocation"):
+            with self.subTest(mutation=mutation):
+                repository = self.root / f"unsafe-{mutation}"
+                expected, paths, process = self.failed_safari_source_reports(repository)
+                report = paths["dyn4k"]
+                if mutation == "stale":
+                    os.utime(report, ns=(process["started_ns"] - 1,
+                                         process["started_ns"] - 1))
+                elif mutation == "symlink":
+                    outside = self.root / "outside.xml"
+                    outside.write_bytes(report.read_bytes())
+                    report.unlink()
+                    report.symlink_to(outside)
+                elif mutation == "oversized":
+                    with report.open("wb") as stream:
+                        stream.truncate(32 * 1024 * 1024 + 1)
+                    process["finished_ns"] = time.time_ns()
+                elif mutation == "crowded":
+                    for index in range(129):
+                        (report.parent / f"extra-{index:03d}.txt").write_bytes(b"x")
+                elif mutation == "failed-process":
+                    process["exit_code"] = 1
+                else:
+                    process["invocation_id"] = None
+                folder = self.root / f"failure-{mutation}" / "development"
+                folder.mkdir(parents=True)
+                lane = {}
+                with mock.patch.object(full_hosted, "expected_cases",
+                                       side_effect=lambda unused, module: expected[module]):
+                    with self.assertRaisesRegex(ValueError,
+                                                "Safari diagnostic case identities differ"):
+                        full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
+                                                 "26.6.2", diagnostic=lane)
+                self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
+                self.assertFalse((folder / "diagnostic/source-xml").exists())
+
     def test_public_safari_route_stages_and_archives_source_and_consumer_reporters(self):
         source_tree = Path(__file__).resolve().parents[2]
         alias = self.root / "temporary-path-alias"
