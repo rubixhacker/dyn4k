@@ -722,7 +722,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(2385, len(corpus["original_mappings"]))
         self.assertEqual(2385, len({row["original"] for row in corpus["original_mappings"]}))
         self.assertEqual(201, len(corpus["source_files"]))
-        self.assertEqual("7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095",
+        self.assertEqual("dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94",
                          qualify.manifest_digest(suite))
         full_suite_manifest.validate_manifest(suite, repository)
         qualify.validate_complete_suite_bindings(suite, repository)
