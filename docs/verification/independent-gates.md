@@ -1,0 +1,74 @@
+# Independent gate archive verifier
+
+Run `independent_gates.py` for one exact Git commit and one approved runtime lane. It reads the reviewed complete suite manifest from revision `fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9` and requires canonical JSON SHA-256 `bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240`. Its result binds the candidate, lane, selected hashes, archive digests, gate outcomes, and numerical policy with SHA-256. An older or altered manifest fails before gate evaluation.
+
+```sh
+python3 tools/qualification/independent_gates.py \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --lane 'jvm:Java:minimum:no-optimize' \
+  --expected-artifacts /audit/jvm-target-hashes.json \
+  --expected-all-target-artifacts /audit/all-21-target-hashes.json \
+  --expected-producer-scopes /audit/producer-scopes.json \
+  --expected-archive-digests /audit/archive-digests.json \
+  --expected-runtime-identity 'selected runner identity' \
+  --archive staged-consumer=/archives/consumer \
+  --archive publication-contract=/archives/publication
+```
+
+The selected hash file maps `dyn4k-core` and `dyn4k` to audited binary SHA-256 values. The all-target file maps every approved target to those two binary hashes. The publication gate requires all 21 targets. The archive digest file maps gate names to `archive_digest(archive_path)` values. An independent archive auditor must record those digests before evaluation. Values copied from a producer receipt do not establish independent provenance. The evaluator cannot authenticate the auditor; the adapter must retain the independent audit record.
+
+The producer scope file maps Java corpus, migration, performance, and review gates to independent evidence scopes. Each scope names its candidate, target, runtime, runtime identity, artifact hashes, and producer manifest hashes. The candidate SHA must equal the selected commit.
+
+Java scopes pin both JVM JARs and `full-ci/lane-manifest.json`. Migration scopes pin the producing JVM core JAR and `evidence/summary.json`. Pilot performance scopes pin both JVM JARs and `evidence/candidate-identity-at-pilot.json`. Sustained performance scopes instead pin `evidence/archive.json`, the reviewed verifier SHA-256, and the approved policy SHA-256. Review scopes use target `source`, no artifact hashes, and separate `standards.json` and `spec.json` hashes.
+
+The verifier rehashes each named manifest. It checks source identity and route-specific counts. Each archive receipt repeats its scope in `producer_scope`. Native KLIB hashes never replace a global JVM producer's JAR hashes. The adapter must supply each scope audit independently of the producer receipt.
+
+The importable `evaluate` function verifies one selected lane and its four global gates. It accepts the approved manifest and independent archive, artifact, runtime, and producer-scope audits. `evaluate_assembly` verifies every approved lane from a 112-entry input map. Its digest binds each lane result, selected case count, and `qualify_adapter` record. The adapter emits complete case results only after a full selected-suite consumer route and every required gate pass. `qualify.py` still needs an integration owner to ingest that record with its own candidate and artifact audits. The CLI exits zero only when every required result passes.
+
+For assembly, pass `--assembly /audit/lanes.json` instead of `--lane` and repeated `--archive` arguments. The JSON object has one key per approved lane ID. Each lane maps to `archives`, `expected_artifact_hashes`, `expected_runtime_identity`, `expected_archive_digests`, and `expected_producer_scopes`. Archive values are paths. The adapter independently reruns `evaluate` for all 112 lanes. It rejects missing lanes, wrong binary hashes, inconsistent global receipts, and unbound passing gates. A missing archive remains `NOT_RUN` in the assembled result.
+
+## Common raw archive
+
+Each archive contains `receipt.json` and every file listed in `receipt.files`. Each file entry has a safe relative path, SHA-256, and original nanosecond mtime. The extracted filesystem mtime must equal the recorded mtime and fall inside the process execution window. The auditor digest covers every extracted file's bytes, path, and filesystem mtime. The verifier rejects unlisted files, duplicate paths, traversal, symbolic links, changed bytes, changed mtimes, and wrong candidate or lane identities.
+
+A passing receipt binds the exact candidate SHA and Git tree, the selected lane where applicable, and audited producer artifact and runtime identities. Its process record includes a command, integer exit code, start and finish times, and raw output paths where the route requires them. Consumer, provider, and publication routes require a recognized launcher, exact lane marker, and raw task outcome in process output. Gradle routes also require task and build outcome lines. Consumer and provider output includes SHA-256 lines for the raw XML, graph, and resolved binaries it produced. These records only become evidence after an independent archive digest and artifact audit bind their origin.
+
+No archive yields `NOT_RUN`. A complete external unavailability observation yields `UNAVAILABLE` with its reason. A malformed attempted pass or a raw failure yields `FAILED`. A producer `PASSED` string cannot replace raw files or audited provenance.
+
+## Gate routes
+
+| Gate | Verifier and pass boundary |
+| --- | --- |
+| staged-artifacts | `qualify.audit_staging` verifies the full repository; both selected target binaries match the independent audit. |
+| staged-consumer | The approved full-suite contract checks every selected case ID, XML, provider graph, resolved binary, lane, and process output. A valid foundation-only group remains `NOT_RUN`. |
+| numerical-parity | `compare.compare` replays all 14 frozen traces. The source adapter computes SHA-256 of `git archive --format=tar <candidate>`, matching actual producer receipts. The 318 adopted prospective case identities are separate rule and arithmetic subgates. A 14-trace receipt without those raw cases fails. The approved JVM comparator blob is SHA-256 `6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f` from reviewed revision `8a5c4681838aa1eb1f08ebfb7aa54d6616bb3977`; stale candidate or mutated checker bytes fail the policy binding. |
+| physical-correctness | Default, configured, Weld/Pulley, and nominal profiles are separate. Each must pass for the gate to pass. The default baseline still records `125,847/126,000` failures. Weld/Pulley requires 36,000 states per case. Nominal requires 36,000 states, 108,001 callbacks, signed-zero checks, and approved analytical comparison. |
+| unchanged-java-corpus | The reviewed `full_ci.py` archive verifier checks 2,385 original Java cases across 12 compile/runtime routes, pinned sources, case identities, logs, provider binaries, and raw archive seals. |
+| java-source-compatibility | The same reviewed archive verifier runs the strict 216-type, 3,078-declaration comparison and Java source projection checks against staged JVM and Android class archives. |
+| duplicate-provider | `qualify.check_providers` verifies both graph coordinates. The raw provider diagnostic, failing exit, exact lane output, and real dependency task must agree. |
+| migration-journeys | `journeys.verify_evidence` checks the archive seal. This verifier rehashes 42 unchanged Java sources, checks compiled class bytes and build commands, then reruns both scene validators from raw input, logs, frames, physics observations, and CCD counters for all ten journeys. |
+| performance-resource | The pilot archive remains unpassed. The sustained route runs the separately reviewed raw verifier with an external trusted key, pinned producer source, and approved policy. |
+| publication-contract | `qualify.audit_staging` checks publication metadata and files. Every binary in all 21 targets must match the separately audited all-target hash map. |
+| independent-review | Two distinct raw Sol sessions must contain exact-final-head standards and spec review outputs. Their actionable findings and resolutions must match the reports and committed evidence. |
+
+The full staged consumer route applies to every approved lane, including devices, browsers, and Wasmtime. Call `consumer_contract(manifest, lane_id)` for its case set and digest. A full receipt uses `consumer_group: full-suite` and includes `consumer_contract_sha256`. Its command names the lane. Its XML has one `testcase id` for every selected case. Foundation groups keep their original classname and method identities, but cannot pass the complete selected-suite gate. Neither route supplies absent device or browser execution.
+
+The Java archive receipt sets `producer` to `reviewed-full-ci`, `full_ci_archive` to a relative archive directory, and `full_ci_manifest_sha256` to that directory's `lane-manifest.json` digest. It lists both resolved publication binaries. The verifier executes the reviewed `full_ci.py` from pinned revision `00d2f949fd485287b737e905808bfb65be942733` against the transportable archive and checks its strict and corpus results. It does not accept a standalone compile summary or an invented case manifest.
+
+The migration archive contains `evidence/sources.sha256` and all 42 source files under `evidence/sources/`. It also contains compiled classes, raw scenes, both resolved provider JARs, and the pinned observer JAR. Source and dependency hashes must match the producer inputs. The core JAR must match the independently audited JVM producer at the candidate commit. Rewriting `summary.json` or resealing `evidence.sha256` cannot replace raw scene validation.
+
+The joint archive lists `weld-spring-equal` and `pulley-taut` under `joint_physical_cases`. Each entry names a candidate trace and capture receipt. The receipt binds candidate source, core JAR, committed capture source, build configuration, both trace digests, counts, and zero skips. Each case requires 36,000 states and 108,000 ordered callbacks. The input row uses the producer's `capture_sha256`, `source_revision`, and `jar_sha256` fields. `verify_joint_physical_cases` replays approved metrics at every step. A failed metric returns `FAILED` with per-case counts. Older Pulley parity evidence records 39 solver-tolerance exceedances and 0.1208278904872957 m maximum extension. The prospective application limit remains 0.01 m.
+
+The nominal archive adds `nominal_physical_case` with `key`, `reference`, `candidate`, and `capture_receipt`. The key must be `nominal-free-motion`. The candidate validator must match its reviewed Git blob. The reference and candidate each require 36,000 states and 108,001 callbacks. The checker audits 216,000 positive-zero values and 540,005 exact timestep values per trace. Its approved comparison must pass before nominal physical status can pass. A missing capture stays `NOT_RUN`; a failed comparison stays `FAILED`.
+
+A retained candidate nominal capture at `1a2b3b5174a5b7a438475628e95f376950fc4e4e` passes the zero and timestep parser. Its recorded comparison is `FAILED` on an exact input field. A separate frozen-baseline copy exercises the complete parser as a synthetic positive. Neither capture qualifies the final physical gate.
+
+The prospective archive provides all 318 case identities, traces, capture receipts, and arithmetic audits. The adopted catalog and checker are pinned to revision `7213238591db1611da86cdec075978190ca6d52f`. Each case binds source, artifact, trace, step count, and catalog identity before rule comparison. Arithmetic audits also bind raw target payload, process receipt, output, and the reviewed rotation oracle blob. That blob is `29de6401ef9253bee669714fdf31bade9291b4ee77d2aacaa34d62907f1bc238` at revision `8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb`.
+
+An optional `oracle` record names hashed binding, receipt, committed target source, and artifact files. The adapter replays them through the pinned rotation oracle against the candidate trace and adopted per-case rotation cap. A failed identity or arithmetic result fails the case. The current oracle labels its successful operation replay `qualification: UNPASSED`, so that result remains `NOT_RUN` for full arithmetic. Future approved producer and oracle results must pass all 318 cases separately. The adopted policy self-check still has 41 failed derived rules, four unpassed premises, and one failed physical case. No producer status string can erase those results.
+
+For sustained performance, supply `evidence/archive.json` in the producer manifest map. Also supply independent `verifier_sha256` and `policy_sha256` values in its scope. Pass an external trusted key through `--expected-performance-key`. The verifier checks the exact candidate's producer files and JVM JAR inventory. It copies the raw archive under home-backed `TMPDIR` before running `sustained_archive.py verify`. The key must remain outside the archive. A missing producer, key, or approved policy stays unpassed; a pilot result cannot satisfy this route.
+
+The independent-review raw sessions contain one final assistant JSON output with `kind: independent-review-result`, `review_kind`, `candidate_sha`, `verdict`, `assessment`, `reviewed_paths`, and full `findings`. Each report must match that raw output. Earlier structured raw findings must appear in the final output. A finding has an ID, severity, description, and a resolution with a committed evidence path and SHA-256 at the final head. Two empty report files cannot hide raw actionable findings.
+
+Historical local Java and migration archives exercise positive verifier paths at their captured commits, including a native lane selecting a separately audited JVM migration producer. The Java test includes a separate synthetic facade fixture; that fixture does not qualify a final candidate. The Weld/Pulley parser test replays the retained real candidate traces at their captured commit and checks their source, capture, reference and artifact identities. No final 112-lane runtime set, complete target arithmetic oracle, all-target staging audit, sustained performance result, or two resolved final-head reviews is supplied by this module.
