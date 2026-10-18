@@ -2,17 +2,19 @@
 
 ## Result and boundary
 
-`tools/numerical/portable/rotation_oracle.py` checks one executed
+`tools/numerical/portable/rotation_oracle.py` checks one supplied
 `portable-rotation-audit/1` payload against the pinned source operations.
 It does not activate the conditional `U(N)` policy or qualify a target.
 The caller must supply an independently captured call manifest, complete
 body-step receipts, a process receipt, and the exact observed bytes.
-The API reports `UNPASSED` when binding evidence is missing.
+The API reports `UNPASSED` when binding evidence is missing. Matching hashes
+and a caller-supplied receipt do not establish that a target process ran.
 
 The four geometry premises remain `UNPASSED_PREMISE`:
 `geometry-boundary-s1-o3-d1`, `geometry-boundary-s1-o3-d3`,
 `geometry-boundary-s1-o4-d1`, and `geometry-boundary-s1-o4-d3`.
 `P-J-Angle-ratio-limits-off--1.0` remains a separate physical failure.
+The original fixed 32-ulp rule retains 41 `FAILED_DERIVED` reference results.
 The default sleep/wake represented-geometry gate remains failed at
 125,847 of 126,000 states. No result here changes an approved bound.
 
@@ -24,12 +26,21 @@ artifact_bytes=..., source_bytes=...)` from an external runner. The audit
 uses the existing exact binary64 hex fields and source revision. `case`,
 `header`, and `states` are the independently captured target case and trace.
 The runner must retain the raw files and supply bytes from that run.
+`payload_bytes` must be the captured audit JSON file bytes; the verifier parses
+that file and compares its content with `audit` before checking the calls.
+`trace_bytes` must be the captured JSONL trace from the same process. The
+supervisor must verify the process command, exit status, runtime, artifact
+identity, and the build link from `source_bytes` to `artifact_bytes` before
+passing their bytes and receipt to this API. It must also establish that the
+manifest and accepted TOI call arguments were recorded independently of the
+audit payload. Hash agreement alone cannot establish any of these facts.
 
 `binding` requires `producer_process`, `producer_command`, `runtime_id`,
 `artifact_sha256`, `target_source_sha256`, `operation_source_revision`,
 `trace_sha256`, `payload_sha256`, `audit_sha256`, `receipt_sha256`,
 `manifest_sha256`,
 `expected_calls`, `body_step_receipts`, `accepted_toi_resets`,
+`accepted_toi_events`,
 `reset_start_rotations`, `reset_end_rotations`, `pair_inputs`, and
 `allowed_evaluations`. The receipt JSON repeats
 the process, command, runtime, source and artifact identities, file hashes,
@@ -46,9 +57,15 @@ and rotate input kind in execution order. It must come from independent
 instrumentation or trace reconciliation. `body_step_receipts` lists every
 `[step, body_id]`, including zero-call steps. `accepted_toi_resets` comes
 from accepted TOI events, not the audit's own declaration.
+For each reset sequence, `accepted_toi_events` names the accepted event's
+step, order, body ID, and exact binary64 `alpha_bits`; `accepted` must be true.
+The verifier finds that event in the JSONL trace and requires its `payload.time`
+and body index to match the bound call. The supervisor must attest that the
+callback was accepted, since the callback row alone does not prove acceptance.
 `reset_start_rotations` maps call sequences to the body's previous transform
 rotation. `reset_end_rotations` maps them to its current rotation before the
-reset. Both values use `[cos_bits, sin_bits]`.
+reset. Both values use `[cos_bits, sin_bits]`. The start pair must match the
+recorded same-step `previousTransform` exactly, including signed zero.
 The current audit schema does not record either source pair separately.
 `pair_inputs` maps rotate call sequences to independently observed `Rotation`
 pairs when `input_kind` is `pair`.
@@ -67,18 +84,32 @@ return `FAILED_COVERAGE`; impossible arithmetic returns `FAILED_ARITHMETIC`.
 ## Arithmetic derivation
 
 The oracle decodes every finite binary64 field by its exact 64 bits.
-It passes the exact angle to GNU MPFR at 320-bit precision. MPFR evaluates
-`sin`, `cos`, and `acos` once toward negative infinity and once toward
-positive infinity. Each endpoint is then converted to binary64 in the same
-direction. MPFR specifies correctly rounded results for these functions
-and directed conversion, so each final pair encloses the exact real value,
-including subnormal outputs and signed zero. This is an enclosure, not a
-claim that the target math library always rounds to nearest.
-[MPFR rounding contract](https://www.mpfr.org/mpfr-current/mpfr.html#Rounding)
-and [transcendental functions](https://www.mpfr.org/mpfr-current/mpfr.html#Transcendental-Functions)
-are the primary source. A rational Taylor remainder independently checks
-the sine enclosure at 0.75 radians. The tests also exercise small, large,
-negative, positive, and signed-zero arguments.
+It requires GNU MPFR **4.2.2** and passes the exact argument to MPFR at
+320-bit precision. MPFR evaluates `sin`, `cos`, and `acos` toward negative
+and positive infinity. The [versioned MPFR 4.2.2 rounding contract](https://www.mpfr.org/mpfr-4.2.2/mpfr.html#Rounding)
+and [function definitions](https://www.mpfr.org/mpfr-4.2.2/mpfr.html#Transcendental-Functions)
+specify correctly rounded directed endpoints. The exact result lies between
+those high-precision endpoints.
+
+For sine and cosine, the approved limit is absolute `2u = 2^-52`.
+The oracle rounds `observed - 2u` upward and `observed + 2u` downward
+at 320 bits. It accepts only when the complete MPFR enclosure lies between
+those inward thresholds. This proves the target's distance from the real
+result is no more than the approved limit. It also rejects a zero whose sign
+differs from the real function, even when its magnitude meets `2u`.
+Zero-angle sine and cosine follow the exact source special cases.
+
+The `2u` decision covers sine and cosine, not `acos`. The pinned Java
+[Math.acos contract](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Math.html#acos(double))
+requires an answer within one ulp of the exact value and positive zero at
+input one. The oracle derives a conservative one-ulp size from the outward
+MPFR endpoints, checks the source's sine-sign branch, and enforces the exact
+zero special case. This checks source compatibility; each Kotlin runtime's
+inverse-trig behavior still needs executed evidence.
+
+A rational Taylor remainder independently checks the sine enclosure and
+the `2u` boundary at 0.75 radians. Tests cover small and large arguments,
+both zero signs, subnormals, and adverse one-ulp changes.
 
 For each rotate component, the oracle forms both products as exact rational
 numbers from the decoded binary64 inputs. It enumerates the correctly
@@ -95,7 +126,8 @@ preserves an in-range signed zero.
 For a direct lerp reset, the oracle checks `alpha` in `[0,1]` and derives
 the start and end angles from `acos(cost)` with the source's sine-sign rule.
 The start pair comes from the previous transform. The end pair equals the
-current transform's recorded pre-state.
+current transform's recorded pre-state. The reset alpha must match the
+independently bound accepted call and its trace event time bit for bit.
 It reproduces both shortest-angle branches with pinned binary64 pi values,
 checks the recorded difference, and checks the strict or fused multiply-add
 angle. It then bounds direct `sin` and `cos` and requires post to equal trig

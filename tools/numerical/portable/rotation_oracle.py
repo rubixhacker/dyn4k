@@ -9,6 +9,8 @@ from fractions import Fraction
 
 
 SOURCE_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
+MPFR_VERSION = "4.2.2"
+_TRIG_ERROR = 2.0 ** -52
 _PI = struct.unpack(">d", bytes.fromhex("400921fb54442d18"))[0]
 _TWO_PI = struct.unpack(">d", bytes.fromhex("401921fb54442d18"))[0]
 _HEX = re.compile(r"[0-9a-f]{16}\Z")
@@ -18,6 +20,7 @@ _BINDING_FIELDS = {"producer_process", "producer_command", "artifact_sha256",
                    "trace_sha256", "payload_sha256", "receipt_sha256", "audit_sha256",
                    "manifest_sha256",
                    "expected_calls", "body_step_receipts", "accepted_toi_resets",
+                   "accepted_toi_events",
                    "reset_start_rotations", "reset_end_rotations", "pair_inputs",
                    "allowed_evaluations"}
 _EVALUATIONS = ("strict", "fma_left", "fma_right", "fused")
@@ -34,12 +37,24 @@ class _MPFR:
         if path is None:
             raise RuntimeError("GNU MPFR is unavailable")
         self.lib = ctypes.CDLL(path)
+        self.lib.mpfr_get_version.restype = ctypes.c_char_p
+        self.version = self.lib.mpfr_get_version().decode("ascii")
+        if self.version != MPFR_VERSION:
+            raise RuntimeError("GNU MPFR 4.2.2 is required")
+        self.library = path
         self.lib.mpfr_init2.argtypes = [ctypes.POINTER(_MPFRNumber), ctypes.c_long]
         self.lib.mpfr_clear.argtypes = [ctypes.POINTER(_MPFRNumber)]
         self.lib.mpfr_set_d.argtypes = [ctypes.POINTER(_MPFRNumber), ctypes.c_double,
                                       ctypes.c_int]
         self.lib.mpfr_get_d.argtypes = [ctypes.POINTER(_MPFRNumber), ctypes.c_int]
         self.lib.mpfr_get_d.restype = ctypes.c_double
+        self.lib.mpfr_add_d.argtypes = [ctypes.POINTER(_MPFRNumber),
+                                       ctypes.POINTER(_MPFRNumber), ctypes.c_double,
+                                       ctypes.c_int]
+        self.lib.mpfr_sub_d.argtypes = self.lib.mpfr_add_d.argtypes
+        self.lib.mpfr_cmp.argtypes = [ctypes.POINTER(_MPFRNumber),
+                                     ctypes.POINTER(_MPFRNumber)]
+        self.lib.mpfr_cmp.restype = ctypes.c_int
         for name in ("sin", "cos", "acos"):
             getattr(self.lib, "mpfr_" + name).argtypes = [ctypes.POINTER(_MPFRNumber),
                                                           ctypes.POINTER(_MPFRNumber),
@@ -60,6 +75,29 @@ class _MPFR:
             for number in (source, lower, upper):
                 self.lib.mpfr_clear(ctypes.byref(number))
 
+    def within_error(self, operation, argument, observed, error):
+        source, lower, upper, target, left, right = (_MPFRNumber() for _ in range(6))
+        numbers = (source, lower, upper, target, left, right)
+        for number in numbers:
+            self.lib.mpfr_init2(ctypes.byref(number), 320)
+        try:
+            self.lib.mpfr_set_d(ctypes.byref(source), argument, 0)
+            self.lib.mpfr_set_d(ctypes.byref(target), observed, 0)
+            function = getattr(self.lib, "mpfr_" + operation)
+            function(ctypes.byref(lower), ctypes.byref(source), 3)
+            function(ctypes.byref(upper), ctypes.byref(source), 2)
+            lower_binary64 = self.lib.mpfr_get_d(ctypes.byref(lower), 3)
+            if observed == 0 and math.copysign(1.0, observed) != math.copysign(
+                    1.0, lower_binary64):
+                return False
+            self.lib.mpfr_sub_d(ctypes.byref(left), ctypes.byref(target), error, 2)
+            self.lib.mpfr_add_d(ctypes.byref(right), ctypes.byref(target), error, 3)
+            return (self.lib.mpfr_cmp(ctypes.byref(left), ctypes.byref(lower)) <= 0 and
+                    self.lib.mpfr_cmp(ctypes.byref(upper), ctypes.byref(right)) <= 0)
+        finally:
+            for number in numbers:
+                self.lib.mpfr_clear(ctypes.byref(number))
+
 
 _mpfr = None
 
@@ -69,6 +107,13 @@ def _interval(operation, value):
     if _mpfr is None:
         _mpfr = _MPFR()
     return _mpfr.interval(operation, value)
+
+
+def _within_error(operation, argument, observed, error):
+    global _mpfr
+    if _mpfr is None:
+        _mpfr = _MPFR()
+    return _mpfr.within_error(operation, argument, observed, error)
 
 
 def _bits(value):
@@ -95,12 +140,16 @@ def trig_interval(angle_bits):
     return (_interval("cos", angle), _interval("sin", angle))
 
 
-def _contains(interval, value):
-    if not interval[0] <= value <= interval[1]:
-        return False
-    if interval[0] == interval[1] == 0.0:
-        return _bits(interval[0]) == _bits(value)
-    return True
+def _verify_trig(angle_bits, trig):
+    angle = _binary64(angle_bits)
+    if angle == 0:
+        expected = [1.0, angle]
+        if [_bits(value) for value in trig] != [_bits(value) for value in expected]:
+            raise ValueError("zero-angle trig special case differs")
+        return
+    for operation, observed in zip(("cos", "sin"), trig):
+        if not _within_error(operation, angle, observed, _TRIG_ERROR):
+            raise ValueError("trig exceeds approved absolute 2u error")
 
 
 def _signed_product(a, b, rounded):
@@ -144,12 +193,18 @@ def _state_pair(transform):
     return values
 
 
-def _source_angle(rotation):
+def _source_angle_matches(rotation, observed):
     cost, sint = rotation
     if not -1.0 <= cost <= 1.0 or not -1.0 <= sint <= 1.0:
         raise ValueError("rotation component outside source domain")
-    low, high = _interval("acos", cost)
-    return (low, high) if sint >= 0 else (-high, -low)
+    negative = sint < 0
+    if cost == 1.0:
+        return _bits(observed) == _bits(-0.0 if negative else 0.0)
+    if observed == 0 or abs(observed) > _PI or (observed < 0) != negative:
+        return False
+    lower, upper = _interval("acos", cost)
+    error = max(math.ulp(lower), math.ulp(upper))
+    return _within_error("acos", cost, abs(observed), error)
 
 
 def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input):
@@ -157,9 +212,7 @@ def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input):
               "pre", "trig", "raw", "post", "clamp"}
     if call.get("input_kind") == "angle":
         fields.add("angle_bits")
-        for interval, value in zip(trig_interval(call["angle_bits"]), trig):
-            if not _contains(interval, value):
-                raise ValueError("trig differs from angle enclosure")
+        _verify_trig(call["angle_bits"], trig)
     elif call.get("input_kind") == "pair":
         fields.add("rotation_input")
         if pair_input is None:
@@ -205,9 +258,9 @@ def _verify_reset(call, pre, trig, start_rotation, end_rotation,
         raise ValueError("TOI alpha outside source interval")
     start = _binary64(call["start_angle_bits"])
     end = _binary64(call["end_angle_bits"])
-    if list(end_rotation) != call["pre"] or not _contains(
-            _source_angle(_pair(start_rotation)), start) or not _contains(
-                _source_angle(_pair(end_rotation)), end):
+    if list(end_rotation) != call["pre"] or not _source_angle_matches(
+            _pair(start_rotation), start) or not _source_angle_matches(
+                _pair(end_rotation), end):
         raise ValueError("source angle differs")
     diff = end - start
     if diff < -_PI:
@@ -224,9 +277,7 @@ def _verify_reset(call, pre, trig, start_rotation, end_rotation,
                 if mode in allowed_evaluations and call["angle_bits"] == result]
     if not matching:
         raise ValueError("lerp angle arithmetic differs")
-    for interval, value in zip(trig_interval(call["angle_bits"]), trig):
-        if not _contains(interval, value):
-            raise ValueError("lerp trig differs from angle enclosure")
+    _verify_trig(call["angle_bits"], trig)
     if call["post"] != call["trig"]:
         raise ValueError("direct-trig reset differs")
     return matching
@@ -243,6 +294,7 @@ def _audit_bytes(audit):
 
 def _manifest_bytes(binding):
     fields = ("expected_calls", "body_step_receipts", "accepted_toi_resets",
+              "accepted_toi_events",
               "reset_start_rotations", "reset_end_rotations", "pair_inputs",
               "allowed_evaluations")
     return _audit_bytes({key: binding[key] for key in fields})
@@ -273,6 +325,45 @@ def _trace_matches(trace_bytes, case, header, states):
         return False
 
 
+def _verify_reset_provenance(call, binding, states, trace_bytes, body_ids):
+    sequence = str(call["sequence"])
+    event = binding["accepted_toi_events"].get(sequence)
+    start_pair = binding["reset_start_rotations"].get(sequence)
+    if event is None or start_pair is None:
+        raise RuntimeError("accepted TOI call or previous rotation is unavailable")
+    if type(event) is not dict or set(event) != {
+            "step", "order", "body_id", "alpha_bits", "accepted"} or \
+            event["accepted"] is not True or \
+            type(event["step"]) is not int or event["step"] != call["step"] or \
+            type(event["order"]) is not int or \
+            event["body_id"] != call["body_id"]:
+        raise ValueError("accepted TOI event binding differs")
+    _binary64(event["alpha_bits"])
+    if call["alpha_bits"] != event["alpha_bits"]:
+        raise ValueError("lerp alpha differs from accepted TOI call")
+    body_state = next((body for body in states[call["step"]]["bodies"]
+                       if body["id"] == call["body_id"]), None)
+    if body_state is None or "previousTransform" not in body_state:
+        raise RuntimeError("recorded previous transform is unavailable")
+    if _state_pair(body_state["previousTransform"]) != start_pair:
+        raise ValueError("lerp start differs from recorded previous transform")
+    rows = [json.loads(line) for line in trace_bytes.splitlines() if line.strip()]
+    matches = [row for row in rows if row["kind"] == "event" and
+               row.get("step") == event["step"] and row.get("order") == event["order"] and
+               row.get("name") in ("toi.payload.bodies", "toi.payload.fixtures")]
+    if len(matches) != 1:
+        raise RuntimeError("accepted TOI time is unavailable in trace")
+    payload = matches[0].get("payload")
+    if type(payload) is not dict or type(payload.get("time")) is not float or \
+            not math.isfinite(payload["time"]) or \
+            type(payload.get("bodies")) is not list or \
+            any(type(index) is not int or index < 0 or index >= len(body_ids)
+                for index in payload["bodies"]) or \
+            body_ids.index(call["body_id"]) not in payload["bodies"] or \
+            _bits(payload["time"]) != event["alpha_bits"]:
+        raise ValueError("accepted TOI time or body differs from trace")
+
+
 def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
                     artifact_bytes, source_bytes):
     if type(binding) is not dict or not _BINDING_FIELDS <= set(binding):
@@ -291,6 +382,7 @@ def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
         return "UNPASSED"
     if any(type(binding[key]) is not expected for key, expected in
            (("expected_calls", list), ("body_step_receipts", list),
+            ("accepted_toi_events", dict),
             ("accepted_toi_resets", list), ("reset_start_rotations", dict),
             ("reset_end_rotations", dict),
             ("allowed_evaluations", list), ("pair_inputs", dict))):
@@ -309,8 +401,14 @@ def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
              ("manifest_sha256", _manifest_bytes(binding)))):
         return "FAILED_IDENTITY"
     try:
+        payload = json.loads(payload_bytes)
         receipt = json.loads(receipt_bytes)
     except (ValueError, UnicodeError):
+        return "FAILED_IDENTITY"
+    try:
+        if _audit_bytes(payload) != _audit_bytes(audit):
+            return "FAILED_IDENTITY"
+    except (TypeError, ValueError):
         return "FAILED_IDENTITY"
     fields = {"producer_process", "producer_command", "exit_code", "artifact_sha256",
               "target_source_sha256", "runtime_id", "trace_sha256", "payload_sha256",
@@ -395,6 +493,7 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                         binding["pair_inputs"].get(str(position))))
                 elif call.get("kind") == "lerp-reset":
                     resets.append([step, body])
+                    _verify_reset_provenance(call, binding, states, trace_bytes, bodies)
                     end = binding["reset_end_rotations"].get(str(position))
                     start = binding["reset_start_rotations"].get(str(position))
                     if start is None or end is None:
@@ -415,6 +514,8 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                 set(binding["reset_end_rotations"]) != {
                     str(i) for i, call in enumerate(calls) if call["kind"] == "lerp-reset"} or \
                 set(binding["reset_start_rotations"]) != {
+                    str(i) for i, call in enumerate(calls) if call["kind"] == "lerp-reset"} or \
+                set(binding["accepted_toi_events"]) != {
                     str(i) for i, call in enumerate(calls) if call["kind"] == "lerp-reset"} or \
                 set(binding["pair_inputs"]) != {
                     str(i) for i, call in enumerate(calls) if call["kind"] == "rotate"

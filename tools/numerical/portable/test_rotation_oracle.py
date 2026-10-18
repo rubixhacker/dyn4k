@@ -37,6 +37,7 @@ def receipt_for(binding):
 def trace_for(case, header, states):
     rows = [{"kind": "inputs", "id": case["id"], "steps": case["steps"],
              **header}]
+    rows += case.get("trace_events", [])
     rows += [{"kind": "state", "id": case["id"], "step": step,
               "state": states[step]} for step in range(1, case["steps"] + 1)]
     rows.append({"kind": "case-end", "id": case["id"], "steps": case["steps"]})
@@ -45,6 +46,7 @@ def trace_for(case, header, states):
 
 def manifest_digest(binding):
     fields = ("expected_calls", "body_step_receipts", "accepted_toi_resets",
+              "accepted_toi_events",
               "reset_start_rotations", "reset_end_rotations", "pair_inputs",
               "allowed_evaluations")
     return audit_digest({key: binding[key] for key in fields})
@@ -66,7 +68,7 @@ class RotationOracleTest(unittest.TestCase):
                   "initial": {"bodies": [{"transform": transform}]}}
         states = {1: {"bodies": [{"id": "b0", "transform": transform}]}}
         trace = trace_for(case, header, states)
-        payload = b"producer executable bytes"
+        payload = json.dumps(audit).encode()
         artifact = b"artifact"
         source = b"source"
         binding = {"producer_process": "pid:41 exit:0", "producer_command": "target-test",
@@ -78,6 +80,7 @@ class RotationOracleTest(unittest.TestCase):
                    "expected_calls": [{"step": 1, "body_id": "b0", "kind": "rotate",
                                        "branch": "integrate", "input_kind": "angle"}],
                    "body_step_receipts": [[1, "b0"]], "accepted_toi_resets": [],
+                   "accepted_toi_events": {},
                    "reset_start_rotations": {}, "reset_end_rotations": {},
                    "pair_inputs": {},
                    "allowed_evaluations": ["strict"]}
@@ -90,6 +93,8 @@ class RotationOracleTest(unittest.TestCase):
         audit, case, header, states, binding, trace, payload, receipt, artifact, source = data
         if refresh_hash:
             binding["audit_sha256"] = audit_digest(audit)
+            payload = json.dumps(audit).encode()
+            binding["payload_sha256"] = digest(payload)
             binding["manifest_sha256"] = manifest_digest(binding)
             trace = trace_for(case, header, states)
             binding["trace_sha256"] = digest(trace)
@@ -139,6 +144,13 @@ class RotationOracleTest(unittest.TestCase):
             with self.subTest(stale_byte_slot=slot):
                 self.assertEqual(self.verify(data, refresh_hash=False)["status"],
                                  "FAILED_IDENTITY")
+        changed = list(self.fixture())
+        changed[6] = b'{"schema":"different"}'
+        changed[4]["payload_sha256"] = digest(changed[6])
+        changed[7] = receipt_for(changed[4])
+        changed[4]["receipt_sha256"] = digest(changed[7])
+        self.assertEqual(self.verify(changed, refresh_hash=False)["status"],
+                         "FAILED_IDENTITY")
         data = self.fixture()
         data[3][1]["bodies"][0]["transform"]["getCost"] = math.nextafter(1.0, 0.0)
         self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
@@ -189,6 +201,35 @@ class RotationOracleTest(unittest.TestCase):
         data[0]["calls"][0]["angle_bits"] = bits(-0.0)
         data[0]["calls"][0]["trig"][1] = bits(-0.0)
         self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+
+    def test_subnormal_angle_rejects_wrong_sign_zero_both_ways(self):
+        for angle, wrong_zero in ((math.ulp(0.0), -0.0),
+                                  (-math.ulp(0.0), 0.0)):
+            data = self.fixture()
+            call = data[0]["calls"][0]
+            call["angle_bits"] = bits(angle)
+            call["trig"][1] = bits(wrong_zero)
+            with self.subTest(angle_bits=call["angle_bits"]):
+                self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+
+    def test_approved_absolute_two_u_trig_boundary(self):
+        data = self.fixture()
+        call = data[0]["calls"][0]
+        call["angle_bits"] = bits(0.75)
+        cosine, sine = trig_interval(call["angle_bits"])
+        permitted = sine[0] + 2.0 ** -52
+        call["trig"] = [bits(cosine[0]), bits(permitted)]
+        call["raw"] = call["trig"][:]
+        call["post"] = call["trig"][:]
+        data[3][1]["bodies"][0]["transform"] = {
+            "getCost": cosine[0], "getSint": permitted}
+        self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+        rejected = math.nextafter(permitted, math.inf)
+        call["trig"][1] = bits(rejected)
+        call["raw"][1] = bits(rejected)
+        call["post"][1] = bits(rejected)
+        data[3][1]["bodies"][0]["transform"]["getSint"] = rejected
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
 
     def test_exact_tie_and_clamp_from_pair_rotation(self):
         data = self.fixture()
@@ -272,8 +313,14 @@ class RotationOracleTest(unittest.TestCase):
 
     def test_lerp_source_relations_and_reset_manifest(self):
         data = self.fixture()
-        audit, _, _, _, binding, *_ = data
+        audit, case, _, states, binding, *_ = data
         one = [bits(1.0), bits(0.0)]
+        states[1]["bodies"][0]["previousTransform"] = {
+            "getCost": 1.0, "getSint": 0.0}
+        case["trace_events"] = [{"kind": "event", "id": "one", "step": 1,
+                                 "order": 0, "name": "toi.payload.bodies",
+                                 "payload": {"bodies": [0, 0], "time": 0.5,
+                                             "distance": 0.0}}]
         audit["calls"][0] = {"sequence": 0, "step": 1, "body_id": "b0",
                              "kind": "lerp-reset", "branch": "toi", "pre": one,
                              "trig": one, "post": one, "alpha_bits": bits(0.5),
@@ -283,9 +330,29 @@ class RotationOracleTest(unittest.TestCase):
         binding["expected_calls"] = [{"step": 1, "body_id": "b0", "kind": "lerp-reset",
                                       "branch": "toi"}]
         binding["accepted_toi_resets"] = [[1, "b0"]]
+        binding["accepted_toi_events"] = {"0": {"step": 1, "order": 0,
+                                                "body_id": "b0",
+                                                "accepted": True,
+                                                "alpha_bits": bits(0.5)}}
         binding["reset_start_rotations"] = {"0": one}
         binding["reset_end_rotations"] = {"0": one}
         self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+        acos_case = copy.deepcopy(data)
+        acos_case[4]["reset_start_rotations"] = {"0": [bits(0.0), bits(1.0)]}
+        acos_case[3][1]["bodies"][0]["previousTransform"] = {
+            "getCost": 0.0, "getSint": 1.0}
+        acos_case[1]["trace_events"][0]["payload"]["time"] = 1.0
+        acos_case[4]["accepted_toi_events"]["0"]["alpha_bits"] = bits(1.0)
+        acos_case[0]["calls"][0]["alpha_bits"] = bits(1.0)
+        for angle, status in ((math.pi / 2, "PASSED_ARITHMETIC"),
+                              (math.nextafter(math.pi / 2, math.inf),
+                               "PASSED_ARITHMETIC"),
+                              (math.nextafter(math.nextafter(math.pi / 2, math.inf),
+                                              math.inf), "FAILED_ARITHMETIC")):
+            acos_case[0]["calls"][0]["start_angle_bits"] = bits(angle)
+            acos_case[0]["calls"][0]["diff_bits"] = bits(-angle)
+            with self.subTest(acos_angle_bits=bits(angle)):
+                self.assertEqual(self.verify(acos_case)["status"], status)
         changed = copy.deepcopy(data)
         changed[4]["allowed_evaluations"] = ["fma_left"]
         self.assertEqual(self.verify(changed)["status"], "FAILED_ARITHMETIC")
@@ -294,7 +361,26 @@ class RotationOracleTest(unittest.TestCase):
         changed[0]["calls"][0].update(alpha_bits=bits(1.0),
                                        start_angle_bits=bits(math.pi),
                                        diff_bits=bits(-math.pi))
+        changed[4]["accepted_toi_events"]["0"]["alpha_bits"] = bits(1.0)
+        changed[1]["trace_events"][0]["payload"]["time"] = 1.0
+        self.assertEqual(self.verify(changed)["status"], "FAILED_ARITHMETIC")
+        changed[3][1]["bodies"][0]["previousTransform"] = {
+            "getCost": -1.0, "getSint": 0.0}
         self.assertEqual(self.verify(changed)["status"], "PASSED_ARITHMETIC")
+        wrong_time = copy.deepcopy(data)
+        wrong_time[1]["trace_events"][0]["payload"]["time"] = 0.75
+        wrong_time[4]["accepted_toi_events"]["0"]["alpha_bits"] = bits(0.75)
+        wrong_time[0]["calls"][0]["alpha_bits"] = bits(0.25)
+        self.assertEqual(self.verify(wrong_time)["status"], "FAILED_ARITHMETIC")
+        missing_previous = copy.deepcopy(data)
+        missing_previous[3][1]["bodies"][0].pop("previousTransform")
+        self.assertEqual(self.verify(missing_previous)["status"], "UNPASSED")
+        missing_event = copy.deepcopy(data)
+        missing_event[4]["accepted_toi_events"].clear()
+        self.assertEqual(self.verify(missing_event)["status"], "UNPASSED")
+        missing_time = copy.deepcopy(data)
+        missing_time[1]["trace_events"].clear()
+        self.assertEqual(self.verify(missing_time)["status"], "UNPASSED")
         wrapped = copy.deepcopy(data)
         before = [bits(-1.0), bits(-math.ulp(0.0))]
         start_pair = [bits(-1.0), bits(math.ulp(0.0))]
@@ -310,6 +396,10 @@ class RotationOracleTest(unittest.TestCase):
             "getCost": -1.0, "getSint": sine}
         wrapped[4]["reset_start_rotations"] = {"0": start_pair}
         wrapped[4]["reset_end_rotations"] = {"0": before}
+        wrapped[4]["accepted_toi_events"]["0"]["alpha_bits"] = bits(1.0)
+        wrapped[1]["trace_events"][0]["payload"]["time"] = 1.0
+        wrapped[3][1]["bodies"][0]["previousTransform"] = {
+            "getCost": -1.0, "getSint": math.ulp(0.0)}
         self.assertEqual(self.verify(wrapped)["status"], "PASSED_ARITHMETIC")
         for field, value in (("alpha_bits", bits(2.0)), ("diff_bits", bits(1.0)),
                              ("angle_bits", bits(1.0)), ("end_angle_bits", bits(1.0))):
@@ -332,6 +422,10 @@ class RotationOracleTest(unittest.TestCase):
         lo, hi = trig_interval(bits(0.75))[1]
         self.assertLessEqual(Fraction.from_float(lo), sine - tail)
         self.assertGreaterEqual(Fraction.from_float(hi), sine + tail)
+        allowed = Fraction.from_float(lo + 2.0 ** -52)
+        rejected = Fraction.from_float(math.nextafter(float(allowed), math.inf))
+        self.assertLessEqual(allowed - (sine - tail), Fraction(1, 2 ** 52))
+        self.assertGreater(rejected - (sine + tail), Fraction(1, 2 ** 52))
 
 
 if __name__ == "__main__":
