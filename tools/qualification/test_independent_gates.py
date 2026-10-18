@@ -824,7 +824,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         run_path = "tools/numerical/portable/run.py"
         run_sha256 = "4dd1f9eed602ae9cf3485fa64962edc3c541d087d9269dd5acd10ed1e22c1a97"
         run_git_blob = "1dc430fa554c31d8a275a3d48a812bad7e6b4ff1"
-        reviewed = "6b3a9c3c05edc486b367570a2e43b0c95dcdee7f"
+        reviewed = edbc
         previous = independent_gates.P2_CURRENT_ASSEMBLY_REVISION
         older = independent_gates.P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION
         self.assertEqual(edbc, independent_gates.P2_EDBC_ASSEMBLY_REVISION)
