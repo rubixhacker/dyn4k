@@ -470,6 +470,81 @@ class SourceCasesTest(unittest.TestCase):
             self.assertEqual(1, rejected.returncode)
             self.assertIn("reviewed consumer lock fixture bytes differ", rejected.stderr)
 
+    def test_fresh_checkout_selects_reviewed_consumer_lock_for_each_runtime(self):
+        import runner
+
+        current = self.current_revision()
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "lock-routes", current)
+            lock = checkout / "consumers/qualification/browser-wasi/kotlin-js-store/yarn.lock"
+            self.assertFalse(lock.exists())
+            self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+
+            original_command = runner.command
+
+            def observed_command(args, cwd, env=None):
+                if args[0] == str(checkout / "gradlew"):
+                    self.assertEqual("true", env["YARN_OFFLINE"])
+                    return subprocess.CompletedProcess(args, 0, "cached stage probe\n", "")
+                return original_command(args, cwd, env)
+
+            staged = Path(directory) / "staged"
+            with mock.patch("runner.command", side_effect=observed_command), \
+                    mock.patch("runner.staged_files", return_value={}):
+                self.assertEqual(0, runner.stage(checkout, current, staged))
+            self.assertEqual(runner.CONSUMER_YARN_LOCK_SHA256, runner.sha256(lock))
+            self.assertEqual(runner.CONSUMER_YARN_LOCK_SHA256,
+                             json.loads((staged / "stage.json").read_text())["consumer_lock_sha256"])
+
+            for runtime, target, digest in (
+                ("firefox", "js", runner.CONSUMER_FIREFOX_LOCK_SHA256),
+                ("chromium", "js", runner.CONSUMER_YARN_LOCK_SHA256),
+                ("firefox", "wasmJs", runner.CONSUMER_YARN_LOCK_SHA256),
+                ("wasmtime", "wasmWasi", runner.CONSUMER_YARN_LOCK_SHA256),
+            ):
+                output = Path(directory) / f"lane-{target}-{runtime}"
+                with mock.patch("runner.verified_stage", side_effect=ValueError("stop before runtime")):
+                    self.assertEqual(1, runner.run_lane(
+                        checkout, current, staged / "stage.json", output,
+                        target, runtime, "minimum", "development",
+                        Path("/unneeded/runtime"), "unneeded"))
+                lane = json.loads((output / "lane.json").read_text())
+                self.assertEqual(digest, runner.sha256(lock))
+                self.assertEqual(digest, lane["consumer_lock_sha256"])
+                self.assertEqual(digest, runner.sha256(output / "consumer-yarn.lock"))
+                self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+
+    def test_public_candidate_rejects_firefox_fixture_tamper_and_wrong_lock(self):
+        import runner
+
+        current = self.current_revision()
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "firefox-lock-adverse", current)
+            fixture = checkout / runner.CONSUMER_FIREFOX_LOCK_FIXTURE
+            lock = checkout / runner.CONSUMER / "kotlin-js-store/yarn.lock"
+            self.assertEqual(runner.CONSUMER_FIREFOX_LOCK_SHA256, runner.sha256(fixture))
+            lock.parent.mkdir(parents=True)
+            lock.write_bytes(b"wrong generated lock")
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("untracked candidate input", rejected.stderr)
+            lock.write_bytes(fixture.read_bytes())
+            self.assertEqual(0, self.public_candidate(checkout, current).returncode)
+            lock.unlink()
+
+            fixture.write_bytes(fixture.read_bytes() + b"\n# tamper\n")
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--assume-unchanged", str(fixture)], check=True)
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("reviewed consumer lock fixture bytes differ", rejected.stderr)
+            subprocess.run(["git", "-C", str(checkout), "update-index",
+                            "--no-assume-unchanged", str(fixture)], check=True)
+            fixture.unlink()
+            rejected = self.public_candidate(checkout, current)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn("reviewed consumer lock fixture is absent", rejected.stderr)
+
     def test_public_candidate_rejects_committed_generator_mutation(self):
         current = self.current_revision()
         with tempfile.TemporaryDirectory() as directory:
@@ -624,6 +699,60 @@ class SourceCasesTest(unittest.TestCase):
                                 if key not in ("result_json", "result_json_sha256")})
             module["result_json_sha256"] = sha256(result)
         write_json(copied / "lane.json", sealed_lane(lane))
+
+    def test_public_firefox_lock_replay_rejects_resealed_variants_and_source_drift(self):
+        import runner
+
+        original = os.environ.get("DYN4K_BROWSER_WASI_FIREFOX_LOCK_RECEIPT")
+        owned_root = os.environ.get("DYN4K_BROWSER_WASI_LOCK_CONTROL_ROOT")
+        if original is None or owned_root is None:
+            self.skipTest("set passing Firefox lock receipt and task-owned source root")
+        source = Path(original).parent
+        lane = json.loads((source / "lane.json").read_text())
+        checkout = Path(lane["candidate_root"])
+        self.assertTrue(checkout.is_relative_to(Path(owned_root).resolve()))
+        self.assertEqual("firefox", lane["runtime"])
+        self.assertEqual("PASSED", lane["status"])
+
+        def audit(receipt):
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("runner.py")),
+                 "audit", "--receipt", str(receipt)],
+                capture_output=True, text=True, check=False,
+            )
+
+        baseline = audit(source / "lane.json")
+        self.assertEqual(0, baseline.returncode, baseline.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            for mutation in ("wrong_variant", "wrong_bytes", "missing_retained"):
+                copied_lane, copied = self.copy_lane(source, directory)
+                if mutation == "wrong_variant":
+                    copied_lane["consumer_lock_variant"] = "chrome"
+                elif mutation == "wrong_bytes":
+                    retained = copied / "consumer-yarn.lock"
+                    retained.write_bytes((checkout / runner.CONSUMER_YARN_LOCK_FIXTURE).read_bytes())
+                    copied_lane["consumer_lock_sha256"] = runner.sha256(retained)
+                else:
+                    (copied / "consumer-yarn.lock").unlink()
+                self.save_copied_lane(copied_lane, copied)
+                rejected = audit(copied / "lane.json")
+                with self.subTest(mutation=mutation):
+                    self.assertEqual(1, rejected.returncode, rejected.stderr)
+                    self.assertIn("evidence digest" if mutation == "missing_retained" else
+                                  "consumer lock provenance", rejected.stderr)
+                shutil.rmtree(copied)
+
+            generated = checkout / runner.CONSUMER / "kotlin-js-store/yarn.lock"
+            prior = generated.read_bytes()
+            try:
+                generated.write_bytes(b"later lane wrote unrelated lock bytes")
+                rejected = self.public_candidate(checkout, lane["candidate_sha"])
+                self.assertEqual(1, rejected.returncode)
+                self.assertIn("untracked candidate input", rejected.stderr)
+                replay = audit(source / "lane.json")
+                self.assertEqual(0, replay.returncode, replay.stderr)
+            finally:
+                generated.write_bytes(prior)
 
     @classmethod
     def copy_resealed_diagnostic_depth(cls, source: Path, case: Path, value: str) -> Path:

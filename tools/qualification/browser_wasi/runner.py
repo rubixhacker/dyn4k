@@ -39,6 +39,10 @@ CONSUMER_SETTINGS_SHA256 = "842383eb0023b5edd4ca9d2394ed3d81b1fcf0ced275ff24842a
 CONSUMER_YARN_LOCK_SHA256 = "521d87b1dc27f4f3ef947115945bd01eefcae1ae6fbfdede75c8f9e15f059263"
 CONSUMER_YARN_LOCK_FIXTURE = Path("tools/qualification/browser_wasi/fixtures/consumer-yarn.lock")
 CONSUMER_LOCK_SOURCE_BASE = "d7a06e57fa7d940e81b3fe90b54d64fd4f3610b9"
+CONSUMER_FIREFOX_LOCK_SHA256 = "5a7e969d27862e545a961704dc33318c9b2b3e2b9f6a3136d990b618bc479e8e"
+CONSUMER_FIREFOX_LOCK_FIXTURE = Path(
+    "tools/qualification/browser_wasi/fixtures/consumer-firefox-yarn.lock")
+CONSUMER_FIREFOX_LOCK_SOURCE_BASE = "0cfa46af5e39d3d2a04eb0bdfc8c9360a61a1852"
 RUNTIME_VERSIONS = {
     "chromium": {"minimum": "119.0.6045.105", "current": "155.0.8059.84"},
     "firefox": {"minimum": "120.0.1", "current": "158.0"},
@@ -510,33 +514,48 @@ def command(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
     return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, check=False)
 
 
-def is_pinned_consumer_lock(root: Path, problem: str) -> bool:
+def is_pinned_consumer_lock(root: Path, problem: str,
+                            allowed_digests: tuple[str, ...] | None = None) -> bool:
     relative = CONSUMER / "kotlin-js-store/yarn.lock"
     lock = root / relative
+    if allowed_digests is None:
+        allowed_digests = (CONSUMER_YARN_LOCK_SHA256,)
     return (problem == f"untracked candidate input: {relative}"
             and lock.is_file() and not lock.is_symlink()
             and not lock.parent.is_symlink()
-            and sha256(lock) == CONSUMER_YARN_LOCK_SHA256)
+            and sha256(lock) in allowed_digests)
 
 
-def reviewed_consumer_lock(root: Path, expected_sha: str) -> bytes | None:
-    if expected_sha == CONSUMER_LOCK_SOURCE_BASE:
-        return None
-    descendant = command(["git", "merge-base", "--is-ancestor",
-                          CONSUMER_LOCK_SOURCE_BASE, expected_sha], root)
-    if descendant.returncode:
-        return None
-    fixture = root / CONSUMER_YARN_LOCK_FIXTURE
+def reviewed_consumer_lock(root: Path, expected_sha: str,
+                           variant: str = "chrome") -> bytes | None:
+    if variant == "chrome":
+        base = CONSUMER_LOCK_SOURCE_BASE
+        fixture_path = CONSUMER_YARN_LOCK_FIXTURE
+        expected_digest = CONSUMER_YARN_LOCK_SHA256
+    elif variant == "firefox":
+        base = CONSUMER_FIREFOX_LOCK_SOURCE_BASE
+        fixture_path = CONSUMER_FIREFOX_LOCK_FIXTURE
+        expected_digest = CONSUMER_FIREFOX_LOCK_SHA256
+    else:
+        raise ValueError("unknown consumer lock variant")
+    tree = command(["git", "ls-tree", expected_sha, "--", str(fixture_path)], root)
+    if tree.returncode:
+        raise ValueError("reviewed consumer lock fixture Git tree is unavailable")
+    if not tree.stdout:
+        if expected_sha == base or command(
+                ["git", "merge-base", "--is-ancestor", base, expected_sha], root
+        ).returncode:
+            return None
+        raise ValueError("reviewed consumer lock fixture is absent from candidate commit")
+    fixture = root / fixture_path
     if not fixture.is_file() or fixture.is_symlink():
         raise ValueError("reviewed consumer lock fixture is absent or not regular")
     raw = fixture.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != CONSUMER_YARN_LOCK_SHA256:
+    if hashlib.sha256(raw).hexdigest() != expected_digest:
         raise ValueError("reviewed consumer lock fixture bytes differ")
-    tree = command(["git", "ls-tree", expected_sha, "--",
-                    str(CONSUMER_YARN_LOCK_FIXTURE)], root)
     match = re.fullmatch(
-        r"100644 blob ([0-9a-f]+)\t" + re.escape(str(CONSUMER_YARN_LOCK_FIXTURE)) + r"\n",
-        tree.stdout) if tree.returncode == 0 else None
+        r"100644 blob ([0-9a-f]+)\t" + re.escape(str(fixture_path)) + r"\n",
+        tree.stdout)
     if match is None:
         raise ValueError("reviewed consumer lock fixture is not committed as a regular file")
     object_format = command(["git", "rev-parse", "--show-object-format"], root)
@@ -548,27 +567,37 @@ def reviewed_consumer_lock(root: Path, expected_sha: str) -> bytes | None:
     return raw
 
 
-def prepare_consumer_lock(root: Path, expected_sha: str) -> None:
-    raw = reviewed_consumer_lock(root, expected_sha)
+def prepare_consumer_lock(root: Path, expected_sha: str,
+                          variant: str = "chrome") -> None:
+    raw = reviewed_consumer_lock(root, expected_sha, variant)
     if raw is None:
         return
+    expected_digest = hashlib.sha256(raw).hexdigest()
     lock = root / CONSUMER / "kotlin-js-store/yarn.lock"
     if lock.parent.is_symlink() or lock.is_symlink():
         raise ValueError("generated consumer lock path is symlinked")
     if lock.exists():
-        if not lock.is_file() or sha256(lock) != CONSUMER_YARN_LOCK_SHA256:
-            raise ValueError("generated consumer lock differs from reviewed bytes")
-        return
+        if not lock.is_file():
+            raise ValueError("generated consumer lock is not regular")
+        if sha256(lock) == expected_digest:
+            return
     lock.parent.mkdir(parents=True, exist_ok=True)
     if lock.parent.is_symlink():
         raise ValueError("generated consumer lock parent is symlinked")
-    with lock.open("xb") as stream:
+    temporary = lock.with_name(f".yarn.lock.{secrets.token_hex(8)}.tmp")
+    with temporary.open("xb") as stream:
         stream.write(raw)
-    if sha256(lock) != CONSUMER_YARN_LOCK_SHA256:
+    os.replace(temporary, lock)
+    if sha256(lock) != expected_digest:
         raise ValueError("generated consumer lock copy differs from reviewed bytes")
 
 
-def candidate_identity(root: Path, expected_sha: str) -> None:
+def consumer_lock_variant(target: str, runtime: str) -> str:
+    return "firefox" if target == "js" and runtime == "firefox" else "chrome"
+
+
+def candidate_identity(root: Path, expected_sha: str,
+                       retained_consumer_lock: bool = False) -> None:
     if not full_corpus.SHA40.fullmatch(expected_sha):
         raise ValueError("candidate SHA is invalid")
     head = command(["git", "rev-parse", "HEAD"], root)
@@ -578,16 +607,21 @@ def candidate_identity(root: Path, expected_sha: str) -> None:
                         expected_sha], root)
     if ancestor.returncode:
         raise ValueError("candidate does not descend from committed full corpus")
+    reviewed_consumer_lock(root, expected_sha)
+    firefox_fixture = reviewed_consumer_lock(root, expected_sha, "firefox")
+    allowed_locks = ((CONSUMER_YARN_LOCK_SHA256, CONSUMER_FIREFOX_LOCK_SHA256)
+                     if firefox_fixture is not None else (CONSUMER_YARN_LOCK_SHA256,))
+    lock_problem = f"untracked candidate input: {CONSUMER}/kotlin-js-store/yarn.lock"
     consumer_generated = tuple(
         f"untracked candidate input: {CONSUMER}/{directory}/"
         for directory in ("build", ".gradle", ".kotlin")
     )
     problems = [problem for problem in full_corpus.candidate_checkout_problems(root, expected_sha)
                 if not problem.startswith(consumer_generated)
-                and not is_pinned_consumer_lock(root, problem)]
+                and not (retained_consumer_lock and problem == lock_problem)
+                and not is_pinned_consumer_lock(root, problem, allowed_locks)]
     if problems:
         raise ValueError(f"source checkout is dirty: {problems[:5]}")
-    reviewed_consumer_lock(root, expected_sha)
     object_format = command(["git", "rev-parse", "--show-object-format"], root)
     if object_format.returncode or object_format.stdout.strip() not in ("sha1", "sha256"):
         raise ValueError("candidate Git object format is unavailable")
@@ -698,6 +732,11 @@ def stage(root: Path, sha: str, output: Path) -> int:
         if completed.returncode:
             raise ValueError("staging command failed")
         candidate_identity(root, sha)
+        if reviewed_consumer_lock(root, sha) is not None:
+            lock = root / CONSUMER / "kotlin-js-store/yarn.lock"
+            if sha256(lock) != CONSUMER_YARN_LOCK_SHA256:
+                raise ValueError("staging changed the reviewed consumer lock")
+            result["consumer_lock_sha256"] = CONSUMER_YARN_LOCK_SHA256
         result["artifacts"] = staged_files(root)
         result["status"] = "PASSED"
     except (OSError, ValueError) as error:
@@ -710,6 +749,9 @@ def verified_stage(root: Path, sha: str, receipt: Path) -> dict[str, str]:
     recorded = json.loads(receipt.read_text())
     if recorded.get("candidate_sha") != sha or recorded.get("status") != "PASSED":
         raise ValueError("staging receipt does not bind this passing candidate")
+    if (reviewed_consumer_lock(root, sha, "firefox") is not None
+            and recorded.get("consumer_lock_sha256") != CONSUMER_YARN_LOCK_SHA256):
+        raise ValueError("staging receipt lacks the reviewed consumer lock")
     actual = staged_files(root)
     if recorded.get("artifacts") != actual:
         raise ValueError("staged artifact hashes differ from receipt")
@@ -740,6 +782,8 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
         if sha256(path) != digest:
             raise ValueError(f"evidence digest differs: {path}")
 
+    if "consumer_lock_retained" in lane:
+        check(lane["consumer_lock_retained"], lane.get("consumer_lock_sha256"))
     for module in modules.values():
         if not isinstance(module, dict):
             raise ValueError("invalid module receipt")
@@ -802,7 +846,19 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
         sha = lane.get("candidate_sha")
         if not isinstance(sha, str):
             raise ValueError("passing lane has no candidate SHA")
-        candidate_identity(root, sha)
+        if reviewed_consumer_lock(root, sha, "firefox") is not None:
+            variant = consumer_lock_variant(lane.get("target"), lane.get("runtime"))
+            raw_lock = reviewed_consumer_lock(root, sha, variant)
+            retained_lock = lane_dir / "consumer-yarn.lock"
+            if (raw_lock is None or lane.get("consumer_lock_variant") != variant
+                    or lane.get("consumer_lock_retained") != str(retained_lock)
+                    or lane.get("consumer_lock_sha256") != hashlib.sha256(raw_lock).hexdigest()
+                    or not retained_lock.is_file() or retained_lock.is_symlink()
+                    or retained_lock.read_bytes() != raw_lock):
+                raise ValueError("passing lane consumer lock provenance differs")
+            candidate_identity(root, sha, retained_consumer_lock=True)
+        else:
+            candidate_identity(root, sha)
         stage_receipt = Path(str(lane.get("staging_receipt", ""))).resolve()
         if (not stage_receipt.is_file() or lane.get("staging_receipt_sha256") !=
                 sha256(stage_receipt) or lane.get("artifact_hashes") !=
@@ -1175,8 +1231,16 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                                "configuration": configuration, "status": "FAILED"}
     try:
         candidate_identity(root, sha)
-        prepare_consumer_lock(root, sha)
+        lock_variant = consumer_lock_variant(target, runtime)
+        prepare_consumer_lock(root, sha, lock_variant)
         candidate_identity(root, sha)
+        selected_lock = reviewed_consumer_lock(root, sha, lock_variant)
+        if selected_lock is not None:
+            retained_lock = output / "consumer-yarn.lock"
+            retained_lock.write_bytes(selected_lock)
+            lane.update(consumer_lock_variant=lock_variant,
+                        consumer_lock_retained=str(retained_lock),
+                        consumer_lock_sha256=hashlib.sha256(selected_lock).hexdigest())
         lane["artifact_hashes"] = verified_stage(root, sha, receipt)
         if target == "js" and runtime == "firefox":
             verify_firefox_launcher_graph(root)
@@ -1255,6 +1319,10 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             }
             results[module] = evidence
             try:
+                if (selected_lock is not None and
+                        sha256(root / CONSUMER / "kotlin-js-store/yarn.lock") !=
+                        lane["consumer_lock_sha256"]):
+                    raise ValueError(f"{module} changed the reviewed consumer lock")
                 if built.returncode:
                     raise ValueError(f"{module} Gradle task failed: {console}")
                 linked = linked_file(project, target, configuration, module)
@@ -1360,6 +1428,10 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 evidence["result_json"] = str(result_path)
                 evidence["result_json_sha256"] = sha256(result_path)
         candidate_identity(root, sha)
+        if (selected_lock is not None and
+                sha256(root / CONSUMER / "kotlin-js-store/yarn.lock") !=
+                lane["consumer_lock_sha256"]):
+            raise ValueError("lane changed the reviewed consumer lock")
         lane["status"] = "PASSED"
     except (OSError, ValueError, json.JSONDecodeError) as error:
         lane["reason"] = str(error)
