@@ -1,10 +1,12 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -19,37 +21,74 @@ from receipt import digest
 
 
 class BaselineCaptureSeamTest(unittest.TestCase):
-    def test_baseline_runtime_rejects_another_dyn4j_provider(self):
+    def test_baseline_runtime_replays_without_build_or_original_argument_file(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             baseline = root / "baseline"
             stub = baseline / "build/classes/kotlin/main"
             jar = root / "dyn4j.jar"
-            jar.write_bytes(b"pinned")
-            extra = root / "extra"
+            with zipfile.ZipFile(jar, "w") as archive:
+                archive.writestr("org/dyn4j/geometry/Vector2.class", b"pinned")
+            for name in baseline_capture.TAP_CLASS_NAMES:
+                file = stub / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(name.encode())
+            argument = root / "original-worker-args.txt"
+            argument.write_text(f"-cp\n{stub}:{jar}\n")
             log = root / "worker.log"
             log.write_text(f"Starting process 'Gradle Test Executor 1'. Command: "
-                           f"{sys.executable} -cp test Worker\n")
-            classes = {jar: {"org/dyn4j/geometry/Vector2.class": b"pinned"},
-                       stub: {"org/dyn4j/geometry/RotationOperationTap.class": b"tap"},
-                       extra: {"org/dyn4j/geometry/Vector2.class": b"other"}}
+                           f"{sys.executable} @{argument} Worker\n"
+                           f"[class,load] org.dyn4j.geometry.Vector2 source: {jar.as_uri()}\n"
+                           f"[class,load] org.dyn4j.geometry.RotationOperationTap "
+                           f"source: {stub.as_uri()}\n")
+            proof = root / "proof"
             with patch.object(baseline_capture, "BASELINE_PROJECT", baseline), \
                     patch.object(baseline_capture, "verify_baseline_jar"), \
-                    patch.object(baseline_capture, "_java_classpath",
-                                 return_value=([stub, jar], [])) as classpath, \
-                    patch.object(baseline_capture, "_provider_classes",
-                                 side_effect=lambda path: classes.get(path, {})), \
-                    patch.object(baseline_capture, "_loaded_java_classes",
-                                 return_value={"org/dyn4j/geometry/Vector2.class": str(jar)}), \
                     patch.object(baseline_capture.subprocess, "run",
                                  return_value=SimpleNamespace(returncode=0, stdout="",
-                                                              stderr='openjdk version "21.0.12"\n')):
-                self.assertEqual([item["kind"] for item in
-                                  baseline_capture.baseline_runtime(log, jar)["dependency"]["providers"]],
-                                 ["baseline-operation-tap", "pinned-dyn4j"])
-                classpath.return_value = ([stub, extra, jar], [])
+                                                              stderr='Picked up JAVA_TOOL_OPTIONS\n'
+                                                                     'openjdk version "21.0.12"\n')):
+                extra_tap = stub / "org/dyn4j/geometry/RotationOperationTap$Extra.class"
+                extra_tap.write_bytes(b"extra")
+                with self.assertRaisesRegex(Exception, "operation tap class set differs"):
+                    baseline_capture.baseline_runtime(log, jar, root / "extra-tap-proof")
+                extra_tap.unlink()
+                extra_provider = root / "extra-provider"
+                file = extra_provider / "org/dyn4j/geometry/Vector2.class"
+                file.parent.mkdir(parents=True)
+                file.write_bytes(b"other")
+                argument.write_text(f"-cp\n{stub}:{extra_provider}:{jar}\n")
                 with self.assertRaisesRegex(Exception, "unexpected dyn4j provider"):
-                    baseline_capture.baseline_runtime(log, jar)
+                    baseline_capture.baseline_runtime(log, jar, root / "extra-provider-proof")
+                argument.write_text(f"-cp\n{stub}:{jar}\n")
+                recorded = baseline_capture.baseline_runtime(log, jar, proof)
+                shutil.rmtree(stub)
+                argument.unlink()
+                self.assertEqual(recorded, baseline_capture.baseline_runtime(
+                    log, jar, proof, recorded))
+                archived_argument = proof / "worker-args-0.txt"
+                archived_argument.write_text("-cp\nmissing\n")
+                with self.assertRaisesRegex(Exception, "archived worker argument file differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                archived_argument.write_text(f"-cp\n{stub}:{jar}\n")
+                tap = proof / "tap-classes/org/dyn4j/geometry/RotationOperationTap.class"
+                tap.write_bytes(b"changed")
+                with self.assertRaisesRegex(Exception, "archived operation tap class hash differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                tap.write_bytes("org/dyn4j/geometry/RotationOperationTap.class".encode())
+                extra = proof / "tap-classes/org/dyn4j/geometry/RotationOperationTap$Extra.class"
+                extra.write_bytes(b"extra")
+                with self.assertRaisesRegex(Exception, "archived operation tap class set differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                extra.unlink()
+                changed = json.loads(json.dumps(recorded))
+                changed["dependency"]["providers"].reverse()
+                with self.assertRaisesRegex(Exception, "recorded provider inventory differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, changed)
+                changed = json.loads(json.dumps(recorded))
+                changed["dependency"]["classpath"].reverse()
+                with self.assertRaisesRegex(Exception, "recorded classpath differs"):
+                    baseline_capture.baseline_runtime(log, jar, proof, changed)
 
     def test_fixture_hash_binds_baseline_operation_tap(self):
         with tempfile.TemporaryDirectory() as directory:

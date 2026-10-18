@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -16,15 +17,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import declared_cases
 from receipt import Rejected, digest, inspect, records
-from run import (MATRIX_METHODS, PORTABLE, ROOT, _java_classpath, _loaded_java_classes,
-                 _provider_classes, clean_identity, extract_xml, git, method_case_ids,
-                 runtime_identity)
+from run import (MATRIX_METHODS, PORTABLE, ROOT, _java_classpath, _provider_classes,
+                 clean_identity, extract_xml, git, method_case_ids, runtime_identity)
 
 
 PINNED_JAR_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
 PINNED_SOURCE_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
 BASELINE_PROJECT = PORTABLE / "baseline"
 ATTESTATION_SCHEMA = "portable-baseline-attestation/1"
+WORKER_PROOF_SCHEMA = "portable-baseline-worker/2"
+TAP_CLASS_NAMES = frozenset({
+    "org/dyn4j/geometry/RotationOperationTap.class",
+    "org/dyn4j/geometry/RotationOperationTap$Call.class",
+    "org/dyn4j/geometry/RotationOperationTap$Capture.class",
+    "org/dyn4j/geometry/RotationOperationTap$Observation.class",
+    "org/dyn4j/geometry/RotationOperationTap$Observation$Rotation.class",
+    "org/dyn4j/geometry/RotationOperationTap$Observation$ToiAccepted.class",
+})
 
 
 def verifier_source_sha256():
@@ -140,6 +149,26 @@ def verify_baseline_jar(path):
     return PINNED_JAR_SHA256
 
 
+def _verify_source_identity(result):
+    if result["baseline_jar_sha256"] != PINNED_JAR_SHA256 or \
+            result["baseline_source_revision"] != PINNED_SOURCE_REVISION:
+        raise Rejected("baseline source identity differs")
+    if result["fixture_source_sha256"] != fixture_source_sha256():
+        raise Rejected("baseline fixture source differs")
+    revision = result.get("candidate_recorder_commit")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise Rejected("recorder source revision is invalid")
+    try:
+        if git("--no-replace-objects", "cat-file", "-t", revision).strip() != b"commit":
+            raise Rejected("recorder source revision is invalid")
+        source = hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false", "archive",
+                                    "--format=tar", revision)).hexdigest()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Rejected("recorder source revision is unavailable") from error
+    if source != result["source_sha256"]:
+        raise Rejected("captured recorder source archive differs")
+
+
 def fixture_source_sha256():
     tap = BASELINE_PROJECT / "src/main/kotlin/org/dyn4j/geometry/RotationOperationTap.kt"
     if not tap.is_file():
@@ -158,7 +187,77 @@ def fixture_source_sha256():
     return result.hexdigest()
 
 
-def baseline_runtime(log, jar, proof_dir=None):
+def _archived_bytes(path, proof_dir):
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(
+            proof_dir.resolve()):
+        raise Rejected("baseline worker proof file is absent or outside the archive")
+    return path.read_bytes()
+
+
+def _tap_classes(proof_dir, stub_root, expected_hashes, capture):
+    archive = proof_dir / "tap-classes"
+    if capture:
+        classes = _provider_classes(stub_root)
+        if set(classes) != TAP_CLASS_NAMES:
+            raise Rejected("baseline operation tap class set differs")
+        for name, data in classes.items():
+            target = archive / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    names = {str(path.relative_to(archive)) for path in archive.rglob("*.class")}
+    if names != TAP_CLASS_NAMES:
+        raise Rejected("baseline archived operation tap class set differs")
+    classes = {name: _archived_bytes(archive / name, proof_dir) for name in TAP_CLASS_NAMES}
+    hashes = {name: hashlib.sha256(classes[name]).hexdigest() for name in sorted(classes)}
+    if not capture and hashes != expected_hashes:
+        raise Rejected("baseline archived operation tap class hash differs")
+    return classes, hashes
+
+
+def _worker_classpath(command, proof_dir, expected, capture):
+    arguments = [token for token in command if token.startswith("@")]
+    if len(arguments) != 1:
+        raise Rejected("baseline worker argument file inventory differs")
+    original = arguments[0][1:]
+    archive = proof_dir / "worker-args-0.txt"
+    if capture:
+        source = Path(original)
+        if not source.is_file():
+            raise Rejected("baseline worker argument file is absent")
+        proof_dir.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(source.read_bytes())
+    data = _archived_bytes(archive, proof_dir)
+    identity = {"original_path": original, "sha256": hashlib.sha256(data).hexdigest()}
+    if not capture and identity != expected:
+        raise Rejected("baseline archived worker argument file differs")
+    replay = ["@" + str(archive) if token == arguments[0] else token for token in command]
+    entries, archived = _java_classpath(replay)
+    if archived != [archive.resolve()]:
+        raise Rejected("baseline worker argument archive differs")
+    return entries, identity
+
+
+def _loaded_baseline_classes(log, pinned, tap, jar_origin, tap_origin):
+    loaded = {}
+    with Path(log).open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            found = re.search(r"\[class,load\] (org\.dyn4j\.[^ ]+) source: (file:[^ ]+)", line)
+            if found is None:
+                continue
+            name = found.group(1).replace(".", "/") + ".class"
+            origin = os.path.normpath(urllib.parse.unquote(urllib.parse.urlparse(
+                found.group(2)).path))
+            expected_origin = jar_origin if name in pinned else tap_origin if name in tap else None
+            if origin != expected_origin:
+                raise Rejected("baseline loaded class origin differs")
+            loaded[name] = origin
+    if loaded.get("org/dyn4j/geometry/Vector2.class") != jar_origin or \
+            loaded.get("org/dyn4j/geometry/RotationOperationTap.class") != tap_origin:
+        raise Rejected("baseline loaded provider proof is absent")
+    return loaded
+
+
+def baseline_runtime(log, jar, proof_dir, recorded=None):
     commands = []
     with Path(log).open(encoding="utf-8") as stream:
         for line in stream:
@@ -172,53 +271,75 @@ def baseline_runtime(log, jar, proof_dir=None):
         raise Rejected("baseline JVM executable is absent")
     version = subprocess.run((str(executable), "-version"), capture_output=True,
                              text=True, check=False)
-    version_text = (version.stdout + version.stderr).strip().splitlines()
-    if version.returncode or not version_text or 'version "21.' not in version_text[0]:
+    version_text = [line for line in (version.stdout + version.stderr).splitlines()
+                    if line.startswith('openjdk version "')]
+    if version.returncode or len(version_text) != 1 or \
+            not version_text[0].startswith('openjdk version "21.'):
         raise Rejected("baseline JVM worker is not Java 21")
-    entries, argfiles = _java_classpath(command)
+    proof_dir = Path(proof_dir)
+    if recorded is not None and (not isinstance(recorded, dict) or
+                                 not isinstance(recorded.get("dependency"), dict) or
+                                 recorded["dependency"].get("schema") != WORKER_PROOF_SCHEMA):
+        raise Rejected("baseline worker proof schema differs")
+    recorded_dependency = recorded["dependency"] if recorded is not None else None
+    entries, argument = _worker_classpath(
+        command, proof_dir,
+        recorded_dependency.get("argument_file") if recorded_dependency is not None else None,
+        capture=recorded is None)
     jar = Path(jar).resolve()
     verify_baseline_jar(jar)
     pinned = _provider_classes(jar)
-    stub_root = (BASELINE_PROJECT / "build/classes/kotlin/main").resolve()
-    stub = _provider_classes(stub_root)
-    prefix = "org/dyn4j/geometry/RotationOperationTap"
-    if not stub or "org/dyn4j/geometry/RotationOperationTap.class" not in stub or \
-            any(not (name == prefix + ".class" or name.startswith(prefix + "$"))
-                for name in stub) or set(stub) & set(pinned):
-        raise Rejected("baseline operation tap classes differ")
-    providers = []
-    for entry in entries:
-        classes = _provider_classes(entry)
-        if not classes:
-            continue
-        if entry == jar and classes == pinned:
-            kind = "pinned-dyn4j"
-        elif entry == stub_root and classes == stub:
-            kind = "baseline-operation-tap"
-        else:
-            raise Rejected("baseline JVM classpath has an unexpected dyn4j provider")
-        providers.append({"kind": kind, "path": str(entry),
-                          "sha256": digest(entry) if entry.is_file() else hashlib.sha256(
-                              b"".join(classes[name] for name in sorted(classes))).hexdigest(),
-                          "classes": len(classes)})
-    if [item["kind"] for item in providers] != ["baseline-operation-tap", "pinned-dyn4j"]:
+    if set(pinned) & TAP_CLASS_NAMES:
+        raise Rejected("pinned dyn4j JAR contains baseline tap classes")
+    if recorded_dependency is None:
+        stub_origin = str((BASELINE_PROJECT / "build/classes/kotlin/main").resolve())
+        jar_origin = str(jar)
+    else:
+        providers = recorded_dependency.get("providers", [])
+        if len(providers) != 2 or [item.get("kind") for item in providers] != [
+                "baseline-operation-tap", "pinned-dyn4j"]:
+            raise Rejected("baseline recorded provider inventory differs")
+        stub_origin = providers[0].get("path")
+        jar_origin = providers[1].get("path")
+        if not all(isinstance(path, str) and Path(path).is_absolute()
+                   for path in (stub_origin, jar_origin)):
+            raise Rejected("baseline recorded provider origin differs")
+    tap, tap_hashes = _tap_classes(
+        proof_dir, Path(stub_origin),
+        recorded_dependency.get("tap_classes") if recorded_dependency is not None else None,
+        capture=recorded is None)
+    if set(tap) & set(pinned):
+        raise Rejected("baseline operation tap overlaps pinned dyn4j")
+    if [str(entry) for entry in entries].count(stub_origin) != 1 or \
+            [str(entry) for entry in entries].count(jar_origin) != 1 or \
+            entries.index(Path(stub_origin)) >= entries.index(Path(jar_origin)):
         raise Rejected("baseline JVM classpath provider order differs")
-    loaded = _loaded_java_classes(log, pinned | stub, jar, True)
-    archived = []
-    if proof_dir is not None:
-        proof_dir = Path(proof_dir)
-        proof_dir.mkdir(parents=True, exist_ok=True)
-        for index, path in enumerate(argfiles):
-            target = proof_dir / f"worker-args-{index}.txt"
-            shutil.copyfile(path, target)
-            archived.append({"path": str(target), "sha256": digest(target)})
+    if recorded_dependency is None:
+        for entry in entries:
+            classes = _provider_classes(entry)
+            if classes and not ((str(entry) == stub_origin and classes == tap) or
+                                (str(entry) == jar_origin and classes == pinned)):
+                raise Rejected("baseline JVM classpath has an unexpected dyn4j provider")
+    providers = [
+        {"kind": "baseline-operation-tap", "path": stub_origin,
+         "sha256": hashlib.sha256(b"".join(tap[name] for name in sorted(tap))).hexdigest(),
+         "classes": len(tap)},
+        {"kind": "pinned-dyn4j", "path": jar_origin,
+         "sha256": digest(jar), "classes": len(pinned)},
+    ]
+    loaded = _loaded_baseline_classes(log, pinned, tap, jar_origin, stub_origin)
+    if recorded_dependency is not None and \
+            [str(entry) for entry in entries] != recorded_dependency.get("classpath"):
+        raise Rejected("baseline recorded classpath differs")
     return {"host": "jvm", "os": platform.platform(), "machine": platform.machine(),
             "device": False, "executable": str(executable),
             "executable_sha256": digest(executable), "version": version_text[0],
             "process_executions": 1, "worker_command": command,
-            "dependency": {"classpath": [str(entry) for entry in entries],
+            "dependency": {"schema": WORKER_PROOF_SCHEMA,
+                           "classpath": [str(entry) for entry in entries],
                            "providers": providers, "dependency_sha256": digest(jar),
-                           "loaded_classes": loaded, "argument_files": archived}}
+                           "loaded_classes": loaded, "argument_file": argument,
+                           "tap_classes": tap_hashes}}
 
 
 def baseline_inventory(raw, xml):
@@ -243,6 +364,24 @@ def baseline_inventory(raw, xml):
     return {"cases": len(expected), "states": raw["states"],
             "tagged_nonfinite_values": sum(item["tagged_nonfinite_values"]
                                             for item in observed.values())}
+
+
+def bounded_inventory(raw, xml, method):
+    ids = method_case_ids(method)
+    cases = {case["id"]: case for case in declared_cases() if case["id"] in set(ids)}
+    if raw["expected_cases"] != len(ids) or set(raw["per_case"]) != set(ids) or \
+            raw["input_records"] != len(ids) or raw["completed_cases"] != len(ids) or \
+            raw["states"] != sum(case["steps"] for case in cases.values()):
+        raise Rejected("bounded baseline method inventory differs")
+    for case_id, case in cases.items():
+        observed = raw["per_case"][case_id]
+        if observed["inputs"] != 1 or observed["case_ends"] != 1 or \
+                observed["states"] != case["steps"] or observed["tagged_nonfinite_values"]:
+            raise Rejected(f"bounded baseline case is incomplete: {case_id}")
+    if any(int(xml.get(key, -1)) != value for key, value in
+           (("tests", 1), ("skipped", 0), ("failures", 0), ("errors", 0))):
+        raise Rejected("bounded baseline JUnit method is incomplete")
+    return {"method": method, "cases": len(ids), "states": raw["states"]}
 
 
 def angle_failure(lane):
@@ -410,23 +549,7 @@ def verify_archive(output, write_verified=True):
              "baseline Angle first nonfinite step changed: 87"):
         raise Rejected("baseline capture failed for an unrelated reason")
     verify_baseline_jar(output / "dyn4j-6.0.0.jar")
-    if result["baseline_jar_sha256"] != PINNED_JAR_SHA256 or \
-            result["baseline_source_revision"] != PINNED_SOURCE_REVISION:
-        raise Rejected("baseline source identity differs")
-    if result["fixture_source_sha256"] != fixture_source_sha256():
-        raise Rejected("baseline fixture source differs")
-    revision = result.get("candidate_recorder_commit")
-    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
-        raise Rejected("recorder source revision is invalid")
-    try:
-        if git("--no-replace-objects", "cat-file", "-t", revision).strip() != b"commit":
-            raise Rejected("recorder source revision is invalid")
-        source = hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false", "archive",
-                                    "--format=tar", revision)).hexdigest()
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise Rejected("recorder source revision is unavailable") from error
-    if source != result["source_sha256"]:
-        raise Rejected("captured recorder source archive differs")
+    _verify_source_identity(result)
     if [item["method"] for item in result["methods"]] != list(MATRIX_METHODS):
         raise Rejected("baseline method inventory differs")
     verify_method_files(lane, result["methods"])
@@ -439,20 +562,16 @@ def verify_archive(output, write_verified=True):
     observed_processes = []
     for method in result["methods"]:
         recorded = method.get("process")
+        if not isinstance(recorded, dict):
+            raise Rejected("baseline method process proof is absent")
         process = baseline_runtime(lane / f"gradle-{method['method']}.log",
-                                   output / "dyn4j-6.0.0.jar")
+                                   output / "dyn4j-6.0.0.jar",
+                                   lane / "process-proof" / method["method"], recorded)
         if any(recorded_runtime.get(key) != value for key, value in
                runtime_identity(process).items()):
             raise Rejected("baseline method runtime identity differs")
-        if recorded is not None:
-            archived = recorded.get("dependency", {}).get("argument_files", [])
-            for file in archived:
-                if digest(file["path"]) != file["sha256"]:
-                    raise Rejected("baseline captured argument file differs")
-            normalized = json.loads(json.dumps(recorded))
-            normalized["dependency"]["argument_files"] = []
-            if normalized != process:
-                raise Rejected("baseline recorded worker command differs")
+        if recorded != process:
+            raise Rejected("baseline recorded worker command differs")
         observed_processes.append(process)
     if recorded_runtime.get("dependency_sha256", PINNED_JAR_SHA256) != PINNED_JAR_SHA256:
         raise Rejected("baseline runtime dependency hash differs")
@@ -491,7 +610,70 @@ def verify_archive(output, write_verified=True):
     return verified
 
 
-def capture(output, baseline_jar):
+def verify_bounded_archive(output):
+    output = Path(output)
+    result = json.loads((output / "result.json").read_text())
+    if result.get("status") != "BOUNDED_METHOD" or result.get("qualification") != "UNPASSED":
+        raise Rejected("bounded baseline capture status differs")
+    method = result.get("bounded_method")
+    if method not in MATRIX_METHODS or [item.get("method") for item in result["methods"]] != [method]:
+        raise Rejected("bounded baseline method identity differs")
+    lane = output / "baseline-jvm"
+    jar = output / "dyn4j-6.0.0.jar"
+    verify_baseline_jar(jar)
+    _verify_source_identity(result)
+    methods = result["methods"]
+    verify_method_files(lane, methods)
+    trace = lane / "trace.jsonl"
+    if digest(trace) != result["trace_sha256"]:
+        raise Rejected("bounded baseline trace hash differs")
+    raw = result["raw_counts"]
+    inventory = bounded_inventory(raw, result["xml"], method)
+    if inventory != result["inventory"]:
+        raise Rejected("bounded baseline recorded inventory differs")
+    xml_counts = verify_xml_trace(lane, methods, raw, result["trace_sha256"])
+    if xml_counts != result["xml_trace_counts"]:
+        raise Rejected("bounded baseline XML trace counts differ")
+    case_hashes = verify_case_slices(lane, method_case_ids(method))
+    if case_hashes != result["case_sha256"]:
+        raise Rejected("bounded baseline case slice hashes differ")
+    cases = [case for case in declared_cases() if case["id"] in set(method_case_ids(method))]
+    trace_counts = inspect(trace, cases)
+    if trace_counts != result["trace_counts"]:
+        raise Rejected("bounded baseline trace inspection differs")
+    xml = lane / "xml" / f"{method}.xml"
+    if b"PROSPECTIVE_ROTATION_JSON " in xml.read_bytes() or \
+            b"PROSPECTIVE_BINDING_JSON " in xml.read_bytes():
+        raise Rejected("bounded old-source baseline has prospective observations")
+    recorded = methods[0].get("process")
+    if not isinstance(recorded, dict):
+        raise Rejected("bounded baseline process proof is absent")
+    observed = baseline_runtime(lane / f"gradle-{method}.log", jar,
+                                lane / "process-proof" / method, recorded)
+    if observed != recorded:
+        raise Rejected("bounded baseline recorded process differs")
+    runtime = result["runtime"]
+    if runtime.get("method_executions") != 1 or \
+            runtime.get("dependency_sha256") != PINNED_JAR_SHA256 or \
+            runtime.get("method_process_sha256") != hashlib.sha256(json.dumps(
+                [recorded], sort_keys=True).encode()).hexdigest() or \
+            any(runtime.get(key) != value for key, value in runtime_identity(observed).items()):
+        raise Rejected("bounded baseline runtime identity differs")
+    return {"status": "BOUNDED_VERIFIED", "qualification": "UNPASSED",
+            "method": method, "inventory": inventory, "xml": result["xml"],
+            "xml_trace_counts": xml_counts, "trace_counts": trace_counts,
+            "case_sha256": case_hashes, "trace_sha256": result["trace_sha256"],
+            "baseline_jar_sha256": PINNED_JAR_SHA256,
+            "fixture_source_sha256": result["fixture_source_sha256"],
+            "source_sha256": result["source_sha256"],
+            "candidate_recorder_commit": result["candidate_recorder_commit"],
+            "process_sha256": _manifest_sha256(observed)}
+
+
+def capture(output, baseline_jar, bounded_method=None):
+    if bounded_method is not None and bounded_method not in MATRIX_METHODS:
+        raise Rejected("unknown bounded baseline method")
+    methods = (bounded_method,) if bounded_method is not None else MATRIX_METHODS
     commit, source_sha256 = clean_identity()
     fixture_sha256 = fixture_source_sha256()
     verify_baseline_jar(baseline_jar)
@@ -506,7 +688,8 @@ def capture(output, baseline_jar):
               "fixture_source_sha256": fixture_sha256,
               "baseline_source_revision": PINNED_SOURCE_REVISION,
               "baseline_jar_sha256": PINNED_JAR_SHA256, "methods": []}
-    raw = {"expected_cases": len(declared_cases()), "input_records": 0,
+    raw = {"expected_cases": len(method_case_ids(bounded_method)) if bounded_method is not None
+           else len(declared_cases()), "input_records": 0,
            "completed_cases": 0, "states": 0, "tagged_nonfinite_values": 0,
            "per_case": {}}
     xml = {key: 0 for key in ("tests", "skipped", "failures", "errors")}
@@ -515,13 +698,15 @@ def capture(output, baseline_jar):
     env["JAVA_TOOL_OPTIONS"] = (env.get("JAVA_TOOL_OPTIONS", "") +
                                 " -verbose:class").strip()
     try:
-        for method in MATRIX_METHODS:
+        for method in methods:
             started = time.time()
             command = [str(ROOT / "gradlew"), "-p", str(BASELINE_PROJECT), "test",
                        "--tests", f"portable.PortableMatrixTest.{method}",
                        f"-PbaselineJar={jar}", "--rerun-tasks", "--no-daemon",
                        "--console=plain", "--info",
                        "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+            if bounded_method is not None:
+                command.append("--offline")
             log = lane / f"gradle-{method}.log"
             with log.open("x", encoding="utf-8") as stream:
                 completed = subprocess.run(command, cwd=ROOT, env=env,
@@ -554,7 +739,7 @@ def capture(output, baseline_jar):
         result["raw_counts"] = raw
         if any(item["gradle_exit"] for item in result["methods"]):
             raise Rejected("baseline test method failed")
-        if not runtimes or len(runtimes) != len(MATRIX_METHODS) or any(
+        if not runtimes or len(runtimes) != len(methods) or any(
                 row != runtimes[0] for row in runtimes[1:]):
             raise Rejected("baseline methods lack one consistent executed JVM")
         result["runtime"] = {**runtimes[0], "method_executions": len(runtimes)}
@@ -562,12 +747,29 @@ def capture(output, baseline_jar):
         result["runtime"]["method_process_sha256"] = hashlib.sha256(json.dumps(
             [item["process"] for item in result["methods"]],
             sort_keys=True).encode()).hexdigest()
-        result["inventory"] = baseline_inventory(raw, xml)
-        result["angle_physical"] = angle_failure(lane)
+        if bounded_method is None:
+            result["inventory"] = baseline_inventory(raw, xml)
+            result["angle_physical"] = angle_failure(lane)
+        else:
+            result["bounded_method"] = bounded_method
+            result["inventory"] = bounded_inventory(raw, xml, bounded_method)
         if clean_identity() != (commit, source_sha256) or fixture_source_sha256() != fixture_sha256:
             raise Rejected("portable recorder source changed during baseline capture")
         result["trace_sha256"] = digest(lane / "trace.jsonl")
-        result["status"] = "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL"
+        if bounded_method is None:
+            result["status"] = "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL"
+        else:
+            result["xml_trace_counts"] = verify_xml_trace(
+                lane, result["methods"], raw, result["trace_sha256"])
+            result["case_sha256"] = verify_case_slices(lane, method_case_ids(bounded_method))
+            cases = [case for case in declared_cases()
+                     if case["id"] in set(method_case_ids(bounded_method))]
+            result["trace_counts"] = inspect(lane / "trace.jsonl", cases)
+            xml_file = lane / "xml" / f"{bounded_method}.xml"
+            if b"PROSPECTIVE_ROTATION_JSON " in xml_file.read_bytes() or \
+                    b"PROSPECTIVE_BINDING_JSON " in xml_file.read_bytes():
+                raise Rejected("bounded old-source baseline has prospective observations")
+            result["status"] = "BOUNDED_METHOD"
     except (Rejected, OSError, EOFError, KeyError, IndexError, TypeError, ValueError) as error:
         result["reason"] = str(error)
     (output / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
@@ -579,11 +781,17 @@ def main():
     parser.add_argument("--baseline-jar", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--verify-existing", action="store_true")
+    parser.add_argument("--verify-bounded-existing", action="store_true")
     parser.add_argument("--attest-existing", action="store_true")
     parser.add_argument("--attestation", type=Path)
+    parser.add_argument("--method", choices=MATRIX_METHODS)
     args = parser.parse_args()
-    if args.verify_existing and args.attest_existing:
+    if sum((args.verify_existing, args.verify_bounded_existing,
+            args.attest_existing)) > 1:
         parser.error("choose one existing-archive verification mode")
+    if args.method is not None and (args.verify_existing or args.verify_bounded_existing or
+                                    args.attest_existing):
+        parser.error("--method is only for a new bounded capture")
     if args.attest_existing:
         if not args.output.is_dir() or args.attestation is None:
             parser.error("existing archive and external attestation path are required")
@@ -596,14 +804,22 @@ def main():
         print(json.dumps({key: value for key, value in verified.items()
                           if key not in ("methods", "case_sha256")}, sort_keys=True))
         return 0
+    if args.verify_bounded_existing:
+        if not args.output.is_dir():
+            parser.error("existing bounded baseline output is absent")
+        verified = verify_bounded_archive(args.output.resolve())
+        print(json.dumps({key: value for key, value in verified.items()
+                          if key != "case_sha256"}, sort_keys=True))
+        return 0
     if args.baseline_jar is None:
         parser.error("--baseline-jar is required for capture")
     if args.output.exists():
         parser.error("output already exists")
-    result = capture(args.output.resolve(), args.baseline_jar.resolve())
+    result = capture(args.output.resolve(), args.baseline_jar.resolve(), args.method)
     print(json.dumps({key: value for key, value in result.items()
                       if key not in ("methods", "raw_counts")}, sort_keys=True))
-    return 0 if result["status"] == "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL" else 1
+    return 0 if result["status"] in ("CAPTURED_WITH_FAILED_ANGLE_PHYSICAL",
+                                      "BOUNDED_METHOD") else 1
 
 
 if __name__ == "__main__":
