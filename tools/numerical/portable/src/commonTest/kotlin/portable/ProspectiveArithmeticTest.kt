@@ -4,9 +4,45 @@ import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Transform
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ProspectiveArithmeticTest {
+    @Test
+    fun nestedCapturesKeepTheirOwnOperationsAndRestoreOuterScope() {
+        val outer = Transform()
+        val inner = Transform()
+        RotationOperationTap.capture("outer") { outerScope ->
+            outer.rotate(0.25)
+            RotationOperationTap.capture("inner") { innerScope ->
+                inner.rotate(0.5)
+                val innerCall = innerScope.drain().single()
+                    as RotationOperationTap.Observation.Rotation
+                assertSame(inner, innerCall.call.target)
+            }
+            assertSame(outerScope, RotationOperationTap.currentCapture())
+            val outerCall = outerScope.drain().single()
+                as RotationOperationTap.Observation.Rotation
+            assertSame(outer, outerCall.call.target)
+        }
+        assertEquals(null, RotationOperationTap.currentCapture())
+    }
+    @Test
+    fun scopedObservationCompletesRotationBeforeConsumerFailure() {
+        val transform = Transform()
+        val expected = Transform().also { it.rotate(0.25) }
+        val observed = RotationOperationTap.capture("failure-probe") { scope ->
+            transform.rotate(0.25)
+            scope.drain()
+        }
+        assertEquals(1, observed.size)
+        assertEquals(expected.getValues().toList(), transform.getValues().toList())
+        try {
+            observed.forEach { throw IllegalStateException("consumer failed") }
+        } catch (_: IllegalStateException) {
+        }
+        assertEquals(expected.getValues().toList(), transform.getValues().toList())
+    }
     @Test fun observedProbe() = observe("observedProbe") {
         val value = Transform()
         value.rotate(0.25)
@@ -16,40 +52,15 @@ class ProspectiveArithmeticTest {
         assertTrue(value.getCost().isFinite())
     }
 
-    private fun hex(value: Double): String = value.toBits().toULong().toString(16).padStart(16, '0')
-    private fun hexNullable(value: Double?): String = if (value == null) "null" else "\"${hex(value)}\""
-    private fun bits(value: Long?): String = if (value == null) "null"
-        else "\"${value.toULong().toString(16).padStart(16, '0')}\""
-    private fun name(value: String?): String = if (value == null) "null" else "\"$value\""
-
     private fun observe(method: String, run: () -> Unit) {
-        check(RotationOperationTap.listener == null)
-        val targets = mutableMapOf<Transform, Int>()
-        var sequence = 0
-        RotationOperationTap.listener = { call ->
-            val target = targets.getOrPut(call.target) { targets.size }
-            println("PROSPECTIVE_ROTATION_JSON " +
-                "{\"schema\":\"portable-rotation-op/2\",\"method\":\"$method\"," +
-                "\"sequence\":${sequence++},\"target_token\":$target," +
-                "\"case_id\":${name(call.caseId)},\"step\":${call.step}," +
-                "\"body_id\":${name(call.bodyId)}," +
-                "\"kind\":\"${call.kind}\",\"source\":\"${call.source}\"," +
-                "\"pre\":[\"${hex(call.preCost)}\",\"${hex(call.preSint)}\"]," +
-                "\"trig\":[\"${hex(call.trigCost)}\",\"${hex(call.trigSint)}\"]," +
-                "\"raw\":[${hexNullable(call.rawCost)},${hexNullable(call.rawSint)}]," +
-                "\"post\":[\"${hex(call.postCost)}\",\"${hex(call.postSint)}\"]," +
-                "\"angle_bits\":${bits(call.angleBits)}," +
-                "\"alpha_bits\":${hexNullable(call.alpha)}," +
-                "\"start_angle_bits\":${hexNullable(call.startAngle)}," +
-                "\"end_angle_bits\":${hexNullable(call.endAngle)}," +
-                "\"diff_bits\":${hexNullable(call.difference)}," +
-                "\"start\":[${hexNullable(call.startCost)},${hexNullable(call.startSint)}]," +
-                "\"end\":[${hexNullable(call.endCost)},${hexNullable(call.endSint)}]}")
-        }
-        try {
+        RotationOperationTap.capture(method) { capture ->
             run()
-        } finally {
-            RotationOperationTap.listener = null
+            for (observation in capture.drain()) {
+                val rotation = observation as? RotationOperationTap.Observation.Rotation
+                    ?: error("accepted TOI observation outside recorder")
+                println("PROSPECTIVE_ROTATION_JSON " +
+                    ProspectiveOperationMarker.encode(capture, rotation.call))
+            }
         }
     }
 
@@ -89,11 +100,12 @@ class ProspectiveArithmeticTest {
 
     @Test
     fun executedRotateAndDirectReset() {
-        val calls = mutableListOf<RotationOperationTap.Call>()
-        RotationOperationTap.listener = { calls.add(it) }
-        try {
+        RotationOperationTap.capture("direct-reset-probe") { scope ->
             val value = Transform()
             value.rotate(0.25)
+            val calls = scope.drain().map {
+                (it as RotationOperationTap.Observation.Rotation).call
+            }
             assertEquals(1, calls.size)
             assertEquals("rotate", calls[0].kind)
             assertEquals(0.25.toBits(), calls[0].angleBits)
@@ -101,14 +113,15 @@ class ProspectiveArithmeticTest {
             assertEquals(value.getSint().toBits(), calls[0].postSint.toBits())
             val end = Transform()
             end.rotate(0.5)
-            val count = calls.size
+            assertEquals(1, scope.drain().size)
             value.lerp(end, 0.5)
-            assertEquals(count + 1, calls.size)
-            assertEquals("lerp-reset", calls.last().kind)
-            assertEquals(value.getCost().toBits(), calls.last().postCost.toBits())
-            assertTrue(calls.last().angleBits != null)
-        } finally {
-            RotationOperationTap.listener = null
+            val reset = scope.drain().map {
+                (it as RotationOperationTap.Observation.Rotation).call
+            }
+            assertEquals(1, reset.size)
+            assertEquals("lerp-reset", reset.last().kind)
+            assertEquals(value.getCost().toBits(), reset.last().postCost.toBits())
+            assertTrue(reset.last().angleBits != null)
         }
     }
 }

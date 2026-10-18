@@ -33,7 +33,6 @@ import org.dyn4j.world.NarrowphaseCollisionData
 import org.dyn4j.world.ManifoldCollisionData
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
-import org.dyn4j.world.ToiAcceptedResetTap
 import org.dyn4j.world.listener.CollisionListener
 import org.dyn4j.world.listener.ContactListener
 import org.dyn4j.world.listener.StepListener
@@ -95,31 +94,69 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         val rotations = bodies.map { it.getTransform().getRotationAngle() }.toMutableList()
         val sums = MutableList(bodies.size) { 0.0 }
         var step = spec.startStep
-        val previousRotationListener = RotationOperationTap.listener
-        val previousResetListener = ToiAcceptedResetTap.listener
+        val diagnostic = RotationOperationTap.currentCapture()
         val bodyTransforms = bodies.map { it.getTransform() }
         val bodyCalls = IntArray(bodies.size)
         var temporaryCalls = 0
         fun bits(value: Double) = value.toBits().toULong().toString(16).padStart(16, '0')
         fun pair(value: Transform) = listOf(bits(value.getCost()), bits(value.getSint()))
+        fun flushObservations() {
+            val capture = diagnostic ?: return
+            for (observation in capture.drain()) {
+                when (observation) {
+                    is RotationOperationTap.Observation.Rotation -> {
+                        val call = observation.call
+                        val index = bodyTransforms.indexOfFirst { it === call.target }
+                        if (index < 0) temporaryCalls++ else bodyCalls[index]++
+                        val bound = call.copy(caseId = spec.id, step = step,
+                            bodyId = if (index < 0) null else "b$index")
+                        println("PROSPECTIVE_ROTATION_JSON " +
+                            ProspectiveOperationMarker.encode(capture, bound))
+                    }
+                    is RotationOperationTap.Observation.ToiAccepted -> {
+                        val firstIndex = bodies.indexOfFirst { it === observation.first }
+                        val secondIndex = bodies.indexOfFirst { it === observation.second }
+                        check(firstIndex >= 0 && secondIndex >= 0) {
+                            "accepted TOI body is outside recorded world"
+                        }
+                        val resets = if (observation.secondDynamic)
+                            listOf("b$firstIndex", "b$secondIndex") else listOf("b$firstIndex")
+                        println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
+                            "kind" to "toi-accepted", "case_id" to spec.id, "step" to step,
+                            "body_ids" to listOf("b$firstIndex", "b$secondIndex"),
+                            "reset_body_ids" to resets, "time_bits" to bits(observation.time))))
+                    }
+                }
+            }
+        }
         var order = 0
         var frozenOrder = 0
         var precedingSecondAsleep = true
         var events = 0
         var endpoints = 0
-        fun event(name: String, payload: Any?, time: TimeStep? = null,
+        val deferredStepEvents = mutableListOf<Map<String, Any?>>()
+        var worldStepRunning = false
+        var diagnosticFailure: Throwable? = null
+        fun event(name: String, payload: () -> Any?, time: TimeStep? = null,
                   projection: ((Int) -> Map<String, Any?>)? = null) {
-            val frozenEvent = if (frozen) {
-                val value = if (name.startsWith("step."))
-                    FrozenEvent.step(spec, name, step, frozenOrder, time)
-                    else projection?.invoke(frozenOrder)
-                        ?: error("frozen callback has no projection: $name")
-                frozenOrder++
-                mapOf("frozenEvent" to value)
-            } else emptyMap()
-            line(mapOf("kind" to "event", "id" to spec.id, "step" to step,
-                "order" to order++, "name" to name, "payload" to payload) + frozenEvent)
-            events++
+            if (diagnosticFailure != null) return
+            try {
+                val observedPayload = payload()
+                val frozenEvent = if (frozen) {
+                    val value = if (name.startsWith("step."))
+                        FrozenEvent.step(spec, name, step, frozenOrder, time)
+                        else projection?.invoke(frozenOrder)
+                            ?: error("frozen callback has no projection: $name")
+                    frozenOrder++
+                    mapOf("frozenEvent" to value)
+                } else emptyMap()
+                val row = mapOf("kind" to "event", "id" to spec.id, "step" to step,
+                    "order" to order++, "name" to name, "payload" to observedPayload) + frozenEvent
+                if (worldStepRunning) deferredStepEvents.add(row) else line(row)
+                events++
+            } catch (failure: Throwable) {
+                diagnosticFailure = failure
+            }
         }
         val contacts = object : ContactListener<Body> {
             fun detail(collision: ContactCollisionData<Body>?, contact: Contact?): Any? =
@@ -132,43 +169,43 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     "tangentialImpulse" to (contact as? SolvedContact)?.getTangentialImpulse(),
                     "solved" to (contact as? SolvedContact)?.isSolved())
             override fun begin(collision: ContactCollisionData<Body>?, contact: Contact?) =
-                event("contact.begin", detail(collision, contact), projection = { position ->
+                event("contact.begin", { detail(collision, contact) }, projection = { position ->
                     FrozenEvent.contactEvent("begin", step, position, collision, listOf(contact), bodies) })
             override fun persist(collision: ContactCollisionData<Body>?, oldContact: Contact?, newContact: Contact?) =
-                event("contact.persist", mapOf("old" to detail(collision, oldContact), "new" to detail(collision, newContact)),
+                event("contact.persist", { mapOf("old" to detail(collision, oldContact), "new" to detail(collision, newContact)) },
                     projection = { position -> FrozenEvent.contactEvent("persist", step, position,
                         collision, listOf(oldContact, newContact), bodies) })
             override fun end(collision: ContactCollisionData<Body>?, contact: Contact?) =
-                event("contact.end", detail(collision, contact), projection = { position ->
+                event("contact.end", { detail(collision, contact) }, projection = { position ->
                     FrozenEvent.contactEvent("end", step, position, collision, listOf(contact), bodies) })
             override fun destroyed(collision: ContactCollisionData<Body>?, contact: Contact?) =
-                event("contact.destroyed", detail(collision, contact), projection = { position ->
+                event("contact.destroyed", { detail(collision, contact) }, projection = { position ->
                     FrozenEvent.contactEvent("destroyed", step, position, collision, listOf(contact), bodies) })
             override fun collision(collision: ContactCollisionData<Body>?) =
-                event("contact.collision", collision?.getPenetration()?.getDepth(), projection = { position ->
+                event("contact.collision", { collision?.getPenetration()?.getDepth() }, projection = { position ->
                     FrozenEvent.contactEvent("collision", step, position, collision, emptyList(), bodies) })
             override fun preSolve(collision: ContactCollisionData<Body>?, contact: Contact?) =
-                event("contact.preSolve", detail(collision, contact), projection = { position ->
+                event("contact.preSolve", { detail(collision, contact) }, projection = { position ->
                     FrozenEvent.contactEvent("preSolve", step, position, collision, listOf(contact), bodies) })
             override fun postSolve(collision: ContactCollisionData<Body>?, contact: SolvedContact?) =
-                event("contact.postSolve", detail(collision, contact), projection = { position ->
+                event("contact.postSolve", { detail(collision, contact) }, projection = { position ->
                     FrozenEvent.contactEvent("postSolve", step, position, collision, listOf(contact), bodies) })
         }
         val collisions = object : CollisionListener<Body, BodyFixture> {
             override fun collision(collision: BroadphaseCollisionData<Body, BodyFixture>?): Boolean {
-                event("collision.broadphase", collision?.getBody1()?.let(bodies::indexOf),
+                event("collision.broadphase", { collision?.getBody1()?.let(bodies::indexOf) },
                     projection = { position -> FrozenEvent.collisionEvent("Broadphase", step,
                         position, collision, bodies) })
                 return true
             }
             override fun collision(collision: NarrowphaseCollisionData<Body, BodyFixture>?): Boolean {
-                event("collision.narrowphase", collision?.getPenetration()?.getDepth(),
+                event("collision.narrowphase", { collision?.getPenetration()?.getDepth() },
                     projection = { position -> FrozenEvent.collisionEvent("Narrowphase", step,
                         position, collision, bodies) })
                 return true
             }
             override fun collision(collision: ManifoldCollisionData<Body, BodyFixture>?): Boolean {
-                event("collision.manifold", collision?.getManifold()?.getPoints()?.size,
+                event("collision.manifold", { collision?.getManifold()?.getPoints()?.size },
                     projection = { position -> FrozenEvent.collisionEvent("Manifold", step,
                         position, collision, bodies) })
                 return true
@@ -176,35 +213,35 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         }
         val timeOfImpact = object : TimeOfImpactListener<Body> {
             override fun collision(body1: Body?, body2: Body?): Boolean {
-                event("toi.bodies", listOf(bodies.indexOf(body1), bodies.indexOf(body2)),
+                event("toi.bodies", { listOf(bodies.indexOf(body1), bodies.indexOf(body2)) },
                     projection = { position -> FrozenEvent.toiEvent(step, position,
                         body1, null, body2, null, null, bodies) })
                 return true
             }
             override fun collision(body1: Body?, fixture1: BodyFixture?, body2: Body?, fixture2: BodyFixture?): Boolean {
-                event("toi.fixtures", listOf(bodies.indexOf(body1), body1?.getFixtures()?.indexOf(fixture1), bodies.indexOf(body2), body2?.getFixtures()?.indexOf(fixture2)),
+                event("toi.fixtures", { listOf(bodies.indexOf(body1), body1?.getFixtures()?.indexOf(fixture1), bodies.indexOf(body2), body2?.getFixtures()?.indexOf(fixture2)) },
                     projection = { position -> FrozenEvent.toiEvent(step, position,
                         body1, fixture1, body2, fixture2, null, bodies) })
                 return true
             }
             override fun collision(body1: Body?, fixture1: BodyFixture?, body2: Body?, fixture2: BodyFixture?, toi: TimeOfImpact?): Boolean {
-                event("toi.payload.fixtures", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()),
+                event("toi.payload.fixtures", { mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()) },
                     projection = { position -> FrozenEvent.toiEvent(step, position,
                         body1, fixture1, body2, fixture2, toi, bodies) })
                 return true
             }
             override fun collision(body1: Body?, body2: Body?, toi: TimeOfImpact?): Boolean {
-                event("toi.payload.bodies", mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()),
+                event("toi.payload.bodies", { mapOf("bodies" to listOf(bodies.indexOf(body1), bodies.indexOf(body2)), "time" to toi?.getTime(), "distance" to toi?.getSeparation()?.getDistance()) },
                     projection = { position -> FrozenEvent.toiEvent(step, position,
                         body1, null, body2, null, toi, bodies) })
                 return true
             }
         }
         val steps = object : StepListener<Body> {
-            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.begin", step?.getDeltaTime(), step)
-            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.updatePerformed", step?.getDeltaTime(), step)
-            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.postSolve", step?.getDeltaTime(), step)
-            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.end", step?.getDeltaTime(), step)
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.begin", { step?.getDeltaTime() }, step)
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.updatePerformed", { step?.getDeltaTime() }, step)
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.postSolve", { step?.getDeltaTime() }, step)
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) = event("step.end", { step?.getDeltaTime() }, step)
         }
         val chain = if (spec.profile == "frozen-weld-pulley" &&
             spec.id.startsWith("P-JINT-Pulley-") &&
@@ -249,25 +286,8 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         var collisionRegistered = false
         var stepRegistered = false
         try {
-            if (previousRotationListener != null) {
-                RotationOperationTap.listener = { call ->
-                    val index = bodyTransforms.indexOfFirst { it === call.target }
-                    if (index < 0) temporaryCalls++ else bodyCalls[index]++
-                    previousRotationListener(call.copy(caseId = spec.id, step = step,
-                        bodyId = if (index < 0) null else "b$index"))
-                }
-                ToiAcceptedResetTap.listener = { first, second, time, secondDynamic ->
-                    val firstIndex = bodies.indexOfFirst { it === first }
-                    val secondIndex = bodies.indexOfFirst { it === second }
-                    check(firstIndex >= 0 && secondIndex >= 0)
-                    val resets = if (secondDynamic) listOf("b$firstIndex", "b$secondIndex")
-                        else listOf("b$firstIndex")
-                    println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
-                        "kind" to "toi-accepted", "case_id" to spec.id, "step" to step,
-                        "body_ids" to listOf("b$firstIndex", "b$secondIndex"),
-                        "reset_body_ids" to resets, "time_bits" to bits(time))))
-                    previousResetListener?.invoke(first, second, time, secondDynamic)
-                }
+            check(diagnostic == null || diagnostic.drain().isEmpty()) {
+                "diagnostic operations preceded case input"
             }
             line(mapOf("kind" to "inputs", "id" to spec.id, "family" to spec.family,
             "profile" to spec.profile, "hz" to spec.hz, "steps" to spec.steps,
@@ -347,7 +367,18 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                             "overLength" to (current > target || !slack)))
                     } else emptyMap()
                 } else emptyMap()
-                world.step(1, dt)
+                flushObservations()
+                worldStepRunning = true
+                try {
+                    if (diagnostic == null) world.step(1, dt)
+                    else diagnostic.captureStep(world) { world.step(1, dt) }
+                } finally {
+                    worldStepRunning = false
+                }
+                diagnosticFailure?.let { throw IllegalStateException("diagnostic event failed", it) }
+                for (row in deferredStepEvents) line(row)
+                deferredStepEvents.clear()
+                flushObservations()
                 for (index in bodies.indices) {
                     val angle = bodies[index].getTransform().getRotationAngle()
                     val difference = atan2(sin(angle - rotations[index]), cos(angle - rotations[index]))
@@ -367,7 +398,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                         "order" to order++, "state" to state) + frozenState)
                     endpoints++
                 }
-                if (previousRotationListener != null) {
+                if (diagnostic != null) {
                     println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
                         "kind" to "body-step", "case_id" to spec.id, "step" to step,
                         "bodies" to bodyTransforms.mapIndexed { index, transform -> mapOf(
@@ -394,12 +425,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     try {
                         if (toiRegistered) world.removeTimeOfImpactListener(timeOfImpact)
                     } finally {
-                        try {
-                            if (contactRegistered) world.removeContactListener(contacts)
-                        } finally {
-                            RotationOperationTap.listener = previousRotationListener
-                            ToiAcceptedResetTap.listener = previousResetListener
-                        }
+                        if (contactRegistered) world.removeContactListener(contacts)
                     }
                 }
             }
