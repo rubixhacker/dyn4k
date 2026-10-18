@@ -25,8 +25,8 @@ The importable `evaluate(manifest, candidate_sha, lane_id, archives, repository,
 | staged-consumer | Existing `artifact.verify_bundle` for bounded archives; frozen consumer XML, graph, and resolved bytes for full receipts | A bounded archive is `NOT_RUN`. A full receipt needs the selected consumer task, exact cases, both binaries, and runtime/configuration binding. |
 | numerical-parity | `compare.compare` for every frozen fixture and raw candidate trace | All 14 fixture identities, counts, reference records, candidate records, and capture receipts must pass. |
 | physical-correctness | Approved phase ceilings over candidate traces after `compare.compare` | Every physical fixture and every represented state must pass. Default profile failures remain failures. |
-| unchanged-java-corpus | Raw process and file receipt validation | The current producer has no transportable full Java corpus contract. A reported pass is `FAILED`; absent evidence is `NOT_RUN`. |
-| java-source-compatibility | Raw process and file receipt validation | The current bounded Kotlin consumer does not prove unchanged Java compilation and execution. A reported pass is `FAILED`; absent evidence is `NOT_RUN`. |
+| unchanged-java-corpus | Candidate committed case manifest, pinned baseline Git sources, raw compile/run logs, provider graph, binaries, and JUnit XML | The producer has not committed `unchanged-java-corpus-cases.json`; absent evidence is `NOT_RUN`. |
+| java-source-compatibility | Candidate committed case manifest, exact Git sources, nine required probe scopes, raw compile/run logs, provider graph, binaries, and JUnit XML | The producer has not committed `java-source-compatibility-cases.json`; absent evidence is `NOT_RUN`. |
 | duplicate-provider | `qualify.check_providers` over raw dependency graph plus failing stderr and exit code | Both providers and the expected diagnostic must appear. |
 | migration-journeys | `journeys.verify_evidence` over the raw ten-journey archive | The pinned sample revision, ten distinct results, final candidate, and candidate JAR hash must agree. |
 | performance-resource | `verify_candidate_archive` raw and environment verifiers | Existing producer returns `qualification: unpassed`; verified raw records remain `NOT_RUN` for this gate. |
@@ -34,6 +34,8 @@ The importable `evaluate(manifest, candidate_sha, lane_id, archives, repository,
 | independent-review | Two distinct raw CLI sessions with `turn_context.model = gpt-6-sol` | Standards and spec reports must target the exact final head and resolve every actionable finding. |
 
 The numerical receipt lists `fixtures` with `key`, `reference`, `candidate`, and `capture_receipt` paths. Its source digest is SHA-256 of the lowercase Git tree ID encoded as UTF-8. The comparator receives that digest and the independently audited `dyn4k-core` binary digest. Performance and migration producer archives belong under `evidence/`. The full staged repository belongs under `staged/`.
+
+Java gate manifests belong under `tools/qualification/` at the candidate commit. Each has `schema: 1`, `kind`, `sources`, and `cases`. Source entries name a path and SHA-256. Case entries name `classname` and `name`. The unchanged corpus manifest also records baseline revision, 199 source files, and 2,171 test annotations. The source compatibility cases cover all nine scopes named in the verifier. A raw Java archive contains the copied sources under `sources/`, compile and run receipts, JUnit XML, provider graph, and both resolved binaries. No such committed producer manifest exists in this branch.
 
 `UNAVAILABLE` requires a separate receipt with the exact SHA and lane. It must give a concrete `reason`, `observed_by`, and positive `observed_at_ns`. It records an absent external runtime or service. No archive means `NOT_RUN`. A malformed or failing attempted archive is `FAILED`. A producer's `PASSED` string cannot replace raw prerequisites.
 

@@ -25,6 +25,9 @@ LANE_GATES = frozenset(("staged-artifacts", "staged-consumer", "numerical-parity
                         "java-source-compatibility", "duplicate-provider"))
 GLOBAL_GATES = frozenset(("migration-journeys", "performance-resource",
                           "publication-contract", "independent-review"))
+JAVA_SCOPES = frozenset(("public-fields", "protected-state", "generic-signatures",
+                         "static-members", "null-behavior", "live-views",
+                         "iterator-mutation", "callback-reentry", "shared-identity"))
 
 
 def digest(value):
@@ -40,6 +43,19 @@ def load_approved_manifest(repository):
     if digest(manifest) != APPROVED_MANIFEST_SHA256:
         raise ValueError("approved complete-suite manifest changed")
     return manifest
+
+
+def _committed_json(repository, revision, path):
+    try:
+        raw = subprocess.check_output(
+            ["git", "-C", str(repository), "show", f"{revision}:{path}"],
+            stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"committed gate manifest is absent: {path}") from error
+    value = json.loads(raw, object_pairs_hook=_strict_object)
+    if not qualify.finite_json(value):
+        raise ValueError(f"non-finite committed manifest: {path}")
+    return value
 
 
 def _result(gate, status, reason, **details):
@@ -408,6 +424,117 @@ def _staged_consumer(root, receipt, candidate_sha, lane, expected_artifact_hashe
     return f"{len(observed)} raw external consumer cases and both resolved artifacts verified"
 
 
+def _java_cases(root, receipt, gate, candidate_sha, lane, repository,
+                expected_artifact_hashes):
+    if lane["target"] != "jvm":
+        raise ValueError(f"{gate} is only applicable to the JVM target")
+    path = f"tools/qualification/{gate}-cases.json"
+    frozen = _committed_json(repository, candidate_sha, path)
+    if (frozen.get("schema") != 1 or frozen.get("kind") != gate
+            or receipt.get("case_manifest_sha256") != digest(frozen)):
+        raise ValueError(f"{gate} committed case manifest differs from raw receipt")
+    sources, cases = frozen.get("sources"), frozen.get("cases")
+    if (not isinstance(sources, list) or not sources or
+            not isinstance(cases, list) or not cases):
+        raise ValueError(f"{gate} has no frozen sources or cases")
+    if gate == "unchanged-java-corpus":
+        inventory = _committed_json(repository, candidate_sha,
+                                    "docs/verification/baseline-inventory.json")
+        if (frozen.get("baseline_revision") != "058bf6d982a0fb89b54050f929f6ea9dae53b714"
+                or frozen.get("test_java_files") != 199
+                or frozen.get("test_annotations") != 2171
+                or len(sources) != 199 or len(cases) < 2171
+                or inventory.get("baseline", {}).get("commit") != frozen["baseline_revision"]
+                or {item.get("path") for item in sources if isinstance(item, dict)}
+                != set(inventory.get("test_java_files", []))):
+            raise ValueError("unchanged Java corpus inventory differs from pinned baseline")
+    else:
+        if {item.get("scope") for item in cases if isinstance(item, dict)} != JAVA_SCOPES:
+            raise ValueError("Java source compatibility probes omit a required scope")
+    source_paths = []
+    for item in sources:
+        if not isinstance(item, dict):
+            raise ValueError("frozen Java source record is invalid")
+        source = item.get("path")
+        _file_path_name(source)
+        source_paths.append(source)
+        recorded = item.get("sha256")
+        if not SHA64.fullmatch(str(recorded)):
+            raise ValueError(f"frozen Java source hash is invalid: {source}")
+        if gate == "java-source-compatibility":
+            committed = subprocess.check_output(
+                ["git", "-C", str(repository), "show", f"{candidate_sha}:{source}"],
+                stderr=subprocess.PIPE)
+            if hashlib.sha256(committed).hexdigest() != recorded:
+                raise ValueError(f"Java source differs from exact candidate: {source}")
+        else:
+            original = subprocess.check_output(
+                ["git", "-C", str(repository), "show",
+                 f"{frozen['baseline_revision']}:{source}"], stderr=subprocess.PIPE)
+            if hashlib.sha256(original).hexdigest() != recorded:
+                raise ValueError(f"unchanged Java source differs from pinned baseline: {source}")
+        if hashlib.sha256(_file_path(root, f"sources/{source}").read_bytes()).hexdigest() != recorded:
+            raise ValueError(f"raw Java source differs from frozen manifest: {source}")
+    if len(source_paths) != len(set(source_paths)):
+        raise ValueError("frozen Java source paths repeat")
+    expected = []
+    for item in cases:
+        if not isinstance(item, dict) or not item.get("classname") or not item.get("name"):
+            raise ValueError("frozen Java case identity is invalid")
+        expected.append((item["classname"], item["name"]))
+    if len(expected) != len(set(expected)):
+        raise ValueError("frozen Java case identities repeat")
+    outer = receipt["process"]
+    for stage in ("compilation", "execution"):
+        process = receipt.get(stage)
+        if (not isinstance(process, dict) or
+                not isinstance(process.get("command"), list) or not process["command"] or
+                process.get("exit_code") != 0 or
+                type(process.get("started_ns")) is not int or
+                type(process.get("finished_ns")) is not int or
+                not outer["started_ns"] <= process["started_ns"] <= process["finished_ns"] <= outer["finished_ns"]):
+            raise ValueError(f"{gate} raw {stage} command or time is invalid")
+        _file_path(root, process.get("log"))
+    graph = _file_path(root, receipt.get("provider_graph")).read_text()
+    providers = set(re.findall(r"io\.github\.rubixhacker:([^:\s]+):", graph))
+    if ("org.dyn4j:dyn4j" in graph or
+            {qualify.target_publication_name(module, "jvm") for module in qualify.MODULES}
+            - providers):
+        raise ValueError("Java consumer provider graph is incomplete or duplicated")
+    binaries = receipt.get("resolved_artifacts")
+    if not isinstance(binaries, dict) or set(binaries) != set(qualify.MODULES):
+        raise ValueError("Java consumer resolved artifacts are missing")
+    for module, relative in binaries.items():
+        if hashlib.sha256(_file_path(root, relative).read_bytes()).hexdigest() != expected_artifact_hashes[module]:
+            raise ValueError(f"Java consumer resolved binary differs: {module}")
+    reports = receipt.get("java_xml")
+    if not isinstance(reports, list) or not reports or len(reports) != len(set(reports)):
+        raise ValueError("Java case XML report paths are missing or duplicate")
+    observed = []
+    for relative in reports:
+        suite = ET.fromstring(_file_path(root, relative).read_bytes())
+        if suite.tag != "testsuite":
+            raise ValueError("Java XML root is not testsuite")
+        rows = list(suite.iter("testcase"))
+        counts = {"tests": len(rows),
+                  "failures": sum(row.find("failure") is not None for row in rows),
+                  "errors": sum(row.find("error") is not None for row in rows),
+                  "skipped": sum(row.find("skipped") is not None for row in rows)}
+        if (any(suite.get(key) is None or int(suite.get(key)) != value
+                for key, value in counts.items()) or
+                any(counts[key] for key in ("failures", "errors", "skipped")) or
+                not 0 <= float(suite.get("time", "nan")) < float("inf")):
+            raise ValueError("Java XML count, outcome, or duration differs")
+        for row in rows:
+            identity = (row.get("classname"), row.get("name"))
+            if not all(identity) or not 0 <= float(row.get("time", "nan")) < float("inf"):
+                raise ValueError("Java XML case identity or duration is invalid")
+            observed.append(identity)
+    if len(observed) != len(set(observed)) or set(observed) != set(expected):
+        raise ValueError("Java XML case identities or counts differ from committed manifest")
+    return f"{len(observed)} committed Java cases and raw compile/run evidence verified"
+
+
 def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
                        physical_only=False):
     numerical_dir = Path(__file__).resolve().parents[1] / "numerical"
@@ -573,6 +700,10 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             reason = _staged_consumer(root, receipt, candidate_sha, lane,
                                       expected_artifact_hashes, repository, process)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
+        if gate in ("unchanged-java-corpus", "java-source-compatibility"):
+            reason = _java_cases(root, receipt, gate, candidate_sha, lane,
+                                 repository, expected_artifact_hashes)
+            return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "migration-journeys":
             reason = _migration_journeys(root, candidate_sha,
                                          expected_artifact_hashes)
@@ -588,12 +719,7 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
         if gate == "independent-review":
             reason = _independent_review(root, candidate_sha, repository)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
-        if receipt["status"] == "PASSED":
-            return _result(gate, "FAILED",
-                           "reported pass lacks an independently verified full producer contract",
-                           archive_sha256=archive_sha)
-        return _result(gate, "FAILED", "producer reported failure",
-                       archive_sha256=archive_sha)
+        raise ValueError(f"unknown approved gate route: {gate}")
     except IncompleteEvidence as error:
         return _result(gate, "NOT_RUN", str(error))
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError,

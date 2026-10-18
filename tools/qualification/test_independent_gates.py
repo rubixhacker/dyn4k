@@ -281,3 +281,84 @@ class IndependentGateSeamTests(unittest.TestCase):
             (root / "consumer.xml").write_bytes(ET.tostring(suite))
             write()
             self.assertEqual("FAILED", status()["status"])
+
+    def test_java_source_uses_committed_manifest_and_raw_compile_run(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            repository = base / "repo"
+            repository.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "archive-fixture", str(repository)],
+                           check=True)
+            source = b"class Probe {}\n"
+            (repository / "Probe.java").write_bytes(source)
+            cases = [{"classname": "ProbeTest", "name": f"case{index}", "scope": scope}
+                     for index, scope in enumerate(sorted(independent_gates.JAVA_SCOPES))]
+            frozen = {"schema": 1, "kind": "java-source-compatibility",
+                      "sources": [{"path": "Probe.java",
+                                   "sha256": hashlib.sha256(source).hexdigest()}],
+                      "cases": cases}
+            path = repository / "tools/qualification/java-source-compatibility-cases.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(frozen))
+            subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",
+                            "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
+                           check=True)
+            candidate = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            tree = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD^{tree}"], text=True).strip()
+            archive = base / "archive"
+            archive.mkdir()
+            (archive / "sources").mkdir()
+            (archive / "sources/Probe.java").write_bytes(source)
+            for name, data in (("compile.log", b"compiled\n"), ("run.log", b"ran\n"),
+                               ("core.bin", b"core"), ("api.bin", b"api")):
+                (archive / name).write_bytes(data)
+            (archive / "graph.txt").write_text(
+                "io.github.rubixhacker:dyn4k-core-jvm:0.1.0-alpha.1\n"
+                "io.github.rubixhacker:dyn4k-jvm:0.1.0-alpha.1\n")
+            suite = ET.Element("testsuite", tests=str(len(cases)), failures="0",
+                               errors="0", skipped="0", time="0.1")
+            for case in cases:
+                ET.SubElement(suite, "testcase", classname=case["classname"],
+                              name=case["name"], time="0.1")
+            (archive / "java.xml").write_bytes(ET.tostring(suite))
+            started = time.time_ns() - 1_000_000
+            hashes = {"dyn4k-core": hashlib.sha256(b"core").hexdigest(),
+                      "dyn4k": hashlib.sha256(b"api").hexdigest()}
+            receipt = {"schema": 1, "status": "PASSED", "candidate_sha": candidate,
+                       "source_tree": tree, "lane": LANE, "target": "jvm", "runtime": "Java",
+                       "version": "minimum", "configuration": "no-optimize",
+                       "runtime_identity": "OpenJDK 8", "artifact_hashes": hashes,
+                       "case_manifest_sha256": independent_gates.digest(frozen),
+                       "process": {"command": ["./gradlew", "javaTest"], "exit_code": 0,
+                                   "started_ns": started, "finished_ns": started + 2_000_000},
+                       "compilation": {"command": ["javac", "Probe.java"], "exit_code": 0,
+                                       "started_ns": started, "finished_ns": started + 1,
+                                       "log": "compile.log"},
+                       "execution": {"command": ["java", "ProbeTest"], "exit_code": 0,
+                                     "started_ns": started + 2, "finished_ns": started + 3,
+                                     "log": "run.log"},
+                       "provider_graph": "graph.txt", "java_xml": ["java.xml"],
+                       "resolved_artifacts": {"dyn4k-core": "core.bin", "dyn4k": "api.bin"}}
+
+            def write():
+                receipt["files"] = [{"path": path.relative_to(archive).as_posix(),
+                                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                                     "mtime_ns": started + 4}
+                                    for path in archive.rglob("*")
+                                    if path.is_file() and path.name != "receipt.json"]
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+
+            def status():
+                return independent_gates.evaluate(
+                    self.manifest, candidate, LANE,
+                    {"java-source-compatibility": archive}, repository,
+                    hashes, "OpenJDK 8")["gates"]["java-source-compatibility"]
+
+            write()
+            self.assertEqual("PASSED", status()["status"])
+            (archive / "sources/Probe.java").write_bytes(b"class Other {}\n")
+            write()
+            self.assertEqual("FAILED", status()["status"])
