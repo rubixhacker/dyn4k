@@ -38,6 +38,38 @@ def command(argv, *, check=True, timeout=30):
     return result
 
 
+def setup_command(archive, label, argv, *, check=True, timeout=30):
+    setup = archive / "setup"
+    setup.mkdir(exist_ok=True)
+    started = time.monotonic_ns()
+    try:
+        result = subprocess.run(argv, capture_output=True, timeout=timeout)
+        stdout, stderr = result.stdout, result.stderr
+        exit_code, timed_out, launch_error = result.returncode, False, None
+    except subprocess.TimeoutExpired as error:
+        stdout, stderr = error.output or b"", error.stderr or b""
+        exit_code, timed_out, launch_error = None, True, None
+    except OSError as error:
+        stdout, stderr = b"", b""
+        exit_code, timed_out, launch_error = None, False, str(error)
+    ended = time.monotonic_ns()
+    (setup / f"{label}.stdout.bin").write_bytes(stdout)
+    (setup / f"{label}.stderr.bin").write_bytes(stderr)
+    (setup / f"{label}.json").write_text(json.dumps({
+        "argv": argv, "exit_code": exit_code, "timed_out": timed_out,
+        "launch_error": launch_error, "started_ns": started, "ended_ns": ended,
+    }, indent=2) + "\n")
+    if timed_out:
+        raise ValueError(f"setup command timed out: {argv}")
+    if launch_error is not None:
+        raise ValueError(f"setup command could not launch: {argv}: {launch_error}")
+    decoded = subprocess.CompletedProcess(argv, exit_code, stdout.decode("utf-8", errors="replace"),
+                                          stderr.decode("utf-8", errors="replace"))
+    if check and exit_code:
+        raise ValueError(f"command failed ({exit_code}): {argv}: {decoded.stderr.strip()}")
+    return decoded
+
+
 def validate_adb_route(port, serial):
     if not isinstance(port, int) or not 5040 <= port <= 65535:
         raise ValueError("ADB port must be an explicit task-isolated port at least 5040")
@@ -101,13 +133,13 @@ def validate_completion(raw, nonce):
 
 
 def simulator_protocol_bytes(raw, bundle_id, observed_pid):
-    first, _, rest = raw.partition(b"\n")
+    first = raw.partition(b"\n")[0]
     match = re.fullmatch(re.escape(bundle_id).encode() + rb": ([1-9][0-9]*)", first)
-    if match:
-        if int(match.group(1)) != observed_pid:
-            raise ValueError("simulator launch PID differs from observed process image")
-        return rest
-    return raw
+    if not match:
+        raise ValueError("simulator console PID header is missing or malformed")
+    if int(match.group(1)) != observed_pid:
+        raise ValueError("simulator launch PID differs from observed process image")
+    raise ValueError("simctl --console stdout-to-PID origin is unverified; Mac control required")
 
 
 def validate_elf_abi(path, target):
@@ -221,19 +253,22 @@ def apple_process_image(executable):
 def run_simulator(args, inventory, harness, producer):
     if not args.udid:
         raise ValueError("set --udid for the selected Apple simulator")
-    xcode = command(["xcodebuild", "-version"]).stdout
+    xcode = setup_command(args.archive, "apple-xcode", ["xcodebuild", "-version"]).stdout
     if not xcode.startswith("Xcode 26.4.1\n"):
         raise ValueError("selected Xcode differs from pinned 26.4.1")
-    listing = json.loads(command(["xcrun", "simctl", "list", "-j", "devices", "available"]).stdout)
+    listing = json.loads(setup_command(args.archive, "apple-device-list",
+                                       ["xcrun", "simctl", "list", "-j", "devices", "available"]).stdout)
     device = validate_simulator(args.target, args.udid, listing)
-    architecture = command(["xcrun", "lipo", "-archs", str(harness)]).stdout.split()
+    architecture = setup_command(args.archive, "apple-architecture",
+                                 ["xcrun", "lipo", "-archs", str(harness)]).stdout.split()
     expected_arch = "x86_64" if args.target == "iosX64" else "arm64"
     if architecture != [expected_arch]:
         raise ValueError("Apple executable architecture differs from selected simulator")
     app = inventory["app_bundle"]
     bundle = inventory["bundle_id"]
-    command(["xcrun", "simctl", "install", args.udid, app], timeout=120)
-    container = command(["xcrun", "simctl", "get_app_container", args.udid, bundle, "app"]).stdout.strip()
+    setup_command(args.archive, "apple-install", ["xcrun", "simctl", "install", args.udid, app], timeout=120)
+    container = setup_command(args.archive, "apple-container",
+                              ["xcrun", "simctl", "get_app_container", args.udid, bundle, "app"]).stdout.strip()
     installed = Path(container) / harness.name
     if not installed.is_file() or capture.digest(installed) != capture.digest(harness):
         raise ValueError("installed simulator package bytes differ from selected app")
@@ -274,17 +309,20 @@ def run_android(args, inventory, harness, producer, nonce):
     port, serial = validate_adb_route(args.adb_port, args.serial)
     adb = capture.required_file(args.adb, "ADB executable")
     prefix = [str(adb), "-P", str(port), "-s", serial]
-    devices = command([str(adb), "-P", str(port), "devices", "-l"]).stdout.splitlines()
+    devices = setup_command(args.archive, "android-devices",
+                            [str(adb), "-P", str(port), "devices", "-l"]).stdout.splitlines()
     listed = [row.split() for row in devices[1:] if row.strip()]
     if listed != [[serial, "device"]] and not (len(listed) == 1 and listed[0][:2] == [serial, "device"]):
         raise ValueError("task-isolated ADB server must expose only the selected ready device")
-    properties = {name: command(prefix + ["shell", "getprop", name]).stdout.strip() for name in
+    properties = {name: setup_command(args.archive, f"android-prop-{name}",
+                                      prefix + ["shell", "getprop", name]).stdout.strip() for name in
                   ("ro.product.cpu.abi", "ro.build.version.sdk", "ro.build.fingerprint", "sys.boot_completed")}
     runtime = validate_android_identity(args.target, properties)
     remote = f"/data/local/tmp/dyn4k-performance-{nonce}"
-    command(prefix + ["push", str(harness), remote], timeout=120)
-    command(prefix + ["shell", "chmod", "700", remote])
-    deployed = command(prefix + ["shell", "sha256sum", remote]).stdout.split()[0]
+    setup_command(args.archive, "android-push", prefix + ["push", str(harness), remote], timeout=120)
+    setup_command(args.archive, "android-chmod", prefix + ["shell", "chmod", "700", remote])
+    deployed = setup_command(args.archive, "android-deployed-sha",
+                             prefix + ["shell", "sha256sum", remote]).stdout.split()[0]
     validate_process_image(deployed, capture.digest(harness))
     guest = "echo DYN4K_PID:$$; exec " + " ".join(shlex.quote(value) for value in [remote, *producer])
     launch = prefix + ["shell", "sh -c " + shlex.quote(guest)]
@@ -301,14 +339,19 @@ def run_android(args, inventory, harness, producer, nonce):
         pid = int(first.split(":", 1)[1])
         image_path = ""
         image_deadline = time.monotonic() + 2
+        attempt = 0
         while time.monotonic() < image_deadline and process.poll() is None:
-            image_path = command(prefix + ["shell", "readlink", f"/proc/{pid}/exe"], check=False).stdout.strip()
+            image_path = setup_command(args.archive, f"android-process-path-{attempt}",
+                                       prefix + ["shell", "readlink", f"/proc/{pid}/exe"],
+                                       check=False).stdout.strip()
+            attempt += 1
             if image_path == remote:
                 break
             time.sleep(0.02)
         if image_path != remote:
             raise ValueError("Android process image path differs from deployed executable")
-        image_sha = command(prefix + ["shell", "sha256sum", f"/proc/{pid}/exe"]).stdout.split()[0]
+        image_sha = setup_command(args.archive, "android-process-sha",
+                                  prefix + ["shell", "sha256sum", f"/proc/{pid}/exe"]).stdout.split()[0]
         validate_process_image(image_sha, capture.digest(harness))
         stdout, stderr = process.communicate(timeout=args.timeout)
     except Exception:
@@ -318,7 +361,7 @@ def run_android(args, inventory, harness, producer, nonce):
         (args.archive / "stderr.bin").write_bytes(stderr)
         raise
     finally:
-        command(prefix + ["shell", "rm", "-f", remote], check=False)
+        setup_command(args.archive, "android-remove", prefix + ["shell", "rm", "-f", remote], check=False)
     (args.archive / "stdout.bin").write_bytes(stdout)
     (args.archive / "stderr.bin").write_bytes(stderr)
     ended = time.monotonic_ns()

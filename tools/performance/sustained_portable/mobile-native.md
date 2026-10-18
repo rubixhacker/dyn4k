@@ -52,7 +52,12 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
 Repeat with the compatibility scenario and a new archive. The launcher checks
 ELF class and machine, guest ABI and API, installed bytes, `/proc/<pid>/exe`,
 PID, host monotonic interval, linked identity, clocks, activity, reset, and
-completion. It retains raw files and an `unpassed` result on failure.
+completion. A failed preflight writes `result.json`; setup commands reached
+after preflight and any launched producer retain their raw streams.
+Every executed setup command also writes `setup/<name>.stdout.bin`,
+`setup/<name>.stderr.bin`, and `setup/<name>.json` in the archive before its
+exit status or timeout is checked. The JSON records the command, exit status,
+timeout, and host monotonic interval. Commands not reached have no record.
 
 On macOS, select one of `iosSimulatorArm64`, `iosX64`,
 `tvosSimulatorArm64`, or `watchosSimulatorArm64`. Stage the corresponding
@@ -71,9 +76,18 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
 ```
 
 The launcher checks Xcode 26.4.1, host architecture, simulator family, app
-installation, installed image bytes, observed `proc_pidpath`, PID, monotonic
-interval, and the fixture protocol. A missing process observation fails the
-capture. Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and
+installation, installed image bytes, observed `proc_pidpath`, PID, and
+monotonic interval. A missing process observation fails the capture.
+Simulator protocol acceptance currently fails closed: `simctl launch
+--console` stdout has no verified association to the observed process PID.
+Even a matching `bundle: PID` line cannot pass until a Mac control proves
+that line comes from `simctl` and cannot be supplied by app stdout. On a Mac,
+capture a real launch for each simulator family and compare the `simctl`
+reported PID with `proc_pidpath`; also inject app output that omits, spoofs,
+and mismatches that line. If the line is app controlled or has no reliable
+origin, use a separate OS launch receipt and app output channel before
+enabling protocol acceptance. Preserve the raw archive from each control.
+Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and
 `watchosDeviceArm64` app builds preserve source scope. Device deployment
 requires a selected physical device and signing identity. Their runtime
 qualification remains unpassed until a matching signed launch is observed.
