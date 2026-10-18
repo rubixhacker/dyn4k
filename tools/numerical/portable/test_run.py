@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -348,6 +349,76 @@ class ExtractionTest(unittest.TestCase):
                            str(executable) + " -cp worker.jar\n")
             with self.assertRaisesRegex(run.Rejected, "Java 21"):
                 run.runtime("jvm", log)
+
+    def test_java_21_banner_cannot_certify_jvm_8_route(self):
+        executable = Path("/tmp/dyn4k-tools/jdk21/bin/java")
+        if not executable.is_file():
+            self.skipTest("Java 21 test runtime is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "gradle.log"
+            log.write_text("Starting process 'Gradle Test Executor 1'. Command: " +
+                           str(executable) + " -cp worker.jar\n")
+            with patch.dict(os.environ, {"JAVA_TOOL_OPTIONS": "-verbose:class"}):
+                with self.assertRaisesRegex(run.Rejected, "Java 8"):
+                    run.runtime("jvm8", log)
+
+    def test_java_version_probe_accepts_retained_banner_shape(self):
+        java8 = subprocess.CompletedProcess(["java", "-version"], 0,
+            stdout="[Opened /tmp/dyn4k-tools/jdk8/jre/lib/rt.jar]\n"
+                   "[Loaded java.lang.Object from /tmp/dyn4k-tools/jdk8/jre/lib/rt.jar]\n",
+            stderr="Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp/numerical -verbose:class\n"
+                   'openjdk version "1.8.0_504"\n'
+                   "OpenJDK Runtime Environment (Temurin)(build 1.8.0_504-b01)\n"
+                   "OpenJDK 64-Bit Server VM (Temurin)(build 25.504-b01, mixed mode)\n")
+        self.assertEqual(run._java_version_line(java8), 'openjdk version "1.8.0_504"')
+        java21 = subprocess.CompletedProcess(["java", "-version"], 0,
+            stdout="[0.008s][info][class,load] java.lang.Object source: shared objects file\n",
+            stderr="Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp/numerical -verbose:class\n"
+                   'openjdk version "21.0.12.1" 2026-08-18 LTS\n'
+                   "OpenJDK Runtime Environment Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)\n"
+                   "OpenJDK 64-Bit Server VM Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)\n")
+        self.assertEqual(run._java_version_line(java21),
+                         'openjdk version "21.0.12.1" 2026-08-18 LTS')
+
+    def test_java_version_probe_rejects_missing_malformed_and_conflicting_lines(self):
+        banner = "Picked up JAVA_TOOL_OPTIONS: -verbose:class\n"
+        failures = (
+            (0, banner, "absent"),
+            (0, banner + 'openjdk version 1.8.0_504\n', "malformed"),
+            (0, banner + 'openjdk version "1.8.0_504"\n'
+             'openjdk version "21.0.12.1"\n', "multiple"),
+            (0, "unrecognized diagnostic\n" + 'openjdk version "1.8.0_504"\n',
+             "preamble"),
+            (1, 'openjdk version "1.8.0_504"\n', "failed"),
+        )
+        for exit_code, output, reason in failures:
+            with self.subTest(reason=reason), self.assertRaisesRegex(run.Rejected, reason):
+                run._java_version_line(subprocess.CompletedProcess(
+                    ["java", "-version"], exit_code, stdout="", stderr=output))
+
+    def test_real_java_8_version_banner_keeps_worker_identity(self):
+        executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
+        if not executable.is_file():
+            self.skipTest("Java 8 test runtime is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "dyn4k-core-jvm.jar"
+            with zipfile.ZipFile(staged, "w") as archive:
+                archive.writestr("org/dyn4j/geometry/Vector2.class", b"staged class")
+            log = root / "gradle.log"
+            log.write_text("Starting process 'Gradle Test Executor 1'. Command: " +
+                           str(executable) + " -cp " + str(staged) + "\n" +
+                           "[Loaded org.dyn4j.geometry.Vector2 from " +
+                           staged.as_uri() + "]\n")
+            execution = root / "native-exec.log"
+            execution.write_text(
+                f'123 execve("{executable}", ["java", "GradleWorkerMain"], 0x1) = 0\n'
+                f'123 openat(AT_FDCWD, "{staged}", O_RDONLY) = 4\n')
+            with patch.dict(os.environ, {"JAVA_TOOL_OPTIONS": "-verbose:class"}):
+                result = run.runtime("jvm8", log, execution, dependency=staged)
+            self.assertEqual(result["version"], 'openjdk version "1.8.0_504"')
+            self.assertEqual(result["executable"], str(executable.resolve()))
+            self.assertEqual(result["dependency"]["worker_open"]["worker_pid"], "123")
 
     def test_two_worker_commands_cannot_be_certified_as_one_execution(self):
         executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")

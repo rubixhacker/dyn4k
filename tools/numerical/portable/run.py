@@ -395,6 +395,32 @@ def _executed_node_bundle(host, execution_log, executable):
             "process_executions": len(executed)}
 
 
+def _java_version_line(probe):
+    if probe.returncode:
+        raise Rejected("Java version probe failed")
+    versions = []
+    for line in (probe.stdout + probe.stderr).splitlines():
+        if re.fullmatch(r'(?:openjdk|java) version "\d+(?:\.\d+){2,3}(?:_\d+)?"'
+                        r'(?: \d{4}-\d{2}-\d{2}(?: LTS)?)?', line):
+            versions.append(line)
+        elif line.startswith(("openjdk version", "java version")):
+            raise Rejected("malformed Java version line")
+        elif not versions:
+            if line.startswith("Picked up JAVA_TOOL_OPTIONS: ") or \
+                    re.fullmatch(r'\[(?:Opened|Loaded) .+\]', line) or \
+                    re.fullmatch(r'\[\d+(?:\.\d+)?s\]\[info\]\[class,load\] .+', line):
+                continue
+            raise Rejected("unexpected Java version preamble")
+        elif not line.startswith(("OpenJDK Runtime Environment", "OpenJDK 64-Bit Server VM",
+                                  "Java(TM) SE Runtime Environment", "Java HotSpot(TM)")):
+            raise Rejected("unexpected Java version output")
+    if not versions:
+        raise Rejected("Java version line is absent")
+    if len(versions) != 1:
+        raise Rejected("multiple Java version lines")
+    return versions[0]
+
+
 def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
             require_loaded=False):
     if host == "linux-x64":
@@ -443,7 +469,11 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
               "device": False, "executable": str(resolved), "executable_sha256": digest(resolved)}
     command = (str(resolved), "--version") if host.startswith("node-") else (str(resolved), "-version")
     probe = subprocess.run(command, capture_output=True, text=True, check=False)
-    result["version"] = (probe.stdout + probe.stderr).strip().splitlines()[0] if probe.stdout or probe.stderr else "UNAVAILABLE"
+    if host.startswith("node-"):
+        result["version"] = ((probe.stdout + probe.stderr).strip().splitlines()[0]
+                             if probe.stdout or probe.stderr else "UNAVAILABLE")
+    else:
+        result["version"] = _java_version_line(probe)
     if host == "jvm8" and 'version "1.8.' not in result["version"]:
         raise Rejected("JVM 8 lane did not execute on Java 8")
     if host in ("jvm", "android-host") and 'version "21.' not in result["version"]:
