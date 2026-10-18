@@ -7,14 +7,20 @@ import os
 from pathlib import Path
 import platform
 import secrets
+import signal
 import subprocess
 import sys
 import time
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = ROOT / "docs/research/performance-manifest-v1.json"
 NATIVE_HOST_TARGETS = {"linuxX64", "linuxArm64", "mingwX64", "macosArm64"}
+NATIVE_TARGET_NAMES = {"linuxX64": "linux_x64", "linuxArm64": "linux_arm64",
+                       "mingwX64": "mingw_x64", "macosArm64": "macos_arm64"}
+ARTIFACT_VERSION = "0.1.0-alpha.1"
+ARTIFACT_GROUP = "io.github.rubixhacker"
 TARGETS = {"js", "wasmJs", "wasmWasi"} | NATIVE_HOST_TARGETS
 MODES = {"timing"}
 STEP_HEADER = ("step", "elapsed_ns", "mutation_ns", "lateness_ns", "body_count",
@@ -62,10 +68,103 @@ def bundle_hashes(harness):
     }
 
 
+def native_module(label, target):
+    if label not in ("dyn4k-core", "dyn4k") or target not in NATIVE_HOST_TARGETS:
+        raise ValueError("unknown Native artifact or target")
+    return f"{ARTIFACT_GROUP}:{label}-{target.lower()}:{ARTIFACT_VERSION}"
+
+
+def native_artifacts(inventory, target):
+    artifacts = inventory.get("resolved_artifacts")
+    if not isinstance(artifacts, list) or len(artifacts) != 2:
+        raise ValueError("Native inventory needs exactly two resolved engine artifacts")
+    expected = {native_module(label, target): label for label in ("dyn4k-core", "dyn4k")}
+    if {item.get("module") for item in artifacts if isinstance(item, dict)} != set(expected):
+        raise ValueError("Native artifact coordinates differ from exact target, group, or version")
+    return {expected[item["module"]]: item for item in artifacts}
+
+
+def validate_klib(path, label, target):
+    if path.suffix != ".klib" or not zipfile.is_zipfile(path):
+        raise ValueError(f"{label} is not a KLIB archive")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = set(archive.namelist())
+            if not {"default/manifest", "default/ir/bodies.knb"} <= entries:
+                raise ValueError(f"{label} KLIB lacks Native compiler entries")
+            fields = dict(line.split("=", 1) for line in
+                          archive.read("default/manifest").decode("utf-8").splitlines()
+                          if "=" in line)
+    except (zipfile.BadZipFile, KeyError, UnicodeError) as error:
+        raise ValueError(f"{label} has an invalid KLIB manifest") from error
+    required = {"builtins_platform": "NATIVE", "compiler_version": "2.4.20",
+                "native_targets": NATIVE_TARGET_NAMES[target], "short_name": label,
+                "unique_name": f"{ARTIFACT_GROUP}\\:{label}"}
+    if any(fields.get(key) != value for key, value in required.items()):
+        raise ValueError(f"{label} KLIB identity differs from exact target or compiler")
+
+
+def validate_publication(root, label, target, selected_sha):
+    module = f"{label}-{target.lower()}"
+    directory = root / "io" / "github" / "rubixhacker" / module / ARTIFACT_VERSION
+    stem = f"{module}-{ARTIFACT_VERSION}"
+    klib = required_file(str(directory / f"{stem}.klib"), "staged KLIB")
+    metadata = required_file(str(directory / f"{stem}.module"), "staged module metadata")
+    sources = required_file(str(directory / f"{stem}-sources.jar"), "staged source archive")
+    for path in (klib, metadata, sources):
+        sidecar = required_file(str(path.with_name(path.name + ".sha256")), "staged checksum")
+        if sidecar.read_text().strip().lower() != digest(path):
+            raise ValueError("staged publication checksum differs from bytes")
+    if digest(klib) != selected_sha:
+        raise ValueError("resolved KLIB differs from staged publication")
+    document = json.loads(metadata.read_text())
+    if document.get("component") != {"url": f"../../{label}/{ARTIFACT_VERSION}/{label}-{ARTIFACT_VERSION}.module",
+                                      "group": ARTIFACT_GROUP, "module": label,
+                                      "version": ARTIFACT_VERSION,
+                                      "attributes": {"org.gradle.status": "release"}}:
+        raise ValueError("staged publication component differs from selected module")
+    variant_name = target + "ApiElements-published"
+    variants = [entry for entry in document.get("variants", []) if entry.get("name") == variant_name]
+    files = variants[0].get("files", []) if len(variants) == 1 else []
+    if len(files) != 1 or files[0].get("url") != klib.name or files[0].get("sha256") != selected_sha:
+        raise ValueError("staged publication metadata differs from resolved KLIB")
+    source_variants = [entry for entry in document.get("variants", [])
+                       if entry.get("name") == target + "SourcesElements-published"]
+    source_files = source_variants[0].get("files", []) if len(source_variants) == 1 else []
+    if (len(source_files) != 1 or source_files[0].get("url") != sources.name or
+            source_files[0].get("sha256") != digest(sources)):
+        raise ValueError("staged publication metadata differs from source archive")
+    source_root = ROOT / label / "src"
+    sets = {"commonMain", "nativeMain", target + "Main"}
+    if target.startswith("linux"):
+        sets.add("linuxMain")
+    if target == "macosArm64":
+        sets.add("appleMain")
+    expected = {str(path.relative_to(source_root)).replace("/kotlin/", "/"): path
+                for path in source_root.rglob("*.kt")
+                if path.relative_to(source_root).parts[0] in sets}
+    try:
+        with zipfile.ZipFile(sources) as archive:
+            actual = {name for name in archive.namelist() if name.endswith(".kt")}
+            if actual != set(expected) or not actual:
+                raise ValueError("staged source archive differs from checked-out source inventory")
+            for name, path in expected.items():
+                if archive.read(name) != path.read_bytes():
+                    raise ValueError("staged source archive differs from checked-out source bytes")
+    except (zipfile.BadZipFile, KeyError) as error:
+        raise ValueError("staged source archive is invalid") from error
+    return {"module": native_module(label, target), "staged_klib": str(klib),
+            "klib_sha256": selected_sha, "module_metadata": str(metadata),
+            "module_metadata_sha256": digest(metadata), "sources": str(sources),
+            "sources_sha256": digest(sources), "source_archive_matches_checkout": True,
+            "source_to_link": "unpassed"}
+
+
 def observed_process_image(pid):
     if sys.platform.startswith("linux"):
         path = Path(f"/proc/{pid}/exe")
-        return {"method": "procfs_exe", "path": os.readlink(path), "sha256": digest(path)}
+        return {"method": "procfs_exe", "path": os.readlink(path),
+                "identity_kind": "mapped_executable", "sha256": digest(path)}
     if sys.platform == "darwin":
         import ctypes
         library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
@@ -74,7 +173,8 @@ def observed_process_image(pid):
         if length <= 0:
             raise OSError(ctypes.get_errno(), "proc_pidpath failed")
         path = Path(os.fsdecode(buffer.value))
-        return {"method": "proc_pidpath", "path": str(path), "sha256": digest(path)}
+        return {"method": "proc_pidpath", "path": str(path),
+                "identity_kind": "reported_path_only", "sha256": None}
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -95,7 +195,7 @@ def observed_process_image(pid):
                 raise ctypes.WinError(ctypes.get_last_error())
             path = Path(buffer.value)
             return {"method": "QueryFullProcessImageNameW", "path": str(path),
-                    "sha256": digest(path)}
+                    "identity_kind": "reported_path_only", "sha256": None}
         finally:
             kernel.CloseHandle(handle)
     raise OSError(f"no native process image observer for {sys.platform}")
@@ -114,12 +214,75 @@ def require_native_host(target):
 
 
 def require_process_image(image, expected_sha):
-    if image is None or image["sha256"] != expected_sha:
+    if image is None or image.get("identity_kind") != "mapped_executable":
+        raise ValueError("mapped process image bytes are unobserved; raw archive retained")
+    if image.get("sha256") != expected_sha:
         raise ValueError("observed process image does not match runtime; raw archive retained")
 
 
+def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
+    started = time.monotonic_ns()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               stdin=subprocess.PIPE if stdin_bytes else None,
+                               cwd=ROOT, env=os.environ.copy(),
+                               start_new_session=(os.name == "posix"))
+    image = None
+    image_error = None
+    try:
+        image = observed_process_image(process.pid)
+    except OSError as error:
+        image_error = str(error)
+    image_observed = time.monotonic_ns()
+    termination = "natural"
+    try:
+        remaining = max(0.001, timeout_seconds - (image_observed - started) / 1e9)
+        stdout, stderr = process.communicate(input=stdin_bytes or None, timeout=remaining)
+    except subprocess.TimeoutExpired:
+        termination = "host_deadline"
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+        except OSError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except OSError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired as error:
+                termination = "host_deadline_cleanup_incomplete"
+                stdout, stderr = error.stdout or b"", error.stderr or b""
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+    ended = time.monotonic_ns()
+    (archive / "stdout.raw").write_bytes(stdout)
+    (archive / "stderr.raw").write_bytes(stderr)
+    (archive / "stdin.raw").write_bytes(stdin_bytes)
+    (archive / "build-inventory.json").write_bytes(inventory_path.read_bytes())
+    receipt = {"pid": process.pid, "command": command, "started_monotonic_ns": started,
+               "image_observed_monotonic_ns": image_observed, "ended_monotonic_ns": ended,
+               "observed_image": image, "image_observation_error": image_error,
+               "exit_code": process.returncode, "termination": termination,
+               "host_timeout_seconds": timeout_seconds,
+               "stdout_sha256": digest(archive / "stdout.raw"),
+               "stderr_sha256": digest(archive / "stderr.raw"),
+               "inventory_sha256": digest(archive / "build-inventory.json")}
+    (archive / "execution.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    return receipt, stdout, stderr
+
+
 def validate_inventory(path, target, build, source_sha, producer_tree, manifest, harness,
-                       core, kotlin, bundle):
+                       core, kotlin, bundle, publication_root=None):
     inventory = json.loads(path.read_text())
     expected = {
         "format": "portable-build-inventory-v1", "target": target, "build": build,
@@ -146,10 +309,23 @@ def validate_inventory(path, target, build, source_sha, producer_tree, manifest,
     artifacts = inventory.get("resolved_artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("build inventory has no resolved compilation artifacts")
+    selected_native = native_artifacts(inventory, target) if target in NATIVE_HOST_TARGETS else None
     for artifact in artifacts:
         actual = required_file(artifact["path"], "resolved compilation artifact")
         if digest(actual) != artifact["sha256"]:
             raise ValueError("resolved compilation artifact changed after build")
+    if selected_native is not None:
+        if publication_root is None:
+            raise ValueError("Native inventory requires an independent staged publication root")
+        publication_root = Path(publication_root)
+        if not publication_root.is_absolute() or not publication_root.is_dir():
+            raise ValueError("staged publication root must be an absolute directory")
+        inventory["publication_inputs"] = []
+        for label in ("dyn4k-core", "dyn4k"):
+            artifact = selected_native[label]
+            validate_klib(Path(artifact["path"]), label, target)
+            inventory["publication_inputs"].append(
+                validate_publication(publication_root, label, target, artifact["sha256"]))
     for label, selected in (("dyn4k-core", core), ("dyn4k", kotlin)):
         selected_hash = digest(selected)
         matches = [item for item in artifacts if item["sha256"] == selected_hash and
@@ -264,6 +440,9 @@ def capture(args):
         require_native_host(args.target)
     if args.steps < 1 or args.warmup < 0:
         raise ValueError("steps must be positive and warm-up nonnegative")
+    host_timeout = float(getattr(args, "host_timeout_seconds", 45.0))
+    if not math.isfinite(host_timeout) or not 0 < host_timeout <= 900:
+        raise ValueError("host timeout must be positive and at most 900 seconds")
     if args.build not in ("development", "optimized"):
         raise ValueError("unknown build configuration")
     manifest_path = required_file(str(MANIFEST), "manifest")
@@ -320,10 +499,30 @@ def capture(args):
     producer_tree = source_tree()
     inventory_path = required_file(args.inventory, "build inventory")
     inventory = validate_inventory(inventory_path, args.target, args.build, args.source_sha,
-                                   producer_tree, manifest_path, harness, core, kotlin, bundle)
+                                   producer_tree, manifest_path, harness, core, kotlin, bundle,
+                                   getattr(args, "publication_root", None))
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
     args.archive.mkdir(parents=True)
+    publication_archive = []
+    if inventory.get("publication_inputs"):
+        directory = args.archive / "publication"
+        directory.mkdir()
+        for item in inventory["publication_inputs"]:
+            label = item["module"].split(":")[1]
+            for key, expected_hash in (("staged_klib", item["klib_sha256"]),
+                                       ("module_metadata", item["module_metadata_sha256"]),
+                                       ("sources", item["sources_sha256"])):
+                for origin in (Path(item[key]), Path(item[key] + ".sha256")):
+                    target = directory / f"{label}-{origin.name}"
+                    target.write_bytes(origin.read_bytes())
+                    if origin.suffix == ".sha256":
+                        if target.read_text().strip().lower() != expected_hash:
+                            raise ValueError("staged checksum changed while archiving")
+                    elif digest(target) != expected_hash:
+                        raise ValueError("staged publication changed while archiving")
+                    publication_archive.append({"path": str(target.relative_to(args.archive)),
+                                                "sha256": digest(target)})
     nonce = secrets.token_hex(16)
     producer_args = [
         scenario["id"], scenario["family"], scenario["variant"], scenario["size"],
@@ -337,22 +536,8 @@ def capture(args):
         stdin_bytes = ("\t".join(producer_args) + "\n").encode("utf-8")
     else:
         command += producer_args
-    started = time.monotonic_ns()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               stdin=subprocess.PIPE if stdin_bytes else None,
-                               cwd=ROOT, env=os.environ.copy())
-    image = None
-    image_error = None
-    try:
-        image = observed_process_image(process.pid)
-    except OSError as error:
-        image_error = str(error)
-    stdout, stderr = process.communicate(input=stdin_bytes if stdin_bytes else None)
-    ended = time.monotonic_ns()
-    (args.archive / "stdout.raw").write_bytes(stdout)
-    (args.archive / "stderr.raw").write_bytes(stderr)
-    (args.archive / "stdin.raw").write_bytes(stdin_bytes)
-    (args.archive / "build-inventory.json").write_bytes(inventory_path.read_bytes())
+    execution, stdout, stderr = run_process(
+        command, args.archive, inventory_path, stdin_bytes, host_timeout)
     process_record = {
         "qualification": "unpassed", "protocol": "portable-development-v1",
         "target": args.target, "build": args.build, "mode": args.mode,
@@ -361,6 +546,9 @@ def capture(args):
         "build_inventory_sha256": digest(args.archive / "build-inventory.json"),
         "build_inventory": {"gradle": inventory["gradle"], "kgp": inventory["kgp"],
                             "compile_configuration": inventory["compile_configuration"]},
+        "publication_inputs": inventory.get("publication_inputs", []),
+        "publication_archive": publication_archive,
+        "source_to_link": "unpassed",
         "command": command, "inputs": {
             label: {"path": str(path), "sha256": hashes[label]}
             for label, path in (("manifest", manifest_path), ("runtime", runtime),
@@ -369,10 +557,18 @@ def capture(args):
         "bundle_sha256": bundle,
         "stdin_sha256": hashlib.sha256(stdin_bytes).hexdigest(),
         "stdin_bytes": len(stdin_bytes),
-        "pid": process.pid, "host": platform.uname()._asdict(),
-        "started_monotonic_ns": started, "ended_monotonic_ns": ended,
-        "observed_image": image, "image_observation_error": image_error,
-        "exit_code": process.returncode,
+        "pid": execution["pid"], "host": platform.uname()._asdict(),
+        "started_monotonic_ns": execution["started_monotonic_ns"],
+        "ended_monotonic_ns": execution["ended_monotonic_ns"],
+        "observed_image": execution["observed_image"],
+        "process_image_identity": (
+            "observed" if execution["observed_image"] is not None and
+            execution["observed_image"].get("identity_kind") == "mapped_executable"
+            else "unobserved"),
+        "image_observation_error": execution["image_observation_error"],
+        "execution_sha256": digest(args.archive / "execution.json"),
+        "termination": execution["termination"],
+        "host_timeout_seconds": host_timeout, "exit_code": execution["exit_code"],
         "raw": {"stdout_sha256": digest(args.archive / "stdout.raw"),
                 "stdout_bytes": len(stdout), "stderr_sha256": digest(args.archive / "stderr.raw"),
                 "stderr_bytes": len(stderr)},
@@ -386,9 +582,10 @@ def capture(args):
         },
     }
     (args.archive / "capture.json").write_text(json.dumps(process_record, indent=2) + "\n")
-    if process.returncode != 0:
-        raise ValueError(f"producer exited {process.returncode}; raw archive retained")
-    require_process_image(image, hashes["runtime"])
+    if execution["termination"].startswith("host_deadline"):
+        raise ValueError("producer exceeded host deadline; raw archive retained")
+    if execution["exit_code"] != 0:
+        raise ValueError(f"producer exited {execution['exit_code']}; raw archive retained")
     try:
         clocks, steps, provider, run = validate_protocol(
             stdout, scenario, args.source_sha, producer_tree, hashes, args.build, nonce,
@@ -406,7 +603,7 @@ def capture(args):
     (args.archive / "provider.json").write_text(json.dumps({
         "api": provider[1], "source_sha": provider[2], "core_sha256": provider[3],
         "kotlin_sha256": provider[4], "scenario": provider[5],
-        "build": provider[6], "nonce": provider[7], "pid": process.pid,
+        "build": provider[6], "nonce": provider[7], "pid": execution["pid"],
         "runtime_sha256": hashes["runtime"], "harness_sha256": hashes["harness"],
     }, indent=2) + "\n")
     (args.archive / "run.json").write_text(json.dumps({
@@ -415,6 +612,12 @@ def capture(args):
         "active_steps": int(run[6]), "memory_attribution": "missing",
         "allocation": "missing", "plateau": "missing", "qualification": "unpassed",
     }, indent=2) + "\n")
+    try:
+        require_process_image(execution["observed_image"], hashes["runtime"])
+    except ValueError as error:
+        process_record["process_identity_error"] = str(error)
+        (args.archive / "capture.json").write_text(json.dumps(process_record, indent=2) + "\n")
+        raise
     return process_record
 
 
@@ -431,8 +634,10 @@ def main():
     parser.add_argument("--core", required=True)
     parser.add_argument("--kotlin", required=True)
     parser.add_argument("--inventory", required=True)
+    parser.add_argument("--publication-root", type=Path)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
+    parser.add_argument("--host-timeout-seconds", type=float, default=45.0)
     args = parser.parse_args()
     try:
         record = capture(args)

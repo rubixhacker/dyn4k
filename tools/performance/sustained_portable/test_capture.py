@@ -1,12 +1,17 @@
 import json
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
+import zipfile
 
 import capture
 import native_host_capture
+import host_image_adverse
 
 
 class PortableCaptureTest(unittest.TestCase):
@@ -100,24 +105,147 @@ class PortableCaptureTest(unittest.TestCase):
         wrong_host = "linuxArm64" if capture.sys.platform == "win32" else "mingwX64"
         with self.assertRaisesRegex(ValueError, "matching Native host"):
             capture.require_native_host(wrong_host)
-        with self.assertRaisesRegex(ValueError, "observed process image"):
+        with self.assertRaisesRegex(ValueError, "unobserved"):
             capture.require_process_image(None, "a" * 64)
+        with self.assertRaisesRegex(ValueError, "unobserved"):
+            capture.require_process_image({"identity_kind": "reported_path_only", "sha256": "a" * 64},
+                                          "a" * 64)
         with self.assertRaisesRegex(ValueError, "observed process image"):
-            capture.require_process_image({"sha256": "b" * 64}, "a" * 64)
-        capture.require_process_image({"sha256": "a" * 64}, "a" * 64)
+            capture.require_process_image({"identity_kind": "mapped_executable", "sha256": "b" * 64},
+                                          "a" * 64)
+        capture.require_process_image({"identity_kind": "mapped_executable", "sha256": "a" * 64},
+                                      "a" * 64)
 
     def test_native_host_selects_only_resolved_target_artifacts(self):
         inventory = {"resolved_artifacts": [
-            {"module": "example:dyn4k-core-linuxarm64:1", "path": "/core.klib"},
-            {"module": "example:dyn4k-linuxarm64:1", "path": "/kotlin.klib"},
+            {"module": capture.native_module("dyn4k-core", "linuxArm64"), "path": "/core.klib"},
+            {"module": capture.native_module("dyn4k", "linuxArm64"), "path": "/kotlin.klib"},
         ]}
-        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k-core"),
+        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k-core", "linuxArm64"),
                          "/core.klib")
-        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k"),
+        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k", "linuxArm64"),
                          "/kotlin.klib")
         inventory["resolved_artifacts"].append(inventory["resolved_artifacts"][0])
-        with self.assertRaisesRegex(ValueError, "one resolved dyn4k-core"):
-            native_host_capture.selected_artifact(inventory, "dyn4k-core")
+        with self.assertRaisesRegex(ValueError, "exactly two"):
+            native_host_capture.selected_artifact(inventory, "dyn4k-core", "linuxArm64")
+
+    def test_publication_receipt_rejects_resealed_source_archive(self):
+        label, target = "dyn4k-core", "linuxX64"
+        module = "dyn4k-core-linuxx64"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "io/github/rubixhacker" / module / capture.ARTIFACT_VERSION
+            directory.mkdir(parents=True)
+            stem = f"{module}-{capture.ARTIFACT_VERSION}"
+            klib = directory / f"{stem}.klib"
+            klib.write_bytes(b"staged bytes")
+            metadata = directory / f"{stem}.module"
+            sources = directory / f"{stem}-sources.jar"
+            source_root = capture.ROOT / label / "src"
+            entries = {str(path.relative_to(source_root)).replace("/kotlin/", "/"): path
+                       for path in source_root.rglob("*.kt")
+                       if path.relative_to(source_root).parts[0] in ("commonMain", "nativeMain",
+                                                                    "linuxMain", "linuxX64Main")}
+            with zipfile.ZipFile(sources, "w") as archive:
+                for name, path in entries.items():
+                    archive.write(path, name)
+            document = {
+                "component": {"url": f"../../{label}/{capture.ARTIFACT_VERSION}/"
+                              f"{label}-{capture.ARTIFACT_VERSION}.module",
+                              "group": capture.ARTIFACT_GROUP, "module": label,
+                              "version": capture.ARTIFACT_VERSION,
+                              "attributes": {"org.gradle.status": "release"}},
+                "variants": [{"name": "linuxX64ApiElements-published",
+                              "files": [{"url": klib.name, "sha256": capture.digest(klib)}]},
+                             {"name": "linuxX64SourcesElements-published",
+                              "files": [{"url": sources.name,
+                                         "sha256": capture.digest(sources)}]}],
+            }
+            metadata.write_text(json.dumps(document))
+            for path in (klib, metadata, sources):
+                path.with_name(path.name + ".sha256").write_text(capture.digest(path))
+            self.assertTrue(capture.validate_publication(root, label, target,
+                                                         capture.digest(klib))["source_archive_matches_checkout"])
+            name = next(iter(entries))
+            with zipfile.ZipFile(sources, "w") as archive:
+                for entry, path in entries.items():
+                    archive.writestr(entry, b"substituted" if entry == name else path.read_bytes())
+            sources.with_name(sources.name + ".sha256").write_text(capture.digest(sources))
+            document["variants"][1]["files"][0]["sha256"] = capture.digest(sources)
+            metadata.write_text(json.dumps(document))
+            metadata.with_name(metadata.name + ".sha256").write_text(capture.digest(metadata))
+            with self.assertRaisesRegex(ValueError, "source bytes"):
+                capture.validate_publication(root, label, target, capture.digest(klib))
+
+    def test_host_deadline_retains_raw_and_process_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "archive"
+            archive.mkdir()
+            inventory = root / "inventory.json"
+            inventory.write_text("{}\n")
+            command = [sys.executable, "-u", "-c",
+                       "import sys,time; print('raw',flush=True); "
+                       "print('error',file=sys.stderr,flush=True); time.sleep(30)"]
+            execution, stdout, stderr = capture.run_process(command, archive, inventory, b"", 0.2)
+            self.assertEqual(execution["termination"], "host_deadline")
+            self.assertNotEqual(execution["exit_code"], 0)
+            self.assertEqual(stdout, (archive / "stdout.raw").read_bytes())
+            self.assertEqual(stderr, (archive / "stderr.raw").read_bytes())
+            self.assertIn(b"raw", stdout)
+            self.assertIn(b"error", stderr)
+            self.assertEqual((archive / "build-inventory.json").read_bytes(), inventory.read_bytes())
+            self.assertEqual(json.loads((archive / "execution.json").read_text())["pid"],
+                             execution["pid"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux capture timeout control")
+    def test_capture_timeout_writes_unpassed_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "debugExecutable" / "probe.kexe"
+            executable.parent.mkdir()
+            shutil.copy2(sys.executable, executable)
+            core, kotlin, inventory = (root / name for name in ("core.klib", "kotlin.klib",
+                                                                 "inventory.json"))
+            core.write_bytes(b"core")
+            kotlin.write_bytes(b"kotlin")
+            inventory.write_text("{}\n")
+            source = subprocess.check_output(["git", "-C", str(capture.ROOT), "rev-parse", "HEAD"],
+                                             text=True).strip()
+            request = SimpleNamespace(target="linuxX64", mode="timing", steps=1, warmup=0,
+                                      build="development", scenario=self.scenario["id"],
+                                      source_sha=source, runtime=str(executable),
+                                      harness=str(executable), core=str(core), kotlin=str(kotlin),
+                                      inventory=str(inventory), archive=root / "archive",
+                                      host_timeout_seconds=0.2, publication_root=root)
+            actual_check = capture.subprocess.check_output
+            actual_run = capture.run_process
+            def check(command, **kwargs):
+                return "" if "status" in command else actual_check(command, **kwargs)
+            def hang(command, archive, receipt, stdin, deadline):
+                script = "import sys,time; print('raw',flush=True); " \
+                         "print('error',file=sys.stderr,flush=True); time.sleep(30)"
+                return actual_run([sys.executable, "-u", "-c", script], archive, receipt,
+                                  stdin, deadline)
+            with mock.patch.object(capture.subprocess, "check_output", side_effect=check), \
+                 mock.patch.object(capture, "validate_inventory", return_value={
+                     "gradle": "9.5.0", "kgp": "2.4.20",
+                     "compile_configuration": "linuxX64CompileKlibraries"}), \
+                 mock.patch.object(capture, "run_process", side_effect=hang):
+                with self.assertRaisesRegex(ValueError, "host deadline"):
+                    capture.capture(request)
+            record = json.loads((request.archive / "capture.json").read_text())
+            self.assertEqual(record["termination"], "host_deadline")
+            self.assertEqual(record["qualification"], "unpassed")
+            self.assertIn(b"raw", (request.archive / "stdout.raw").read_bytes())
+            self.assertIn(b"error", (request.archive / "stderr.raw").read_bytes())
+            self.assertEqual((request.archive / "build-inventory.json").read_bytes(), b"{}\n")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_keeps_linux_proc_image_bytes(self):
+        result = host_image_adverse.path_swap_control()
+        self.assertEqual(result["swap"], "applied")
+        self.assertEqual(result["mapped_image_identity"], "matched_original")
 
     def test_rejects_nonfinite_and_negative_physical_diagnostics(self):
         payload = self.protocol()
@@ -219,17 +347,33 @@ class PortableCaptureTest(unittest.TestCase):
                                            core, kotlin, bad_bundle)
             inventory.update(target="linuxX64", compile_configuration="linuxX64CompileKlibraries",
                              compiler_mode="debug", link_task="linkDebugExecutableLinuxX64")
+            inventory["resolved_artifacts"][1]["module"] = capture.native_module("dyn4k", "linuxX64")
+            for module in ("example:dyn4k-core-linuxx64:1",
+                           capture.native_module("dyn4k-core", "linuxArm64"),
+                           "io.github.rubixhacker:dyn4k-core-linuxx64:wrong"):
+                inventory["resolved_artifacts"][0]["module"] = module
+                receipt.write_text(json.dumps(inventory))
+                with self.subTest(module=module), self.assertRaisesRegex(ValueError, "coordinates"):
+                    capture.validate_inventory(receipt, "linuxX64", "development", source,
+                                               capture.source_tree(), capture.MANIFEST, harness,
+                                               core, kotlin, bundle, root)
+            inventory["resolved_artifacts"][0]["module"] = capture.native_module("dyn4k-core", "linuxArm64")
+            inventory["resolved_artifacts"][1]["module"] = capture.native_module("dyn4k", "linuxArm64")
             receipt.write_text(json.dumps(inventory))
-            capture.validate_inventory(receipt, "linuxX64", "development", source,
-                                       capture.source_tree(), capture.MANIFEST, harness,
-                                       core, kotlin, bundle)
-            inventory["compiler_mode"] = "release"
-            receipt.write_text(json.dumps(inventory))
-            with self.assertRaisesRegex(ValueError, "source, build, or bundle"):
+            with self.assertRaisesRegex(ValueError, "coordinates"):
                 capture.validate_inventory(receipt, "linuxX64", "development", source,
                                            capture.source_tree(), capture.MANIFEST, harness,
-                                           core, kotlin, bundle)
+                                           core, kotlin, bundle, root)
+            inventory["resolved_artifacts"][0]["module"] = capture.native_module("dyn4k-core", "linuxX64")
+            inventory["resolved_artifacts"][1]["module"] = capture.native_module("dyn4k", "linuxX64")
+            receipt.write_text(json.dumps(inventory))
+            with self.assertRaisesRegex(ValueError, "not a KLIB"):
+                capture.validate_inventory(receipt, "linuxX64", "development", source,
+                                           capture.source_tree(), capture.MANIFEST, harness,
+                                           core, kotlin, bundle, root)
             inventory.update(target="js", compiler_mode="debug")
+            inventory["resolved_artifacts"][0]["module"] = "example:dyn4k-core-js:1"
+            inventory["resolved_artifacts"][1]["module"] = "example:dyn4k-js:1"
             receipt.write_text(json.dumps(inventory))
             core.write_bytes(b"substituted")
             with self.assertRaisesRegex(ValueError, "Gradle-resolved build input"):
