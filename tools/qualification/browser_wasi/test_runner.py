@@ -11,7 +11,29 @@ from pathlib import Path
 from unittest import mock
 
 from runner import (gradle_test_task, runtime_version, source_cases, staged_files,
-                    verify_reports, verify_wasmtime_output)
+                    verify_reports, verify_wasmtime_output, isolated_karma_port)
+
+
+class BrowserReporterStageTest(unittest.TestCase):
+    def test_browser_port_stages_line_reporter_and_cleans_both_fragments(self):
+        reporter = Path(__file__).resolve().parents[1] / "safari-karma-reporter.js"
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            with isolated_karma_port(project, reporter) as port:
+                config = project / "karma.config.d"
+                self.assertEqual(reporter.read_bytes(),
+                                 (config / "qualification-browser-reporter.js").read_bytes())
+                self.assertEqual(f"config.set({{port: {port}}});\n",
+                                 (config / "qualification-port.js").read_text())
+            self.assertFalse(config.exists())
+
+    def test_browser_port_rejects_missing_reporter_without_staging_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            with self.assertRaises(FileNotFoundError):
+                with isolated_karma_port(project, project / "missing-reporter.js"):
+                    pass
+            self.assertFalse((project / "karma.config.d").exists())
 
 
 class SourceCasesTest(unittest.TestCase):
@@ -774,7 +796,8 @@ class SourceCasesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with isolated_karma_port(root) as port:
+            reporter = Path(__file__).resolve().parents[1] / "safari-karma-reporter.js"
+            with isolated_karma_port(root, reporter) as port:
                 source = root / "karma.config.d/qualification-port.js"
                 self.assertIn(f"port: {port}", source.read_text())
                 self.assertGreater(port, 0)

@@ -40,8 +40,8 @@ RUNTIME_VERSIONS = {
     "wasmtime": {"minimum": "37.0.3", "current": "49.0.3"},
 }
 KARMA_EXECUTABLE_SUFFIX_SHA256 = {
-    "js": "4fb346d23df13171174478f38e46ebb8115f4ad7aaa634e6523c7c74e0eed909",
-    "wasmJs": "8efbb78a776d148bfbc3fcb85725f066971d154908f478b065c72c7722217bf9",
+    "js": "b9eaea550a4e6a3be9a8a6e22cd35dbc778ca4384af9fd98a75d9fda29e65064",
+    "wasmJs": "2f7aebd80087d79b5093a8cf05008be537c17f0cc4dc27a5c342d0a618ba439d",
 }
 KARMA_HELPER_SHA256 = {
     "runner": "15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18",
@@ -751,22 +751,29 @@ def gradle_command(root: Path, module: str, target: str,
 
 
 @contextmanager
-def isolated_karma_port(project_root: Path):
+def isolated_karma_port(project_root: Path, reporter_source: Path):
     config_dir = project_root / "karma.config.d"
     if config_dir.exists():
         raise ValueError(f"Karma configuration directory is already present: {config_dir}")
+    reporter = reporter_source.read_bytes()
+    if not reporter or len(reporter) > 256 * 1024:
+        raise ValueError("browser reporter source is empty or oversized")
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     content = f"config.set({{port: {port}}});\n"
     config_dir.mkdir()
+    reporter_file = config_dir / "qualification-browser-reporter.js"
     config_file = config_dir / "qualification-port.js"
     try:
+        reporter_file.write_bytes(reporter)
         config_file.write_text(content)
         yield port
     finally:
         if config_file.is_file() and config_file.read_text() == content:
             config_file.unlink()
+        if reporter_file.is_file() and reporter_file.read_bytes() == reporter:
+            reporter_file.unlink()
         if config_dir.is_dir() and not any(config_dir.iterdir()):
             config_dir.rmdir()
 
@@ -830,7 +837,9 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 built = command(gradle, root, env)
                 karma_port = None
             else:
-                with isolated_karma_port(project) as karma_port:
+                with isolated_karma_port(
+                    project, root / "tools/qualification/safari-karma-reporter.js"
+                ) as karma_port:
                     built = command(gradle, root, env)
             finished_ns = time.time_ns()
             console = module_output / "gradle-console.log"
