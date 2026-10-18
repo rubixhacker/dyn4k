@@ -2038,6 +2038,7 @@ class FullHostedTests(unittest.TestCase):
             original = report.read_bytes()
             modified_ns = report.stat().st_mtime_ns
             for mutation in ("deleted", "duplicate", "truncated", "truncated-tail",
+                             "truncated-transform",
                              "wrong-fixture",
                              "wrong-method", "wrong-phase", "wrong-order", "wrong-step"):
                 with self.subTest(configuration=lane["configuration"], mutation=mutation):
@@ -2055,6 +2056,12 @@ class FullHostedTests(unittest.TestCase):
                     elif mutation == "truncated-tail":
                         actual[4] = actual[4].rsplit("manifold.point.0.id=", 1)[0] + \
                             "manifold.point.0.id=indexed:3\n"
+                    elif mutation == "truncated-transform":
+                        fields = actual[0].split("\t")
+                        transform = next(i for i, field in enumerate(fields)
+                                         if field.startswith("a.transform="))
+                        fields[transform] = "a.transform=1"
+                        actual[0] = "\t".join(fields)
                     else:
                         old, new = {
                             "wrong-fixture": ("fixture=CirclePolygon", "fixture=CircleSlice"),
@@ -2076,7 +2083,8 @@ class FullHostedTests(unittest.TestCase):
                             full_hosted.verify_raw_files(
                                 self.root, changed, manifest, consumer,
                                 candidate_repository=self.candidate_repository)
-                        if mutation in ("deleted", "duplicate", "truncated", "truncated-tail"):
+                        if mutation in ("deleted", "duplicate", "truncated", "truncated-tail",
+                                        "truncated-transform"):
                             (self.root / "receipt.json").write_text(json.dumps(changed))
                             full_hosted.package_archive(self.root, archive)
                             with mock.patch.object(full_hosted, "load_corpus",
@@ -2094,6 +2102,87 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.verify_transport_archive(
                 archive, receipt["candidate_sha"], "jsSafari",
                 candidate_repository=self.candidate_repository)
+
+    def test_safari_real_rows_reject_incomplete_nested_v2_values(self):
+        rows = self.safari_diagnostic_rows()
+        suite = ET.Element("testsuite")
+        for method in ("capsuleSlice", "circlePolygon", "circleSegment", "circleSlice",
+                       "polygonCapsule", "polygonPolygon"):
+            ET.SubElement(suite, "testcase", classname=
+                          "jsBrowserTest.org.dyn4j.collision.narrowphase."
+                          "WindowsCollisionIntermediateDiagnosticTest",
+                          name=f"{method}[js, browser, Safari26.6.2, MacOS10.15.7]")
+        output = ET.SubElement(suite, "system-out")
+        output.text = "".join(rows)
+        full_hosted.check_safari_diagnostic_suite(suite)
+        self.assertTrue(any("\ta.foci.world=null\t" in row for row in rows))
+        self.assertTrue(any("\tepa.replay.simplex=\t" in row for row in rows))
+        mutations = (
+            ("a.shape.local", "kind=Capsule|center=1"),
+            ("a.polygon.edgeArithmetic", "0:1"),
+            ("a.foci.world", "1"),
+            ("a.axes.withB", "1"),
+            ("clip.probe.feature.a", "point:0:1"),
+            ("sat.candidates", "x"),
+            ("sat.winner.preOrientation", "1"),
+            ("epa.replay.epsilon", "1"),
+            ("epa.replay.simplex", "1"),
+            ("epa.iteration.records", "1"),
+            ("epa.edge.a", "1"),
+            ("manifold.normal", "1"),
+            ("manifold.point.0.position", "1"),
+        )
+        for key, invalid in mutations:
+            with self.subTest(field=key):
+                changed = rows.copy()
+                index = next(i for i, row in enumerate(changed)
+                             if any(field.startswith(key + "=") and field != key + "=na"
+                                    and field != key + "=null" and field != key + "="
+                                    for field in row.split("\t")))
+                fields = changed[index].split("\t")
+                field_index = next(i for i, field in enumerate(fields)
+                                   if field.startswith(key + "="))
+                fields[field_index] = f"{key}={invalid}"
+                changed[index] = "\t".join(fields)
+                output.text = "".join(changed)
+                with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                    full_hosted.check_safari_diagnostic_suite(suite)
+        for key, original, invalid in (
+                ("a.foci.world", "null", "nul"),
+                ("a.axes.withB", "null", "nul"),
+                ("epa.edge.a", "na", "n"),
+                ("epa.replay.simplex", "", ";"),
+                ("epa.iteration.records", "", ":")):
+            with self.subTest(field=key, original=original):
+                changed = rows.copy()
+                index = next(i for i, row in enumerate(changed)
+                             if f"\t{key}={original}\t" in row)
+                changed[index] = changed[index].replace(
+                    f"\t{key}={original}\t", f"\t{key}={invalid}\t", 1)
+                output.text = "".join(changed)
+                with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                    full_hosted.check_safari_diagnostic_suite(suite)
+        changed = rows.copy()
+        changed[0] = changed[0].replace("a.transform=1@4607182418800017408,",
+                                        "a.transform=1@1,", 1)
+        output.text = "".join(changed)
+        with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+            full_hosted.check_safari_diagnostic_suite(suite)
+        keys = {field.split("=", 1)[0] for row in rows for field in row.split("\t")
+                if "=" in field}
+        for key in sorted(keys):
+            with self.subTest(malformed_field=key):
+                changed = rows.copy()
+                index = next(i for i, row in enumerate(changed)
+                             if any(field.startswith(key + "=") for field in row.split("\t")))
+                fields = changed[index].split("\t")
+                field_index = next(i for i, field in enumerate(fields)
+                                   if field.startswith(key + "="))
+                fields[field_index] = f"{key}=x"
+                changed[index] = "\t".join(fields)
+                output.text = "".join(changed)
+                with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                    full_hosted.check_safari_diagnostic_suite(suite)
 
     def test_public_safari_archive_rejects_resealed_product_substitutions(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")

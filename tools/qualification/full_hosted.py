@@ -11,6 +11,7 @@ import posixpath
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -54,6 +55,14 @@ SAFARI_DIAGNOSTIC_CASES = {
     "circleSlice": ("CircleSlice", "gjk"),
     "polygonCapsule": ("PolygonCapsule", "sat"),
     "polygonPolygon": ("PolygonPolygon", "sat"),
+}
+SAFARI_DIAGNOSTIC_SHAPES = {
+    "CapsuleSlice": ("Capsule", "Slice"),
+    "CirclePolygon": ("Circle", "Polygon"),
+    "CircleSegment": ("Circle", "Segment"),
+    "CircleSlice": ("Circle", "Slice"),
+    "PolygonCapsule": ("Polygon", "Capsule"),
+    "PolygonPolygon": ("Polygon", "Polygon"),
 }
 SAFARI_DIAGNOSTIC_PREFIX_KEYS = (
     "provider", "fixture", "method", "phase", "order", "step", "algorithm",
@@ -311,6 +320,299 @@ def safari_diagnostic_identities():
     return expected
 
 
+def safari_v2_require(condition, field):
+    if not condition:
+        raise ValueError(f"Safari diagnostic {field} value is incomplete or malformed")
+
+
+def safari_v2_integer(value, field, minimum=None):
+    safari_v2_require(len(value) <= 20 and bool(re.fullmatch(
+        r"(?:0|-?[1-9]\d*)", value)), field)
+    number = int(value)
+    safari_v2_require(minimum is None or number >= minimum, field)
+    return number
+
+
+def safari_v2_number(value, field):
+    parts = value.split("@")
+    safari_v2_require(len(parts) == 2 and len(parts[0]) <= 32 and bool(re.fullmatch(
+        r"(?:NaN|-?Infinity|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)",
+        parts[0])), field)
+    bits = safari_v2_integer(parts[1], field)
+    safari_v2_require(-(1 << 63) <= bits < (1 << 63), field)
+    number = float(parts[0])
+    if math.isnan(number):
+        raw = bits & ((1 << 64) - 1)
+        safari_v2_require((raw & 0x7ff0000000000000) == 0x7ff0000000000000
+                          and (raw & 0x000fffffffffffff) != 0, field)
+    else:
+        safari_v2_require(not math.isinf(number) or parts[0] in ("Infinity", "-Infinity"),
+                          field)
+        encoded = struct.unpack(">q", struct.pack(">d", number))[0]
+        safari_v2_require(bits == encoded or (number == 0.0 and bits in (0, -(1 << 63))),
+                          field)
+
+
+def safari_v2_vector(value, field):
+    parts = value.split(",")
+    safari_v2_require(len(parts) == 2, field)
+    for part in parts:
+        safari_v2_number(part, field)
+
+
+def safari_v2_numbers(value, field, count):
+    parts = value.split(",")
+    safari_v2_require(len(parts) == count, field)
+    for part in parts:
+        safari_v2_number(part, field)
+
+
+def safari_v2_vectors(value, field, allow_null=True, allow_empty=True):
+    if value == "null":
+        safari_v2_require(allow_null, field)
+        return None
+    if value == "":
+        safari_v2_require(allow_empty, field)
+        return 0
+    parts = value.split(";")
+    for part in parts:
+        safari_v2_vector(part, field)
+    return len(parts)
+
+
+def safari_v2_feature(value, field):
+    parts = value.split(":")
+    if parts[0] == "point":
+        safari_v2_require(len(parts) == 3, field)
+        safari_v2_integer(parts[1], field)
+        safari_v2_vector(parts[2], field)
+    elif parts[0] == "edge":
+        safari_v2_require(len(parts) == 9, field)
+        for index in (1, 2, 4, 6):
+            safari_v2_integer(parts[index], field)
+        for index in (3, 5, 7, 8):
+            safari_v2_vector(parts[index], field)
+    else:
+        safari_v2_require(len(parts) == 2 and parts[0] == "unknown", field)
+        safari_v2_integer(parts[1], field)
+
+
+def safari_v2_shape(value, field):
+    parts = [part.split("=", 1) for part in value.split("|")]
+    safari_v2_require(all(len(part) == 2 for part in parts), field)
+    fields = dict(parts)
+    kind = fields.get("kind")
+    suffixes = {
+        "Circle": ("circle.radius",),
+        "Capsule": ("capsule.length", "capsule.capRadius", "capsule.localFoci",
+                    "capsule.localAxis"),
+        "Slice": ("slice.radius", "slice.theta", "slice.circleCenter",
+                  "slice.rotation", "slice.upperEdge", "slice.lowerEdge"),
+        "Segment": ("segment.length", "vertices", "normals"),
+        "Polygon": ("vertices", "normals"),
+    }
+    safari_v2_require(kind in suffixes and [part[0] for part in parts] ==
+                      ["kind", "center", "radius", *suffixes[kind]], field)
+    safari_v2_vector(fields["center"], field)
+    safari_v2_number(fields["radius"], field)
+    for name in ("circle.radius", "capsule.length", "capsule.capRadius",
+                 "slice.radius", "slice.theta", "segment.length"):
+        if name in fields:
+            safari_v2_number(fields[name], field)
+    if kind == "Capsule":
+        safari_v2_vectors(fields["capsule.localFoci"], field)
+        safari_v2_vector(fields["capsule.localAxis"], field)
+    if kind == "Slice":
+        safari_v2_vector(fields["slice.circleCenter"], field)
+        safari_v2_vector(fields["slice.rotation"], field)
+        safari_v2_feature(fields["slice.upperEdge"], field)
+        safari_v2_feature(fields["slice.lowerEdge"], field)
+    count = None
+    if kind in ("Polygon", "Segment"):
+        count = safari_v2_vectors(fields["vertices"], field, False, False)
+        safari_v2_require(safari_v2_vectors(fields["normals"], field, False, False)
+                          == count, field)
+    return kind, count
+
+
+def safari_v2_polygon_edges(value, field, kind, vertices):
+    if kind != "Polygon":
+        safari_v2_require(value == "na", field)
+        return
+    edges = value.split(";")
+    safari_v2_require(len(edges) == vertices, field)
+    for index, edge in enumerate(edges):
+        parts = edge.split(":")
+        safari_v2_require(len(parts) == 12 and parts[0] == str(index), field)
+        for part in parts[1:8]:
+            safari_v2_number(part, field)
+        safari_v2_vector(parts[8], field)
+        safari_v2_number(parts[9], field)
+        safari_v2_vector(parts[10], field)
+        safari_v2_vector(parts[11], field)
+
+
+def safari_v2_sat_candidates(value, field):
+    safari_v2_require(bool(value), field)
+    candidates = value.split(";")
+    separated = False
+    for index, candidate in enumerate(candidates):
+        parts = candidate.split(":")
+        safari_v2_require(len(parts) in (4, 6, 13), field)
+        safari_v2_require(parts[0] in ("0", "1"), field)
+        safari_v2_integer(parts[1], field, 0)
+        if len(parts) == 4:
+            safari_v2_require(parts[2] == "zero", field)
+            safari_v2_vector(parts[3], field)
+        elif len(parts) == 6:
+            safari_v2_require(parts[2] == "separated" and
+                              index == len(candidates) - 1, field)
+            safari_v2_vector(parts[3], field)
+            safari_v2_vector(parts[4], field)
+            safari_v2_vector(parts[5], field)
+            separated = True
+        else:
+            safari_v2_vector(parts[2], field)
+            safari_v2_vector(parts[3], field)
+            safari_v2_vector(parts[4], field)
+            safari_v2_number(parts[5], field)
+            safari_v2_require(all(part in ("true", "false") for part in
+                              (parts[6], parts[7], parts[12])), field)
+            for part in (parts[8], parts[9]):
+                if part != "na":
+                    safari_v2_number(part, field)
+            safari_v2_number(parts[10], field)
+            safari_v2_vector(parts[11], field)
+    return separated
+
+
+def safari_v2_epa_records(value, field, iteration):
+    records = [] if not value else value.split(";")
+    safari_v2_require(len(records) == iteration, field)
+    for index, record in enumerate(records, 1):
+        parts = record.split(":")
+        safari_v2_require(len(parts) == 13 and parts[0] == str(index), field)
+        if parts[1] != "na":
+            safari_v2_integer(parts[1], field, 0)
+        for part in parts[2:6]:
+            safari_v2_vector(part, field)
+        safari_v2_number(parts[6], field)
+        safari_v2_vector(parts[7], field)
+        for part in parts[8:10]:
+            safari_v2_number(part, field)
+        safari_v2_require(parts[10] in ("continue", "epsilon", "iterationLimit"), field)
+        if parts[11] not in ("na", ""):
+            for edge_id in parts[11].split(","):
+                safari_v2_integer(edge_id, field, 0)
+        safari_v2_require(parts[12] in ("true", "false"), field)
+
+
+def safari_v2_check_values(values, step, points):
+    for field in ("a.transform", "b.transform"):
+        safari_v2_numbers(values[field], field, 6)
+    for field in ("a.center.local", "b.center.local", "a.center.world",
+                  "b.center.world", "penetration.normal", "gjk.initial.centerDirection",
+                  "gjk.initial.effectiveDirection"):
+        safari_v2_vector(values[field], field)
+    safari_v2_number(values["penetration.depth"], "penetration.depth")
+    shapes = {side: safari_v2_shape(values[f"{side}.shape.local"],
+                                    f"{side}.shape.local") for side in ("a", "b")}
+    expected_shapes = SAFARI_DIAGNOSTIC_SHAPES[values["fixture"]]
+    if values["order"] == "reverse":
+        expected_shapes = expected_shapes[::-1]
+    safari_v2_require(tuple(shapes[side][0] for side in ("a", "b")) == expected_shapes,
+                      "fixture shapes")
+    for side in ("a", "b"):
+        kind, vertices = shapes[side]
+        safari_v2_polygon_edges(values[f"{side}.polygon.edgeArithmetic"],
+                                f"{side}.polygon.edgeArithmetic", kind, vertices)
+        for suffix in ("foci.world", "axes.withB" if side == "a" else "axes.withA"):
+            safari_v2_vectors(values[f"{side}.{suffix}"], f"{side}.{suffix}")
+        feature = values[f"clip.probe.feature.{side}"]
+        safari_v2_require((feature == "na") == (values["hit"] == "false"),
+                          f"clip.probe.feature.{side}")
+        if feature != "na":
+            safari_v2_feature(feature, f"clip.probe.feature.{side}")
+    for index in range(6):
+        for suffix in ("direction", "a", "b.negated", "minkowski"):
+            field = f"support.{index}.{suffix}"
+            safari_v2_vector(values[field], field)
+    if step < 4:
+        safari_v2_require(values["manifold.normal"] == "na", "manifold.normal")
+    else:
+        safari_v2_vector(values["manifold.normal"], "manifold.normal")
+    for index in range(points):
+        safari_v2_vector(values[f"manifold.point.{index}.position"],
+                         f"manifold.point.{index}.position")
+        safari_v2_number(values[f"manifold.point.{index}.depth"],
+                         f"manifold.point.{index}.depth")
+    if values["algorithm"] == "sat":
+        safari_v2_require(values["sat.replay.hit"] in ("true", "false") and
+                          values["sat.replay.matchesResult"] in ("true", "false"),
+                          "sat.replay")
+        separated = safari_v2_sat_candidates(values["sat.candidates"], "sat.candidates")
+        safari_v2_require((values["sat.replay.hit"] == "false") == separated,
+                          "sat.candidates")
+        safari_v2_integer(values["sat.winner.index"], "sat.winner.index", 0)
+        if separated:
+            safari_v2_require(values["sat.winner.source"] in ("0", "1"),
+                              "sat.winner.source")
+        else:
+            safari_v2_require(values["sat.winner.source"] in ("a", "b"),
+                              "sat.winner.source")
+            for field in ("sat.winner.preOrientation", "sat.winner.finalAxis"):
+                safari_v2_vector(values[field], field)
+            for field in ("sat.winner.centerDot", "sat.winner.depth"):
+                safari_v2_number(values[field], field)
+            safari_v2_require(values["sat.winner.orientationFlip"] in ("true", "false"),
+                              "sat.winner.orientationFlip")
+    safari_v2_require(values["epa.replay.identity"] == "unobserved", "epa.replay.identity")
+    simplex = safari_v2_vectors(values["epa.replay.simplex"], "epa.replay.simplex",
+                                False, True)
+    iteration = safari_v2_integer(values["epa.replay.iteration"], "epa.replay.iteration", 0)
+    if values["algorithm"] == "sat":
+        safari_v2_require(iteration == 0, "epa.replay.iteration")
+    maximum = safari_v2_integer(values["epa.replay.maxIterations"],
+                                "epa.replay.maxIterations", 1)
+    safari_v2_require(iteration <= maximum, "epa.replay.iteration")
+    safari_v2_require(values["epa.replay.stop"] in ("notRun", "epsilon", "iterationLimit"),
+                      "epa.replay.stop")
+    safari_v2_require((iteration == 0) == (values["epa.replay.stop"] == "notRun"),
+                      "epa.replay.stop")
+    safari_v2_require(values["epa.replay.stop"] != "iterationLimit" or iteration == maximum,
+                      "epa.replay.stop")
+    safari_v2_require(simplex == 0 if iteration == 0 else simplex > 0,
+                      "epa.replay.simplex")
+    safari_v2_number(values["epa.replay.epsilon"], "epa.replay.epsilon")
+    safari_v2_require(values["epa.iteration.schema"] ==
+                      "index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:"
+                      "support:projection:delta:stop:equalDistanceEdgeIds:mirrorMatches",
+                      "epa.iteration.schema")
+    safari_v2_epa_records(values["epa.iteration.records"], "epa.iteration.records", iteration)
+    safari_v2_require(values["epa.queue.reconstructedMatches"] in ("true", "false"),
+                      "epa.queue.reconstructedMatches")
+    edge_present = values["epa.edge.a"] != "na"
+    safari_v2_require(edge_present == (iteration > 0), "epa.edge.a")
+    for field in ("epa.edge.a", "epa.edge.b", "epa.edge.normal", "epa.terminal.support"):
+        value = values[field]
+        if edge_present:
+            safari_v2_vector(value, field)
+        else:
+            safari_v2_require(value == "na", field)
+    for field in ("epa.edge.distance", "epa.terminal.projection", "epa.terminal.delta"):
+        value = values[field]
+        if edge_present:
+            safari_v2_number(value, field)
+        else:
+            safari_v2_require(value == "na", field)
+    for field in ("epa.replay.normalMatchesResult", "epa.replay.depthMatchesResult"):
+        safari_v2_require(values[field] in (("true", "false") if edge_present else ("na",)),
+                          field)
+    expected_selection = ("satSourceReplay" if values["algorithm"] == "sat" else
+                          "epaSourceReplay" if edge_present else "unavailable")
+    safari_v2_require(values["selection"] == expected_selection, "selection")
+
+
 def check_safari_diagnostic_suite(suite):
     expected_methods = set(SAFARI_DIAGNOSTIC_CASES)
     cases = suite.findall("testcase")
@@ -350,14 +652,18 @@ def check_safari_diagnostic_suite(suite):
         if (not 0 <= points <= 2 or str(step) != values["step"]
                 or (count != "na" and str(points) != count)):
             raise ValueError("Safari diagnostic step or manifold count is invalid")
+        sat_keys = (SAFARI_DIAGNOSTIC_SAT_KEYS[:5]
+                    if values.get("sat.replay.hit") == "false" else SAFARI_DIAGNOSTIC_SAT_KEYS)
         keys = (SAFARI_DIAGNOSTIC_PREFIX_KEYS + SAFARI_DIAGNOSTIC_TRACE_KEYS
-                + (SAFARI_DIAGNOSTIC_SAT_KEYS if values.get("algorithm") == "sat" else ())
+                + (sat_keys if values.get("algorithm") == "sat" else ())
                 + SAFARI_DIAGNOSTIC_EPA_KEYS + tuple(
                     f"manifold.point.{index}.{field}" for index in range(points)
                     for field in ("position", "depth", "id")))
         if ([pair[0] for pair in pairs] != list(keys)
                 or any(not value for key, value in pairs
-                       if key not in ("epa.replay.simplex", "epa.iteration.records"))
+                       if key not in ("a.foci.world", "b.foci.world", "a.axes.withB",
+                                      "b.axes.withA", "epa.replay.simplex",
+                                      "epa.iteration.records"))
                 or values["provider"] != "dyn4k"
                 or values["hit"] not in ("true", "false")
                 or values["epa.replay.depthMatchesResult"] not in ("true", "false", "na")):
@@ -376,6 +682,7 @@ def check_safari_diagnostic_suite(suite):
                                   or values["clipped"] not in ("true", "false")
                                   or count == "na")):
             raise ValueError("Safari diagnostic phase fields differ")
+        safari_v2_check_values(values, step, points)
         observed.add(identity)
     if observed != expected_rows:
         raise ValueError("Safari diagnostic rows are incomplete")
