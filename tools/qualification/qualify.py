@@ -415,6 +415,40 @@ def expected_probe_cases(manifest, group):
     return identities
 
 
+def validate_probe_accounting(probe, manifest, group_ids):
+    groups = {group.get("id"): group for group in manifest.get("groups", [])
+              if isinstance(group, dict) and isinstance(group.get("id"), str)}
+    summaries = probe.get("groups") if isinstance(probe, dict) else None
+    if not isinstance(summaries, list):
+        raise ValueError("probe report group counts are missing")
+    by_id = {item.get("id"): item for item in summaries
+             if isinstance(item, dict) and isinstance(item.get("id"), str)}
+    if len(by_id) != len(summaries) or set(by_id) != set(group_ids):
+        raise ValueError("probe report group counts differ from selected groups")
+    totals = {"expected": 0, "executed": 0, "reported": 0,
+              "failures": 0, "errors": 0, "skipped": 0}
+    for group_id in group_ids:
+        if group_id not in groups:
+            raise ValueError(f"probe manifest group is missing: {group_id}")
+        summary = by_id[group_id]
+        selected = len(expected_probe_cases(manifest, groups[group_id]))
+        if (type(summary.get("expected")) is not int or summary["expected"] != selected
+                or type(summary.get("executed")) is not int
+                or summary["executed"] != selected
+                or type(summary.get("reported")) is not int
+                or summary["reported"] < selected):
+            raise ValueError(f"probe counts differ from selected cases: {group_id}")
+        for key in ("failures", "errors", "skipped"):
+            if type(summary.get(key)) is not int or summary[key] != 0:
+                raise ValueError(f"probe has failed, errored, or skipped cases: {group_id}")
+        for key in totals:
+            totals[key] += summary[key]
+    for key, value in totals.items():
+        if type(probe.get(key)) is not int or probe[key] != value:
+            raise ValueError(f"probe aggregate {key} differs from report groups")
+    return totals
+
+
 def run_probe(command, report_paths, candidate_sha, output, manifest=None):
     problems = []
     groups = manifest.get("groups") if isinstance(manifest, dict) else None
@@ -426,8 +460,9 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
         problems.append("probe manifest has duplicate or invalid report groups")
     if sorted(report_paths) != sorted(patterns):
         problems.append("requested report groups differ from frozen manifest")
-    expected = executed = failures = skipped = 0
+    expected = executed = reported = failures = errors = skipped = 0
     expected_by_group = {}
+    group_reports = []
     for group in groups:
         try:
             identities = expected_probe_cases(manifest, group)
@@ -455,6 +490,8 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
             if not expected_cases and paths:
                 problems.append(f'unexpected report for empty group {group["id"]}')
             observed_cases = []
+            skipped_cases = set()
+            group_failures = group_errors = group_skipped = 0
             for path in paths:
                 try:
                     root = ET.parse(path).getroot()
@@ -464,15 +501,17 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
                     if not math.isfinite(suite_time) or suite_time < 0:
                         raise ValueError("suite time is invalid")
                     testcases = list(root.iter("testcase"))
-                    reported = {key: int(root.get(key, "-1")) for key in
-                                ("tests", "failures", "errors", "skipped")}
-                    if any(value < 0 for value in reported.values()):
+                    suite_counts = {key: int(root.get(key, "-1")) for key in
+                                    ("tests", "failures", "errors", "skipped")}
+                    if any(value < 0 for value in suite_counts.values()):
                         raise ValueError("suite counts are missing or negative")
                     actual_failures = sum(bool(testcase.find("failure") is not None) for testcase in testcases)
                     actual_errors = sum(bool(testcase.find("error") is not None) for testcase in testcases)
                     actual_skips = sum(bool(testcase.find("skipped") is not None) for testcase in testcases)
-                    if (reported["tests"] != len(testcases) or reported["failures"] != actual_failures
-                            or reported["errors"] != actual_errors or reported["skipped"] != actual_skips):
+                    if (suite_counts["tests"] != len(testcases)
+                            or suite_counts["failures"] != actual_failures
+                            or suite_counts["errors"] != actual_errors
+                            or suite_counts["skipped"] != actual_skips):
                         raise ValueError("suite counts differ from case elements")
                     for testcase in testcases:
                         duration = float(testcase.get("time", "nan"))
@@ -482,27 +521,49 @@ def run_probe(command, report_paths, candidate_sha, output, manifest=None):
                         if not all(identity):
                             raise ValueError("case identity is missing")
                         observed_cases.append(identity)
-                    executed += len(testcases) - actual_skips
-                    failures += actual_failures + actual_errors
-                    skipped += actual_skips
+                        if testcase.find("skipped") is not None:
+                            skipped_cases.add(identity)
+                    group_failures += actual_failures
+                    group_errors += actual_errors
+                    group_skipped += actual_skips
                 except (ET.ParseError, OSError, TypeError, ValueError) as error:
                     problems.append(f"invalid report {path}: {error}")
-            if len(observed_cases) != len(set(observed_cases)):
+            observed_counts = {}
+            for identity in observed_cases:
+                observed_counts[identity] = observed_counts.get(identity, 0) + 1
+            duplicate_cases = [identity for identity, count in observed_counts.items() if count > 1]
+            if duplicate_cases:
                 problems.append(f'duplicate cases in group {group["id"]}')
-            if set(observed_cases) != set(expected_cases):
-                problems.append(f'partial or unexpected cases in group {group["id"]}')
+            missing_cases = [identity for identity in expected_cases
+                             if observed_counts.get(identity, 0) == 0]
+            if missing_cases:
+                problems.append(f'missing selected cases in group {group["id"]}')
+            selected_executed = sum(
+                observed_counts.get(identity, 0) == 1 and identity not in skipped_cases
+                for identity in expected_cases)
+            full_reported = len(observed_cases)
+            executed += selected_executed
+            reported += full_reported
+            failures += group_failures
+            errors += group_errors
+            skipped += group_skipped
+            group_reports.append({"id": group["id"], "expected": len(expected_cases),
+                                  "executed": selected_executed, "reported": full_reported,
+                                  "failures": group_failures, "errors": group_errors,
+                                  "skipped": group_skipped})
         finished_at_ns = time.time_ns()
-    if failures or skipped:
-        problems.append("probe has failed or skipped cases")
+    if failures or errors or skipped:
+        problems.append("probe has failed, errored, or skipped cases")
     if executed != expected:
         problems.append("probe executed count differs from frozen expected count")
     result = {"candidate_sha": candidate_sha, "command": command,
               "exit_code": completed.returncode if completed else None,
               "started_at_ns": started_at_ns, "finished_at_ns": finished_at_ns,
-              "expected": expected, "executed": executed, "failures": failures,
+              "expected": expected, "executed": executed, "reported": reported,
+              "groups": group_reports, "failures": failures, "errors": errors,
               "skipped": skipped, "manifest_sha256": manifest_digest(manifest) if manifest else None,
               "status": "PROBE_FAILED" if problems else "PROBE_PASSED",
-              "reason": "; ".join(problems) if problems else "frozen foundation cases executed",
+              "reason": "; ".join(problems) if problems else "frozen selected cases verified in full reports",
               "scope": "foundation probe only; not a complete lane"}
     output.write_text(json.dumps(result, indent=2) + "\n")
     if completed:
@@ -605,9 +666,13 @@ def validate_hosted_probe(probe, candidate_sha, repository=None):
                 or observed.get("manifest_sha256") != manifest_digest(selected)
                 or observed.get("status") != "PROBE_PASSED"
                 or observed.get("expected") != expected or observed.get("executed") != expected
-                or observed.get("failures") != 0 or observed.get("skipped") != 0
+                or observed.get("failures") != 0 or observed.get("errors") != 0
+                or observed.get("skipped") != 0
+                or type(observed.get("reported")) is not int
+                or observed.get("reported") < expected
                 or observed.get("exit_code") != 0):
             raise ValueError(f"hosted {key} differs from frozen executed suite")
+        validate_probe_accounting(observed, selected, ids)
     hashes = probe.get("artifact_hashes")
     if (not isinstance(hashes, dict) or set(hashes) != set(MODULES)
             or any(not SHA64.fullmatch(str(value)) for value in hashes.values())):

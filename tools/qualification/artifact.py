@@ -71,9 +71,12 @@ def collect_group(repository, destination, manifest, group, started, finished, f
             observed.append(identity)
         files.append({"path": portable_path(bundled.relative_to(destination).as_posix()),
                       "sha256": qualify.digest(bundled), "mtime_ns": mtime_ns})
-    if len(observed) != len(set(observed)) or set(observed) != set(expected):
-        raise ValueError(f"partial, duplicate, or unexpected cases in {group_id}")
-    return len(observed)
+    if len(observed) != len(set(observed)):
+        raise ValueError(f"duplicate cases in {group_id}")
+    observed_set = set(observed)
+    if any(identity not in observed_set for identity in expected):
+        raise ValueError(f"missing selected cases in {group_id}")
+    return {"selected": len(expected), "reported": len(observed)}
 
 
 def check_probe(probe, manifest, groups, ids, candidate_sha):
@@ -83,9 +86,13 @@ def check_probe(probe, manifest, groups, ids, candidate_sha):
             or probe.get("status") != "PROBE_PASSED"
             or probe.get("manifest_sha256") != qualify.manifest_digest(selected)
             or probe.get("expected") != expected or probe.get("executed") != expected
-            or probe.get("failures") != 0 or probe.get("skipped") != 0
+            or probe.get("failures") != 0 or probe.get("errors") != 0
+            or probe.get("skipped") != 0
+            or type(probe.get("reported")) is not int
+            or probe.get("reported") < expected
             or probe.get("exit_code") != 0):
         raise ValueError(f"probe for {', '.join(ids)} differs from frozen executed suite")
+    qualify.validate_probe_accounting(probe, manifest, ids)
     started, finished = probe.get("started_at_ns"), probe.get("finished_at_ns")
     if (type(started) is not int or type(finished) is not int
             or started <= 0 or finished < started):
@@ -167,7 +174,7 @@ def stage_hosted(repository, manifest, candidate_sha, target, probe_path, matrix
     (destination / "json").mkdir()
     result = {"candidate_sha": candidate_sha, "route": target, "status": "PROBE_FAILED",
               "reason": "raw evidence is incomplete", "expected": 0, "executed": 0,
-              "groups": {}, "files": []}
+              "reported": 0, "groups": {}, "reported_groups": {}, "files": []}
     problems = []
     nonpass_status = None
 
@@ -202,14 +209,20 @@ def stage_hosted(repository, manifest, candidate_sha, target, probe_path, matrix
             if copy_json(sidecar, destination) != probe[key]:
                 problems.append(f"{suffix} JSON differs from hosted result")
             started, finished = check_probe(probe[key], manifest, groups, ids, candidate_sha)
+            declared_groups = {item["id"]: item for item in probe[key]["groups"]}
             for group_id in ids:
                 group = groups[group_id]
                 expected = qualify.expected_probe_cases(manifest, group)
                 result["expected"] += len(expected)
-                observed = collect_group(repository, destination, manifest, group,
-                                         started, finished, result["files"])
-                result["groups"][group_id] = observed
-                result["executed"] += observed
+                counts = collect_group(repository, destination, manifest, group,
+                                       started, finished, result["files"])
+                if (counts["selected"] != declared_groups[group_id]["executed"]
+                        or counts["reported"] != declared_groups[group_id]["reported"]):
+                    raise ValueError(f"raw report counts differ from probe: {group_id}")
+                result["groups"][group_id] = counts["selected"]
+                result["reported_groups"][group_id] = counts["reported"]
+                result["executed"] += counts["selected"]
+                result["reported"] += counts["reported"]
         if result["executed"] != result["expected"]:
             problems.append("raw executed count differs from frozen manifest")
         result["runtime"] = probe.get("runtime")
@@ -268,7 +281,7 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
     (destination / "json").mkdir()
     result = {"candidate_sha": candidate_sha, "route": "ubuntu-host", "status": "PROBE_FAILED",
               "reason": "raw evidence is incomplete", "expected": 0, "executed": 0,
-              "groups": {}, "files": []}
+              "reported": 0, "groups": {}, "reported_groups": {}, "files": []}
     problems = []
     try:
         result["runtime"] = ubuntu_runtime()
@@ -277,13 +290,19 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
         for name, ids in UBUNTU_PROBES.items():
             probe = copy_json(evidence_dir / name, destination)
             started, finished = check_probe(probe, manifest, groups, ids, candidate_sha)
+            declared_groups = {item["id"]: item for item in probe["groups"]}
             for group_id in ids:
                 group = groups[group_id]
                 result["expected"] += len(qualify.expected_probe_cases(manifest, group))
-                count = collect_group(repository, destination, manifest, group,
-                                      started, finished, result["files"])
-                result["groups"][group_id] = count
-                result["executed"] += count
+                counts = collect_group(repository, destination, manifest, group,
+                                       started, finished, result["files"])
+                if (counts["selected"] != declared_groups[group_id]["executed"]
+                        or counts["reported"] != declared_groups[group_id]["reported"]):
+                    raise ValueError(f"raw report counts differ from probe: {group_id}")
+                result["groups"][group_id] = counts["selected"]
+                result["reported_groups"][group_id] = counts["reported"]
+                result["executed"] += counts["selected"]
+                result["reported"] += counts["reported"]
         result["gav"], result["staged_files"], result["artifact_hashes"] = capture_staging(
             repository, destination, ("jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))
         for name in ("artifact-audit.json", "runtime-matrix.json"):
@@ -332,6 +351,7 @@ def verify_bundle(bundle, manifest, candidate_sha, require_matrix=True):
             selections[f"{name}-source.json"] = (f"core-{route}", route)
     groups = {group["id"]: group for group in manifest["groups"]}
     found = {}
+    found_reported = {}
     files = []
     recorded = summary.get("files")
     if (not isinstance(recorded, list) or not recorded
@@ -352,11 +372,18 @@ def verify_bundle(bundle, manifest, candidate_sha, require_matrix=True):
                 if probe != top.get(role):
                     raise ValueError(f"bundled {role} differs from hosted observation")
             started, finished = check_probe(probe, manifest, groups, ids, candidate_sha)
+            declared_groups = {item["id"]: item for item in probe["groups"]}
             for group_id in ids:
-                found[group_id] = collect_group(bundle / "xml", scratch, manifest,
-                                                groups[group_id], started, finished, files,
-                                                recorded_times)
-    if found != summary.get("groups") or sum(found.values()) != summary.get("executed"):
+                counts = collect_group(bundle / "xml", scratch, manifest, groups[group_id],
+                                       started, finished, files, recorded_times)
+                if (counts["selected"] != declared_groups[group_id]["executed"]
+                        or counts["reported"] != declared_groups[group_id]["reported"]):
+                    raise ValueError(f"bundled report counts differ from probe: {group_id}")
+                found[group_id] = counts["selected"]
+                found_reported[group_id] = counts["reported"]
+    if (found != summary.get("groups") or sum(found.values()) != summary.get("executed")
+            or found_reported != summary.get("reported_groups")
+            or sum(found_reported.values()) != summary.get("reported")):
         raise ValueError("bundle counts differ from raw XML")
     if summary.get("expected") != sum(found.values()):
         raise ValueError("bundle expected count differs from frozen cases")
@@ -477,6 +504,7 @@ def main():
         result = verify_bundle(args.output, manifest, args.candidate_sha)
     print(json.dumps({"route": result["route"], "status": result["status"],
                       "executed": result["executed"], "expected": result["expected"],
+                      "reported": result.get("reported", 0),
                       "reason": result["reason"]}))
     return 0 if result["status"] == "PROBE_PASSED" else 1
 

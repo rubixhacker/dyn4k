@@ -529,45 +529,3571 @@
       "normalizeReadsFieldsWithoutCallingOverriddenMagnitude",
       "normalizeUsesOneReciprocalAndMutatesTheSameVector",
       "zeroThresholdLeavesMutableVectorAndReturnsFreshZeroCopy"
+    ],
+    "combined_core_upstreamavltreecoveragetest": [
+      "clear",
+      "contains",
+      "get",
+      "getDepth",
+      "getMaximum",
+      "getMinimum",
+      "goncaloMarquesIssue",
+      "headIterator",
+      "headIteratorMissing",
+      "insertDuplicate",
+      "insertInOrder",
+      "insertReverseOrder",
+      "insertReverseOrderSorted",
+      "insertSequential",
+      "insertShuffled",
+      "insertSimple",
+      "isEmpty",
+      "iterator",
+      "random",
+      "remove",
+      "removeNotFound",
+      "removeRoot",
+      "removeRootNodeAndReplaceWithRight",
+      "sequentialRemoval",
+      "size",
+      "subsetIterator",
+      "subsetIteratorMissing",
+      "tailIterator",
+      "tailIteratorMissing"
+    ],
+    "combined_core_coverage_portablefoundationcoveragetest": [
+      "boxRejectsReversedCoordinatesAndNegativeRadius",
+      "boxUnionReturnsCopyAndMutationChangesReceiver",
+      "circleBoundaryAndAreaUseOriginalRadius",
+      "intervalBoundaryModesAndUnionAreObservable",
+      "matrix33SolveUsesAllThreeCoordinates",
+      "matrixSolveAndCopyUseIndependentValues",
+      "polygonRejectsWrongWindingAndCoincidentVertices",
+      "polygonVertexViewIsLiveAndCopyIsIndependent",
+      "protectedRotationStateAndOverrideRemainObservable",
+      "rayExposesLiveStartAndCopyOwnsItsStart",
+      "rectangleAreaAndTranslationKeepDimensions",
+      "referenceEqualityAndMutableValue",
+      "segmentsIntersectAtKnownPoint",
+      "transformTranslationAndInverseRecoverOriginalPoint",
+      "treeAcceptsOriginalShuffledValuesAndRemainsBalanced",
+      "treeRangeIteratorsIncludeBoundariesAndRejectRemoval",
+      "treeRejectsDuplicateButRetainsSortedValues",
+      "treeRemovalChangesMembershipAndExtremeValues",
+      "vector3DistanceAndCopyIncludeThirdCoordinate",
+      "vectorConstructionAndCopyKeepIndependentCoordinates",
+      "vectorDistanceUsesBothCoordinates",
+      "vectorMutationAndProductHaveDifferentIdentity",
+      "versionNumbersAreAnIndependentValue",
+      "windingChangesSignWhenVertexOrderReverses"
+    ],
+    "combined_core_coverage_upstreammatrix22coveragetest": [
+      "add",
+      "copy",
+      "createFull",
+      "createFullArray",
+      "createLessThanFourElements",
+      "createMoreThanFourElements",
+      "createNullArray",
+      "determinant",
+      "difference",
+      "equals",
+      "getInverse",
+      "getTranspose",
+      "identity",
+      "invert",
+      "multiplyMatrix",
+      "multiplyScalar",
+      "multiplyVector",
+      "multiplyVectorT",
+      "norm",
+      "productMatrix",
+      "productScalar",
+      "productVector",
+      "productVectorT",
+      "solve",
+      "subtract",
+      "sum",
+      "transpose"
+    ],
+    "combined_core_coverage_upstreammatrix33coveragetest": [
+      "add",
+      "copy",
+      "createFull",
+      "createFullArray",
+      "createNullArray",
+      "createPartialArray",
+      "determinant",
+      "difference",
+      "equalsHashcode",
+      "getInverse",
+      "getTranspose",
+      "identity",
+      "invert",
+      "multiplyMatrix",
+      "multiplyScalar",
+      "multiplyVector",
+      "multiplyVectorT",
+      "productMatrix",
+      "productScalar",
+      "productVector",
+      "productVectorT",
+      "solve22",
+      "solve33",
+      "subtract",
+      "sum",
+      "transpose"
+    ],
+    "combined_core_coverage_upstreamreferencecoveragetest": [
+      "testCreate",
+      "testEquals",
+      "testHashcode",
+      "testToString"
+    ],
+    "combined_core_coverage_upstreamrotationcoveragetest": [
+      "compare",
+      "copy",
+      "create",
+      "cross",
+      "dot",
+      "equals",
+      "get",
+      "getNormalizedAngle",
+      "getRotated",
+      "getRotationBetween",
+      "getShortestDistance",
+      "inverse",
+      "isAngleBetween",
+      "isIdentity",
+      "rotate",
+      "set",
+      "testIsUnit",
+      "toAngle",
+      "toVector"
+    ],
+    "combined_core_coverage_upstreamtransformcoveragetest": [
+      "copy",
+      "getTransformed",
+      "getTranslationRotationTransform",
+      "identity",
+      "lerp",
+      "rotate",
+      "setRotation",
+      "setTransform",
+      "setTranslation",
+      "transform",
+      "translate",
+      "values"
+    ],
+    "combined_core_coverage_upstreamvector2coveragetest": [
+      "add",
+      "copy",
+      "create",
+      "cross",
+      "distance",
+      "distanceBugInVersions_1_1_0_to_3_1_7",
+      "divide",
+      "dot",
+      "equals",
+      "equalsEpsilon",
+      "get",
+      "getAngleBetweenRange",
+      "interpolate",
+      "isOrthogonal",
+      "isZero",
+      "left",
+      "multiply",
+      "negate",
+      "normalize",
+      "project",
+      "right",
+      "rotate",
+      "set",
+      "subtract",
+      "to",
+      "tripleProduct",
+      "zero"
+    ],
+    "combined_core_coverage_upstreamvector3coveragetest": [
+      "add",
+      "copy",
+      "create",
+      "cross",
+      "distance",
+      "dot",
+      "equals",
+      "equalsEpsilon",
+      "get",
+      "interpolate",
+      "isOrthogonal",
+      "isZero",
+      "multiply",
+      "negate",
+      "normalize",
+      "project",
+      "set",
+      "subtract",
+      "to",
+      "tripleProduct",
+      "zero"
+    ],
+    "combined_core_coverage_upstreamversioncoveragetest": [
+      "getVersionString",
+      "versions"
+    ],
+    "combined_core_coverage_geometry_factory_geometryfactorycoveragetest": [
+      "cleanseArray",
+      "cleanseArrayWithNullElements",
+      "cleanseEmpty",
+      "cleanseList",
+      "cleanseListWithNullElements",
+      "cleanseNullList",
+      "createCircle",
+      "createEllipse",
+      "createEquilateralTriangle",
+      "createHalfEllipse",
+      "createHalfEllipseAtOrigin",
+      "createHorizontalSegment",
+      "createIsoscelesTriangle",
+      "createLessThan3PointsUnitCirclePolygon",
+      "createLinks",
+      "createLinksNull",
+      "createLinksNullVertex",
+      "createLinksOneVertex",
+      "createLinksWrap",
+      "createNegativeHeightEquilateralTriangle",
+      "createNegativeHeightIsoscelesTriangle",
+      "createNegativeHeightRectangle",
+      "createNegativeHeightRightTriangle",
+      "createNegativeLengthHorizontalSegment",
+      "createNegativeLengthVerticalSegment",
+      "createNegativeRadiusCircle",
+      "createNegativeRadiusUnitCirclePolygon",
+      "createNegativeSizeSquare",
+      "createNegativeWidthIsoscelesTriangle",
+      "createNegativeWidthRectangle",
+      "createNegativeWidthRightTriangle",
+      "createPolygon",
+      "createPolygonAtOrigin",
+      "createPolygonNullPoint",
+      "createPolygonalCapsule",
+      "createPolygonalCapsuleInvalidCount",
+      "createPolygonalCapsuleNegativeHeight",
+      "createPolygonalCapsuleNegativeWidth",
+      "createPolygonalCapsuleZeroHeight",
+      "createPolygonalCapsuleZeroWidth",
+      "createPolygonalCircle",
+      "createPolygonalCircleInvalidCount",
+      "createPolygonalCircleNegativeCount",
+      "createPolygonalCircleNegativeRadius",
+      "createPolygonalCircleZeroCount",
+      "createPolygonalCircleZeroRadius",
+      "createPolygonalEllipse",
+      "createPolygonalEllipseLessCount",
+      "createPolygonalEllipseNegativeHeight",
+      "createPolygonalEllipseNegativeWidth",
+      "createPolygonalEllipseOddCount",
+      "createPolygonalEllipseZeroHeight",
+      "createPolygonalEllipseZeroWidth",
+      "createPolygonalHalfEllipse",
+      "createPolygonalHalfEllipseAtOrigin",
+      "createPolygonalHalfEllipseInvalidCount",
+      "createPolygonalHalfEllipseNegativeHeight",
+      "createPolygonalHalfEllipseNegativeWidth",
+      "createPolygonalHalfEllipseZeroHeight",
+      "createPolygonalHalfEllipseZeroWidth",
+      "createPolygonalSlice",
+      "createPolygonalSliceAtOrigin",
+      "createPolygonalSliceInvalidCount",
+      "createPolygonalSliceNegativeRadius",
+      "createPolygonalSliceThetaGreaterThan180",
+      "createPolygonalSliceThetaLessThanZero",
+      "createPolygonalSliceThetaLessZero",
+      "createPolygonalSliceZeroRadius",
+      "createRectangle",
+      "createRightTriangle",
+      "createRightTriangleMirror",
+      "createSegment",
+      "createSegmentAtOrigin",
+      "createSegmentEnd",
+      "createSegmentNullPoint1",
+      "createSegmentNullPoint2",
+      "createSlice",
+      "createSliceAtOrigin",
+      "createSquare",
+      "createTriangle",
+      "createTriangleAtOrigin",
+      "createTriangleNullPoint",
+      "createUnitCirclePolygon",
+      "createVerticalSegment",
+      "createZeroHeightEquilateralTriangle",
+      "createZeroHeightIsoscelesTriangle",
+      "createZeroHeightRectangle",
+      "createZeroHeightRightTriangle",
+      "createZeroLengthHorizontalSegment",
+      "createZeroLengthVerticalSegment",
+      "createZeroRadiusCircle",
+      "createZeroRadiusUnitCirclePolygon",
+      "createZeroSizeSquare",
+      "createZeroWidthIsoscelesTriangle",
+      "createZeroWidthRectangle",
+      "createZeroWidthRightTriangle",
+      "flip",
+      "flipNullAxis",
+      "flipNullPoint",
+      "flipNullPolygon",
+      "flipZeroAxis",
+      "getAreaWeightedCenter",
+      "getAreaWeightedCenterArrayNullElements",
+      "getAreaWeightedCenterEmptyArray",
+      "getAreaWeightedCenterEmptyList",
+      "getAreaWeightedCenterListNullElements",
+      "getAreaWeightedCenterNullList",
+      "getAreaWeightedCenterOffset",
+      "getAreaWeightedCenterZeroAreaArray",
+      "getAreaWeightedCenterZeroAreaList",
+      "getAverageCenterArray",
+      "getAverageCenterArrayNullElements",
+      "getAverageCenterArrayNullOnlyElement",
+      "getAverageCenterEmptyArray",
+      "getAverageCenterEmptyList",
+      "getAverageCenterList",
+      "getAverageCenterListNullElements",
+      "getAverageCenterListNullOnlyElement",
+      "getAverageCenterNullList",
+      "getCounterClockwiseEdgeNormals",
+      "getCounterClockwiseEdgeNormalsWithNullVertex",
+      "getRotationRadius",
+      "getWindingArray",
+      "getWindingArrayLessThan2Points",
+      "getWindingArrayNullPoint",
+      "getWindingList",
+      "getWindingListLessThan2Points",
+      "getWindingListNullPoint",
+      "getWindingNullList",
+      "minkowskiSum",
+      "minkowskiSumInvalidCount1",
+      "minkowskiSumInvalidCount2",
+      "minkowskiSumInvalidCount3",
+      "minkowskiSumInvalidCount4",
+      "minkowskiSumInvalidRadius1",
+      "minkowskiSumInvalidRadius2",
+      "minkowskiSumInvalidSegments",
+      "minkowskiSumNullShape1",
+      "minkowskiSumNullShape2",
+      "minkowskiSumNullShape3",
+      "minkowskiSumNullWound1",
+      "minkowskiSumNullWound2",
+      "polygonIntersection",
+      "polygonIntersectionCoincidentVertexA",
+      "polygonIntersectionCoincidentVertexB",
+      "polygonIntersectionColinearEdgeB",
+      "polygonIntersectionContainment",
+      "polygonIntersectionEdgeTouching",
+      "polygonIntersectionNoIntersection",
+      "polygonIntersectionVertexOnEdgeA",
+      "polygonIntersectionVertexOnEdgeB",
+      "polygonIntersectionVertexTouching",
+      "polygonIntersectionVertexTouchingCoincident",
+      "reverseWindingEmptyOrOneElement",
+      "reverseWindingNullList",
+      "scale",
+      "scaleCapsuleInvalid",
+      "scaleCircleInvalid",
+      "scaleEllipseInvalid",
+      "scaleHalfEllipseInvalid",
+      "scaleNullCapsule",
+      "scaleNullCircle",
+      "scaleNullEllipse",
+      "scaleNullHalfEllipse",
+      "scaleNullPolygon",
+      "scaleNullSegment",
+      "scaleNullSlice",
+      "scalePolygonInvalid",
+      "scaleSegmentInvalid",
+      "scaleSliceInvalid"
+    ],
+    "combined_core_geometry_aabbtest": [
+      "area",
+      "contains",
+      "containsPoint",
+      "copy",
+      "createCopy",
+      "createFailure1",
+      "createFailure2",
+      "createFromPoints",
+      "createRadius",
+      "createRadiusNegative",
+      "createSuccess",
+      "degenerate",
+      "expand",
+      "getCenter",
+      "getHeight",
+      "getWidth",
+      "intersection",
+      "overlaps",
+      "perimeter",
+      "setFromPoints",
+      "testEquals",
+      "testHashcode",
+      "testToString",
+      "translate",
+      "union",
+      "zero"
+    ],
+    "combined_core_geometry_abstractshapetest": [
+      "create",
+      "setUserData"
+    ],
+    "combined_core_geometry_adaptivedecimaltest": [
+      "append",
+      "checkInvariants",
+      "clear",
+      "copy",
+      "create",
+      "getEstimation",
+      "negate",
+      "normalize",
+      "removeZeros",
+      "size",
+      "sum",
+      "testArgument1",
+      "testArgument2",
+      "testIndex1",
+      "testIndex2",
+      "testIndex3",
+      "testState"
+    ],
+    "combined_core_geometry_capsuletest": [
+      "contains",
+      "copy",
+      "createAABB",
+      "createCircle",
+      "createMass",
+      "createNegativeHeight",
+      "createNegativeWidth",
+      "createSuccessHorizontal",
+      "createSuccessVertical",
+      "createZeroHeight",
+      "createZeroWidth",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getRadius",
+      "getRotation",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_circletest": [
+      "contains",
+      "copy",
+      "createAABB",
+      "createMass",
+      "createNegativeRadius",
+      "createSuccess",
+      "createZeroRadius",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getRadius",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_ellipsetest": [
+      "contains",
+      "copy",
+      "createAABB",
+      "createMass",
+      "createNegativeHeight",
+      "createNegativeWidth",
+      "createSuccess",
+      "createZeroHeight",
+      "createZeroWidth",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFarthestPointOnEllipse",
+      "getFoci",
+      "getRadius",
+      "getRotation",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_featuretest": [
+      "copy",
+      "create",
+      "createNonIndexed"
+    ],
+    "combined_core_geometry_halfellipsetest": [
+      "contains",
+      "copy",
+      "createAABB",
+      "createMass",
+      "createNegativeHeight",
+      "createNegativeWidth",
+      "createSuccess",
+      "createZeroHeight",
+      "createZeroWidth",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getRadius",
+      "getRadiusAboveXAxisBelowEvolute",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_intervaltest": [
+      "clamp",
+      "contains",
+      "copy",
+      "create",
+      "createCopy",
+      "createMinGreaterThanMax",
+      "degenerate",
+      "distance",
+      "expand",
+      "getLength",
+      "includes",
+      "intersection",
+      "overlaps",
+      "set",
+      "setInvalidMax",
+      "setInvalidMin",
+      "setMax",
+      "setMin",
+      "union"
+    ],
+    "combined_core_geometry_linktest": [
+      "copy",
+      "copyNonLoop",
+      "creatSuccess",
+      "createCoincident",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_masstest": [
+      "createCopy",
+      "createCopyNull",
+      "createFixedAngularVelocity",
+      "createFixedLinearVelocity",
+      "createInfinite",
+      "createList",
+      "createListEmpty",
+      "createListInfinite",
+      "createListNull",
+      "createListNullElement",
+      "createListOneElement",
+      "createListOneNullElement",
+      "createNegativeInertia",
+      "createNegativeMass",
+      "createNullCenter",
+      "createSuccess",
+      "equals",
+      "polygonInertiaAndCOM",
+      "polygonInertiaAndMass",
+      "setNullType",
+      "setType",
+      "setTypeIgnored"
+    ],
+    "combined_core_geometry_polygontest": [
+      "contains",
+      "containsPointCoIncidentMid",
+      "containsPointCoIncidentStart",
+      "containsPointCoIncidentWithCoincidentEdges",
+      "containsPointCoIncidentWithCoincidentEdges2",
+      "copy",
+      "createAABB",
+      "createCCW",
+      "createCoincident",
+      "createDegenerate",
+      "createMass",
+      "createNonConvex",
+      "createNotCCW",
+      "createNotEnoughPoints",
+      "createNullPoint",
+      "createSuccess",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getNormals",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_raytest": [
+      "copy",
+      "create",
+      "createFromOrigin",
+      "createNullDirection",
+      "createNullStart",
+      "createZeroDirection",
+      "setDirection",
+      "setDirectionNull",
+      "setDirectionZero",
+      "setStartNull"
+    ],
+    "combined_core_geometry_rectangletest": [
+      "computeAABB",
+      "contains",
+      "copy",
+      "createInvalidHeight",
+      "createInvalidWidth",
+      "createMass",
+      "createSuccess",
+      "getArea",
+      "getAxes",
+      "getRotation",
+      "project"
+    ],
+    "combined_core_geometry_robustgeometrytest": [
+      "randomizedTest",
+      "randomizedTest2"
+    ],
+    "combined_core_geometry_segmenttest": [
+      "contains",
+      "containsRadius",
+      "copy",
+      "creatSuccess",
+      "createAABB",
+      "createCoincident",
+      "createMass",
+      "createNullPoint1",
+      "createNullPoint2",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getLength",
+      "getLineIntersection",
+      "getLocation",
+      "getNormals",
+      "getPointClosest",
+      "getSegmentIntersection",
+      "project",
+      "rotate",
+      "translate"
+    ],
+    "combined_core_geometry_slicetest": [
+      "contains",
+      "copy",
+      "createAABB",
+      "createMass",
+      "createNegativeRadius",
+      "createNegativeTheta",
+      "createSuccess",
+      "createZeroRadius",
+      "createZeroTheta",
+      "getArea",
+      "getAxes",
+      "getFarthest",
+      "getFoci",
+      "getRadiusAtPoint",
+      "getRotation",
+      "project",
+      "rotate",
+      "sliceRadius",
+      "translate"
+    ],
+    "combined_core_geometry_triangletest": [
+      "contains",
+      "copy",
+      "tostring"
+    ],
+    "combined_core_geometry_woundtest": [
+      "getRadius",
+      "getRadiusCenter",
+      "woundIteratorCount",
+      "woundIteratorFail",
+      "woundIteratorRemove",
+      "woundIteratorStartIndex"
     ]
   },
   "groups": [
-    {"id":"core-jvm","report_pattern":"dyn4k-core/build/test-results/jvmTest/TEST-*.xml","case_set":"core_bridge","classname":"org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[jvm]","extra_case_sets":[{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"jvm","report_pattern":"dyn4k/build/test-results/jvmTest/TEST-*.xml","classname":"io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[jvm]","additional_classname":"io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"io.github.rubixhacker.dyn4k.FieldBridgeJvmTest","case_set":"jvm_field_bridge"},{"classname":"io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-linuxX64","report_pattern":"dyn4k-core/build/test-results/linuxX64Test/TEST-*.xml","case_set":"core_bridge","classname":"linuxX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[linuxX64]","extra_case_sets":[{"classname":"linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"linuxX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"linuxX64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"linuxX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"linuxX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"linuxX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"linuxX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"linuxX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"linuxX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"linuxX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"linuxX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"linuxX64","report_pattern":"dyn4k/build/test-results/linuxX64Test/TEST-*.xml","classname":"linuxX64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[linuxX64]","additional_classname":"linuxX64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"linuxX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"linuxX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"linuxX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"linuxX64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"linuxX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"linuxX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-jsNode","report_pattern":"dyn4k-core/build/test-results/jsNodeTest/TEST-*.xml","case_set":"core_bridge","classname":"jsNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[js, node]","extra_case_sets":[{"classname":"jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"jsNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"jsNodeTest.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"jsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"jsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"jsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"jsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"jsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"jsNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"jsNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"jsNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"jsNode","report_pattern":"dyn4k/build/test-results/jsNodeTest/TEST-*.xml","classname":"jsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[js, node]","additional_classname":"jsNodeTest.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"jsNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"jsNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"jsNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"jsNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"jsNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"jsNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-wasmJsNode","report_pattern":"dyn4k-core/build/test-results/wasmJsNodeTest/TEST-*.xml","case_set":"core_bridge","classname":"wasmJsNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[wasmJs, node]","extra_case_sets":[{"classname":"wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"wasmJsNodeTest.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"wasmJsNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"wasmJsNode","report_pattern":"dyn4k/build/test-results/wasmJsNodeTest/TEST-*.xml","classname":"wasmJsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[wasmJs, node]","additional_classname":"wasmJsNodeTest.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"wasmJsNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"wasmJsNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"wasmJsNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"wasmJsNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-wasmWasiNode","report_pattern":"dyn4k-core/build/test-results/wasmWasiNodeTest/TEST-*.xml","case_set":"core_bridge","classname":"wasmWasiNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[wasmWasi, node]","extra_case_sets":[{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"wasmWasiNodeTest.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"wasmWasiNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"wasmWasiNode","report_pattern":"dyn4k/build/test-results/wasmWasiNodeTest/TEST-*.xml","classname":"wasmWasiNodeTest.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[wasmWasi, node]","additional_classname":"wasmWasiNodeTest.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"wasmWasiNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"wasmWasiNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"wasmWasiNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"wasmWasiNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-androidHost","report_pattern":"dyn4k-core/build/test-results/testAndroidHostTest/TEST-*.xml","case_set":"core_bridge","classname":"org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"","extra_case_sets":[{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"androidHost","report_pattern":"dyn4k/build/test-results/testAndroidHostTest/TEST-*.xml","classname":"io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"","additional_classname":"io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id":"core-macosArm64","report_pattern":"dyn4k-core/build/test-results/macosArm64Test/TEST-*.xml","case_set":"core_bridge","classname":"macosArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[macosArm64]","extra_case_sets":[{"classname":"macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"macosArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"macosArm64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"macosArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"macosArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"macosArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"macosArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"macosArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"macosArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"macosArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"macosArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"macosArm64","report_pattern":"dyn4k/build/test-results/macosArm64Test/TEST-*.xml","classname":"macosArm64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[macosArm64]","additional_classname":"macosArm64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"macosArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"macosArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"macosArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"macosArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"macosArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"macosArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-macosArm64", "report_pattern": "consumers/qualification/portable/build/test-results/macosArm64Test/TEST-*.xml", "cases": [{"classname": "macosArm64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[macosArm64]"}, {"classname": "macosArm64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[macosArm64]"},{"classname":"macosArm64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[macosArm64]"}]},
-    {"id":"core-iosSimulatorArm64","report_pattern":"dyn4k-core/build/test-results/iosSimulatorArm64Test/TEST-*.xml","case_set":"core_bridge","classname":"iosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[iosSimulatorArm64]","extra_case_sets":[{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"iosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"iosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"iosSimulatorArm64","report_pattern":"dyn4k/build/test-results/iosSimulatorArm64Test/TEST-*.xml","classname":"iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[iosSimulatorArm64]","additional_classname":"iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"iosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-iosSimulatorArm64", "report_pattern": "consumers/qualification/portable/build/test-results/iosSimulatorArm64Test/TEST-*.xml", "cases": [{"classname": "iosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[iosSimulatorArm64]"}, {"classname": "iosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[iosSimulatorArm64]"},{"classname":"iosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[iosSimulatorArm64]"}]},
-    {"id":"core-tvosSimulatorArm64","report_pattern":"dyn4k-core/build/test-results/tvosSimulatorArm64Test/TEST-*.xml","case_set":"core_bridge","classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[tvosSimulatorArm64]","extra_case_sets":[{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"tvosSimulatorArm64","report_pattern":"dyn4k/build/test-results/tvosSimulatorArm64Test/TEST-*.xml","classname":"tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[tvosSimulatorArm64]","additional_classname":"tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"tvosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-tvosSimulatorArm64", "report_pattern": "consumers/qualification/portable/build/test-results/tvosSimulatorArm64Test/TEST-*.xml", "cases": [{"classname": "tvosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[tvosSimulatorArm64]"}, {"classname": "tvosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[tvosSimulatorArm64]"},{"classname":"tvosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[tvosSimulatorArm64]"}]},
-    {"id":"core-watchosSimulatorArm64","report_pattern":"dyn4k-core/build/test-results/watchosSimulatorArm64Test/TEST-*.xml","case_set":"core_bridge","classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[watchosSimulatorArm64]","extra_case_sets":[{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"watchosSimulatorArm64","report_pattern":"dyn4k/build/test-results/watchosSimulatorArm64Test/TEST-*.xml","classname":"watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[watchosSimulatorArm64]","additional_classname":"watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"watchosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-watchosSimulatorArm64", "report_pattern": "consumers/qualification/portable/build/test-results/watchosSimulatorArm64Test/TEST-*.xml", "cases": [{"classname": "watchosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[watchosSimulatorArm64]"}, {"classname": "watchosSimulatorArm64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[watchosSimulatorArm64]"},{"classname":"watchosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[watchosSimulatorArm64]"}]},
-    {"id":"core-iosX64","report_pattern":"dyn4k-core/build/test-results/iosX64Test/TEST-*.xml","case_set":"core_bridge","classname":"iosX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[iosX64]","extra_case_sets":[{"classname":"iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"iosX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"iosX64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"iosX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"iosX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"iosX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"iosX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"iosX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"iosX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"iosX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"iosX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"iosX64","report_pattern":"dyn4k/build/test-results/iosX64Test/TEST-*.xml","classname":"iosX64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[iosX64]","additional_classname":"iosX64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"iosX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"iosX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"iosX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"iosX64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"iosX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"iosX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-iosX64", "report_pattern": "consumers/qualification/portable/build/test-results/iosX64Test/TEST-*.xml", "cases": [{"classname": "iosX64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[iosX64]"}, {"classname": "iosX64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[iosX64]"},{"classname":"iosX64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[iosX64]"}]},
-    {"id":"core-mingwX64","report_pattern":"dyn4k-core/build/test-results/mingwX64Test/TEST-*.xml","case_set":"core_bridge","classname":"mingwX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest","name_suffix":"[mingwX64]","extra_case_sets":[{"classname":"mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest","case_set":"core_polygon_hull"},{"classname":"mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest","case_set":"core_polygon_decomposition"},{"classname":"mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest","case_set":"core_polygon_simplification"},{"classname":"mingwX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest","case_set":"core_polygon_support"},{"classname":"mingwX64Test.org.dyn4j.collision.CollisionModelTest","case_set":"core_collision_model"},{"classname":"mingwX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest","case_set":"core_collision_bounds"},{"classname":"mingwX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest","case_set":"core_collision_body"},{"classname":"mingwX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest","case_set":"core_collision_item_pair"},{"classname":"mingwX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest","case_set":"core_collision_support"},{"classname":"mingwX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest","case_set":"core_collision_filter_fixture"},{"classname":"mingwX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest","case_set":"core_epsilon"},{"classname":"mingwX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest","case_set":"core_foundation_extra"},{"classname":"mingwX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest","case_set":"core_vector2_normalization"}]},
-    {"id":"mingwX64","report_pattern":"dyn4k/build/test-results/mingwX64Test/TEST-*.xml","classname":"mingwX64Test.io.github.rubixhacker.dyn4k.FoundationTest","name_suffix":"[mingwX64]","additional_classname":"mingwX64Test.io.github.rubixhacker.dyn4k.TreeTest","additional_case_names":["insertsAndTraversesInSortedOrder","searchAndRangeIteratorsFollowBaseline","referenceAndVersionHaveBaselineValues","removesAndKeepsTreeBalanced"],"extra_case_sets":[{"classname":"mingwX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest","case_set":"geometry"},{"classname":"mingwX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest","case_set":"polygon_algorithm"},{"classname":"mingwX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest","case_set":"polygon_decomposition_support"},{"classname":"mingwX64Test.org.dyn4j.geometry.hull.HullSupportStateTest","case_set":"polygon_hull_support"},{"classname":"mingwX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest","case_set":"geometry_copy_extension"},{"classname":"mingwX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest","case_set":"polygon_subclass_extension"}]},
-    {"id": "consumer-mingwX64", "report_pattern": "consumers/qualification/portable/build/test-results/mingwX64Test/TEST-*.xml", "cases": [{"classname": "mingwX64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[mingwX64]"}, {"classname": "mingwX64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[mingwX64]"},{"classname":"mingwX64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[mingwX64]"}]},
-    {"id": "consumer-jsSafari", "report_pattern": "consumers/qualification/portable/build/test-results/jsBrowserTest/TEST-*.xml", "cases": [{"classname": "jsBrowserTest.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, browser, Safari26.6.2, MacOS10.15.7]"}, {"classname": "jsBrowserTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser, Safari26.6.2, MacOS10.15.7]"},{"classname":"jsBrowserTest.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[js, browser, Safari26.6.2, MacOS10.15.7]"}]},
-    {"id": "consumer-jvm", "report_pattern": "consumers/qualification/portable/build/test-results/jvmTest/TEST-*.xml", "cases": [{"classname": "qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[jvm]"}, {"classname": "qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[jvm]"},{"classname":"qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[jvm]"}]},
-    {"id": "consumer-linuxX64", "report_pattern": "consumers/qualification/portable/build/test-results/linuxX64Test/TEST-*.xml", "cases": [{"classname": "linuxX64Test.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[linuxX64]"}, {"classname": "linuxX64Test.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[linuxX64]"},{"classname":"linuxX64Test.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[linuxX64]"}]},
-    {"id": "consumer-jsNode", "report_pattern": "consumers/qualification/portable/build/test-results/jsNodeTest/TEST-*.xml", "cases": [{"classname": "jsNodeTest.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, node]"}, {"classname": "jsNodeTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, node]"},{"classname":"jsNodeTest.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[js, node]"}]},
-    {"id": "consumer-wasmJsNode", "report_pattern": "consumers/qualification/portable/build/test-results/wasmJsNodeTest/TEST-*.xml", "cases": [{"classname": "wasmJsNodeTest.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[wasmJs, node]"}, {"classname": "wasmJsNodeTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[wasmJs, node]"},{"classname":"wasmJsNodeTest.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[wasmJs, node]"}]},
-    {"id": "consumer-wasmWasiNode", "report_pattern": "consumers/qualification/portable/build/test-results/wasmWasiNodeTest/TEST-*.xml", "cases": [{"classname": "wasmWasiNodeTest.qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[wasmWasi, node]"}, {"classname": "wasmWasiNodeTest.qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[wasmWasi, node]"},{"classname":"wasmWasiNodeTest.qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides[wasmWasi, node]"}]},
-    {"id": "consumer-androidHost", "report_pattern": "consumers/qualification/portable/build/test-results/testAndroidHostTest/TEST-*.xml", "cases": [{"classname": "qualification.StagedGeometryTest", "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants"}, {"classname": "qualification.StagedGeometryTest", "name": "stagedRootCoordinatesResolveAndTransformSharedObjects"},{"classname":"qualification.StagedFoundationExtraMethodsTest","name":"publishedAliasesRetainKotlinHelpersAndGetterOverrides"}]}
+    {
+      "id": "core-jvm",
+      "report_pattern": "dyn4k-core/build/test-results/jvmTest/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[jvm]",
+      "extra_case_sets": [
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "jvm",
+      "report_pattern": "dyn4k/build/test-results/jvmTest/TEST-*.xml",
+      "classname": "io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[jvm]",
+      "additional_classname": "io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "io.github.rubixhacker.dyn4k.FieldBridgeJvmTest",
+          "case_set": "jvm_field_bridge"
+        },
+        {
+          "classname": "io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-linuxX64",
+      "report_pattern": "dyn4k-core/build/test-results/linuxX64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "linuxX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[linuxX64]",
+      "extra_case_sets": [
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "linuxX64",
+      "report_pattern": "dyn4k/build/test-results/linuxX64Test/TEST-*.xml",
+      "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[linuxX64]",
+      "additional_classname": "linuxX64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "linuxX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "linuxX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-jsNode",
+      "report_pattern": "dyn4k-core/build/test-results/jsNodeTest/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "jsNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[js, node]",
+      "extra_case_sets": [
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "jsNode",
+      "report_pattern": "dyn4k/build/test-results/jsNodeTest/TEST-*.xml",
+      "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[js, node]",
+      "additional_classname": "jsNodeTest.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "jsNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "jsNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-wasmJsNode",
+      "report_pattern": "dyn4k-core/build/test-results/wasmJsNodeTest/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "wasmJsNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[wasmJs, node]",
+      "extra_case_sets": [
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "wasmJsNode",
+      "report_pattern": "dyn4k/build/test-results/wasmJsNodeTest/TEST-*.xml",
+      "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[wasmJs, node]",
+      "additional_classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "wasmJsNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "wasmJsNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-wasmWasiNode",
+      "report_pattern": "dyn4k-core/build/test-results/wasmWasiNodeTest/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "wasmWasiNodeTest.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[wasmWasi, node]",
+      "extra_case_sets": [
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "wasmWasiNode",
+      "report_pattern": "dyn4k/build/test-results/wasmWasiNodeTest/TEST-*.xml",
+      "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[wasmWasi, node]",
+      "additional_classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "wasmWasiNodeTest.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "wasmWasiNodeTest.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-androidHost",
+      "report_pattern": "dyn4k-core/build/test-results/testAndroidHostTest/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "",
+      "extra_case_sets": [
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "androidHost",
+      "report_pattern": "dyn4k/build/test-results/testAndroidHostTest/TEST-*.xml",
+      "classname": "io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "",
+      "additional_classname": "io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "core-macosArm64",
+      "report_pattern": "dyn4k-core/build/test-results/macosArm64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "macosArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[macosArm64]",
+      "extra_case_sets": [
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "macosArm64",
+      "report_pattern": "dyn4k/build/test-results/macosArm64Test/TEST-*.xml",
+      "classname": "macosArm64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[macosArm64]",
+      "additional_classname": "macosArm64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "macosArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "macosArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "macosArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "macosArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-macosArm64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/macosArm64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "macosArm64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[macosArm64]"
+        },
+        {
+          "classname": "macosArm64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[macosArm64]"
+        },
+        {
+          "classname": "macosArm64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[macosArm64]"
+        }
+      ]
+    },
+    {
+      "id": "core-iosSimulatorArm64",
+      "report_pattern": "dyn4k-core/build/test-results/iosSimulatorArm64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[iosSimulatorArm64]",
+      "extra_case_sets": [
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "iosSimulatorArm64",
+      "report_pattern": "dyn4k/build/test-results/iosSimulatorArm64Test/TEST-*.xml",
+      "classname": "iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[iosSimulatorArm64]",
+      "additional_classname": "iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-iosSimulatorArm64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/iosSimulatorArm64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "iosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[iosSimulatorArm64]"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[iosSimulatorArm64]"
+        },
+        {
+          "classname": "iosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[iosSimulatorArm64]"
+        }
+      ]
+    },
+    {
+      "id": "core-tvosSimulatorArm64",
+      "report_pattern": "dyn4k-core/build/test-results/tvosSimulatorArm64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[tvosSimulatorArm64]",
+      "extra_case_sets": [
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "tvosSimulatorArm64",
+      "report_pattern": "dyn4k/build/test-results/tvosSimulatorArm64Test/TEST-*.xml",
+      "classname": "tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[tvosSimulatorArm64]",
+      "additional_classname": "tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-tvosSimulatorArm64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/tvosSimulatorArm64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "tvosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[tvosSimulatorArm64]"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[tvosSimulatorArm64]"
+        },
+        {
+          "classname": "tvosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[tvosSimulatorArm64]"
+        }
+      ]
+    },
+    {
+      "id": "core-watchosSimulatorArm64",
+      "report_pattern": "dyn4k-core/build/test-results/watchosSimulatorArm64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[watchosSimulatorArm64]",
+      "extra_case_sets": [
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "watchosSimulatorArm64",
+      "report_pattern": "dyn4k/build/test-results/watchosSimulatorArm64Test/TEST-*.xml",
+      "classname": "watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[watchosSimulatorArm64]",
+      "additional_classname": "watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-watchosSimulatorArm64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/watchosSimulatorArm64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "watchosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[watchosSimulatorArm64]"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[watchosSimulatorArm64]"
+        },
+        {
+          "classname": "watchosSimulatorArm64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[watchosSimulatorArm64]"
+        }
+      ]
+    },
+    {
+      "id": "core-iosX64",
+      "report_pattern": "dyn4k-core/build/test-results/iosX64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "iosX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[iosX64]",
+      "extra_case_sets": [
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "iosX64",
+      "report_pattern": "dyn4k/build/test-results/iosX64Test/TEST-*.xml",
+      "classname": "iosX64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[iosX64]",
+      "additional_classname": "iosX64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "iosX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "iosX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "iosX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "iosX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-iosX64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/iosX64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "iosX64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[iosX64]"
+        },
+        {
+          "classname": "iosX64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[iosX64]"
+        },
+        {
+          "classname": "iosX64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[iosX64]"
+        }
+      ]
+    },
+    {
+      "id": "core-mingwX64",
+      "report_pattern": "dyn4k-core/build/test-results/mingwX64Test/TEST-*.xml",
+      "case_set": "core_bridge",
+      "classname": "mingwX64Test.org.dyn4j.geometry.FoundationPackageBridgeTest",
+      "name_suffix": "[mingwX64]",
+      "extra_case_sets": [
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamHullCoverageTest",
+          "case_set": "core_polygon_hull"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamDecompositionCoverageTest",
+          "case_set": "core_polygon_decomposition"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.geometry.algorithms.UpstreamSimplificationCoverageTest",
+          "case_set": "core_polygon_simplification"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.simplify.UpstreamSimplificationSupportCoverageTest",
+          "case_set": "core_polygon_support"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.collision.CollisionModelTest",
+          "case_set": "core_collision_model"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.collision.model.BoundsCoverageTest",
+          "case_set": "core_collision_bounds"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.collision.model.CollisionBodyCoverageTest",
+          "case_set": "core_collision_body"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.collision.model.CollisionItemPairCoverageTest",
+          "case_set": "core_collision_item_pair"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.collision.model.CollisionSupportCoverageTest",
+          "case_set": "core_collision_support"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest",
+          "case_set": "core_collision_filter_fixture"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
+          "case_set": "core_epsilon"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.FoundationExtraMethodsParityTest",
+          "case_set": "core_foundation_extra"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.Vector2NormalizationParityTest",
+          "case_set": "core_vector2_normalization"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.UpstreamAVLTreeCoverageTest",
+          "case_set": "combined_core_upstreamavltreecoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.PortableFoundationCoverageTest",
+          "case_set": "combined_core_coverage_portablefoundationcoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamMatrix22CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix22coveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamMatrix33CoverageTest",
+          "case_set": "combined_core_coverage_upstreammatrix33coveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamReferenceCoverageTest",
+          "case_set": "combined_core_coverage_upstreamreferencecoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamRotationCoverageTest",
+          "case_set": "combined_core_coverage_upstreamrotationcoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamTransformCoverageTest",
+          "case_set": "combined_core_coverage_upstreamtransformcoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamVector2CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector2coveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamVector3CoverageTest",
+          "case_set": "combined_core_coverage_upstreamvector3coveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.UpstreamVersionCoverageTest",
+          "case_set": "combined_core_coverage_upstreamversioncoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.coverage.geometry.factory.GeometryFactoryCoverageTest",
+          "case_set": "combined_core_coverage_geometry_factory_geometryfactorycoveragetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.AABBTest",
+          "case_set": "combined_core_geometry_aabbtest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.AbstractShapeTest",
+          "case_set": "combined_core_geometry_abstractshapetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.AdaptiveDecimalTest",
+          "case_set": "combined_core_geometry_adaptivedecimaltest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.CapsuleTest",
+          "case_set": "combined_core_geometry_capsuletest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.CircleTest",
+          "case_set": "combined_core_geometry_circletest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.EllipseTest",
+          "case_set": "combined_core_geometry_ellipsetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.FeatureTest",
+          "case_set": "combined_core_geometry_featuretest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.HalfEllipseTest",
+          "case_set": "combined_core_geometry_halfellipsetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.IntervalTest",
+          "case_set": "combined_core_geometry_intervaltest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.LinkTest",
+          "case_set": "combined_core_geometry_linktest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.MassTest",
+          "case_set": "combined_core_geometry_masstest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.PolygonTest",
+          "case_set": "combined_core_geometry_polygontest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.RayTest",
+          "case_set": "combined_core_geometry_raytest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.RectangleTest",
+          "case_set": "combined_core_geometry_rectangletest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.RobustGeometryTest",
+          "case_set": "combined_core_geometry_robustgeometrytest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.SegmentTest",
+          "case_set": "combined_core_geometry_segmenttest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.SliceTest",
+          "case_set": "combined_core_geometry_slicetest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.TriangleTest",
+          "case_set": "combined_core_geometry_triangletest"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.WoundTest",
+          "case_set": "combined_core_geometry_woundtest"
+        }
+      ]
+    },
+    {
+      "id": "mingwX64",
+      "report_pattern": "dyn4k/build/test-results/mingwX64Test/TEST-*.xml",
+      "classname": "mingwX64Test.io.github.rubixhacker.dyn4k.FoundationTest",
+      "name_suffix": "[mingwX64]",
+      "additional_classname": "mingwX64Test.io.github.rubixhacker.dyn4k.TreeTest",
+      "additional_case_names": [
+        "insertsAndTraversesInSortedOrder",
+        "searchAndRangeIteratorsFollowBaseline",
+        "referenceAndVersionHaveBaselineValues",
+        "removesAndKeepsTreeBalanced"
+      ],
+      "extra_case_sets": [
+        {
+          "classname": "mingwX64Test.io.github.rubixhacker.dyn4k.GeometryShapeTest",
+          "case_set": "geometry"
+        },
+        {
+          "classname": "mingwX64Test.io.github.rubixhacker.dyn4k.PolygonAlgorithmTest",
+          "case_set": "polygon_algorithm"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.decompose.DecompositionSupportStateTest",
+          "case_set": "polygon_decomposition_support"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.hull.HullSupportStateTest",
+          "case_set": "polygon_hull_support"
+        },
+        {
+          "classname": "mingwX64Test.org.dyn4j.geometry.GeometryCopyExtensionTest",
+          "case_set": "geometry_copy_extension"
+        },
+        {
+          "classname": "mingwX64Test.io.github.rubixhacker.dyn4k.PolygonSubclassExtensionTest",
+          "case_set": "polygon_subclass_extension"
+        }
+      ]
+    },
+    {
+      "id": "consumer-mingwX64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/mingwX64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "mingwX64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[mingwX64]"
+        },
+        {
+          "classname": "mingwX64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[mingwX64]"
+        },
+        {
+          "classname": "mingwX64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[mingwX64]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-jsSafari",
+      "report_pattern": "consumers/qualification/portable/build/test-results/jsBrowserTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "jsBrowserTest.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, browser, Safari26.6.2, MacOS10.15.7]"
+        },
+        {
+          "classname": "jsBrowserTest.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, browser, Safari26.6.2, MacOS10.15.7]"
+        },
+        {
+          "classname": "jsBrowserTest.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[js, browser, Safari26.6.2, MacOS10.15.7]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-jvm",
+      "report_pattern": "consumers/qualification/portable/build/test-results/jvmTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[jvm]"
+        },
+        {
+          "classname": "qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[jvm]"
+        },
+        {
+          "classname": "qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[jvm]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-linuxX64",
+      "report_pattern": "consumers/qualification/portable/build/test-results/linuxX64Test/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "linuxX64Test.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[linuxX64]"
+        },
+        {
+          "classname": "linuxX64Test.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[linuxX64]"
+        },
+        {
+          "classname": "linuxX64Test.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[linuxX64]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-jsNode",
+      "report_pattern": "consumers/qualification/portable/build/test-results/jsNodeTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "jsNodeTest.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[js, node]"
+        },
+        {
+          "classname": "jsNodeTest.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[js, node]"
+        },
+        {
+          "classname": "jsNodeTest.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[js, node]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-wasmJsNode",
+      "report_pattern": "consumers/qualification/portable/build/test-results/wasmJsNodeTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "wasmJsNodeTest.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[wasmJs, node]"
+        },
+        {
+          "classname": "wasmJsNodeTest.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[wasmJs, node]"
+        },
+        {
+          "classname": "wasmJsNodeTest.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[wasmJs, node]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-wasmWasiNode",
+      "report_pattern": "consumers/qualification/portable/build/test-results/wasmWasiNodeTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "wasmWasiNodeTest.qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants[wasmWasi, node]"
+        },
+        {
+          "classname": "wasmWasiNodeTest.qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects[wasmWasi, node]"
+        },
+        {
+          "classname": "wasmWasiNodeTest.qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides[wasmWasi, node]"
+        }
+      ]
+    },
+    {
+      "id": "consumer-androidHost",
+      "report_pattern": "consumers/qualification/portable/build/test-results/testAndroidHostTest/TEST-*.xml",
+      "cases": [
+        {
+          "classname": "qualification.StagedGeometryTest",
+          "name": "namedConstructorsResolveFromPublishedCommonAndPlatformVariants"
+        },
+        {
+          "classname": "qualification.StagedGeometryTest",
+          "name": "stagedRootCoordinatesResolveAndTransformSharedObjects"
+        },
+        {
+          "classname": "qualification.StagedFoundationExtraMethodsTest",
+          "name": "publishedAliasesRetainKotlinHelpersAndGetterOverrides"
+        }
+      ]
+    }
   ]
 }

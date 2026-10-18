@@ -32,6 +32,39 @@ class QualificationTests(unittest.TestCase):
         "geometryFactoriesConstructEveryCurvedBaselineShape",
     )
 
+    def run_synthetic_probe(self, selected, observed, failures=(), errors=(), skipped=()):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                suite = ET.Element(
+                    "testsuite", tests=str(len(observed)),
+                    failures=str(sum(identity in failures for identity in observed)),
+                    errors=str(sum(identity in errors for identity in observed)),
+                    skipped=str(sum(identity in skipped for identity in observed)), time="0")
+                for identity in observed:
+                    case = ET.SubElement(suite, "testcase", classname=identity[0],
+                                         name=identity[1], time="0")
+                    if identity in failures:
+                        ET.SubElement(case, "failure")
+                    if identity in errors:
+                        ET.SubElement(case, "error")
+                    if identity in skipped:
+                        ET.SubElement(case, "skipped")
+                xml = ET.tostring(suite, encoding="unicode")
+                command = ["python3", "-c", "from pathlib import Path; "
+                           "Path('probe.xml').write_text(" + repr(xml) + ")"]
+                group = {"id": "synthetic", "report_pattern": "probe.xml",
+                         "cases": [{"classname": classname, "name": name}
+                                   for classname, name in selected]}
+                return qualify.run_probe(command, ["probe.xml"], "a" * 40,
+                                         root / "result.json",
+                                         manifest={"kind": "foundation-probe",
+                                                   "groups": [group]})
+            finally:
+                os.chdir(previous)
+
     def test_frozen_host_manifest_names_integrated_geometry_cases(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         groups = {group["id"]: group for group in manifest["groups"]}
@@ -53,10 +86,19 @@ class QualificationTests(unittest.TestCase):
             self.assertIn((f"{prefix}org.dyn4j.geometry.GeometryCopyExtensionTest",
                            "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState" + suffix),
                           cases)
-            self.assertEqual(441, len(qualify.expected_probe_cases(
+            self.assertEqual(1066, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
             self.assertEqual(3, len(qualify.expected_probe_cases(
                 manifest, groups["consumer-" + group_id])))
+
+        selected_group_ids = (
+            "core-jvm", "jvm", "core-linuxX64", "linuxX64",
+            "core-jsNode", "jsNode", "core-wasmJsNode", "wasmJsNode",
+            "core-wasmWasiNode", "wasmWasiNode", "core-androidHost", "androidHost",
+        )
+        self.assertEqual(6668, sum(
+            len(qualify.expected_probe_cases(manifest, groups[group_id]))
+            for group_id in selected_group_ids))
 
     def test_frozen_core_manifest_names_integrated_epsilon_on_every_host(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
@@ -69,11 +111,69 @@ class QualificationTests(unittest.TestCase):
             epsilon = (prefix + "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
                        "compute" + group["name_suffix"])
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(441, len(cases), group["id"])
+            self.assertEqual(1066, len(cases), group["id"])
             self.assertEqual(1, cases.count(epsilon), group["id"])
             collision = (prefix + "org.dyn4j.collision.CollisionModelTest",
                          "copyExceptionFromNamesPreservesMessage" + group["name_suffix"])
             self.assertEqual(1, cases.count(collision), group["id"])
+
+    def test_frozen_core_probe_rejects_missing_renamed_and_skipped_selected_cases(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        core = next(group for group in manifest["groups"] if group["id"] == "core-jvm")
+        cases = qualify.expected_probe_cases(manifest, core)
+        self.assertEqual(1066, len(cases))
+        with tempfile.TemporaryDirectory() as root:
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                for change in ("missing", "renamed", "skipped"):
+                    observed = list(cases)
+                    if change == "missing":
+                        observed.pop()
+                    elif change == "renamed":
+                        classname, _ = observed[-1]
+                        observed[-1] = (classname, "renamed[jvm]")
+                    suite = ET.Element(
+                        "testsuite",
+                        tests=str(len(observed)),
+                        failures="0",
+                        errors="0",
+                        skipped=str(int(change == "skipped")),
+                        time="0",
+                    )
+                    for index, (classname, name) in enumerate(observed):
+                        case = ET.SubElement(
+                            suite, "testcase", classname=classname, name=name, time="0")
+                        if change == "skipped" and index == 0:
+                            ET.SubElement(case, "skipped")
+                    report = Path("core.xml")
+                    xml = ET.tostring(suite, encoding="unicode")
+                    command = [
+                        "python3",
+                        "-c",
+                        "from pathlib import Path; Path('core.xml').write_text(" + repr(xml) + ")",
+                    ]
+                    result = qualify.run_probe(
+                        command,
+                        [str(report)],
+                        "a" * 40,
+                        Path(root) / (change + ".json"),
+                        manifest={
+                            "kind": "foundation-probe",
+                            "case_names": manifest["case_names"],
+                            "case_sets": manifest["case_sets"],
+                            "groups": [{**core, "report_pattern": str(report)}],
+                        },
+                    )
+                    self.assertEqual("PROBE_FAILED", result["status"], change)
+                    self.assertEqual(1066, result["expected"], change)
+                    self.assertIn(
+                        "skipped cases" if change == "skipped" else "missing selected",
+                        result["reason"],
+                        change,
+                    )
+            finally:
+                os.chdir(previous)
 
     def test_frozen_dyn_manifest_names_integrated_polygon_extension(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
@@ -102,7 +202,7 @@ class QualificationTests(unittest.TestCase):
             prefix = group["classname"].removesuffix(
                 "org.dyn4j.geometry.FoundationPackageBridgeTest")
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(441, len(cases), group["id"])
+            self.assertEqual(1066, len(cases), group["id"])
             for classname, names in (
                 ("FoundationExtraMethodsParityTest", (
                     "rotationKeepsFieldBasedMathAndGetterDispatch",
@@ -131,7 +231,7 @@ class QualificationTests(unittest.TestCase):
                         base_name.removeprefix("namedConstructorsResolveFromPublishedCommonAndPlatformVariants"))
             self.assertEqual(1, cases.count(expected), group["id"])
 
-    def test_expanded_host_probe_rejects_unexpected_geometry_case(self):
+    def test_expanded_host_probe_accepts_extra_passing_full_report_case(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
         group = next(group for group in manifest["groups"] if group["id"] == "jvm")
         cases = qualify.expected_probe_cases(manifest, group)
@@ -150,12 +250,69 @@ class QualificationTests(unittest.TestCase):
                 result = qualify.run_probe(command, [str(report)], "a" * 40,
                                            Path(root) / "result.json",
                                            manifest={**manifest, "groups": [report_group]})
-                self.assertEqual("PROBE_FAILED", result["status"])
+                self.assertEqual("PROBE_PASSED", result["status"])
                 self.assertEqual(47, result["expected"])
-                self.assertEqual(48, result["executed"])
-                self.assertIn("unexpected cases", result["reason"])
+                self.assertEqual(47, result["executed"])
+                self.assertEqual(48, result["reported"])
+                self.assertEqual({"jvm": 47, "reported": 48},
+                                 {"jvm": result["groups"][0]["executed"],
+                                  "reported": result["groups"][0]["reported"]})
             finally:
                 os.chdir(previous)
+
+    def test_full_report_allows_extra_passing_cases_without_counting_them_selected(self):
+        selected = [("Selected", "one"), ("Selected", "two")]
+        result = self.run_synthetic_probe(
+            selected, [*selected, ("Supplemental", "pass")])
+        self.assertEqual("PROBE_PASSED", result["status"])
+        self.assertEqual((2, 2, 3),
+                         (result["expected"], result["executed"], result["reported"]))
+        self.assertEqual({"expected": 2, "executed": 2, "reported": 3,
+                          "failures": 0, "errors": 0, "skipped": 0},
+                         {key: result["groups"][0][key]
+                          for key in ("expected", "executed", "reported", "failures",
+                                      "errors", "skipped")})
+
+    def test_full_report_rejects_a_missing_selected_case(self):
+        selected = [("Selected", "one"), ("Selected", "two")]
+        result = self.run_synthetic_probe(selected, [selected[0]])
+        self.assertEqual("PROBE_FAILED", result["status"])
+        self.assertEqual((2, 1, 1),
+                         (result["expected"], result["executed"], result["reported"]))
+        self.assertIn("missing selected", result["reason"])
+
+    def test_full_report_rejects_a_changed_selected_identity(self):
+        selected = [("Selected", "one"), ("Selected", "two")]
+        result = self.run_synthetic_probe(
+            selected, [selected[0], ("Selected", "renamed-two")])
+        self.assertEqual("PROBE_FAILED", result["status"])
+        self.assertEqual((2, 1, 2),
+                         (result["expected"], result["executed"], result["reported"]))
+        self.assertIn("missing selected", result["reason"])
+
+    def test_full_report_rejects_a_duplicate_selected_case(self):
+        selected = [("Selected", "one"), ("Selected", "two")]
+        result = self.run_synthetic_probe(
+            selected, [selected[0], selected[0], selected[1]])
+        self.assertEqual("PROBE_FAILED", result["status"])
+        self.assertEqual((2, 1, 3),
+                         (result["expected"], result["executed"], result["reported"]))
+        self.assertIn("duplicate cases", result["reason"])
+
+    def test_full_report_rejects_failing_error_and_skipped_extra_cases(self):
+        selected = [("Selected", "one"), ("Selected", "two")]
+        failed = ("Unknown", "failed")
+        errored = ("Unknown", "error")
+        skipped = ("Unknown", "skipped")
+        result = self.run_synthetic_probe(
+            selected, [*selected, failed, errored, skipped],
+            failures=(failed,), errors=(errored,), skipped=(skipped,))
+        self.assertEqual("PROBE_FAILED", result["status"])
+        self.assertEqual((2, 2, 5),
+                         (result["expected"], result["executed"], result["reported"]))
+        self.assertEqual((1, 1, 1),
+                         (result["failures"], result["errors"], result["skipped"]))
+        self.assertIn("failed, errored, or skipped", result["reason"])
 
     def test_contract_covers_all_targets_and_runtime_families(self):
         rows = qualify.matrix()
