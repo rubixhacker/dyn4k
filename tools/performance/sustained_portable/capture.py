@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -24,7 +25,7 @@ NATIVE_TARGET_NAMES = {"linuxX64": "linux_x64", "linuxArm64": "linux_arm64",
 ARTIFACT_VERSION = "0.1.0-alpha.1"
 ARTIFACT_GROUP = "io.github.rubixhacker"
 TARGETS = {"js", "wasmJs", "wasmWasi"} | NATIVE_HOST_TARGETS
-MODES = {"timing"}
+MODES = {"timing", "memory"}
 STEP_HEADER = ("step", "elapsed_ns", "mutation_ns", "lateness_ns", "body_count",
                "joint_count", "awake_count", "linear_speed_sum_m_per_s",
                "angular_speed_sum_rad_per_s", "contact_begins", "contact_ends",
@@ -207,11 +208,15 @@ def require_process_image(image, expected_sha):
     if image.get("sha256") != expected_sha:
         raise ValueError("observed process image does not match runtime; raw archive retained")
     if kind == "mapped_executable_vnode" and (
-            image.get("method") != "proc_pidinfo_region_vnode" or
+            image.get("method") not in ("proc_pidinfo_region_vnode", "lsof_txt_vnode") or
             image.get("mapped_dev") != image.get("selected_dev") or
             image.get("mapped_ino") != image.get("selected_ino") or
             not isinstance(image.get("mapped_size"), int) or image["mapped_size"] <= 0):
         raise ValueError("observed mapped vnode differs from selected executable")
+    if kind == "mapped_executable_vnode" and image.get("method") == "lsof_txt_vnode" and (
+            image.get("mapped_size") != image.get("selected_size") or
+            not image.get("lsof_stdout_hex")):
+        raise ValueError("observed text vnode lacks selected executable size or raw proof")
     if kind == "mapped_executable_code" and (
             image.get("method") != "ReadProcessMemory_main_PE_code" or
             not isinstance(image.get("matched_code_bytes"), int) or
@@ -221,7 +226,8 @@ def require_process_image(image, expected_sha):
         raise ValueError("observed mapped PE code lacks selected executable binding")
 
 
-def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
+def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds,
+                observe_memory=False):
     started = time.monotonic_ns()
     stdout_path = archive / "stdout.raw"
     stderr_path = archive / "stderr.raw"
@@ -230,6 +236,21 @@ def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
                                    stdin=subprocess.PIPE if stdin_bytes else None,
                                    cwd=ROOT, env=os.environ.copy(),
                                    start_new_session=(os.name == "posix"))
+        memory = None
+        memory_stop = threading.Event()
+        memory_thread = None
+        if observe_memory:
+            import native_memory
+            memory_result = {}
+            def observe_resident():
+                try:
+                    memory_result.update(native_memory.sample_while_alive(process, memory_stop))
+                except Exception as error:
+                    memory_result.update({"pid": process.pid, "samples": [],
+                                          "errors": [{"error": str(error)}],
+                                          "status": "unavailable_or_partial"})
+            memory_thread = threading.Thread(target=observe_resident, daemon=True)
+            memory_thread.start()
         observation = {}
         observed = threading.Event()
 
@@ -276,6 +297,14 @@ def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
                     process.communicate(timeout=3)
                 except subprocess.TimeoutExpired:
                     termination = "host_deadline_cleanup_incomplete"
+        finally:
+            if memory_thread is not None:
+                memory_stop.set()
+                memory_thread.join(timeout=1)
+                memory = memory_result if not memory_thread.is_alive() else {
+                    "pid": process.pid, "samples": [],
+                    "errors": [{"error": "resident-byte observer exceeded cleanup bound"}],
+                    "status": "unavailable_or_partial"}
     ended = time.monotonic_ns()
     def read_raw(path):
         before = path.stat().st_size
@@ -294,6 +323,10 @@ def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
         stdout = stderr = b""
     (archive / "stdin.raw").write_bytes(stdin_bytes)
     (archive / "build-inventory.json").write_bytes(inventory_path.read_bytes())
+    if memory is not None:
+        (archive / "rss.json").write_text(json.dumps(memory, indent=2) + "\n")
+        (archive / "rss.csv").write_text("monotonic_ns,resident_bytes\n" +
+            "".join(f"{stamp},{resident}\n" for stamp, resident in memory["samples"]))
     receipt = {"pid": process.pid, "command": command, "started_monotonic_ns": started,
                "image_observed_monotonic_ns": image_observed, "ended_monotonic_ns": ended,
                "observed_image": image, "image_observation_error": image_error,
@@ -306,6 +339,11 @@ def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
                "stdout_bytes": stdout_bytes, "stderr_bytes": stderr_bytes,
                "stdout_sha256": stdout_sha256, "stderr_sha256": stderr_sha256,
                "inventory_sha256": digest(archive / "build-inventory.json")}
+    if memory is not None:
+        receipt["rss_observation"] = {"status": memory["status"],
+                                      "samples": len(memory["samples"]),
+                                      "errors": len(memory["errors"]),
+                                      "rss_json_sha256": digest(archive / "rss.json")}
     (archive / "execution.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt, stdout, stderr
 
@@ -393,9 +431,23 @@ def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, n
     construction = next_record(3, "CONSTRUCTION")
     if construction != ["CONSTRUCTION", str(bodies), str(joints)]:
         raise ValueError("construction does not match manifest fixture")
-    clocks = {"warmup": [], "measure": []}
+    clocks = {"warmup": [], "measure": [], "heap": []}
     previous_end = -1
     cursor = 4
+    previous_epoch = 0
+    def collect_heap(stage):
+        nonlocal cursor, previous_epoch
+        row = next_record(cursor, "HEAP")
+        if len(row) != 4 or row[1] != stage:
+            raise ValueError("HEAP stage is missing or out of order")
+        retained, epoch = map(int, row[2:])
+        if retained <= 0 or epoch <= previous_epoch:
+            raise ValueError("HEAP bytes or collection epoch are invalid")
+        clocks["heap"].append((stage, retained, epoch))
+        previous_epoch = epoch
+        cursor += 1
+    if mode == "memory":
+        collect_heap("constructed")
     for step in range(warmup):
         row = next_record(cursor, "CLOCK")
         if len(row) != 5 or row[1:3] != ["warmup", str(step)]:
@@ -410,6 +462,8 @@ def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, n
     if reset != ["RESET", "after_warmup", str(warmup)]:
         raise ValueError("fixture reset marker does not match warm-up")
     cursor += 1
+    if mode == "memory":
+        collect_heap("after_reset")
     step_rows = []
     previous_events = (0, 0, 0)
     for step in range(steps):
@@ -448,6 +502,8 @@ def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, n
             raise ValueError("unsampled pair counts must be -1")
         step_rows.append(row)
         cursor += 1
+    if mode == "memory":
+        collect_heap("measured")
     run = next_record(cursor, "RUN")
     if len(run) != 10 or next_record(cursor + 1, "COMPLETE") != ["COMPLETE", nonce] or cursor + 1 != len(records) - 1:
         raise ValueError("run requires a final matching completion marker")
@@ -465,6 +521,8 @@ def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, n
 def capture(args):
     if args.target not in TARGETS or args.mode not in MODES:
         raise ValueError("unsupported target or mode")
+    if args.mode == "memory" and args.target not in NATIVE_HOST_TARGETS:
+        raise ValueError("resident-byte memory observer requires a Native host")
     if args.target in NATIVE_HOST_TARGETS:
         require_native_host(args.target)
     if args.steps < 1 or args.warmup < 0:
@@ -535,6 +593,12 @@ def capture(args):
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
     args.archive.mkdir(parents=True)
+    selected_executable = None
+    if args.target in NATIVE_HOST_TARGETS:
+        selected_executable = args.archive / harness.name
+        shutil.copyfile(harness, selected_executable)
+        if digest(selected_executable) != hashes["harness"]:
+            raise ValueError("archived selected executable differs from build inventory")
     source_link = None
     verified_receipt_sha = None
     if getattr(args, "source_link_receipt", None) is not None:
@@ -581,8 +645,13 @@ def capture(args):
         stdin_bytes = ("\t".join(producer_args) + "\n").encode("utf-8")
     else:
         command += producer_args
-    execution, stdout, stderr = run_process(
-        command, args.archive, inventory_path, stdin_bytes, host_timeout)
+    if args.mode == "memory":
+        execution, stdout, stderr = run_process(
+            command, args.archive, inventory_path, stdin_bytes, host_timeout,
+            observe_memory=True)
+    else:
+        execution, stdout, stderr = run_process(
+            command, args.archive, inventory_path, stdin_bytes, host_timeout)
     if source_link is not None and digest(args.archive / "source-link.json") != verified_receipt_sha:
         raise ValueError("archived source-link receipt changed during process capture")
     process_record = {
@@ -612,6 +681,9 @@ def capture(args):
                                 ("harness", harness), ("core", core), ("kotlin", kotlin))
         },
         "bundle_sha256": bundle,
+        "selected_executable_archive": (
+            {"path": selected_executable.name, "sha256": digest(selected_executable)}
+            if selected_executable is not None else None),
         "stdin_sha256": hashlib.sha256(stdin_bytes).hexdigest(),
         "stdin_bytes": len(stdin_bytes),
         "pid": execution["pid"], "host": platform.uname()._asdict(),
@@ -633,6 +705,7 @@ def capture(args):
                 "stderr_bytes": execution["stderr_bytes"]},
         "memory_attribution": "missing", "plateau": "missing",
         "allocation": "missing",
+        "rss_observation": execution.get("rss_observation"),
         "noise_approval": "missing", "stress_ceiling_approval": "missing",
         "required_non_jvm_gates": {
             "absolute_p99_seconds": manifest["budgets"]["absolute_p99_seconds"][str(scenario["rate_hz"])],
@@ -661,6 +734,14 @@ def capture(args):
     (args.archive / "activity.csv").write_text(
         ",".join(STEP_HEADER) + "\n" +
         "\n".join(",".join(row[1:]) for row in steps) + "\n")
+    if args.mode == "memory":
+        (args.archive / "heap.csv").write_text("stage,retained_heap_bytes,gc_epoch\n" +
+            "".join(f"{stage},{size},{epoch}\n" for stage, size, epoch in clocks["heap"]))
+        process_record["managed_heap_observation"] = {
+            "status": "observed_kotlin_heap_after_collection",
+            "stages": len(clocks["heap"]),
+            "heap_csv_sha256": digest(args.archive / "heap.csv")}
+        (args.archive / "capture.json").write_text(json.dumps(process_record, indent=2) + "\n")
     (args.archive / "provider.json").write_text(json.dumps({
         "api": provider[1], "source_sha": provider[2], "core_sha256": provider[3],
         "kotlin_sha256": provider[4], "scenario": provider[5],
@@ -671,7 +752,10 @@ def capture(args):
         "api": run[1], "mode": run[2], "steps": int(run[3]),
         "warmup_steps": int(run[4]), "measured_wall_ns": int(run[5]),
         "active_steps": int(run[6]), "memory_attribution": "missing",
-        "allocation": "missing", "plateau": "missing", "qualification": "unpassed",
+        "allocation": "missing", "plateau": "missing",
+        "rss_observation": execution.get("rss_observation"),
+        "managed_heap_observation": process_record.get("managed_heap_observation"),
+        "qualification": "unpassed",
     }, indent=2) + "\n")
     try:
         require_process_image(execution["observed_image"], hashes["runtime"])

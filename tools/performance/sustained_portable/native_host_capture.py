@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--target", choices=sorted(capture.NATIVE_HOST_TARGETS), required=True)
     parser.add_argument("--build", choices=("development", "optimized"), required=True)
+    parser.add_argument("--mode", choices=("timing", "memory"), default="timing")
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
     parser.add_argument("--host-timeout-seconds", type=float, default=45.0)
@@ -35,6 +36,7 @@ def main():
                    "--publication-root", str(args.publication_root),
                    "--scenario", args.scenario, "--target", args.target,
                    "--build", args.build, "--source-sha", inventory["source_sha"],
+                   "--mode", args.mode,
                    "--runtime", harness, "--harness", harness,
                    "--core", selected_artifact(inventory, "dyn4k-core", args.target),
                    "--kotlin", selected_artifact(inventory, "dyn4k", args.target),

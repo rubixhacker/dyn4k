@@ -77,7 +77,10 @@ private suspend fun phase(
     return Pair(nowNs() - started, active)
 }
 
-internal suspend fun runPortable(args: Array<String>, pause: suspend (Int) -> Unit = {}) {
+internal suspend fun runPortable(
+    args: Array<String>, pause: suspend (Int) -> Unit = {},
+    memoryProbe: (() -> Pair<Long, Long>)? = null,
+) {
     require(args.size == 14) {
         "scenario family variant size hz steps warmup mode api source core kotlin build nonce"
     }
@@ -98,7 +101,8 @@ internal suspend fun runPortable(args: Array<String>, pause: suspend (Int) -> Un
     require(api == "direct_kotlin" || api == "compatibility")
     require(hz == 30 || hz == 60 || hz == 120)
     require(steps > 0 && warmup >= 0)
-    require(mode == "timing")
+    require(mode == "timing" || mode == "memory")
+    require(mode != "memory" || memoryProbe != null)
     require(build == "development" || build == "optimized")
     require(scenario == "$family.$variant.$size.${hz}hz.$api")
     require(source.matches(Regex("[0-9a-f]{40}")))
@@ -106,24 +110,37 @@ internal suspend fun runPortable(args: Array<String>, pause: suspend (Int) -> Un
     require(core.matches(Regex("[0-9a-f]{64}")))
     require(kotlin.matches(Regex("[0-9a-f]{64}")))
     require(nonce.matches(Regex("[0-9a-f]{32}")))
+    fun heap(stage: String) {
+        if (mode == "memory") {
+            val sample = requireNotNull(memoryProbe).invoke()
+            require(sample.first > 0 && sample.second > 0)
+            emit("HEAP", stage, sample.first, sample.second)
+        }
+    }
     val count = expectedCount(family, size)
     emit("PROVIDER", api, source, core, kotlin, scenario, build, nonce)
     emit("RESOLUTION", calibratedResolutionNs(), 64)
     emit("LINK", BuildIdentity.sourceSha, BuildIdentity.producerTree)
     var warmed: Fixture? = Fixture(family, variant, count, hz, api)
     emit("CONSTRUCTION", warmed!!.world.getBodyCount(), warmed.world.getJointCount())
+    heap("constructed")
     phase(warmed, warmup, true, pause)
     warmed = null
     emit("RESET", "after_warmup", warmup)
+    heap("after_reset")
     val measured = Fixture(family, variant, count, hz, api)
     val (wallNs, activeSteps) = phase(measured, steps, false, pause)
+    heap("measured")
     emit("RUN", api, mode, steps, warmup, wallNs, activeSteps,
         "memory_attribution_missing", "plateau_missing", "unpassed")
     emit("COMPLETE", nonce)
 }
 
-internal fun startPortable(args: Array<String>, pause: suspend (Int) -> Unit = {}) {
-    suspend { runPortable(args, pause) }.startCoroutine(object : Continuation<Unit> {
+internal fun startPortable(
+    args: Array<String>, pause: suspend (Int) -> Unit = {},
+    memoryProbe: (() -> Pair<Long, Long>)? = null,
+) {
+    suspend { runPortable(args, pause, memoryProbe) }.startCoroutine(object : Continuation<Unit> {
         override val context = EmptyCoroutineContext
         override fun resumeWith(result: Result<Unit>) { result.getOrThrow() }
     })

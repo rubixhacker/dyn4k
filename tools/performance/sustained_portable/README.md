@@ -23,7 +23,8 @@ Linux ARM64, Windows x64, and macOS ARM64 Native processes. See the
 harness entry, including Wasm binaries, before launch. On Linux it reads
 `/proc/<pid>/exe`; on Windows it compares mapped PE headers and code through
 `ReadProcessMemory`; on macOS it compares the mapped executable vnode with a
-selected file handle through `proc_pidinfo`. Path APIs provide diagnostics;
+selected file handle through `proc_pidinfo` or a bounded `lsof` text mapping
+probe. Path APIs provide diagnostics;
 a failed lookup records `path: null` and `path_error` without replacing the
 mapped identity check.
 Each OS probe fails closed when its identity check is unavailable. The archive contains the
@@ -79,8 +80,10 @@ running those tests to retain the rejected HTTP response bytes, changed
 resource bytes, frozen inventory hashes, and rejection records for the
 omitted-import, lookup-to-read swap, and unknown-executable controls.
 
-The capture result is always `qualification: unpassed`. This module only
-accepts timing mode. A short run checks
-the producer protocol and host process only. Memory attribution, allocation
-stream, plateau, approved noise and stress ceilings, reference environment,
-optimized build, and sustained durations remain separate open requirements.
+The capture result is always `qualification: unpassed`. Native hosts also
+accept a separate `--mode memory` process. It retains live resident-byte
+samples from the selected PID and post-collection Native heap checkpoints.
+A short run checks the producer
+protocol and host process. Memory attribution, allocation stream, plateau,
+approved noise and stress ceilings, reference environment, optimized build,
+and sustained durations remain separate open requirements.

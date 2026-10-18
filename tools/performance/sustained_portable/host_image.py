@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import struct
+import subprocess
 
 
 def file_sha256(stream):
@@ -53,11 +54,52 @@ class _RegionWithPath(ctypes.Structure):
 
 def select_macos_region(regions, selected_stat):
     matches = [region for region in regions
-               if region["protection"] & 4 and region["offset"] == 0 and
+               if region["protection"] & 4 and
                region["dev"] == (selected_stat.st_dev & 0xffffffff) and
                region["ino"] == selected_stat.st_ino and region["size"] > 0]
     if len(matches) != 1:
         raise ValueError("one executable main-image vnode mapping was not observed")
+    return matches[0]
+
+
+def select_macos_text_vnode(raw, pid, selected_stat):
+    records = []
+    current = None
+    observed_pid = None
+    for field in (part.lstrip(b"\n") for part in raw.split(b"\0") if part.strip(b"\n")):
+        key, value = field[:1], field[1:]
+        if key == b"p":
+            if observed_pid is not None or value != str(pid).encode():
+                raise ValueError("macOS text mapping PID differs from selected child")
+            observed_pid = pid
+        elif key == b"f":
+            if current is not None:
+                records.append(current)
+            current = {b"f": value}
+        elif current is None or key in current:
+            raise ValueError("macOS text mapping record is malformed")
+        else:
+            current[key] = value
+    if current is not None:
+        records.append(current)
+    if observed_pid != pid:
+        raise ValueError("macOS text mapping PID was not observed")
+    matches = []
+    for record in records:
+        if record.get(b"f") != b"txt":
+            continue
+        try:
+            device = int(record[b"D"], 0)
+            inode = int(record[b"i"])
+            size = int(record[b"s"])
+        except (KeyError, ValueError):
+            continue
+        if (device, inode, size) == (selected_stat.st_dev, selected_stat.st_ino,
+                                      selected_stat.st_size):
+            matches.append({"dev": device, "ino": inode, "size": size,
+                            "path": os.fsdecode(record.get(b"n", b""))})
+    if len(matches) != 1:
+        raise ValueError("one selected executable text vnode was not observed")
     return matches[0]
 
 
@@ -99,23 +141,42 @@ def observe_macos(pid, selected):
                             "dev": record.vnode.stat.dev, "ino": record.vnode.stat.ino,
                             "path": os.fsdecode(record.path).rstrip("\x00")}
             regions.append(region)
-            if region["protection"] & 4 and region["offset"] == 0 and \
+            if region["protection"] & 4 and \
                     region["dev"] == (selected_stat.st_dev & 0xffffffff) and \
                     region["ino"] == selected_stat.st_ino:
                 break
             address = following
         else:
             raise ValueError("macOS process region scan exceeded bound")
-        match = select_macos_region(regions, selected_stat)
+        try:
+            match = select_macos_region(regions, selected_stat)
+            method = "proc_pidinfo_region_vnode"
+            mapped_size = match["size"]
+            raw_text = None
+        except ValueError as region_error:
+            try:
+                result = subprocess.run(
+                    ["/usr/sbin/lsof", "-a", "-p", str(pid), "-d", "txt", "-F0pfiDns"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3, check=True)
+                if len(result.stdout) > 1024 * 1024:
+                    raise ValueError("macOS text mapping output exceeded bound")
+                match = select_macos_text_vnode(result.stdout, pid, selected_stat)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                raise ValueError(f"macOS selected vnode mapping unavailable: "
+                                 f"region={region_error}; text={error}") from error
+            method = "lsof_txt_vnode"
+            mapped_size = match["size"]
+            raw_text = result.stdout.hex()
         if os.fstat(stream.fileno()).st_size != selected_stat.st_size or \
                 file_sha256(stream) != selected_sha:
             raise ValueError("selected executable changed during image observation")
-    return {"method": "proc_pidinfo_region_vnode", "identity_kind": "mapped_executable_vnode",
+    return {"method": method, "identity_kind": "mapped_executable_vnode",
             "path": reported_path, "path_error": path_error, "mapped_path": match["path"],
-            "mapped_address": match["address"], "mapped_size": match["size"],
+            "mapped_address": match.get("address"), "mapped_size": mapped_size,
             "mapped_dev": match["dev"], "mapped_ino": match["ino"],
             "selected_dev": selected_stat.st_dev & 0xffffffff,
-            "selected_ino": selected_stat.st_ino,
+            "selected_ino": selected_stat.st_ino, "selected_size": selected_stat.st_size,
+            "lsof_stdout_hex": raw_text,
             "sha256": selected_sha, "hash_scope": "selected_file_on_matching_mapped_vnode"}
 
 
@@ -181,13 +242,15 @@ def pe_executable_sections(image):
                                          page + (value & 0xfff) + width))
             offset += block_size
     return {"image_size": image_size, "header_size": header_size,
-            "preferred_base": preferred_base, "sections": executable,
+            "preferred_base": preferred_base, "image_base_offset": optional + 24,
+            "sections": executable,
             "relocations": relocations}
 
 
 def compare_pe_code(image, layout, read_memory, base):
     mapped_header = read_memory(base, layout["header_size"])
-    selected_header = image[:layout["header_size"]]
+    selected_header = bytearray(image[:layout["header_size"]])
+    struct.pack_into("<Q", selected_header, layout["image_base_offset"], base)
     if len(mapped_header) != len(selected_header):
         raise ValueError("live mapped PE header differs from selected executable in length")
     if mapped_header != selected_header:

@@ -146,8 +146,10 @@ python -B tools/performance/sustained_portable/host_image_adverse.py `
 The Windows observer uses `EnumProcessModulesEx` to select the main module,
 then `ReadProcessMemory` to compare its mapped PE header and every readable,
 nonwritable executable section with the selected file. The comparison masks
-only documented base-relocation bytes and requires at least 4 KiB of matched
-code. `QueryFullProcessImageNameW` supplies diagnostic path metadata only;
+only documented base-relocation bytes in code and requires at least 4 KiB of
+matched code. The PE32+ header `ImageBase` must equal the observed main module
+base. Every other header byte must match the selected executable.
+`QueryFullProcessImageNameW` supplies diagnostic path metadata only;
 failure records `path: null` and `path_error` after the live code comparison.
 The receipt records both the selected file SHA-256 and mapped code hash; it
 does not call the path digest mapped bytes. The path-swap control records an
@@ -187,9 +189,13 @@ python3 -B tools/performance/sustained_portable/host_image_adverse.py \
 ```
 
 The macOS observer scans live executable regions with
-`proc_pidinfo(PROC_PIDREGIONPATHINFO)`. It compares the mapped vnode's device
-and inode with `fstat` on the selected executable file handle, then hashes
-that handle's bytes. `proc_pidpath` is retained as diagnostic path metadata;
+`proc_pidinfo(PROC_PIDREGIONPATHINFO)`. The executable region can start after
+the file's read-only header, so a zero file offset is not required. If the
+region scan has no matching executable vnode, the bounded `/usr/sbin/lsof`
+text-mapping probe requires one record for the selected child PID and exact
+device, inode, and file size. Its raw bytes are retained in the process receipt.
+Both methods compare the mapped vnode with `fstat` on the selected executable
+file handle, then hash that handle's bytes. `proc_pidpath` is retained as diagnostic path metadata;
 its path bytes are never called mapped image bytes. Lookup failure records
 `path: null` and `path_error` while the vnode comparison remains required.
 The path-swap control
@@ -209,12 +215,29 @@ macOS binds a live executable region's vnode to the selected file handle.
 Windows compares the live main module's PE header and executable code with
 the selected file. These methods have different evidence scopes in their
 raw receipts; any failed OS observation remains unpassed.
+The Native archive also keeps an exact copy of the selected executable for
+later PE or Mach-O inspection, with a verified SHA-256 receipt.
 The host controller has a 45-second default deadline with terminate/kill
 cleanup; it retains raw stdout, stderr, stdin, inventory, publication inputs,
 and process/error receipt on timeout. Linux x64 can retain a traced source
 read, fresh KLIB, resolved link read, and executable chain. Its internal
-compiler transformation remains unpassed. A valid short capture does not satisfy memory,
-allocation, plateau, noise, sustained duration, or performance budgets.
+compiler transformation remains unpassed.
+
+Use `--mode memory` with `native_host_capture.py` in a separate fresh process
+and archive for a short resident-memory diagnostic. The host samples the
+selected PID every 20 ms. Linux reads `/proc/PID/statm`, macOS reads
+`PROC_PIDTASKINFO.pti_resident_size`, and Windows reads
+`GetProcessMemoryInfo.WorkingSetSize`. `rss.json` and `rss.csv` retain the
+monotonic sample times and resident bytes, or explicit probe errors.
+The Native producer also forces collection and emits managed heap bytes and
+collection epochs after construction, reset, and measurement. `heap.csv`
+retains these validated checkpoints. A missing collection record fails the
+memory-mode protocol.
+`RUN` remains `memory_attribution_missing` because the heap and resident probes
+do not attribute native allocations and reserved overhead. The 30-step route does not
+perform the required 100 create/use/dispose cycles or post-collection heap
+probe, so `plateau_missing` remains accurate. A valid short capture does not
+satisfy allocation, plateau, noise, sustained duration, or performance budgets.
 
 The remaining iOS, tvOS, watchOS, and Android Native device and simulator
 routes need application shells, deployment, and device process identity.

@@ -19,6 +19,7 @@ import zipfile
 
 import capture
 import native_host_capture
+import native_memory
 import native_source_link
 import host_image_adverse
 import host_image
@@ -72,6 +73,32 @@ class PortableCaptureTest(unittest.TestCase):
         self.assertEqual(int(steps[0][7]), 100)
         self.assertEqual(provider[1], "direct_kotlin")
         self.assertEqual(run[-1], "unpassed")
+
+    def test_memory_mode_requires_its_own_producer_process_marker(self):
+        payload = self.protocol().replace(b"RUN\tdirect_kotlin\ttiming",
+                                          b"RUN\tdirect_kotlin\tmemory")
+        with self.assertRaisesRegex(ValueError, "HEAP"):
+            capture.validate_protocol(payload, self.scenario, self.source,
+                                      self.producer_tree, self.hashes,
+                                      "development", self.nonce, 1, 1, "memory")
+        payload = payload.replace(b"DYN4K\tCLOCK\twarmup", b"DYN4K\tHEAP\tconstructed\t100\t1\nDYN4K\tCLOCK\twarmup")
+        payload = payload.replace(b"DYN4K\tCLOCK\tmeasure", b"DYN4K\tHEAP\tafter_reset\t90\t2\nDYN4K\tCLOCK\tmeasure")
+        payload = payload.replace(b"DYN4K\tRUN", b"DYN4K\tHEAP\tmeasured\t120\t3\nDYN4K\tRUN")
+        result = capture.validate_protocol(payload, self.scenario, self.source,
+                                           self.producer_tree, self.hashes,
+                                           "development", self.nonce, 1, 1, "memory")
+        self.assertEqual(result[3][2], "memory")
+        self.assertEqual(result[0]["heap"], [("constructed", 100, 1),
+                                             ("after_reset", 90, 2),
+                                             ("measured", 120, 3)])
+        with self.assertRaisesRegex(ValueError, "HEAP"):
+            capture.validate_protocol(payload.replace(b"\t120\t3", b"\t120\t1"),
+                                      self.scenario, self.source, self.producer_tree,
+                                      self.hashes, "development", self.nonce, 1, 1, "memory")
+        with self.assertRaisesRegex(ValueError, "HEAP"):
+            capture.validate_protocol(self.protocol(), self.scenario, self.source,
+                                      self.producer_tree, self.hashes,
+                                      "development", self.nonce, 1, 1, "memory")
 
     def test_rejects_substituted_provider(self):
         payload = self.protocol().replace(b"\taaaaaaaaaa", b"\teeeeeeeeee")
@@ -140,10 +167,10 @@ class PortableCaptureTest(unittest.TestCase):
 
     def test_macos_region_requires_selected_executable_vnode(self):
         selected = SimpleNamespace(st_dev=7, st_ino=11)
-        region = {"protection": 5, "offset": 0, "dev": 7, "ino": 11, "size": 4096}
+        region = {"protection": 5, "offset": 4096, "dev": 7, "ino": 11, "size": 4096}
         self.assertEqual(host_image.select_macos_region([region], selected), region)
         for changed in ({**region, "ino": 12}, {**region, "protection": 1},
-                        {**region, "offset": 4096}):
+                        {**region, "size": 0}):
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "vnode mapping"):
                 host_image.select_macos_region([changed], selected)
 
@@ -180,6 +207,38 @@ class PortableCaptureTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "vnode mapping"):
                 observe_region(stat.st_ino + 1)
 
+    def test_macos_text_vnode_fallback_survives_path_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "moved-sleep"
+            selected.write_bytes(b"actual child image")
+            stat = selected.stat()
+            raw = (f"p17\0ftxt\0n/unrelated/cache\0ftxt\0D{stat.st_dev:#x}\0i{stat.st_ino}\0s{stat.st_size}"
+                   "\0n/old/path/sleep\0").encode()
+            match = host_image.select_macos_text_vnode(raw, 17, stat)
+            self.assertEqual((match["dev"], match["ino"], match["size"]),
+                             (stat.st_dev, stat.st_ino, stat.st_size))
+            self.assertEqual(match["path"], "/old/path/sleep")
+            for adverse in (raw.replace(b"p17", b"p18"),
+                            raw.replace(f"i{stat.st_ino}".encode(), b"i1"),
+                            raw.replace(f"s{stat.st_size}".encode(), b"s1"), raw + raw[4:]):
+                with self.subTest(adverse=adverse), self.assertRaises(ValueError):
+                    host_image.select_macos_text_vnode(adverse, 17, stat)
+
+            library = SimpleNamespace(proc_pidpath=mock.Mock(return_value=0),
+                                      proc_pidinfo=mock.Mock(return_value=0))
+            completed = SimpleNamespace(stdout=raw, stderr=b"", returncode=0)
+            with mock.patch.object(host_image.ctypes, "CDLL", return_value=library), \
+                    mock.patch.object(host_image.subprocess, "run", return_value=completed) as probe:
+                receipt = host_image.observe_macos(17, selected)
+            probe.assert_called_once()
+            self.assertEqual(receipt["method"], "lsof_txt_vnode")
+            self.assertEqual(bytes.fromhex(receipt["lsof_stdout_hex"]), raw)
+            self.assertIsNone(receipt["path"])
+            capture.require_process_image(receipt, hashlib.sha256(selected.read_bytes()).hexdigest())
+            with self.assertRaisesRegex(ValueError, "observed mapped vnode"):
+                capture.require_process_image({**receipt, "mapped_ino": stat.st_ino + 1},
+                                              receipt["sha256"])
+
     @staticmethod
     def windows_pe_fixture():
         image = bytearray(0x2200)
@@ -207,6 +266,19 @@ class PortableCaptureTest(unittest.TestCase):
             return bytes(image[:size] if address == base else image[0x200:0x200 + size])
         self.assertEqual(host_image.compare_pe_code(image, layout, read, base)
                          ["matched_code_bytes"], 8192)
+        relocated_base = base + 0x6c0000
+        def rebased_read(address, size):
+            if address == relocated_base:
+                header = bytearray(image[:size])
+                struct.pack_into("<Q", header, 0x98 + 24, relocated_base)
+                return bytes(header)
+            return bytes(image[0x200:0x200 + size])
+        self.assertEqual(host_image.compare_pe_code(image, layout, rebased_read,
+                                                    relocated_base)["matched_code_bytes"], 8192)
+        with self.assertRaisesRegex(ValueError, "mapped PE header differs"):
+            host_image.compare_pe_code(image, layout,
+                lambda address, size: (bytes(image[:size]) if address == relocated_base
+                                       else rebased_read(address, size)), relocated_base)
         relocated_layout = {**layout, "relocations": set(range(0x1010, 0x1018))}
         def relocated_read(address, size):
             if address == base:
@@ -227,6 +299,79 @@ class PortableCaptureTest(unittest.TestCase):
         relative = PureWindowsPath("commonMain", "kotlin", "org", "dyn4j", "Vector2.kt")
         self.assertEqual(capture.source_archive_name(relative),
                          "commonMain/org/dyn4j/Vector2.kt")
+
+    def test_native_memory_observer_retains_live_resident_series(self):
+        if sys.platform != "linux":
+            self.skipTest("local live resident-byte control requires Linux")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inventory = root / "inventory.json"
+            inventory.write_text("{}\n")
+            archive = root / "archive"
+            archive.mkdir()
+            receipt, _, _ = capture.run_process(
+                [sys.executable, "-c", "import time; time.sleep(0.18)"],
+                archive, inventory, b"", 2, observe_memory=True)
+            series = json.loads((archive / "rss.json").read_text())
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual(series["status"], "observed_diagnostic")
+            self.assertGreaterEqual(len(series["samples"]), 2)
+            self.assertTrue(all(value > 0 for _, value in series["samples"]))
+            self.assertEqual(receipt["rss_observation"]["rss_json_sha256"],
+                             capture.digest(archive / "rss.json"))
+
+    def test_native_memory_unavailable_is_explicit(self):
+        class FakeProcess:
+            pid = 17
+            calls = 0
+            def poll(self):
+                self.calls += 1
+                return None if self.calls < 3 else 1
+        with mock.patch.object(native_memory, "read_rss_bytes", side_effect=OSError(5, "denied")):
+            result = native_memory.sample_while_alive(FakeProcess(), mock.Mock(is_set=lambda: False))
+        self.assertEqual(result["status"], "unavailable_or_partial")
+        self.assertEqual(result["samples"], [])
+        self.assertGreaterEqual(len(result["errors"]), 1)
+
+    def test_macos_resident_probe_uses_task_info_bytes(self):
+        def pidinfo(pid, flavor, argument, pointer, size):
+            self.assertEqual((pid, flavor, argument), (17, 4, 0))
+            info = ctypes.cast(pointer, ctypes.POINTER(native_memory._MacTaskInfo)).contents
+            info.resident_size = 123456
+            return size
+        library = SimpleNamespace(proc_pidinfo=mock.Mock(side_effect=pidinfo))
+        with mock.patch.object(native_memory.sys, "platform", "darwin"), \
+                mock.patch.object(native_memory.ctypes, "CDLL", return_value=library):
+            self.assertEqual(native_memory.read_rss_bytes(17), 123456)
+            library.proc_pidinfo.return_value = 0
+            library.proc_pidinfo.side_effect = None
+            with self.assertRaisesRegex(OSError, "resident bytes unavailable"):
+                native_memory.read_rss_bytes(17)
+
+    def test_windows_resident_probe_uses_working_set_bytes(self):
+        def memory_info(handle, pointer, size):
+            self.assertEqual((handle, size), (123, ctypes.sizeof(native_memory._WindowsMemoryCounters)))
+            counters = ctypes.cast(pointer, ctypes.POINTER(
+                native_memory._WindowsMemoryCounters)).contents
+            counters.working_set = 654321
+            return 1
+        kernel = SimpleNamespace(OpenProcess=mock.Mock(return_value=123),
+                                 CloseHandle=mock.Mock())
+        psapi = SimpleNamespace(GetProcessMemoryInfo=mock.Mock(side_effect=memory_info))
+        with mock.patch.object(native_memory.sys, "platform", "win32"), \
+                mock.patch.object(native_memory.ctypes, "WinDLL", create=True,
+                                  side_effect=lambda name, **kwargs:
+                                  kernel if name == "kernel32" else psapi), \
+                mock.patch.object(native_memory.ctypes, "WinError", create=True,
+                                  side_effect=lambda code: OSError(code, "denied")), \
+                mock.patch.object(native_memory.ctypes, "get_last_error", create=True,
+                                  return_value=5):
+            self.assertEqual(native_memory.read_rss_bytes(17), 654321)
+            kernel.CloseHandle.assert_called_once_with(123)
+            psapi.GetProcessMemoryInfo.side_effect = None
+            psapi.GetProcessMemoryInfo.return_value = 0
+            with self.assertRaises(OSError):
+                native_memory.read_rss_bytes(17)
 
     def test_windows_diagnostic_path_failure_preserves_live_code_gate(self):
         image = self.windows_pe_fixture()
