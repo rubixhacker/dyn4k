@@ -453,6 +453,64 @@ class FullHostedTests(unittest.TestCase):
         with tarfile.open(archive) as packed:
             self.assertIn("debug-g/product-inventory-source.json", packed.getnames())
 
+    def test_missing_safari_product_retains_compiler_and_karma_layouts(self):
+        repository = self.root / "repository"
+        project = repository / "dyn4k-core"
+        package = repository / "build/js/packages/dyn4k-dyn4k-core-test"
+        bundle = package / "kotlin/dyn4k-dyn4k-core-test.js"
+        bundle.parent.mkdir(parents=True)
+        bundle.write_bytes(b"Karma development input")
+        alternate = (project / "build/compileSync/js/test/testProductionExecutable"
+                     / "alternate/dyn4k-dyn4k-core-test.js")
+        alternate.parent.mkdir(parents=True)
+        alternate.write_bytes(b"Mac layout candidate")
+        output = self.root / "failed-safari"
+        output.mkdir()
+        (output / "receipt.json").write_text("{}")
+        process = {"started_ns": 1, "finished_ns": time.time_ns() + 10**9,
+                   "invocation_id": "safari-invocation", "exit_code": 0}
+        for mode in ("development", "production"):
+            diagnostic = output / mode / "product-inventory-source.json"
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "product inventory"):
+                full_hosted.collect_test_products(
+                    {"dyn4k-core": project}, "jsSafari", mode, process,
+                    diagnostic, output)
+            record = json.loads(diagnostic.read_text())["projects"]["dyn4k-core"]
+            self.assertEqual(str(project / "build/compileSync/js/test" /
+                                 ("testDevelopmentExecutable" if mode == "development"
+                                  else "testProductionExecutable") / "kotlin" /
+                                 "dyn4k-dyn4k-core-test.js"), record["expected"])
+            self.assertEqual(str(bundle if mode == "development" else record["expected"]),
+                             record["karma_input"])
+            roots = record["roots"]
+            self.assertIn("compiler", roots)
+            self.assertIn("karma_package", roots)
+            self.assertEqual(full_hosted.sha256(bundle), next(
+                entry["sha256"] for entry in roots["karma_package"]["entries"]
+                if entry["path"].endswith("/kotlin/dyn4k-dyn4k-core-test.js")))
+            self.assertIn(str(alternate), {str(project / entry["path"])
+                for entry in roots["compiler"]["entries"] if entry["kind"] == "file"})
+        archive = self.root / "failed-safari.tar"
+        full_hosted.package_archive(output, archive)
+        with tarfile.open(archive) as packed:
+            self.assertIn("development/product-inventory-source.json", packed.getnames())
+            self.assertIn("production/product-inventory-source.json", packed.getnames())
+
+    def test_safari_product_inventory_does_not_follow_symlinked_package(self):
+        repository = self.root / "repository"
+        project = repository / "dyn4k-core"
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "secret.js").write_bytes(b"outside")
+        package = repository / "build/js/packages/dyn4k-dyn4k-core-test"
+        package.parent.mkdir(parents=True)
+        package.symlink_to(outside, target_is_directory=True)
+        record = full_hosted.product_inventory(project, "jsSafari", "development",
+                                               "dyn4k-core")
+        self.assertFalse(record["roots"]["karma_package"]["present"])
+        self.assertTrue(record["roots"]["karma_package"]["unsafe_symlink"])
+        self.assertEqual([], record["roots"]["karma_package"]["entries"])
+
     def test_product_diagnostic_inventory_has_a_fixed_entry_limit(self):
         project = self.root / "dyn4k-core"
         folder = project / "build/bin/macosArm64/debugTest"

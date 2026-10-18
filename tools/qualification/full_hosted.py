@@ -453,7 +453,80 @@ def test_products(project, target, configuration, process):
             "size": stat.st_size, "modified_ns": stat.st_mtime_ns}
 
 
-def product_inventory(project, target):
+def safari_product_inventory(project, configuration, name):
+    if configuration not in CONFIGS["jsSafari"] or name not in (
+            "dyn4k-core", "dyn4k", "consumer"):
+        raise ValueError("unknown Safari product inventory selection")
+    relative = (Path("consumers/qualification/portable") if name == "consumer"
+                else Path(name))
+    package = safari_reporter.PACKAGES[relative]
+    build_root = project if name == "consumer" else project.parent
+    mode = "Production" if configuration == "production" else "Development"
+    expected = (project / "build/compileSync/js/test" /
+                f"test{mode}Executable/kotlin" / f"{package}.js")
+    karma_package = build_root / "build/js/packages" / package
+    karma_input = (expected if configuration == "production" else
+                   karma_package / "kotlin" / f"{package}.js")
+
+    def inspect(base, root):
+        record = {"base": str(base), "root": str(root), "present": False,
+                  "unsafe_symlink": False, "entries": [], "truncated": False}
+        current = base
+        for part in root.relative_to(base).parts:
+            current = current / part
+            try:
+                metadata = current.lstat()
+            except FileNotFoundError:
+                return record
+            if stat.S_ISLNK(metadata.st_mode):
+                record["unsafe_symlink"] = True
+                return record
+            if not stat.S_ISDIR(metadata.st_mode):
+                return record
+        record["present"] = True
+        hash_budget = 256 * 1024 * 1024
+
+        def scan(directory):
+            nonlocal hash_budget
+            for path in sorted(directory.iterdir()):
+                if len(record["entries"]) == 128:
+                    record["truncated"] = True
+                    return
+                metadata = path.lstat()
+                kind = ("file" if stat.S_ISREG(metadata.st_mode) else
+                        "directory" if stat.S_ISDIR(metadata.st_mode) else
+                        "symlink" if stat.S_ISLNK(metadata.st_mode) else "other")
+                entry = {"path": path.relative_to(base).as_posix(), "kind": kind,
+                         "size": metadata.st_size, "mode": stat.S_IMODE(metadata.st_mode),
+                         "modified_ns": metadata.st_mtime_ns}
+                if kind == "file" and metadata.st_size <= hash_budget:
+                    entry["sha256"] = sha256(path)
+                    hash_budget -= metadata.st_size
+                record["entries"].append(entry)
+                if kind == "directory":
+                    scan(path)
+                    if record["truncated"]:
+                        return
+
+        scan(root)
+        return record
+
+    roots = {
+        "compiler": inspect(project, project / "build/compileSync/js/test"),
+        "karma_package": inspect(build_root, karma_package),
+    }
+    if build_root != project:
+        roots["root_compiler"] = inspect(build_root,
+                                         build_root / "build/compileSync/js/test")
+        roots["module_package"] = inspect(project,
+                                          project / "build/js/packages" / package)
+    return {"expected": str(expected), "karma_input": str(karma_input),
+            "roots": roots}
+
+
+def product_inventory(project, target, configuration=None, name=None):
+    if target == "jsSafari":
+        return safari_product_inventory(project, configuration, name)
     root = project / "build/bin"
     result = {"root": str(root), "requested_target": str(root / target),
               "present": root.is_dir() and not root.is_symlink(),
@@ -504,7 +577,7 @@ def collect_test_products(projects, target, configuration, process, diagnostic, 
                   "started_ns": process["started_ns"],
                   "finished_ns": process["finished_ns"],
                   "exit_code": process["exit_code"],
-                  "projects": {name: product_inventory(project, target)
+                  "projects": {name: product_inventory(project, target, configuration, name)
                                for name, project in projects.items()}}
         diagnostic.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
         relative = diagnostic.relative_to(archive_root).as_posix()
