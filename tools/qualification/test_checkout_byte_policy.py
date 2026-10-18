@@ -79,7 +79,21 @@ def hash_guarded_source_paths():
         if (path.startswith(("dyn4k-core/src/", "dyn4k/src/"))
                 and path.endswith((".kt", ".java"))):
             paths.add(path)
+        if path.startswith("tools/diagnostic/windows_collision/"):
+            paths.add(path)
     return paths
+
+
+def changed_paths(candidate, checkout, relative_paths):
+    changed = []
+    for path in relative_paths:
+        expected = subprocess.check_output(
+            ["git", "-C", str(REPOSITORY), "show", f"{candidate}:{path}"]
+        )
+        actual = (checkout / path).read_bytes()
+        if actual != expected:
+            changed.append(path)
+    return changed
 
 
 class CheckoutBytePolicyTests(unittest.TestCase):
@@ -98,14 +112,16 @@ class CheckoutBytePolicyTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             try:
-                changed = []
-                for path in relative_paths:
-                    expected = subprocess.check_output(
-                        ["git", "-C", str(REPOSITORY), "show", f"{candidate}:{path}"]
-                    )
-                    actual = (checkout / path).read_bytes()
-                    if actual != expected:
-                        changed.append(path)
+                changed = changed_paths(candidate, checkout, relative_paths)
+                diagnostic_paths = [
+                    path for path in relative_paths
+                    if path.startswith("tools/diagnostic/windows_collision/")
+                ]
+                adverse_path = "tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt"
+                adverse_file = checkout / adverse_path
+                adverse_file.write_bytes(adverse_file.read_bytes() + b"\n// adverse source mutation\n")
+                self.assertIn(adverse_path,
+                              changed_paths(candidate, checkout, diagnostic_paths))
             finally:
                 subprocess.run(
                     ["git", "-C", str(REPOSITORY), "worktree", "remove", "--force",

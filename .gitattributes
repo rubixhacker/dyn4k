@@ -42,3 +42,6 @@ tools/compatibility/fixtures/exception_serialization/ExceptionSerializationProbe
 tools/baseline/fixtures/CopyExceptionAmbiguity.java -text
 tools/baseline/fixtures/ExtraMethodsAuditFixture.java -text
 tools/baseline/fixtures/ExtraMethodsProbe.java -text
+
+# Preserve source and verification bytes for the Windows diagnostic controls.
+tools/diagnostic/windows_collision/** -text
