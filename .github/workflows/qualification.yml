@@ -279,9 +279,12 @@ jobs:
             (cd "$gradle_home" && find daemon -type f -name '*.out.log' -print0) > "$gradle_manifest"
             if [[ -s "$gradle_manifest" ]]; then
               mkdir -p "$diagnostics/logs/gradle-user-home"
-              while IFS= read -r -d '' relative; do
-                cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
-              done < "$gradle_manifest"
+              (
+                cd "$gradle_home"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
+                done < "$gradle_manifest"
+              )
             else
               printf 'No Gradle daemon logs found under %s/daemon.\n' "$gradle_home" >> "$errors"
               missing=1
@@ -424,9 +427,12 @@ jobs:
               \( -name stdout.txt -o -name stderr.txt \) -print0) > "$full_hosted_manifest"
             if [[ -s "$full_hosted_manifest" ]]; then
               mkdir -p "$diagnostics/logs/full-hosted"
-              while IFS= read -r -d '' relative; do
-                cp --parents -- "$relative" "$diagnostics/logs/full-hosted"
-              done < "$full_hosted_manifest"
+              (
+                cd "$full_hosted_root"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/full-hosted"
+                done < "$full_hosted_manifest"
+              )
             else
               printf 'No full-hosted stdout/stderr logs found under %s.\n' "$full_hosted_root" >> "$errors"
               missing=1
@@ -441,9 +447,12 @@ jobs:
             (cd "$gradle_home" && find daemon -type f -name '*.out.log' -print0) > "$gradle_manifest"
             if [[ -s "$gradle_manifest" ]]; then
               mkdir -p "$diagnostics/logs/gradle-user-home"
-              while IFS= read -r -d '' relative; do
-                cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
-              done < "$gradle_manifest"
+              (
+                cd "$gradle_home"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
+                done < "$gradle_manifest"
+              )
             else
               printf 'No Gradle daemon logs found under %s/daemon.\n' "$gradle_home" >> "$errors"
               missing=1
