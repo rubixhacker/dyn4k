@@ -231,6 +231,24 @@ class RotationOracleTest(unittest.TestCase):
         data[3][1]["bodies"][0]["transform"]["getSint"] = rejected
         self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
 
+        data = self.fixture()
+        call = data[0]["calls"][0]
+        call["angle_bits"] = bits(1.0)
+        permitted = struct.unpack(">d", bytes.fromhex("3fe14a280fb5068d"))[0]
+        sine = trig_interval(call["angle_bits"])[1][0]
+        call["trig"] = [bits(permitted), bits(sine)]
+        call["raw"] = call["trig"][:]
+        call["post"] = call["trig"][:]
+        data[3][1]["bodies"][0]["transform"] = {
+            "getCost": permitted, "getSint": sine}
+        self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+        rejected = math.nextafter(permitted, math.inf)
+        call["trig"][0] = bits(rejected)
+        call["raw"][0] = bits(rejected)
+        call["post"][0] = bits(rejected)
+        data[3][1]["bodies"][0]["transform"]["getCost"] = rejected
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+
     def test_exact_tie_and_clamp_from_pair_rotation(self):
         data = self.fixture()
         audit, _, header, states, binding, *_ = data
@@ -410,6 +428,68 @@ class RotationOracleTest(unittest.TestCase):
         changed = copy.deepcopy(data)
         changed[0]["accepted_toi_resets"] = []
         self.assertEqual(self.verify(changed)["status"], "FAILED_COVERAGE")
+
+    def test_acos_one_ulp_on_both_sides_of_one_in_full_toi_reset(self):
+        cosine_below_one = struct.unpack(">d", bytes.fromhex(
+            "3fe14a280fb5068c"))[0]
+        below_one = math.nextafter(1.0, -math.inf)
+        two_below = math.nextafter(below_one, -math.inf)
+        above_one = math.nextafter(1.0, math.inf)
+        two_above = math.nextafter(above_one, math.inf)
+        cases = (
+            (cosine_below_one, two_below, "FAILED_ARITHMETIC"),
+            (cosine_below_one, below_one, "PASSED_ARITHMETIC"),
+            (cosine_below_one, 1.0, "PASSED_ARITHMETIC"),
+            (cosine_below_one, above_one, "FAILED_ARITHMETIC"),
+            (math.nextafter(cosine_below_one, -math.inf), two_below,
+             "FAILED_ARITHMETIC"),
+            (math.nextafter(cosine_below_one, -math.inf), below_one,
+             "PASSED_ARITHMETIC"),
+            (math.nextafter(cosine_below_one, -math.inf), 1.0,
+             "PASSED_ARITHMETIC"),
+            (math.nextafter(cosine_below_one, -math.inf), above_one,
+             "PASSED_ARITHMETIC"),
+            (math.nextafter(cosine_below_one, -math.inf), two_above,
+             "FAILED_ARITHMETIC"))
+        for cosine, angle, status in cases:
+            data = self.fixture()
+            audit, case, header, states, binding, *_ = data
+            sine = math.sin(1.0)
+            pair = [bits(cosine), bits(sine)]
+            trig_intervals = trig_interval(bits(angle))
+            trig = [bits(interval[0]) for interval in trig_intervals]
+            audit["calls"][0] = {
+                "sequence": 0, "step": 1, "body_id": "b0",
+                "kind": "lerp-reset", "branch": "toi", "pre": pair,
+                "trig": trig, "post": trig[:], "alpha_bits": bits(0.5),
+                "start_angle_bits": bits(angle), "end_angle_bits": bits(angle),
+                "diff_bits": bits(0.0), "angle_bits": bits(angle)}
+            audit["accepted_toi_resets"] = [[1, "b0"]]
+            header["initial"]["bodies"][0]["transform"] = {
+                "getCost": cosine, "getSint": sine}
+            states[1]["bodies"][0]["previousTransform"] = {
+                "getCost": cosine, "getSint": sine}
+            states[1]["bodies"][0]["transform"] = {
+                "getCost": trig_intervals[0][0],
+                "getSint": trig_intervals[1][0]}
+            case["trace_events"] = [{"kind": "event", "id": "one", "step": 1,
+                                     "order": 0, "name": "toi.payload.bodies",
+                                     "payload": {"bodies": [0, 0], "time": 0.5,
+                                                 "distance": 0.0}}]
+            binding["expected_calls"] = [{"step": 1, "body_id": "b0",
+                                          "kind": "lerp-reset", "branch": "toi"}]
+            binding["accepted_toi_resets"] = [[1, "b0"]]
+            binding["accepted_toi_events"] = {"0": {"step": 1, "order": 0,
+                                                    "body_id": "b0",
+                                                    "accepted": True,
+                                                    "alpha_bits": bits(0.5)}}
+            binding["reset_start_rotations"] = {"0": pair}
+            binding["reset_end_rotations"] = {"0": pair}
+            with self.subTest(cosine_bits=bits(cosine), angle_bits=bits(angle)):
+                result = self.verify(data)
+                self.assertEqual(result["status"], status, result)
+                if status == "PASSED_ARITHMETIC":
+                    self.assertEqual(result["qualification"], "UNPASSED")
 
     def test_interval_encloses_independent_rational_taylor(self):
         x = Fraction(3, 4)

@@ -203,7 +203,9 @@ def _source_angle_matches(rotation, observed):
     if observed == 0 or abs(observed) > _PI or (observed < 0) != negative:
         return False
     lower, upper = _interval("acos", cost)
-    error = max(math.ulp(lower), math.ulp(upper))
+    if lower != upper and math.nextafter(lower, math.inf) != upper:
+        raise RuntimeError("acos one-ulp bracket is unresolved")
+    error = upper - lower if lower != upper else math.ulp(lower)
     return _within_error("acos", cost, abs(observed), error)
 
 

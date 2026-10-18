@@ -102,10 +102,22 @@ Zero-angle sine and cosine follow the exact source special cases.
 The `2u` decision covers sine and cosine, not `acos`. The pinned Java
 [Math.acos contract](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Math.html#acos(double))
 requires an answer within one ulp of the exact value and positive zero at
-input one. The oracle derives a conservative one-ulp size from the outward
-MPFR endpoints, checks the source's sine-sign branch, and enforces the exact
-zero special case. This checks source compatibility; each Kotlin runtime's
-inverse-trig behavior still needs executed evidence.
+input one. The Math class defines one ulp of a nonrepresentable real result
+as the distance between its two bracketing binary64 values. The oracle
+requires its directed binary64 `acos` endpoints to coincide or be adjacent.
+For adjacent endpoints, their separation is the local one-ulp error limit.
+For an exact representable result, it uses that result's binary64 ulp.
+It compares the candidate against the 320-bit directed MPFR enclosure with
+this limit. It does not use the larger endpoint's ulp across a power-of-two
+boundary. An unresolved bracket returns `UNPASSED`.
+
+This distance check retains values permitted near either side of 1.0,
+including a candidate in the smaller binade when the exact value is above
+1.0. It rejects a candidate more than one local ulp below an exact value
+under 1.0. The source's sine-sign branch and `acos(1)` zero case are checked
+separately. This is a per-call source accuracy check. Each Kotlin runtime's
+inverse-trig behavior and the Java contract's semi-monotonicity still need
+executed evidence.
 
 A rational Taylor remainder independently checks the sine enclosure and
 the `2u` boundary at 0.75 radians. Tests cover small and large arguments,
