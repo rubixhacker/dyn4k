@@ -137,11 +137,17 @@ python -B tools/performance/sustained_portable/host_image_adverse.py `
   --output 'C:\absolute\new\archive\windows-path-swap.json'
 ```
 
-`QueryFullProcessImageNameW` reports the PID's path, not mapped executable
-bytes. The capture retains its path and raw protocol but exits unpassed on
-process-image identity even if the path-swap control succeeds. A hosted probe
-must bind a live PID to an immutable executable mapping or trusted launch
-handle and independently compare its bytes with the inventory.
+The Windows observer uses `EnumProcessModulesEx` to select the main module,
+then `ReadProcessMemory` to compare its mapped PE header and every readable,
+nonwritable executable section with the selected file. The comparison masks
+only documented base-relocation bytes and requires at least 4 KiB of matched
+code. `QueryFullProcessImageNameW` supplies diagnostic path metadata only.
+The receipt records both the selected file SHA-256 and mapped code hash; it
+does not call the path digest mapped bytes. The path-swap control records an
+OS sharing denial when Windows prevents rename and still requires a matching
+live code observation and a rejected stale PID. A failed module or memory
+read remains unpassed. Hosted Windows execution must establish whether this
+probe succeeds for the Kotlin/Native executable on the selected runner.
 
 ## macOS ARM64 hosted runner
 
@@ -173,10 +179,15 @@ python3 -B tools/performance/sustained_portable/host_image_adverse.py \
   --output /absolute/new/archive/macos-path-swap.json
 ```
 
-`proc_pidpath` reports the PID's path, not mapped executable bytes. The
-capture retains its path and raw protocol but exits unpassed on process-image
-identity. A hosted probe must bind a live PID to an immutable mapped vnode
-or equivalent trusted file handle and compare its bytes with the inventory.
+The macOS observer scans live executable regions with
+`proc_pidinfo(PROC_PIDREGIONPATHINFO)`. It compares the mapped vnode's device
+and inode with `fstat` on the selected executable file handle, then hashes
+that handle's bytes. `proc_pidpath` is retained as diagnostic path metadata;
+its path bytes are never called mapped image bytes. The path-swap control
+must still match the original mapped vnode after the wrapper pathname is
+replaced, and must reject a stale PID. A missing or inaccessible region
+remains unpassed. Hosted macOS ARM64 execution must establish whether the
+libproc region probe succeeds on the selected runner.
 
 ## Evidence and remaining paths
 
@@ -185,7 +196,10 @@ KLIB manifests, staged publication checksums and module metadata, staged
 source archives against checkout bytes, executable bundle, linked producer
 identity, PID, monotonic interval, fixture reset, clocks, activity, and
 completion marker. Linux reads mapped executable bytes through procfs.
-Windows and macOS record only path metadata and fail closed on image identity.
+macOS binds a live executable region's vnode to the selected file handle.
+Windows compares the live main module's PE header and executable code with
+the selected file. These methods have different evidence scopes in their
+raw receipts; any failed OS observation remains unpassed.
 The host controller has a 45-second default deadline with terminate/kill
 cleanup; it retains raw stdout, stderr, stdin, inventory, publication inputs,
 and process/error receipt on timeout. Linux x64 can retain a traced source

@@ -160,44 +160,21 @@ def validate_publication(root, label, target, selected_sha):
             "source_to_link": "unpassed"}
 
 
-def observed_process_image(pid):
+def observed_process_image(pid, selected=None):
     if sys.platform.startswith("linux"):
         path = Path(f"/proc/{pid}/exe")
         return {"method": "procfs_exe", "path": os.readlink(path),
                 "identity_kind": "mapped_executable", "sha256": digest(path)}
     if sys.platform == "darwin":
-        import ctypes
-        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-        buffer = ctypes.create_string_buffer(4096)
-        length = library.proc_pidpath(pid, buffer, len(buffer))
-        if length <= 0:
-            raise OSError(ctypes.get_errno(), "proc_pidpath failed")
-        path = Path(os.fsdecode(buffer.value))
-        return {"method": "proc_pidpath", "path": str(path),
-                "identity_kind": "reported_path_only", "sha256": None}
+        if selected is None:
+            raise ValueError("selected executable is required for macOS image observation")
+        import host_image
+        return host_image.observe_macos(pid, selected)
     if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
-                                                       wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-        kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
-        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel.OpenProcess(0x1000, False, pid)
-        if not handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            buffer = ctypes.create_unicode_buffer(32768)
-            length = wintypes.DWORD(len(buffer))
-            if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            path = Path(buffer.value)
-            return {"method": "QueryFullProcessImageNameW", "path": str(path),
-                    "identity_kind": "reported_path_only", "sha256": None}
-        finally:
-            kernel.CloseHandle(handle)
+        if selected is None:
+            raise ValueError("selected executable is required for Windows image observation")
+        import host_image
+        return host_image.observe_windows(pid, selected)
     raise OSError(f"no native process image observer for {sys.platform}")
 
 
@@ -214,10 +191,24 @@ def require_native_host(target):
 
 
 def require_process_image(image, expected_sha):
-    if image is None or image.get("identity_kind") != "mapped_executable":
+    kind = image.get("identity_kind") if image else None
+    if kind not in ("mapped_executable", "mapped_executable_vnode", "mapped_executable_code"):
         raise ValueError("mapped process image bytes are unobserved; raw archive retained")
     if image.get("sha256") != expected_sha:
         raise ValueError("observed process image does not match runtime; raw archive retained")
+    if kind == "mapped_executable_vnode" and (
+            image.get("method") != "proc_pidinfo_region_vnode" or
+            image.get("mapped_dev") != image.get("selected_dev") or
+            image.get("mapped_ino") != image.get("selected_ino") or
+            not isinstance(image.get("mapped_size"), int) or image["mapped_size"] <= 0):
+        raise ValueError("observed mapped vnode differs from selected executable")
+    if kind == "mapped_executable_code" and (
+            image.get("method") != "ReadProcessMemory_main_PE_code" or
+            not isinstance(image.get("matched_code_bytes"), int) or
+            image["matched_code_bytes"] < 4096 or
+            not isinstance(image.get("mapped_code_sha256"), str) or
+            len(image["mapped_code_sha256"]) != 64):
+        raise ValueError("observed mapped PE code lacks selected executable binding")
 
 
 def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
@@ -229,8 +220,8 @@ def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
     image = None
     image_error = None
     try:
-        image = observed_process_image(process.pid)
-    except OSError as error:
+        image = observed_process_image(process.pid, command[0])
+    except (OSError, ValueError) as error:
         image_error = str(error)
     image_observed = time.monotonic_ns()
     termination = "natural"
@@ -591,7 +582,8 @@ def capture(args):
         "observed_image": execution["observed_image"],
         "process_image_identity": (
             "observed" if execution["observed_image"] is not None and
-            execution["observed_image"].get("identity_kind") == "mapped_executable"
+            execution["observed_image"].get("identity_kind") in
+            ("mapped_executable", "mapped_executable_vnode", "mapped_executable_code")
             else "unobserved"),
         "image_observation_error": execution["image_observation_error"],
         "execution_sha256": digest(args.archive / "execution.json"),

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ import capture
 import native_host_capture
 import native_source_link
 import host_image_adverse
+import host_image
 
 
 class PortableCaptureTest(unittest.TestCase):
@@ -119,6 +121,65 @@ class PortableCaptureTest(unittest.TestCase):
                                           "a" * 64)
         capture.require_process_image({"identity_kind": "mapped_executable", "sha256": "a" * 64},
                                       "a" * 64)
+        vnode = {"method": "proc_pidinfo_region_vnode", "identity_kind": "mapped_executable_vnode",
+                 "sha256": "a" * 64, "mapped_dev": 1, "selected_dev": 1,
+                 "mapped_ino": 2, "selected_ino": 2, "mapped_size": 4096}
+        capture.require_process_image(vnode, "a" * 64)
+        with self.assertRaisesRegex(ValueError, "mapped vnode differs"):
+            capture.require_process_image({**vnode, "mapped_ino": 3}, "a" * 64)
+        code = {"method": "ReadProcessMemory_main_PE_code",
+                "identity_kind": "mapped_executable_code", "sha256": "a" * 64,
+                "mapped_code_sha256": "b" * 64, "matched_code_bytes": 8192}
+        capture.require_process_image(code, "a" * 64)
+        with self.assertRaisesRegex(ValueError, "lacks selected executable binding"):
+            capture.require_process_image({**code, "matched_code_bytes": 10}, "a" * 64)
+
+    def test_macos_region_requires_selected_executable_vnode(self):
+        selected = SimpleNamespace(st_dev=7, st_ino=11)
+        region = {"protection": 5, "offset": 0, "dev": 7, "ino": 11, "size": 4096}
+        self.assertEqual(host_image.select_macos_region([region], selected), region)
+        for changed in ({**region, "ino": 12}, {**region, "protection": 1},
+                        {**region, "offset": 4096}):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "vnode mapping"):
+                host_image.select_macos_region([changed], selected)
+
+    def test_windows_live_pe_code_comparison_rejects_substitution(self):
+        image = bytearray(0x2200)
+        image[:2] = b"MZ"
+        struct.pack_into("<I", image, 0x3c, 0x80)
+        image[0x80:0x84] = b"PE\0\0"
+        struct.pack_into("<HH", image, 0x84, 0x8664, 1)
+        struct.pack_into("<H", image, 0x94, 0xf0)
+        struct.pack_into("<H", image, 0x98, 0x20b)
+        struct.pack_into("<Q", image, 0x98 + 24, 0x140000000)
+        struct.pack_into("<I", image, 0x98 + 56, 0x3000)
+        struct.pack_into("<I", image, 0x98 + 60, 0x200)
+        struct.pack_into("<I", image, 0x98 + 108, 16)
+        image[0x188:0x18d] = b".text"
+        struct.pack_into("<IIII", image, 0x190, 8192, 0x1000, 8192, 0x200)
+        struct.pack_into("<I", image, 0x188 + 36, 0x60000020)
+        image[0x200:] = bytes(range(256)) * 32
+        layout = host_image.pe_executable_sections(image)
+        base = 0x140000000
+        def read(address, size):
+            return bytes(image[:size] if address == base else image[0x200:0x200 + size])
+        self.assertEqual(host_image.compare_pe_code(image, layout, read, base)
+                         ["matched_code_bytes"], 8192)
+        relocated_layout = {**layout, "relocations": set(range(0x1010, 0x1018))}
+        def relocated_read(address, size):
+            if address == base:
+                return read(address, size)
+            code = bytearray(read(address, size))
+            code[0x10:0x18] = b"relocate"
+            return bytes(code)
+        self.assertEqual(host_image.compare_pe_code(image, relocated_layout, relocated_read, base)
+                         ["matched_code_bytes"], 8184)
+        with self.assertRaisesRegex(ValueError, "mapped PE code differs"):
+            host_image.compare_pe_code(image, layout,
+                lambda address, size: (b"z" * size if address != base else read(address, size)), base)
+        with self.assertRaisesRegex(ValueError, "mapped PE header differs"):
+            host_image.compare_pe_code(image, layout,
+                lambda address, size: (b"z" * size if address == base else read(address, size)), base)
 
     def test_native_host_selects_only_resolved_target_artifacts(self):
         inventory = {"resolved_artifacts": [
@@ -492,6 +553,7 @@ class PortableCaptureTest(unittest.TestCase):
         result = host_image_adverse.path_swap_control()
         self.assertEqual(result["swap"], "applied")
         self.assertEqual(result["mapped_image_identity"], "matched_original")
+        self.assertEqual(result["stale_pid"], "rejected")
 
     def test_rejects_nonfinite_and_negative_physical_diagnostics(self):
         payload = self.protocol()

@@ -32,24 +32,28 @@ def path_swap_control():
             time.sleep(0.1)
             if process.poll() is not None:
                 raise ValueError("adverse executable exited before path swap")
-            receipt["before"] = capture.observed_process_image(process.pid)
+            receipt["before"] = capture.observed_process_image(process.pid, executable)
+            capture.require_process_image(receipt["before"], original_sha)
             try:
                 os.replace(executable, moved)
                 executable.write_bytes(b"DYN4K_PATH_SWAP_DECOY")
                 receipt["swap"] = "applied"
             except OSError as error:
-                receipt["swap"] = "unavailable"
+                receipt["swap"] = "blocked_by_os"
                 receipt["swap_error"] = str(error)
-            receipt["after"] = capture.observed_process_image(process.pid)
+            selected = moved if receipt["swap"] == "applied" else executable
+            receipt["after"] = capture.observed_process_image(process.pid, selected)
             reported = Path(receipt["after"]["path"])
             try:
                 receipt["reported_path_sha256_after"] = capture.digest(reported)
             except OSError:
                 receipt["reported_path_sha256_after"] = None
-            if receipt["after"]["identity_kind"] == "mapped_executable":
-                receipt["mapped_image_identity"] = (
-                    "matched_original" if receipt["after"]["sha256"] == original_sha
-                    else "mismatched")
+            try:
+                capture.require_process_image(receipt["after"], original_sha)
+                receipt["mapped_image_identity"] = "matched_original"
+            except ValueError as error:
+                receipt["mapped_image_identity"] = "mismatched"
+                receipt["identity_error"] = str(error)
         finally:
             process.terminate()
             try:
@@ -58,6 +62,12 @@ def path_swap_control():
                 process.kill()
                 process.communicate(timeout=3)
             receipt["exit_code"] = process.returncode
+            try:
+                capture.observed_process_image(process.pid, moved if receipt["swap"] == "applied"
+                                               else executable)
+                receipt["stale_pid"] = "incorrectly_observed"
+            except (OSError, ValueError):
+                receipt["stale_pid"] = "rejected"
         return receipt
 
 
@@ -75,7 +85,8 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
-    if result["swap"] != "applied" or result["mapped_image_identity"] == "mismatched":
+    if result["mapped_image_identity"] != "matched_original" or result.get("stale_pid") != "rejected" or \
+            result["swap"] not in ("applied", "blocked_by_os"):
         raise SystemExit(1)
 
 

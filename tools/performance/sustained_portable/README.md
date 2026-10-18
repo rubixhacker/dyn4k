@@ -21,9 +21,10 @@ The launcher accepts JS, Wasm JS, and Wasm WASI through Node, plus Linux x64,
 Linux ARM64, Windows x64, and macOS ARM64 Native processes. See the
 [Native host commands](native-hosts.md). It hashes all files adjacent to the
 harness entry, including Wasm binaries, before launch. On Linux it reads
-`/proc/<pid>/exe`; on Windows it uses `QueryFullProcessImageNameW`; on macOS
-it uses `proc_pidpath`. It compares the observed image bytes with the selected
-executable. The archive contains the
+`/proc/<pid>/exe`; on Windows it compares mapped PE headers and code through
+`ReadProcessMemory`; on macOS it compares the mapped executable vnode with a
+selected file handle through `proc_pidinfo`. Path APIs provide diagnostics.
+Each OS probe fails closed when its identity check is unavailable. The archive contains the
 raw streams, exit code, PID, monotonic host times, input hashes, linked identity,
 positive clock calibration, fixture reset, and activity. Invalid or incomplete output
 leaves the raw archive and exits nonzero.
