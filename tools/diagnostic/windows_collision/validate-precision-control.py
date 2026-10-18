@@ -450,6 +450,34 @@ def command_path(raw):
     raise ValueError("corrected probe command path is not absolute")
 
 
+def test_pe_run_root(directory):
+    search_lines = (directory / "test-executable-search.txt").read_text(encoding="utf-8").splitlines()
+    candidate_lines = (directory / "test-executable-candidates.txt").read_text(encoding="utf-8").splitlines()
+    if len(search_lines) != 1 or len(candidate_lines) != 1:
+        raise ValueError("corrected debugTest PE search or candidate count differs")
+    kind, search = command_path(search_lines[0])
+    if command_path(candidate_lines[0]) != (kind, search + ("test.exe",)):
+        raise ValueError("corrected debugTest PE candidate differs from search")
+    suffix = ("dyn4k-core", "build", "bin", "mingwx64", "debugtest") if kind == "windows" else \
+        ("dyn4k-core", "build", "bin", "mingwX64", "debugTest")
+    if len(search) <= len(suffix) or search[-len(suffix):] != suffix:
+        raise ValueError("corrected debugTest PE search suffix differs")
+    root = search[:-len(suffix)]
+    if kind == "windows":
+        if len(root) != 4 or root[1:] != ("a", "dyn4k", "dyn4k"):
+            raise ValueError("corrected debugTest PE checkout root differs")
+    elif (kind, root) != command_path(str(REPO)):
+        raise ValueError("corrected debugTest PE local checkout root differs")
+    return kind, root
+
+
+def run_temp_root(run_root, java_directory):
+    kind, root = run_root
+    if kind == "windows":
+        return kind, (root[0], "a", "_temp")
+    return command_path(str(java_directory.parent))
+
+
 def command_source_root(raw, relative):
     kind, parts = command_path(raw)
     suffix = tuple(part.casefold() for part in PureWindowsPath(relative).parts) if kind == "windows" else \
@@ -485,11 +513,16 @@ def command_output_root(raw, mode, local_mode, source_root):
     return kind, root
 
 
-def corrected_java_output(raw, local_directory):
+def corrected_java_output(raw, local_directory, temp_root=None):
     prefix = "-OutputDirectory "
     if not isinstance(raw, str) or not raw.startswith(prefix):
         raise ValueError("corrected Java output option differs")
     kind, parts = command_path(raw[len(prefix):])
+    if temp_root is not None:
+        suffix = ("windows-collision-focus", "java") if temp_root[0] == "windows" else ("java",)
+        if (kind, parts) != (temp_root[0], temp_root[1] + suffix):
+            raise ValueError("corrected Java output differs from the recorded run root")
+        return
     if (kind, parts) == command_path(str(local_directory)):
         return
     if kind != "windows" or len(parts) != 5 or parts[1:] != (
@@ -497,7 +530,7 @@ def corrected_java_output(raw, local_directory):
         raise ValueError("corrected Java output root or suffix differs")
 
 
-def corrected_probe_modes(directory):
+def corrected_probe_modes(directory, run_root=None):
     root = Path(directory)
     modes = (("debug-g", ("-g",)), ("default", ()), ("optimized-opt", ("-opt",)))
     if (root / "probe-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
@@ -552,6 +585,11 @@ def corrected_probe_modes(directory):
         if source_root[0] != kind:
             raise ValueError(f"{name} compiler and source path forms differ")
         actual_output_root = command_output_root(arguments[-1], name, mode, source_root)
+        if run_root is not None and source_root != run_root:
+            raise ValueError(f"{name} source differs from the debugTest PE checkout root")
+        if run_root is not None and run_root[0] == "windows" and \
+                actual_output_root != ("windows", (run_root[1][0], "a", "_temp")):
+            raise ValueError(f"{name} output differs from the debugTest PE runner temp root")
         if output_root is None:
             output_root = actual_output_root
         elif actual_output_root != output_root:
@@ -594,6 +632,7 @@ def validate_corrected(args):
     test_hash = hashlib.sha256(test_pe.read_bytes()).hexdigest()
     if (test_pe.parent / "test-executable-sha256.txt").read_text(encoding="utf-8").strip() != f"{test_hash}  test.exe":
         raise ValueError("corrected debugTest PE hash differs")
+    run_root = test_pe_run_root(test_pe.parent)
     cases = corrected_xml_cases(native)
     source_count = corrected_source_hashes(probe, args.source_sha)
     java_directory = Path(args.java_trace).parent
@@ -604,11 +643,15 @@ def validate_corrected(args):
             raise ValueError(f"corrected pinned Java output missing: {name}")
     java_command = (java_directory / "java-command.txt").read_text(encoding="utf-8").splitlines()
     if len(java_command) != 5 or java_command[0] != ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1" or \
-            not java_command[1].startswith("-JdkHome ") or \
-            not java_command[2].endswith("dyn4j-6.0.0.jar") or \
-            not java_command[3].startswith("-BaselineSource "):
+            not java_command[1].startswith("-JdkHome "):
         raise ValueError("corrected pinned Java command is partial or differs")
-    corrected_java_output(java_command[4], java_directory)
+    temp_root = run_temp_root(run_root, java_directory)
+    for argument, option, filename in ((java_command[2], "-BaselineJar ", "dyn4j-6.0.0.jar"),
+                                       (java_command[3], "-BaselineSource ", "dyn4j-6.0.0-source")):
+        if not argument.startswith(option) or \
+                command_path(argument[len(option):]) != (temp_root[0], temp_root[1] + (filename,)):
+            raise ValueError(f"corrected pinned Java {option.strip()} differs from the recorded run root")
+    corrected_java_output(java_command[4], java_directory, temp_root)
     if not (java_directory / "java-stdout.log").read_bytes():
         raise ValueError("corrected pinned Java stdout is empty")
     if (java_directory.parent / "baseline-source-revision.txt").read_text(encoding="utf-8").strip() != \
@@ -628,7 +671,7 @@ def validate_corrected(args):
     version = (Path(args.native_scalars).parent / "kotlin-native-version.txt").read_text(encoding="utf-8")
     if SCALAR["VERSION_TOKEN"].search(version) is None:
         raise ValueError("corrected Kotlin/Native compiler version differs")
-    modes = corrected_probe_modes(probe)
+    modes = corrected_probe_modes(probe, run_root)
     result = {"route": "corrected-production", "sourceSha": args.source_sha,
               "originalAndDiagnosticPasses": len(cases), "nativeTraceRows": native_rows,
               "javaTraceRows": java_rows, "scalarIDs": [row["id"] for row in scalars],

@@ -112,10 +112,10 @@ def probe_fixture(directory):
                 "", encoding="utf-8")
 
 
-def windows_probe_fixture(directory):
+def windows_probe_fixture(directory, drive="D"):
     probe_fixture(directory)
-    checkout = "D:\\a\\dyn4k\\dyn4k"
-    output = "D:\\a\\_temp\\windows-collision-focus\\corrected-probe"
+    checkout = f"{drive}:\\a\\dyn4k\\dyn4k"
+    output = f"{drive}:\\a\\_temp\\windows-collision-focus\\corrected-probe"
     compiler = "C:\\Users\\runneradmin\\.konan\\kotlin-native-prebuilt-windows-x86_64-2.4.20\\bin\\kotlinc-native.bat"
     sources = [checkout + "\\" + path.replace("/", "\\") for path in
                (V["ENGINE_SOURCES"][1], V["ENGINE_SOURCES"][2], V["PROBE_SOURCE"])]
@@ -205,7 +205,7 @@ class CorrectedControlTest(unittest.TestCase):
         receipt.write_text("\n".join(["0" * 64 + "  " + paths[0], *lines[1:]]) + "\n", encoding="utf-8")
         self.reject(lambda: V["corrected_source_hashes"](self.root, source_sha))
 
-    def test_corrected_route_result_and_adverse(self):
+    def route_fixture(self, windows_drive=None):
         native = self.root / "native"
         native.mkdir()
         xml_fixture(native)
@@ -223,6 +223,11 @@ class CorrectedControlTest(unittest.TestCase):
         (test_pe / "test-executable-status.txt").write_text("OK\n", encoding="utf-8")
         test_pe_hash = hashlib.sha256((test_pe / "test.exe").read_bytes()).hexdigest()
         (test_pe / "test-executable-sha256.txt").write_text(f"{test_pe_hash}  test.exe\n", encoding="utf-8")
+        pe_search = (f"{windows_drive}:\\a\\dyn4k\\dyn4k\\dyn4k-core\\build\\bin\\mingwX64\\debugTest"
+                     if windows_drive else str(REPO / "dyn4k-core/build/bin/mingwX64/debugTest"))
+        pe_candidate = pe_search + ("\\test.exe" if windows_drive else "/test.exe")
+        (test_pe / "test-executable-search.txt").write_text(pe_search + "\n", encoding="utf-8")
+        (test_pe / "test-executable-candidates.txt").write_text(pe_candidate + "\n", encoding="utf-8")
         scalar = self.root / "scalar"
         scalar.mkdir()
         (scalar / "native-scalar.tsv").write_text(scalar_rows("kotlin-native"), encoding="utf-8")
@@ -235,10 +240,15 @@ class CorrectedControlTest(unittest.TestCase):
         java_trace = java_dir / "java-trace.tsv"
         java_trace.write_text("synthetic 72-row parser delegation\n", encoding="utf-8")
         (java_dir / "java-exit-code.txt").write_text("0\n", encoding="utf-8")
+        temp_root = f"{windows_drive}:\\a\\_temp" if windows_drive else str(self.root)
+        java_output = temp_root + ("\\windows-collision-focus\\java" if windows_drive else "/java")
         (java_dir / "java-command.txt").write_text("\n".join((
             ".\\tools\\diagnostic\\windows_collision\\run-java-control.ps1",
-            "-JdkHome /pinned/jdk21", "-BaselineJar /pinned/dyn4j-6.0.0.jar",
-            "-BaselineSource /pinned/dyn4j-source", f"-OutputDirectory {java_dir}")) + "\n", encoding="utf-8")
+            "-JdkHome /pinned/jdk21", f"-BaselineJar {temp_root}" +
+            ("\\dyn4j-6.0.0.jar" if windows_drive else "/dyn4j-6.0.0.jar"),
+            f"-BaselineSource {temp_root}" +
+            ("\\dyn4j-6.0.0-source" if windows_drive else "/dyn4j-6.0.0-source"),
+            f"-OutputDirectory {java_output}")) + "\n", encoding="utf-8")
         (java_dir / "java-stdout.log").write_text(
             "PINNED_DYN4J_CONTROL jarSha256=204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e "
             "sourceRevision=058bf6d982a0fb89b54050f929f6ea9dae53b714 records=72\n", encoding="utf-8")
@@ -246,7 +256,10 @@ class CorrectedControlTest(unittest.TestCase):
             (java_dir / name).write_text("synthetic Java output\n", encoding="utf-8")
         probe = self.root / "probe"
         probe.mkdir()
-        probe_fixture(probe)
+        if windows_drive:
+            windows_probe_fixture(probe, windows_drive)
+        else:
+            probe_fixture(probe)
         paths = (*V["ENGINE_SOURCES"], *V["PROBE_SOURCES"])
         (probe / "source-sha256.txt").write_text(
             "\n".join(f"{hashlib.sha256((REPO / path).read_bytes()).hexdigest()}  {path}" for path in paths) + "\n",
@@ -257,6 +270,11 @@ class CorrectedControlTest(unittest.TestCase):
                                source_sha=subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"],
                                                                   text=True).strip(),
                                result=str(self.root / "result.json"))
+        return args, test_pe, gradle_command
+
+    def test_corrected_route_result_and_adverse(self):
+        args, test_pe, gradle_command = self.route_fixture()
+        native = Path(args.native_directory)
         with patch.object(FOCUS, "validate", return_value=(7, 6, 72, 72)) as trace_validator:
             V["validate_corrected"](args)
             trace_validator.assert_called_once()
@@ -273,6 +291,70 @@ class CorrectedControlTest(unittest.TestCase):
                 "command": ["cmd.exe", "/d", "/s", "/c", " ".join(gradle_command)]}), encoding="utf-8")
             (test_pe / "test.exe").write_bytes(b"MZother")
             self.reject(lambda: V["validate_corrected"](args))
+
+    def test_full_route_rejects_split_windows_roots(self):
+        args, test_pe, _ = self.route_fixture(windows_drive="D")
+        java_command_file = self.root / "java" / "java-command.txt"
+        original_java = java_command_file.read_text(encoding="utf-8")
+        with patch.object(FOCUS, "validate", return_value=(7, 6, 72, 72)):
+            V["validate_corrected"](args)
+            for label, before, after in (
+                    ("Java output drive", "-OutputDirectory D:\\a\\_temp", "-OutputDirectory E:\\a\\_temp"),
+                    ("Java JAR root", "-BaselineJar D:\\a\\_temp", "-BaselineJar E:\\other"),
+                    ("Java JAR basename", "dyn4j-6.0.0.jar", "other.jar"),
+                    ("Java source root", "-BaselineSource D:\\a\\_temp\\dyn4j-6.0.0-source",
+                     "-BaselineSource E:\\other-source"),
+                    ("Java source directory", "dyn4j-6.0.0-source", "other-source"),
+                    ("empty Java source", "-BaselineSource D:\\a\\_temp\\dyn4j-6.0.0-source",
+                     "-BaselineSource "),
+            ):
+                with self.subTest(label=label):
+                    java_command_file.write_text(original_java.replace(before, after), encoding="utf-8")
+                    self.reject(lambda: V["validate_corrected"](args))
+                    java_command_file.write_text(original_java, encoding="utf-8")
+
+            probe = Path(args.probe_directory)
+            command_files = [mode / filename for mode in
+                             (probe / "debug-g", probe / "default", probe / "optimized-opt") for filename in
+                             ("compiler-command.json", "compiler-receipt.json", "run-receipt.json")]
+            original_commands = {path: path.read_text(encoding="utf-8") for path in command_files}
+            def move_drive(value):
+                if isinstance(value, str):
+                    return value.replace("D:\\a\\", "E:\\a\\")
+                if isinstance(value, list):
+                    return [move_drive(item) for item in value]
+                if isinstance(value, dict):
+                    return {key: move_drive(item) for key, item in value.items()}
+                return value
+            for path, original in original_commands.items():
+                path.write_text(json.dumps(move_drive(json.loads(original))), encoding="utf-8")
+            self.reject(lambda: V["validate_corrected"](args))
+            for path, original in original_commands.items():
+                path.write_text(original, encoding="utf-8")
+
+            for filename in ("test-executable-search.txt", "test-executable-candidates.txt"):
+                with self.subTest(label=filename):
+                    path = test_pe / filename
+                    original = path.read_text(encoding="utf-8")
+                    path.write_text(original.replace("D:\\a\\", "E:\\a\\"), encoding="utf-8")
+                    self.reject(lambda: V["validate_corrected"](args))
+                    path.write_text(original, encoding="utf-8")
+            search = test_pe / "test-executable-search.txt"
+            original_search = search.read_text(encoding="utf-8")
+            candidates = test_pe / "test-executable-candidates.txt"
+            original_candidates = candidates.read_text(encoding="utf-8")
+            search.write_text(original_search.replace("\\debugTest", "\\otherTest"), encoding="utf-8")
+            candidates.write_text(original_candidates.replace("\\debugTest", "\\otherTest"), encoding="utf-8")
+            self.reject(lambda: V["validate_corrected"](args))
+            search.write_text(original_search, encoding="utf-8")
+            candidates.write_text(original_candidates, encoding="utf-8")
+            candidates.write_text(original_candidates * 2, encoding="utf-8")
+            self.reject(lambda: V["validate_corrected"](args))
+
+    def test_full_route_accepts_consistent_other_windows_drive(self):
+        args, _, _ = self.route_fixture(windows_drive="E")
+        with patch.object(FOCUS, "validate", return_value=(7, 6, 72, 72)):
+            V["validate_corrected"](args)
 
     def test_probe_modes_and_adverse(self):
         probe_fixture(self.root)
