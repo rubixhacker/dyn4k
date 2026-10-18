@@ -1,10 +1,12 @@
-# Prospective portable numerical policy proposal
+# Prospective portable numerical policy
 
-Status: **PROPOSED, UNPASSED**. This document describes 318 cases outside the
-14 approved frozen comparisons. It does not approve a threshold or qualify a
-target. The machine-readable [catalog](../../tools/numerical/portable/prospective_policy_catalog.json)
+Status: **ADOPTED, TARGET QUALIFICATION UNPASSED**. The delegated choice was
+[recorded before implementation](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193).
+This document covers 318 cases outside the 14 frozen comparisons. The
+machine-readable [catalog](../../tools/numerical/portable/prospective_policy_catalog.json)
 binds every case to its pinned reference SHA-256 and every observed record leaf
-to a proposed rule. The comparator still reports exact matches as diagnostics.
+to an adopted rule. An exact match alone is a diagnostic, and no target has
+been qualified by this policy.
 
 ## Reference and inventory
 
@@ -43,41 +45,41 @@ but `reject_nonfinite` cannot become a parity pass. The default sleep/wake
 represented-geometry failure, 125,847 of 126,000 samples, also remains failed
 under its separate frozen policy. An exact diagnostic is never qualification.
 
-## Proposed rules
+## Adopted rules
 
 The catalog maps each of the 566 paths to one of the rules below. Values are
-prospective engineering choices. They come from solver scales and the stated
+adopted engineering choices. They come from solver scales and the stated
 physical meaning, not candidate differences. No dyn4j source line promises
 cross-platform error below these values. The [default settings](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/dynamics/Settings.java#L73-L102)
 set six velocity iterations, two position iterations, 0.005 m linear
-tolerance and 2 degrees angular tolerance. The proposed general position
+tolerance and 2 degrees angular tolerance. The adopted general position
 budget is **5e-6 m**, one thousandth of that linear tolerance; the angular
 budget is **3.490658503988659e-5 rad**, one thousandth of 2 degrees. These
 are comparison budgets, never permission to fail an independent physical
 check.
 
-| Catalog rule | Proposed comparison or invariant |
+| Catalog rule | Adopted comparison or invariant |
 | --- | --- |
 | `exact_input` | Match the complete input and setup record as binary64 or exact structural values, including the explicit negative-zero token. |
 | `exact_structure` | Match case IDs, kinds, array lengths, integer indexes, action names/steps, event order and completion counts exactly. Boolean contact/TOI branches must agree. |
 | `exact_configuration` | Match joint mode and gravity values to their specified input or action at every state. Use finite binary64 identity for configured numbers. The moving joint anchor uses `bounded_position`. |
 | `exact_step` | Require finite binary64 `1/hz` in each step callback and the declared step count. |
 | `reject_nonfinite` | Reject a new NaN or infinity. Retain the known Angle reference failure separately as failed physical behavior. |
-| `bounded_position`, `bounded_velocity`, `bounded_angular_velocity` | Bound each position component by 5e-6 m, each velocity by 5e-6/`dt` m/s and angular velocity by 3.490658503988659e-5/`dt` rad/s. For the ten free-motion cases, propose 2e-9 m and 2e-7 rad with the same `dt` propagation. Boundary geometry positions use the tighter represented-gap rule below. |
+| `bounded_position`, `bounded_velocity`, `bounded_angular_velocity` | Bound each position component by 5e-6 m, each velocity by 5e-6/`dt` m/s and angular velocity by 3.490658503988659e-5/`dt` rad/s. For the ten free-motion cases, use 2e-9 m and 2e-7 rad with the same `dt` propagation. Boundary geometry positions use the tighter represented-gap rule below. |
 | `derived_transform`, `derived_rotation` | First check each run's translation aliases and matrix `[c,-s,x,s,c,y]`; check `c²+s²` against 1 with 32 binary64 ulps and wrapped angle against `acos(c)` with sign from `s`. Then use the position/angular budgets across runs; compare angles modulo 2π. |
-| `bounded_geometry_distance`, `bounded_contact_depth` | Require exact detected/separated branches. Propose 1.0536712127723509e-8 m for ordinary GJK distance and 5e-6 m for dynamic contact depth. Boundary cases use the smaller of 8 ulps at the represented coordinate and one quarter of the nonzero represented gap. Zero gap uses the 8-ulp term. |
+| `bounded_geometry_distance`, `bounded_contact_depth` | Require exact detected/separated branches. Use 1.0536712127723509e-8 m for ordinary GJK distance and 5e-6 m for dynamic contact depth. Boundary cases use the smaller of 8 ulps at the represented coordinate and one quarter of the nonzero represented gap. Zero gap uses the 8-ulp term. |
 | `bounded_direction` | Require the same normal orientation and at most 3.490658503988659e-5 Euclidean component error; independently check unit length within 32 ulps where a normal is defined. |
 | `bounded_toi_distance`, `bounded_toi_time` | Require the same callback sequence, finite distance within 4.806217383937352e-6 m, and normalized impact time within `min(0.001, 4.806217383937352e-6 / represented_sweep_distance_m)`. Require time in [0,1]. |
 | `bounded_impulse`, `bounded_force`, `bounded_torque` | Derive component caps from the state budget: `m_eff*epsilon_x/dt` N·s, `m_eff*epsilon_x/dt²` N, and `I_eff*epsilon_angle/dt²` N·m. Use mass/inertia from exact setup, and the sum for a two-body reaction. |
-| `derived_momentum`, `derived_energy` | Check each run against its own `m*v`, angular momentum about center, and `½m|v|²+½Iω²` first. Propagate the accepted velocity/angular errors through those formulas, adding 32 ulps per product/sum. |
+| `derived_momentum`, `derived_energy` | Check each run against its own `m*v`, angular momentum about center, and `½m|v|²+½Iω²` first. Propagate both allowed velocity-component errors and the angular error through those formulas, with rounding in the derived quantity's units. |
 
 There are no observed paths assigned to the catalog's `bounded_scalar`
 sentinel. An added path must receive an explicit rule. Finite zero is a
-separate condition: where the scene has no applied force/torque, or a source
-solver returns a zero reaction, require finite numerical zero before using a
-force tolerance. Sign is not required for that computed zero. Signed zero in
-input, setup and exact matrix identities remains exact. The current comparator
-continues to reject all changed zero signs until the decision is recorded.
+separate condition: body force and torque without an applied source, and the
+Angle joint's zero reaction force, require finite numerical zero before a
+force tolerance. Computed and alias finite zero accepts either sign. Explicit
+signed zero in input and setup remains exact. Finite configured numbers accept
+equivalent JSON number spellings such as `60` and `60.0`.
 
 These formulas follow the [body's symplectic Euler velocity update and
 position integration](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/dynamics/AbstractPhysicsBody.java#L726-L827).
@@ -92,7 +94,7 @@ a permissive depth tolerance. The GJK default distance epsilon is
 [Conservative advancement](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/collision/continuous/ConservativeAdvancement.java#L103-L203)
 iterates on separation, with [`cbrt(Epsilon.E)`](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/collision/continuous/ConservativeAdvancement.java#L48-L62)
 as its default distance stop. These are source facts; the factors above are
-proposed budgets.
+adopted comparison budgets.
 
 Joint trajectories follow ten separate pinned solvers:
 [Angle](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/dynamics/joint/AngleJoint.java#L335-L391),
@@ -112,7 +114,7 @@ but its velocity update uses both ratio and sign
 That source behavior supports retaining the failed physical case as evidence,
 not granting it a nonfinite exception.
 
-## Binding and adverse controls required before a verdict
+## Implementation and adverse controls
 
 For each target and build configuration, require the declared 332-case receipt,
 actual runtime executable, artifact hashes, case/trace hashes, input bytes,
@@ -122,30 +124,46 @@ unexpected path, missing step, extra callback, stale receipt or incomplete
 suite fails before any tolerance. [TimeStep.java](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/dynamics/TimeStep.java#L58-L97)
 sets the step fields and ratio used by the callback premise.
 
-Each target must demonstrate binary64 values, `nextafter`/ulp behavior,
-negative-zero serialization, finite arithmetic and the represented geometry
-after its own input decode. If a 1e-12 m perturbation rounds away at a 1e6 m
-origin, record that premise as unavailable for a physical boundary claim;
-do not quietly treat exact matching as a successful separation experiment.
-Measure the represented sweep distance before using the TOI time formula.
-Recheck callback branches and force/torque zero premises per case. An error or
-exception where the pinned run completed fails; the 318 cases do not cover
-exception parity generally, so a separate error suite is still required.
+The comparator checks the adopted rule and path map digest, all 318 catalog
+entries, the pinned source, fixture, JAR, trace and per-case hashes, actual
+candidate source and artifact hashes, runtime executable and 15 method logs,
+the sealed 332-case receipt, case slices, and producer and receipt inventory.
+It checks the target's decoded boundary setup against the input expression
+`origin.x + scale*(1.5 + delta)` from the
+[portable fixture](../../tools/numerical/portable/src/commonTest/kotlin/portable/PortableMatrixTest.kt),
+including the represented zero-gap condition. A 1e-12 m perturbation that
+rounds away at a 1e6 m origin stays `UNPASSED_PREMISE`. The TOI time bound
+uses the represented per-step sweep. Joint modes are checked against setup
+and the recorded action before comparison. Transform aliases, the matrix,
+rotation sum, momentum, energy, event order, branch identity and finite zero
+are checked before bounded parity. The public case seam keeps
+`qualification: UNPASSED`; only the host path with verified identity may mark
+an individual case `PASSED_CASE_POLICY`.
 
-Before implementation, add controls that change exactly one leaf beyond each
-bound, at the bound, and just inside it; flip a geometry detection bit; reverse
-a normal; alter a joint mode at step 201; shift an impact time near 0 or 1;
-change a finite zero to a nonzero and an explicit negative zero to positive
-zero; inject NaN and infinity; and alter a case hash or event count. Verify
-each family and every rule class. The existing inventory tests cover missing
-cases, stale trace, added paths and unchanged diagnostics only. No threshold
-adverse control or qualifying port comparison has run.
+Unit controls exercise every distinct numeric rule inside, at, and beyond its
+bound; free-motion caps, geometry represented gaps, TOI time range, normal
+orientation and unit length, 32-ulp transform checks, mode changes, branch
+flips, explicit input negative zero, computed zero, NaN/infinity, missing and
+extra cases/paths/receipts, and stale source, artifact, runtime, fixture and
+trace identities. The target's own trace demonstrates its serialized binary64
+values and represented geometry; an independent target `nextafter` probe is
+still unavailable. The 318 cases do not cover exception parity generally, so
+a separate error suite remains necessary.
 
-## Remaining decision
+## Reference self-check and remaining work
 
-Record the concrete budgets, branch identity, zero treatment and target
-premises on [Define numerical and migration acceptance](https://github.com/rubixhacker/dyn4k/issues/7)
-before any qualifying verdict is implemented. A decision may reject these
-numbers; it cannot turn the known Angle or default physical failures into
-passes. The pending 14-reference replay and seven-host terminal integration
-runs are separate evidence.
+Applying the adopted comparator to each pinned reference slice against itself
+gave 272 within policy, 41 `FAILED_DERIVED`, four `UNPASSED_PREMISE`, and one
+`FAILED_PHYSICAL`. All 41 derived failures are the adopted
+`c²+s²` within 32 ulps invariant on joint trajectories. Disabling only that
+check in a read-only diagnostic raised the within-policy count to 313; the
+adopted check remains enabled. The four boundary cases have nonzero declared
+deltas that round to zero in their represented setup. These source self-checks
+are controls, not target comparisons or qualifications. The Angle failure and
+the separate default sleep/wake failure remain failed.
+
+The coordinator must resolve the 41 source-positive-control conflicts on the
+[numerical acceptance ticket](https://github.com/rubixhacker/dyn4k/issues/7)
+before those cases can pass this policy. The 14 frozen replay and seven-host
+runtime qualification remain separate evidence. No target comparison was run
+for this document.

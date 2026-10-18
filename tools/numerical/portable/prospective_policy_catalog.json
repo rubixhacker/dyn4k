@@ -1,5 +1,6 @@
 {
-  "schema": "portable-prospective-policy-proposal/1",
+  "schema": "portable-prospective-policy-adopted/1",
+  "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193",
   "qualification": "UNPASSED",
   "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
   "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
