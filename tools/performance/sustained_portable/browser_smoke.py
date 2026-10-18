@@ -14,6 +14,7 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 
+from browser_process import ChromeObserver, boottime_ns
 import capture
 
 JS_SCRIPTS = (
@@ -51,6 +52,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(page)))
             self.end_headers()
             self.wfile.write(page)
+            with self.server.resource_lock:
+                if self.server.page_served_boottime_ns is None:
+                    self.server.page_served_boottime_ns = boottime_ns()
         else:
             name = unquote(urlsplit(self.path).path).lstrip("/")
             if name not in self.server.expected_bundle:
@@ -84,10 +88,14 @@ class Handler(SimpleHTTPRequestHandler):
                 self.resource_error(f"resource response incomplete: {name}")
                 return
             with self.server.resource_lock:
+                observed_ns = boottime_ns()
                 self.server.served[name] = actual
                 self.server.served_bytes[name] = len(payload)
                 self.server.resource_responses.append(
                     {"name": name, "sha256": actual, "bytes": len(payload)})
+                if self.server.first_resource_boottime_ns is None:
+                    self.server.first_resource_boottime_ns = observed_ns
+                self.server.last_resource_boottime_ns = observed_ns
 
     def do_POST(self):
         if self.path not in ("/complete", "/error"):
@@ -98,9 +106,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(413)
             return
         payload = self.rfile.read(size)
-        if not self.server.completed.is_set():
-            self.server.received = {"kind": self.path[1:], "payload": payload}
-            self.server.completed.set()
+        with self.server.completion_lock:
+            if not self.server.completed.is_set():
+                self.server.received = {"kind": self.path[1:], "payload": payload}
+                self.server.completion_boottime_ns = boottime_ns()
+                self.server.completed.set()
         self.send_response(204)
         self.end_headers()
 
@@ -127,6 +137,11 @@ def browser_server(directory, page, bundle, target, handler=Handler):
     server.served_bytes = {}
     server.resource_responses = []
     server.resource_errors = []
+    server.page_served_boottime_ns = None
+    server.first_resource_boottime_ns = None
+    server.last_resource_boottime_ns = None
+    server.completion_boottime_ns = None
+    server.completion_lock = threading.Lock()
     server.completed = threading.Event()
     server.received = None
     return server
@@ -291,16 +306,41 @@ def run(args):
     ]
     command.append(f"http://127.0.0.1:{server.server_port}/")
     started = time.monotonic_ns()
+    launched_boottime_ns = boottime_ns()
     process = None
+    observer = None
+    process_image = None
+    process_error = None
     completed = False
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True)
+        try:
+            observer = ChromeObserver(process.pid, profile, command[-1], browser_binary,
+                                      browser_sha, launched_boottime_ns)
+        except (OSError, ValueError) as error:
+            process_error = str(error)
         deadline = time.monotonic() + 45
-        while not server.completed.wait(timeout=0.1):
+        while True:
+            if observer is not None and process_error is None:
+                try:
+                    observer.sample()
+                except (OSError, ValueError) as error:
+                    process_error = str(error)
+            if server.completed.wait(timeout=0.02):
+                break
             if process.poll() is not None or time.monotonic() >= deadline:
                 break
         completed = server.completed.is_set()
+        if completed and observer is not None and process_error is None:
+            try:
+                process_image = observer.finish(
+                    server.page_served_boottime_ns,
+                    server.first_resource_boottime_ns,
+                    server.last_resource_boottime_ns,
+                    server.completion_boottime_ns, nonce)
+            except (OSError, ValueError) as error:
+                process_error = str(error)
     finally:
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
@@ -333,6 +373,8 @@ def run(args):
             "completion_sha256": capture.digest(args.archive / "completion.raw"),
             "resource_validation_error": str(error),
         }
+        if process_error is not None:
+            failure["process_validation_error"] = process_error
         (args.archive / "capture.json").write_text(json.dumps(failure, indent=2) + "\n")
         raise
     receipt = {
@@ -346,6 +388,7 @@ def run(args):
         "controller_terminated_after_receipt": bool(completed),
         "completion_kind": received["kind"] if received else "timeout",
         "started_monotonic_ns": started, "ended_monotonic_ns": ended,
+        "launched_boottime_ns": launched_boottime_ns,
         "page_sha256": hashlib.sha256(page).hexdigest(),
         "bundle_sha256": bundle, "core_sha256": hashes["core"],
         "kotlin_sha256": hashes["kotlin"],
@@ -360,7 +403,7 @@ def run(args):
         **resource_state,
         "stderr_sha256": capture.digest(args.archive / "stderr.raw"),
         "stderr_bytes": len(stderr),
-        "browser_process_image": "unobserved_through_flatpak_wrapper",
+        "browser_process_image": process_image,
         "memory_attribution": "missing", "allocation": "missing", "plateau": "missing",
         "required_non_jvm_gates": {
             "absolute_p99_seconds": manifest["budgets"]["absolute_p99_seconds"][str(scenario["rate_hz"])],
@@ -373,6 +416,10 @@ def run(args):
         raise ValueError("browser completion timed out; raw archive retained")
     if received["kind"] == "error":
         raise ValueError(f"browser script error: {received['payload'][:200]!r}")
+    if process_error is not None or process_image is None:
+        receipt["process_validation_error"] = process_error or "browser process image missing"
+        (args.archive / "capture.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        raise ValueError(receipt["process_validation_error"])
     try:
         capture.validate_protocol(
             raw, scenario, source, producer_tree, hashes, "development", nonce,

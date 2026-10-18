@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -12,6 +13,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import browser_smoke
+import browser_process
 
 
 WASM_FILES = (
@@ -303,7 +305,7 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
             def communicate(self, timeout):
                 return b"", b""
 
-        for missing in ("served_bytes", "served"):
+        for missing in ("served_bytes", "served", "process"):
             with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 bundle_dir = root / "bundle"
@@ -346,8 +348,28 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
                     server = original_factory(*factory_args)
                     server.received = {"kind": "complete", "payload": raw}
                     server.completed.set()
-                    delattr(server, missing)
+                    if missing == "process":
+                        for name, digest in server.expected_bundle.items():
+                            size = (bundle_dir / name).stat().st_size
+                            server.served[name] = digest
+                            server.served_bytes[name] = size
+                            server.resource_responses.append(
+                                {"name": name, "sha256": digest, "bytes": size})
+                    else:
+                        delattr(server, missing)
                     return server
+
+                class Observer:
+                    def __init__(self, *args):
+                        pass
+
+                    def sample(self):
+                        pass
+
+                    def finish(self, *args):
+                        if missing == "process":
+                            raise ValueError("browser process image was not uniquely observed")
+                        return {"pid": 1}
 
                 with mock.patch.object(browser_smoke.subprocess, "check_output",
                                        side_effect=check_output), \
@@ -359,8 +381,11 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
                                        return_value={"gradle": "9.5.0", "kgp": "2.4.20",
                                                      "compile_configuration": "development"}), \
                      mock.patch.object(browser_smoke, "browser_server",
-                                       side_effect=faulty_server):
-                    with self.assertRaisesRegex(ValueError, "resource state is incomplete"):
+                                       side_effect=faulty_server), \
+                     mock.patch.object(browser_smoke, "ChromeObserver", Observer):
+                    expected = ("not uniquely observed" if missing == "process"
+                                else "resource state is incomplete")
+                    with self.assertRaisesRegex(ValueError, expected):
                         browser_smoke.run(args)
 
                 self.assertEqual((archive / "producer.raw").read_bytes(), raw)
@@ -369,8 +394,111 @@ class BrowserRunFailureReceiptTest(unittest.TestCase):
                 self.assertEqual(receipt["qualification"], "unpassed")
                 self.assertEqual(receipt["source_sha"], source)
                 self.assertEqual(receipt["producer_sha256"], hashlib.sha256(raw).hexdigest())
-                self.assertIn("resource state is incomplete", receipt["resource_validation_error"])
-                self.assertNotIn("loaded_resource_bytes", receipt)
+                if missing == "process":
+                    self.assertIn("not uniquely observed", receipt["process_validation_error"])
+                    self.assertIsNone(receipt["browser_process_image"])
+                else:
+                    self.assertIn("resource state is incomplete",
+                                  receipt["resource_validation_error"])
+                    self.assertNotIn("loaded_resource_bytes", receipt)
+
+
+class BrowserProcessObservationTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.proc = self.root / "proc"
+        self.proc.mkdir()
+        self.selected = self.root / "selected/chrome"
+        self.selected.parent.mkdir()
+        self.selected.write_bytes(b"selected image")
+        self.profile = self.root / "profile"
+        self.page_url = "http://127.0.0.1:12345/"
+        self.write_process(100, 1, 10000)
+        self.write_process(101, 100, 10001)
+        self.write_process(102, 101, 10002, chrome=True)
+
+    def write_process(self, pid, ppid, start_ticks, chrome=False, url=None):
+        directory = self.proc / str(pid)
+        directory.mkdir(exist_ok=True)
+        fields = ["S", str(ppid), str(pid), "100"] + ["0"] * 15 + [str(start_ticks)]
+        (directory / "stat").write_text(f"{pid} (chrome) " + " ".join(fields) + "\n")
+        if chrome:
+            arguments = [str(self.selected), "--headless",
+                         f"--user-data-dir={self.profile}", url or self.page_url]
+            (directory / "cmdline").write_bytes(
+                b"\0".join(os.fsencode(arg) for arg in arguments) + b"\0")
+            if not (directory / "exe").exists():
+                (directory / "exe").symlink_to(self.selected)
+        else:
+            (directory / "cmdline").unlink(missing_ok=True)
+            (directory / "exe").unlink(missing_ok=True)
+
+    def observer(self):
+        digest = hashlib.sha256(self.selected.read_bytes()).hexdigest()
+        return browser_process.ChromeObserver(
+            100, self.profile, self.page_url, self.selected, digest,
+            10001 * browser_process.TICK_NS, proc_root=self.proc)
+
+    def test_profile_tree_mapped_image_and_exchange_are_bound(self):
+        observer = self.observer()
+        observer.sample()
+        page = 10003 * browser_process.TICK_NS
+        record = observer.finish(page, page + 1, page + 2, page + 3,
+                                 "nonce")
+        self.assertEqual(record["pid"], 102)
+        self.assertEqual([item["pid"] for item in record["ancestry"]], [101, 100])
+        self.assertEqual(record["mapped_image"]["sha256"], observer.selected_sha256)
+        self.assertIn(f"--user-data-dir={self.profile}", record["argv"])
+        self.assertEqual(record["page_url"], self.page_url)
+
+    def test_missing_ambiguous_mismatched_and_raced_processes_reject(self):
+        self.write_process(102, 101, 10002)
+        observer = self.observer()
+        with self.assertRaisesRegex(ValueError, "not uniquely observed"):
+            observer.finish(1, 2, 3, 4, "nonce")
+
+        self.write_process(102, 101, 10002, chrome=True)
+        self.write_process(103, 101, 10003, chrome=True)
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            self.observer().sample()
+        for path in (self.proc / "103").iterdir():
+            path.unlink()
+        (self.proc / "103").rmdir()
+
+        self.write_process(102, 101, 10002, chrome=True,
+                           url="http://127.0.0.1:99999/")
+        with self.assertRaisesRegex(ValueError, "profile or page"):
+            self.observer().sample()
+
+        self.write_process(102, 101, 10002, chrome=True)
+        observer = self.observer()
+        observer.sample()
+        self.write_process(102, 101, 10004, chrome=True)
+        with self.assertRaises(ValueError):
+            observer.finish(1, 2, 3, 4, "nonce")
+
+    def test_live_selected_path_swap_rejects_mapped_image(self):
+        selected = self.root / "live/chrome"
+        selected.parent.mkdir()
+        shutil.copy2("/usr/bin/sleep", selected)
+        expected = hashlib.sha256(selected.read_bytes()).hexdigest()
+        process = subprocess.Popen([str(selected), "5"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        try:
+            observed = browser_process.verify_mapped_image(
+                Path("/proc"), process.pid, selected, expected)
+            self.assertEqual(observed["sha256"], expected)
+            replacement = self.root / "replacement"
+            replacement.write_bytes(b"replaced selected pathname")
+            replacement.replace(selected)
+            with self.assertRaisesRegex(ValueError, "differs from selected"):
+                browser_process.verify_mapped_image(Path("/proc"), process.pid,
+                                                    selected, expected)
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
 
 
 if __name__ == "__main__":
