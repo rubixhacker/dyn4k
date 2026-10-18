@@ -10,6 +10,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 
@@ -17,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = ROOT / "docs/research/performance-manifest-v1.json"
 NATIVE_HOST_TARGETS = {"linuxX64", "linuxArm64", "mingwX64", "macosArm64"}
+MAX_RAW_PARSE_BYTES = 64 * 1024 * 1024
 NATIVE_TARGET_NAMES = {"linuxX64": "linux_x64", "linuxArm64": "linux_arm64",
                        "mingwX64": "mingw_x64", "macosArm64": "macos_arm64"}
 ARTIFACT_VERSION = "0.1.0-alpha.1"
@@ -213,60 +215,88 @@ def require_process_image(image, expected_sha):
 
 def run_process(command, archive, inventory_path, stdin_bytes, timeout_seconds):
     started = time.monotonic_ns()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               stdin=subprocess.PIPE if stdin_bytes else None,
-                               cwd=ROOT, env=os.environ.copy(),
-                               start_new_session=(os.name == "posix"))
-    image = None
-    image_error = None
-    try:
-        image = observed_process_image(process.pid, command[0])
-    except (OSError, ValueError) as error:
-        image_error = str(error)
-    image_observed = time.monotonic_ns()
-    termination = "natural"
-    try:
-        remaining = max(0.001, timeout_seconds - (image_observed - started) / 1e9)
-        stdout, stderr = process.communicate(input=stdin_bytes or None, timeout=remaining)
-    except subprocess.TimeoutExpired:
-        termination = "host_deadline"
+    stdout_path = archive / "stdout.raw"
+    stderr_path = archive / "stderr.raw"
+    with stdout_path.open("wb") as stdout_stream, stderr_path.open("wb") as stderr_stream:
+        process = subprocess.Popen(command, stdout=stdout_stream, stderr=stderr_stream,
+                                   stdin=subprocess.PIPE if stdin_bytes else None,
+                                   cwd=ROOT, env=os.environ.copy(),
+                                   start_new_session=(os.name == "posix"))
+        observation = {}
+        observed = threading.Event()
+
+        def observe_image():
+            try:
+                observation["image"] = observed_process_image(process.pid, command[0])
+            except Exception as error:
+                observation["error"] = str(error)
+            finally:
+                observed.set()
+
+        threading.Thread(target=observe_image, daemon=True).start()
+        image_timed_out = not observed.wait(min(5.0, timeout_seconds))
+        image = observation.get("image") if not image_timed_out else None
+        image_error = ("process image observation exceeded its deadline"
+                       if image_timed_out else observation.get("error"))
+        image_observed = time.monotonic_ns()
+        termination = "natural"
         try:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGTERM)
-            else:
-                process.terminate()
-        except OSError:
-            pass
-        try:
-            stdout, stderr = process.communicate(timeout=3)
+            if image_timed_out:
+                raise subprocess.TimeoutExpired(command, timeout_seconds)
+            remaining = max(0.001, timeout_seconds - (image_observed - started) / 1e9)
+            process.communicate(input=stdin_bytes or None, timeout=remaining)
         except subprocess.TimeoutExpired:
+            termination = "host_deadline"
             try:
                 if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                 else:
-                    process.kill()
+                    process.terminate()
             except OSError:
                 pass
             try:
-                stdout, stderr = process.communicate(timeout=3)
-            except subprocess.TimeoutExpired as error:
-                termination = "host_deadline_cleanup_incomplete"
-                stdout, stderr = error.stdout or b"", error.stderr or b""
-                for stream in (process.stdout, process.stderr):
-                    if stream is not None:
-                        stream.close()
+                process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except OSError:
+                    pass
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    termination = "host_deadline_cleanup_incomplete"
     ended = time.monotonic_ns()
-    (archive / "stdout.raw").write_bytes(stdout)
-    (archive / "stderr.raw").write_bytes(stderr)
+    def read_raw(path):
+        before = path.stat().st_size
+        with path.open("rb") as stream:
+            data = stream.read(MAX_RAW_PARSE_BYTES + 1)
+        after = path.stat().st_size
+        complete = before == after == len(data) and len(data) <= MAX_RAW_PARSE_BYTES
+        return data if complete else b"", after, (
+            hashlib.sha256(data).hexdigest() if complete else None)
+
+    stdout, stdout_bytes, stdout_sha256 = read_raw(stdout_path)
+    stderr, stderr_bytes, stderr_sha256 = read_raw(stderr_path)
+    raw_parse_limit_exceeded = max(stdout_bytes, stderr_bytes) > MAX_RAW_PARSE_BYTES
+    raw_snapshot_incomplete = (stdout_sha256 is None or stderr_sha256 is None)
+    if raw_snapshot_incomplete:
+        stdout = stderr = b""
     (archive / "stdin.raw").write_bytes(stdin_bytes)
     (archive / "build-inventory.json").write_bytes(inventory_path.read_bytes())
     receipt = {"pid": process.pid, "command": command, "started_monotonic_ns": started,
                "image_observed_monotonic_ns": image_observed, "ended_monotonic_ns": ended,
                "observed_image": image, "image_observation_error": image_error,
                "exit_code": process.returncode, "termination": termination,
+               "raw_collection": ("selected_process_exited" if process.poll() is not None
+                                  and not raw_snapshot_incomplete else "incomplete"),
+               "raw_parse_limit_exceeded": raw_parse_limit_exceeded,
+               "raw_snapshot_incomplete": raw_snapshot_incomplete,
                "host_timeout_seconds": timeout_seconds,
-               "stdout_sha256": digest(archive / "stdout.raw"),
-               "stderr_sha256": digest(archive / "stderr.raw"),
+               "stdout_bytes": stdout_bytes, "stderr_bytes": stderr_bytes,
+               "stdout_sha256": stdout_sha256, "stderr_sha256": stderr_sha256,
                "inventory_sha256": digest(archive / "build-inventory.json")}
     (archive / "execution.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt, stdout, stderr
@@ -589,9 +619,10 @@ def capture(args):
         "execution_sha256": digest(args.archive / "execution.json"),
         "termination": execution["termination"],
         "host_timeout_seconds": host_timeout, "exit_code": execution["exit_code"],
-        "raw": {"stdout_sha256": digest(args.archive / "stdout.raw"),
-                "stdout_bytes": len(stdout), "stderr_sha256": digest(args.archive / "stderr.raw"),
-                "stderr_bytes": len(stderr)},
+        "raw": {"stdout_sha256": execution["stdout_sha256"],
+                "stdout_bytes": execution["stdout_bytes"],
+                "stderr_sha256": execution["stderr_sha256"],
+                "stderr_bytes": execution["stderr_bytes"]},
         "memory_attribution": "missing", "plateau": "missing",
         "allocation": "missing",
         "noise_approval": "missing", "stress_ceiling_approval": "missing",
@@ -606,6 +637,8 @@ def capture(args):
         raise ValueError("producer exceeded host deadline; raw archive retained")
     if execution["exit_code"] != 0:
         raise ValueError(f"producer exited {execution['exit_code']}; raw archive retained")
+    if execution["raw_snapshot_incomplete"]:
+        raise ValueError("producer raw output could not be fully parsed; raw archive retained")
     try:
         clocks, steps, provider, run = validate_protocol(
             stdout, scenario, args.source_sha, producer_tree, hashes, args.build, nonce,

@@ -44,6 +44,7 @@ jobs:
         shell: bash
         run: |
           python -B - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -53,6 +54,7 @@ jobs:
           import signal
           import subprocess
           import sys
+          import time
 
           root = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
           evidence = (Path(os.environ["RUNNER_TEMP"]) / "performance-native-host-short").resolve()
@@ -65,6 +67,37 @@ jobs:
                    "run_id": os.environ["GITHUB_RUN_ID"],
                    "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
                    "qualification": "unpassed", "commands": {}, "scenarios": {}}
+
+          def process_rows():
+              listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,stat="],
+                                       capture_output=True, text=True, timeout=5, check=True)
+              return {int(parts[0]): (int(parts[1]), parts[2])
+                      for line in listing.stdout.splitlines()
+                      if len(parts := line.split()) >= 3}
+
+          def descendants(parent, rows):
+              found = set()
+              pending = [parent]
+              while pending:
+                  current = pending.pop()
+                  children = {pid for pid, (ppid, _) in rows.items() if ppid == current}
+                  found.update(children)
+                  pending.extend(children)
+              return found
+
+          def raw_file(path):
+              if not path.is_file():
+                  return {"status": "missing"}
+              size = path.stat().st_size
+              if size > 64 * 1024 * 1024:
+                  return {"bytes": size, "status": "hash_size_limit"}
+              value = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for block in iter(lambda: stream.read(65536), b""):
+                      value.update(block)
+              if path.stat().st_size != size:
+                  return {"bytes": size, "status": "changed_during_hash"}
+              return {"bytes": size, "sha256": value.hexdigest()}
 
           def execute(label, argv, timeout=300):
               output = evidence / label
@@ -103,10 +136,38 @@ jobs:
                                           killer.wait(timeout=5)
                                           record["tree_kill_error"] = "taskkill deadline"
                               else:
+                                  os.killpg(process.pid, signal.SIGSTOP)
+                                  record["process_group_stop"] = "SIGSTOP"
+                                  tracked = set()
+                                  for _ in range(4):
+                                      found = descendants(process.pid, process_rows())
+                                      fresh = found - tracked
+                                      for pid in fresh:
+                                          try:
+                                              os.kill(pid, signal.SIGSTOP)
+                                          except ProcessLookupError:
+                                              pass
+                                      tracked.update(fresh)
+                                      if not fresh:
+                                          break
+                                  else:
+                                      record["tree_kill_error"] = "descendants did not quiesce"
+                                  record["descendant_pids"] = sorted(tracked)
+                                  for pid in sorted(tracked, reverse=True):
+                                      try:
+                                          os.kill(pid, signal.SIGKILL)
+                                      except ProcessLookupError:
+                                          pass
                                   os.killpg(process.pid, signal.SIGKILL)
                                   record["process_group_signal"] = "SIGKILL"
-                          except (OSError, subprocess.TimeoutExpired) as error:
+                          except (OSError, ValueError, subprocess.CalledProcessError,
+                                  subprocess.TimeoutExpired) as error:
                               record["tree_kill_error"] = str(error)
+                              if os.name != "nt":
+                                  try:
+                                      os.killpg(process.pid, signal.SIGKILL)
+                                  except ProcessLookupError:
+                                      pass
                           try:
                               record["exit_code"] = process.wait(timeout=10)
                           except subprocess.TimeoutExpired:
@@ -116,11 +177,34 @@ jobs:
                               except subprocess.TimeoutExpired:
                                   record["exit_code"] = None
                               record["tree_kill_error"] = "wrapper required direct kill"
-                          record["termination"] = (
-                              "deadline_tree_signaled" if not record.get("tree_kill_error")
-                              and (record.get("process_group_signal") == "SIGKILL" or
-                                   record.get("tree_kill_exit_code") == 0)
-                              else "deadline_tree_unverified")
+                          if os.name != "nt" and "descendant_pids" in record:
+                              try:
+                                  deadline = time.monotonic() + 2
+                                  while True:
+                                      rows = process_rows()
+                                      remaining = [pid for pid in record["descendant_pids"]
+                                                   if pid in rows and not rows[pid][1].startswith("Z")]
+                                      if not remaining or time.monotonic() >= deadline:
+                                          break
+                                      time.sleep(0.05)
+                                  record["remaining_descendant_pids"] = remaining
+                                  if remaining:
+                                      record["tree_kill_error"] = "descendants survived deadline cleanup"
+                              except (OSError, subprocess.CalledProcessError,
+                                      subprocess.TimeoutExpired) as error:
+                                  record["tree_kill_error"] = "descendant verification failed: " + str(error)
+                          if record.get("tree_kill_error"):
+                              record["termination"] = "deadline_tree_unverified"
+                          elif os.name == "nt":
+                              record["termination"] = (
+                                  "deadline_tree_signaled" if record.get("tree_kill_exit_code") == 0
+                                  else "deadline_tree_unverified")
+                          else:
+                              record["termination"] = (
+                                  "deadline_observed_tree_stopped"
+                                  if record.get("process_group_signal") == "SIGKILL"
+                                  and not record.get("remaining_descendant_pids")
+                                  else "deadline_tree_unverified")
               except OSError as error:
                   with stderr_path.open("ab") as stderr:
                       stderr.write((str(error) + "\n").encode())
@@ -201,7 +285,8 @@ jobs:
               route["path_swap_control_passed"] = image_control
               for api in ("direct_kotlin", "compatibility"):
                   archive = (evidence / "captures" / api).resolve()
-                  passed, _, _ = execute(f"captures/{api}-command", [sys.executable, "-B",
+                  label = f"captures/{api}-command"
+                  passed, _, _ = execute(label, [sys.executable, "-B",
                       root / "tools/performance/sustained_portable/native_host_capture.py",
                       "--inventory", inventory, "--publication-root", staging,
                       "--target", target, "--build", build,
@@ -209,6 +294,29 @@ jobs:
                       "--archive", archive, "--steps", "30", "--warmup", "3"], 120)
                   route["scenarios"][api] = {"exit_zero": passed,
                       "capture_receipt": (archive / "capture.json").is_file()}
+                  if not passed:
+                      raw = {}
+                      for name in ("stdout.raw", "stderr.raw"):
+                          path = archive / name
+                          try:
+                              raw[name] = raw_file(path)
+                          except OSError as error:
+                              raw[name] = {"status": "unreadable", "error": str(error)}
+                      execution_path = archive / "execution.json"
+                      try:
+                          execution_receipt = json.loads(execution_path.read_text())
+                          raw_collection = (execution_receipt.get("raw_collection", "incomplete")
+                                            if isinstance(execution_receipt, dict) else "incomplete")
+                      except (OSError, ValueError, UnicodeError):
+                          raw_collection = "incomplete"
+                      if any("sha256" not in item for item in raw.values()):
+                          raw_collection = "incomplete"
+                      failure = {"qualification": "unpassed", "source_sha": sha,
+                                 "target": target, "build": build, "scenario": api,
+                                 "command": route["commands"][label], "raw": raw,
+                                 "raw_collection": raw_collection}
+                      (evidence / "captures" / f"{api}-failure.json").write_text(
+                          json.dumps(failure, indent=2) + "\n")
               if not image_control or not all(row["exit_zero"] for row in route["scenarios"].values()):
                   raise RuntimeError("one or more Native host controls failed")
           except (KeyError, ValueError, OSError, RuntimeError) as error:
