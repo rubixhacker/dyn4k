@@ -23,7 +23,7 @@ $konanc = Join-Path $KonancHome 'bin/kotlinc-native.bat'
 $javac = Join-Path $JdkHome 'bin/javac.exe'
 $java = Join-Path $JdkHome 'bin/java.exe'
 $version = (& $konanc -version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $version -notmatch '(?<![\w.+-])2\.4\.20(?![\w.+-])') { throw "Kotlin/Native version mismatch: $version" }
+if ($LASTEXITCODE -ne 0 -or $version -notmatch '(?<![-A-Za-z0-9_~+/])2\.4\.20(?![-A-Za-z0-9_~+/]|\.[A-Za-z0-9])') { throw "Kotlin/Native version mismatch: $version" }
 $validator = Join-Path $PSScriptRoot 'validate-scalar-control.py'
 & python $validator self-test
 if ($LASTEXITCODE -ne 0) { throw "Scalar validator self-test failed: $LASTEXITCODE" }
