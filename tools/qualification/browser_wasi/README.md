@@ -32,7 +32,7 @@ Each lane keeps a private copy of the linked test executable. Wasmtime executes 
 python3 tools/qualification/browser_wasi/runner.py audit --receipt /path/to/lane.json
 ```
 
-The audit replays the raw case checks and rejects a receipt whose PASS fields differ from the raw XML or Wasmtime events. An older 932/46 receipt cannot pass the full corpus audit. Preserve older failed receipts as failed evidence.
+The audit replays the raw case checks and rejects a receipt whose PASS fields differ from the raw XML or Wasmtime events. For each browser module, it also requires the exact Gradle command, the linked source for the claimed configuration, and the production input marker in raw stdout. Development stdout must have no production input marker. The retained linked executable must match its source digest recorded during the run. An older 932/46 receipt cannot pass the full corpus audit. Preserve older failed receipts as failed evidence.
 
 The runner invokes Wasmtime with `-W gc=y -W exceptions=y -W function-references=y` and the test binary's `startUnitTests` export. Production WASI and Wasm JS tests consume Binaryen's `optimized` output. JavaScript production tests consume the production linked output. Browser tests use Karma and the selected `CHROME_BIN` or `FIREFOX_BIN`; the XML records the actual browser family and major version.
 

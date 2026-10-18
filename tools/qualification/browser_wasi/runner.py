@@ -465,18 +465,17 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             if (type(started) is not int or type(finished) is not int
                     or started <= 0 or finished < started):
                 raise ValueError(f"passing {name} has no fresh invocation window")
-            expected_gradle = gradle_test_task(name, target, configuration)
-            gradle_command = module.get("gradle_command")
-            if (not isinstance(gradle_command, list) or expected_gradle not in gradle_command
-                    or "--rerun-tasks" not in gradle_command or "--no-daemon" not in gradle_command):
-                raise ValueError(f"passing {name} Gradle task differs")
-            if name == "consumer" and (f"-PqualificationRepository={root / 'build/staging-repository'}"
-                                       not in gradle_command):
-                raise ValueError("passing consumer did not resolve staged repository")
+            if module.get("gradle_command") != gradle_command(root, name, target, configuration):
+                raise ValueError(f"passing {name} Gradle configuration or task differs")
+            source = linked_file(test_project(root, name), target, configuration, name)
+            if module.get("linked_source") != str(source):
+                raise ValueError(f"passing {name} linked source configuration differs")
             linked = Path(module["linked_executable"]).resolve()
-            if linked.suffix != (".wasm" if target == "wasmWasi" else
-                                 ".mjs" if target == "wasmJs" else ".js"):
-                raise ValueError(f"passing {name} linked target differs")
+            if linked != (lane_dir / name / f"linked-executable{source.suffix}"):
+                raise ValueError(f"passing {name} retained linked executable differs")
+            if (module.get("linked_source_sha256") is not None and
+                    module["linked_source_sha256"] != module.get("linked_sha256")):
+                raise ValueError(f"passing {name} linked source digest differs")
             if target == "wasmWasi":
                 if not all(key in module for key in ("raw_stdout", "raw_stderr")):
                     raise ValueError(f"passing {name} has no separate Wasmtime streams")
@@ -492,6 +491,11 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 observed = verify_wasmtime_output(Path(module["raw_console"]).read_text(),
                                                   expected)
             else:
+                production_marker = f"qualification test input: {source}"
+                markers = [line for line in Path(module["gradle_stdout"]).read_text().splitlines()
+                           if line.startswith("qualification test input:")]
+                if markers != ([production_marker] if configuration == "production" else []):
+                    raise ValueError(f"passing {name} browser configuration input differs")
                 marker = ("ChromeHeadless" if lane["runtime"] == "chromium" else
                           "Firefox") + lane["expected_runtime_version"].split(".")[0]
                 observed = verify_reports(Path(module["raw_xml"][0]["path"]).parent,
@@ -585,6 +589,22 @@ def gradle_test_task(module: str, target: str, configuration: str) -> str:
     return f"{prefix}compileTest{kind}ExecutableKotlinWasmWasi{optimize}"
 
 
+def gradle_command(root: Path, module: str, target: str,
+                   configuration: str) -> list[str]:
+    args = [str(root / "gradlew")]
+    if module == "consumer":
+        args += ["-p", str(test_project(root, module)),
+                 f"-PqualificationRepository={root / 'build/staging-repository'}"]
+    if target != "wasmWasi":
+        args.append("kotlinUpgradeYarnLock" if target == "js" else
+                    "kotlinWasmUpgradeYarnLock")
+    args += [gradle_test_task(module, target, configuration), "--rerun-tasks",
+             "--console=plain", "--no-daemon"]
+    if configuration == "production" and target != "wasmWasi":
+        args.append("-PqualificationProduction=true")
+    return args
+
+
 def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
              runtime: str, role: str, configuration: str, binary: Path,
              expected_version: str) -> int:
@@ -635,16 +655,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 env.update(DYN4K_BROWSER_SELECTED_BINARY=str(binary),
                            DYN4K_BROWSER_ATTESTATION=str(attestation),
                            DYN4K_BROWSER_TOKEN=token, DYN4K_BROWSER_RUNTIME=runtime)
-            gradle = [str(root / "gradlew")]
-            if module == "consumer":
-                gradle += ["-p", str(project), f"-PqualificationRepository={root / 'build/staging-repository'}"]
-            task = gradle_test_task(module, target, configuration)
-            if target != "wasmWasi":
-                gradle.append("kotlinUpgradeYarnLock" if target == "js"
-                              else "kotlinWasmUpgradeYarnLock")
-            gradle += [task, "--rerun-tasks", "--console=plain", "--no-daemon"]
-            if configuration == "production" and target != "wasmWasi":
-                gradle.append("-PqualificationProduction=true")
+            gradle = gradle_command(root, module, target, configuration)
             report_dir = project / "build/test-results" / f"{target}BrowserTest"
             if target != "wasmWasi" and report_dir.exists():
                 shutil.rmtree(report_dir)
@@ -676,13 +687,17 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 linked = linked_file(project, target, configuration, module)
                 if not linked.is_file():
                     raise ValueError(f"missing linked test executable: {linked}")
-                if configuration == "production" and target != "wasmWasi":
+                if target != "wasmWasi":
                     marker = f"qualification test input: {linked}"
-                    if marker not in built.stdout:
-                        raise ValueError(f"production test did not select optimized input: {linked}")
+                    markers = [line for line in built.stdout.splitlines()
+                               if line.startswith("qualification test input:")]
+                    if markers != ([marker] if configuration == "production" else []):
+                        raise ValueError(f"browser configuration did not select input: {linked}")
                 frozen_linked = module_output / f"linked-executable{linked.suffix}"
                 shutil.copy2(linked, frozen_linked)
-                evidence.update(linked_source=str(linked), linked_executable=str(frozen_linked),
+                evidence.update(linked_source=str(linked),
+                                linked_source_sha256=sha256(linked),
+                                linked_executable=str(frozen_linked),
                                 linked_sha256=sha256(frozen_linked))
                 if target == "wasmWasi":
                     invocation = [str(binary), "run", "-W", "gc=y", "-W", "exceptions=y",

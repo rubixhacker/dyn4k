@@ -8,12 +8,40 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from runner import (gradle_test_task, runtime_version, source_cases, staged_files,
                     verify_reports, verify_wasmtime_output)
 
 
 class SourceCasesTest(unittest.TestCase):
+    @staticmethod
+    def copy_lane(source: Path, directory: str) -> tuple[dict, Path]:
+        copied = Path(directory) / source.name
+        shutil.copytree(source, copied)
+
+        def replace_paths(value):
+            if isinstance(value, str):
+                return value.replace(str(source), str(copied))
+            if isinstance(value, list):
+                return [replace_paths(item) for item in value]
+            if isinstance(value, dict):
+                return {key: replace_paths(item) for key, item in value.items()}
+            return value
+
+        return replace_paths(json.loads((copied / "lane.json").read_text())), copied
+
+    @staticmethod
+    def save_copied_lane(lane: dict, copied: Path) -> None:
+        from runner import sealed_lane, sha256, write_json
+
+        for module in lane["modules"].values():
+            result = Path(module["result_json"])
+            write_json(result, {key: value for key, value in module.items()
+                                if key not in ("result_json", "result_json_sha256")})
+            module["result_json_sha256"] = sha256(result)
+        write_json(copied / "lane.json", sealed_lane(lane))
+
     def test_committed_common_corpus_has_all_browser_and_wasi_cases(self):
         from runner import common_corpus_cases
 
@@ -252,6 +280,72 @@ class SourceCasesTest(unittest.TestCase):
             receipt.write_text(json.dumps(lane))
             with self.assertRaisesRegex(ValueError, "seal"):
                 audit_lane_receipt(receipt)
+
+    def test_resealed_browser_configuration_relabel_is_rejected(self):
+        from runner import audit_lane_receipt
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for target, runtime in (("js", "chromium"), ("wasmJs", "firefox")):
+            for original, claimed in (("development", "production"),
+                                      ("production", "development")):
+                source = Path(evidence_root) / f"{target}-{runtime}-minimum-{original}"
+                self.assertTrue((source / "lane.json").is_file(), source)
+                with tempfile.TemporaryDirectory() as directory:
+                    lane, copied = self.copy_lane(source, directory)
+                    lane["configuration"] = claimed
+                    for module in lane["modules"].values():
+                        module["configuration"] = claimed
+                    self.save_copied_lane(lane, copied)
+                    with self.subTest(target=target, original=original, claimed=claimed):
+                        with self.assertRaisesRegex(ValueError, "configuration|production|development"):
+                            with mock.patch("runner.candidate_identity"):
+                                audit_lane_receipt(copied / "lane.json")
+
+    def test_resealed_browser_output_binding_mutations_are_rejected(self):
+        from runner import audit_lane_receipt, sha256
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for original, mutation, expected_error in (
+            ("production", "missing_production_flag", "Gradle configuration"),
+            ("production", "missing_production_marker", "browser configuration input"),
+            ("production", "development_linked_source", "linked source configuration"),
+            ("production", "wrong_linked_digest", "linked source digest"),
+            ("production", "wrong_browser_task", "Gradle configuration"),
+            ("development", "added_production_flag", "Gradle configuration"),
+        ):
+            source = Path(evidence_root) / f"js-chromium-minimum-{original}"
+            self.assertTrue((source / "lane.json").is_file(), source)
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                module = lane["modules"]["dyn4k-core"]
+                if mutation == "missing_production_flag":
+                    module["gradle_command"].remove("-PqualificationProduction=true")
+                elif mutation == "missing_production_marker":
+                    stdout = Path(module["gradle_stdout"])
+                    stdout.write_text("".join(line for line in stdout.read_text().splitlines(True)
+                                              if not line.startswith("qualification test input:")))
+                    console = Path(module["gradle_console"])
+                    console.write_text(stdout.read_text() + Path(module["gradle_stderr"]).read_text())
+                    module["gradle_stdout_sha256"] = sha256(stdout)
+                    module["gradle_console_sha256"] = sha256(console)
+                elif mutation == "development_linked_source":
+                    module["linked_source"] = module["linked_source"].replace(
+                        "testProductionExecutable", "testDevelopmentExecutable")
+                elif mutation == "wrong_linked_digest":
+                    module["linked_source_sha256"] = "0" * 64
+                elif mutation == "wrong_browser_task":
+                    module["gradle_command"][2] = ":dyn4k-core:wasmJsBrowserTest"
+                else:
+                    module["gradle_command"].append("-PqualificationProduction=true")
+                self.save_copied_lane(lane, copied)
+                with self.subTest(mutation=mutation):
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
 
     def test_existing_failed_lane_is_not_overwritten(self):
         from runner import run_lane
