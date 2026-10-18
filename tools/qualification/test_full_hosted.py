@@ -25,6 +25,16 @@ class FullHostedTests(unittest.TestCase):
         self.path = self.root / "TEST-one.xml"
         self.expected = {("org.dyn4j.geometry.ExampleTest", "works")}
 
+    def align_synthetic_docs(self, repository, target):
+        staging = repository / "build/staging-repository" / qualify.GROUP.replace(".", "/")
+        for module in qualify.MODULES:
+            root = staging / module / qualify.VERSION / f"{module}-{qualify.VERSION}-javadoc.jar"
+            name = qualify.target_publication_name(module, target)
+            target_jar = staging / name / qualify.VERSION / f"{name}-{qualify.VERSION}-javadoc.jar"
+            target_jar.write_bytes(root.read_bytes())
+            target_jar.with_name(target_jar.name + ".sha256").write_text(
+                full_hosted.sha256(target_jar) + "\n")
+
     def write_suite(self, cases, skipped=False, ignored=False):
         suite = ET.Element("testsuite", tests=str(len(cases)), failures="0", errors="0",
                            skipped="1" if skipped else "0", time="0.1")
@@ -187,6 +197,7 @@ class FullHostedTests(unittest.TestCase):
         repository.mkdir()
         target = "tvosSimulatorArm64"
         staging = test_publication.PublicationAuditTests().stage(repository, (target,))
+        self.align_synthetic_docs(repository, target)
         for module in qualify.MODULES:
             (repository / module / "src/commonMain/kotlin/api/Type.kt").write_bytes(
                 b"// Fixture notice\npackage api\nclass Type\n")
@@ -271,6 +282,183 @@ class FullHostedTests(unittest.TestCase):
             self.assertIn("staged publication is partial or invalid", wrong["reason"])
             self.assertNotIn("staged_gav", wrong)
 
+    def test_synthetic_joined_run_replays_complete_apple_receipt(self):
+        evidence_parent = os.environ.get("DYN4K_HOSTED_JOINED_EVIDENCE_DIR")
+        if evidence_parent:
+            parent = Path(evidence_parent)
+            parent.mkdir(parents=True, exist_ok=True)
+            evidence = Path(tempfile.mkdtemp(prefix="synthetic-joined-", dir=parent))
+        else:
+            evidence = self.root / "synthetic-joined"
+            evidence.mkdir()
+        actual_repository = Path(__file__).resolve().parents[2]
+        repository = evidence / "checkout"
+        repository.mkdir()
+        output = evidence / "full"
+        target = "tvosSimulatorArm64"
+        simulator = "00000000-0000-0000-0000-000000000001"
+        (repository / "LICENSE.md").write_bytes(b"Fixture license\n")
+        for module in qualify.MODULES:
+            source = repository / module / "src/commonMain/kotlin/api/Type.kt"
+            source.parent.mkdir(parents=True)
+            source.write_text("// Fixture notice\npackage api\nclass Type\n")
+        manifest = json.loads((actual_repository / full_hosted.MANIFEST).read_text())
+        for item in manifest["source_files"]:
+            destination = repository / item["path"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(actual_repository / item["path"], destination)
+            self.assertEqual(item["sha256"], full_hosted.sha256(destination))
+        for relative in full_hosted.INPUTS:
+            destination = repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(actual_repository / relative, destination)
+        shutil.copy2(actual_repository / "gradlew", repository / "gradlew")
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        subprocess.run(["git", "-C", str(repository), "add", "LICENSE.md", "gradlew",
+                        "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
+                        "consumers/qualification/portable/build.gradle.kts"], check=True)
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
+                       check=True)
+        candidate = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
+                                            text=True).strip()
+        for relative in ("LICENSE.md", *full_hosted.INPUTS):
+            self.assertEqual((repository / relative).read_bytes(),
+                             full_hosted.committed_input(repository, candidate, relative))
+
+        consumer_manifest = json.loads((repository / "tools/qualification/foundation-probes.json").read_text())
+        group = next(item for item in consumer_manifest["groups"]
+                     if item["id"] == f"consumer-{target}")
+        consumer_cases = qualify.expected_probe_cases(consumer_manifest, group)
+
+        def write(path, data):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data if isinstance(data, bytes) else data.encode())
+
+        def suite(cases):
+            root = ET.Element("testsuite", tests=str(len(cases)), failures="0", errors="0",
+                              skipped="0", time="1")
+            for classname, method in cases:
+                ET.SubElement(root, "testcase", classname=classname, name=method, time="0.1")
+            return ET.tostring(root)
+
+        def synthetic_command(command, _cwd, destination, invocation_id=None):
+            started = time.time_ns()
+            kind = destination.name
+            configuration = destination.parent.name
+            if kind == "stage":
+                test_publication.PublicationAuditTests().stage(repository, (target,))
+                self.align_synthetic_docs(repository, target)
+                stdout = "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository\n"
+            elif kind == "source":
+                mode = "Release" if configuration == "optimized-opt" else "Debug"
+                stdout = ""
+                for module in qualify.MODULES:
+                    stdout += (f"> Task :{module}:link{mode}TestTvosSimulatorArm64\n"
+                               f"> Task :{module}:{target}Test\n")
+                    cases = [(f"{target}Test.{name}", f"{method}[{target}]")
+                             for name, method in full_hosted.expected_cases(manifest, module)]
+                    write(repository / module / "build/test-results" / f"{target}Test/TEST-all.xml",
+                          suite(cases))
+                    binary_mode = "releaseTest" if mode == "Release" else "debugTest"
+                    write(repository / module / "build/bin" / target / binary_mode / "test.kexe",
+                          f"synthetic-{module}-{configuration}")
+            elif kind == "consumer":
+                mode = "Release" if configuration == "optimized-opt" else "Debug"
+                stdout = f"> Task :link{mode}TestTvosSimulatorArm64\n> Task :{target}Test\n"
+                report = repository / group["report_pattern"].replace("TEST-*.xml", "TEST-all.xml")
+                write(report, suite(consumer_cases))
+                binary_mode = "releaseTest" if mode == "Release" else "debugTest"
+                write(repository / "consumers/qualification/portable/build/bin" /
+                      target / binary_mode / "consumer.kexe", f"synthetic-consumer-{configuration}")
+            else:
+                self.assertEqual("graph", kind)
+                artifacts = []
+                for module in qualify.MODULES:
+                    name = qualify.target_publication_name(module, target)
+                    binary = repository / "build/staging-repository" / qualify.target_binary_path(module, target)
+                    artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
+                                      "file": str(binary), "name": binary.name,
+                                      "size": binary.stat().st_size,
+                                      "sha256": full_hosted.sha256(binary)})
+                graph = {"configuration": f"{target}CompileKlibraries",
+                         "components": [item["component"] for item in artifacts] +
+                         [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
+                         "artifacts": artifacts}
+                stdout = "DYN4K_RESOLVED_GRAPH=" + json.dumps(graph) + "\n"
+            write(destination / "stdout.txt", stdout + "BUILD SUCCESSFUL\n")
+            write(destination / "stderr.txt", "")
+            finished = time.time_ns()
+            return {"command": command, "pid": 42, "exit_code": 0,
+                    "invocation_id": invocation_id, "started_ns": started,
+                    "finished_ns": finished,
+                    "stdout_sha256": full_hosted.sha256(destination / "stdout.txt"),
+                    "stderr_sha256": full_hosted.sha256(destination / "stderr.txt")}
+
+        runtime = {"system": "macOS", "machine": "arm64", "os_version": "15.0",
+                   "java_version": "21.0.12", "simulators": {"tvOS": [{"udid": simulator}]}}
+        runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
+                  "RUNNER_NAME": "synthetic-runner", "RUNNER_OS": "macOS",
+                  "RUNNER_ARCH": "ARM64"}
+        with mock.patch.object(full_hosted, "__file__", str(repository /
+                               "tools/qualification/full_hosted.py")), \
+                mock.patch.object(full_hosted, "load_corpus", wraps=full_hosted.load_corpus) as load, \
+                mock.patch.object(full_hosted.hosted, "discover_runtime", return_value=runtime), \
+                mock.patch.object(full_hosted.hosted, "runtime_status", return_value=("READY", "")), \
+                mock.patch.object(full_hosted.hosted, "gradle_wrapper",
+                                  return_value=str(repository / "gradlew")), \
+                mock.patch.object(full_hosted.hosted, "tool_version", return_value="9.5.0"), \
+                mock.patch.object(full_hosted, "run_command", side_effect=synthetic_command), \
+                mock.patch.object(full_hosted.artifact, "capture_staging",
+                                  wraps=full_hosted.artifact.capture_staging) as capture, \
+                mock.patch.dict(os.environ, runner):
+            emitted = full_hosted.run(target, candidate, output)
+            self.assertEqual("FULL_COMMON_PASSED", emitted["status"], emitted.get("reason"))
+            self.assertEqual(2, len(emitted["configurations"]))
+            self.assertEqual(candidate, capture.call_args.args[3])
+            self.assertEqual(52, len([item for item in emitted["files"]
+                                      if item["path"].startswith("staged/")]))
+            self.assertEqual(2, load.call_count)
+            receipt = qualify.load_json_strict(output / "receipt.json")
+            self.assertEqual(emitted, receipt)
+            full_hosted.verify_raw_files(output, receipt)
+            archive = evidence / "full.tar"
+            full_hosted.package_archive(output, archive)
+            transported = full_hosted.verify_transport_archive(archive, candidate, target)
+            self.assertEqual(receipt, transported)
+
+            adverse = evidence / "adverse-source"
+            shutil.copytree(output, adverse)
+            name = qualify.target_publication_name("dyn4k-core", target)
+            source = (adverse / "staged" / qualify.GROUP.replace(".", "/") / name /
+                      qualify.VERSION / f"{name}-{qualify.VERSION}-sources.jar")
+            source.write_bytes(source.read_bytes() + b"\n")
+            source.with_name(source.name + ".sha256").write_text(full_hosted.sha256(source) + "\n")
+            changed = qualify.load_json_strict(adverse / "receipt.json")
+            changed["files"] = full_hosted.archive_inventory(adverse)
+            (adverse / "receipt.json").write_text(json.dumps(changed, sort_keys=True) + "\n")
+            with self.assertRaises(ValueError) as directory_error:
+                full_hosted.verify_raw_files(adverse, changed)
+            adverse_archive = evidence / "adverse-source.tar"
+            full_hosted.package_archive(adverse, adverse_archive)
+            with self.assertRaises(ValueError) as tar_error:
+                full_hosted.verify_transport_archive(adverse_archive, candidate, target)
+            (evidence / "evidence.json").write_text(json.dumps({
+                "synthetic": True, "real_hosted_runtime": False,
+                "corpus_loader": "real_source_derived_candidate",
+                "candidate_input_count": len(full_hosted.INPUTS),
+                "reviewed_source_file_count": len(manifest["source_files"]),
+                "candidate_sha": candidate, "target": target,
+                "staged_files": 52, "configurations": list(full_hosted.CONFIGS[target]),
+                "source_cases_per_configuration": {module: len(full_hosted.expected_cases(manifest, module))
+                                                   for module in qualify.MODULES},
+                "consumer_cases_per_configuration": len(consumer_cases),
+                "positive_archive_sha256": full_hosted.sha256(archive),
+                "adverse_archive_sha256": full_hosted.sha256(adverse_archive),
+                "adverse_directory_rejection": str(directory_error.exception),
+                "adverse_tar_rejection": str(tar_error.exception),
+            }, indent=2, sort_keys=True) + "\n")
+
     def full_archive(self):
         repository = Path(__file__).resolve().parents[2]
         manifest = json.loads((repository / full_hosted.MANIFEST).read_text())
@@ -340,6 +528,7 @@ class FullHostedTests(unittest.TestCase):
         checkout_patch.start()
         self.addCleanup(checkout_patch.stop)
         test_publication.PublicationAuditTests().stage(self.candidate_repository, (target,))
+        self.align_synthetic_docs(self.candidate_repository, target)
         subprocess.run(["git", "init", "-q", str(self.candidate_repository)], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "add", "LICENSE.md",
                         "dyn4k-core/src", "dyn4k/src"], check=True)
