@@ -41,14 +41,19 @@ class NominalPositiveZeroTest(unittest.TestCase):
             "state.state.bodies[].force[]", "state.state.bodies[].torque",
             "state.state.bodies[].accumulatedForce[]", "state.state.bodies[].accumulatedTorque"])
         self.assertEqual(selected["rules"], fixture["rules"])
-        self.assertEqual(selected["exact_numeric"], fixture["exact_numeric"])
+        self.assertEqual(selected["exact_numeric"][:1], fixture["exact_numeric"])
+        self.assertEqual(selected["exact_numeric"][1:], [
+            "event.payload[].getDeltaTime", "event.payload[].getPrevousDeltaTime",
+            "event.payload[].getInverseDeltaTime",
+            "event.payload[].getPreviousInverseDeltaTime",
+            "event.payload[].getDeltaTimeRatio"])
         self.assertNotIn("zero_numeric", fixture)
         self.assertEqual(nominal_zero.with_rules(selected), selected)
         with self.assertRaisesRegex(compare.Rejected, "scope"):
             nominal_zero.with_rules({**fixture, "zero_numeric": ["unapproved.path"]})
 
     def test_candidate_comparison_rejects_negative_zero_before_numeric_comparator(self):
-        fixture = {"key": "nominal-free-motion", "counts": {"state": 1}}
+        fixture = {"key": "nominal-free-motion", "counts": {"state": 1, "event": 0}}
         with tempfile.TemporaryDirectory() as root:
             reference = Path(root) / "reference.jsonl"
             candidate = Path(root) / "candidate.jsonl"
@@ -66,6 +71,40 @@ class NominalPositiveZeroTest(unittest.TestCase):
                                                    "source", "artifact", "commit")
                 self.assertEqual(result["nominal_positive_zero"]["candidate"]["positive_zero_checks"], 6)
                 self.assertEqual(numeric.call_args.args[0]["zero_numeric"], nominal_zero.ZERO_PATHS)
+
+    def test_every_nominal_callback_getter_has_approved_exact_binary64_value(self):
+        values = {
+            "getDeltaTime": float.fromhex("0x1.1111111111111p-6"),
+            "getPrevousDeltaTime": float.fromhex("0x1.1111111111111p-6"),
+            "getInverseDeltaTime": float.fromhex("0x1.e000000000000p+5"),
+            "getPreviousInverseDeltaTime": float.fromhex("0x1.e000000000000p+5"),
+            "getDeltaTimeRatio": float.fromhex("0x1.0000000000000p+0"),
+        }
+        with tempfile.TemporaryDirectory() as root:
+            trace = Path(root) / "nominal.jsonl"
+            for method in ("begin", "updatePerformed", "postSolve", "end"):
+                row = {"kind": "event", "step": 1, "order": 0,
+                       "listener": "StepListener",
+                       "method": "public abstract void org.dyn4j.world.listener.StepListener."
+                                 + method + "(org.dyn4j.dynamics.TimeStep,org.dyn4j.world.PhysicsWorld<T, ?>)",
+                       "payload": [{**values, "type": "org.dyn4j.dynamics.TimeStep"},
+                                   {"world": "L-free-s1.0-o0.0,0.0-hz60"}]}
+                trace.write_text(json.dumps(row) + "\n")
+                self.assertEqual(nominal_zero.audit_trace(trace, 0, 1)["exact_timestep_checks"], 5)
+                for field, value in values.items():
+                    changed = copy.deepcopy(row)
+                    changed["payload"][0][field] = math.nextafter(value, math.inf)
+                    trace.write_text(json.dumps(changed) + "\n")
+                    with self.subTest(method=method, field=field), self.assertRaisesRegex(
+                            compare.Rejected, "nominal timestep " + field):
+                        nominal_zero.audit_trace(trace, 0, 1)
+                for nonfinite in (math.nan, math.inf, -math.inf):
+                    changed = copy.deepcopy(row)
+                    changed["payload"][0]["getDeltaTime"] = nonfinite
+                    trace.write_text(json.dumps(changed) + "\n")
+                    with self.subTest(method=method, nonfinite=nonfinite), self.assertRaises(
+                            compare.Rejected):
+                        nominal_zero.audit_trace(trace, 0, 1)
 
 
 if __name__ == "__main__":
