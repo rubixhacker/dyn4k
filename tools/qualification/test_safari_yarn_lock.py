@@ -45,6 +45,39 @@ def git_oid(repository, revision):
         text=True).strip()
 
 
+def commit_crlf_source_fixture(repository):
+    (repository / "build.gradle.kts").write_bytes(b"plugins {}\r\n")
+    subprocess.run(["git", "-C", str(repository), "add", "build.gradle.kts"], check=True)
+    staged = subprocess.run(["git", "-C", str(repository), "diff", "--cached", "--quiet",
+                             "--", "build.gradle.kts"], check=False)
+    if staged.returncode == 1:
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "CRLF source fixture"], check=True)
+    else:
+        staged.check_returncode()
+    return git_oid(repository, "HEAD")
+
+
+def git_bash_from_git(git_command):
+    git_executable = Path(git_command).absolute()
+    if git_executable.parent.name.lower() not in ("bin", "cmd"):
+        raise ValueError("Git Bash fixture requires Git for Windows")
+    candidate = git_executable.parent.parent / "bin/bash.exe"
+    if not git_executable.is_file() or not candidate.is_file():
+        raise FileNotFoundError("Git Bash fixture executable is missing")
+    return candidate
+
+
+def bash_executable():
+    if os.name != "nt":
+        return "bash"
+    git_command = shutil.which("git")
+    if git_command is None:
+        raise FileNotFoundError("Git Bash fixture requires Git for Windows")
+    return str(git_bash_from_git(git_command))
+
+
 def bash_path(path):
     if os.name == "nt":
         path = Path(path).absolute()
@@ -912,7 +945,9 @@ class SafariYarnLockTests(unittest.TestCase):
                     mock.patch.object(subprocess, "Popen", return_value=Process()), \
                     mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess(
                         ["taskkill"], 0)), \
-                    mock.patch.object(safari_yarn_lock, "os", proxy):
+                    mock.patch.object(safari_yarn_lock, "os", proxy), \
+                    mock.patch.object(safari_yarn_lock.time, "time_ns",
+                                      return_value=1792357360496682600):
                 return safari_yarn_lock._run_lock_task_windows(repository, output, command)
 
         arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
@@ -970,13 +1005,7 @@ class SafariYarnLockTests(unittest.TestCase):
 
     def test_public_hosted_capture_records_staging_handle_failure_residue(self):
         source = self.repository / "build.gradle.kts"
-        source.write_bytes(b"plugins {}\r\n")
-        subprocess.run(["git", "-C", str(self.repository), "add", "build.gradle.kts"],
-                       check=True)
-        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
-                        "-c", "user.email=test@example.invalid", "commit", "-qm",
-                        "CRLF source fixture"], check=True)
-        self.candidate = git_oid(self.repository, "HEAD")
+        self.candidate = commit_crlf_source_fixture(self.repository)
         self.assertEqual(source.read_bytes(), safari_reporter.committed_bytes(
             self.repository, self.candidate, Path("build.gradle.kts")))
         binary_flag = getattr(os, "O_BINARY", 1 << 29)
@@ -1048,6 +1077,19 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(str(Path("dyn4k-core/karma.config.d")),
                          stage["forensic"][0]["path"])
         self.assertTrue((self.repository / "dyn4k-core/karma.config.d").is_dir())
+
+    def test_crlf_source_fixture_commit_is_idempotent(self):
+        first = commit_crlf_source_fixture(self.repository)
+        second = commit_crlf_source_fixture(self.repository)
+        self.assertEqual(first, second)
+        self.assertEqual(b"plugins {}\r\n", (self.repository / "build.gradle.kts").read_bytes())
+        self.assertEqual(b"plugins {}\r\n", safari_reporter.committed_bytes(
+            self.repository, second, Path("build.gradle.kts")))
+        old_commit = subprocess.run(
+            ["git", "-C", str(self.repository), "-c", "user.name=Test",
+             "-c", "user.email=test@example.invalid", "commit", "-qm",
+             "CRLF source fixture"], capture_output=True, check=False)
+        self.assertEqual(1, old_commit.returncode)
 
     def test_public_capture_log_open_failure_records_clean_stage_without_launch(self):
         real_open = Path.open
@@ -2451,7 +2493,7 @@ class SafariYarnLockTests(unittest.TestCase):
                     "set -euo pipefail\n", "set -euo pipefail\n" + function + "\n")
                 controlled.write_bytes(script.encode())
                 result = subprocess.run(
-                    ["bash", bash_path(controlled), bash_path(redirect)],
+                    [bash_executable(), bash_path(controlled), bash_path(redirect)],
                     env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
                     capture_output=True, text=True, timeout=5)
                 self.assertEqual(23, result.returncode,
@@ -2485,7 +2527,7 @@ class SafariYarnLockTests(unittest.TestCase):
         redirect.write_bytes(b"redirect\n")
         context = self.root / "failed-sampler"
         result = subprocess.run(
-            ["bash", bash_path(controlled), bash_path(redirect)],
+            [bash_executable(), bash_path(controlled), bash_path(redirect)],
             env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
             capture_output=True, text=True, timeout=5)
         self.assertEqual(1, result.returncode,
@@ -2498,6 +2540,58 @@ class SafariYarnLockTests(unittest.TestCase):
         process = list(context.glob("process-*.txt"))
         self.assertEqual(1, len(process))
         self.assertIn("sample_state_write_failed", process[0].read_text())
+
+    def test_wrapper_uses_git_bash_when_bare_bash_does_not_run_script(self):
+        git_bin = self.root / "Git/bin"
+        git_bin.mkdir(parents=True)
+        git_command = git_bin / "git.exe"
+        git_command.write_bytes(b"fixture")
+        git_bash = git_bin / "bash.exe"
+        git_bash.write_bytes(b'#!/bin/sh\nexec /bin/bash "$@"\n')
+        git_bash.chmod(0o755)
+        wrong_bin = self.root / "System32"
+        wrong_bin.mkdir()
+        wrong_bash = wrong_bin / "bash"
+        wrong_bash.write_bytes(b"#!/bin/sh\nprintf '%*s' 504 ' '\nexit 1\n")
+        wrong_bash.chmod(0o755)
+        fake_open = self.root / "fake-open"
+        fake_open.write_bytes(b"#!/bin/bash\nexit 23\n")
+        fake_open.chmod(0o755)
+        redirect = self.root / "redirect.html"
+        redirect.write_bytes(b"redirect\n")
+        launcher = Path(__file__).with_name("safari-launch.sh").read_text()
+        controlled = self.root / "controlled-launch.sh"
+        controlled.write_bytes(launcher.replace("/usr/bin/open", bash_path(fake_open))
+                               .replace("/bin/sleep 2", "/bin/sleep 0.01").encode())
+        context = self.root / "launch-context"
+        environment = {**os.environ, "PATH": str(wrong_bin) + os.pathsep + os.environ["PATH"],
+                       "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)}
+        if os.name != "nt":
+            wrong = subprocess.run(["bash", bash_path(controlled), bash_path(redirect)],
+                                   env=environment, capture_output=True, text=True, timeout=5)
+            self.assertEqual(1, wrong.returncode)
+            self.assertEqual(504, len(wrong.stdout))
+            self.assertFalse(context.exists())
+        chosen = git_bash_from_git(git_command)
+        self.assertEqual(git_bash, chosen)
+        git_cmd = self.root / "Git/cmd/git.exe"
+        git_cmd.parent.mkdir()
+        git_cmd.write_bytes(b"fixture")
+        self.assertEqual(git_bash, git_bash_from_git(git_cmd))
+        with self.assertRaisesRegex(ValueError, "Git for Windows"):
+            git_bash_from_git(wrong_bin / "git.exe")
+        correct_bash = bash_executable() if os.name == "nt" else str(chosen)
+        correct = subprocess.run([correct_bash, bash_path(controlled), bash_path(redirect)],
+                                 env=environment, capture_output=True, text=True, timeout=5)
+        self.assertEqual(23, correct.returncode,
+                         self.wrapper_failure_context(correct, context))
+        detail = json.loads(self.wrapper_failure_context(correct, context))
+        self.assertEqual(1, detail["files"]["launch"])
+        self.assertEqual(1, len(list(context.glob("process-*.txt"))))
+        self.assertEqual(1, len(list(context.glob("launch-outcome-*.txt"))))
+        git_bash.unlink()
+        with self.assertRaisesRegex(FileNotFoundError, "executable is missing"):
+            git_bash_from_git(git_command)
 
     def test_wrapper_failure_context_bounds_diagnostic_and_redacts_fixture_text(self):
         context = self.root / "diagnostic-context"

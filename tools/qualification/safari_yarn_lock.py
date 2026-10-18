@@ -772,6 +772,7 @@ def _run_lock_task_windows(repository, output, command):
 
 def _run_lock_task_windows_opened(repository, command, stdout, stderr):
     started = time.time_ns()
+    started_tick = time.perf_counter_ns()
     job = None
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -852,7 +853,8 @@ def _run_lock_task_windows_opened(repository, command, stdout, stderr):
         finally:
             if job is not None:
                 kernel.CloseHandle(job)
-    result["finished_ns"] = time.time_ns()
+    finished_tick = time.perf_counter_ns()
+    result["finished_ns"] = max(time.time_ns(), started + finished_tick - started_tick)
     return result
 
 
