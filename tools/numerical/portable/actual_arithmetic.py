@@ -447,7 +447,11 @@ def _sha(value):
 
 
 def _source_archive(commit):
-    result = subprocess.run(("git", "archive", "--format=tar", commit),
+    if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise CaptureRejected("candidate commit identity differs")
+    result = subprocess.run(("git", "-c", "core.autocrlf=false",
+                             "--no-replace-objects", "archive", "--format=tar",
+                             commit),
                             cwd=_ROOT, capture_output=True, check=False)
     if result.returncode:
         raise CaptureRejected("candidate commit archive unavailable")
