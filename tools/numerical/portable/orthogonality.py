@@ -96,6 +96,34 @@ def _state_pair(transform):
     return tuple(struct.pack(">d", value).hex() for value in values)
 
 
+def _bits(value):
+    return struct.pack(">d", value).hex()
+
+
+def _source_angle(pair):
+    c, s = pair
+    if not -1.0 <= c <= 1.0:
+        raise ValueError("rotation audit source angle cosine differs")
+    acos = math.acos(c)
+    return acos if s >= 0.0 else -acos
+
+
+def _source_angle_agrees(recorded_bits, pair):
+    recorded = _binary64(recorded_bits)
+    expected = _source_angle(pair)
+    if expected == 0.0:
+        return recorded_bits == _bits(expected)
+    return abs(recorded - expected) <= 8 * math.ulp(max(abs(recorded),
+                                                         abs(expected), 1.0))
+
+
+def _trig_agrees(angle, trig):
+    if angle == 0.0:
+        return _bits(trig[0]) == _bits(1.0) and _bits(trig[1]) == _bits(angle)
+    return all(abs(observed - expected) <= 16 * math.ulp(1.0)
+               for observed, expected in zip(trig, (math.cos(angle), math.sin(angle))))
+
+
 def _validate_rotate(call, pre, trig, post):
     required = {"sequence", "step", "body_id", "kind", "branch", "input_kind",
                 "pre", "trig", "raw", "post", "clamp"}
@@ -106,7 +134,8 @@ def _validate_rotate(call, pre, trig, post):
     if set(call) != required or call["branch"] not in ("integrate", "joint", "contact"):
         raise ValueError("rotation audit source branch differs")
     if call["input_kind"] == "angle":
-        _binary64(call["angle_bits"])
+        if not _trig_agrees(_binary64(call["angle_bits"]), trig):
+            raise ValueError("rotation audit angle and trig pair differ")
     elif call["rotation_input"] != call["trig"]:
         raise ValueError("rotation audit pair input differs")
     if abs(trig[0] * trig[0] + trig[1] * trig[1] - 1.0) > direct_reset_ulps() * float(_Q):
@@ -127,9 +156,15 @@ def _validate_rotate(call, pre, trig, post):
         observed = Fraction.from_float(raw[index])
         if abs(observed - ideal) > _GAMMA3 * (abs(a) + abs(b)):
             raise ValueError("rotation audit orientation rounding differs")
-        expected = max(-1.0, min(1.0, raw[index]))
+        first = (pre[0] * trig[0] if index == 0 else pre[1] * trig[0])
+        second = (pre[1] * trig[1] if index == 0 else pre[0] * trig[1])
+        source_raw = first - second if index == 0 else first + second
+        if (source_raw == 0.0 or raw[index] == 0.0) and \
+                call["raw"][index] != _bits(source_raw):
+            raise ValueError("rotation audit signed zero raw differs")
         was_clamped = raw[index] < -1.0 or raw[index] > 1.0
-        expected_bits = struct.pack(">d", expected).hex()
+        expected_bits = (_bits(-1.0) if raw[index] < -1.0 else
+                         _bits(1.0) if raw[index] > 1.0 else call["raw"][index])
         if clamp[index] is not was_clamped or call["post"][index] != expected_bits:
             raise ValueError("rotation audit clamp result differs")
 
@@ -137,11 +172,28 @@ def _validate_rotate(call, pre, trig, post):
 def _validate_reset(call, trig, post):
     if set(call) != {"sequence", "step", "body_id", "kind", "branch", "pre", "trig",
                      "post", "alpha_bits", "start_angle_bits", "end_angle_bits",
-                     "diff_bits", "angle_bits"} or call["branch"] != "toi":
+                     "diff_bits", "angle_bits", "end_rotation"} or call["branch"] != "toi":
         raise ValueError("rotation audit direct reset branch differs")
-    for key in ("alpha_bits", "start_angle_bits", "end_angle_bits", "diff_bits",
-                "angle_bits"):
-        _binary64(call[key])
+    alpha = _binary64(call["alpha_bits"])
+    start = _binary64(call["start_angle_bits"])
+    end = _binary64(call["end_angle_bits"])
+    _binary64(call["diff_bits"])
+    angle = _binary64(call["angle_bits"])
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("rotation audit lerp alpha differs")
+    if not _source_angle_agrees(call["start_angle_bits"], _pair(call["pre"])) or \
+            not _source_angle_agrees(call["end_angle_bits"], _pair(call["end_rotation"])):
+        raise ValueError("rotation audit lerp source angle differs")
+    diff = end - start
+    if diff < -math.pi:
+        diff += 2.0 * math.pi
+    if diff > math.pi:
+        diff -= 2.0 * math.pi
+    if call["diff_bits"] != _bits(diff) or \
+            call["angle_bits"] != _bits(diff * alpha + start):
+        raise ValueError("rotation audit lerp angle arithmetic differs")
+    if not _trig_agrees(angle, trig):
+        raise ValueError("rotation audit lerp angle and trig pair differ")
     if call["post"] != call["trig"]:
         raise ValueError("rotation audit direct trig reset differs")
     if abs(post[0] * post[0] + post[1] * post[1] - 1.0) > direct_reset_ulps() * float(_Q):
@@ -152,7 +204,7 @@ def validate_rotation_audit(audit, case, header, states, rotation_cap):
     if not isinstance(audit, dict) or set(audit) != {
             "schema", "case_id", "operation_model_revision", "declared_calls",
             "accepted_toi_resets", "calls"} or \
-            audit["schema"] != "portable-rotation-audit/1" or \
+            audit["schema"] != "portable-rotation-audit/2" or \
             audit["case_id"] != case["id"] or \
             audit["operation_model_revision"] != "058bf6d982a0fb89b54050f929f6ea9dae53b714" or \
             type(audit["declared_calls"]) is not int or \

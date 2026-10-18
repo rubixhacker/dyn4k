@@ -113,6 +113,9 @@ class ProspectiveComparisonTest(unittest.TestCase):
         frozen = {case["id"] for case in cases if case["require_frozen_projection"]}
         manifest = self.policy_manifest(catalog, frozen)
         verify_policy_catalog(catalog, manifest, cases, frozen)
+        self.assertEqual(catalog["orthogonality_policy"], "fixed-32-ulps/1")
+        self.assertEqual(catalog["conditional_orthogonality_policy"],
+                         "source-derived-u-n/1")
         self.assertEqual(len(catalog["cases"]), 318)
         self.assertEqual(len(catalog["rotation_caps"]), 318)
         self.assertEqual({cap: list(catalog["rotation_caps"].values()).count(cap)
@@ -193,7 +196,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "rotation cap"):
                 verify_policy_catalog(altered, manifest, cases, frozen)
         altered = deepcopy(catalog)
-        altered["decision"] = altered["prior_decision"]
+        altered["decision"] = altered["conditional_decision"]
         with self.assertRaisesRegex(Exception, "adoption"):
             verify_policy_catalog(altered, manifest, cases, frozen)
 
@@ -700,8 +703,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 1.0 + ulps * math.ulp(1.0), 0.0]
             self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
                              expected)
-        for ulps, expected in ((4, "PASSED_NUMERICAL_POLICY"),
-                               (5, "FAILED_DERIVED")):
+        for ulps, expected in ((16, "PASSED_NUMERICAL_POLICY"),
+                               (17, "FAILED_DERIVED")):
             candidate = json.loads(json.dumps(rows))
             body = candidate[2]["state"]["bodies"][0]
             body["transform"].update(transform(c=1.0 + ulps * math.ulp(1.0)))
@@ -763,39 +766,43 @@ class ProspectiveComparisonTest(unittest.TestCase):
         catalog["cases"] = {case["id"]: {"path_set": 0}}
         catalog["rotation_caps"] = {case["id"]: 1}
         q = math.ulp(1.0)
-        for error_ulps, status in ((14, "PASSED_NUMERICAL_POLICY"),
-                                   (16, "PASSED_NUMERICAL_POLICY"),
+        for error_ulps, status in ((14, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
+                                   (16, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                    (18, "FAILED_DERIVED")):
             with self.subTest(error_ulps=error_ulps):
                 same = deepcopy(rows)
                 same[4]["state"]["bodies"][0]["transform"] = transform(
                     s=math.sqrt(error_ulps * q))
-                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                self.assertEqual(self.policy_result(same, same, case, catalog,
+                                                    conditional_diagnostic=True)["status"],
                                  status)
-        for component_ulps, status in ((7, "PASSED_NUMERICAL_POLICY"),
-                                       (8, "PASSED_NUMERICAL_POLICY"),
+        for component_ulps, status in ((7, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
+                                       (8, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                        (9, "FAILED_DERIVED")):
             with self.subTest(negative_component_ulps=component_ulps):
                 same = deepcopy(rows)
                 same[4]["state"]["bodies"][0]["transform"] = transform(
                     c=1.0 - component_ulps * q)
-                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                self.assertEqual(self.policy_result(same, same, case, catalog,
+                                                    conditional_diagnostic=True)["status"],
                                  status)
         same = deepcopy(rows)
         same[2]["state"]["bodies"][0]["transform"] = transform(s=2 ** -24)
-        self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+        self.assertEqual(self.policy_result(same, same, case, catalog,
+                                            conditional_diagnostic=True)["status"],
                          "FAILED_DERIVED")
-        for initial, status in ((transform(), "PASSED_NUMERICAL_POLICY"),
+        for initial, status in ((transform(), "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                 (transform(s=math.sqrt(2 * q)),
-                                 "PASSED_NUMERICAL_POLICY"),
+                                 "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                 (transform(s=math.sqrt(3 * q)), "FAILED_DERIVED"),
-                                (transform(c=1.0 - q), "PASSED_NUMERICAL_POLICY"),
+                                (transform(c=1.0 - q), "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                 (transform(c=1.0 - 2 * q), "FAILED_DERIVED")):
             with self.subTest(zero_rotation_initial=initial["getValues"]):
                 same = deepcopy(rows)
                 same[0]["initial"]["bodies"][0]["transform"] = initial
                 same[2]["state"]["bodies"][0]["previousTransform"] = initial
-                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                self.assertEqual(self.policy_result(same, same, case, catalog,
+                                                    conditional_diagnostic=True)["status"],
                                  status)
 
     def test_policy_case_requires_declared_action_steps_even_in_identical_runs(self):
@@ -852,15 +859,147 @@ class ProspectiveComparisonTest(unittest.TestCase):
         catalog["cases"] = {case["id"]: {"path_set": 0}}
         catalog["rotation_caps"] = {case["id"]: 7}
         q = math.ulp(1.0)
-        for error_ulps, status in ((29699, "PASSED_NUMERICAL_POLICY"),
-                                   (29700, "PASSED_NUMERICAL_POLICY"),
+        for error_ulps, status in ((29699, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
+                                   (29700, "CONDITIONAL_DIAGNOSTIC_WITHIN"),
                                    (29701, "FAILED_DERIVED")):
             with self.subTest(error_ulps=error_ulps):
                 same = deepcopy(rows)
                 last = same[-2]["state"]["bodies"][0]
                 last["transform"] = transform(math.sqrt(error_ulps * q))
-                self.assertEqual(self.policy_result(same, same, case, catalog)["status"],
+                self.assertEqual(self.policy_result(same, same, case, catalog,
+                                                    conditional_diagnostic=True)["status"],
                                  status)
+                active = self.policy_result(same, same, case, catalog)
+                self.assertEqual(active["status"], "FAILED_DERIVED")
+                self.assertEqual(active["orthogonality_assessment"],
+                                 "ACTIVE_FIXED_32_ULPS")
+
+    def test_rotation_audit_signed_zero_raw_and_post_direct_controls(self):
+        from orthogonality import _validate_rotate
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        minus_zero = bits(-0.0)
+        plus_zero = bits(0.0)
+        one = bits(1.0)
+        call = {"sequence": 0, "step": 1, "body_id": "b0", "kind": "rotate",
+                "branch": "integrate", "input_kind": "angle",
+                "angle_bits": minus_zero, "pre": [one, minus_zero],
+                "trig": [one, minus_zero], "raw": [one, minus_zero],
+                "post": [one, minus_zero], "clamp": [False, False]}
+        _validate_rotate(call, (1.0, -0.0), (1.0, -0.0), (1.0, -0.0))
+        changed = deepcopy(call)
+        changed["post"][1] = plus_zero
+        with self.assertRaisesRegex(ValueError, "clamp result"):
+            _validate_rotate(changed, (1.0, -0.0), (1.0, -0.0), (1.0, 0.0))
+        changed = deepcopy(call)
+        changed["raw"][1] = plus_zero
+        changed["post"][1] = plus_zero
+        with self.assertRaisesRegex(ValueError, "signed zero"):
+            _validate_rotate(changed, (1.0, -0.0), (1.0, -0.0), (1.0, 0.0))
+        changed = deepcopy(call)
+        changed["angle_bits"] = bits(3.0)
+        with self.assertRaisesRegex(ValueError, "trig pair"):
+            _validate_rotate(changed, (1.0, -0.0), (1.0, -0.0), (1.0, -0.0))
+
+    def test_rotation_audit_direct_lerp_source_relationship_controls(self):
+        from orthogonality import _validate_reset
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        one = [bits(1.0), bits(0.0)]
+        call = {"sequence": 0, "step": 1, "body_id": "b0",
+                "kind": "lerp-reset", "branch": "toi", "pre": one,
+                "end_rotation": one, "trig": one, "post": one,
+                "alpha_bits": bits(0.0), "start_angle_bits": bits(0.0),
+                "end_angle_bits": bits(0.0), "diff_bits": bits(0.0),
+                "angle_bits": bits(0.0)}
+        for alpha in (0.0, 0.5, 1.0):
+            valid = deepcopy(call)
+            valid["alpha_bits"] = bits(alpha)
+            _validate_reset(valid, (1.0, 0.0), (1.0, 0.0))
+        for key, value in (("alpha_bits", bits(math.nextafter(0.0, -math.inf))),
+                           ("alpha_bits", bits(math.nextafter(1.0, math.inf))),
+                           ("alpha_bits", bits(-1.0)),
+                           ("alpha_bits", bits(2.0)),
+                           ("start_angle_bits", bits(1.0)),
+                           ("end_angle_bits", bits(1.0)),
+                           ("diff_bits", bits(2.0)),
+                           ("angle_bits", bits(3.0))):
+            with self.subTest(key=key, value=value):
+                changed = deepcopy(call)
+                changed[key] = value
+                with self.assertRaises(ValueError):
+                    _validate_reset(changed, (1.0, 0.0), (1.0, 0.0))
+        changed = deepcopy(call)
+        changed["trig"] = [bits(1.0), bits(0.5)]
+        with self.assertRaisesRegex(ValueError, "trig pair"):
+            _validate_reset(changed, (1.0, 0.5), (1.0, 0.5))
+        changed = deepcopy(call)
+        changed["start_angle_bits"] = bits(-0.0)
+        with self.assertRaisesRegex(ValueError, "source angle"):
+            _validate_reset(changed, (1.0, 0.0), (1.0, 0.0))
+
+    def test_rotation_audit_direct_valid_clamp_and_boundary(self):
+        from orthogonality import _validate_rotate
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        small = math.sqrt(math.ulp(1.0))
+        pre = (1.0, -small)
+        trig = (1.0, small)
+        raw = (1.0 + math.ulp(1.0), 0.0)
+        post = (1.0, 0.0)
+        call = {"sequence": 0, "step": 1, "body_id": "b0", "kind": "rotate",
+                "branch": "integrate", "input_kind": "pair",
+                "rotation_input": [bits(value) for value in trig],
+                "pre": [bits(value) for value in pre],
+                "trig": [bits(value) for value in trig],
+                "raw": [bits(value) for value in raw],
+                "post": [bits(value) for value in post],
+                "clamp": [True, False]}
+        _validate_rotate(call, pre, trig, post)
+        changed = deepcopy(call)
+        changed["clamp"][0] = False
+        with self.assertRaisesRegex(ValueError, "clamp result"):
+            _validate_rotate(changed, pre, trig, post)
+
+    def test_rotation_audit_direct_lerp_wraps_both_sides(self):
+        from orthogonality import _validate_reset
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        for start_angle, end_angle in ((3.0, -3.0), (-3.0, 3.0)):
+            with self.subTest(start=start_angle, end=end_angle):
+                start_pair = (math.cos(start_angle), math.sin(start_angle))
+                end_pair = (math.cos(end_angle), math.sin(end_angle))
+                start = math.copysign(math.acos(start_pair[0]), start_pair[1])
+                end = math.copysign(math.acos(end_pair[0]), end_pair[1])
+                unwrapped = end - start
+                diff = unwrapped
+                if diff < -math.pi:
+                    diff += 2.0 * math.pi
+                if diff > math.pi:
+                    diff -= 2.0 * math.pi
+                angle = diff * 0.5 + start
+                trig = (math.cos(angle), math.sin(angle))
+                call = {"sequence": 0, "step": 1, "body_id": "b0",
+                        "kind": "lerp-reset", "branch": "toi",
+                        "pre": [bits(value) for value in start_pair],
+                        "end_rotation": [bits(value) for value in end_pair],
+                        "trig": [bits(value) for value in trig],
+                        "post": [bits(value) for value in trig],
+                        "alpha_bits": bits(0.5), "start_angle_bits": bits(start),
+                        "end_angle_bits": bits(end), "diff_bits": bits(diff),
+                        "angle_bits": bits(angle)}
+                _validate_reset(call, trig, trig)
+                call["diff_bits"] = bits(unwrapped)
+                with self.assertRaisesRegex(ValueError, "angle arithmetic"):
+                    _validate_reset(call, trig, trig)
 
     def test_rotation_audit_structure_clamp_reset_and_count_controls(self):
         rows, case, _ = self.policy_rows()
@@ -887,7 +1026,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 "branch": "integrate", "input_kind": "angle", "angle_bits": bits(0.0),
                 "pre": one, "trig": one, "raw": one, "post": one,
                 "clamp": [False, False]}
-        audit = {"schema": "portable-rotation-audit/1", "case_id": "one",
+        audit = {"schema": "portable-rotation-audit/2", "case_id": "one",
                  "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
                  "declared_calls": 1, "accepted_toi_resets": [], "calls": [call]}
         result = self.policy_result(rows, rows, case, catalog, rotation_audit=audit)
@@ -956,20 +1095,75 @@ class ProspectiveComparisonTest(unittest.TestCase):
                                      clamp=[True, False])
         self.assertEqual(self.policy_result(rows, rows, case, catalog,
                                             rotation_audit=clamped)["status"],
-                         "PASSED_NUMERICAL_POLICY")
+                         "UNPASSED_PREMISE")
         reset = deepcopy(audit)
         reset["accepted_toi_resets"] = [[1, "b0"]]
         reset["calls"][0] = {"sequence": 0, "step": 1, "body_id": "b0",
                              "kind": "lerp-reset", "branch": "toi",
                              "alpha_bits": bits(0.0), "start_angle_bits": bits(0.0),
                              "end_angle_bits": bits(0.0), "diff_bits": bits(0.0),
-                             "angle_bits": bits(0.0), "pre": one, "trig": one,
+                             "angle_bits": bits(0.0), "pre": one,
+                             "end_rotation": one, "trig": one,
                              "post": one}
         self.assertEqual(self.policy_result(rows, rows, case, catalog,
                                             rotation_audit=reset)["status"],
                          "PASSED_NUMERICAL_POLICY")
-        for error_ulps, status in ((3, "PASSED_NUMERICAL_POLICY"),
-                                   (5, "PASSED_NUMERICAL_POLICY"),
+        old_schema = deepcopy(reset)
+        old_schema["schema"] = "portable-rotation-audit/1"
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=old_schema)["status"],
+                         "UNPASSED_PREMISE")
+        missing_end = deepcopy(reset)
+        missing_end["calls"][0].pop("end_rotation")
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=missing_end)["status"],
+                         "UNPASSED_PREMISE")
+        for key, value in (("alpha_bits", bits(-1.0)),
+                           ("alpha_bits", bits(2.0)),
+                           ("start_angle_bits", bits(1.0)),
+                           ("end_angle_bits", bits(1.0)),
+                           ("diff_bits", bits(2.0)),
+                           ("angle_bits", bits(3.0))):
+            with self.subTest(inconsistent_lerp=key, bits=value):
+                changed = deepcopy(reset)
+                changed["calls"][0][key] = value
+                self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                                    rotation_audit=changed)["status"],
+                                 "UNPASSED_PREMISE")
+        wrong_trig = deepcopy(reset)
+        wrong_trig["calls"][0]["angle_bits"] = bits(3.0)
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=wrong_trig)["status"],
+                         "UNPASSED_PREMISE")
+        wrong_rotate_angle = deepcopy(audit)
+        wrong_rotate_angle["calls"][0]["angle_bits"] = bits(3.0)
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=wrong_rotate_angle)["status"],
+                         "UNPASSED_PREMISE")
+        wrong_raw_zero = deepcopy(audit)
+        wrong_raw_zero["calls"][0]["raw"][1] = bits(-0.0)
+        wrong_raw_zero["calls"][0]["post"][1] = bits(-0.0)
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=wrong_raw_zero)["status"],
+                         "UNPASSED_PREMISE")
+        signed_rows = deepcopy(rows)
+        signed_rows[0]["initial"]["bodies"][0]["transform"] = transform(s=-0.0)
+        signed_rows[0]["setup"]["bodies"][0]["transform"] = transform(s=-0.0)
+        signed_post = deepcopy(audit)
+        signed_post["calls"][0].update(
+            angle_bits=bits(-0.0), pre=[bits(1.0), bits(-0.0)],
+            trig=[bits(1.0), bits(-0.0)], raw=[bits(1.0), bits(-0.0)])
+        signed_post["calls"][0]["post"] = one
+        self.assertEqual(self.policy_result(signed_rows, signed_rows, case, catalog,
+                                            rotation_audit=signed_post)["status"],
+                         "UNPASSED_PREMISE")
+        signed_post["calls"][0]["post"] = [bits(1.0), bits(-0.0)]
+        signed_rows[2]["state"]["bodies"][0]["transform"] = transform(s=-0.0)
+        self.assertEqual(self.policy_result(signed_rows, signed_rows, case, catalog,
+                                            rotation_audit=signed_post)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        for error_ulps, status in ((3, "UNPASSED_PREMISE"),
+                                   (5, "UNPASSED_PREMISE"),
                                    (7, "UNPASSED_PREMISE")):
             with self.subTest(direct_reset_ulps=error_ulps):
                 same = deepcopy(rows)
@@ -1035,8 +1229,9 @@ class ProspectiveComparisonTest(unittest.TestCase):
                       "kind": "lerp-reset", "branch": "toi",
                       "alpha_bits": one[1], "start_angle_bits": one[1],
                       "end_angle_bits": one[1], "diff_bits": one[1],
-                      "angle_bits": one[1], "pre": one, "trig": one, "post": one}
-        audit = {"schema": "portable-rotation-audit/1", "case_id": case["id"],
+                      "angle_bits": one[1], "pre": one,
+                      "end_rotation": one, "trig": one, "post": one}
+        audit = {"schema": "portable-rotation-audit/2", "case_id": case["id"],
                  "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
                  "declared_calls": 1, "accepted_toi_resets": [[1, "b0"]],
                  "calls": [reset_call]}
@@ -1235,11 +1430,13 @@ class ProspectiveComparisonTest(unittest.TestCase):
             "state.state.bodies[].position[]": "bounded_position",
             "event.step.begin.payload": "exact_step"})
 
-    def policy_result(self, reference, candidate, case, catalog, rotation_audit=None):
+    def policy_result(self, reference, candidate, case, catalog, rotation_audit=None,
+                      conditional_diagnostic=False):
         self.reference.write_text(''.join(json.dumps(row) + "\n" for row in reference))
         self.candidate.write_text(''.join(json.dumps(row) + "\n" for row in candidate))
         return compare_policy_case(self.reference, self.candidate, case, catalog,
-                                   rotation_audit=rotation_audit)
+                                   rotation_audit=rotation_audit,
+                                   conditional_diagnostic=conditional_diagnostic)
 
     @staticmethod
     def small_policy(rows, rules):

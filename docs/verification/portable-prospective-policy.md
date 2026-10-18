@@ -1,6 +1,7 @@
 # Prospective portable numerical policy
 
-Status: **CONDITIONAL RULE IMPLEMENTED, TARGET QUALIFICATION UNPASSED**. The
+Status: **FIXED 32-ULP RULE OPERATIVE, CONDITIONAL U(N) DIAGNOSTIC,
+TARGET QUALIFICATION UNPASSED**. The
 [initial numerical policy](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193)
 and [conditional orthogonality decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438)
 were recorded before their respective implementations.
@@ -68,7 +69,7 @@ check.
 | `exact_step` | Require finite binary64 `1/hz` in each step callback and the declared step count. |
 | `reject_nonfinite` | Reject a new NaN or infinity. Retain the known Angle reference failure separately as failed physical behavior. |
 | `bounded_position`, `bounded_velocity`, `bounded_angular_velocity` | Bound each position component by 5e-6 m, each velocity by 5e-6/`dt` m/s and angular velocity by 3.490658503988659e-5/`dt` rad/s. For the ten free-motion cases, use 2e-9 m and 2e-7 rad with the same `dt` propagation. Boundary geometry positions use the tighter represented-gap rule below. |
-| `derived_transform`, `derived_rotation` | First check each run's translation aliases and matrix `[c,-s,x,s,c,y]`; check `c²+s²` against 1 with the conditional source-derived `U(step × R)` binary64-ulps envelope below and wrapped angle against `acos(c)` with sign from `s`. Then use the unchanged position/angular budgets across runs; compare angles modulo 2π. |
+| `derived_transform`, `derived_rotation` | First check each run's translation aliases and matrix `[c,-s,x,s,c,y]`; check `c²+s²` against 1 with the operative fixed 32 binary64 ulps and wrapped angle against `acos(c)` with sign from `s`. Then use the unchanged position/angular budgets across runs; compare angles modulo 2π. `U(step × R)` is a separate conditional diagnostic below. |
 | `bounded_geometry_distance`, `bounded_contact_depth` | Require exact detected/separated branches. Use 1.0536712127723509e-8 m for ordinary GJK distance and 5e-6 m for dynamic contact depth. Boundary cases use the smaller of 8 ulps at the represented coordinate and one quarter of the nonzero represented gap. Zero gap uses the 8-ulp term. |
 | `bounded_direction` | Require the same normal orientation and at most 3.490658503988659e-5 Euclidean component error; independently check unit length within 32 ulps where a normal is defined. |
 | `bounded_toi_distance`, `bounded_toi_time` | Require the same callback sequence, finite distance within 4.806217383937352e-6 m, and normalized impact time within `min(0.001, 4.806217383937352e-6 / represented_sweep_distance_m)`. Require time in [0,1]. |
@@ -85,8 +86,8 @@ equivalent JSON number spellings such as `60` and `60.0`.
 
 ### Conditional transform orthogonality
 
-The original fixed 32-ulp transform check produced 41 `FAILED_DERIVED`
-reference self-check results. It remains historical evidence. The
+The operative fixed 32-ulp transform check produces 41 `FAILED_DERIVED`
+reference self-check results. Those failures remain the current result. The
 conditional decision selects a source opportunity cap `R` per case and
 `N=step × R` for a state at that step. The catalog lists every one of the
 318 case caps: one case has `R=1`, 140 have `R=5`, 92 have `R=7`, 61 have
@@ -96,7 +97,7 @@ pinned case family, joint type and an immutable map digest. The largest
 
 Let `u=2^-53`, `q=ulp(1)=2u`, `gamma3=3u/(1-3u)`, and
 `delta=4√2u+8u²`. Set `a=√(1+delta)(1+√2 gamma3)` and
-`b=√(1-delta)(1-√2 gamma3)`. The permitted squared-norm error is
+`b=√(1-delta)(1-√2 gamma3)`. The conditional squared-norm error is
 `U(N)q`, where
 `U(N)=ceil(max((1+gamma3)a^(2N)-1, 1-(1-gamma3)b^(2N))/q)`.
 The implementation encloses square roots with integer arithmetic at
@@ -107,6 +108,12 @@ The per-step cap comes from one integration rotation and at most two
 position iterations. Each iteration has at most two contact-point
 rotations per body plus the source-derived joint solver opportunities.
 These are upper bounds, not counts inferred from candidate errors.
+The catalog retains `fixed-32-ulps/1` as its operative marker and records
+`source-derived-u-n/1` only as conditional. A caller must explicitly request
+`conditional_diagnostic=True`; a within-envelope result is labeled
+`CONDITIONAL_DIAGNOSTIC_WITHIN`, never `PASSED_NUMERICAL_POLICY`. Activation
+still requires the bound target producer, adverse controls and independent
+target audit to be implemented and executed under the recorded decision.
 
 The pinned [incremental rotate source](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Transform.java#L101-L150)
 uses two products and an add or subtract per component, then clamps each
@@ -121,10 +128,15 @@ error at every actual computed angle, normal orientation intermediates
 obey round-to-nearest binary64, subnormal and zero products are handled as
 audited, and FMA or reassociation stays within the three-operation error
 envelope. The 13-value spacing probe does not prove those premises.
-The optional `portable-rotation-audit/1` structural verifier checks exact
+The optional `portable-rotation-audit/2` structural verifier checks exact
 binary64 call records, angle or `Rotation` pair inputs, sequence, body/step
 chains, rotation caps, clamp results, accepted TOI reset bodies, finite
-fields and normal arithmetic envelopes. It reports each producer, trig,
+fields and normal arithmetic envelopes. A lerp reset must record the end
+orientation pair. The verifier checks its start/end source angles, wrapped
+difference, alpha in [0,1], interpolated angle, and the angle/trig relation.
+It checks exact signed-zero raw products and unclamped outputs. The local
+trig screen is a conservative host-libm consistency check, not a target
+trig error proof. It reports each producer, trig,
 rounding, subnormal, zero-product and FMA premise as `UNPASSED`. Its
 supplied bytes are not yet sealed to a target process or checked by an
 independent trig interval oracle. A valid synthetic audit cannot grant a
@@ -226,10 +238,10 @@ a separate error suite remains necessary.
 
 ## Reference self-check and remaining work
 
-The historical fixed-32 self-check gave 272 within policy, 41
+The operative fixed-32 self-check gives 272 within policy, 41
 `FAILED_DERIVED`, four `UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`.
-With the recorded conditional U(N) rule, the pinned 318 reference slices
-compared with themselves yield **313 within the numeric envelope**, four
+In explicitly requested U(N) diagnostic mode, the pinned 318 reference slices
+compared with themselves yield **313 within the conditional envelope**, four
 `UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`. The four boundary cases have
 nonzero declared deltas that round to zero in their represented setup.
 The Angle case still becomes nonfinite. Every reference self-check case

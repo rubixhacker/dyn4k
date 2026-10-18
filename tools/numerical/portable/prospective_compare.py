@@ -55,10 +55,11 @@ def load_policy_catalog(path=None):
 
 
 def verify_policy_catalog(catalog, manifest, cases, frozen_ids):
-    if catalog.get("schema") != "portable-prospective-policy-conditional/2" or \
-            catalog.get("decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438" or \
-            catalog.get("prior_decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193" or \
-            catalog.get("orthogonality_policy") != "source-derived-u-n/1" or \
+    if catalog.get("schema") != "portable-prospective-policy-adopted/1" or \
+            catalog.get("decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193" or \
+            catalog.get("conditional_decision") != "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438" or \
+            catalog.get("orthogonality_policy") != "fixed-32-ulps/1" or \
+            catalog.get("conditional_orthogonality_policy") != "source-derived-u-n/1" or \
             catalog.get("qualification") != "UNPASSED":
         raise Rejected("prospective policy catalog adoption or qualification differs")
     if catalog.get("baseline_trace_sha256") != manifest.get("trace_sha256"):
@@ -386,10 +387,12 @@ def _transform_invariant(transform, limit_ulps):
         raise Difference("FAILED_DERIVED", "transform angle differs from cosine and sine")
 
 
-def _same_run_state(row, header, previous_state, rotation_cap):
+def _same_run_state(row, header, previous_state, rotation_cap, conditional_diagnostic):
     state = row["state"]
-    current_limit = orthogonality_ulps(row["step"] * rotation_cap)
-    previous_limit = orthogonality_ulps((row["step"] - 1) * rotation_cap)
+    current_limit = (orthogonality_ulps(row["step"] * rotation_cap)
+                     if conditional_diagnostic else 32)
+    previous_limit = (orthogonality_ulps((row["step"] - 1) * rotation_cap)
+                      if conditional_diagnostic else 32)
     for index, body in enumerate(state["bodies"]):
         prior_body = (header["initial"]["bodies"][index] if previous_state is None
                       else previous_state["bodies"][index])
@@ -567,7 +570,8 @@ def _policy_limit(rule, path, location, case, header, previous_state,
     raise Difference("FAILED_POLICY", f"unhandled rule: {rule}")
 
 
-def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None):
+def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None,
+                        conditional_diagnostic=False):
     result = {"case_id": case["id"], "status": "FAILED_COVERAGE", "qualification": "UNPASSED",
               "records": 0, "states": 0, "rule_checks": {}, "bounded_checks": 0,
               "exact_numeric_values": 0, "different_numeric_values": 0,
@@ -576,6 +580,8 @@ def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None
                                   ("producer", "trig", "rounding", "subnormal",
                                    "zero_product", "fma")},
               "rotation_audit": "UNPASSED_NOT_EXECUTED"}
+    result["orthogonality_assessment"] = ("CONDITIONAL_U_N_DIAGNOSTIC" if
+                                           conditional_diagnostic else "ACTIVE_FIXED_32_ULPS")
     expected_paths = {catalog["paths"][index]["path"]: catalog["paths"][index]
                       for index in catalog["path_sets"][catalog["cases"][case["id"]]["path_set"]]}
     observed_paths = set()
@@ -738,9 +744,11 @@ def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None
                     candidate_states[step] = right["state"]
                     _same_run_configuration(left, header, reference_modes)
                     _same_run_configuration(right, header, candidate_modes)
-                    _same_run_state(left, header, previous_reference, rotation_cap) if all(
+                    _same_run_state(left, header, previous_reference, rotation_cap,
+                                    conditional_diagnostic) if all(
                         "transform" in body for body in left["state"]["bodies"]) else None
-                    _same_run_state(right, header, previous_candidate, rotation_cap) if all(
+                    _same_run_state(right, header, previous_candidate, rotation_cap,
+                                    conditional_diagnostic) if all(
                         "transform" in body for body in right["state"]["bodies"]) else None
                 else:
                     events += 1
@@ -774,7 +782,8 @@ def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None
             except (KeyError, TypeError, ValueError, OverflowError) as error:
                 raise Difference("UNPASSED_PREMISE", str(error)) from error
             result["rotation_audit"] = "STRUCTURE_PASSED_ORACLE_UNPASSED"
-        result["status"] = "PASSED_NUMERICAL_POLICY"
+        result["status"] = ("CONDITIONAL_DIAGNOSTIC_WITHIN" if conditional_diagnostic
+                            else "PASSED_NUMERICAL_POLICY")
     except Difference as error:
         result["status"] = error.status
         result["reason"] = str(error)

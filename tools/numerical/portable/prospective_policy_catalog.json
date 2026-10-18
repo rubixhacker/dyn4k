@@ -1,8 +1,9 @@
 {
-  "schema": "portable-prospective-policy-conditional/2",
-  "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438",
-  "prior_decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193",
-  "orthogonality_policy": "source-derived-u-n/1",
+  "schema": "portable-prospective-policy-adopted/1",
+  "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244397193",
+  "conditional_decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244770438",
+  "orthogonality_policy": "fixed-32-ulps/1",
+  "conditional_orthogonality_policy": "source-derived-u-n/1",
   "rotation_caps": {
     "P-J-Angle-ratio-limits-off--1.0": 7,
     "ccd-circle-ALL-120": 5,
