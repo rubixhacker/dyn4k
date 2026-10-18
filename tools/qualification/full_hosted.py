@@ -2,6 +2,7 @@
 import argparse
 import csv
 import hashlib
+import itertools
 import json
 import math
 import ntpath
@@ -361,7 +362,13 @@ def capture_safari_config(repository, candidate_sha, project, configuration,
                                     repository, project, configuration)
     return {**record, "source_path": str(source), "project": project.as_posix(),
             "configuration": configuration, "source_device": identity.st_dev,
-            "source_inode": identity.st_ino}
+            "source_inode": identity.st_ino, "input_path": safari_config_input(data)}
+
+
+def safari_config_input(data):
+    prefix = "\nmodule.exports = function(config) {\n\nconfig.set("
+    settings, _ = json.JSONDecoder().raw_decode(data.decode("utf-8"), len(prefix))
+    return settings["files"][1]
 
 
 def verify_safari_reporter_archive(output, receipt, lane, candidate_repository, repository_root):
@@ -407,6 +414,8 @@ def verify_safari_reporter_archive(output, receipt, lane, candidate_repository, 
             raise ValueError("Safari generated config bytes or process window differ")
         safari_reporter.validate_config(raw.read_bytes(), fragment, repository_root,
                                         project, lane["configuration"])
+        if record.get("input_path") != safari_config_input(raw.read_bytes()):
+            raise ValueError("Safari generated config input path differs")
         expected_archive.add(expected_path)
     actual = {item["path"] for item in receipt["files"]
               if item["path"].startswith(f"{lane['configuration']}/karma-config/")}
@@ -433,30 +442,10 @@ def require_test_tasks(process, folder, target, configuration, modules):
                 raise ValueError("production Safari test executable was not built")
 
 
-def test_products(project, target, configuration, process):
-    if target in NATIVE:
-        binary_mode = "releaseTest" if configuration == "optimized-opt" else "debugTest"
-        root = project / "build/bin" / target / binary_mode
-        products = [path for path in root.glob("*") if path.is_file()
-                    and path.suffix in (".kexe", ".exe")]
-    else:
-        binary_mode = "Production" if configuration == "production" else "Development"
-        root = project / "build/compileSync/js/test" / f"test{binary_mode}Executable/kotlin"
-        products = list(root.glob("*-test.js"))
-    if len(products) != 1:
-        raise ValueError(f"exactly one {configuration} test executable is required: {root}")
-    product = products[0]
-    stat = product.stat()
-    if not process["started_ns"] <= stat.st_mtime_ns <= process["finished_ns"]:
-        raise ValueError("test executable predates invocation")
-    return {"path": str(product), "sha256": sha256(product),
-            "size": stat.st_size, "modified_ns": stat.st_mtime_ns}
-
-
-def safari_product_inventory(project, configuration, name):
+def safari_product_paths(project, configuration, name):
     if configuration not in CONFIGS["jsSafari"] or name not in (
             "dyn4k-core", "dyn4k", "consumer"):
-        raise ValueError("unknown Safari product inventory selection")
+        raise ValueError("unknown Safari product selection")
     relative = (Path("consumers/qualification/portable") if name == "consumer"
                 else Path(name))
     package = safari_reporter.PACKAGES[relative]
@@ -467,6 +456,111 @@ def safari_product_inventory(project, configuration, name):
     karma_package = build_root / "build/js/packages" / package
     karma_input = (expected if configuration == "production" else
                    karma_package / "kotlin" / f"{package}.js")
+    return expected, karma_input, build_root, karma_package
+
+
+def safari_file_observation(path, anchor, max_hash_bytes=None):
+    record = {"path": str(path), "status": "MISSING", "hash_status": "NOT_HASHED"}
+    try:
+        parts = path.relative_to(anchor).parts
+    except ValueError:
+        record["status"] = "UNSAFE"
+        return record
+    current = anchor
+    for index, part in enumerate((None, *parts)):
+        if part is not None:
+            current = current / part
+        try:
+            identity = current.lstat()
+        except FileNotFoundError:
+            return record
+        except OSError:
+            record["status"] = "ERROR"
+            return record
+        if stat.S_ISLNK(identity.st_mode):
+            record["status"] = "UNSAFE"
+            return record
+        if index < len(parts) and not stat.S_ISDIR(identity.st_mode):
+            record["status"] = "UNSAFE"
+            return record
+    if not stat.S_ISREG(identity.st_mode):
+        record["status"] = "OTHER"
+        return record
+    record.update(status="REGULAR", size=identity.st_size,
+                  modified_ns=identity.st_mtime_ns)
+    if max_hash_bytes is not None and identity.st_size > max_hash_bytes:
+        record["hash_status"] = "TOO_LARGE"
+        return record
+    try:
+        digest = sha256(path)
+        after = path.lstat()
+    except OSError:
+        record.update(status="ERROR", hash_status="NOT_HASHED")
+        return record
+    if (identity.st_dev, identity.st_ino, identity.st_size, identity.st_mtime_ns,
+            identity.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size,
+                                      after.st_mtime_ns, after.st_ctime_ns):
+        record.update(status="CHANGED", hash_status="NOT_HASHED")
+        return record
+    record.update(hash_status="HASHED", sha256=digest)
+    return record
+
+
+def test_products(project, target, configuration, process, safari_input=None, name=None):
+    if target in NATIVE:
+        binary_mode = "releaseTest" if configuration == "optimized-opt" else "debugTest"
+        root = project / "build/bin" / target / binary_mode
+        products = [path for path in root.glob("*") if path.is_file()
+                    and path.suffix in (".kexe", ".exe")]
+    elif target == "jsSafari":
+        expected, selected, build_root, _ = safari_product_paths(project, configuration, name)
+        if safari_input != str(selected):
+            raise ValueError("Safari Karma input differs from validated config")
+        root = expected.parent
+        if safari_file_observation(expected, project, 0)["status"] == "UNSAFE":
+            raise ValueError("Safari compiler product path is unsafe")
+        products = []
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.name.endswith("-test.js"):
+                        products.append(root / entry.name)
+                        if len(products) == 2:
+                            break
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+        except OSError as error:
+            raise ValueError("Safari compiler product directory is unavailable") from error
+    else:
+        raise ValueError(f"exactly one {configuration} test executable is required: {target}")
+    if len(products) != 1 or (target == "jsSafari" and products[0] != expected):
+        raise ValueError(f"exactly one {configuration} test executable is required: {root}")
+    product = products[0]
+    if target == "jsSafari":
+        compiler = safari_file_observation(product, project)
+        karma = safari_file_observation(selected, build_root)
+        for label, observed in (("compiler", compiler), ("Karma", karma)):
+            if observed["status"] != "REGULAR" or observed["hash_status"] != "HASHED" \
+                    or observed["size"] <= 0:
+                raise ValueError(f"Safari {label} input is missing, unsafe, or changed")
+            if not process["started_ns"] <= observed["modified_ns"] <= process["finished_ns"]:
+                raise ValueError(f"Safari {label} input predates invocation")
+        if (compiler["size"], compiler["sha256"]) != (karma["size"], karma["sha256"]):
+            raise ValueError("Safari compiler and Karma input bytes differ")
+        return {"path": str(product), "sha256": compiler["sha256"],
+                "size": compiler["size"], "modified_ns": compiler["modified_ns"],
+                "karma_input": karma}
+    metadata = product.stat()
+    if not process["started_ns"] <= metadata.st_mtime_ns <= process["finished_ns"]:
+        raise ValueError("test executable predates invocation")
+    return {"path": str(product), "sha256": sha256(product),
+            "size": metadata.st_size, "modified_ns": metadata.st_mtime_ns}
+
+
+def safari_product_inventory(project, configuration, name):
+    expected, karma_input, build_root, karma_package = safari_product_paths(
+        project, configuration, name)
+    package = karma_package.name
 
     def inspect(base, root):
         record = {"base": str(base), "root": str(root), "present": False,
@@ -488,10 +582,12 @@ def safari_product_inventory(project, configuration, name):
 
         def scan(directory):
             nonlocal hash_budget
-            for path in sorted(directory.iterdir()):
-                if len(record["entries"]) == 128:
-                    record["truncated"] = True
-                    return
+            remaining = 128 - len(record["entries"])
+            with os.scandir(directory) as entries:
+                children = [directory / item.name for item in
+                            itertools.islice(entries, remaining + 1)]
+            overflow = len(children) > remaining
+            for index, path in enumerate(sorted(children[:remaining])):
                 metadata = path.lstat()
                 kind = ("file" if stat.S_ISREG(metadata.st_mode) else
                         "directory" if stat.S_ISDIR(metadata.st_mode) else
@@ -507,6 +603,11 @@ def safari_product_inventory(project, configuration, name):
                     scan(path)
                     if record["truncated"]:
                         return
+                if len(record["entries"]) == 128 and (overflow or index + 1 < len(children)):
+                    record["truncated"] = True
+                    return
+            if overflow:
+                record["truncated"] = True
 
         scan(root)
         return record
@@ -521,6 +622,10 @@ def safari_product_inventory(project, configuration, name):
         roots["module_package"] = inspect(project,
                                           project / "build/js/packages" / package)
     return {"expected": str(expected), "karma_input": str(karma_input),
+            "observations": {
+                "expected": safari_file_observation(expected, project, 256 * 1024 * 1024),
+                "karma_input": safari_file_observation(karma_input, build_root,
+                                                        256 * 1024 * 1024)},
             "roots": roots}
 
 
@@ -562,12 +667,15 @@ def product_inventory(project, target, configuration=None, name=None):
     return result
 
 
-def collect_test_products(projects, target, configuration, process, diagnostic, archive_root):
+def collect_test_products(projects, target, configuration, process, diagnostic, archive_root,
+                          safari_inputs=None):
     products = {}
     errors = []
     for name, project in projects.items():
         try:
-            products[name] = test_products(project, target, configuration, process)
+            products[name] = test_products(
+                project, target, configuration, process,
+                safari_inputs.get(name) if safari_inputs is not None else None, name)
         except ValueError as error:
             errors.append(f"{name}: {error}")
     if errors:
@@ -584,6 +692,21 @@ def collect_test_products(projects, target, configuration, process, diagnostic, 
         raise ValueError("; ".join(errors) +
                          f"; product inventory {relative} SHA-256 {sha256(diagnostic)}")
     return products
+
+
+def archive_test_product(product, output, configuration, name, target):
+    archive_name = f"{configuration}/executables/{name}/{Path(product['path']).name}"
+    copied = archive_copy(Path(product["path"]), output, archive_name)
+    if any(copied[key] != product[key] for key in ("sha256", "size", "modified_ns")):
+        raise ValueError("test executable changed after observation")
+    product["archive_path"] = archive_name
+    if target == "jsSafari":
+        selected = product["karma_input"]
+        input_name = f"{configuration}/karma-inputs/{name}/{Path(selected['path']).name}"
+        copied = archive_copy(Path(selected["path"]), output, input_name)
+        if any(copied[key] != selected[key] for key in ("sha256", "size", "modified_ns")):
+            raise ValueError("Safari Karma input changed after observation")
+        selected["archive_path"] = input_name
 
 
 def init_script(target, configuration, simulator_udid=None):
@@ -1149,6 +1272,7 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     seen_invocations = set()
     expected_xml = set()
     expected_executables = set()
+    expected_karma_inputs = set()
     expected_resolved = set()
     for lane in lanes:
         if lane.get("status") != "FULL_COMMON_PASSED":
@@ -1248,11 +1372,14 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                 mode = "releaseTest" if config == "optimized-opt" else "debugTest"
                 expected_parent = project / "build/bin" / target / mode
             else:
-                mode = "Production" if config == "production" else "Development"
-                expected_parent = project / "build/compileSync/js/test" / f"test{mode}Executable/kotlin"
+                expected_product, selected_input, _, _ = safari_product_paths(
+                    project, config, name)
+                expected_parent = expected_product.parent
             executable = original_path(target, product.get("path", ""))
             if executable.parent != expected_parent or executable.name != path.name:
                 raise ValueError("test executable target or configuration path differs")
+            if target == "jsSafari" and executable != expected_product:
+                raise ValueError("Safari compiler executable differs from configured product")
             if (sha256(path) != product["sha256"] or path.stat().st_size != product["size"]
                     or path.stat().st_mtime_ns != product["modified_ns"]
                     or product["size"] <= 0):
@@ -1260,6 +1387,28 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
             process = lane["consumer_process"] if name == "consumer" else lane["source_process"]
             if not process["started_ns"] <= product["modified_ns"] <= process["finished_ns"]:
                 raise ValueError("test executable predates invocation")
+            if target == "jsSafari":
+                selected = product.get("karma_input")
+                config_input = lane["safari_karma_configs"][name]["input_path"]
+                if (not isinstance(selected, dict) or config_input != str(selected_input)
+                        or selected.get("path") != config_input
+                        or selected.get("status") != "REGULAR"
+                        or selected.get("hash_status") != "HASHED"):
+                    raise ValueError("Safari Karma input differs from validated config")
+                selected_path = original_path(target, selected["path"])
+                input_archive = f"{config}/karma-inputs/{name}/{selected_path.name}"
+                if selected.get("archive_path") != input_archive:
+                    raise ValueError("Safari Karma input archive path differs")
+                selected_bytes = archived_file(output, input_archive)
+                expected_karma_inputs.add(input_archive)
+                if (sha256(selected_bytes) != selected.get("sha256")
+                        or selected_bytes.stat().st_size != selected.get("size")
+                        or selected_bytes.stat().st_mtime_ns != selected.get("modified_ns")
+                        or selected["size"] != product["size"]
+                        or selected["sha256"] != product["sha256"]
+                        or not process["started_ns"] <= selected["modified_ns"]
+                        <= process["finished_ns"]):
+                    raise ValueError("Safari Karma input bytes or freshness differ")
         graph = parse_graph(folder / "graph", lane["graph_process"], target,
                             receipt["artifact_hashes"], receipt["staging_repository"],
                             staged_root=output / "staged",
@@ -1282,11 +1431,14 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     archived_xml = {item["path"] for item in receipt["files"] if "/xml/" in item["path"]}
     archived_executables = {item["path"] for item in receipt["files"]
                             if "/executables/" in item["path"]}
+    archived_karma_inputs = {item["path"] for item in receipt["files"]
+                             if "/karma-inputs/" in item["path"]}
     archived_resolved = {item["path"] for item in receipt["files"]
                          if "/resolved-artifacts/" in item["path"]}
     if (archived_xml != expected_xml or archived_executables != expected_executables
+            or archived_karma_inputs != expected_karma_inputs
             or archived_resolved != expected_resolved):
-        raise ValueError("extra or missing XML, executable, or resolved artifact archive member")
+        raise ValueError("extra or missing XML, executable, Karma input, or resolved artifact archive member")
 
 
 def run(target, candidate_sha, output):
@@ -1404,11 +1556,11 @@ def run(target, candidate_sha, output):
                 lane["source_executables"] = collect_test_products(
                     {module: repository / module for module in qualify.MODULES},
                     target, config, lane["source_process"],
-                    folder / "product-inventory-source.json", output)
+                    folder / "product-inventory-source.json", output,
+                    {module: lane["safari_karma_configs"][module]["input_path"]
+                     for module in qualify.MODULES} if target == "jsSafari" else None)
                 for module, product in lane["source_executables"].items():
-                    name = f"{config}/executables/{module}/{Path(product['path']).name}"
-                    archive_copy(Path(product["path"]), output, name)
-                    product["archive_path"] = name
+                    archive_test_product(product, output, config, module, target)
                 lane["source"] = copy_reports(repository, target, folder,
                                                lane["source_process"], manifest,
                                                runtime.get("safari_version"))
@@ -1446,11 +1598,11 @@ def run(target, candidate_sha, output):
                                    ("",))
                 lane["consumer_executable"] = collect_test_products(
                     {"consumer": consumer}, target, config, lane["consumer_process"],
-                    folder / "product-inventory-consumer.json", output)["consumer"]
+                    folder / "product-inventory-consumer.json", output,
+                    {"consumer": lane["safari_karma_configs"]["consumer"]["input_path"]}
+                    if target == "jsSafari" else None)["consumer"]
                 product = lane["consumer_executable"]
-                name = f"{config}/executables/consumer/{Path(product['path']).name}"
-                archive_copy(Path(product["path"]), output, name)
-                product["archive_path"] = name
+                archive_test_product(product, output, config, "consumer", target)
                 lane["consumer"] = capture_consumer(repository, target, folder,
                                                      lane["consumer_process"])
                 graph_init = folder / "qualification-graph.init.gradle"

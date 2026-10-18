@@ -188,6 +188,12 @@ class FullHostedTests(unittest.TestCase):
                         + json.dumps(settings) + ");"
                         + full_hosted.safari_reporter.APPROVED_GENERATOR_TAIL
                         + fragment + "\n}\n")
+                    product, selected_product, _, _ = full_hosted.safari_product_paths(
+                        root, mode, project)
+                    product.parent.mkdir(parents=True, exist_ok=True)
+                    product.write_bytes(b"linked")
+                    selected_product.parent.mkdir(parents=True, exist_ok=True)
+                    selected_product.write_bytes(b"linked")
                     if (configuration == "symlink" and project == "dyn4k-core"
                             and not folder.is_symlink()):
                         outside = self.root / "outside-symlink-generated"
@@ -225,19 +231,6 @@ class FullHostedTests(unittest.TestCase):
                             "stdout_sha256": full_hosted.sha256(destination / "stdout.txt"),
                             "stderr_sha256": full_hosted.sha256(destination / "stderr.txt")}
 
-                def products(projects, target, mode, process, diagnostic, output):
-                    result = {}
-                    for name, root in projects.items():
-                        item = root / "build/compileSync/js/test" / (
-                            "testProductionExecutable" if mode == "production"
-                            else "testDevelopmentExecutable") / "kotlin" / f"{name}.js"
-                        item.parent.mkdir(parents=True, exist_ok=True)
-                        item.write_bytes(b"linked")
-                        result[name] = {"path": str(item), "sha256": full_hosted.sha256(item),
-                                        "size": item.stat().st_size,
-                                        "modified_ns": item.stat().st_mtime_ns}
-                    return result
-
                 def tasks(process, folder, target, mode, modules):
                     if modules == ("",):
                         raise ValueError("fixture stops after Safari consumer capture")
@@ -264,8 +257,6 @@ class FullHostedTests(unittest.TestCase):
                         mock.patch.object(full_hosted.artifact, "capture_staging",
                                           return_value=({}, None, {"js": hashes}, {})), \
                         mock.patch.object(full_hosted, "capture_dokka_output"), \
-                        mock.patch.object(full_hosted, "collect_test_products",
-                                          side_effect=products), \
                         mock.patch.object(full_hosted, "copy_reports", return_value=[]), \
                         mock.patch.object(full_hosted, "require_test_tasks", side_effect=tasks):
                     receipt = full_hosted.run("jsSafari", candidate, output)
@@ -510,6 +501,145 @@ class FullHostedTests(unittest.TestCase):
         self.assertFalse(record["roots"]["karma_package"]["present"])
         self.assertTrue(record["roots"]["karma_package"]["unsafe_symlink"])
         self.assertEqual([], record["roots"]["karma_package"]["entries"])
+        self.assertEqual("UNSAFE", record["observations"]["karma_input"]["status"])
+
+    def test_crowded_safari_inventory_keeps_exact_inputs_with_bounded_work(self):
+        repository = self.root / "repository"
+        project = repository / "dyn4k-core"
+        compiler = project / "build/compileSync/js/test"
+        crowded = compiler / "aaa"
+        crowded.mkdir(parents=True)
+        for index in range(200):
+            (crowded / f"file-{index:03d}.js").write_bytes(b"noise")
+        expected = (compiler / "testProductionExecutable/kotlin"
+                    / "dyn4k-dyn4k-core-test.js")
+        expected.parent.mkdir(parents=True)
+        expected.write_bytes(b"intended product")
+        duplicate = expected.with_name("unrelated-test.js")
+        duplicate.write_bytes(b"other product")
+        original_scandir = os.scandir
+        case = self
+
+        def bounded_scandir(directory):
+            entries = original_scandir(directory)
+            if Path(directory) != crowded:
+                return entries
+
+            class GuardedEntries:
+                count = 0
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    entries.close()
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    if self.count >= 129:
+                        case.fail("Safari diagnostic enumerated beyond the listing bound")
+                    self.count += 1
+                    return next(entries)
+
+            return GuardedEntries()
+
+        process = {"started_ns": 1, "finished_ns": time.time_ns() + 10**9,
+                   "invocation_id": "crowded", "exit_code": 0}
+        output = self.root / "failed"
+        output.mkdir()
+        diagnostic = output / "production/product-inventory-source.json"
+        with mock.patch.object(os, "scandir", bounded_scandir):
+            with self.assertRaisesRegex(ValueError, "exactly one.*product inventory"):
+                full_hosted.collect_test_products(
+                    {"dyn4k-core": project}, "jsSafari", "production", process,
+                    diagnostic, output, {"dyn4k-core": str(expected)})
+        record = json.loads(diagnostic.read_text())["projects"]["dyn4k-core"]
+        self.assertTrue(record["roots"]["compiler"]["truncated"])
+        self.assertLessEqual(len(record["roots"]["compiler"]["entries"]), 128)
+        self.assertEqual("HASHED", record["observations"]["expected"]["hash_status"])
+        self.assertEqual(full_hosted.sha256(expected),
+                         record["observations"]["expected"]["sha256"])
+        self.assertEqual(full_hosted.sha256(expected),
+                         record["observations"]["karma_input"]["sha256"])
+        expected.unlink()
+        missing = full_hosted.product_inventory(project, "jsSafari", "production",
+                                                "dyn4k-core")
+        self.assertEqual("MISSING", missing["observations"]["expected"]["status"])
+        expected.symlink_to(self.root / "outside.js")
+        unsafe = full_hosted.product_inventory(project, "jsSafari", "production",
+                                               "dyn4k-core")
+        self.assertEqual("UNSAFE", unsafe["observations"]["expected"]["status"])
+        expected.unlink()
+        with expected.open("wb") as stream:
+            stream.truncate(256 * 1024 * 1024 + 1)
+        too_large = full_hosted.product_inventory(project, "jsSafari", "production",
+                                                  "dyn4k-core")
+        self.assertEqual("TOO_LARGE",
+                         too_large["observations"]["expected"]["hash_status"])
+
+    def test_safari_product_requires_exact_compiler_and_karma_bytes(self):
+        repository = self.root / "repository"
+        project = repository / "dyn4k-core"
+        compiler = (project / "build/compileSync/js/test/testDevelopmentExecutable/kotlin"
+                    / "dyn4k-dyn4k-core-test.js")
+        karma = (repository / "build/js/packages/dyn4k-dyn4k-core-test/kotlin"
+                 / "dyn4k-dyn4k-core-test.js")
+        compiler.parent.mkdir(parents=True)
+        karma.parent.mkdir(parents=True)
+        started = time.time_ns()
+        compiler.write_bytes(b"same product")
+        karma.write_bytes(b"same product")
+        process = {"started_ns": started, "finished_ns": time.time_ns() + 10**9}
+        selected = full_hosted.test_products(project, "jsSafari", "development", process,
+                                             str(karma), "dyn4k-core")
+        self.assertEqual(str(compiler), selected["path"])
+        self.assertEqual(str(karma), selected["karma_input"]["path"])
+        for mutation in ("unrelated", "duplicate", "compiler-symlink", "karma-symlink",
+                         "compiler-stale", "karma-stale", "different-bytes", "missing"):
+            with self.subTest(mutation=mutation):
+                compiler.unlink(missing_ok=True)
+                karma.unlink(missing_ok=True)
+                compiler.write_bytes(b"same product")
+                karma.write_bytes(b"same product")
+                if mutation == "unrelated":
+                    compiler.rename(compiler.with_name("unrelated-test.js"))
+                elif mutation == "duplicate":
+                    compiler.with_name("unrelated-test.js").write_bytes(b"other")
+                elif mutation == "compiler-symlink":
+                    compiler.unlink()
+                    compiler.symlink_to(karma)
+                elif mutation == "karma-symlink":
+                    karma.unlink()
+                    karma.symlink_to(compiler)
+                elif mutation == "compiler-stale":
+                    os.utime(compiler, ns=(started - 1, started - 1))
+                elif mutation == "karma-stale":
+                    os.utime(karma, ns=(started - 1, started - 1))
+                elif mutation == "different-bytes":
+                    karma.write_bytes(b"substituted")
+                elif mutation == "missing":
+                    compiler.unlink()
+                with self.assertRaises(ValueError):
+                    full_hosted.test_products(project, "jsSafari", "development", process,
+                                              str(karma), "dyn4k-core")
+                compiler.with_name("unrelated-test.js").unlink(missing_ok=True)
+        compiler.write_bytes(b"same product")
+        karma.write_bytes(b"same product")
+        observed = full_hosted.test_products(project, "jsSafari", "development", process,
+                                             str(karma), "dyn4k-core")
+        karma.write_bytes(b"changed after observation")
+        with self.assertRaisesRegex(ValueError, "changed after observation"):
+            full_hosted.archive_test_product(observed, self.root / "archive", "development",
+                                             "dyn4k-core", "jsSafari")
+        production = (project / "build/compileSync/js/test/testProductionExecutable/kotlin"
+                      / "dyn4k-dyn4k-core-test.js")
+        production.parent.mkdir(parents=True)
+        production.write_bytes(b"production")
+        self.assertEqual(str(production), full_hosted.test_products(
+            project, "jsSafari", "production", process, str(production),
+            "dyn4k-core")["karma_input"]["path"])
 
     def test_product_diagnostic_inventory_has_a_fixed_entry_limit(self):
         project = self.root / "dyn4k-core"
@@ -1466,7 +1596,7 @@ class FullHostedTests(unittest.TestCase):
                 window = stage_window
             elif parts[0] in full_hosted.CONFIGS[target] and len(parts) > 2:
                 phase = parts[1]
-                if phase in ("xml", "executables"):
+                if phase in ("xml", "executables", "karma-inputs"):
                     phase = "consumer" if parts[2] == "consumer" else "source"
                 if phase == "karma-config":
                     phase = "consumer" if parts[2] == "consumer" else "source"
@@ -1714,7 +1844,18 @@ class FullHostedTests(unittest.TestCase):
                         "source_inode": archived.stat().st_ino,
                         "source_path": str(original_root /
                                            full_hosted.safari_reporter.config_relative(project)),
-                        "project": project.as_posix(), "configuration": config}
+                        "project": project.as_posix(), "configuration": config,
+                        "input_path": str(selected)}
+                    executable = (lane["consumer_executable"] if name == "consumer" else
+                                  lane["source_executables"][name])
+                    selected_archive = write(folder / "karma-inputs" / name / f"{package}.js",
+                                             (self.root / executable["archive_path"]).read_bytes())
+                    executable["karma_input"] = {
+                        "path": str(selected), "status": "REGULAR", "hash_status": "HASHED",
+                        "sha256": full_hosted.sha256(selected_archive),
+                        "size": selected_archive.stat().st_size,
+                        "modified_ns": selected_archive.stat().st_mtime_ns,
+                        "archive_path": selected_archive.relative_to(self.root).as_posix()}
             receipt["configurations"].append(lane)
         receipt["files"] = full_hosted.archive_inventory(self.root)
         return receipt, manifest, consumer_manifest
@@ -1866,6 +2007,51 @@ class FullHostedTests(unittest.TestCase):
         self.assertEqual([2465, 58], [item["executed"]
                          for item in receipt["configurations"][0]["source"]])
         self.assertEqual(3, receipt["configurations"][0]["consumer"]["executed"])
+
+    def test_public_safari_archive_rejects_resealed_product_substitutions(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        for mode_index in range(2):
+            for name in ("dyn4k-core", "consumer"):
+                for mutation, reason in (("unrelated", "Safari compiler executable differs"),
+                                         ("changed-input", "Safari Karma input bytes"),
+                                         ("missing-input", "missing or unsafe archive file")):
+                    with self.subTest(configuration=mode_index, name=name, mutation=mutation):
+                        changed = json.loads(json.dumps(receipt))
+                        lane = changed["configurations"][mode_index]
+                        product = (lane["consumer_executable"] if name == "consumer" else
+                                   lane["source_executables"][name])
+                        selected = product["karma_input"]
+                        input_file = self.root / selected["archive_path"]
+                        product_file = self.root / product["archive_path"]
+                        original_input = input_file.read_bytes()
+                        input_time = input_file.stat().st_mtime_ns
+                        unrelated = product_file.with_name("unrelated-test.js")
+                        try:
+                            if mutation == "unrelated":
+                                product_file.rename(unrelated)
+                                product["path"] = str(Path(product["path"]).with_name(
+                                    "unrelated-test.js"))
+                                product["archive_path"] = unrelated.relative_to(self.root).as_posix()
+                            elif mutation == "changed-input":
+                                input_file.write_bytes(b"different executed bundle")
+                                os.utime(input_file, ns=(input_time, input_time))
+                                selected["sha256"] = full_hosted.sha256(input_file)
+                                selected["size"] = input_file.stat().st_size
+                            else:
+                                input_file.unlink()
+                            changed["files"] = full_hosted.archive_inventory(self.root)
+                            with self.assertRaisesRegex(ValueError, reason):
+                                full_hosted.verify_raw_files(
+                                    self.root, changed, manifest, consumer,
+                                    candidate_repository=self.candidate_repository)
+                        finally:
+                            if mutation == "unrelated":
+                                unrelated.rename(product_file)
+                            else:
+                                input_file.write_bytes(original_input)
+                                os.utime(input_file, ns=(input_time, input_time))
 
     def test_public_safari_rejects_fabricated_parsed_source_case_in_both_modes(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
