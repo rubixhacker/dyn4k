@@ -943,6 +943,17 @@ def verify_report_group(output, folder, group, checked, prefix):
             raise ValueError("archived XML differs from receipt")
 
 
+def canonical_safari_json(repository, candidate_sha, output, relative):
+    source = committed_input(repository, candidate_sha, relative)
+    archived = archived_file(output, f"inputs/{relative}")
+    if archived.stat().st_size != len(source) or archived.read_bytes() != source:
+        raise ValueError(f"archived Safari source input differs: {relative}")
+    value = json.loads(source, parse_constant=lambda item: (_ for _ in ()).throw(ValueError(item)))
+    if not isinstance(value, dict):
+        raise ValueError(f"Safari source inventory is not an object: {relative}")
+    return value
+
+
 def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                      candidate_repository=None):
     repository = candidate_repository or Path(__file__).resolve().parents[2]
@@ -958,11 +969,34 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
         raise ValueError("Gradle user home receipt is absent")
     if original_path(target, receipt["gradle_user_home"]) != expected_gradle_home(target, receipt):
         raise ValueError("Gradle user home differs from runner environment")
-    if manifest is None:
-        manifest = load_corpus(repository, receipt["candidate_sha"])
-    if consumer_manifest is None:
-        consumer_manifest = qualify.load_json_strict(
-            repository / "tools/qualification/foundation-probes.json")
+    if target == "jsSafari":
+        canonical_manifest = canonical_safari_json(
+            repository, receipt["candidate_sha"], output, MANIFEST)
+        canonical_consumer = canonical_safari_json(
+            repository, receipt["candidate_sha"], output,
+            "tools/qualification/foundation-probes.json")
+        if manifest is None:
+            manifest = load_corpus(repository, receipt["candidate_sha"])
+        if consumer_manifest is None:
+            consumer_manifest = canonical_consumer
+        for supplied, canonical, label in (
+                (manifest, canonical_manifest, "source"),
+                (consumer_manifest, canonical_consumer, "consumer")):
+            try:
+                matching = (type(supplied) is dict and supplied == canonical
+                            and canonical_hash(supplied) == canonical_hash(canonical))
+            except (TypeError, ValueError):
+                matching = False
+            if not matching:
+                raise ValueError(f"parsed {label} manifest differs from Safari candidate source")
+        manifest = canonical_manifest
+        consumer_manifest = canonical_consumer
+    else:
+        if manifest is None:
+            manifest = load_corpus(repository, receipt["candidate_sha"])
+        if consumer_manifest is None:
+            consumer_manifest = qualify.load_json_strict(
+                repository / "tools/qualification/foundation-probes.json")
     if (receipt.get("manifest_sha256") != canonical_hash(manifest)
             or receipt.get("source_tree_sha256") != manifest["source_tree_sha256"]
             or receipt.get("map_sha256") != sha256(repository / MAPPING)

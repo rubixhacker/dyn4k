@@ -1545,6 +1545,50 @@ class FullHostedTests(unittest.TestCase):
         receipt["files"] = full_hosted.archive_inventory(self.root)
         return receipt, manifest, consumer_manifest
 
+    def reseal_safari_case(self, receipt, group, classname, old_name, new_name):
+        self.assertEqual(["development", "production"],
+                         [lane["configuration"] for lane in receipt["configurations"]])
+        for lane in receipt["configurations"]:
+            configuration = lane["configuration"]
+            record = (lane["source"][0] if group == "dyn4k-core" else lane["consumer"])
+            old_id = f"{classname.removeprefix('jsBrowserTest.')}#{old_name}" if group == "dyn4k-core" \
+                else f"{classname}#{old_name}[js, browser, Safari26.6.2, MacOS10.15.7]"
+            new_id = old_id.replace(f"#{old_name}", f"#{new_name}", 1)
+            self.assertIn(old_id, record["case_ids"])
+            record["case_ids"] = sorted(new_id if item == old_id else item
+                                        for item in record["case_ids"])
+            path = self.root / configuration / "xml" / group / "TEST-all.xml"
+            modified_ns = path.stat().st_mtime_ns
+            tree = ET.parse(path)
+            selected = [case for case in tree.iter("testcase")
+                        if case.get("classname") == classname
+                        and case.get("name", "").startswith(old_name + "[")]
+            self.assertEqual(1, len(selected))
+            name = selected[0].get("name")
+            selected[0].set("name", new_name + name[len(old_name):])
+            tree.write(path)
+            os.utime(path, ns=(modified_ns, modified_ns))
+            record["reports"][0]["sha256"] = full_hosted.sha256(path)
+        receipt["files"] = full_hosted.archive_inventory(self.root)
+
+    def assert_safari_parsed_case_rejected(self, receipt, manifest, consumer,
+                                           expected_reason):
+        archive = self.root.parent / (self.root.name + "-parsed-case.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=json.loads(
+                (self.candidate_repository / full_hosted.MANIFEST).read_text())):
+            tar_reason = ("source or manifest hash differs" if expected_reason.startswith(
+                "parsed source") else "staged consumer cases are missing")
+            with self.assertRaisesRegex(ValueError, tar_reason):
+                full_hosted.verify_transport_archive(
+                    archive, receipt["candidate_sha"], "jsSafari",
+                    candidate_repository=self.candidate_repository)
+        with self.assertRaisesRegex(ValueError, expected_reason):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                         candidate_repository=self.candidate_repository)
+
     def test_windows_fixture_source_archive_matches_candidate_with_autocrlf(self):
         config = self.root / "global-gitconfig"
         config.write_text("[core]\n\tautocrlf = true\n")
@@ -1632,6 +1676,63 @@ class FullHostedTests(unittest.TestCase):
                         full_hosted.verify_raw_files(
                             self.root, changed, manifest, consumer,
                             candidate_repository=self.candidate_repository)
+
+    def test_public_safari_directory_and_tar_accept_canonical_parsed_inventories(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        archive = self.root.parent / (self.root.name + "-canonical-parsed.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+        self.assertEqual([2465, 58], [item["executed"]
+                         for item in receipt["configurations"][0]["source"]])
+        self.assertEqual(3, receipt["configurations"][0]["consumer"]["executed"])
+
+    def test_public_safari_rejects_fabricated_parsed_source_case_in_both_modes(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        archived_sha = full_hosted.sha256(self.root / "inputs" / full_hosted.MANIFEST)
+        altered = json.loads(json.dumps(manifest))
+        selected = [case for case in altered["cases"]
+                    if case["classname"] == "org.dyn4j.UpstreamAVLTreeCoverageTest"
+                    and case["method"] == "clear" and case["module"] == "dyn4k-core"]
+        self.assertEqual(1, len(selected))
+        selected[0]["method"] = "unexecutedFabricatedCase"
+        receipt["manifest_sha256"] = full_hosted.canonical_hash(altered)
+        self.reseal_safari_case(receipt, "dyn4k-core",
+                                "jsBrowserTest.org.dyn4j.UpstreamAVLTreeCoverageTest",
+                                "clear", "unexecutedFabricatedCase")
+        self.assertEqual(archived_sha, full_hosted.sha256(
+            self.root / "inputs" / full_hosted.MANIFEST))
+        self.assertEqual(archived_sha, full_hosted.sha256(
+            self.candidate_repository / full_hosted.MANIFEST))
+        self.assert_safari_parsed_case_rejected(receipt, altered, consumer,
+                                                "parsed source manifest differs")
+
+    def test_public_safari_rejects_fabricated_parsed_consumer_case_in_both_modes(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        relative = "tools/qualification/foundation-probes.json"
+        archived_sha = full_hosted.sha256(self.root / "inputs" / relative)
+        altered = json.loads(json.dumps(consumer))
+        group = next(item for item in altered["groups"] if item["id"] == "consumer-jsSafari")
+        selected = [case for case in group["cases"]
+                    if case["name"].startswith("namedConstructorsResolveFromPublished")]
+        self.assertEqual(1, len(selected))
+        selected[0]["name"] = selected[0]["name"].replace(
+            "namedConstructorsResolveFromPublishedCommonAndPlatformVariants",
+            "unexecutedFabricatedConsumerCase", 1)
+        self.reseal_safari_case(receipt, "consumer",
+                                "jsBrowserTest.qualification.StagedGeometryTest",
+                                "namedConstructorsResolveFromPublishedCommonAndPlatformVariants",
+                                "unexecutedFabricatedConsumerCase")
+        self.assertEqual(archived_sha, full_hosted.sha256(self.root / "inputs" / relative))
+        self.assertEqual(archived_sha, full_hosted.sha256(self.candidate_repository / relative))
+        self.assert_safari_parsed_case_rejected(receipt, manifest, altered,
+                                                "parsed consumer manifest differs")
 
     def test_public_safari_directory_and_tar_reject_duplicate_unrelated_source_entry(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
