@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import shutil
 import tempfile
@@ -9,16 +10,26 @@ import time
 import unittest
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import artifact
 import qualify
 import test_publication
 
 
+def fixture_original_path(path, windows_host=None):
+    if windows_host is None:
+        windows_host = os.name == "nt"
+    if windows_host:
+        source = PureWindowsPath(path)
+        return "/fixture/" + "/".join((source.drive.rstrip(":"), *source.parts[1:]))
+    return str(path)
+
+
 class RawArtifactTests(unittest.TestCase):
     def _full_hosted_fixture(self, bundle, repository=None):
         repository = repository or Path(__file__).resolve().parents[2]
+        original = fixture_original_path
         final_contract = (repository / "tools/qualification/full_hosted.py").is_file()
         sha = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
                                       text=True).strip()
@@ -42,10 +53,10 @@ class RawArtifactTests(unittest.TestCase):
                    "map_sha256": qualify.digest(repository / "tools/qualification/full-common-original-map.tsv"),
                    "reviewed_pairs_sha256": qualify.digest(repository / "tools/qualification/full-common-reviewed-pairs.tsv"),
                    "artifact_hashes": {}, "configurations": [],
-                   "staging_repository": str(repository / "build/staging-repository")}
+                   "staging_repository": original(repository / "build/staging-repository")}
         if final_contract:
-            receipt.update(archive_root=str(bundle.resolve()),
-                           repository_root=str(repository.resolve()))
+            receipt.update(archive_root=original(bundle.resolve()),
+                           repository_root=original(repository.resolve()))
 
         def write(relative, payload):
             path = bundle / relative
@@ -118,22 +129,22 @@ class RawArtifactTests(unittest.TestCase):
             for stream, payload in (("stdout", stdout), ("stderr", stderr)):
                 path = write(f"{prefix}/{stream}.txt", payload)
                 os.utime(path, ns=(start + 1_000_000_001, start + 1_000_000_001))
-            wrapper = str(repository / "gradlew") if final_contract else "./gradlew"
+            wrapper = original(repository / "gradlew") if final_contract else "./gradlew"
             command = [wrapper, "--rerun-tasks", *tasks]
             if invocation:
                 command.append(f"-PqualificationInvocationId={invocation}")
             if name in ("source", "consumer"):
-                script = (str(bundle / folder / "qualification.init.gradle") if final_contract
+                script = (original(bundle / folder / "qualification.init.gradle") if final_contract
                           else f"/host/{folder}/qualification.init.gradle")
                 command += ["--init-script", script]
             if name == "graph":
-                script = (str(bundle / folder / "qualification-graph.init.gradle")
+                script = (original(bundle / folder / "qualification-graph.init.gradle")
                           if final_contract else f"/host/{folder}/qualification-graph.init.gradle")
                 command += ["--init-script", script]
             if name in ("consumer", "graph"):
                 command.append(f"-PqualificationRepository={receipt['staging_repository']}")
                 if final_contract:
-                    command += ["-p", str(repository / "consumers/qualification/portable")]
+                    command += ["-p", original(repository / "consumers/qualification/portable")]
             if name == "graph":
                 command.remove("--rerun-tasks")
             return {"command": command,
@@ -187,8 +198,8 @@ class RawArtifactTests(unittest.TestCase):
                 os.utime(executable, ns=(start + 1, start + 1))
                 build_mode = "releaseTest" if config == "optimized-opt" else "debugTest"
                 lane["source_executables"][module] = {
-                    "path": str(repository / module / "build/bin/macosArm64" / build_mode /
-                                f"{module}.kexe"),
+                    "path": original(repository / module / "build/bin/macosArm64" / build_mode /
+                                     f"{module}.kexe"),
                     "archive_path": executable.relative_to(bundle).as_posix(),
                     "sha256": qualify.digest(executable), "size": executable.stat().st_size,
                     "modified_ns": executable.stat().st_mtime_ns}
@@ -201,7 +212,7 @@ class RawArtifactTests(unittest.TestCase):
             for module in qualify.MODULES:
                 name = qualify.target_publication_name(module, "macosArm64")
                 graph_artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
-                                        "file": str(Path(receipt["staging_repository"]) /
+                                        "file": str(PurePosixPath(receipt["staging_repository"]) /
                                                     qualify.target_binary_path(module, "macosArm64")),
                                         "name": name, "size": len(module),
                                         "sha256": receipt["artifact_hashes"][module]})
@@ -222,9 +233,9 @@ class RawArtifactTests(unittest.TestCase):
             executable = write(f"{config}/executables/consumer/consumer.kexe", b"consumer")
             os.utime(executable, ns=(start + 2_000_000_001, start + 2_000_000_001))
             lane["consumer_executable"] = {
-                "path": str(repository / "consumers/qualification/portable/build/bin/macosArm64" /
-                            ("releaseTest" if config == "optimized-opt" else "debugTest") /
-                            "consumer.kexe"),
+                "path": original(repository / "consumers/qualification/portable/build/bin/macosArm64" /
+                                 ("releaseTest" if config == "optimized-opt" else "debugTest") /
+                                 "consumer.kexe"),
                 "archive_path": executable.relative_to(bundle).as_posix(),
                 "sha256": qualify.digest(executable), "size": executable.stat().st_size,
                 "modified_ns": executable.stat().st_mtime_ns}
@@ -444,6 +455,18 @@ class RawArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "configuration"):
                 artifact.verify_full_hosted(bundle, "a" * 40, bundle)
 
+    def test_windows_runner_paths_and_macos_fixture_paths_keep_their_own_format(self):
+        windows = r"D:\a\dyn4k\dyn4k\build\staging-repository"
+        self.assertEqual(PureWindowsPath(windows), artifact._full_original_path("mingwX64", windows))
+        self.assertEqual("/fixture/D/a/dyn4k/dyn4k/build/staging-repository",
+                         fixture_original_path(windows, windows_host=True))
+        self.assertEqual(PurePosixPath("/fixture/D/a/dyn4k/dyn4k/build/staging-repository"),
+                         artifact._full_original_path("macosArm64",
+                                                      fixture_original_path(windows, windows_host=True)))
+        for unsafe in (r"D:relative\stage", r"\stage", r"D:\a\..\stage"):
+            with self.subTest(path=unsafe), self.assertRaisesRegex(ValueError, "invalid"):
+                artifact._full_original_path("mingwX64", unsafe)
+
     def test_runner_contract_public_directory_and_tar_clis(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(__file__).resolve().parents[2]
@@ -469,7 +492,7 @@ class RawArtifactTests(unittest.TestCase):
             bundle = Path(temporary) / "bundle"
             bundle.mkdir()
             sha = self._full_hosted_fixture(bundle, repository=repository)
-            command = ["python3", str(repository / "tools/qualification/artifact.py"),
+            command = [sys.executable, str(repository / "tools/qualification/artifact.py"),
                        "verify", "--candidate-sha", sha, "--output"]
             directory = subprocess.run(command + [str(bundle)], cwd=repository,
                                        capture_output=True, text=True)
@@ -488,7 +511,7 @@ class RawArtifactTests(unittest.TestCase):
             self.assertEqual(0, archived.returncode, archived.stderr)
             result = Path(temporary) / "qualification.json"
             recorded = subprocess.run([
-                "python3", str(repository / "tools/qualification/qualify.py"), "record",
+                sys.executable, str(repository / "tools/qualification/qualify.py"), "record",
                 "--candidate-sha", sha, "--full-hosted-bundle", str(transport),
                 "--output", str(result)], cwd=repository, capture_output=True, text=True)
             self.assertEqual(1, recorded.returncode)
@@ -602,7 +625,7 @@ class RawArtifactTests(unittest.TestCase):
             self.assertEqual(weakened_sha, self._full_hosted_fixture(
                 weakened_bundle, repository=repository))
             rejected = subprocess.run([
-                "python3", str(repository / "tools/qualification/qualify.py"), "record",
+                sys.executable, str(repository / "tools/qualification/qualify.py"), "record",
                 "--candidate-sha", weakened_sha, "--full-hosted-bundle", str(weakened_bundle),
                 "--output", str(result)], cwd=repository, capture_output=True, text=True)
             self.assertEqual(2, rejected.returncode)

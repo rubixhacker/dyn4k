@@ -25,7 +25,7 @@ JDK = {"java8": Path("/tmp/dyn4k-tools/jdk8"),
        "current": Path("/tmp/dyn4k-tools/jdk21")}
 BUILD_JDK = JDK["current"]
 GRADLE = Path("/tmp/dyn4k-tools/gradle-9.5.0")
-SOURCE = Path("/tmp/dyn4k-upstream-6.0.0")
+SOURCE = Path(os.environ.get("DYN4K_UPSTREAM_SOURCE", "/tmp/dyn4k-upstream-6.0.0"))
 NATIVE_MODES = {"debug": "Debug", "optimized": "Release"}
 JUNIT_HELPER = r'''import java.io.FileOutputStream;
 import java.util.ArrayList;

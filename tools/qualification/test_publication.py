@@ -20,6 +20,7 @@ class PublicationAuditTests(unittest.TestCase):
     def stage(self, root, targets=("jvm", "js")):
         license_bytes = b"Fixture license\n"
         (root / "LICENSE.md").write_bytes(license_bytes)
+        (root / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
         staging = root / "build/staging-repository"
         names = [module for module in qualify.MODULES]
         names += [qualify.target_publication_name(module, target)
@@ -88,11 +89,11 @@ class PublicationAuditTests(unittest.TestCase):
                 self.write(base / f"{name}-{qualify.VERSION}-javadoc.jar", archive.read_bytes())
             source_tree = root / module / "src/commonMain/kotlin/api/Type.kt"
             source_tree.parent.mkdir(parents=True, exist_ok=True)
-            source_tree.write_text("// Fixture notice\npackage api\nclass Type\n")
+            source_tree.write_bytes(b"// Fixture notice\npackage api\nclass Type\n")
             docs_tree = root / module / "build/dokka/html"
             (docs_tree / "api/Type").mkdir(parents=True, exist_ok=True)
-            (docs_tree / "index.html").write_text("<html><body>Type API</body></html>")
-            (docs_tree / "api/Type/index.html").write_text("<html><body>Type members</body></html>")
+            (docs_tree / "index.html").write_bytes(b"<html><body>Type API</body></html>")
+            (docs_tree / "api/Type/index.html").write_bytes(b"<html><body>Type members</body></html>")
             self.write(base / f"{name}-{qualify.VERSION}-license.md", license_bytes)
             if target in qualify.APPLE_TARGETS:
                 with tempfile.TemporaryDirectory() as temporary:
@@ -181,6 +182,17 @@ class PublicationAuditTests(unittest.TestCase):
             audit = qualify.audit_staging(staging, "a" * 40, targets=("jvm", "js"), license_file=root / "LICENSE.md")
             self.assertEqual("PASSED", audit["status"], audit["errors"])
 
+    def test_source_archive_rejects_crlf_changed_from_candidate(self):
+        source = b"// Fixture notice\npackage api\nclass Type\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            archive_path = Path(temporary) / "sources.jar"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\r\n\r\n")
+                archive.writestr("commonMain/api/Type.kt", source.replace(b"\n", b"\r\n"))
+            with self.assertRaisesRegex(ValueError, "source bytes differ"):
+                qualify.validate_source_archive(archive_path, {
+                    "commonMain/api/Type.kt": hashlib.sha256(source).hexdigest()})
+
     def test_jvm_module_descriptor_matches_only_committed_core_jvm_source(self):
         descriptor = b"module org.dyn4j { exports org.dyn4j; }\n"
         source = b"package api\nclass Type\n"
@@ -193,8 +205,9 @@ class PublicationAuditTests(unittest.TestCase):
             descriptor_path = root / "dyn4k-core/src/jvmModule/java/module-info.java"
             descriptor_path.parent.mkdir(parents=True)
             descriptor_path.write_bytes(descriptor)
+            (root / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "add", "dyn4k-core", "dyn4k"], check=True)
+            subprocess.run(["git", "-C", str(root), "add", ".gitattributes", "dyn4k-core", "dyn4k"], check=True)
             subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
                             "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
                            check=True)
@@ -641,7 +654,7 @@ class PublicationAuditTests(unittest.TestCase):
             targets = ("js", "jvm")
             staging = self.stage(root, targets)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "add", "LICENSE.md",
+            subprocess.run(["git", "-C", str(root), "add", ".gitattributes", "LICENSE.md",
                             "dyn4k-core/src", "dyn4k/src"], check=True)
             subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
                             "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
