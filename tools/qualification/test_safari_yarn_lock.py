@@ -113,6 +113,57 @@ class SafariYarnLockTests(unittest.TestCase):
             ["git", "-C", str(self.repository), "rev-parse", "HEAD"], text=True).strip()
         self.output = self.root / "capture"
 
+    def assert_incomplete_fixture_status(self, receipt):
+        process = receipt.get("process")
+        if not isinstance(process, dict):
+            process = {}
+
+        def bounded_int(value):
+            return value if type(value) is int and -(1 << 63) <= value < (1 << 63) else None
+
+        expected_command = safari_yarn_lock.full_hosted_command(
+            self.repository.resolve(),
+            self.output.resolve() / "development/qualification.init.gradle",
+            "development", receipt.get("invocation_id"))
+        try:
+            with (self.output / "stdout.txt").open("rb") as stream:
+                stdout = stream.read(safari_yarn_lock.MAX_FILE_BYTES + 1)
+        except OSError:
+            stdout = None
+        output = stdout if stdout is not None else b""
+        started = process.get("started_ns")
+        finished = process.get("finished_ns")
+        reason = receipt.get("reason")
+        status = receipt.get("status")
+        detail = {
+            "status": status if isinstance(status, str) and re.fullmatch(
+                r"[A-Z_]{1,64}", status) else "<invalid-status>",
+            "reason": reason[:160] if isinstance(reason, str) else None,
+            "command_identity": process.get("command") == expected_command,
+            "pid": bounded_int(process.get("pid")),
+            "pid_valid": isinstance(process.get("pid"), int) and process["pid"] > 0,
+            "started_ns": bounded_int(started),
+            "finished_ns": bounded_int(finished),
+            "timing_ordered": (isinstance(started, int) and isinstance(finished, int)
+                               and started < finished),
+            "exit_code": bounded_int(process.get("exit_code")),
+            "stdout_present": stdout is not None,
+            "stdout_over_limit": stdout is not None and len(stdout) > safari_yarn_lock.MAX_FILE_BYTES,
+            "task_markers": [marker in output for marker in safari_yarn_lock.HOSTED_TASK_MARKERS],
+            "lock_success_marker": re.search(
+                rb"(?m)^> Task :kotlinStoreYarnLock\r?$", output) is not None,
+            "lock_failure_marker": re.search(
+                rb"(?m)^> Task :kotlinStoreYarnLock FAILED\r?$", output) is not None,
+            "stream_flags": {name: process.get(name) if isinstance(process.get(name), bool)
+                             else None for name in ("timed_out", "stream_incomplete",
+                                                   "stdout_truncated", "stderr_truncated")},
+        }
+        message = json.dumps(detail, sort_keys=True, separators=(",", ":"))
+        if len(message) > 700:
+            detail["reason"] = "<omitted: diagnostic length bound>"
+            message = json.dumps(detail, sort_keys=True, separators=(",", ":"))
+        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"], message)
+
     def test_fixture_commits_exact_crlf_bytes(self):
         self.assertEqual("false", subprocess.check_output(
             ["git", "-C", str(self.repository), "config", "--local", "--get",
@@ -867,10 +918,43 @@ class SafariYarnLockTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()):
             self.assertEqual(1, safari_yarn_lock.main())
         receipt = json.loads((self.output / "receipt.json").read_text())
-        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
+        self.assert_incomplete_fixture_status(receipt)
         self.assertFalse(receipt["qualified"])
         with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
             safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_incomplete_fixture_mismatch_reports_bounded_predicates_only(self):
+        self.output.mkdir()
+        (self.output / "stdout.txt").write_bytes(
+            b"> Task :dyn4k-core:jsTestPackageJson\nSECRET_LOG_BYTES\n")
+        receipt = {"status": "PROCESS_BINDING_REJECTED",
+                   "reason": "injected fixture reason " + "r" * 1000,
+                   "invocation_id": "a" * 32,
+                   "host": {"environment": "SECRET_ENVIRONMENT_VALUE"},
+                   "process": {"command": ["SECRET_COMMAND_VALUE"], "pid": 0,
+                               "started_ns": 2, "finished_ns": 1,
+                               "stream_incomplete": True, "timed_out": False}}
+        with mock.patch.dict(os.environ, {"SECRET_VAR": "SECRET_ENVIRONMENT_VALUE"}):
+            with self.assertRaises(AssertionError) as failure:
+                self.assert_incomplete_fixture_status(receipt)
+        message = str(failure.exception)
+        self.assertIn('"status":"PROCESS_BINDING_REJECTED"', message)
+        self.assertIn('"command_identity":false', message)
+        self.assertIn('"pid_valid":false', message)
+        self.assertIn('"timing_ordered":false', message)
+        self.assertIn('"task_markers":[true,false,false]', message)
+        self.assertIn('"stream_incomplete":true', message)
+        self.assertIn('"reason":"injected fixture reason ', message)
+        for secret in ("SECRET_ENVIRONMENT_VALUE", "SECRET_COMMAND_VALUE",
+                       "SECRET_LOG_BYTES"):
+            self.assertNotIn(secret, message)
+        self.assertLess(len(message), 900)
+        receipt["reason"] = "\U0001f600" * 1000
+        with self.assertRaises(AssertionError) as unicode_failure:
+            self.assert_incomplete_fixture_status(receipt)
+        unicode_message = str(unicode_failure.exception)
+        self.assertIn('"reason":"<omitted: diagnostic length bound>"', unicode_message)
+        self.assertLess(len(unicode_message), 900)
 
     def test_public_hosted_capture_records_staging_handle_failure_residue(self):
         class Directory:
@@ -1140,7 +1224,7 @@ class SafariYarnLockTests(unittest.TestCase):
                 redirect_stdout(io.StringIO()):
             self.assertEqual(1, safari_yarn_lock.main())
         receipt = json.loads((self.output / "receipt.json").read_text())
-        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
+        self.assert_incomplete_fixture_status(receipt)
         self.assertTrue(receipt["process"]["stream_incomplete"])
         self.assertFalse(receipt["qualified"])
         self.assertFalse(unbound_child_started)
