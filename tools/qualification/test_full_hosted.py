@@ -50,7 +50,8 @@ class FullHostedTests(unittest.TestCase):
                     archive.writestr(name, contents + str(nonce).encode()
                                      if name == "default/ir/bodies.knb" else contents)
             contents = buffer.getvalue()
-            if hashlib.sha1(contents).hexdigest().startswith("0"):
+            digest = hashlib.sha1(contents).hexdigest()
+            if digest.startswith("0") and not digest.startswith("00"):
                 break
         else:
             self.fail("could not create a synthetic leading-zero KLIB")
@@ -822,7 +823,8 @@ class FullHostedTests(unittest.TestCase):
                 test_publication.PublicationAuditTests().stage(repository, (target,))
                 leading_digest = self.make_staged_binary_sha1_leading_zero(repository, target)
                 self.assertEqual(40, len(leading_digest))
-                self.assertTrue(leading_digest.startswith("0"))
+                self.assertTrue(leading_digest.startswith("0") and
+                                not leading_digest.startswith("00"))
                 self.align_synthetic_docs(repository, target)
                 stdout = "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository\n"
             elif kind == "source":
