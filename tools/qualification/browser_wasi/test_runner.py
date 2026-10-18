@@ -16,6 +16,25 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_only_exact_generated_consumer_lock_is_accepted(self):
+        import runner
+
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory)
+            lock = candidate / "consumers/qualification/browser-wasi/kotlin-js-store/yarn.lock"
+            lock.parent.mkdir(parents=True)
+            lock.write_bytes(b"pinned generated lock")
+            problem = ("untracked candidate input: "
+                       "consumers/qualification/browser-wasi/kotlin-js-store/yarn.lock")
+            digest = hashlib.sha256(lock.read_bytes()).hexdigest()
+            with mock.patch.object(runner, "CONSUMER_YARN_LOCK_SHA256", digest):
+                self.assertTrue(runner.is_pinned_consumer_lock(candidate, problem))
+                self.assertFalse(runner.is_pinned_consumer_lock(candidate, problem + ".other"))
+                lock.write_bytes(lock.read_bytes() + b"tampered")
+                self.assertFalse(runner.is_pinned_consumer_lock(candidate, problem))
+                lock.unlink()
+                self.assertFalse(runner.is_pinned_consumer_lock(candidate, problem))
+
     def test_scoped_browser_xml_rejects_lost_duplicated_and_truncated_diagnostics(self):
         source = os.environ.get("DYN4K_BROWSER_WASI_SCOPED_XML")
         if source is None:

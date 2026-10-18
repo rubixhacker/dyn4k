@@ -34,6 +34,7 @@ PHYSICS_CONSUMER_SOURCE = CONSUMER / "src/commonTest/kotlin/qualification/Staged
 PHYSICS_CONSUMER_SHA256 = "e5a5a5f1a8e1e7cf3286d0f7be92795e14ad153ea4b1b5117fb7f560ee7a0189"
 CONSUMER_BUILD_SHA256 = "ff37cf87e35a9346f0d25fcb85d9e3db0747f15561c3d985552dd4512ddfbbb7"
 CONSUMER_SETTINGS_SHA256 = "842383eb0023b5edd4ca9d2394ed3d81b1fcf0ced275ff24842aa9844f9d8a63"
+CONSUMER_YARN_LOCK_SHA256 = "521d87b1dc27f4f3ef947115945bd01eefcae1ae6fbfdede75c8f9e15f059263"
 RUNTIME_VERSIONS = {
     "chromium": {"minimum": "119.0.6045.105", "current": "155.0.8059.84"},
     "firefox": {"minimum": "120.0.1", "current": "158.0"},
@@ -376,6 +377,15 @@ def command(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> su
     return subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True, check=False)
 
 
+def is_pinned_consumer_lock(root: Path, problem: str) -> bool:
+    relative = CONSUMER / "kotlin-js-store/yarn.lock"
+    lock = root / relative
+    return (problem == f"untracked candidate input: {relative}"
+            and lock.is_file() and not lock.is_symlink()
+            and not lock.parent.is_symlink()
+            and sha256(lock) == CONSUMER_YARN_LOCK_SHA256)
+
+
 def candidate_identity(root: Path, expected_sha: str) -> None:
     if not full_corpus.SHA40.fullmatch(expected_sha):
         raise ValueError("candidate SHA is invalid")
@@ -391,7 +401,8 @@ def candidate_identity(root: Path, expected_sha: str) -> None:
         for directory in ("build", ".gradle", ".kotlin")
     )
     problems = [problem for problem in full_corpus.candidate_checkout_problems(root, expected_sha)
-                if not problem.startswith(consumer_generated)]
+                if not problem.startswith(consumer_generated)
+                and not is_pinned_consumer_lock(root, problem)]
     if problems:
         raise ValueError(f"source checkout is dirty: {problems[:5]}")
     object_format = command(["git", "rev-parse", "--show-object-format"], root)
