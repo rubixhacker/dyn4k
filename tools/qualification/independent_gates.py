@@ -90,15 +90,32 @@ APPROVED_PROSPECTIVE_POLICY_CHECKERS = {
     "reference_diagnostic.py": "5d87eb26d11dabacc7caa0842a129d62d6e8f661a4b079c3383af309e7c6ef22",
 }
 P2_CLASS_LOAD_REVISION = "5b750850277a6e9d494483dc5fa2791b6d292233"
+P2_NUMERICAL_ARCHIVE_REVISION = "4f2c7abb2cebd528515b7a5a0fd1497fd5511c86"
+P2_CANONICAL_ARCHIVE_OWNER_REVISION = "606e6734613fc90677d3c30cabbf01c6a2e17ae4"
+P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION = "48638f5acca9bf97532ce575809cf5e8472c93f7"
 APPROVED_P2_PRODUCERS = {
+    "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
+    "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
+    "capture_actual.py": "aa95aa348dc0d78cab30afaf5f4ea4b64d36ab5e3d1e3e0aa35a12a6c6f44e0e",
+    "rotation_oracle.py": "a95e4fba5883728dfe936c752daacd5a1fe0bb484dff4b14ddc9935b4a322ac6",
+    "run.py": "d789ab13f68c81c8351a6b91450adf91a7961327f93fbb6969a5ead7de7cf2d0",
+}
+APPROVED_P2_PRE_ARITHMETIC_PRODUCERS = {
+    **APPROVED_P2_PRODUCERS,
     "actual_arithmetic.py": "b96043c57a918dabe8425961b02aff930a704e592c32baffc5645b94b84ce835",
+}
+APPROVED_P2_CLASS_LOAD_PRODUCERS = {
+    **APPROVED_P2_PRE_ARITHMETIC_PRODUCERS,
     "baseline_capture.py": "914e775309ffaa2ae4ea1690a22f83c055f422d7579e334e27d2fdf03d4e5a8f",
     "capture_actual.py": "2366b83a3314c72d208d49642609734536ae212c65db23025a7431dc636363b0",
-    "rotation_oracle.py": "a95e4fba5883728dfe936c752daacd5a1fe0bb484dff4b14ddc9935b4a322ac6",
     "run.py": "2bd20f332a15621b10f634dee7cf3551310e0dbe8b6465f4c55d7e5a5d420d7e",
 }
+APPROVED_P2_OWNER_CANONICAL_PRODUCERS = {
+    **APPROVED_P2_CLASS_LOAD_PRODUCERS,
+    "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
+}
 APPROVED_P2_HISTORICAL_PRODUCERS = {
-    **APPROVED_P2_PRODUCERS,
+    **APPROVED_P2_CLASS_LOAD_PRODUCERS,
     "actual_arithmetic.py": "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
 }
 ROTATION_ORACLE_REVISION = "8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb"
@@ -386,8 +403,16 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
-    approved = (APPROVED_P2_PRODUCERS if descends_from(P2_CLASS_LOAD_REVISION)
-                else APPROVED_P2_HISTORICAL_PRODUCERS)
+    if descends_from(P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION):
+        approved = APPROVED_P2_PRODUCERS
+    elif descends_from(P2_CANONICAL_ARCHIVE_OWNER_REVISION):
+        approved = APPROVED_P2_OWNER_CANONICAL_PRODUCERS
+    elif descends_from(P2_NUMERICAL_ARCHIVE_REVISION):
+        approved = APPROVED_P2_PRE_ARITHMETIC_PRODUCERS
+    elif descends_from(P2_CLASS_LOAD_REVISION):
+        approved = APPROVED_P2_CLASS_LOAD_PRODUCERS
+    else:
+        approved = APPROVED_P2_HISTORICAL_PRODUCERS
     source_dir = "tools/numerical/portable"
     for name, local_approved in APPROVED_P2_PRODUCERS.items():
         relative = f"{source_dir}/{name}"

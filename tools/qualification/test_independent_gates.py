@@ -708,22 +708,38 @@ class IndependentGateSeamTests(unittest.TestCase):
             independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS["actual_arithmetic.py"])
         self.assertEqual(
             "b96043c57a918dabe8425961b02aff930a704e592c32baffc5645b94b84ce835",
+            independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"])
+        self.assertEqual(
+            "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
             independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"])
         arithmetic_path = "tools/numerical/portable/actual_arithmetic.py"
         for reviewed in ("6408495750659a46eb0e2fb6f2167186f6eca2ef",
                          "ffdc8ba9b600732e6927e38e7d3da43a519994a4"):
             self.assertEqual(
-                independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"],
+                independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"],
                 hashlib.sha256(subprocess.check_output(
                     ["git", "show", f"{reviewed}:{arithmetic_path}"], cwd=ROOT)).hexdigest())
         for name, approved in independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS.items():
             path = f"tools/numerical/portable/{name}"
             self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
                 ["git", "show", f"{historical}:{path}"], cwd=ROOT)).hexdigest())
-        for name, approved in independent_gates.APPROVED_P2_PRODUCERS.items():
+        for name, approved in independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS.items():
             path = f"tools/numerical/portable/{name}"
             self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
                 ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
+        for reviewed, blobs in (
+                (independent_gates.P2_NUMERICAL_ARCHIVE_REVISION,
+                 independent_gates.APPROVED_P2_PRE_ARITHMETIC_PRODUCERS),
+                (independent_gates.P2_CANONICAL_ARCHIVE_OWNER_REVISION,
+                 independent_gates.APPROVED_P2_OWNER_CANONICAL_PRODUCERS),
+                (independent_gates.P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION,
+                 independent_gates.APPROVED_P2_PRODUCERS)):
+            for name, approved in blobs.items():
+                path = f"tools/numerical/portable/{name}"
+                self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
+                    ["git", "show", f"{reviewed}:{path}"], cwd=ROOT)).hexdigest())
+        for name, approved in independent_gates.APPROVED_P2_PRODUCERS.items():
+            path = f"tools/numerical/portable/{name}"
             self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
                 ["git", "show", f"{current}:{path}"], cwd=ROOT)).hexdigest())
         with mock.patch.dict(independent_gates.APPROVED_P2_PRODUCERS,
@@ -739,6 +755,55 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"actual_arithmetic.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, historical)
+        for blobs, candidate, name, stale in (
+                (independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS, revision,
+                 "actual_arithmetic.py", independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"]),
+                (independent_gates.APPROVED_P2_PRE_ARITHMETIC_PRODUCERS,
+                 independent_gates.P2_NUMERICAL_ARCHIVE_REVISION, "run.py",
+                 independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["run.py"]),
+                (independent_gates.APPROVED_P2_OWNER_CANONICAL_PRODUCERS,
+                 independent_gates.P2_CANONICAL_ARCHIVE_OWNER_REVISION,
+                 "actual_arithmetic.py",
+                 independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"]),
+                (independent_gates.APPROVED_P2_PRODUCERS, current, "run.py",
+                 independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["run.py"])):
+            with self.subTest(candidate=candidate, stale=name), mock.patch.dict(
+                    blobs, {name: stale}):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, candidate)
+
+    def test_p2_canonical_archive_source_keeps_exact_revision_windows(self):
+        source = "tools/numerical/portable/actual_arithmetic.py"
+        historical = "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675"
+        class_load = "b96043c57a918dabe8425961b02aff930a704e592c32baffc5645b94b84ce835"
+        canonical = "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf"
+        owner = "606e6734613fc90677d3c30cabbf01c6a2e17ae4"
+        assembled = "48638f5acca9bf97532ce575809cf5e8472c93f7"
+        self.assertEqual("4f2c7abb2cebd528515b7a5a0fd1497fd5511c86",
+                         independent_gates.P2_NUMERICAL_ARCHIVE_REVISION)
+        self.assertEqual(owner, independent_gates.P2_CANONICAL_ARCHIVE_OWNER_REVISION)
+        self.assertEqual(assembled, independent_gates.P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION)
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                          cwd=ROOT, text=True).strip()
+        windows = ((independent_gates.PROSPECTIVE_CHECKER_REVISION, historical),
+                   (f"{independent_gates.P2_CLASS_LOAD_REVISION}^", historical),
+                   (independent_gates.P2_CLASS_LOAD_REVISION, class_load),
+                   (f"{owner}^", class_load), (f"{assembled}^", class_load),
+                   (owner, canonical), (assembled, canonical), (current, canonical))
+        for revision, expected in windows:
+            with self.subTest(revision=revision):
+                committed = subprocess.check_output(["git", "--no-replace-objects", "show",
+                                                     f"{revision}:{source}"], cwd=ROOT)
+                self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
+                for autocrlf in ("false", "true"):
+                    with mock.patch.dict(os.environ, {
+                            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                            "GIT_CONFIG_VALUE_0": autocrlf}):
+                        self.assertEqual(expected, independent_gates._p2_producer_binding(
+                            ROOT, revision)["actual_arithmetic.py"])
+        with self.assertRaisesRegex(ValueError, "predates reviewed P2 raw producer"):
+            independent_gates._p2_producer_binding(
+                ROOT, independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION)
 
     def test_p2_318_case_policy_requires_attested_method_and_policy_results(self):
         methods = independent_gates.PROSPECTIVE_BRIDGE_METHODS
