@@ -151,11 +151,15 @@ def validate_publication(root, label, target, selected_sha):
                 if path.relative_to(source_root).parts[0] in sets}
     try:
         with zipfile.ZipFile(sources) as archive:
-            actual = {name for name in archive.namelist() if name.endswith(".kt")}
+            members = [info for info in archive.infolist() if info.filename.endswith(".kt")]
+            names = [info.filename for info in members]
+            if len(names) != len(set(names)):
+                raise ValueError("staged source archive has duplicate Kotlin member")
+            actual = set(names)
             if actual != set(expected) or not actual:
                 raise ValueError("staged source archive differs from checked-out source inventory")
-            for name, path in expected.items():
-                if archive.read(name) != path.read_bytes():
+            for info in members:
+                if archive.read(info) != expected[info.filename].read_bytes():
                     raise ValueError("staged source archive differs from checked-out source bytes")
     except (zipfile.BadZipFile, KeyError) as error:
         raise ValueError("staged source archive is invalid") from error

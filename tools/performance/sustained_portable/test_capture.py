@@ -14,6 +14,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+import warnings
 import zipfile
 
 import capture
@@ -333,15 +334,27 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertTrue(capture.validate_publication(root, label, target,
                                                          capture.digest(klib))["source_archive_matches_checkout"])
             name = next(iter(entries))
-            with zipfile.ZipFile(sources, "w") as archive:
-                for entry, path in entries.items():
-                    archive.writestr(entry, b"substituted" if entry == name else path.read_bytes())
-            sources.with_name(sources.name + ".sha256").write_text(capture.digest(sources))
-            document["variants"][1]["files"][0]["sha256"] = capture.digest(sources)
-            metadata.write_text(json.dumps(document))
-            metadata.with_name(metadata.name + ".sha256").write_text(capture.digest(metadata))
-            with self.assertRaisesRegex(ValueError, "source bytes"):
-                capture.validate_publication(root, label, target, capture.digest(klib))
+            original = [(entry, path.read_bytes()) for entry, path in entries.items()]
+            mutations = (
+                ("changed", [(entry, b"substituted" if entry == name else data)
+                             for entry, data in original], "source bytes"),
+                ("missing", [(entry, data) for entry, data in original if entry != name],
+                 "source inventory"),
+                ("duplicate", [(name, b"SUBSTITUTED_FIRST"), *original],
+                 "duplicate Kotlin"),
+            )
+            for mutation, members, error in mutations:
+                with self.subTest(mutation=mutation), warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    with zipfile.ZipFile(sources, "w") as archive:
+                        for entry, data in members:
+                            archive.writestr(entry, data)
+                    sources.with_name(sources.name + ".sha256").write_text(capture.digest(sources))
+                    document["variants"][1]["files"][0]["sha256"] = capture.digest(sources)
+                    metadata.write_text(json.dumps(document))
+                    metadata.with_name(metadata.name + ".sha256").write_text(capture.digest(metadata))
+                    with self.assertRaisesRegex(ValueError, error):
+                        capture.validate_publication(root, label, target, capture.digest(klib))
 
     def test_source_link_trace_requires_real_reads(self):
         with tempfile.TemporaryDirectory() as temporary:
