@@ -1,12 +1,14 @@
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import baseline_capture
+import run
 from baseline_capture import (angle_failure, baseline_inventory, verify_baseline_jar,
                               verify_archive, verify_case_slices, verify_method_files,
                               verify_attestation, write_attestation)
@@ -15,6 +17,88 @@ from receipt import digest
 
 
 class BaselineCaptureSeamTest(unittest.TestCase):
+    def test_recorder_revision_ignores_same_type_commit_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "source"
+            root.mkdir()
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            source = root / "source.txt"
+            source.write_text("original\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            commit = ("git", "-C", str(root), "-c", "user.name=Test", "-c",
+                      "user.email=test@example.invalid", "commit", "-qm")
+            subprocess.run((*commit, "original"), check=True)
+            original = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD"),
+                                               text=True).strip()
+            source.write_text("substituted\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            subprocess.run((*commit, "substitute"), check=True)
+            substitute = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD"),
+                                                 text=True).strip()
+            subprocess.run(("git", "-C", str(root), "replace", original, substitute), check=True)
+            output = Path(directory) / "archive"
+            output.mkdir()
+            with patch.object(run, "ROOT", root), \
+                    patch.object(baseline_capture, "verify_baseline_jar"), \
+                    patch.object(baseline_capture, "fixture_source_sha256",
+                                 return_value="fixture"):
+                canonical = hashlib.sha256(baseline_capture.git(
+                    "--no-replace-objects", "-c", "core.autocrlf=false", "archive",
+                    "--format=tar", original)).hexdigest()
+                substituted = hashlib.sha256(baseline_capture.git(
+                    "-c", "core.autocrlf=false", "archive", "--format=tar",
+                    original)).hexdigest()
+                self.assertNotEqual(canonical, substituted)
+                result = {"status": "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL",
+                          "baseline_jar_sha256": baseline_capture.PINNED_JAR_SHA256,
+                          "baseline_source_revision": baseline_capture.PINNED_SOURCE_REVISION,
+                          "fixture_source_sha256": "fixture",
+                          "candidate_recorder_commit": original,
+                          "source_sha256": canonical, "methods": []}
+                (output / "result.json").write_text(json.dumps(result))
+                with self.assertRaisesRegex(Exception, "baseline method inventory differs"):
+                    verify_archive(output, write_verified=False)
+                result["source_sha256"] = substituted
+                (output / "result.json").write_text(json.dumps(result))
+                with self.assertRaisesRegex(Exception, "captured recorder source archive differs"):
+                    verify_archive(output, write_verified=False)
+
+    def test_recorder_revision_rejects_tree_even_when_replaced_with_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "source"
+            root.mkdir()
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            (root / "source.txt").write_text("original\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            subprocess.run(("git", "-C", str(root), "-c", "user.name=Test", "-c",
+                            "user.email=test@example.invalid", "commit", "-qm", "source"),
+                           check=True)
+            commit = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD"),
+                                             text=True).strip()
+            tree = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD^{tree}"),
+                                           text=True).strip()
+            subprocess.run(("git", "-C", str(root), "update-ref", f"refs/replace/{tree}",
+                            commit), check=True)
+            self.assertEqual(subprocess.check_output(("git", "-C", str(root), "cat-file",
+                                                      "-t", tree)).strip(), b"commit")
+            output = Path(directory) / "archive"
+            output.mkdir()
+            with patch.object(run, "ROOT", root), \
+                    patch.object(baseline_capture, "verify_baseline_jar"), \
+                    patch.object(baseline_capture, "fixture_source_sha256",
+                                 return_value="fixture"):
+                source_hash = hashlib.sha256(baseline_capture.git(
+                    "--no-replace-objects", "-c", "core.autocrlf=false", "archive",
+                    "--format=tar", tree)).hexdigest()
+                (output / "result.json").write_text(json.dumps({
+                    "status": "CAPTURED_WITH_FAILED_ANGLE_PHYSICAL",
+                    "baseline_jar_sha256": baseline_capture.PINNED_JAR_SHA256,
+                    "baseline_source_revision": baseline_capture.PINNED_SOURCE_REVISION,
+                    "fixture_source_sha256": "fixture", "candidate_recorder_commit": tree,
+                    "source_sha256": source_hash, "methods": []}))
+                with self.assertRaisesRegex(Exception, "recorder source revision is invalid"):
+                    verify_archive(output, write_verified=False)
+
     def test_recorder_source_archive_is_canonical_for_current_and_historical_commits(self):
         revisions = {
             "8b43f38d60bdee314fde06028b79bf73696d2c08":
@@ -58,6 +142,10 @@ class BaselineCaptureSeamTest(unittest.TestCase):
                 with self.subTest(malformed_revision=revision), \
                         self.assertRaisesRegex(Exception, "recorder source revision is invalid"):
                     verify_archive(output, write_verified=False)
+            result["candidate_recorder_commit"] = "0" * 40
+            (output / "result.json").write_text(json.dumps(result))
+            with self.assertRaisesRegex(Exception, "recorder source revision is unavailable"):
+                verify_archive(output, write_verified=False)
 
     def test_attestation_is_external_current_and_bound_to_original_seal(self):
         with tempfile.TemporaryDirectory() as directory:

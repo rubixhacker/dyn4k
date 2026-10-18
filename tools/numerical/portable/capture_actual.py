@@ -52,17 +52,18 @@ def git(*args):
 
 
 def clean_source():
-    if git("status", "--porcelain", "--untracked-files=all").strip():
+    if git("--no-replace-objects", "status", "--porcelain",
+           "--untracked-files=all").strip():
         raise CaptureRejected("target source is not clean")
-    ignored = git("ls-files", "--others", "--ignored", "--exclude-standard",
-                  "--full-name", "-z").split(b"\0")
+    ignored = git("--no-replace-objects", "ls-files", "--others", "--ignored",
+                  "--exclude-standard", "--full-name", "-z").split(b"\0")
     for name in ignored:
         if not name:
             continue
         relative = os.fsdecode(name)
         if not any(relative.startswith(root + "/") for root in GENERATED_ROOTS):
             raise CaptureRejected("ignored file outside exact generated roots")
-    return git("rev-parse", "HEAD").decode().strip()
+    return git("--no-replace-objects", "rev-parse", "HEAD").decode().strip()
 
 
 def run_capture(method, output):
@@ -83,7 +84,7 @@ def run_capture(method, output):
     if not (JDK21 / "bin/java").is_file():
         raise CaptureRejected("pinned JDK21 is unavailable")
     with (output / "source.tar").open("xb") as archive:
-        subprocess.run(("git", "-c", "core.autocrlf=false", "archive",
+        subprocess.run(("git", "--no-replace-objects", "-c", "core.autocrlf=false", "archive",
                         "--format=tar", commit), cwd=ROOT,
                        stdout=archive, check=True)
     stage_command = [str(ROOT / "gradlew"),

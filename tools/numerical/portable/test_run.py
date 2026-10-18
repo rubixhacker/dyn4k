@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -123,6 +124,43 @@ class ExtractionTest(unittest.TestCase):
                                    check=True)
                     archive_hashes[setting] = run.clean_identity()[1]
             self.assertEqual(archive_hashes["false"], archive_hashes["true"])
+
+    def test_source_identity_uses_original_commit_despite_same_type_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            source = root / "source.txt"
+            source.write_text("original\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            commit = ("git", "-C", str(root), "-c", "user.name=Test", "-c",
+                      "user.email=test@example.invalid", "commit", "-qm")
+            subprocess.run((*commit, "original"), check=True)
+            original = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD"),
+                                               text=True).strip()
+            source.write_text("substituted\n")
+            subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+            subprocess.run((*commit, "substitute"), check=True)
+            substitute = subprocess.check_output(("git", "-C", str(root), "rev-parse", "HEAD"),
+                                                 text=True).strip()
+            subprocess.run(("git", "-C", str(root), "checkout", "-q", original), check=True)
+            subprocess.run(("git", "-C", str(root), "replace", original, substitute), check=True)
+            canonical = subprocess.check_output(("git", "-C", str(root),
+                                                 "--no-replace-objects", "-c",
+                                                 "core.autocrlf=false", "archive",
+                                                 "--format=tar", original))
+            substituted = subprocess.check_output(("git", "-C", str(root), "-c",
+                                                   "core.autocrlf=false", "archive",
+                                                   "--format=tar", original))
+            self.assertNotEqual(canonical, substituted)
+            with patch.object(run, "ROOT", root):
+                self.assertEqual(run.clean_identity(),
+                                 (original, hashlib.sha256(canonical).hexdigest()))
+                source.write_text("substituted\n")
+                subprocess.run(("git", "-C", str(root), "add", "."), check=True)
+                self.assertEqual(subprocess.check_output(("git", "-C", str(root), "status",
+                                                         "--porcelain")), b"")
+                with self.assertRaisesRegex(run.Rejected, "source tree is dirty"):
+                    run.clean_identity()
 
     def test_unexecuted_android_native_host_is_not_called_unavailable(self):
         self.assertEqual(run.other_lane_status("android-native-x64")[0], "NOT_RUN")

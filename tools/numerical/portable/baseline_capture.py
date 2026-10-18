@@ -349,7 +349,9 @@ def verify_archive(output, write_verified=True):
     if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise Rejected("recorder source revision is invalid")
     try:
-        source = hashlib.sha256(git("-c", "core.autocrlf=false", "archive",
+        if git("--no-replace-objects", "cat-file", "-t", revision).strip() != b"commit":
+            raise Rejected("recorder source revision is invalid")
+        source = hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false", "archive",
                                     "--format=tar", revision)).hexdigest()
     except (OSError, subprocess.CalledProcessError) as error:
         raise Rejected("recorder source revision is unavailable") from error
