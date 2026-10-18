@@ -383,6 +383,42 @@ def apple_process_image(executable, pid, expected_sha, expected_size, before, ar
             "method": "simctl-launch-pid/proc_pidpath/lsof-text-vnode"}
 
 
+def wait_simulator_ready(data_container, nonce, timeout):
+    ready = data_container / f"dyn4k-performance-{nonce}.ready"
+    release = data_container / f"dyn4k-performance-{nonce}.release"
+    deadline = time.monotonic() + min(timeout, 15)
+    while time.monotonic() < deadline:
+        if os.path.lexists(release):
+            raise ValueError("simulator attestation release appeared before live image proof")
+        if os.path.lexists(ready):
+            if ready.is_symlink() or not ready.is_file() or ready.read_bytes() != nonce.encode():
+                raise ValueError("simulator attestation ready marker is malformed")
+            return {"ready": ready, "release": release, "ready_ns": time.monotonic_ns()}
+        time.sleep(0.005)
+    raise ValueError("simulator attestation ready marker is missing")
+
+
+def release_simulator_barrier(barrier, nonce, archive):
+    ready = barrier["ready"]
+    release = barrier["release"]
+    if (ready.is_symlink() or not ready.is_file() or ready.read_bytes() != nonce.encode()
+            or os.path.lexists(release)):
+        raise ValueError("simulator attestation marker changed before release")
+    pending = release.with_name(release.name + ".tmp")
+    with pending.open("xb") as output:
+        output.write(nonce.encode())
+    try:
+        os.link(pending, release)
+    finally:
+        pending.unlink(missing_ok=True)
+    (archive / "attestation.ready.bin").write_bytes(ready.read_bytes())
+    (archive / "attestation.release.bin").write_bytes(release.read_bytes())
+    return {"method": "simulator-data-container-nonce-file-v1",
+            "ready_sha256": capture.digest(archive / "attestation.ready.bin"),
+            "release_sha256": capture.digest(archive / "attestation.release.bin"),
+            "ready_ns": barrier["ready_ns"], "released_ns": time.monotonic_ns()}
+
+
 def run_simulator(args, inventory, harness, producer, nonce):
     if not args.udid:
         raise ValueError("set --udid for the selected Apple simulator")
@@ -429,17 +465,23 @@ def run_simulator(args, inventory, harness, producer, nonce):
         raise ValueError("simulator app data container is missing or invalid")
     stdout_path = data_container / f"dyn4k-performance-{nonce}.stdout"
     stderr_path = data_container / f"dyn4k-performance-{nonce}.stderr"
-    if stdout_path.exists() or stderr_path.exists():
-        raise ValueError("simulator output paths already exist")
+    ready_path = data_container / f"dyn4k-performance-{nonce}.ready"
+    release_path = data_container / f"dyn4k-performance-{nonce}.release"
+    if any(os.path.lexists(path) for path in (stdout_path, stderr_path, ready_path,
+                                             release_path, ready_path.with_name(ready_path.name + ".tmp"),
+                                             release_path.with_name(release_path.name + ".tmp"))):
+        raise ValueError("simulator output or attestation paths already exist")
     launch = ["xcrun", "simctl", "launch", f"--stdout={stdout_path}",
               f"--stderr={stderr_path}", "--terminate-running-process",
-              args.udid, bundle, *producer]
+              args.udid, bundle, *producer, "--simulator-attestation-barrier", str(data_container)]
     started = time.monotonic_ns()
     image = None
+    attestation = None
     try:
         setup_command(args.archive, "apple-launch", launch, timeout=args.timeout)
         launch_stdout = (args.archive / "setup/apple-launch.stdout.bin").read_bytes()
         pid = simulator_launch_pid(launch_stdout, bundle)
+        barrier = wait_simulator_ready(data_container, nonce, args.timeout)
         deadline = time.monotonic() + min(args.timeout, 15)
         while time.monotonic() < deadline:
             path = apple_process_path(pid)
@@ -454,6 +496,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
             raise ValueError("simulator launch PID process image was not observable")
         if validate_installed_bundle(Path(app), installed_app) != inventory["bundle_sha256"]:
             raise ValueError("post-launch simulator package differs from selected inventory")
+        attestation = release_simulator_barrier(barrier, nonce, args.archive)
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             path = apple_process_path(pid)
@@ -495,6 +538,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
     return stdout, stderr, {"command": launch, "launch_exit_code": 0,
                             "app_exit_code": None,
                             "image": image, "runtime": device, "xcode": xcode.strip(),
+                            "attestation": attestation,
                             "bundle_id": bundle,
                             "installed_image_sha256": capture.digest(installed),
                             "installed_image_size": apple_file_identity(installed)["size"],
@@ -621,8 +665,35 @@ def run(args):
             launch_file = args.archive / "setup/apple-launch.stdout.bin"
             if not launch_file.is_file():
                 raise ValueError("simulator OS launch receipt is missing")
+            launch_record = json.loads((args.archive / "setup/apple-launch.json").read_text())
+            launch_command = process.get("command")
+            if (not isinstance(launch_command, list) or len(launch_command) < 2
+                    or launch_command[-2] != "--simulator-attestation-barrier"
+                    or launch_record.get("argv") != launch_command
+                    or launch_record.get("exit_code") != 0):
+                raise ValueError("simulator OS launch did not request the attestation barrier")
+            attestation = process.get("attestation")
+            ready_file = args.archive / "attestation.ready.bin"
+            release_file = args.archive / "attestation.release.bin"
+            token_sha = hashlib.sha256(nonce.encode()).hexdigest()
+            if (not isinstance(attestation, dict)
+                    or attestation.get("method") != "simulator-data-container-nonce-file-v1"
+                    or not ready_file.is_file() or not release_file.is_file()
+                    or ready_file.read_bytes() != nonce.encode()
+                    or release_file.read_bytes() != nonce.encode()
+                    or attestation.get("ready_sha256") != token_sha
+                    or attestation.get("release_sha256") != token_sha
+                    or not isinstance(attestation.get("ready_ns"), int)
+                    or not isinstance(attestation.get("released_ns"), int)
+                    or not process["started_ns"] < attestation["ready_ns"]
+                    < attestation["released_ns"] < process["ended_ns"]):
+                raise ValueError("simulator live-image attestation barrier is missing or malformed")
             launch = process.get("launch")
             output = process.get("output")
+            if (not isinstance(output, dict)
+                    or launch_command[-1] != str(Path(output.get("stdout_path", "")).parent)
+                    or launch_command[-1] != str(Path(output.get("stderr_path", "")).parent)):
+                raise ValueError("simulator attestation container differs from producer output")
             if not isinstance(launch, dict) or launch.get("method") != "simctl-redirected-files":
                 raise ValueError("simulator OS launch receipt origin is missing")
             if launch.get("stdout_sha256") != capture.digest(launch_file):
