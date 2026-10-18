@@ -1,25 +1,30 @@
 import copy
 import contextlib
+import ctypes
 import csv
 import hashlib
 import io
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from manifest import manifest
 from sustained_archive import (CLOCK_FIELDS, MEMORY_FIELDS, PLATEAU_FIELDS, STEP_FIELDS,
+                               STRESS_MONITOR_FIELDS,
                                WARMUP_CLOCK_FIELDS, canonical, comparison_control_keys,
-                               capture_one, merge_parts,
+                               capture_one, command_prefix, merge_parts,
                                initialize_archive,
                                observed_host, required_measurements, required_noise,
                                required_plateaus, required_reports, signature, step_summary,
+                               wait4_peak_rss, windows_peak_handle, windows_terminal_peak,
+                               close_windows_peak_handle, PROCESS_MEMORY_COUNTERS,
                                _verify_archive, main)
 from candidate_runner import ROOT, source_trees
 from measure import sha256
@@ -28,6 +33,53 @@ from analyze import bootstrap_ratio
 
 
 class SustainedArchiveContractTest(unittest.TestCase):
+    def test_windows_native_terminal_counter_handle_pid_and_query_contract(self):
+        kernel = Mock()
+        kernel.OpenProcess.return_value = 123
+        kernel.GetProcessId.return_value = 42
+        psapi = Mock()
+        def set_peak(handle, pointer, size):
+            self.assertEqual(123, handle)
+            self.assertEqual(ctypes.sizeof(PROCESS_MEMORY_COUNTERS), size)
+            ctypes.cast(pointer, ctypes.POINTER(PROCESS_MEMORY_COUNTERS)).contents.PeakWorkingSetSize = 8192
+            return 1
+        psapi.GetProcessMemoryInfo.side_effect = set_peak
+        with patch("sustained_archive.ctypes.WinDLL", side_effect=[kernel, kernel, psapi,
+                                                                kernel], create=True):
+            handle = windows_peak_handle(42)
+            self.assertEqual(8192, windows_terminal_peak(handle, 42))
+            close_windows_peak_handle(handle)
+        kernel.OpenProcess.assert_called_once_with(0x1000, False, 42)
+        kernel.CloseHandle.assert_called_once_with(123)
+        kernel.GetProcessId.return_value = 43
+        with patch("sustained_archive.ctypes.WinDLL", return_value=kernel, create=True):
+            with self.assertRaisesRegex(ValueError, "handle PID differs"):
+                windows_peak_handle(42)
+        kernel.GetProcessId.return_value = 42
+        psapi.GetProcessMemoryInfo.side_effect = None
+        psapi.GetProcessMemoryInfo.return_value = 0
+        with patch("sustained_archive.ctypes.WinDLL", side_effect=[kernel, psapi], create=True):
+            with self.assertRaisesRegex(OSError, "terminal peak working set is unavailable"):
+                windows_terminal_peak(123, 42)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux wait4")
+    def test_linux_exact_child_wait4_reports_terminal_peak_and_signal(self):
+        child = subprocess.Popen([sys.executable, "-c",
+                                  "import time; b = bytearray(8 * 1024 * 1024); "
+                                  "b[::4096] = b'X' * 2048; time.sleep(10)"])
+        try:
+            import time
+            time.sleep(0.2)
+            child.send_signal(signal.SIGTERM)
+            result = wait4_peak_rss(child.pid, 0, "Linux")
+            self.assertEqual(-signal.SIGTERM, os.waitstatus_to_exitcode(result[0]))
+            self.assertGreaterEqual(result[1], 8 * 1024 * 1024)
+            child.returncode = os.waitstatus_to_exitcode(result[0])
+        finally:
+            if child.returncode is None:
+                child.kill()
+                child.wait()
+
     def test_frozen_matrix_has_every_gate_case_and_no_stress_gate(self):
         plan = required_measurements(manifest())
         self.assertEqual(999, len(manifest()["scenarios"]))
@@ -142,10 +194,16 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                                         "probe_sha256": sha256(timer)}},
             "comparison_controls": {key: row_id for key in comparison_control_keys(cls.policy)},
             "noise_upper_ratio_max": {key: 1.05 for key in comparison_control_keys(cls.policy)},
-            "stress_wall_stop_ns": 190_000_000_000,
-            "stress_wall_ns_max": 200_000_000_000,
-            "stress_rss_stop_bytes": 5000,
-            "stress_rss_bytes_max": 3 * 1024 ** 3}
+            "stress_limits": {row_id: {
+                "row_id": row_id,
+                "wall_stop_ns": 190_000_000_000,
+                "wall_max_ns": 200_000_000_000,
+                "rss_stop_bytes": 5000,
+                "rss_max_bytes": 3 * 1024 ** 3,
+                "rss_metric_kind": "peak_rss_bytes",
+                "reference_overhead_sha256": "1" * 64,
+                "monitor_validation_sha256": "2" * 64,
+                "host_capacity_sha256": "3" * 64}}}
         receipt = cls.root / "build-receipt.json"
         receipt.write_text(json.dumps({"source_commit": cls.commit,
                                        "source_trees": source_trees(cls.commit),
@@ -366,7 +424,10 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                     "process_image_observed_ns": host_start + 1,
                     "started_ns": item["started_ns"], "ended_ns": item["ended_ns"],
                     "sample_count": 2, "peak_rss_bytes": 2000,
-                    "termination_reason": "completed", "exit_code": 0}))
+                    "termination_reason": "completed", "exit_code": 0,
+                    "metric_kind": "peak_rss_bytes", "terminal_pid": pid,
+                    "terminal_wait_status": 0, "terminal_ru_maxrss_bytes": 2000,
+                    "terminal_observed_ns": item["ended_ns"] - 1}))
                 item.update(stress_monitor_receipt_path=str(stress_receipt.relative_to(cls.root)),
                             stress_monitor_receipt_sha256=sha256(stress_receipt))
             if mode == "memory":
@@ -435,7 +496,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
     def stopped_capacity_archive(self, name):
         root, index_path, index = self.changed_archive(name)
         policy = copy.deepcopy(self.policy)
-        policy["sustained_gate"]["stress_rss_stop_bytes"] = 1500
+        policy["sustained_gate"]["stress_limits"]["jvm.java"]["rss_stop_bytes"] = 1500
         index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
         capture_index = next(position for position, item in enumerate(index["captures"])
                              if item["kind"] == "report" and item["mode"] == "timing")
@@ -465,7 +526,10 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         receipt = json.loads(receipt_path.read_text())
         receipt.update(ended_ns=item["ended_ns"], termination_reason="rss_limit",
                        exit_code=-15, stop_action="terminate",
-                       stop_requested_ns=item["started_ns"] + 150_500_000_000)
+                       stop_requested_ns=item["started_ns"] + 150_500_000_000,
+                       stop_dispatched_ns=item["started_ns"] + 150_500_000_001,
+                       terminal_wait_status=15,
+                       terminal_observed_ns=item["ended_ns"] - 1)
         receipt_path.write_text(json.dumps(receipt))
         item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
         self.reseal(index_path, index)
@@ -486,8 +550,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
             "bounded-wall-capacity")
         item = index["captures"][capture_index]
-        policy["sustained_gate"].update(stress_wall_stop_ns=140_000_000_000,
-                                         stress_rss_stop_bytes=5000)
+        policy["sustained_gate"]["stress_limits"]["jvm.java"].update(
+            wall_stop_ns=140_000_000_000, rss_stop_bytes=5000)
         monitor_path = root / item["stress_monitor_path"]
         monitor = list(csv.DictReader(monitor_path.read_text().splitlines()))
         monitor[-1]["action"] = "wall_limit"
@@ -526,6 +590,108 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertEqual(0, status, result)
         self.assertEqual("capacity_limited", result["capacity_report"]["status"])
 
+    def test_public_capacity_requires_exact_row_bound_evidence(self):
+        for attack in ("missing", "extra", "swapped", "missing_evidence", "scalar"):
+            with self.subTest(attack=attack):
+                root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+                    "row-bounds-" + attack)
+                bounds = policy["sustained_gate"]["stress_limits"]
+                if attack == "missing":
+                    bounds.clear()
+                elif attack == "extra":
+                    bounds["caller.selected"] = copy.deepcopy(bounds["jvm.java"])
+                elif attack == "swapped":
+                    bounds["jvm.java"]["row_id"] = "android.android_jvm"
+                elif attack == "missing_evidence":
+                    del bounds["jvm.java"]["host_capacity_sha256"]
+                else:
+                    del policy["sustained_gate"]["stress_limits"]
+                    policy["sustained_gate"]["stress_wall_ns_max"] = 200_000_000_000
+                index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+                self.reseal(index_path, index)
+                status, result = self.cli_capacity(root, policy, capture_index)
+                self.assertNotEqual(0, status, result)
+                self.assertIn("stress", result["reason"])
+
+    def test_public_capacity_rejects_signed_linux_exit_and_terminal_attacks(self):
+        for attack in ("coherent_exit1", "kill_term", "term_kill", "missing_dispatch",
+                       "missing_terminal", "wrong_terminal_pid", "terminal_peak_spike",
+                       "terminal_before_dispatch"):
+            with self.subTest(attack=attack):
+                root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+                    "linux-" + attack)
+                item = index["captures"][capture_index]
+                receipt_path = root / item["stress_monitor_receipt_path"]
+                receipt = json.loads(receipt_path.read_text())
+                if attack == "coherent_exit1":
+                    item["exit_code"] = receipt["exit_code"] = 1
+                    receipt["terminal_wait_status"] = 256
+                elif attack == "kill_term":
+                    receipt["stop_action"] = "kill"
+                elif attack == "term_kill":
+                    item["exit_code"] = receipt["exit_code"] = -9
+                    receipt["terminal_wait_status"] = 9
+                elif attack == "missing_dispatch":
+                    del receipt["stop_dispatched_ns"]
+                elif attack == "missing_terminal":
+                    del receipt["terminal_ru_maxrss_bytes"]
+                elif attack == "wrong_terminal_pid":
+                    receipt["terminal_pid"] += 1
+                elif attack == "terminal_peak_spike":
+                    receipt["terminal_ru_maxrss_bytes"] = 3 * 1024 ** 3 + 1
+                    item["stress_peak_rss_bytes"] = receipt["peak_rss_bytes"] = \
+                        receipt["terminal_ru_maxrss_bytes"]
+                    monitor_path = root / item["stress_monitor_path"]
+                    write_csv(monitor_path, STRESS_MONITOR_FIELDS,
+                              ((1_000_000, 2000, "running"),
+                               (150_500_000_000, item["stress_peak_rss_bytes"], "rss_limit")))
+                    item["stress_monitor_sha256"] = sha256(monitor_path)
+                else:
+                    receipt["terminal_observed_ns"] = receipt["stop_dispatched_ns"] - 1
+                receipt_path.write_text(json.dumps(receipt))
+                item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+                self.reseal(index_path, index)
+                status, result = self.cli_capacity(root, policy, capture_index)
+                self.assertNotEqual(0, status, result)
+                self.assertEqual("unpassed", result["qualification"])
+
+    def test_public_capacity_accepts_windows_native_exit1_and_rejects_terminal_attacks(self):
+        root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+            "windows-exit1-capacity")
+        self.remote_sources(root, index, system="Windows")
+        policy["sustained_gate"]["stress_limits"]["jvm.java"]["rss_metric_kind"] = \
+            "peak_working_set_bytes"
+        item = index["captures"][capture_index]
+        item["stress_monitor_method"] = "windows_psapi_peak_working_set_v1"
+        item["exit_code"] = 1
+        receipt_path = root / item["stress_monitor_receipt_path"]
+        receipt = json.loads(receipt_path.read_text())
+        receipt.update(method=item["stress_monitor_method"], exit_code=1,
+                       metric_kind="peak_working_set_bytes", terminal_exit_code=1,
+                       terminal_peak_working_set_bytes=2000)
+        del receipt["terminal_wait_status"]
+        del receipt["terminal_ru_maxrss_bytes"]
+        image = json.loads((root / item["process_image_receipt_path"]).read_text())
+        receipt["process_image_sha256"] = image["sha256"]
+        receipt["process_image_observed_ns"] = image["observed_ns"]
+        receipt_path.write_text(json.dumps(receipt))
+        item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        status, result = self.cli_capacity(root, policy, capture_index)
+        self.assertEqual(0, status, result)
+        self.assertTrue(result["capacity_report"]["complete"])
+        for field, value in (("terminal_pid", item["pid"] + 1),
+                             ("metric_kind", "peak_rss_bytes"),
+                             ("terminal_peak_working_set_bytes", 1),
+                             ("terminal_exit_code", 0)):
+            with self.subTest(field=field):
+                receipt_path.write_text(json.dumps({**receipt, field: value}))
+                item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+                self.reseal(index_path, index)
+                status, result = self.cli_capacity(root, policy, capture_index)
+                self.assertNotEqual(0, status, result)
+
     def test_public_capacity_report_rejects_signed_crash_and_receipt_attacks(self):
         for attack in ("crash", "wrong_exit", "wrong_pid", "missing_stop",
                        "missing_monitor", "partial_clock", "below_stop"):
@@ -552,7 +718,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                               ([row[field] for field in CLOCK_FIELDS] for row in stamps))
                     item["clock_sha256"] = sha256(clock_path)
                 else:
-                    policy["sustained_gate"]["stress_rss_stop_bytes"] = 2500
+                    policy["sustained_gate"]["stress_limits"]["jvm.java"]["rss_stop_bytes"] = 2500
                     index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
                 if attack in ("wrong_pid", "missing_stop"):
                     receipt_path.write_text(json.dumps(receipt))
@@ -669,6 +835,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         policy["targets"] = [row["target"]]
         gate = policy["sustained_gate"]
         gate["harnesses"][row_id] = gate["harnesses"].pop(old_id)
+        gate["stress_limits"][row_id] = gate["stress_limits"].pop(old_id)
+        gate["stress_limits"][row_id]["row_id"] = row_id
         control_source = "c" * 40
         control_records = {}
         control_hashes = {}
@@ -893,9 +1061,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertIn("external peak RSS monitor is unvalidated", result["reason"])
 
     def test_public_verify_reports_missing_approved_noise_and_stress_policy(self):
-        for field in ("noise_upper_ratio_max", "stress_wall_stop_ns",
-                      "stress_wall_ns_max", "stress_rss_stop_bytes",
-                      "stress_rss_bytes_max"):
+        for field in ("noise_upper_ratio_max", "stress_limits"):
             with self.subTest(field=field):
                 policy = copy.deepcopy(self.policy)
                 policy["sustained_gate"].pop(field)
@@ -956,10 +1122,14 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                        "started_ns": item["started_ns"], "ended_ns": item["ended_ns"],
                        "sample_count": len(monitor),
                        "peak_rss_bytes": item["stress_peak_rss_bytes"],
-                       "termination_reason": "completed", "exit_code": 0}
+                       "termination_reason": "completed", "exit_code": 0,
+                       "metric_kind": ("peak_working_set_bytes" if system == "Windows" else
+                                       "peak_rss_bytes"), "terminal_pid": item["pid"],
+                       "terminal_observed_ns": item["ended_ns"] - 1}
             if system == "Darwin":
-                receipt.update(metric_kind="peak_rss_bytes", terminal_pid=item["pid"],
-                               terminal_wait_status=0, terminal_ru_maxrss_bytes=4096)
+                receipt.update(terminal_wait_status=0, terminal_ru_maxrss_bytes=4096)
+            elif system == "Windows":
+                receipt.update(terminal_exit_code=0, terminal_peak_working_set_bytes=2000)
             path = root / Path(item["stress_monitor_path"]).with_name("stress-receipt.json")
             path.write_text(json.dumps(receipt))
             item["stress_monitor_receipt_path"] = str(path.relative_to(root))
@@ -971,8 +1141,13 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                 root, index_path, index = self.changed_archive(system.lower() + "-monitor")
                 self.remote_sources(root, index, system=system)
                 self.add_stress_receipts(root, index, system)
+                policy = copy.deepcopy(self.policy)
+                if system == "Windows":
+                    policy["sustained_gate"]["stress_limits"]["jvm.java"]["rss_metric_kind"] = \
+                        "peak_working_set_bytes"
+                    index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
                 self.reseal(index_path, index)
-                status, result = self.cli_verify(root)
+                status, result = self.cli_verify(root, policy=policy)
                 self.assertEqual(0, status, result)
                 self.assertEqual("passed", result["qualification"])
                 item = next(row for row in index["captures"] if row["kind"] == "report")
@@ -989,7 +1164,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                         receipt_path.write_text(json.dumps(receipt))
                         item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
                         self.reseal(index_path, index)
-                        status, result = self.cli_verify(root)
+                        status, result = self.cli_verify(root, policy=policy)
                         self.assertNotEqual(0, status)
                         self.assertIn("stress monitor receipt", result["reason"])
 
@@ -1363,6 +1538,61 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertEqual(len(index["captures"]) + 1, len(saved["captures"]))
         captured = saved["captures"][-1]
         self.assertEqual(sha256(root / captured["raw_path"]), captured["raw_sha256"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux process image and wait4")
+    def test_public_capture_records_real_linux_terminal_peak_before_raw_rejection(self):
+        root, index_path, index = self.changed_archive("real-linux-terminal-producer")
+        removed = next(item for item in index["captures"] if item["kind"] == "report" and
+                       item["mode"] == "timing" and item["scenario_id"].endswith("baseline"))
+        index["captures"].remove(removed)
+        policy = copy.deepcopy(self.policy)
+        limit = policy["sustained_gate"]["stress_limits"]["jvm.java"]
+        limit["rss_stop_bytes"] = 1
+        runtime = Path(sys.executable).resolve()
+        reference = index["references"]["jvm.java"]
+        archived_runtime = root / reference["runtime"]["archive_path"]
+        shutil.copyfile(runtime, archived_runtime)
+        reference["runtime"].update(path=str(runtime), sha256=sha256(archived_runtime))
+        policy["sustained_gate"]["noise_controls"]["jvm.java"]["runtime_sha256"] = \
+            sha256(runtime)
+        script = ("import json,os,time; "
+                  "open(os.environ['DYN4K_CLOCK_ORIGIN_JSON'],'w').write(json.dumps("
+                  "{{'pid':os.getpid(),'runtime_ns':time.monotonic_ns(),"
+                  "'nonce':os.environ['DYN4K_CLOCK_NONCE']}})); time.sleep(10)")
+        policy["sustained_gate"]["harnesses"]["jvm.java"]["command_prefix"] = [
+            "{runtime}", "-c", script, "-cp",
+            "{harness}:{adapter}:{baseline}:{core}:{kotlin}"]
+        scenario = next(s for s in policy["scenarios"] if s["id"] == removed["scenario_id"])
+        tail = [scenario["family"], scenario["variant"], scenario["size"],
+                str(scenario["rate_hz"]), str(60 * scenario["rate_hz"]),
+                removed["mode"], str(120 * scenario["rate_hz"])]
+        job = {name: removed[name] for name in
+               ("kind", "row_id", "scenario_id", "mode", "repeat", "sequence")}
+        job["command"] = command_prefix(reference, policy, "jvm.java",
+                                        index["artifacts"], index["baseline"]) + tail
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        key_path = Path(self.folder.name) / "real-producer-operator.key"
+        key_path.write_bytes(self.key)
+        job_path = Path(self.folder.name) / "real-producer-job.json"
+        job_path.write_text(json.dumps(job))
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["sustained_archive.py", "capture", "--archive", str(root),
+                                        "--trusted-key", str(key_path), "--job", str(job_path)]), \
+             patch("sustained_archive.frozen_policy", return_value=policy), \
+             contextlib.redirect_stdout(output):
+            main()
+        result = json.loads(output.getvalue())
+        self.assertEqual("invalid_raw", result["status"])
+        captured = json.loads(index_path.read_text())["captures"][-1]
+        self.assertEqual("rss_limit", captured["termination_reason"])
+        receipt = json.loads((root / captured["stress_monitor_receipt_path"]).read_text())
+        self.assertEqual(captured["pid"], receipt["terminal_pid"])
+        self.assertEqual("terminate", receipt["stop_action"])
+        self.assertEqual(-signal.SIGTERM,
+                         os.waitstatus_to_exitcode(receipt["terminal_wait_status"]))
+        self.assertGreater(receipt["terminal_ru_maxrss_bytes"], 0)
+        self.assertLessEqual(receipt["terminal_observed_ns"], captured["ended_ns"])
 
     def test_initializer_requires_optimized_build_and_copies_approved_binaries(self):
         index = json.loads((self.root / "archive.json").read_text())

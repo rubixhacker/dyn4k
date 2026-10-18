@@ -3,6 +3,8 @@
 import argparse
 import copy
 import csv
+import ctypes
+from ctypes import wintypes
 import hashlib
 import hmac
 import json
@@ -21,7 +23,8 @@ from analyze import activity_status, bootstrap_ratio, plateau_status, warmup_sta
 from candidate_runner import ROOT, source_trees
 from manifest import manifest, validate
 from measure import MANIFEST_FILE, balanced_orders, sha256, summary as pilot_summary
-from stress_monitor import darwin_wait4_peak_rss, peak_rss_bytes, stress_monitor_method
+from stress_monitor import (PROCESS_MEMORY_COUNTERS, darwin_wait4_peak_rss,
+                            peak_rss_bytes, stress_monitor_method)
 
 
 MODES = ("timing", "allocation", "memory")
@@ -44,6 +47,62 @@ STRESS_MONITOR_FIELDS = ("elapsed_ns", "rss_bytes", "action")
 PROCESS_IMAGE_METHODS = {"Linux": "os_procfs", "Darwin": "macos_libproc",
                          "Windows": "windows_query_image"}
 FROZEN_MANIFEST_SHA256 = "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a"
+
+
+def wait4_peak_rss(pid, options, system):
+    if system == "Darwin":
+        return darwin_wait4_peak_rss(pid, options)
+    require(system == "Linux" and type(pid) is int and pid > 0,
+            "Linux terminal usage PID is invalid")
+    observed_pid, status, usage = os.wait4(pid, options)
+    if observed_pid == 0 and options & os.WNOHANG:
+        return None
+    require(observed_pid == pid and type(status) is int and usage is not None and
+            type(usage.ru_maxrss) is int and usage.ru_maxrss > 0,
+            "Linux terminal wait4 usage is invalid")
+    return status, usage.ru_maxrss * 1024
+
+
+def windows_peak_handle(pid):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.GetProcessId.argtypes = [ctypes.c_void_p]
+    kernel.GetProcessId.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        raise OSError("Windows terminal peak process handle is unavailable")
+    if kernel.GetProcessId(handle) != pid:
+        kernel.CloseHandle(handle)
+        raise ValueError("Windows terminal peak handle PID differs")
+    return handle
+
+
+def windows_terminal_peak(handle, pid):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel.GetProcessId.argtypes = [ctypes.c_void_p]
+    kernel.GetProcessId.restype = wintypes.DWORD
+    psapi.GetProcessMemoryInfo.argtypes = [ctypes.c_void_p,
+                                           ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                                           wintypes.DWORD]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    require(kernel.GetProcessId(handle) == pid, "Windows terminal peak handle PID differs")
+    counters = PROCESS_MEMORY_COUNTERS()
+    counters.cb = ctypes.sizeof(counters)
+    if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+        raise OSError("Windows terminal peak working set is unavailable")
+    require(counters.PeakWorkingSetSize > 0, "Windows terminal peak working set is invalid")
+    return counters.PeakWorkingSetSize
+
+
+def close_windows_peak_handle(handle):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.CloseHandle(handle)
 
 
 def frozen_policy():
@@ -168,13 +227,24 @@ def approved_gate(policy):
             all(type(limits[key]) in (int, float) and math.isfinite(limits[key]) and
                 limits[key] >= 1 for key in control_keys),
             "unpassed policy: frozen comparison control map or noise limits are absent")
+    stress_limits = gate.get("stress_limits")
     require(isinstance(gate.get("harnesses"), dict) and
             set(gate["harnesses"]) == rows and
-            all(type(gate.get(name)) is int and gate[name] > 0 for name in
-                ("stress_wall_stop_ns", "stress_wall_ns_max",
-                 "stress_rss_stop_bytes", "stress_rss_bytes_max")) and
-            gate["stress_wall_stop_ns"] < gate["stress_wall_ns_max"] and
-            gate["stress_rss_stop_bytes"] < gate["stress_rss_bytes_max"],
+            isinstance(stress_limits, dict) and set(stress_limits) == rows and
+            all(isinstance(limit, dict) and set(limit) == {
+                "row_id", "wall_stop_ns", "wall_max_ns", "rss_stop_bytes",
+                "rss_max_bytes", "rss_metric_kind", "reference_overhead_sha256",
+                "monitor_validation_sha256", "host_capacity_sha256"} and
+                limit["row_id"] == row_id and
+                limit["rss_metric_kind"] in ("peak_rss_bytes", "peak_working_set_bytes") and
+                all(type(limit[name]) is int and limit[name] > 0 for name in
+                    ("wall_stop_ns", "wall_max_ns", "rss_stop_bytes", "rss_max_bytes")) and
+                limit["wall_stop_ns"] < limit["wall_max_ns"] and
+                limit["rss_stop_bytes"] < limit["rss_max_bytes"] and
+                all(isinstance(limit[name], str) and len(limit[name]) == 64 and
+                    all(char in "0123456789abcdef" for char in limit[name]) for name in
+                    ("reference_overhead_sha256", "monitor_validation_sha256",
+                     "host_capacity_sha256")) for row_id, limit in stress_limits.items()),
             "unpassed policy: approved noise or stress ceiling is absent or invalid")
     fixture_hash = hashlib.sha256(canonical({"fixture": policy["fixture"],
                     "joint_parameters": policy["joint_parameters"]})).hexdigest()
@@ -657,16 +727,19 @@ def validate_plateau(rows, cycles):
 
 
 def validate_stress(root, item, policy, image_receipt):
-    gate = policy["sustained_gate"]
+    limit = policy["sustained_gate"]["stress_limits"][item["row_id"]]
+    system = item["host"]["system"]
+    metric_kind = "peak_working_set_bytes" if system == "Windows" else "peak_rss_bytes"
     reason = item.get("termination_reason")
     limited = reason in ("wall_limit", "rss_limit")
     require(item.get("stress_monitor_method") ==
             stress_monitor_method(item["host"]["system"]) and
             not item["stress_monitor_method"].startswith("unsupported_"),
             "unpassed row: external peak RSS monitor is unvalidated")
-    require(item["wall_ns"] <= gate["stress_wall_ns_max"] and
+    require(limit["rss_metric_kind"] == metric_kind and
+            item["wall_ns"] <= limit["wall_max_ns"] and
             type(item.get("stress_peak_rss_bytes")) is int and
-            item["stress_peak_rss_bytes"] <= gate["stress_rss_bytes_max"],
+            item["stress_peak_rss_bytes"] <= limit["rss_max_bytes"],
             "stress wall, memory, or termination ceiling invalid")
     require((item["status"] == "capacity_limited" and type(item["exit_code"]) is int and
              item["exit_code"] != 0) if limited else
@@ -681,30 +754,50 @@ def validate_stress(root, item, policy, image_receipt):
             item["started_ns"] + elapsed[0] >= image_receipt["observed_ns"] and
             elapsed == sorted(set(elapsed)) and
             elapsed[-1] <= item["wall_ns"] and
-            all(0 < value <= gate["stress_rss_bytes_max"] for value in rss) and
-            (item["host"]["system"] == "Darwin" or rss == sorted(rss)) and
+            all(0 < value <= limit["rss_max_bytes"] for value in rss) and
+            (system == "Darwin" or rss == sorted(rss)) and
             max(rss) == item["stress_peak_rss_bytes"] and
             all(row["action"] == "running" for row in rows[:-1]) and
             rows[-1]["action"] == reason and
-            ((elapsed[-1] >= gate["stress_wall_stop_ns"] if reason == "wall_limit" else
-              item["stress_peak_rss_bytes"] >= gate["stress_rss_stop_bytes"])
+            ((elapsed[-1] >= limit["wall_stop_ns"] if reason == "wall_limit" else
+              item["stress_peak_rss_bytes"] >= limit["rss_stop_bytes"])
              if limited else
-             elapsed[-1] < gate["stress_wall_stop_ns"] and
-             item["stress_peak_rss_bytes"] < gate["stress_rss_stop_bytes"]),
+             elapsed[-1] < limit["wall_stop_ns"] and
+             item["stress_peak_rss_bytes"] < limit["rss_stop_bytes"]),
             "stress monitor stream or termination receipt invalid")
     receipt = json.loads(checked_file(root, item, "stress_monitor_receipt_path",
                                       "stress_monitor_receipt_sha256").read_text())
-    terminal_fields = ({"metric_kind", "terminal_pid", "terminal_wait_status",
-                        "terminal_ru_maxrss_bytes"} if item["host"]["system"] == "Darwin"
-                       else set())
-    stop_fields = {"stop_action", "stop_requested_ns"} if limited else set()
+    terminal_fields = ({"metric_kind", "terminal_pid", "terminal_observed_ns"} |
+                       ({"terminal_exit_code", "terminal_peak_working_set_bytes"}
+                        if system == "Windows" else
+                        {"terminal_wait_status", "terminal_ru_maxrss_bytes"}))
+    stop_fields = {"stop_action", "stop_requested_ns", "stop_dispatched_ns"} if limited else set()
+    terminal_peak_field = ("terminal_peak_working_set_bytes" if system == "Windows" else
+                           "terminal_ru_maxrss_bytes")
+    terminal_status_valid = (
+        type(receipt.get("terminal_exit_code")) is int and
+        receipt["terminal_exit_code"] == item["exit_code"] if system == "Windows" else
+        type(receipt.get("terminal_wait_status")) is int and
+        os.waitstatus_to_exitcode(receipt["terminal_wait_status"]) == item["exit_code"])
+    stop_status_valid = (not limited or
+        (receipt.get("stop_action") in ("terminate", "kill") and
+         type(receipt.get("stop_requested_ns")) is int and
+         type(receipt.get("stop_dispatched_ns")) is int and
+         item["started_ns"] + elapsed[-1] <= receipt["stop_requested_ns"] <=
+         receipt["stop_dispatched_ns"] <= receipt.get("terminal_observed_ns", -1) <=
+         item["ended_ns"] and
+         (item["exit_code"] == 1 if system == "Windows" else
+          os.WIFSIGNALED(receipt["terminal_wait_status"]) and
+          os.WTERMSIG(receipt["terminal_wait_status"]) ==
+          (15 if receipt["stop_action"] == "terminate" else 9))))
     require(set(receipt) == {"pid", "method", "process_image_sha256",
                              "process_image_observed_ns", "started_ns", "ended_ns",
                              "sample_count", "peak_rss_bytes", "termination_reason",
                              "exit_code"} | terminal_fields | stop_fields and
             all(type(receipt[field]) is int for field in
                 ("pid", "process_image_observed_ns", "started_ns", "ended_ns",
-                 "sample_count", "peak_rss_bytes", "exit_code")) and
+                 "sample_count", "peak_rss_bytes", "exit_code", "terminal_pid",
+                 "terminal_observed_ns", terminal_peak_field)) and
             receipt == {"pid": item["pid"],
                         "method": item["stress_monitor_method"],
                         "process_image_sha256": image_receipt["sha256"],
@@ -716,21 +809,20 @@ def validate_stress(root, item, policy, image_receipt):
                         "termination_reason": item["termination_reason"],
                         "exit_code": item["exit_code"],
                         **({"stop_action": receipt["stop_action"],
-                            "stop_requested_ns": receipt["stop_requested_ns"]}
+                            "stop_requested_ns": receipt["stop_requested_ns"],
+                            "stop_dispatched_ns": receipt["stop_dispatched_ns"]}
                            if limited else {}),
-                        **({"metric_kind": "peak_rss_bytes",
-                            "terminal_pid": item["pid"],
-                            "terminal_wait_status": receipt["terminal_wait_status"],
-                            "terminal_ru_maxrss_bytes": item["stress_peak_rss_bytes"]}
-                           if terminal_fields else {})} and
-            (not limited or
-             receipt["stop_action"] in ("terminate", "kill") and
-             type(receipt["stop_requested_ns"]) is int and
-             item["started_ns"] + elapsed[-1] <= receipt["stop_requested_ns"] <= item["ended_ns"]) and
-            (not terminal_fields or
-             (os.waitstatus_to_exitcode(receipt["terminal_wait_status"]) == item["exit_code"]) and
-             rss[-1] == receipt["terminal_ru_maxrss_bytes"] and
-             all(value <= rss[-1] for value in rss[:-1])),
+                        "metric_kind": metric_kind,
+                        "terminal_pid": item["pid"],
+                        "terminal_observed_ns": receipt["terminal_observed_ns"],
+                        terminal_peak_field: item["stress_peak_rss_bytes"],
+                        **({"terminal_exit_code": receipt["terminal_exit_code"]}
+                           if system == "Windows" else
+                           {"terminal_wait_status": receipt["terminal_wait_status"]})} and
+            terminal_status_valid and stop_status_valid and
+            image_receipt["observed_ns"] <= receipt["terminal_observed_ns"] <= item["ended_ns"] and
+            rss[-1] == receipt[terminal_peak_field] and
+            all(value <= rss[-1] for value in rss[:-1]),
             "stress monitor receipt differs from process image or termination")
     return "capacity_limited" if limited else "completed"
 
@@ -1719,8 +1811,8 @@ def verify_archive(root, key, expected_source_commit):
     return _verify_archive(root, key, expected_source_commit, frozen_policy())
 
 
-def verify_capacity_report(root, key, expected_source_commit, capture_index, policy=None):
-    policy = frozen_policy() if policy is None else policy
+def verify_capacity_report(root, key, expected_source_commit, capture_index):
+    policy = frozen_policy()
     approved_gate(policy)
     root = Path(root).resolve()
     require(len(key) >= 32, "trusted key is too short")
@@ -1995,7 +2087,9 @@ def capture_one(root, job, key):
         termination_reason = None
         stress_peak_rss = None
         terminal_usage = None
+        terminal_observed_ns = None
         stop_requested_ns = None
+        stop_dispatched_ns = None
         stop_action = None
         if image_observation is None and process.poll() is None:
             termination_reason = "image_probe_unavailable"
@@ -2037,86 +2131,109 @@ def capture_one(root, job, key):
                     "method": "host_file_bracket_v1", "host_before_ns": started,
                     "host_after_ns": time.monotonic_ns()}, sort_keys=True) + "\n")
         if job["kind"] == "report" and image_observation is not None and origin is not None:
+            system = platform.system()
+            limit = gate["stress_limits"][job["row_id"]]
             peak = 0
+            windows_handle = None
+            if system == "Windows":
+                try:
+                    windows_handle = windows_peak_handle(pid)
+                except (OSError, ValueError):
+                    termination_reason = "monitor_unavailable"
             with stress_monitor.open("w", newline="") as monitor_stream:
                 writer = csv.writer(monitor_stream)
                 writer.writerow(STRESS_MONITOR_FIELDS)
-                while True:
+                while termination_reason != "monitor_unavailable":
                     elapsed = time.monotonic_ns() - started
-                    if platform.system() == "Darwin":
+                    if system in ("Linux", "Darwin"):
                         try:
-                            terminal_usage = darwin_wait4_peak_rss(pid, os.WNOHANG)
+                            terminal_usage = wait4_peak_rss(pid, os.WNOHANG, system)
                         except (OSError, ValueError, ChildProcessError):
                             termination_reason = "monitor_unavailable"
                             break
                         running = terminal_usage is None
                     else:
                         running = process.poll() is None
-                    if running:
+                    if not running:
                         try:
-                            rss = peak_rss_bytes(pid, platform.system())
-                        except (OSError, ValueError, subprocess.TimeoutExpired):
-                            if platform.system() == "Darwin":
-                                try:
-                                    terminal_usage = darwin_wait4_peak_rss(pid, os.WNOHANG)
-                                except (OSError, ValueError, ChildProcessError):
-                                    terminal_usage = None
-                            if terminal_usage is None:
-                                termination_reason = "monitor_unavailable"
-                                rss = peak
+                            if system == "Windows":
+                                process.wait()
+                                terminal_peak = windows_terminal_peak(windows_handle, pid)
                             else:
-                                running = False
-                        if not running:
+                                status, terminal_peak = terminal_usage
+                                process.returncode = os.waitstatus_to_exitcode(status)
+                        except (OSError, ValueError):
+                            termination_reason = "monitor_unavailable"
+                            break
+                        terminal_observed_ns = time.monotonic_ns()
+                        peak = max(peak, terminal_peak)
+                        termination_reason = "completed"
+                        writer.writerow((elapsed, terminal_peak, termination_reason))
+                        break
+                    try:
+                        rss = peak_rss_bytes(pid, system)
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        if system in ("Linux", "Darwin"):
+                            try:
+                                terminal_usage = wait4_peak_rss(pid, os.WNOHANG, system)
+                            except (OSError, ValueError, ChildProcessError):
+                                terminal_usage = None
+                        if terminal_usage is not None:
                             status, terminal_peak = terminal_usage
                             process.returncode = os.waitstatus_to_exitcode(status)
+                            terminal_observed_ns = time.monotonic_ns()
                             peak = max(peak, terminal_peak)
                             termination_reason = "completed"
                             writer.writerow((elapsed, terminal_peak, termination_reason))
-                            break
-                        peak = max(peak, rss)
-                        if elapsed >= gate["stress_wall_stop_ns"]:
-                            termination_reason = "wall_limit"
-                        elif peak >= gate["stress_rss_stop_bytes"]:
-                            termination_reason = "rss_limit"
-                        if termination_reason:
-                            stop_requested_ns = time.monotonic_ns()
-                            stop_action = "terminate"
+                        else:
+                            termination_reason = "monitor_unavailable"
+                        break
+                    peak = max(peak, rss)
+                    if elapsed >= limit["wall_stop_ns"]:
+                        termination_reason = "wall_limit"
+                    elif peak >= limit["rss_stop_bytes"]:
+                        termination_reason = "rss_limit"
+                    if termination_reason:
+                        stop_requested_ns = time.monotonic_ns()
+                        stop_action = "terminate"
+                        try:
                             process.terminate()
-                            if platform.system() == "Darwin":
+                            stop_dispatched_ns = time.monotonic_ns()
+                            if system in ("Linux", "Darwin"):
                                 deadline = time.monotonic() + 5
                                 while time.monotonic() < deadline and terminal_usage is None:
-                                    terminal_usage = darwin_wait4_peak_rss(pid, os.WNOHANG)
+                                    terminal_usage = wait4_peak_rss(pid, os.WNOHANG, system)
                                     if terminal_usage is None:
                                         time.sleep(0.05)
                                 if terminal_usage is None:
                                     stop_action = "kill"
+                                    stop_requested_ns = time.monotonic_ns()
                                     process.kill()
-                                    terminal_usage = darwin_wait4_peak_rss(pid, 0)
+                                    stop_dispatched_ns = time.monotonic_ns()
+                                    terminal_usage = wait4_peak_rss(pid, 0, system)
                                 status, terminal_peak = terminal_usage
                                 process.returncode = os.waitstatus_to_exitcode(status)
-                                peak = max(peak, terminal_peak)
-                                rss = terminal_peak
                             else:
                                 try:
                                     process.wait(timeout=5)
                                 except subprocess.TimeoutExpired:
                                     stop_action = "kill"
+                                    stop_requested_ns = time.monotonic_ns()
                                     process.kill()
+                                    stop_dispatched_ns = time.monotonic_ns()
                                     process.wait()
-                            writer.writerow((elapsed, rss, termination_reason))
+                                terminal_peak = windows_terminal_peak(windows_handle, pid)
+                            terminal_observed_ns = time.monotonic_ns()
+                        except (OSError, ValueError, ChildProcessError):
+                            termination_reason = "monitor_unavailable"
                             break
-                        writer.writerow((elapsed, rss, "running"))
-                        time.sleep(0.1)
-                    else:
-                        if platform.system() == "Darwin":
-                            status, terminal_peak = terminal_usage
-                            process.returncode = os.waitstatus_to_exitcode(status)
-                            peak = max(peak, terminal_peak)
-                        else:
-                            terminal_peak = peak
-                        termination_reason = "completed"
+                        peak = max(peak, terminal_peak)
                         writer.writerow((elapsed, terminal_peak, termination_reason))
                         break
+                    writer.writerow((elapsed, rss, "running"))
+                    time.sleep(0.1)
+            if windows_handle is not None:
+                close_windows_peak_handle(windows_handle)
             stress_peak_rss = peak
             if termination_reason == "monitor_unavailable" and process.poll() is None:
                 process.terminate()
@@ -2129,10 +2246,13 @@ def capture_one(root, job, key):
     ended = time.monotonic_ns()
     capacity_limited = (job["kind"] == "report" and
                         termination_reason in ("wall_limit", "rss_limit") and
-                        returncode != 0 and stop_requested_ns is not None and
-                        ended - started <= gate["stress_wall_ns_max"] and
+                        stop_dispatched_ns is not None and
+                        terminal_observed_ns is not None and
+                        (returncode == 1 if platform.system() == "Windows" else
+                         returncode == (-15 if stop_action == "terminate" else -9)) and
+                        ended - started <= gate["stress_limits"][job["row_id"]]["wall_max_ns"] and
                         stress_peak_rss is not None and
-                        stress_peak_rss <= gate["stress_rss_bytes_max"])
+                        stress_peak_rss <= gate["stress_limits"][job["row_id"]]["rss_max_bytes"])
     item = {**job, "status": ("capacity_limited" if capacity_limited else
             "complete" if returncode == 0 and image_observation is not None and
             termination_reason in (None, "completed") else "failed"),
@@ -2179,13 +2299,18 @@ def capture_one(root, job, key):
                     "termination_reason": termination_reason,
                     "exit_code": returncode,
                     **({"stop_action": stop_action,
-                        "stop_requested_ns": stop_requested_ns}
+                        "stop_requested_ns": stop_requested_ns,
+                        "stop_dispatched_ns": stop_dispatched_ns}
                        if capacity_limited else {}),
-                    **({"metric_kind": "peak_rss_bytes", "terminal_pid": pid,
-                        "terminal_wait_status": terminal_usage[0],
-                        "terminal_ru_maxrss_bytes": terminal_usage[1]}
-                       if platform.system() == "Darwin" and terminal_usage is not None
-                       else {})}, sort_keys=True) + "\n")
+                    **({"metric_kind": ("peak_working_set_bytes" if platform.system() == "Windows"
+                                         else "peak_rss_bytes"),
+                        "terminal_pid": pid, "terminal_observed_ns": terminal_observed_ns,
+                        **({"terminal_exit_code": returncode,
+                            "terminal_peak_working_set_bytes": terminal_peak}
+                           if platform.system() == "Windows" else
+                           {"terminal_wait_status": terminal_usage[0],
+                            "terminal_ru_maxrss_bytes": terminal_usage[1]})}
+                       if terminal_observed_ns is not None else {})}, sort_keys=True) + "\n")
                 item.update(stress_monitor_receipt_path=str(stress_monitor_receipt.relative_to(root)),
                             stress_monitor_receipt_sha256=sha256(stress_monitor_receipt))
     if provider.is_file():
