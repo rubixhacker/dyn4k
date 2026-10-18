@@ -35,7 +35,7 @@ POM_MODULE_DESCRIPTIONS = {
 APPLE_TARGETS = {"iosArm64", "iosSimulatorArm64", "iosX64", "macosArm64",
                  "tvosArm64", "tvosSimulatorArm64", "watchosArm64",
                  "watchosDeviceArm64", "watchosSimulatorArm64"}
-APPROVED_COMPLETE_SUITE_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
+APPROVED_COMPLETE_SUITE_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
 
 
 def matrix():
@@ -499,9 +499,9 @@ def validate_complete_suite_bindings(suite_manifest, repository):
                                           "line": source["line"]}):
             raise ValueError(f"complete suite case differs from reviewed corpus: {identity}")
     counts = suite_manifest.get("counts", {})
-    if (sum(item.get("scope") == "portable" for item in cases) != 2512
+    if (sum(item.get("scope") == "portable" for item in cases) != 2518
             or sum(item.get("scope") == "jvm-only" for item in cases) != 3
-            or counts.get("portable_methods") != 2512
+            or counts.get("portable_methods") != 2518
             or counts.get("jvm_only_facade_methods") != 3):
         raise ValueError("complete suite reviewed method counts differ")
     lanes = suite_manifest.get("lanes")
@@ -1284,7 +1284,7 @@ def full_hosted_lane(receipt, receipt_sha256, suite_manifest=None):
     for lane_id, config in zip(ids, receipt["configurations"]):
         source = config["source"]
         common = {group["module"]: group["case_ids"] for group in source}
-        if (set(common) != set(MODULES) or len(common["dyn4k-core"]) != 2454
+        if (set(common) != set(MODULES) or len(common["dyn4k-core"]) != 2460
                 or len(common["dyn4k"]) != 58
                 or len(config["consumer"]["case_ids"]) != 3):
             raise ValueError("full hosted reviewed common or consumer case count differs")

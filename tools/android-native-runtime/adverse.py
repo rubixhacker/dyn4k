@@ -49,10 +49,10 @@ def test_adverse(root, receipt_path):
         def missing_case(item):
             raw = stdout.replace(b"[ RUN      ] " + first + b"\n", b"", 1)
             raw = re.sub(rb"\[       OK \] " + re.escape(first) + rb" \(\d+ ms\)\n", b"", raw, count=1)
-            raw = raw.replace(b"[==========] 2454 tests from", b"[==========] 2453 tests from")
-            raw = raw.replace(b"[  PASSED  ] 2454 tests.", b"[  PASSED  ] 2453 tests.")
+            raw = raw.replace(b"[==========] 2460 tests from", b"[==========] 2459 tests from")
+            raw = raw.replace(b"[  PASSED  ] 2460 tests.", b"[  PASSED  ] 2459 tests.")
             replace_raw(item["lanes"][key]["process"]["stdout"], raw, directory, "missing.stdout")
-            item["lanes"][key]["case_count"] = 2453
+            item["lanes"][key]["case_count"] = 2459
             item["total_common_cases"] -= 1
 
         def duplicate_case(item):
@@ -60,16 +60,16 @@ def test_adverse(root, receipt_path):
             match = re.search(rb"\[       OK \] " + re.escape(first) + rb" \(\d+ ms\)\n", stdout)
             pair = run_line + match.group()
             raw = stdout.replace(pair, pair + pair, 1)
-            raw = raw.replace(b"[==========] 2454 tests from", b"[==========] 2455 tests from")
-            raw = raw.replace(b"[  PASSED  ] 2454 tests.", b"[  PASSED  ] 2455 tests.")
+            raw = raw.replace(b"[==========] 2460 tests from", b"[==========] 2461 tests from")
+            raw = raw.replace(b"[  PASSED  ] 2460 tests.", b"[  PASSED  ] 2461 tests.")
             replace_raw(item["lanes"][key]["process"]["stdout"], raw, directory, "duplicate.stdout")
-            item["lanes"][key]["case_count"] = 2455
+            item["lanes"][key]["case_count"] = 2461
             item["total_common_cases"] += 1
 
         expect_rejected("missing case", missing_case)
         expect_rejected("duplicate case", duplicate_case)
         expect_rejected("forged PASS line", lambda item: replace_raw(
-            item["lanes"][key]["process"]["stdout"], stdout + b"[  PASSED  ] 2454 tests.\n", directory, "forged.stdout"))
+            item["lanes"][key]["process"]["stdout"], stdout + b"[  PASSED  ] 2460 tests.\n", directory, "forged.stdout"))
         expect_rejected("nonzero process", lambda item: item["lanes"][key]["process"].update(exit_code=1))
         expect_rejected("lost stdout", lambda item: item["lanes"][key]["process"]["stdout"].update(path=str(directory / "missing")))
         expect_rejected("lost stderr", lambda item: item["lanes"][key]["process"]["stderr"].update(path=str(directory / "missing")))

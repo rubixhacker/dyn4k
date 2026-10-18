@@ -19,11 +19,11 @@ class FullSuiteManifestTest(unittest.TestCase):
     def test_every_lane_selects_complete_portable_suite_and_jvm_only_cases(self):
         full_suite_manifest.validate_manifest(self.manifest, ROOT)
         self.assertEqual(112, len(self.manifest["lanes"]))
-        self.assertEqual(2515, len(self.manifest["cases"]))
+        self.assertEqual(2521, len(self.manifest["cases"]))
         linux = full_suite_manifest.select_lane(self.manifest, "linuxX64:Linux x64:minimum:debug-g", ROOT)
         jvm = full_suite_manifest.select_lane(self.manifest, "jvm:Java:minimum:no-optimize", ROOT)
-        self.assertEqual(2512, len(linux["case_ids"]))
-        self.assertEqual(2515, len(jvm["case_ids"]))
+        self.assertEqual(2518, len(linux["case_ids"]))
+        self.assertEqual(2521, len(jvm["case_ids"]))
         self.assertEqual(set(linux["case_ids"]), set(jvm["case_ids"]) -
                          {case["id"] for case in self.manifest["cases"] if case["scope"] == "jvm-only"})
         self.assertEqual(len(linux["case_ids"]), len(set(linux["case_ids"])))
@@ -50,6 +50,19 @@ class FullSuiteManifestTest(unittest.TestCase):
                                 for original in case["originals"])
                             for case in selected))
         self.assertEqual({"geometry"}, {case["area"] for case in selected})
+
+    def test_six_windows_collision_diagnostics_are_portable_supplements(self):
+        diagnostic = [case for case in self.manifest["cases"] if
+                      case["classname"] ==
+                      "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest"]
+        self.assertEqual({"capsuleSlice", "circlePolygon", "circleSegment",
+                          "circleSlice", "polygonCapsule", "polygonPolygon"},
+                         {case["method"] for case in diagnostic})
+        self.assertEqual(6, len(diagnostic))
+        self.assertTrue(all(case["area"] == "collision" and
+                            case["scope"] == "portable" and
+                            case["kind"] == "supplemental" and
+                            not case["originals"] for case in diagnostic))
 
     def test_missing_area_case_extra_case_and_duplicate_case_fail(self):
         for mutation in ("area", "missing", "extra", "duplicate"):

@@ -70,7 +70,7 @@ def common_corpus_cases(root: Path, candidate_sha: str, module: str) -> set[tupl
         raise ValueError("full common corpus differs from source tree or reviewed map")
     cases = {(case["classname"], case["method"]) for case in manifest["cases"]
              if case["module"] == module and case["source_set"] == "commonTest"}
-    required = 2454 if module == "dyn4k-core" else 58
+    required = 2460 if module == "dyn4k-core" else 58
     if len(cases) != required:
         raise ValueError(f"full common corpus count differs: {module} {len(cases)}")
     return cases
