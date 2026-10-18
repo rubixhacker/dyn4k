@@ -329,14 +329,15 @@ internal open class WorldTrackedArrayList<E>(initialCapacity: Int = 10) : Abstra
         }
 
         override fun subList(fromIndex: Int, toIndex: Int): MutableList<E> {
-            checkVersion()
-            checkSubListRange(fromIndex, toIndex, size)
-            return ReadOnlyView(offset + fromIndex, toIndex - fromIndex, structuralVersion)
+            checkSubListRange(fromIndex, toIndex, fixedSize ?: backing.size)
+            return ReadOnlyView(offset + fromIndex, toIndex - fromIndex, expectedVersion ?: structuralVersion)
         }
 
         override fun set(index: Int, element: E): E = throw UnsupportedOperationException()
+        override fun add(element: E): Boolean = throw UnsupportedOperationException()
         override fun add(index: Int, element: E): Unit = throw UnsupportedOperationException()
         override fun removeAt(index: Int): E = throw UnsupportedOperationException()
+        override fun remove(element: E): Boolean = throw UnsupportedOperationException()
         override fun clear(): Unit = throw UnsupportedOperationException()
         override fun addAll(elements: Collection<E>): Boolean = throw UnsupportedOperationException()
         override fun addAll(index: Int, elements: Collection<E>): Boolean = throw UnsupportedOperationException()

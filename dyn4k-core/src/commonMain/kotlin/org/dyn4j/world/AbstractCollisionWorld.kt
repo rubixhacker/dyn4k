@@ -78,23 +78,45 @@ internal fun <Q> worldLiveUnmodifiableList(backing: MutableList<Q>): List<Q> {
     return worldPlatformUnmodifiableBackingList(backing, worldReadOnlyView(backing))
 }
 
-private fun <Q> worldReadOnlyView(backing: MutableList<Q>): List<Q> = object : AbstractList<Q>(), RandomAccess {
+private fun <Q> worldReadOnlyView(backing: MutableList<Q>, rangeSize: Int? = null): MutableList<Q> = object : AbstractMutableList<Q>(), RandomAccess {
     override val size: Int get() = backing.size
     override fun get(index: Int): Q = backing[index]
-    override fun iterator(): Iterator<Q> = listIterator()
-    override fun listIterator(): ListIterator<Q> = listIterator(0)
-    override fun listIterator(index: Int): ListIterator<Q> {
+    override fun set(index: Int, element: Q): Q = throw UnsupportedOperationException()
+    override fun add(element: Q): Boolean = throw UnsupportedOperationException()
+    override fun add(index: Int, element: Q): Unit = throw UnsupportedOperationException()
+    override fun removeAt(index: Int): Q = throw UnsupportedOperationException()
+    override fun remove(element: Q): Boolean = throw UnsupportedOperationException()
+    override fun clear(): Unit = throw UnsupportedOperationException()
+    override fun addAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
+    override fun addAll(index: Int, elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
+    override fun removeAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
+    override fun retainAll(elements: Collection<Q>): Boolean = throw UnsupportedOperationException()
+
+    override fun iterator(): MutableIterator<Q> = listIterator()
+    override fun listIterator(): MutableListIterator<Q> = listIterator(0)
+    override fun listIterator(index: Int): MutableListIterator<Q> {
         val iterator = backing.listIterator(index)
-        return object : ListIterator<Q> {
+        return object : MutableListIterator<Q> {
             override fun hasNext() = iterator.hasNext()
             override fun next() = iterator.next()
             override fun hasPrevious() = iterator.hasPrevious()
             override fun previous() = iterator.previous()
             override fun nextIndex() = iterator.nextIndex()
             override fun previousIndex() = iterator.previousIndex()
+            override fun remove(): Unit = throw UnsupportedOperationException()
+            override fun set(element: Q): Unit = throw UnsupportedOperationException()
+            override fun add(element: Q): Unit = throw UnsupportedOperationException()
         }
     }
-    override fun subList(fromIndex: Int, toIndex: Int): List<Q> = worldReadOnlyView(backing.subList(fromIndex, toIndex))
+    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Q> {
+        if (rangeSize != null) {
+            if (fromIndex < 0 || toIndex > rangeSize) throw IndexOutOfBoundsException()
+            if (fromIndex > toIndex) throw IllegalArgumentException()
+        }
+        val child = backing.subList(fromIndex, toIndex)
+        backing.size // Check the parent before a child can adopt the root's current version.
+        return worldReadOnlyView(child, toIndex - fromIndex)
+    }
 }
 
 abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : CollisionData<T, E>> :
@@ -112,9 +134,9 @@ abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : Col
     @kotlin.jvm.JvmField protected val bodies: MutableList<T>
     @kotlin.jvm.JvmField protected val bodiesUnmodifiable: List<T>
     @kotlin.jvm.JvmField protected val collisionData: MutableMap<CollisionPair<CollisionItem<T, E>>, V>
-    @kotlin.jvm.JvmField protected val collisionListeners: MutableList<CollisionListener<T, E>> = ArrayList(10)
+    @kotlin.jvm.JvmField protected val collisionListeners: MutableList<CollisionListener<T, E>> = worldTrackedArrayList(10)
     @kotlin.jvm.JvmField protected val collisionListenersUnmodifiable: List<CollisionListener<T, E>>
-    @kotlin.jvm.JvmField protected val boundsListeners: MutableList<BoundsListener<T, E>> = ArrayList(10)
+    @kotlin.jvm.JvmField protected val boundsListeners: MutableList<BoundsListener<T, E>> = worldTrackedArrayList(10)
     @kotlin.jvm.JvmField protected val boundsListenersUnmodifiable: List<BoundsListener<T, E>>
 
     constructor() : this(CollisionWorld.DEFAULT_INITIAL_BODY_CAPACITY)
@@ -129,7 +151,7 @@ abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : Col
         )
         broadphaseDetector = CollisionItemBroadphaseDetectorAdapter(broadphase)
         broadphaseDetector.setUpdateTrackingEnabled(true)
-        bodies = ArrayList(capacity)
+        bodies = worldTrackedArrayList(capacity)
         bodiesUnmodifiable = worldLiveUnmodifiableList(bodies)
         collisionData = LinkedHashMap(Collisions.getEstimatedCollisionPairs(capacity))
         collisionListenersUnmodifiable = worldLiveUnmodifiableList(collisionListeners)
