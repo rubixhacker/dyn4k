@@ -170,7 +170,7 @@ jobs:
               throw "Kotlin/Native compiler is missing: $konanc"
             }
             $konancVersion = (& $konanc -version 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0 -or $konancVersion -notmatch '2\.4\.20') {
+            if ($LASTEXITCODE -ne 0 -or $konancVersion -notmatch '(?<![\w.+-])2\.4\.20(?![\w.+-])') {
               throw "Kotlin/Native version check failed: $konancVersion"
             }
             Set-Content -Path (Join-Path $scalar 'kotlin-native-version.txt') -Value $konancVersion
@@ -269,6 +269,34 @@ jobs:
             ) | Set-Content -Path (Join-Path $evidence 'runner-runtime-identity.txt')
           } catch {
             $collectionErrors.Add("Runner identity collection failed: $($_.ToString())")
+            $collectionStatus = 1
+          }
+
+          $controlSources = @(
+            'tools/diagnostic/windows_collision/WindowsCollisionScalarControl.kt'
+            'tools/diagnostic/windows_collision/WindowsCollisionScalarJavaControl.java'
+            'tools/diagnostic/windows_collision/run-scalar-control.ps1'
+            'tools/diagnostic/windows_collision/validate-scalar-control.py'
+            '.github/workflows/windows-collision-focus.yml'
+          )
+          $controlSourceHashes = [System.Collections.Generic.List[string]]::new()
+          foreach ($relativeSource in $controlSources) {
+            try {
+              $sourcePath = Join-Path $PWD $relativeSource
+              if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                throw "Control source is missing: $relativeSource"
+              }
+              $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath -ErrorAction Stop).Hash.ToLowerInvariant()
+              $controlSourceHashes.Add("$sourceHash  $relativeSource")
+            } catch {
+              $collectionErrors.Add("Control source hash failed for $relativeSource`: $($_.ToString())")
+              $collectionStatus = 1
+            }
+          }
+          try {
+            $controlSourceHashes | Set-Content -Path (Join-Path $evidence 'control-source-sha256.txt') -ErrorAction Stop
+          } catch {
+            $collectionErrors.Add("Control source hash record failed: $($_.ToString())")
             $collectionStatus = 1
           }
 
