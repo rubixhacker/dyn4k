@@ -24,10 +24,10 @@ sys.path.pop(0)
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "e35e3f1ec357b1c44b6d2b742e0d88bc2e91f767"
-MANIFEST_REV = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
-OLD_MANIFEST_REV = "6f983ad3a36bdc549c32f5d0883b0a47b28e1963"
-MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
-OLD_MANIFEST_SHA256 = "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"
+MANIFEST_REV = "44053b62f49c9f12f3be7540f93164a446bd0e61"
+OLD_MANIFEST_REV = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
+MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
+OLD_MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
 LANE = "jvm:Java:minimum:no-optimize"
 
 
@@ -75,12 +75,17 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(28, len({(lane["target"], lane["runtime"])
                                   for lane in self.manifest["lanes"].values()}))
         self.assertEqual(112, len(self.manifest["lanes"]))
-        self.assertEqual(2515, len(self.manifest["cases"]))
+        self.assertEqual(2521, len(self.manifest["cases"]))
         corpus = json.loads((ROOT / "tools/qualification/full-common-corpus.json").read_text())
         self.assertEqual(2385, len(corpus["original_mappings"]))
-        self.assertEqual(199, len(corpus["source_files"]))
-        self.assertEqual(2512, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
+        self.assertEqual(201, len(corpus["source_files"]))
+        self.assertEqual(2518, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
         self.assertEqual(3, sum(case["scope"] == "jvm-only" for case in self.manifest["cases"]))
+        historical = json.loads(subprocess.check_output(
+            ["git", "show", "6c6faed0499d0ddc2fee4ae910e4f58d044130e0:tools/qualification/full-common-corpus.json"],
+            cwd=ROOT))
+        self.assertEqual(199, len(historical["source_files"]))
+        self.assertEqual(2385, len(historical["original_mappings"]))
 
     def test_missing_archives_keep_every_declared_route_unpassed(self):
         result = independent_gates.evaluate(
@@ -117,13 +122,18 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(current, hashlib.sha256(subprocess.check_output(
             ["git", "show", f"8a5c4681838aa1eb1f08ebfb7aa54d6616bb3977:{path}"],
             cwd=ROOT)).hexdigest())
-        approved = independent_gates._policy_binding(
-            ROOT, "cd21a4bd7d6731a096597f97966db9e02b9de448")
-        self.assertEqual(current, approved[path])
+        historical = "cd21a4bd7d6731a096597f97966db9e02b9de448"
+        current_source = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                                 cwd=ROOT, text=True).strip()
+        self.assertEqual(current, independent_gates._policy_binding(ROOT, historical)[path])
+        self.assertEqual(current, independent_gates._policy_binding(ROOT, current_source)[path])
         for path, approved in independent_gates.APPROVED_POLICY.items():
             committed = subprocess.check_output(["git", "show", f"{BASE}:{path}"],
                                                 cwd=ROOT)
-            if path != "tools/numerical/compare.py":
+            if path == "tools/numerical/fixtures.json":
+                self.assertEqual(independent_gates.HISTORICAL_FIXTURE_SHA256,
+                                 hashlib.sha256(committed).hexdigest())
+            elif path != "tools/numerical/compare.py":
                 self.assertEqual(approved, hashlib.sha256(committed).hexdigest())
         with self.assertRaisesRegex(ValueError,
                                     "approved policy/checker blob differs: tools/numerical/compare.py"):
@@ -132,8 +142,11 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"tools/numerical/compare.py":
                               "4310fe9ddad700bd591b7708cc1a61e9b307029ca97f5240b608a61fe0430fa3"}):
             with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
-                independent_gates._policy_binding(
-                    ROOT, "cd21a4bd7d6731a096597f97966db9e02b9de448")
+                independent_gates._policy_binding(ROOT, historical)
+        with mock.patch.dict(independent_gates.APPROVED_POLICY,
+                             {"tools/numerical/fixtures.json": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
+                independent_gates._policy_binding(ROOT, current_source)
 
     def test_producer_scope_requires_independently_pinned_raw_manifest(self):
         scope = {"candidate_sha": BASE, "target": "jvm", "runtime": "Java",
@@ -244,7 +257,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                                          selections, ROOT)
         self.assertEqual(112, assembled["required_lanes"])
         self.assertEqual("NOT_RUN", assembled["status"])
-        self.assertEqual(2515, assembled["selected_cases"][LANE])
+        self.assertEqual(2521, assembled["selected_cases"][LANE])
         self.assertEqual(assembled["result_sha256"], independent_gates.digest(
             {key: value for key, value in assembled.items() if key != "result_sha256"}))
         with tempfile.TemporaryDirectory() as temporary:
@@ -278,7 +291,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.manifest, candidate, selections, ROOT)
         self.assertEqual("PASSED", assembled["status"])
         self.assertEqual(112, len(assembled["qualify_adapter"]))
-        self.assertEqual(2515, len(assembled["qualify_adapter"][LANE]["case_results"]))
+        self.assertEqual(2521, len(assembled["qualify_adapter"][LANE]["case_results"]))
         self.assertEqual({"PASSED"}, {row["status"] for row in
                                         assembled["qualify_adapter"][LANE]["case_results"]})
         def incomplete(*args):
@@ -312,7 +325,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 key = Path(key_temporary) / "trusted.key"
                 key.write_bytes(b"independent-archive-key-1234567890")
                 with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
-                                            "not assembled"):
+                                            "not present at candidate"):
                     independent_gates._performance_resource(
                         root, BASE, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
                         scope, ROOT, key)
@@ -326,6 +339,38 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "policy pin"):
                 independent_gates._producer_scope("performance-resource", BASE,
                                                   {"performance-resource": full_scope})
+
+    def test_sustained_current_source_requires_approved_policy_and_rejects_wrong_pin(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        verifier = ROOT / "tools/performance/sustained_archive.py"
+        policy = ROOT / "docs/research/performance-manifest-v1.json"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "archive"
+            root.mkdir()
+            evidence = root / "evidence"
+            evidence.mkdir()
+            index = {"schema": 1, "route": "sustained-raw-v1",
+                     "source_commit": candidate,
+                     "artifacts": {"jvm.java": {"core": {"sha256": "a" * 64},
+                                                 "kotlin": {"sha256": "b" * 64}}}}
+            (evidence / "archive.json").write_text(json.dumps(index))
+            key = Path(temporary) / "trusted.key"
+            key.write_bytes(b"independent-archive-key-1234567890")
+            scope = {"producer_manifest_hashes": {"evidence/archive.json":
+                     hashlib.sha256((evidence / "archive.json").read_bytes()).hexdigest()},
+                     "verifier_sha256": hashlib.sha256(verifier.read_bytes()).hexdigest(),
+                     "policy_sha256": hashlib.sha256(policy.read_bytes()).hexdigest()}
+            with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
+                                        "unpassed policy"):
+                independent_gates._performance_resource(
+                    root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
+                    scope, ROOT, key)
+            scope["verifier_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "independently approved verifier"):
+                independent_gates._performance_resource(
+                    root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
+                    scope, ROOT, key)
 
     def test_producer_scope_is_part_of_digest_bound_public_result(self):
         scope = {"candidate_sha": BASE, "target": "jvm", "runtime": "Java",
@@ -347,6 +392,75 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates.verify_prospective_case_subgates(
                     root, receipt, ROOT, BASE, {"dyn4k-core": "a" * 64}, source_sha)
 
+    def test_prospective_rule_and_arithmetic_status_requires_both_verified(self):
+        self.assertEqual("PASSED", independent_gates._prospective_case_status(
+            "PASSED_NUMERICAL_POLICY", "PASSED"))
+        self.assertEqual("NOT_RUN", independent_gates._prospective_case_status(
+            "PASSED_NUMERICAL_POLICY", "NOT_RUN"))
+        self.assertEqual("NOT_RUN", independent_gates._prospective_case_status(
+            "UNPASSED_TARGET_MATH", "PASSED"))
+        self.assertEqual("FAILED", independent_gates._prospective_case_status(
+            "FAILED_NUMERICAL_POLICY", "PASSED"))
+        self.assertEqual("FAILED", independent_gates._prospective_case_status(
+            "PASSED_NUMERICAL_POLICY", "FAILED_ARITHMETIC"))
+
+    def test_pending_prospective_bridge_binds_15_receipts_without_claiming_pass(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        source_sha = independent_gates.verified_numerical_source_sha256(ROOT, candidate)
+        artifact_sha = "a" * 64
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            methods = []
+            for method in independent_gates.PROSPECTIVE_BRIDGE_METHODS:
+                path = f"{method}.json"
+                (root / path).write_text(json.dumps({
+                    "schema": "portable-arithmetic-capture-receipt/3",
+                    "method": method, "candidate_commit": candidate,
+                    "source_archive_sha256": source_sha,
+                    "artifact_sha256": artifact_sha}))
+                methods.append({"method": method, "receipt": path,
+                                "sha256": hashlib.sha256((root / path).read_bytes()).hexdigest()})
+            inventory = {"schema": "prospective-arithmetic-bridge/1",
+                         "candidate_sha": candidate, "source_sha256": source_sha,
+                         "artifact_sha256": artifact_sha,
+                         "case_ids": list(independent_gates.approved_prospective_cases(str(ROOT))),
+                         "methods": methods, "baseline_attestation_sha256": "b" * 64}
+
+            def check():
+                path = root / "bridge.json"
+                path.write_text(json.dumps(inventory))
+                bridge = {"inventory": path.name,
+                          "inventory_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                return independent_gates.verify_pending_prospective_bridge(
+                    root, {"status": "PASSED", "prospective_bridge": bridge}, ROOT,
+                    candidate, artifact_sha, source_sha)
+
+            self.assertEqual("NOT_RUN", check()["status"])
+            self.assertEqual(15, check()["transport_receipts"])
+            inventory["case_ids"].reverse()
+            with self.assertRaisesRegex(ValueError, "case, method"):
+                check()
+            inventory["case_ids"].reverse()
+            inventory["methods"][0], inventory["methods"][1] = (
+                inventory["methods"][1], inventory["methods"][0])
+            with self.assertRaisesRegex(ValueError, "case, method"):
+                check()
+            inventory["methods"][0], inventory["methods"][1] = (
+                inventory["methods"][1], inventory["methods"][0])
+            inventory["artifact_sha256"] = "c" * 64
+            with self.assertRaisesRegex(ValueError, "case, method"):
+                check()
+            inventory["artifact_sha256"] = artifact_sha
+            inventory["source_sha256"] = "d" * 64
+            with self.assertRaisesRegex(ValueError, "case, method"):
+                check()
+            inventory["source_sha256"] = source_sha
+            method_path = root / methods[0]["receipt"]
+            method_path.write_text(method_path.read_text().replace(candidate, BASE))
+            with self.assertRaisesRegex(ValueError, "method receipt differs"):
+                check()
+
     def test_prospective_adapter_loads_pinned_checker_then_demands_raw_case_bytes(self):
         candidate = independent_gates.PROSPECTIVE_POLICY_REVISION
         identities = independent_gates.approved_prospective_cases(str(ROOT))
@@ -362,6 +476,17 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate,
                     {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
+
+    def test_prospective_checker_pins_historical_and_assembled_source(self):
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                          cwd=ROOT, text=True).strip()
+        independent_gates._prospective_checker_binding(ROOT, current)
+        independent_gates._prospective_checker_binding(
+            ROOT, independent_gates.PROSPECTIVE_POLICY_REVISION)
+        with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_CHECKERS,
+                             {"prospective_compare.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current)
 
     def test_prospective_arithmetic_requires_raw_target_process_and_oracle_pin(self):
         case = "geometry-boundary-s0-o0-d0"

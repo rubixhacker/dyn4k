@@ -21,8 +21,8 @@ import qualify
 import artifact
 
 
-APPROVED_MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
-APPROVED_MANIFEST_REVISION = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
+APPROVED_MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
+APPROVED_MANIFEST_REVISION = "44053b62f49c9f12f3be7540f93164a446bd0e61"
 MANIFEST_PATH = "tools/qualification/full-suite-manifest.json"
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -35,13 +35,15 @@ PRODUCER_SCOPED_GATES = frozenset(("unchanged-java-corpus", "java-source-compati
                                    "migration-journeys", "performance-resource",
                                    "independent-review"))
 APPROVED_POLICY = {
-    "tools/numerical/fixtures.json": "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c",
+    "tools/numerical/fixtures.json": "3086e982d8a4915634bd62d50dbfa0bf4f6e8cc0070a7a16d1f4bede9764d48a",
     "tools/numerical/compare.py": "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f",
     "tools/numerical/physical.py": "98ff243a02eece8a47a4faeda06385696174b2b10836e4e1315d6a13e22ee5ba",
     "tools/numerical/weld-pulley-physical-declaration.json": "9794a4ef64c93f6ff76afb03d98784b27be68fe413256362abf1a3f84cf96368",
     "tools/numerical/weld-pulley-physical-manifest.json": "5531b263fbd5a7684db0ea9fbef167c8d8772104949ce01ba4de7606498aecab",
     "tools/numerical/weld_pulley_quality.py": "f8c7cb7449b5d007e5c7dabb20e08deda93974b3cd8a4bedf0cd96f1640c2c87",
 }
+HISTORICAL_FIXTURE_SHA256 = "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c"
+CURRENT_FIXTURE_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_MIGRATION = {
     "tools/migration/journeys.py": "f5111af3f263691446eae984904232d26a1d9392d6fa26881225bf8c9079b9b9",
     "tools/migration/validate_scene.py": "fa50bf08f0af86c173a4ec8775c4b6febb4b4c98099afd5dcb872ce97639ce6e",
@@ -55,11 +57,26 @@ REVIEWED_FULL_CI_REVISION = "00d2f949fd485287b737e905808bfb65be942733"
 REVIEWED_FULL_CI_SHA256 = "f8e0bda794d141b1418b76ccd712306b9c9f1d587446fe79fcb4697b57885ad7"
 NUMERICAL_SOURCE_HASH_METHOD = "SHA-256 of git archive --format=tar HEAD"
 PROSPECTIVE_CASE_COUNT = 318
+PROSPECTIVE_BRIDGE_METHODS = (
+    "captureGeometry", "captureFreeMotion", "captureDefaultContacts",
+    "captureConfigured30Repeat1", "captureConfigured30Repeat2",
+    "captureConfigured60Repeat1", "captureConfigured60Repeat2",
+    "captureConfigured120Repeat1", "captureConfigured120Repeat2",
+    "captureJoints", "captureJointBooleanModes", "captureJointNumericModes",
+    "captureAngleFailure", "captureCcd", "captureLongMotion")
 JOINT_PHYSICAL_CASES = ("weld-spring-equal", "pulley-taut")
 JOINT_PHYSICAL_STEPS = 36000
 PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
 PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
+PROSPECTIVE_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
+APPROVED_PROSPECTIVE_CHECKERS = {
+    "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
+    "cases.py": "273c8246850d6995f0b3db1dac2d6f52d1c3154af1deaa48fbde25dc41f184c1",
+    "orthogonality.py": "946bea6b9662a8f6e763ee9ce19374fa2b0b822a16a8e74ec355603576a5a15e",
+    "reference_diagnostic.py": "f3e40a4671c8e07d5d0071f11818f9235d7a0f4a8ddfd784cb01604b0bb4b967",
+    "receipt.py": "36c6c18255274195f58e4361e91d5fd7a5fc77eb9d5df01acc4abc0d36c75b0c",
+}
 ROTATION_ORACLE_REVISION = "8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb"
 ROTATION_ORACLE_SHA256 = "29de6401ef9253bee669714fdf31bade9291b4ee77d2aacaa34d62907f1bc238"
 ROTATION_ORACLE_PATH = "tools/numerical/portable/rotation_oracle.py"
@@ -200,8 +217,27 @@ def consumer_contract(manifest, lane_id):
 
 
 def _policy_binding(repository, candidate_sha):
-    return _source_binding(repository, candidate_sha, APPROVED_POLICY,
-                           "numerical approved policy/checker")
+    fixture = "tools/numerical/fixtures.json"
+    approved = _source_binding(repository, candidate_sha,
+                               {path: value for path, value in APPROVED_POLICY.items()
+                                if path != fixture}, "numerical approved policy/checker")
+    local = Path(__file__).resolve().parents[2] / fixture
+    committed = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{fixture}"], stderr=subprocess.PIPE)
+    candidate_digest = hashlib.sha256(committed).hexdigest()
+    changed = subprocess.run(
+        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+         "--is-ancestor", CURRENT_FIXTURE_REVISION, candidate_sha],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+    if changed.returncode not in (0, 1):
+        raise ValueError("numerical fixture revision ancestry is unavailable")
+    expected_digest = (APPROVED_POLICY[fixture] if changed.returncode == 0
+                       else HISTORICAL_FIXTURE_SHA256)
+    if (hashlib.sha256(local.read_bytes()).hexdigest() != APPROVED_POLICY[fixture]
+            or candidate_digest != expected_digest):
+        raise ValueError(f"numerical approved policy/checker blob differs: {fixture}")
+    return {**approved, fixture: candidate_digest}
 
 
 def verified_numerical_source_sha256(repository, candidate_sha):
@@ -231,6 +267,38 @@ def approved_prospective_catalog(repository):
 
 def approved_prospective_cases(repository):
     return tuple(sorted(approved_prospective_catalog(str(repository))["cases"]))
+
+
+def _prospective_checker_binding(repository, candidate_sha):
+    source_dir = "tools/numerical/portable"
+    changed = subprocess.run(
+        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+         "--is-ancestor", PROSPECTIVE_CHECKER_REVISION, candidate_sha],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+    if changed.returncode not in (0, 1):
+        raise ValueError("prospective checker revision ancestry is unavailable")
+    for filename, current in APPROVED_PROSPECTIVE_CHECKERS.items():
+        relative = f"{source_dir}/{filename}"
+        local = Path(__file__).resolve().parents[2] / relative
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+        approved = (current if changed.returncode == 0 else hashlib.sha256(
+            subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(repository), "show",
+                 f"{PROSPECTIVE_POLICY_REVISION}:{relative}"], stderr=subprocess.PIPE)
+        ).hexdigest())
+        if (hashlib.sha256(local.read_bytes()).hexdigest() != current
+                or hashlib.sha256(committed).hexdigest() != approved):
+            raise ValueError(f"prospective policy/checker blob differs: {relative}")
+    catalog = f"{source_dir}/prospective_policy_catalog.json"
+    committed = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{catalog}"], stderr=subprocess.PIPE)
+    if (hashlib.sha256(committed).hexdigest() != PROSPECTIVE_POLICY_SHA256
+            or hashlib.sha256((Path(__file__).resolve().parents[2] / catalog).read_bytes()).hexdigest()
+            != PROSPECTIVE_POLICY_SHA256):
+        raise ValueError(f"prospective policy/checker blob differs: {catalog}")
 
 
 def _missing_numerical_subgates(repository):
@@ -591,6 +659,60 @@ def _target_arithmetic_evidence(root, audit, identity, repository,
     return "NOT_RUN"
 
 
+def _prospective_case_status(rule, arithmetic):
+    if rule.startswith("FAILED") or arithmetic.startswith("FAILED"):
+        return "FAILED"
+    if rule != "PASSED_NUMERICAL_POLICY":
+        return "NOT_RUN"
+    return "PASSED" if arithmetic == "PASSED" else "NOT_RUN"
+
+
+def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
+                                      artifact_sha256, source_sha256):
+    bridge = receipt.get("prospective_bridge")
+    if not isinstance(bridge, dict) or set(bridge) != {"inventory", "inventory_sha256"}:
+        raise ValueError("prospective bridge inventory is missing or malformed")
+    raw = _file_path(root, bridge["inventory"]).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != bridge["inventory_sha256"]:
+        raise ValueError("prospective bridge inventory differs")
+    inventory = _json(_file_path(root, bridge["inventory"]))
+    if (not isinstance(inventory, dict)
+            or set(inventory) != {"schema", "candidate_sha", "source_sha256",
+                                  "artifact_sha256", "case_ids", "methods",
+                                  "baseline_attestation_sha256"}
+            or inventory["schema"] != "prospective-arithmetic-bridge/1"
+            or inventory["candidate_sha"] != candidate_sha
+            or inventory["source_sha256"] != source_sha256
+            or inventory["artifact_sha256"] != artifact_sha256
+            or inventory["case_ids"] != list(approved_prospective_cases(str(repository)))
+            or not SHA64.fullmatch(str(inventory["baseline_attestation_sha256"]))
+            or not isinstance(inventory["methods"], list)
+            or [item.get("method") for item in inventory["methods"]
+                if isinstance(item, dict)] != list(PROSPECTIVE_BRIDGE_METHODS)):
+        raise ValueError("prospective bridge case, method, source, or artifact identity differs")
+    paths = set()
+    for item in inventory["methods"]:
+        if not isinstance(item, dict) or set(item) != {"method", "receipt", "sha256"}:
+            raise ValueError("prospective bridge method receipt is malformed")
+        path = item["receipt"]
+        if path in paths:
+            raise ValueError("prospective bridge method receipt path is duplicated")
+        paths.add(path)
+        data = _file_path(root, path).read_bytes()
+        if hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise ValueError("prospective bridge method receipt differs")
+        method_receipt = _json(_file_path(root, path))
+        if (method_receipt.get("schema") != "portable-arithmetic-capture-receipt/3"
+                or method_receipt.get("method") != item["method"]
+                or method_receipt.get("candidate_commit") != candidate_sha
+                or method_receipt.get("source_archive_sha256") != source_sha256
+                or method_receipt.get("artifact_sha256") != artifact_sha256):
+            raise ValueError(f"prospective bridge method is misbound: {item['method']}")
+    return {"status": "NOT_RUN", "required_cases": PROSPECTIVE_CASE_COUNT,
+            "transport_receipts": len(paths),
+            "reason": "15 method receipts are bound, but approved raw bridge verification and external baseline attestation are absent"}
+
+
 def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                                      expected_artifact_hashes, source_sha):
     catalog = approved_prospective_catalog(str(repository))
@@ -601,18 +723,8 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
         raise ValueError("318 prospective rule/arithmetic raw case identities are missing or duplicated")
     if receipt.get("prospective_catalog_sha256") != PROSPECTIVE_POLICY_SHA256:
         raise ValueError("adopted prospective catalog identity differs")
+    _prospective_checker_binding(repository, candidate_sha)
     portable = "tools/numerical/portable"
-    for filename in ("prospective_policy_catalog.json", "prospective_compare.py",
-                     "cases.py", "orthogonality.py", "reference_diagnostic.py", "receipt.py"):
-        relative = f"{portable}/{filename}"
-        approved = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "show",
-             f"{PROSPECTIVE_POLICY_REVISION}:{relative}"], stderr=subprocess.PIPE)
-        committed = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "show",
-             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
-        if committed != approved:
-            raise ValueError(f"prospective policy/checker blob differs: {relative}")
     archive = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "archive", candidate_sha,
          portable, "tools/numerical/compare.py", "tools/numerical/fixtures.json"],
@@ -669,8 +781,7 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                 rule = compared["status"]
                 cases[case_id] = {"rule": rule,
                                   "arithmetic": arithmetic_status,
-                                  "status": "FAILED" if rule.startswith("FAILED") else
-                                  "PASSED" if rule == "PASSED" and arithmetic_status == "PASSED" else "NOT_RUN"}
+                                  "status": _prospective_case_status(rule, arithmetic_status)}
             overall = ("FAILED" if any(item["status"] == "FAILED" for item in cases.values()) else
                        "PASSED" if all(item["status"] == "PASSED" for item in cases.values()) else "NOT_RUN")
             return {"status": overall,
@@ -1395,8 +1506,15 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, r
         return physical_profiles
     subgates = _missing_numerical_subgates(repository)
     subgates["frozen-traces"] = {"status": "PASSED", "required_cases": len(entries)}
-    subgates["prospective-rule-arithmetic"] = verify_prospective_case_subgates(
-        root, receipt, repository, candidate_sha, expected_artifact_hashes, source_sha)
+    if "prospective_bridge" in receipt:
+        if "prospective_cases" in receipt:
+            raise ValueError("prospective bridge and per-case arithmetic routes are ambiguous")
+        subgates["prospective-rule-arithmetic"] = verify_pending_prospective_bridge(
+            root, receipt, repository, candidate_sha,
+            expected_artifact_hashes["dyn4k-core"], source_sha)
+    else:
+        subgates["prospective-rule-arithmetic"] = verify_prospective_case_subgates(
+            root, receipt, repository, candidate_sha, expected_artifact_hashes, source_sha)
     return subgates
 
 
@@ -1427,14 +1545,19 @@ def _performance_resource(root, candidate_sha, expected_artifact_hashes,
         checked = ("tools/performance/sustained_archive.py",
                    "tools/performance/manifest.py", "tools/performance/measure.py",
                    "tools/performance/analyze.py", "tools/performance/candidate_runner.py",
+                   "tools/performance/stress_monitor.py",
                    "docs/research/performance-manifest-v1.json")
         for relative in checked:
             local = repository / relative
             if not local.is_file():
                 raise IncompleteEvidence(f"sustained performance producer source is not assembled: {relative}")
-            committed = subprocess.check_output(
-                ["git", "--no-replace-objects", "-C", str(repository), "show",
-                 f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+            try:
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "-C", str(repository), "show",
+                     f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError as error:
+                raise IncompleteEvidence(
+                    f"sustained performance producer source is not present at candidate: {relative}") from error
             if local.read_bytes() != committed:
                 raise ValueError(f"sustained performance verifier source differs: {relative}")
             if relative.endswith("sustained_archive.py") and hashlib.sha256(committed).hexdigest() != scope["verifier_sha256"]:
