@@ -262,7 +262,7 @@ jobs:
           - {target: iosX64, runner: macos-26-intel}
           - {target: mingwX64, runner: windows-2025}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 55
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -304,6 +304,33 @@ jobs:
           --hosted-probe "${{ runner.temp }}/native-raw-bundle/json/hosted-${{ matrix.target }}.json"
           --raw-bundle "${{ runner.temp }}/native-raw-bundle"
           --output "${{ runner.temp }}/native-raw-bundle/json/matrix-${{ matrix.target }}.json"
+      - name: Execute full hosted common corpus and staged consumer
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+      - name: Independently verify full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+      - name: Package full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --package
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+          --archive "${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar"
+      - name: Verify transportable full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify-tar
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --archive "${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar"
       - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -312,10 +339,17 @@ jobs:
           path: |
             ${{ runner.temp }}/native-raw-bundle/
           if-no-files-found: error
+      - name: Upload full native common corpus evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-full-${{ github.sha }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar
+          if-no-files-found: error
 
   safari-browser:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       SAFARI_BIN: ${{ github.workspace }}/tools/qualification/safari-launch.sh
     steps:
@@ -360,6 +394,33 @@ jobs:
           --hosted-probe "${{ runner.temp }}/safari-raw-bundle/json/hosted-jsSafari.json"
           --raw-bundle "${{ runner.temp }}/safari-raw-bundle"
           --output "${{ runner.temp }}/safari-raw-bundle/json/matrix-jsSafari.json"
+      - name: Execute full Safari common corpus and staged consumer
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py
+          --candidate-sha "${{ github.sha }}"
+          --target jsSafari
+          --output "${{ runner.temp }}/full-hosted-jsSafari"
+      - name: Independently verify full Safari archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify
+          --candidate-sha "${{ github.sha }}"
+          --target jsSafari
+          --output "${{ runner.temp }}/full-hosted-jsSafari"
+      - name: Package full Safari archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --package
+          --output "${{ runner.temp }}/full-hosted-jsSafari"
+          --archive "${{ runner.temp }}/full-hosted-jsSafari.tar"
+      - name: Verify transportable full Safari archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify-tar
+          --candidate-sha "${{ github.sha }}"
+          --target jsSafari
+          --archive "${{ runner.temp }}/full-hosted-jsSafari.tar"
       - name: Upload Safari evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -367,4 +428,11 @@ jobs:
           name: qualification-${{ github.sha }}-jsSafari
           path: |
             ${{ runner.temp }}/safari-raw-bundle/
+          if-no-files-found: error
+      - name: Upload full Safari common corpus evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-full-${{ github.sha }}-jsSafari
+          path: ${{ runner.temp }}/full-hosted-jsSafari.tar
           if-no-files-found: error
