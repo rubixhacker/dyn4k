@@ -595,6 +595,12 @@ def run_lock_task(repository, output, command=None):
                    "--rerun-tasks", ":kotlinStoreYarnLock"]
     if os.name == "nt":
         return _run_lock_task_windows(repository, output, command)
+    with (output / "stdout.txt").open("wb") as stdout, \
+            (output / "stderr.txt").open("wb") as stderr:
+        return _run_lock_task_posix(repository, command, stdout, stderr)
+
+
+def _run_lock_task_posix(repository, command, stdout, stderr):
     started = time.time_ns()
     process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
@@ -603,9 +609,7 @@ def run_lock_task(repository, output, command=None):
     kept = {"stdout": 0, "stderr": 0}
     timed_out = False
     stream_incomplete = False
-    with (output / "stdout.txt").open("wb") as stdout, \
-            (output / "stderr.txt").open("wb") as stderr, \
-            selectors.DefaultSelector() as selector:
+    with selectors.DefaultSelector() as selector:
         selector.register(process.stdout, selectors.EVENT_READ, ("stdout", stdout))
         selector.register(process.stderr, selectors.EVENT_READ, ("stderr", stderr))
         drain_deadline = None
@@ -730,6 +734,12 @@ def _windows_job_active_count(kernel, job):
 
 
 def _run_lock_task_windows(repository, output, command):
+    with (output / "stdout.txt").open("wb") as stdout, \
+            (output / "stderr.txt").open("wb") as stderr:
+        return _run_lock_task_windows_opened(repository, command, stdout, stderr)
+
+
+def _run_lock_task_windows_opened(repository, command, stdout, stderr):
     started = time.time_ns()
     job = None
     if os.name == "nt":
@@ -810,8 +820,7 @@ def _run_lock_task_windows(repository, output, command):
     kept = {"stdout": 0, "stderr": 0}
     reader_errors = []
     timed_out = False
-    with (output / "stdout.txt").open("wb") as stdout, \
-            (output / "stderr.txt").open("wb") as stderr:
+    with stdout, stderr:
         def drain(name, source, destination):
             try:
                 while chunk := source.read(64 * 1024):
@@ -961,28 +970,48 @@ def capture(repository, candidate_sha, output, configuration=None):
         expected_command = full_hosted_command(repository, init, configuration,
                                                receipt["invocation_id"])
         receipt["init_script_sha256"] = digest(init)
-    if configuration:
-        try:
+    reporter_stage = None
+    try:
+        if configuration:
             with safari_reporter.stage(repository, candidate_sha,
                                        (Path("dyn4k-core"), Path("dyn4k")), output) as reporter_stage:
                 process = run_lock_task(repository, output, expected_command)
-        except safari_reporter.StageFailure as error:
-            for item in error.result["forensic"]:
+            receipt["reporter_stage"] = reporter_stage
+            for item in reporter_stage["forensic"]:
                 if "archive_path" in item:
                     files.append({"path": item["archive_path"], "sha256": item["sha256"],
                                   "size": item["retained_size"]})
-            receipt.update(status="STAGED_REPORTER_CHANGED", reason=str(error),
-                           reporter_stage=error.result, files=files)
-            (output / "receipt.json").write_text(json.dumps(receipt, indent=2,
-                                                           sort_keys=True) + "\n")
-            return receipt
-        receipt["reporter_stage"] = reporter_stage
-        for item in reporter_stage["forensic"]:
+        else:
+            process = run_lock_task(repository, output)
+    except safari_reporter.StageFailure as error:
+        for item in error.result["forensic"]:
             if "archive_path" in item:
                 files.append({"path": item["archive_path"], "sha256": item["sha256"],
                               "size": item["retained_size"]})
-    else:
-        process = run_lock_task(repository, output)
+        receipt.update(status="STAGED_REPORTER_CHANGED", reason=str(error),
+                       reporter_stage=error.result, files=files)
+        (output / "receipt.json").write_text(json.dumps(receipt, indent=2,
+                                                       sort_keys=True) + "\n")
+        return receipt
+    except OSError as error:
+        if reporter_stage is not None:
+            receipt["reporter_stage"] = reporter_stage
+            for item in reporter_stage["forensic"]:
+                if "archive_path" in item:
+                    files.append({"path": item["archive_path"], "sha256": item["sha256"],
+                                  "size": item["retained_size"]})
+        for name in ("stdout.txt", "stderr.txt"):
+            path = output / name
+            try:
+                if path.is_file():
+                    files.append({"path": name, "sha256": digest(path),
+                                  "size": path.stat().st_size})
+            except OSError:
+                pass
+        receipt.update(status="PROCESS_CAPTURE_FAILED", reason=str(error)[:512], files=files)
+        (output / "receipt.json").write_text(json.dumps(receipt, indent=2,
+                                                       sort_keys=True) + "\n")
+        return receipt
     receipt["process"] = process
     for name in ("stdout.txt", "stderr.txt"):
         path = output / name

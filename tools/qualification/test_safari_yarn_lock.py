@@ -714,6 +714,75 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("dyn4k-core/karma.config.d", stage["forensic"][0]["path"])
         self.assertTrue((self.repository / "dyn4k-core/karma.config.d").is_dir())
 
+    def test_public_capture_log_open_failure_records_clean_stage_without_launch(self):
+        real_open = Path.open
+        real_run = safari_yarn_lock.run_lock_task
+        real_popen = subprocess.Popen
+        outside = self.root / "outside.txt"
+        outside.write_bytes(b"outside sentinel")
+        for platform_name in ("posix", "nt"):
+            for failed_name in ("stdout.txt", "stderr.txt"):
+                with self.subTest(platform=platform_name, failed_name=failed_name):
+                    output = self.root / f"capture-{platform_name}-{failed_name}"
+                    launched = []
+                    kernel = mock.Mock()
+                    kernel.CreateJobObjectW.return_value = 789
+                    kernel.SetInformationJobObject.return_value = 1
+                    kernel.AssignProcessToJobObject.return_value = 1
+
+                    def fail_log(path, mode="r", *args, **kwargs):
+                        if path == output / failed_name and mode == "wb":
+                            raise PermissionError(f"injected {failed_name} open failure")
+                        return real_open(path, mode, *args, **kwargs)
+
+                    def launch(*args, **kwargs):
+                        if not str(args[0][0]).endswith("/gradlew"):
+                            return real_popen(*args, **kwargs)
+                        launched.append(True)
+                        process = mock.Mock(pid=345, _handle=456, returncode=0)
+                        process.stdout = mock.Mock()
+                        process.stderr = mock.Mock()
+                        return process
+
+                    def run(repository, folder, command):
+                        if platform_name == "posix":
+                            return real_run(repository, folder, command)
+                        proxy = mock.Mock(wraps=os)
+                        proxy.name = "nt"
+                        with mock.patch.object(safari_yarn_lock, "os", proxy), \
+                                mock.patch.object(safari_yarn_lock.ctypes, "WinDLL",
+                                                  return_value=kernel, create=True), \
+                                mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                                  create=True), \
+                                mock.patch.object(safari_yarn_lock,
+                                                  "_resume_suspended_windows_process"):
+                            return safari_yarn_lock._run_lock_task_windows(
+                                repository, folder, command)
+
+                    arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                                 "--output", str(output), "--configuration", "development"]
+                    with mock.patch.object(Path, "open", fail_log), \
+                            mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                            mock.patch.object(safari_yarn_lock, "run_lock_task",
+                                              side_effect=run), \
+                            mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                            mock.patch.object(sys, "argv", arguments), \
+                            redirect_stdout(io.StringIO()):
+                        self.assertEqual(1, safari_yarn_lock.main())
+                    self.assertFalse(launched)
+                    if platform_name == "nt":
+                        kernel.CreateJobObjectW.assert_not_called()
+                    receipt = json.loads((output / "receipt.json").read_text())
+                    self.assertEqual("PROCESS_CAPTURE_FAILED", receipt["status"])
+                    self.assertFalse(receipt["qualified"])
+                    self.assertIn(failed_name, receipt["reason"])
+                    self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+                    self.assertEqual(b"outside sentinel", outside.read_bytes())
+                    for module in ("dyn4k-core", "dyn4k"):
+                        self.assertFalse((self.repository / module / "karma.config.d").exists())
+                    with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+                        safari_yarn_lock.audit_capture(self.repository, self.candidate, output)
+
     def test_public_hosted_capture_rejects_detached_job_child_with_closed_pipes(self):
         class Process:
             pid = 345

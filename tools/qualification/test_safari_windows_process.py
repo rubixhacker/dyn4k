@@ -13,6 +13,53 @@ import safari_yarn_lock
 
 
 class SafariWindowsProcessTests(unittest.TestCase):
+    def test_log_open_failure_never_launches_windows_process_or_leaves_job(self):
+        for failed_name in ("stdout.txt", "stderr.txt"):
+            with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output = root / "capture"
+                output.mkdir()
+                outside = root / "outside.txt"
+                outside.write_bytes(b"outside sentinel")
+                real_open = Path.open
+                launched = []
+                kernel = mock.Mock()
+                kernel.CreateJobObjectW.return_value = 789
+                kernel.SetInformationJobObject.return_value = 1
+                kernel.AssignProcessToJobObject.return_value = 1
+
+                def fail_log(path, mode="r", *args, **kwargs):
+                    if path == output / failed_name and mode == "wb":
+                        raise PermissionError(f"injected {failed_name} open failure")
+                    return real_open(path, mode, *args, **kwargs)
+
+                def launch(*args, **kwargs):
+                    launched.append(True)
+                    process = mock.Mock(pid=345, _handle=456, returncode=0)
+                    process.stdout = mock.Mock()
+                    process.stderr = mock.Mock()
+                    return process
+
+                proxy = mock.Mock(wraps=os)
+                proxy.name = "nt"
+                with mock.patch.object(Path, "open", fail_log), \
+                        mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                          create=True), \
+                        mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                        mock.patch.object(safari_yarn_lock, "os", proxy), \
+                        mock.patch.object(safari_yarn_lock.ctypes, "WinDLL",
+                                          return_value=kernel, create=True), \
+                        mock.patch.object(safari_yarn_lock, "_resume_suspended_windows_process"):
+                    with self.assertRaisesRegex(PermissionError, failed_name):
+                        safari_yarn_lock._run_lock_task_windows(root, output, ["gradle"])
+                self.assertFalse(launched)
+                kernel.CreateJobObjectW.assert_not_called()
+                self.assertEqual(b"outside sentinel", outside.read_bytes())
+                for name in ("stdout.txt", "stderr.txt"):
+                    if (output / name).exists():
+                        with (output / name).open("ab"):
+                            pass
+
     def test_resume_requires_unique_primary_thread_and_suspend_count_one(self):
         closed = []
 
