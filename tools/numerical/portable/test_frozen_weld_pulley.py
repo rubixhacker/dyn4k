@@ -1,6 +1,7 @@
 import gzip
 import json
 import math
+import os
 import tempfile
 import unittest
 from fractions import Fraction
@@ -12,7 +13,7 @@ from frozen_weld_pulley import (BOUNDS, certify_observed_math, compare_branches,
                                compare_case, compare_records,
                                policy, verify_baseline_producer,
                                verify_provider_chain, verify_temporal_state)
-from receipt import records
+from receipt import Rejected, records
 from reference_diagnostic import projected_records, reference_records
 
 
@@ -24,6 +25,58 @@ ATTESTATION = Path("/var/home/stewart/dyn4k-evidence/portable-706-review-fix/"
 
 
 class FrozenWeldPulleySeamTest(unittest.TestCase):
+    @unittest.skipUnless(CHAIN_ARCHIVE.is_dir(), "retained baseline archive is unavailable")
+    def test_historical_recorder_source_uses_canonical_archive_under_autocrlf(self):
+        verified = json.loads((CHAIN_ARCHIVE / "verified.json").read_text())
+        self.assertEqual(verified["candidate_recorder_commit"],
+                         "ab7be1a150c30fcfdf51b0d889651569420c6ed7")
+        self.assertEqual(verified["source_sha256"],
+                         "56570d10c744eed880ead9aebd82d0bf11cf72797093ba36a0d07c2f1bfbf31b")
+        with tempfile.TemporaryDirectory() as directory:
+            attestation = Path(directory) / "attestation.json"
+            attestation.write_text("{}")
+            with patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1",
+                                          "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                          "GIT_CONFIG_VALUE_0": "true"}), \
+                    patch("baseline_capture.verify_attestation",
+                          return_value={"method_processes_verified": 15}), \
+                    patch("baseline_capture.fixture_source_sha256",
+                          return_value=verified["fixture_source_sha256"]):
+                result = verify_baseline_producer(
+                    CHAIN_ARCHIVE, "weld-enabled-equal", attestation)
+            self.assertEqual(result["source_sha256"], verified["source_sha256"])
+
+    @unittest.skipUnless(CHAIN_ARCHIVE.is_dir(), "retained baseline archive is unavailable")
+    def test_historical_recorder_source_rejects_changed_digest_and_invalid_commit(self):
+        verified = json.loads((CHAIN_ARCHIVE / "verified.json").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "archive"
+            root.mkdir()
+            (root / "dyn4j-6.0.0.jar").symlink_to(CHAIN_ARCHIVE / "dyn4j-6.0.0.jar")
+            (root / "baseline-jvm").mkdir()
+            (root / "baseline-jvm/cases").symlink_to(
+                CHAIN_ARCHIVE / "baseline-jvm/cases", target_is_directory=True)
+            attestation = Path(directory) / "attestation.json"
+            attestation.write_text("{}")
+            with patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1",
+                                          "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                          "GIT_CONFIG_VALUE_0": "true"}), \
+                    patch("baseline_capture.verify_attestation",
+                          return_value={"method_processes_verified": 15}), \
+                    patch("baseline_capture.fixture_source_sha256",
+                          return_value=verified["fixture_source_sha256"]):
+                for label, field, value in (
+                        ("changed digest", "source_sha256", "0" * 64),
+                        ("invalid ref", "candidate_recorder_commit", "invalid-recorder-commit"),
+                        ("invalid type", "candidate_recorder_commit", None)):
+                    with self.subTest(label=label):
+                        (root / "verified.json").write_text(
+                            json.dumps({**verified, field: value}))
+                        with self.assertRaisesRegex(Rejected,
+                                                    "baseline recorder source binding differs"):
+                            verify_baseline_producer(
+                                root, "weld-enabled-equal", attestation)
+
     @unittest.skipUnless(CHAIN_ARCHIVE.is_dir() and FROZEN.is_dir() and
                          ATTESTATION.is_file(), "retained baseline evidence is unavailable")
     def test_public_frozen_consumer_rejects_sidecar_without_raw_archive(self):
