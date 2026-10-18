@@ -121,7 +121,18 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                f"I/ActivityManager( 1485): Killing 3378:{package}/u0a58 (adj 0): stop {package}\n")
         added = (f"I/ActivityManager( 1485): Start proc {package} for added application "
                  f"{package}: pid=3378 uid=10058 gids={{50058, 9997}} abi=x86\n")
+        service = (f"I/ActivityManager( 1485): Start proc {package} for service "
+                   f"{package}/.SyncService: pid=3379 uid=10058 gids={{50058}} "
+                   "abi=arm64-v8a\n")
+        other_activity = (f"I/ActivityManager( 1485): Start proc {package} for activity "
+                          f"{package}/.OtherActivity: pid=3379 uid=10058 gids={{50058}} "
+                          "abi=arm64-v8a\n")
+        external = (f"I/ActivityManager( 1485): Start proc {package}.other for service "
+                    f"{package}.other/.SyncService: pid=3379 uid=10059 gids={{50059}} "
+                    "abi=arm64-v8a\n")
         self.assertEqual(run_full.validate_api21_process_log(log, package, "x86", "3334"), "3378")
+        self.assertEqual(run_full.validate_api21_process_log(
+            log.replace(added, added + external), package, "x86", "3334"), "3378")
         with self.assertRaisesRegex(ValueError, "instrumentation process"):
             run_full.validate_api21_process_log(log, package, "x86", "not-a-pid")
         for bad in (log.replace("pid=3378", "pid=3379"),
@@ -140,6 +151,13 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                     log + log):
             with self.subTest(bad=bad[-100:]), self.assertRaisesRegex(ValueError, "instrumentation process"):
                 run_full.validate_api21_process_log(bad, package, "x86", "3334")
+        for reason, extra in (("service", service),
+                              ("service with matching identity", service.replace(
+                                  "pid=3379", "pid=3378").replace("abi=arm64-v8a", "abi=x86")),
+                              ("other activity", other_activity)):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, "instrumentation process"):
+                run_full.validate_api21_process_log(
+                    log.replace(added, added + extra), package, "x86", "3334")
 
     def test_api21_process_list_requires_one_exact_application_pid(self):
         package = "io.github.rubixhacker.dyn4k.full"

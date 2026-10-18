@@ -133,6 +133,9 @@ def validate_runtime(identity, expected_api, expected_abi, boot_completed):
 
 def validate_api21_process_log(log, package, expected_abi, before_pid):
     escaped = re.escape(package)
+    all_starts = list(re.finditer(
+        rf"(?m)^[A-Z]/ActivityManager\(\s*\d+\): Start proc {escaped}(?=\s|$)[^\n]*$",
+        log))
     activities = list(re.finditer(
         rf"(?m)^[A-Z]/ActivityManager\(\s*\d+\): Start proc {escaped} for activity "
         rf"{escaped}/\.FullActivity: [^\n]*$", log))
@@ -143,7 +146,9 @@ def validate_api21_process_log(log, package, expected_abi, before_pid):
     finishes = list(re.finditer(
         rf"(?m)^I/ActivityManager\(\s*\d+\): Force stopping {escaped} "
         r"appid=(\d+) user=\d+: finished inst$", log))
-    if len(activities) != 1 or len(starts) != 1 or len(finishes) != 1 or \
+    if len(all_starts) != 2 or len(activities) != 1 or len(starts) != 1 or \
+            all_starts[0].start() != activities[0].start() or \
+            all_starts[1].start() != starts[0].start() or len(finishes) != 1 or \
             not isinstance(before_pid, str) or not before_pid.isdigit() or \
             activities[0].start() >= starts[0].start() or \
             starts[0].start() >= finishes[0].start():
