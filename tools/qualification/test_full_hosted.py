@@ -94,6 +94,158 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.read_reports([self.path], self.expected, "jsSafari", 0, end,
                                      "26.6.3")
 
+    def test_public_safari_route_stages_and_archives_source_and_consumer_reporters(self):
+        source_tree = Path(__file__).resolve().parents[2]
+        for configuration in ("development", "production", "missing"):
+            with self.subTest(configuration=configuration):
+                repository = self.root / f"source-{configuration}"
+                consumer = repository / "consumers/qualification/portable"
+                for project in ("dyn4k-core", "dyn4k"):
+                    (repository / project).mkdir(parents=True)
+                consumer.mkdir(parents=True)
+                for relative in ("tools/qualification/safari-karma-reporter.js",
+                                 "tools/qualification/safari_reporter.py"):
+                    destination = repository / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_tree / relative, destination)
+                for relative in (full_hosted.MAPPING, full_hosted.PAIRS):
+                    destination = repository / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_text("fixture\n")
+                (repository / "build.gradle.kts").write_text(
+                    'kotlin("multiplatform") version "2.4.20"\n'
+                    'id("com.android.kotlin.multiplatform.library") version "9.3.1"\n')
+                (repository / "gradlew").write_text("#!/bin/sh\n")
+                subprocess.run(["git", "init", "-q", str(repository)], check=True)
+                subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+                subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",
+                                "-c", "user.email=fixture@example.invalid", "commit", "-qm",
+                                "candidate"], check=True)
+                candidate = subprocess.check_output(
+                    ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+                fragment = (repository / "tools/qualification/safari-karma-reporter.js").read_text()
+
+                def generated_config(project, package, mode):
+                    build_root = consumer if project == "consumer" else repository
+                    root = consumer if project == "consumer" else repository / project
+                    folder = build_root / "build/js/packages" / package
+                    folder.mkdir(parents=True, exist_ok=True)
+                    runner = str(build_root / "build/js/node_modules/kotlin-web-helpers/dist"
+                                 / "kotlin-test-karma-runner.js")
+                    selected = (str(root / "build/compileSync/js/test/testProductionExecutable"
+                                    / "kotlin" / f"{package}.js") if mode == "production"
+                                else str(folder / "kotlin" / f"{package}.js"))
+                    settings = {"basePath": str(folder), "files": [runner, selected],
+                                "browsers": ["Safari"],
+                                "reporters": ["karma-kotlin-reporter"],
+                                "preprocessors": {runner: ["webpack", "sourcemap"],
+                                                  selected: ["webpack", "sourcemap"]}}
+                    (folder / "karma.conf.js").write_text(
+                        "module.exports = function(config) {\nconfig.set(" + json.dumps(settings) +
+                        ");\nconfig.plugins.push(require('kotlin-web-helpers/dist/"
+                        "karma-kotlin-reporter'));\n" + fragment + "\n}\n")
+
+                calls = []
+
+                def command(command, cwd, destination, invocation_id=None):
+                    started = time.time_ns()
+                    destination.mkdir(parents=True, exist_ok=True)
+                    (destination / "stdout.txt").write_text("BUILD SUCCESSFUL\n")
+                    (destination / "stderr.txt").write_text("")
+                    calls.append(destination.name)
+                    if destination.name == "source":
+                        for module in ("dyn4k-core", "dyn4k"):
+                            self.assertEqual(fragment.encode(),
+                                (repository / module / "karma.config.d"
+                                 / "qualification-safari-reporter.js").read_bytes())
+                            if configuration != "missing" or module == "dyn4k-core":
+                                generated_config(module, f"dyn4k-{module}-test",
+                                                 destination.parent.name)
+                        self.assertFalse((consumer / "karma.config.d").exists())
+                    elif destination.name == "consumer":
+                        staged = consumer / "karma.config.d/qualification-safari-reporter.js"
+                        self.assertEqual(fragment.encode(), staged.read_bytes())
+                        self.assertFalse((repository / "dyn4k-core/karma.config.d").exists())
+                        self.assertFalse((repository / "dyn4k/karma.config.d").exists())
+                        generated_config("consumer", "dyn4k-staged-portable-consumer-test",
+                                         destination.parent.name)
+                        if configuration == "production":
+                            staged.write_bytes(b"config.plugins = [];\n")
+                    return {"command": command, "pid": 123, "exit_code": 0,
+                            "started_ns": started, "finished_ns": time.time_ns(),
+                            "stdout_sha256": full_hosted.sha256(destination / "stdout.txt"),
+                            "stderr_sha256": full_hosted.sha256(destination / "stderr.txt")}
+
+                def products(projects, target, mode, process, diagnostic, output):
+                    result = {}
+                    for name, root in projects.items():
+                        item = root / "build/compileSync/js/test" / (
+                            "testProductionExecutable" if mode == "production"
+                            else "testDevelopmentExecutable") / "kotlin" / f"{name}.js"
+                        item.parent.mkdir(parents=True, exist_ok=True)
+                        item.write_bytes(b"linked")
+                        result[name] = {"path": str(item), "sha256": full_hosted.sha256(item),
+                                        "size": item.stat().st_size,
+                                        "modified_ns": item.stat().st_mtime_ns}
+                    return result
+
+                def tasks(process, folder, target, mode, modules):
+                    if modules == ("",):
+                        raise ValueError("fixture stops after Safari consumer capture")
+
+                hashes = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
+                output = self.root / f"archive-{configuration}"
+                manifest = {"source_files": [], "source_tree_sha256": "c" * 64}
+                runtime = {"system": "Darwin", "machine": "arm64", "java_version": "21.0.12",
+                           "safari_version": "26.6.2"}
+                with mock.patch.object(full_hosted, "__file__", str(repository /
+                                       "tools/qualification/full_hosted.py")), \
+                        mock.patch.object(full_hosted, "INPUTS", (
+                            "tools/qualification/safari-karma-reporter.js",
+                            "tools/qualification/safari_reporter.py")), \
+                        mock.patch.object(full_hosted, "load_corpus", return_value=manifest), \
+                        mock.patch.object(full_hosted.hosted, "discover_runtime", return_value=runtime), \
+                        mock.patch.object(full_hosted.hosted, "runtime_status",
+                                          return_value=("READY", "")), \
+                        mock.patch.object(full_hosted.hosted, "gradle_wrapper",
+                                          return_value=str(repository / "gradlew")), \
+                        mock.patch.object(full_hosted.hosted, "tool_version", return_value="9.5.0"), \
+                        mock.patch.object(full_hosted, "run_command", side_effect=command), \
+                        mock.patch.object(full_hosted.hosted, "target_hashes", return_value=hashes), \
+                        mock.patch.object(full_hosted.artifact, "capture_staging",
+                                          return_value=({}, None, {"js": hashes}, {})), \
+                        mock.patch.object(full_hosted, "capture_dokka_output"), \
+                        mock.patch.object(full_hosted, "collect_test_products",
+                                          side_effect=products), \
+                        mock.patch.object(full_hosted, "copy_reports", return_value=[]), \
+                        mock.patch.object(full_hosted, "require_test_tasks", side_effect=tasks):
+                    receipt = full_hosted.run("jsSafari", candidate, output)
+                self.assertEqual((["stage", "source", "source"] if configuration == "missing"
+                                  else ["stage", "source", "consumer", "source", "consumer"]),
+                                 calls)
+                self.assertEqual("FAILED", receipt["status"])
+                for lane in receipt["configurations"]:
+                    self.assertIn(("Safari generated Karma config is absent"
+                                   if configuration == "missing" else
+                                   "staged Safari consumer reporter changed"
+                                   if configuration == "production" else
+                                   "fixture stops after Safari consumer capture"), lane["reason"])
+                    for module in (("dyn4k-core",) if configuration == "missing" else
+                                   ("dyn4k-core", "dyn4k") if configuration == "production"
+                                   else ("dyn4k-core", "dyn4k", "consumer")):
+                        self.assertIn(fragment.encode(),
+                            (output / lane["configuration"] / "karma-config"
+                             / module / "karma.conf.js").read_bytes())
+                    if configuration == "production":
+                        self.assertEqual(b"config.plugins = [];\n",
+                            (output / lane["configuration"] / "forensic/safari-reporter"
+                             / "consumers/qualification/portable"
+                             / "qualification-safari-reporter.js").read_bytes())
+                        self.assertEqual("CHANGED", lane["safari_reporter_stage"]["consumer"]
+                                         ["status"])
+                for root in (repository / "dyn4k-core", repository / "dyn4k", consumer):
+                    self.assertFalse((root / "karma.config.d").exists())
+
     def test_committed_manifest_bytes_reject_source_drift(self):
         file = self.root / "tools/qualification/full-common-corpus.json"
         file.parent.mkdir(parents=True)
@@ -511,7 +663,8 @@ class FullHostedTests(unittest.TestCase):
                        check=True)
         subprocess.run(["git", "-C", str(repository), "add", ".gitattributes", "LICENSE.md", "gradlew",
                         "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
-                        "consumers/qualification/portable/build.gradle.kts"], check=True)
+                        "consumers/qualification/portable/build.gradle.kts",
+                        "consumers/qualification/portable/settings.gradle.kts"], check=True)
         subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",
                         "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
                        check=True)
@@ -1065,11 +1218,12 @@ class FullHostedTests(unittest.TestCase):
                 "unlisted_dokka_rejection": unlisted_replay.stderr.strip().splitlines()[-1],
             }, indent=2, sort_keys=True) + "\n")
 
-    def full_archive(self):
+    def full_archive(self, target="mingwX64"):
         repository = Path(__file__).resolve().parents[2]
         manifest = json.loads((repository / full_hosted.MANIFEST).read_text())
         consumer_manifest = json.loads((repository / "tools/qualification/foundation-probes.json").read_text())
-        target = "mingwX64"
+        safari = target == "jsSafari"
+        artifact_target = "js" if safari else target
         now = time.time_ns()
         stage_window = (now - 60 * 10**9, now + 60 * 10**9)
         windows = {}
@@ -1078,24 +1232,37 @@ class FullHostedTests(unittest.TestCase):
             for phase in ("source", "consumer", "graph"):
                 windows[(configuration, phase)] = (boundary, boundary + 10 * 10**9)
                 boundary += 10 * 10**9
+        original_repository = ("/Users/runner/work/dyn4k/dyn4k" if safari
+                               else r"C:\runner\work\dyn4k")
+        original_archive = ("/Users/runner/work/_temp/full" if safari
+                            else r"C:\runner\temp\full")
+        original_home = ("/Users/runner" if safari else r"C:\runner")
         receipt = {"schema": 2, "kind": "hosted-full-common-corpus", "target": target,
                    "status": "FULL_COMMON_PASSED",
                    "manifest_sha256": full_hosted.canonical_hash(manifest),
                    "source_tree_sha256": manifest["source_tree_sha256"],
                    "map_sha256": full_hosted.sha256(repository / full_hosted.MAPPING),
                    "reviewed_pairs_sha256": full_hosted.sha256(repository / full_hosted.PAIRS),
-                   "runtime": {"system": "Windows", "machine": "AMD64",
-                               "os_version": "10.0.26100", "java_version": "21.0.1",
+                   "runtime": {"system": "Darwin" if safari else "Windows",
+                               "machine": "arm64" if safari else "AMD64",
+                               "os_version": "26.0" if safari else "10.0.26100",
+                               "xcode_version": "26.4.1" if safari else None,
+                               "safari_version": "26.6.2" if safari else None,
+                               "safaridriver_version": "safaridriver 26.6.2" if safari else None,
+                               "java_version": "21.0.1",
                                "gradle_version": "9.5.0", "kgp_declared_version": "2.4.20",
                                "agp_declared_version": "9.3.1"},
                    "github_run_id": "123", "github_job": "hosted-native", "runner_name": "runner",
-                   "runner_os": "Windows", "runner_arch": "X64",
-                   "archive_root": r"C:\runner\temp\full",
-                   "repository_root": r"C:\runner\work\dyn4k",
-                   "runner_home": r"C:\runner",
+                   "runner_os": "macOS" if safari else "Windows",
+                   "runner_arch": "ARM64" if safari else "X64",
+                   "archive_root": original_archive,
+                   "repository_root": original_repository,
+                   "runner_home": original_home,
                    "gradle_user_home_override": None,
-                   "staging_repository": r"C:\runner\work\dyn4k\build\staging-repository",
-                   "gradle_user_home": r"C:\runner\.gradle",
+                   "staging_repository": str(full_hosted.original_path(target, original_repository)
+                                             / "build/staging-repository"),
+                   "gradle_user_home": str(full_hosted.original_path(target, original_home)
+                                           / ".gradle"),
                    "configurations": [], "artifact_hashes": {}}
 
         def write(path, data):
@@ -1108,6 +1275,8 @@ class FullHostedTests(unittest.TestCase):
                 phase = parts[1]
                 if phase in ("xml", "executables"):
                     phase = "consumer" if parts[2] == "consumer" else "source"
+                if phase == "karma-config":
+                    phase = "consumer" if parts[2] == "consumer" else "source"
                 window = windows.get((parts[0], phase))
             else:
                 window = None
@@ -1119,24 +1288,32 @@ class FullHostedTests(unittest.TestCase):
         def process(folder, invocation, task, output):
             write(folder / "stdout.txt", output + "\nBUILD SUCCESSFUL\n")
             write(folder / "stderr.txt", "")
-            wrapper = str(PureWindowsPath(receipt["repository_root"]) / "gradlew.bat")
+            original_root = full_hosted.original_path(target, receipt["repository_root"])
+            original_output = full_hosted.original_path(target, receipt["archive_root"])
+            wrapper = str(original_root / ("gradlew" if safari else "gradlew.bat"))
             if invocation is None:
                 command = [wrapper, "--rerun-tasks", *[task for module in qualify.MODULES for task in (
                     f":{module}:publishKotlinMultiplatformPublicationToStagingRepository",
-                    f":{module}:publishMingwX64PublicationToStagingRepository")]]
+                    f":{module}:publish{artifact_target[0].upper() + artifact_target[1:]}PublicationToStagingRepository")]]
             else:
                 command = [wrapper, "--rerun-tasks", task,
                            f"-PqualificationInvocationId={invocation}"]
                 if folder.name == "source":
                     command += [f":dyn4k:{full_hosted.SOURCE_TASK[target]}",
-                                "--init-script", str(PureWindowsPath(receipt["archive_root"]) /
+                                "--init-script", str(original_output /
                                                        folder.parent.name / "qualification.init.gradle")]
+                    if safari and folder.parent.name == "production":
+                        command.append("-PqualificationProduction=true")
                 else:
-                    command += ["-p", str(PureWindowsPath(receipt["repository_root"]) /
+                    command += ["-p", str(original_root /
                                           "consumers/qualification/portable"),
                                 f"-PqualificationRepository={receipt['staging_repository']}"]
+                if safari and folder.name == "consumer":
+                    command += ["--init-script", str(original_output /
+                                folder.parent.name / "qualification.init.gradle"),
+                                "-PqualificationSafari=true"]
                 if folder.name == "graph":
-                    command += ["--init-script", str(PureWindowsPath(receipt["archive_root"]) /
+                    command += ["--init-script", str(original_output /
                                                      folder.parent.name / "qualification-graph.init.gradle")]
             window = (stage_window if invocation is None
                       else windows[(folder.parent.name, folder.name)])
@@ -1159,8 +1336,9 @@ class FullHostedTests(unittest.TestCase):
                                            return_value=self.candidate_repository)
         checkout_patch.start()
         self.addCleanup(checkout_patch.stop)
-        test_publication.PublicationAuditTests().stage(self.candidate_repository, (target,))
-        self.align_synthetic_docs(self.candidate_repository, target)
+        test_publication.PublicationAuditTests().stage(self.candidate_repository,
+                                                       (artifact_target,))
+        self.align_synthetic_docs(self.candidate_repository, artifact_target)
         for relative in full_hosted.INPUTS:
             destination = self.candidate_repository / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1170,7 +1348,8 @@ class FullHostedTests(unittest.TestCase):
                         "core.autocrlf", "false"], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "add", "LICENSE.md",
                         "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
-                        "consumers/qualification/portable/build.gradle.kts"], check=True)
+                        "consumers/qualification/portable/build.gradle.kts",
+                        "consumers/qualification/portable/settings.gradle.kts"], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "-c", "user.name=Fixture",
                         "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
                        check=True)
@@ -1179,13 +1358,14 @@ class FullHostedTests(unittest.TestCase):
             text=True).strip()
         receipt["staged_gav"], _, staged_hashes, receipt["staged_content_contract"] = (
             full_hosted.artifact.capture_staging(self.candidate_repository, self.root,
-                                                 [target], receipt["candidate_sha"]))
-        receipt["artifact_hashes"] = staged_hashes[target]
+                                                 [artifact_target], receipt["candidate_sha"]))
+        receipt["artifact_hashes"] = staged_hashes[artifact_target]
         receipt["stage"] = process(self.root / "stage", None,
                                    ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                                    "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository")
         full_hosted.capture_dokka_output(self.candidate_repository, self.root, receipt)
-        group = next(group for group in consumer_manifest["groups"] if group["id"] == "consumer-mingwX64")
+        group = next(group for group in consumer_manifest["groups"]
+                     if group["id"] == f"consumer-{target}")
         consumer_cases = qualify.expected_probe_cases(consumer_manifest, group)
         for index, config in enumerate(full_hosted.CONFIGS[target]):
             folder = self.root / config
@@ -1193,17 +1373,27 @@ class FullHostedTests(unittest.TestCase):
             write(folder / "qualification.init.gradle", full_hosted.init_script(target, config))
             write(folder / "qualification-graph.init.gradle", full_hosted.graph_script(target))
             link = "Release" if config == "optimized-opt" else "Debug"
-            source_tasks = "\n".join(f"> Task :{module}:link{link}TestMingwX64\n> Task :{module}:mingwX64Test" for module in qualify.MODULES)
-            consumer_tasks = f"> Task :link{link}TestMingwX64\n> Task :mingwX64Test"
+            if safari:
+                source_tasks = "\n".join(
+                    (f"> Task :{module}:jsTestTestProductionExecutableCompileSync\n"
+                     if config == "production" else "") + f"> Task :{module}:jsBrowserTest"
+                    for module in qualify.MODULES)
+                consumer_tasks = (("> Task :jsTestTestProductionExecutableCompileSync\n"
+                                   if config == "production" else "") + "> Task :jsBrowserTest")
+            else:
+                source_tasks = "\n".join(f"> Task :{module}:link{link}TestMingwX64\n> Task :{module}:mingwX64Test" for module in qualify.MODULES)
+                consumer_tasks = f"> Task :link{link}TestMingwX64\n> Task :mingwX64Test"
             lane = {"configuration": config, "status": "FULL_COMMON_PASSED",
                     "invocation_id": invocation,
                     "source_process": process(folder / "source", invocation,
-                                              ":dyn4k-core:mingwX64Test", source_tasks),
+                                              f":dyn4k-core:{full_hosted.SOURCE_TASK[target]}", source_tasks),
                     "consumer_process": process(folder / "consumer", invocation,
-                                                "mingwX64Test", consumer_tasks),
+                                                full_hosted.SOURCE_TASK[target], consumer_tasks),
                     "source": [], "source_executables": {}}
             for module in qualify.MODULES:
-                cases = [(f"mingwX64Test.{name}", f"{method}[mingwX64]")
+                cases = [(f"jsBrowserTest.{name}" if safari else f"mingwX64Test.{name}",
+                          f"{method}[js, browser, Safari26.6.2, MacOS10.15.7]" if safari
+                          else f"{method}[mingwX64]")
                          for name, method in full_hosted.expected_cases(manifest, module)]
                 suite = ET.Element("testsuite", tests=str(len(cases)), failures="0", errors="0",
                                    skipped="0", time="1")
@@ -1216,12 +1406,20 @@ class FullHostedTests(unittest.TestCase):
                 checked["module"] = module
                 checked["reports"][0]["path"] = f"xml/{module}/TEST-all.xml"
                 lane["source"].append(checked)
-                product = write(folder / "executables" / module / "test.exe", b"test-" + module.encode())
+                package = f"dyn4k-{module}-test"
+                filename = f"{package}.js" if safari else "test.exe"
+                product = write(folder / "executables" / module / filename,
+                                b"test-" + module.encode())
+                executable_parent = (full_hosted.original_path(target, receipt["repository_root"])
+                                     / module / "build/compileSync/js/test" /
+                                     ("testProductionExecutable" if config == "production"
+                                      else "testDevelopmentExecutable") / "kotlin") if safari else (
+                                     PureWindowsPath(receipt["repository_root"]) / module / "build/bin" /
+                                     target / ("releaseTest" if config == "optimized-opt"
+                                               else "debugTest"))
                 lane["source_executables"][module] = {"archive_path": product.relative_to(self.root).as_posix(),
                     "sha256": full_hosted.sha256(product), "size": product.stat().st_size,
-                    "path": str(PureWindowsPath(receipt["repository_root"]) / module / "build/bin" /
-                                target / ("releaseTest" if config == "optimized-opt" else "debugTest") /
-                                "test.exe"),
+                    "path": str(executable_parent / filename),
                     "modified_ns": product.stat().st_mtime_ns}
             suite = ET.Element("testsuite", tests=str(len(consumer_cases)), failures="0", errors="0",
                                skipped="0", time="1")
@@ -1231,24 +1429,30 @@ class FullHostedTests(unittest.TestCase):
             lane["consumer"] = full_hosted.read_consumer_reports([report], set(consumer_cases),
                                                                     lane["consumer_process"])
             lane["consumer"]["reports"][0]["path"] = "xml/consumer/TEST-all.xml"
-            product = write(folder / "executables/consumer/test.exe", b"test-consumer")
+            consumer_filename = ("dyn4k-staged-portable-consumer-test.js" if safari else "test.exe")
+            product = write(folder / "executables/consumer" / consumer_filename,
+                            b"test-consumer")
+            consumer_parent = (full_hosted.original_path(target, receipt["repository_root"])
+                               / "consumers/qualification/portable/build/compileSync/js/test" /
+                               ("testProductionExecutable" if config == "production"
+                                else "testDevelopmentExecutable") / "kotlin") if safari else (
+                               PureWindowsPath(receipt["repository_root"]) /
+                               "consumers/qualification/portable/build/bin" / target /
+                               ("releaseTest" if config == "optimized-opt" else "debugTest"))
             lane["consumer_executable"] = {"archive_path": product.relative_to(self.root).as_posix(),
                 "sha256": full_hosted.sha256(product), "size": product.stat().st_size,
-                "path": str(PureWindowsPath(receipt["repository_root"]) /
-                            "consumers/qualification/portable/build/bin" / target /
-                            ("releaseTest" if config == "optimized-opt" else "debugTest") /
-                            "test.exe"),
+                "path": str(consumer_parent / consumer_filename),
                 "modified_ns": product.stat().st_mtime_ns}
             artifacts = []
             for module in qualify.MODULES:
-                name = qualify.target_publication_name(module, target)
-                binary = self.root / "staged" / qualify.target_binary_path(module, target)
+                name = qualify.target_publication_name(module, artifact_target)
+                binary = self.root / "staged" / qualify.target_binary_path(module, artifact_target)
                 artifacts.append({"component": f"{qualify.GROUP}:{name}:{qualify.VERSION}",
-                                  "file": str(PureWindowsPath(receipt["staging_repository"]) /
-                                              qualify.target_binary_path(module, target)),
+                                  "file": str(full_hosted.original_path(target, receipt["staging_repository"])
+                                              / qualify.target_binary_path(module, artifact_target)),
                                   "name": binary.name, "size": binary.stat().st_size,
                                   "sha256": full_hosted.sha256(binary)})
-            graph = {"configuration": "mingwX64CompileKlibraries",
+            graph = {"configuration": "jsCompileClasspath" if safari else "mingwX64CompileKlibraries",
                      "gradle_user_home": receipt["gradle_user_home"],
                      "components": [item["component"] for item in artifacts] +
                      [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
@@ -1260,10 +1464,57 @@ class FullHostedTests(unittest.TestCase):
             lane["resolved_artifacts"] = []
             for graph_index, item in enumerate(artifacts):
                 source = self.root / "staged" / qualify.target_binary_path(
-                    "dyn4k-core" if "dyn4k-core" in item["name"] else "dyn4k", target)
+                    "dyn4k-core" if "dyn4k-core" in item["name"] else "dyn4k", artifact_target)
                 name = f"{config}/resolved-artifacts/{graph_index:03d}-{item['name']}"
                 full_hosted.archive_copy(source, self.root, name)
                 lane["resolved_artifacts"].append({**item, "archive_path": name})
+            if safari:
+                fragment = (repository /
+                            "tools/qualification/safari-karma-reporter.js").read_text()
+                fragment_sha = hashlib.sha256(fragment.encode()).hexdigest()
+                lane["safari_reporter_stage"] = {
+                    "source": {"status": "CLEAN", "source_sha256": fragment_sha,
+                               "projects": {"dyn4k-core": "CLEAN", "dyn4k": "CLEAN"},
+                               "forensic": []},
+                    "consumer": {"status": "CLEAN", "source_sha256": fragment_sha,
+                                 "projects": {"consumers/qualification/portable": "CLEAN"},
+                                 "forensic": []}}
+                lane["safari_karma_configs"] = {}
+                original_root = full_hosted.original_path(target, receipt["repository_root"])
+                for name, project, package in (
+                        ("dyn4k-core", Path("dyn4k-core"), "dyn4k-dyn4k-core-test"),
+                        ("dyn4k", Path("dyn4k"), "dyn4k-dyn4k-test"),
+                        ("consumer", Path("consumers/qualification/portable"),
+                         "dyn4k-staged-portable-consumer-test")):
+                    project_root = original_root / project
+                    build_root = (project_root if name == "consumer" else original_root)
+                    package_root = build_root / "build/js/packages" / package
+                    runner = str(build_root / "build/js/node_modules/kotlin-web-helpers/dist"
+                                 / "kotlin-test-karma-runner.js")
+                    selected = (project_root / "build/compileSync/js/test" /
+                                ("testProductionExecutable" if config == "production"
+                                 else "testDevelopmentExecutable") / "kotlin" / f"{package}.js"
+                                if config == "production" else
+                                package_root / "kotlin" / f"{package}.js")
+                    settings = {"basePath": str(package_root),
+                                "files": [runner, str(selected)],
+                                "browsers": ["Safari"],
+                                "reporters": ["karma-kotlin-reporter"],
+                                "preprocessors": {runner: ["webpack", "sourcemap"],
+                                                  str(selected): ["webpack", "sourcemap"]}}
+                    generated = ("module.exports = function(config) {\nconfig.set(" +
+                                 json.dumps(settings) + ");\n"
+                                 "config.plugins.push(require('kotlin-web-helpers/dist/"
+                                 "karma-kotlin-reporter'));\n" + fragment + "\n}\n")
+                    archived = write(folder / "karma-config" / name / "karma.conf.js", generated)
+                    lane["safari_karma_configs"][name] = {
+                        "path": archived.relative_to(self.root).as_posix(),
+                        "sha256": full_hosted.sha256(archived),
+                        "size": archived.stat().st_size,
+                        "modified_ns": archived.stat().st_mtime_ns,
+                        "source_path": str(original_root /
+                                           full_hosted.safari_reporter.config_relative(project)),
+                        "project": project.as_posix(), "configuration": config}
             receipt["configurations"].append(lane)
         receipt["files"] = full_hosted.archive_inventory(self.root)
         return receipt, manifest, consumer_manifest
@@ -1276,6 +1527,73 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.verify_raw_files(
                 self.root, receipt, manifest, consumer,
                 candidate_repository=self.candidate_repository)
+
+    def test_public_safari_archive_verifies_exact_reporter_and_rejects_resealed_mutations(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                         candidate_repository=self.candidate_repository)
+            (self.root / "receipt.json").write_text(json.dumps(receipt))
+            archive = self.root.parent / (self.root.name + "-safari.tar")
+            self.addCleanup(archive.unlink, missing_ok=True)
+            full_hosted.package_archive(self.root, archive)
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+        self.assertEqual([2465, 58], [item["executed"] for item in
+                         receipt["configurations"][0]["source"]])
+        self.assertEqual(3, receipt["configurations"][0]["consumer"]["executed"])
+        fragment = (self.candidate_repository /
+                    "tools/qualification/safari-karma-reporter.js").read_bytes()
+        for name in ("dyn4k-core", "dyn4k", "consumer"):
+            config = self.root / "development/karma-config" / name / "karma.conf.js"
+            original = config.read_bytes()
+            timestamp = config.stat().st_mtime_ns
+            for mutation in ("missing", "altered", "wrong-module"):
+                with self.subTest(module=name, mutation=mutation):
+                    changed = json.loads(json.dumps(receipt))
+                    if mutation == "missing":
+                        config.unlink()
+                    elif mutation == "altered":
+                        config.write_bytes(original.replace(fragment, b"// absent reporter\n"))
+                    else:
+                        config.write_bytes(original.replace(
+                            b"/build/js/packages/dyn4k-", b"/build/js/packages/other-", 1))
+                    if config.exists():
+                        os.utime(config, ns=(timestamp, timestamp))
+                        record = changed["configurations"][0]["safari_karma_configs"][name]
+                        record["sha256"] = full_hosted.sha256(config)
+                        record["size"] = config.stat().st_size
+                    changed["files"] = full_hosted.archive_inventory(self.root)
+                    with self.assertRaises(ValueError):
+                        full_hosted.verify_raw_files(
+                            self.root, changed, manifest, consumer,
+                            candidate_repository=self.candidate_repository)
+                    if name == "dyn4k-core" and mutation == "altered":
+                        (self.root / "receipt.json").write_text(json.dumps(changed))
+                        full_hosted.package_archive(self.root, archive)
+                        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                            with self.assertRaises(ValueError):
+                                full_hosted.verify_transport_archive(
+                                    archive, changed["candidate_sha"], "jsSafari",
+                                    candidate_repository=self.candidate_repository)
+                    config.write_bytes(original)
+                    os.utime(config, ns=(timestamp, timestamp))
+                    (self.root / "receipt.json").write_text(json.dumps(receipt))
+            for mutation in ("stage-sha", "stage-missing"):
+                with self.subTest(module=name, mutation=mutation):
+                    changed = json.loads(json.dumps(receipt))
+                    phase = "consumer" if name == "consumer" else "source"
+                    stage = changed["configurations"][0]["safari_reporter_stage"][phase]
+                    if mutation == "stage-sha":
+                        stage["source_sha256"] = "0" * 64
+                    else:
+                        stage["projects"].pop("consumers/qualification/portable"
+                                              if name == "consumer" else name)
+                    with self.assertRaisesRegex(ValueError, "Safari reporter staging"):
+                        full_hosted.verify_raw_files(
+                            self.root, changed, manifest, consumer,
+                            candidate_repository=self.candidate_repository)
 
     def test_resealed_wrong_or_missing_toolchain_fails_directory_and_tar(self):
         receipt, manifest, consumer = self.full_archive()

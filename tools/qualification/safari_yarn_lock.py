@@ -13,10 +13,10 @@ import stat
 import subprocess
 import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
 
 import full_hosted
+import safari_reporter
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,9 +29,8 @@ HOSTED_SOURCE_INPUTS = (Path("tools/qualification/full_hosted.py"),
                         Path("dyn4k/build.gradle.kts"),
                         Path("tools/qualification/safari-launch.sh"),
                         Path(".github/workflows/safari-yarn-lock-diagnostic.yml"),
+                        Path("tools/qualification/safari_reporter.py"),
                         Path("tools/qualification/safari-karma-reporter.js"))
-REPORTER_SOURCE = Path("tools/qualification/safari-karma-reporter.js")
-REPORTER_NAME = "qualification-safari-reporter.js"
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PACKAGES = 128
 MAX_PROCESS_SECONDS = 600
@@ -82,30 +81,6 @@ def safari_output_overflow(stdout, stderr):
             b"(more than 1Mb). Event was lost." in stderr)
 
 
-@contextmanager
-def staged_safari_reporter(repository):
-    content = source_bytes(repository, REPORTER_SOURCE)
-    staged = []
-    try:
-        for module in ("dyn4k-core", "dyn4k"):
-            directory = repository / module / "karma.config.d"
-            if directory.exists() or directory.is_symlink():
-                raise ValueError(f"preexisting Safari Karma configuration: {directory}")
-            directory.mkdir()
-            destination = directory / REPORTER_NAME
-            staged.append((directory, destination))
-            destination.write_bytes(content)
-        yield
-    finally:
-        for directory, destination in reversed(staged):
-            if destination.is_file() and not destination.is_symlink() \
-                    and destination.read_bytes() == content:
-                destination.unlink()
-            if directory.is_dir() and not directory.is_symlink() \
-                    and not any(directory.iterdir()):
-                directory.rmdir()
-
-
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -142,6 +117,7 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
     config = context / "config"
     seen_files = set()
     copied_configs = set()
+    reporter_source = None
 
     def record(path, status, reason, **details):
         nonlocal incomplete
@@ -319,6 +295,8 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
 
     try:
         require_candidate(repository, candidate_sha)
+        reporter_source = safari_reporter.committed_fragment(repository, candidate_sha)
+        inventory["reporter_source_sha256"] = hashlib.sha256(reporter_source).hexdigest()
         if config.exists() or config.is_symlink():
             raise ValueError("Safari context config destination already exists")
         config.mkdir()
@@ -344,6 +322,21 @@ def capture_karma_context(repository, candidate_sha, context, raw_context):
             required_config = root / "karma.conf.js"
             if required_config not in copied_configs:
                 record(required_config, "failed", "missing_module_karma_config")
+        modes = set()
+        for project, root in ((Path("dyn4k-core"), CONTEXT_ROOTS[0]),
+                              (Path("dyn4k"), CONTEXT_ROOTS[1])):
+            required_config = root / "karma.conf.js"
+            if required_config in copied_configs:
+                try:
+                    modes.add(safari_reporter.validate_config(
+                        (config / required_config).read_bytes(), reporter_source,
+                        repository, project))
+                except safari_reporter.ConfigBindingError as error:
+                    record(required_config, "failed", str(error))
+        if len(modes) > 1:
+            record("config", "failed", "karma_config_source_mismatch")
+        elif len(modes) == 1:
+            inventory["configuration"] = next(iter(modes))
         require_candidate(repository, candidate_sha)
     except (OSError, ValueError, TimeoutError) as error:
         record("config", "failed", "scan_failed", error=str(error))
@@ -679,8 +672,14 @@ def capture(repository, candidate_sha, output, configuration=None):
                                                receipt["invocation_id"])
         receipt["init_script_sha256"] = digest(init)
     if configuration:
-        with staged_safari_reporter(repository):
+        with safari_reporter.stage(repository, candidate_sha,
+                                   (Path("dyn4k-core"), Path("dyn4k")), output) as reporter_stage:
             process = run_lock_task(repository, output, expected_command)
+        receipt["reporter_stage"] = reporter_stage
+        for item in reporter_stage["forensic"]:
+            if "archive_path" in item:
+                files.append({"path": item["archive_path"], "sha256": item["sha256"],
+                              "size": item["retained_size"]})
     else:
         process = run_lock_task(repository, output)
     receipt["process"] = process
@@ -712,7 +711,9 @@ def capture(repository, candidate_sha, output, configuration=None):
         stdout = (output / "stdout.txt").read_bytes()
         lock_succeeded = re.search(rb"(?m)^> Task :kotlinStoreYarnLock\r?$", stdout) is not None
         lock_failed = re.search(rb"(?m)^> Task :kotlinStoreYarnLock FAILED\r?$", stdout) is not None
-        if (receipt["head_after_task"] != candidate_sha
+        if (configuration and receipt["reporter_stage"]["status"] != "CLEAN"):
+            receipt["status"] = "STAGED_REPORTER_CHANGED"
+        elif (receipt["head_after_task"] != candidate_sha
                 or receipt["head_after"] != candidate_sha
                 or receipt["tracked_changes_after_task"] or receipt["tracked_changes_after"]
                 or receipt["source_input_after_sha256"] != committed_hashes):

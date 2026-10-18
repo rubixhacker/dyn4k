@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import artifact
 import hosted
 import qualify
+import safari_reporter
 
 
 TARGETS = hosted.TARGETS
@@ -34,9 +35,12 @@ MAPPING = "tools/qualification/full-common-original-map.tsv"
 PAIRS = "tools/qualification/full-common-reviewed-pairs.tsv"
 INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json",
           "tools/qualification/full_corpus.py", "tools/qualification/full_hosted.py",
+          "tools/qualification/safari_reporter.py",
+          "tools/qualification/safari-karma-reporter.js",
           "tools/qualification/hosted.py", "tools/qualification/qualify.py",
           "tools/qualification/artifact.py", "build.gradle.kts",
-          "consumers/qualification/portable/build.gradle.kts")
+          "consumers/qualification/portable/build.gradle.kts",
+          "consumers/qualification/portable/settings.gradle.kts")
 SOURCE_TASK = {target: f"{target}Test" for target in NATIVE}
 SOURCE_TASK["jsSafari"] = "jsBrowserTest"
 REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2465, "dyn4k": 58}
@@ -333,6 +337,68 @@ def run_command(command, cwd, destination, invocation_id=None):
             "started_ns": started, "finished_ns": finished,
             "stdout_sha256": sha256(destination / "stdout.txt"),
             "stderr_sha256": sha256(destination / "stderr.txt")}
+
+
+def capture_safari_config(repository, candidate_sha, project, configuration,
+                          process, output, archive_name):
+    relative = safari_reporter.config_relative(project)
+    source = repository / relative
+    if (source.is_symlink() or not source.is_file()
+            or source.stat().st_size > safari_reporter.MAX_FRAGMENT_BYTES
+            or not process["started_ns"] <= source.stat().st_mtime_ns <= process["finished_ns"]):
+        raise ValueError(f"Safari generated Karma config is absent, unsafe, stale, or oversized: {relative}")
+    record = archive_copy(source, output, archive_name)
+    fragment = safari_reporter.committed_fragment(repository, candidate_sha)
+    safari_reporter.validate_config((output / archive_name).read_bytes(), fragment,
+                                    repository, project, configuration)
+    return {**record, "source_path": str(source), "project": project.as_posix(),
+            "configuration": configuration}
+
+
+def verify_safari_reporter_archive(output, receipt, lane, candidate_repository, repository_root):
+    fragment = committed_input(candidate_repository, receipt["candidate_sha"],
+                               safari_reporter.SOURCE.as_posix())
+    expected_sha = hashlib.sha256(fragment).hexdigest()
+    stages = lane.get("safari_reporter_stage")
+    configs = lane.get("safari_karma_configs")
+    if not isinstance(stages, dict) or set(stages) != {"source", "consumer"} \
+            or not isinstance(configs, dict) or set(configs) != {
+                "dyn4k-core", "dyn4k", "consumer"}:
+        raise ValueError("Safari reporter stage or generated config inventory is absent")
+    expected_projects = {"source": {"dyn4k-core": "CLEAN", "dyn4k": "CLEAN"},
+                         "consumer": {"consumers/qualification/portable": "CLEAN"}}
+    for phase, expected in expected_projects.items():
+        state = stages[phase]
+        if (not isinstance(state, dict) or state.get("status") != "CLEAN"
+                or state.get("source_sha256") != expected_sha
+                or state.get("projects") != expected
+                or state.get("forensic") != [] or state.get("leftovers")):
+            raise ValueError("Safari reporter staging differs from committed source")
+    expected_archive = set()
+    for name, project in (("dyn4k-core", Path("dyn4k-core")), ("dyn4k", Path("dyn4k")),
+                          ("consumer", Path("consumers/qualification/portable"))):
+        record = configs[name]
+        expected_path = f"{lane['configuration']}/karma-config/{name}/karma.conf.js"
+        expected_source = repository_root / safari_reporter.config_relative(project)
+        process = lane["consumer_process"] if name == "consumer" else lane["source_process"]
+        if (not isinstance(record, dict) or record.get("path") != expected_path
+                or record.get("source_path") != str(expected_source)
+                or record.get("project") != project.as_posix()
+                or record.get("configuration") != lane["configuration"]):
+            raise ValueError("Safari generated config identity differs")
+        raw = archived_file(output, expected_path)
+        modified = raw.stat().st_mtime_ns
+        if (record.get("sha256") != sha256(raw) or record.get("size") != raw.stat().st_size
+                or record.get("modified_ns") != modified
+                or not process["started_ns"] <= modified <= process["finished_ns"]):
+            raise ValueError("Safari generated config bytes or process window differ")
+        safari_reporter.validate_config(raw.read_bytes(), fragment, repository_root,
+                                        project, lane["configuration"])
+        expected_archive.add(expected_path)
+    actual = {item["path"] for item in receipt["files"]
+              if item["path"].startswith(f"{lane['configuration']}/karma-config/")}
+    if actual != expected_archive:
+        raise ValueError("extra or missing Safari generated config archive member")
 
 
 def require_test_tasks(process, folder, target, configuration, modules):
@@ -996,8 +1062,10 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                 raise ValueError("external consumer project invocation is absent")
             if process_name in ("source", "consumer") and "--rerun-tasks" not in command:
                 raise ValueError("test process did not force execution")
-            if process_name in ("source", "graph"):
+            if process_name in ("source", "graph") or (target == "jsSafari" and process_name == "consumer"):
                 script = source_script_path if process_name == "source" else graph_script_path
+                if process_name == "consumer":
+                    script = source_script_path
                 original = original_root / script.relative_to(output).as_posix()
                 if "--init-script" not in command or str(original) not in command:
                     raise ValueError("test or graph init script is unbound")
@@ -1012,6 +1080,8 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
         source_process = lane["source_process"]
         consumer_process = lane["consumer_process"]
         graph_process = lane["graph_process"]
+        if target == "jsSafari":
+            verify_safari_reporter_archive(output, receipt, lane, repository, repository_root)
         if not (stage["finished_ns"] <= source_process["started_ns"]
                 <= source_process["finished_ns"] <= consumer_process["started_ns"]
                 <= consumer_process["finished_ns"] <= graph_process["started_ns"]):
@@ -1182,8 +1252,24 @@ def run(target, candidate_sha, output):
                            f"-PqualificationInvocationId={lane['invocation_id']}"]
                 if target == "jsSafari" and config == "production":
                     command.append("-PqualificationProduction=true")
-                lane["source_process"] = run_command(command, repository, folder / "source",
-                                                      lane["invocation_id"])
+                if target == "jsSafari":
+                    lane["safari_reporter_stage"] = {}
+                    lane["safari_karma_configs"] = {}
+                    with safari_reporter.stage(repository, candidate_sha,
+                                               (Path("dyn4k-core"), Path("dyn4k")), folder) as staged:
+                        lane["source_process"] = run_command(command, repository, folder / "source",
+                                                              lane["invocation_id"])
+                    lane["safari_reporter_stage"]["source"] = staged
+                    if staged["status"] != "CLEAN":
+                        raise ValueError("staged Safari source reporter changed")
+                    for module in qualify.MODULES:
+                        lane["safari_karma_configs"][module] = capture_safari_config(
+                            repository, candidate_sha, Path(module), config,
+                            lane["source_process"], output,
+                            f"{config}/karma-config/{module}/karma.conf.js")
+                else:
+                    lane["source_process"] = run_command(command, repository, folder / "source",
+                                                          lane["invocation_id"])
                 require_test_tasks(lane["source_process"], folder / "source", target, config,
                                    qualify.MODULES)
                 lane["source_executables"] = collect_test_products(
@@ -1206,8 +1292,22 @@ def run(target, candidate_sha, output):
                                     f"-PqualificationInvocationId={lane['invocation_id']}"]
                 if target == "jsSafari":
                     consumer_command.append("-PqualificationSafari=true")
-                lane["consumer_process"] = run_command(consumer_command, repository,
-                                                        folder / "consumer", lane["invocation_id"])
+                if target == "jsSafari":
+                    with safari_reporter.stage(repository, candidate_sha,
+                                               (Path("consumers/qualification/portable"),),
+                                               folder) as staged:
+                        lane["consumer_process"] = run_command(
+                            consumer_command, repository, folder / "consumer", lane["invocation_id"])
+                    lane["safari_reporter_stage"]["consumer"] = staged
+                    if staged["status"] != "CLEAN":
+                        raise ValueError("staged Safari consumer reporter changed")
+                    lane["safari_karma_configs"]["consumer"] = capture_safari_config(
+                        repository, candidate_sha, Path("consumers/qualification/portable"),
+                        config, lane["consumer_process"], output,
+                        f"{config}/karma-config/consumer/karma.conf.js")
+                else:
+                    lane["consumer_process"] = run_command(consumer_command, repository,
+                                                            folder / "consumer", lane["invocation_id"])
                 require_test_tasks(lane["consumer_process"], folder / "consumer", target, config,
                                    ("",))
                 lane["consumer_executable"] = collect_test_products(
@@ -1257,6 +1357,8 @@ def run(target, candidate_sha, output):
         if receipt["configurations"]:
             receipt["configurations"][-1]["status"] = "FAILED"
     finally:
+        if target == "jsSafari" and receipt["status"] != "FULL_COMMON_PASSED":
+            receipt["files"] = archive_inventory(output)
         (output / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     return receipt
 
