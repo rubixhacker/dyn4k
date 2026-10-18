@@ -11,7 +11,10 @@ import signal
 import stat
 import subprocess
 import time
+import uuid
 from pathlib import Path
+
+import full_hosted
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +22,9 @@ TRACKED_LOCK = Path("kotlin-js-store/yarn.lock")
 GENERATED_LOCK = Path("build/js/yarn.lock")
 SOURCE_INPUTS = (Path("build.gradle.kts"), Path("settings.gradle.kts"),
                  Path("gradle/wrapper/gradle-wrapper.properties"))
+HOSTED_SOURCE_INPUTS = (Path("tools/qualification/full_hosted.py"),
+                        Path("dyn4k-core/build.gradle.kts"),
+                        Path("dyn4k/build.gradle.kts"))
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PACKAGES = 128
 MAX_PROCESS_SECONDS = 600
@@ -29,6 +35,15 @@ REQUIRED_PACKAGE_INPUTS = (Path("build/js/package.json"),) + tuple(
     Path("build/js/packages") / name / "package.json" for name in REQUIRED_PACKAGES)
 LOCK_ERROR_LINE = ("> Lock file was changed. Run the `kotlinUpgradeYarnLock` task "
                    "to actualize lock file")
+HOSTED_TASK_MARKERS = (b"> Task :dyn4k-core:jsTestPackageJson",
+                       b"> Task :dyn4k:jsTestPackageJson",
+                       b"> Task :kotlinNpmInstall")
+
+
+def hosted_task_markers(process):
+    final = (b"> Task :kotlinStoreYarnLock" if process.get("exit_code") == 0
+             else b"> Task :kotlinStoreYarnLock FAILED")
+    return (*HOSTED_TASK_MARKERS, final)
 
 
 def digest(path):
@@ -125,9 +140,20 @@ def lock_failure_signature(stderr):
                     for line in lines))
 
 
-def run_lock_task(repository, output):
+def full_hosted_command(repository, init, configuration, invocation_id):
     command = [str(repository / "gradlew"), "--no-daemon", "--console=plain",
-               "--rerun-tasks", ":kotlinStoreYarnLock"]
+               "--rerun-tasks", "--init-script", str(init),
+               ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest",
+               f"-PqualificationInvocationId={invocation_id}"]
+    if configuration == "production":
+        command.append("-PqualificationProduction=true")
+    return command
+
+
+def run_lock_task(repository, output, command=None):
+    if command is None:
+        command = [str(repository / "gradlew"), "--no-daemon", "--console=plain",
+                   "--rerun-tasks", ":kotlinStoreYarnLock"]
     started = time.time_ns()
     process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
@@ -227,11 +253,22 @@ def capture_package_graph(repository, output, files, receipt):
         elif value.get("name") != relative.parent.name:
             errors.append(f"package name differs: {relative}")
     receipt["package_graph_errors"] = errors
+    if receipt.get("configuration") in ("development", "production"):
+        for name in ("dyn4k-dyn4k-core-test", "dyn4k-dyn4k-test"):
+            path = output / "generated/build/js/packages" / name / "package.json"
+            try:
+                dependency = json.loads(path.read_text())["devDependencies"]["karma-safari-launcher"]
+            except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+                dependency = None
+            if dependency != "1.0.0":
+                errors.append(f"Safari launcher dependency differs: {name}")
 
 
-def capture(repository, candidate_sha, output):
+def capture(repository, candidate_sha, output, configuration=None):
     repository = repository.resolve()
     output = output.resolve()
+    if configuration not in (None, "development", "production"):
+        raise ValueError("invalid Safari diagnostic configuration")
     if output.is_relative_to(repository):
         raise ValueError("diagnostic output must be outside the source checkout")
     if output.exists() and any(output.iterdir()):
@@ -241,8 +278,9 @@ def capture(repository, candidate_sha, output):
     require_candidate(repository, candidate_sha)
     output.mkdir(parents=True, exist_ok=True)
     files = [copy_file(repository, TRACKED_LOCK, output, "tracked")]
-    files += [copy_file(repository, path, output, "inputs") for path in SOURCE_INPUTS]
-    source_inputs = (TRACKED_LOCK, *SOURCE_INPUTS)
+    source_inputs = (TRACKED_LOCK, *SOURCE_INPUTS,
+                     *(HOSTED_SOURCE_INPUTS if configuration else ()))
+    files += [copy_file(repository, path, output, "inputs") for path in source_inputs[1:]]
     committed_hashes = {path.as_posix(): hashlib.sha256(subprocess.check_output(
         ["git", "-C", str(repository), "show", f"{candidate_sha}:{path}"])).hexdigest()
                         for path in source_inputs}
@@ -252,13 +290,27 @@ def capture(repository, candidate_sha, output):
         raise ValueError("archived source inputs differ from candidate")
     receipt = {"schema": 1, "kind": "safari-yarn-lock-diagnostic",
                "candidate_sha": candidate_sha, "qualified": False,
+               "configuration": configuration,
+               "repository_root": str(repository), "archive_root": str(output),
                "host": {"system": platform.system(), "machine": platform.machine(),
                         "java_home": os.environ.get("JAVA_HOME"),
                         "runner_image_os": os.environ.get("ImageOS"),
                         "runner_image_version": os.environ.get("ImageVersion")},
                "tracked_sha256": captured_hashes[TRACKED_LOCK.as_posix()],
                "source_input_sha256": committed_hashes}
-    process = run_lock_task(repository, output)
+    expected_command = None
+    if configuration:
+        init = output / configuration / "qualification.init.gradle"
+        init.parent.mkdir()
+        init.write_text(full_hosted.init_script("jsSafari", configuration))
+        files.append({"path": init.relative_to(output).as_posix(),
+                      "sha256": digest(init), "size": init.stat().st_size})
+        receipt["invocation_id"] = uuid.uuid4().hex
+        expected_command = full_hosted_command(repository, init, configuration,
+                                               receipt["invocation_id"])
+        receipt["init_script_sha256"] = digest(init)
+    process = (run_lock_task(repository, output, expected_command) if configuration
+               else run_lock_task(repository, output))
     receipt["process"] = process
     for name in ("stdout.txt", "stderr.txt"):
         path = output / name
@@ -268,6 +320,8 @@ def capture(repository, candidate_sha, output):
     receipt["tracked_changes_after_task"] = git(repository, "status", "--porcelain=v1",
                                                   "--untracked-files=no")
     try:
+        if configuration and digest(output / configuration / "qualification.init.gradle") != receipt["init_script_sha256"]:
+            raise ValueError("hosted Safari init script changed during task")
         if source_path(repository, GENERATED_LOCK).is_file():
             files.append(copy_file(repository, GENERATED_LOCK, output, "generated"))
             receipt["generated_sha256"] = digest(output / "generated" / GENERATED_LOCK)
@@ -288,6 +342,15 @@ def capture(repository, candidate_sha, output):
                 or receipt["tracked_changes_after_task"] or receipt["tracked_changes_after"]
                 or receipt["source_input_after_sha256"] != committed_hashes):
             receipt["status"] = "SOURCE_CHANGED"
+        elif configuration and (process.get("command") != expected_command
+                                or not isinstance(process.get("pid"), int)
+                                or process["pid"] <= 0
+                                or not isinstance(process.get("started_ns"), int)
+                                or not isinstance(process.get("finished_ns"), int)
+                                or process["started_ns"] >= process["finished_ns"]
+                                or not all(marker in (output / "stdout.txt").read_bytes()
+                                           for marker in hosted_task_markers(process))):
+            receipt["status"] = "PROCESS_BINDING_REJECTED"
         elif process.get("timed_out"):
             receipt["status"] = "PROCESS_TIMEOUT"
         elif (process.get("stream_incomplete") or process.get("stdout_truncated")
@@ -314,12 +377,111 @@ def capture(repository, candidate_sha, output):
     return receipt
 
 
+def audit_capture(repository, candidate_sha, output):
+    repository = repository.resolve()
+    output = output.resolve()
+    require_candidate(repository, candidate_sha)
+    receipt = json.loads(source_bytes(output, Path("receipt.json")))
+    configuration = receipt.get("configuration")
+    if (receipt.get("candidate_sha") != candidate_sha
+            or receipt.get("qualified") is not False
+            or receipt.get("status") != "LOCK_MISMATCH_CAPTURED"
+            or receipt.get("head_after_task") != candidate_sha
+            or receipt.get("head_after") != candidate_sha
+            or receipt.get("tracked_changes_after_task") != ""
+            or receipt.get("tracked_changes_after") != ""
+            or configuration not in ("development", "production")
+            or not isinstance(receipt.get("invocation_id"), str)
+            or not re.fullmatch(r"[0-9a-f]{32}", receipt["invocation_id"])):
+        raise ValueError("hosted diagnostic identity differs")
+    source_inputs = (TRACKED_LOCK, *SOURCE_INPUTS, *HOSTED_SOURCE_INPUTS)
+    init_relative = Path(configuration) / "qualification.init.gradle"
+    expected = {init_relative.as_posix(), "stdout.txt", "stderr.txt",
+                f"tracked/{TRACKED_LOCK}", f"tracked-after/{TRACKED_LOCK}",
+                f"generated/{GENERATED_LOCK}"}
+    expected.update(f"inputs/{path}" for path in source_inputs[1:])
+    expected.update(f"generated/{path}" for path in REQUIRED_PACKAGE_INPUTS)
+    if (receipt.get("package_inputs_expected") != [path.as_posix() for path in REQUIRED_PACKAGE_INPUTS]
+            or set(receipt.get("package_inputs_observed", []))
+            != {path.as_posix() for path in REQUIRED_PACKAGE_INPUTS}
+            or receipt.get("missing_package_inputs") != []
+            or receipt.get("unexpected_package_inputs") != []
+            or receipt.get("package_graph_errors") != []
+            or receipt.get("package_count_exceeds_bound") is not False):
+        raise ValueError("hosted diagnostic package graph inventory differs")
+    files = receipt.get("files")
+    if not isinstance(files, list) or {item.get("path") for item in files
+                                       if isinstance(item, dict)} != expected or len(files) != len(expected):
+        raise ValueError("hosted diagnostic file inventory differs")
+    for item in files:
+        relative = Path(item["path"])
+        data = source_bytes(output, relative)
+        if (hashlib.sha256(data).hexdigest() != item.get("sha256")
+                or len(data) != item.get("size")):
+            raise ValueError(f"hosted diagnostic raw file differs: {relative}")
+    committed = {path.as_posix(): hashlib.sha256(subprocess.check_output(
+        ["git", "-C", str(repository), "show", f"{candidate_sha}:{path}"])).hexdigest()
+                 for path in source_inputs}
+    if (receipt.get("source_input_sha256") != committed
+            or receipt.get("source_input_after_sha256") != committed):
+        raise ValueError("hosted diagnostic candidate source binding differs")
+    for path in source_inputs:
+        prefix = "tracked" if path == TRACKED_LOCK else "inputs"
+        if hashlib.sha256(source_bytes(output, Path(prefix) / path)).hexdigest() != committed[path.as_posix()]:
+            raise ValueError(f"hosted diagnostic archived source differs: {path}")
+    script = full_hosted.init_script("jsSafari", configuration).encode()
+    if (source_bytes(output, init_relative) != script
+            or receipt.get("init_script_sha256") != hashlib.sha256(script).hexdigest()):
+        raise ValueError("hosted diagnostic init script differs")
+    original_repository = Path(receipt.get("repository_root", ""))
+    original_output = Path(receipt.get("archive_root", ""))
+    if not original_repository.is_absolute() or not original_output.is_absolute():
+        raise ValueError("hosted diagnostic original paths are absent")
+    process = receipt.get("process")
+    expected_command = full_hosted_command(original_repository,
+                                           original_output / init_relative,
+                                           configuration, receipt["invocation_id"])
+    if (not isinstance(process, dict) or process.get("command") != expected_command
+            or not isinstance(process.get("pid"), int) or process["pid"] <= 0
+            or not isinstance(process.get("started_ns"), int)
+            or not isinstance(process.get("finished_ns"), int)
+            or process["started_ns"] >= process["finished_ns"]
+            or not isinstance(process.get("exit_code"), int)
+            or process["exit_code"] == 0
+            or any(process.get(key) is not False for key in
+                   ("timed_out", "stream_incomplete", "stdout_truncated", "stderr_truncated"))):
+        raise ValueError("hosted diagnostic process binding differs")
+    stdout = output / "stdout.txt"
+    stderr = output / "stderr.txt"
+    if (process.get("stdout_bytes_seen") != stdout.stat().st_size
+            or process.get("stderr_bytes_seen") != stderr.stat().st_size
+            or not all(marker in stdout.read_bytes() for marker in hosted_task_markers(process))
+            or not lock_failure_signature(stderr)):
+        raise ValueError("hosted diagnostic process output differs")
+    tracked = source_bytes(output, Path("tracked") / TRACKED_LOCK)
+    generated = source_bytes(output, Path("generated") / GENERATED_LOCK)
+    if (tracked == generated
+            or tracked != source_bytes(output, Path("tracked-after") / TRACKED_LOCK)
+            or receipt.get("tracked_sha256") != hashlib.sha256(tracked).hexdigest()
+            or receipt.get("tracked_after_sha256") != hashlib.sha256(tracked).hexdigest()
+            or receipt.get("generated_sha256") != hashlib.sha256(generated).hexdigest()):
+        raise ValueError("hosted diagnostic lock bytes differ")
+    for name in ("dyn4k-dyn4k-core-test", "dyn4k-dyn4k-test"):
+        data = source_bytes(output, Path("generated/build/js/packages") / name / "package.json")
+        if json.loads(data).get("devDependencies", {}).get("karma-safari-launcher") != "1.0.0":
+            raise ValueError(f"hosted diagnostic Safari package differs: {name}")
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description="Capture a Kotlin/JS Yarn lock mismatch")
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--configuration", choices=("development", "production"))
+    parser.add_argument("--audit", action="store_true")
     args = parser.parse_args()
-    receipt = capture(ROOT, args.candidate_sha, args.output)
+    receipt = (audit_capture(ROOT, args.candidate_sha, args.output) if args.audit
+               else capture(ROOT, args.candidate_sha, args.output, args.configuration))
     print(json.dumps({"candidate_sha": receipt["candidate_sha"],
                       "status": receipt["status"], "qualified": False,
                       "output": str(args.output)}))

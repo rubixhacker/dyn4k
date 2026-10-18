@@ -7,6 +7,14 @@ on:
         description: Full reviewed candidate commit SHA
         required: true
         type: string
+      configuration:
+        description: Full-hosted Safari source configuration
+        required: true
+        default: development
+        type: choice
+        options:
+          - development
+          - production
 
 permissions:
   contents: read
@@ -40,12 +48,21 @@ jobs:
         run: >-
           python tools/qualification/safari_yarn_lock.py
           --candidate-sha "${{ inputs.candidate_sha }}"
+          --configuration "${{ inputs.configuration }}"
           --output "${{ runner.temp }}/safari-yarn-lock-diagnostic"
+      - name: Audit captured mismatch bytes
+        run: |
+          if python -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["status"] != "LOCK_MISMATCH_CAPTURED")' \
+              "${{ runner.temp }}/safari-yarn-lock-diagnostic/receipt.json"; then
+            python tools/qualification/safari_yarn_lock.py \
+              --candidate-sha "${{ inputs.candidate_sha }}" \
+              --output "${{ runner.temp }}/safari-yarn-lock-diagnostic" --audit
+          fi
       - name: Retain raw lock diagnosis
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: safari-yarn-lock-${{ inputs.candidate_sha }}
+          name: safari-yarn-lock-${{ inputs.candidate_sha }}-${{ inputs.configuration }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/safari-yarn-lock-diagnostic/
           include-hidden-files: true
           if-no-files-found: error
