@@ -897,8 +897,8 @@ def run(target, candidate_sha, output):
         staging = repository / "build/staging-repository"
         receipt["staging_repository"] = str(staging)
         receipt["artifact_hashes"] = hosted.target_hashes(staging, artifact_target)
-        receipt["staged_gav"], _, staged_hashes = artifact.capture_staging(
-            repository, output, [artifact_target])
+        receipt["staged_gav"], _, staged_hashes, _ = artifact.capture_staging(
+            repository, output, [artifact_target], candidate_sha)
         if staged_hashes[artifact_target] != receipt["artifact_hashes"]:
             raise ValueError("staged artifact capture differs from target hashes")
         for config in CONFIGS[target]:

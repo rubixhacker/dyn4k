@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -11,6 +12,7 @@ from unittest import mock
 
 import full_hosted
 import qualify
+import test_publication
 
 
 class FullHostedTests(unittest.TestCase):
@@ -177,6 +179,78 @@ class FullHostedTests(unittest.TestCase):
                 full_corpus, "candidate_input_problems", side_effect=corpus_audit):
             self.assertEqual(2460, len(full_hosted.expected_cases(
                 full_hosted.load_corpus(repository, sha), "dyn4k-core")))
+
+    def test_run_binds_candidate_to_real_staged_publication_audit(self):
+        repository = self.root / "checkout"
+        repository.mkdir()
+        target = "tvosSimulatorArm64"
+        staging = test_publication.PublicationAuditTests().stage(repository, (target,))
+        for module in qualify.MODULES:
+            (repository / module / "src/commonMain/kotlin/api/Type.kt").write_bytes(
+                b"// Fixture notice\npackage api\nclass Type\n")
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        subprocess.run(["git", "-C", str(repository), "config", "core.autocrlf", "false"],
+                       check=True)
+        subprocess.run(["git", "-C", str(repository), "add", "LICENSE.md",
+                        "dyn4k-core/src", "dyn4k/src"], check=True)
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
+                       check=True)
+        candidate = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
+                                            text=True).strip()
+        for relative in (full_hosted.MAPPING, full_hosted.PAIRS):
+            path = repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture\n")
+        (repository / "build.gradle.kts").write_text(
+            'kotlin("multiplatform") version "2.4.20"\n'
+            'id("com.android.kotlin.multiplatform.library") version "9.3.1"\n')
+        manifest = {"source_files": [], "source_tree_sha256": "a" * 64}
+        runtime = {"java_version": "21.0.12", "simulators": {"tvOS": [
+            {"udid": "00000000-0000-0000-0000-000000000001"}]}}
+        audit = qualify.audit_staging(staging, candidate, (target,), repository / "LICENSE.md")
+        self.assertEqual("PASSED", audit["status"], audit["errors"])
+
+        calls = []
+        def stop_after_staging(*_args, **_kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                return {"exit_code": 0}
+            raise ValueError("fixture stops after staging capture")
+
+        captured = []
+        original_capture = full_hosted.artifact.capture_staging
+        def capture_staging(*args):
+            result = original_capture(*args)
+            captured.append(result)
+            return result
+
+        with mock.patch.object(full_hosted, "__file__", str(repository /
+                               "tools/qualification/full_hosted.py")), \
+                mock.patch.object(full_hosted, "INPUTS", ()), \
+                mock.patch.object(full_hosted, "load_corpus", return_value=manifest), \
+                mock.patch.object(full_hosted.hosted, "discover_runtime", return_value=runtime), \
+                mock.patch.object(full_hosted.hosted, "runtime_status", return_value=("READY", "")), \
+                mock.patch.object(full_hosted.hosted, "gradle_wrapper",
+                                  return_value=str(repository / "gradlew")), \
+                mock.patch.object(full_hosted.hosted, "tool_version", return_value="9.5.0"), \
+                mock.patch.object(full_hosted, "run_command", side_effect=stop_after_staging), \
+                mock.patch.object(full_hosted.artifact, "capture_staging",
+                                  side_effect=capture_staging) as capture:
+            receipt = full_hosted.run(target, candidate, self.root / "captured")
+            self.assertEqual(candidate, capture.call_args.args[3])
+            self.assertEqual("FAILED", receipt["status"])
+            self.assertEqual("fixture stops after staging capture",
+                             receipt["configurations"][0]["reason"])
+            self.assertEqual(set(qualify.MODULES), set(receipt["artifact_hashes"]))
+            self.assertTrue(receipt["staged_gav"])
+            self.assertEqual(audit["content_contract"], captured[0][3])
+
+            calls.clear()
+            wrong = full_hosted.run(target, "b" * 40, self.root / "wrong-candidate")
+            self.assertEqual("FAILED", wrong["status"])
+            self.assertIn("staged publication is partial or invalid", wrong["reason"])
+            self.assertNotIn("staged_gav", wrong)
 
     def full_archive(self):
         repository = Path(__file__).resolve().parents[2]
