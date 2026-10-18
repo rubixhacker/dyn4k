@@ -933,42 +933,42 @@ class ExtraTargetSeamTest(unittest.TestCase):
                     extra_targets.source_identity()
 
     def test_source_identity_uses_canonical_archive_with_autocrlf_enabled(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            (root / "source.txt").write_text("first\nsecond\n")
-            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
-            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
-                            "user.email=test@example.com", "commit", "-qm", "seed"], check=True)
-            commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
-            canonical = hashlib.sha256(subprocess.check_output(
-                ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
-                 "HEAD"])).hexdigest()
-            converted = hashlib.sha256(subprocess.check_output(
-                ["git", "-C", str(root), "-c", "core.autocrlf=true", "archive", "--format=tar",
-                 "HEAD"])).hexdigest()
-            self.assertNotEqual(canonical, converted)
-            with patch.object(extra_targets, "ROOT", root), patch.dict(
-                    os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
-                                 "GIT_CONFIG_VALUE_0": "true"}):
-                self.assertEqual(extra_targets.source_identity(), (commit, canonical))
-            (root / "source.txt").write_text("replacement\n")
-            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
-            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
-                            "user.email=test@example.com", "commit", "-qm", "replacement"], check=True)
-            replacement = subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
-            subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", commit], check=True)
-            subprocess.run(["git", "-C", str(root), "replace", commit, replacement], check=True)
-            substituted = hashlib.sha256(subprocess.check_output(
-                ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
-                 commit])).hexdigest()
-            self.assertNotEqual(canonical, substituted)
-            for autocrlf in ("false", "true"):
-                with patch.object(extra_targets, "ROOT", root), patch.dict(
-                        os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
-                                     "GIT_CONFIG_VALUE_0": autocrlf}):
+        for autocrlf in ("false", "true"):
+            with patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                        "GIT_CONFIG_VALUE_0": autocrlf}), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                subprocess.run(["git", "init", "-q", str(root)], check=True)
+                (root / "source.txt").write_text("first\nsecond\n")
+                subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
+                subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
+                                "user.email=test@example.com", "commit", "-qm", "seed"], check=True)
+                commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
+                canonical = hashlib.sha256(subprocess.check_output(
+                    ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
+                     "HEAD"])).hexdigest()
+                converted = hashlib.sha256(subprocess.check_output(
+                    ["git", "-C", str(root), "-c", "core.autocrlf=true", "archive", "--format=tar",
+                     "HEAD"])).hexdigest()
+                self.assertNotEqual(canonical, converted)
+                with patch.object(extra_targets, "ROOT", root):
                     self.assertEqual(extra_targets.source_identity(), (commit, canonical))
+                (root / "source.txt").write_text("replacement\n")
+                subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
+                subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
+                                "user.email=test@example.com", "commit", "-qm", "replacement"], check=True)
+                replacement = subprocess.check_output(
+                    ["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
+                subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", commit], check=True)
+                subprocess.run(["git", "-C", str(root), "replace", commit, replacement], check=True)
+                substituted = hashlib.sha256(subprocess.check_output(
+                    ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
+                     commit])).hexdigest()
+                self.assertNotEqual(canonical, substituted)
+                with patch.object(extra_targets, "ROOT", root):
+                    self.assertEqual(extra_targets.source_identity(), (commit, canonical))
+                    (root / "source.txt").write_text("dirty\n")
+                    with self.assertRaisesRegex(Rejected, "source tree is dirty"):
+                        extra_targets.source_identity()
 
 
 if __name__ == "__main__":
