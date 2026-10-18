@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -344,8 +345,14 @@ def verify_archive(output, write_verified=True):
         raise Rejected("baseline source identity differs")
     if result["fixture_source_sha256"] != fixture_source_sha256():
         raise Rejected("baseline fixture source differs")
-    source = hashlib.sha256(git("archive", "--format=tar",
-                                result["candidate_recorder_commit"])).hexdigest()
+    revision = result.get("candidate_recorder_commit")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise Rejected("recorder source revision is invalid")
+    try:
+        source = hashlib.sha256(git("-c", "core.autocrlf=false", "archive",
+                                    "--format=tar", revision)).hexdigest()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Rejected("recorder source revision is unavailable") from error
     if source != result["source_sha256"]:
         raise Rejected("captured recorder source archive differs")
     if [item["method"] for item in result["methods"]] != list(MATRIX_METHODS):

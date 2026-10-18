@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import capture_actual
@@ -28,6 +29,34 @@ class CaptureSourceGuardTest(unittest.TestCase):
         root = patch.object(capture_actual, "ROOT", self.root)
         root.start()
         self.addCleanup(root.stop)
+
+    def test_capture_writes_canonical_source_before_failed_stage(self):
+        subprocess.run(("git", "-C", str(self.root), "config", "core.autocrlf", "true"),
+                       check=True)
+        converted = capture_actual.git("archive", "--format=tar", "HEAD")
+        canonical = capture_actual.git("-c", "core.autocrlf=false", "archive",
+                                       "--format=tar", "HEAD")
+        self.assertNotEqual(converted, canonical)
+        temporary = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home())))
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name) / "capture"
+        jdk = Path(temporary.name) / "jdk"
+        (jdk / "bin").mkdir(parents=True)
+        (jdk / "bin/java").write_bytes(b"test executable")
+        real_run = subprocess.run
+
+        def stop_before_execution(command, *args, **kwargs):
+            if command[0] == "git":
+                return real_run(command, *args, **kwargs)
+            return SimpleNamespace(returncode=1)
+
+        with patch.object(capture_actual, "JDK21", jdk), \
+                patch.object(capture_actual, "expected_case_ids", return_value={"method": []}), \
+                patch.object(capture_actual.subprocess, "run", side_effect=stop_before_execution):
+            with self.assertRaisesRegex(CaptureRejected, "publication failed"):
+                capture_actual.run_capture("method", output)
+        self.assertEqual((output / "source.tar").read_bytes(), canonical)
+        self.assertFalse((output / "receipt.json").exists())
 
     def test_only_exact_generated_roots_are_exempt(self):
         for relative in ("build/cache/generated.bin", ".gradle/cache/state.bin",
