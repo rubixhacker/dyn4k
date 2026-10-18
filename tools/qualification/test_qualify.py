@@ -53,10 +53,19 @@ class QualificationTests(unittest.TestCase):
             self.assertIn((f"{prefix}org.dyn4j.geometry.GeometryCopyExtensionTest",
                            "curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState" + suffix),
                           cases)
-            self.assertEqual(441, len(qualify.expected_probe_cases(
+            self.assertEqual(1066, len(qualify.expected_probe_cases(
                 manifest, groups["core-" + group_id])))
             self.assertEqual(3, len(qualify.expected_probe_cases(
                 manifest, groups["consumer-" + group_id])))
+
+        selected_group_ids = (
+            "core-jvm", "jvm", "core-linuxX64", "linuxX64",
+            "core-jsNode", "jsNode", "core-wasmJsNode", "wasmJsNode",
+            "core-wasmWasiNode", "wasmWasiNode", "core-androidHost", "androidHost",
+        )
+        self.assertEqual(6668, sum(
+            len(qualify.expected_probe_cases(manifest, groups[group_id]))
+            for group_id in selected_group_ids))
 
     def test_frozen_core_manifest_names_integrated_epsilon_on_every_host(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
@@ -69,11 +78,71 @@ class QualificationTests(unittest.TestCase):
             epsilon = (prefix + "org.dyn4j.coverage.epsilon.UpstreamEpsilonCoverageTest",
                        "compute" + group["name_suffix"])
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(441, len(cases), group["id"])
+            self.assertEqual(1066, len(cases), group["id"])
             self.assertEqual(1, cases.count(epsilon), group["id"])
             collision = (prefix + "org.dyn4j.collision.CollisionModelTest",
                          "copyExceptionFromNamesPreservesMessage" + group["name_suffix"])
             self.assertEqual(1, cases.count(collision), group["id"])
+
+    def test_frozen_core_probe_rejects_missing_renamed_skipped_and_unexpected_cases(self):
+        manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
+        core = next(group for group in manifest["groups"] if group["id"] == "core-jvm")
+        cases = qualify.expected_probe_cases(manifest, core)
+        self.assertEqual(1066, len(cases))
+        with tempfile.TemporaryDirectory() as root:
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                for change in ("missing", "renamed", "skipped", "unexpected"):
+                    observed = list(cases)
+                    if change == "missing":
+                        observed.pop()
+                    elif change == "renamed":
+                        classname, _ = observed[-1]
+                        observed[-1] = (classname, "renamed[jvm]")
+                    elif change == "unexpected":
+                        observed.append(("org.dyn4j.UnexpectedTest", "extra[jvm]"))
+                    suite = ET.Element(
+                        "testsuite",
+                        tests=str(len(observed)),
+                        failures="0",
+                        errors="0",
+                        skipped=str(int(change == "skipped")),
+                        time="0",
+                    )
+                    for index, (classname, name) in enumerate(observed):
+                        case = ET.SubElement(
+                            suite, "testcase", classname=classname, name=name, time="0")
+                        if change == "skipped" and index == 0:
+                            ET.SubElement(case, "skipped")
+                    report = Path("core.xml")
+                    xml = ET.tostring(suite, encoding="unicode")
+                    command = [
+                        "python3",
+                        "-c",
+                        "from pathlib import Path; Path('core.xml').write_text(" + repr(xml) + ")",
+                    ]
+                    result = qualify.run_probe(
+                        command,
+                        [str(report)],
+                        "a" * 40,
+                        Path(root) / (change + ".json"),
+                        manifest={
+                            "kind": "foundation-probe",
+                            "case_names": manifest["case_names"],
+                            "case_sets": manifest["case_sets"],
+                            "groups": [{**core, "report_pattern": str(report)}],
+                        },
+                    )
+                    self.assertEqual("PROBE_FAILED", result["status"], change)
+                    self.assertEqual(1066, result["expected"], change)
+                    self.assertIn(
+                        "skipped cases" if change == "skipped" else "cases",
+                        result["reason"],
+                        change,
+                    )
+            finally:
+                os.chdir(previous)
 
     def test_frozen_dyn_manifest_names_integrated_polygon_extension(self):
         manifest = json.loads(Path(__file__).with_name("foundation-probes.json").read_text())
@@ -102,7 +171,7 @@ class QualificationTests(unittest.TestCase):
             prefix = group["classname"].removesuffix(
                 "org.dyn4j.geometry.FoundationPackageBridgeTest")
             cases = qualify.expected_probe_cases(manifest, group)
-            self.assertEqual(441, len(cases), group["id"])
+            self.assertEqual(1066, len(cases), group["id"])
             for classname, names in (
                 ("FoundationExtraMethodsParityTest", (
                     "rotationKeepsFieldBasedMathAndGetterDispatch",

@@ -1,0 +1,23 @@
+import org.gradle.api.tasks.testing.Test
+
+gradle.projectsEvaluated {
+    def core = gradle.rootProject.project(':dyn4k-core')
+    def classes = gradle.startParameter.projectProperties['detectionClasses']
+    def provider = gradle.startParameter.projectProperties['detectionProvider']
+    def evidence = gradle.startParameter.projectProperties['detectionEvidence']
+    if (classes == null || provider == null || evidence == null) {
+        throw new GradleException('Set detectionClasses, detectionProvider, and detectionEvidence')
+    }
+    core.tasks.register('detectionJUnitEvidence', Test) {
+        testClassesDirs = core.files(classes)
+        classpath = core.files(classes, provider.split(File.pathSeparator))
+        useJUnit()
+        include '**/collision/broadphase/*Test.class'
+        include '**/collision/narrowphase/*Test.class'
+        include '**/collision/manifold/*Test.class'
+        include '**/collision/continuous/*Test.class'
+        reports.junitXml.required = true
+        reports.junitXml.outputLocation = core.file(evidence)
+        reports.html.required = false
+    }
+}

@@ -25,7 +25,7 @@ class HostedQualificationTests(unittest.TestCase):
         groups = {group["id"]: group for group in manifest["groups"]}
         for target in hosted.NATIVE_TARGETS:
             self.assertEqual(45, len(qualify.expected_probe_cases(manifest, groups[target])))
-            self.assertEqual(441, len(qualify.expected_probe_cases(manifest, groups[f"core-{target}"])))
+            self.assertEqual(1066, len(qualify.expected_probe_cases(manifest, groups[f"core-{target}"])))
             self.assertEqual(3, len(qualify.expected_probe_cases(
                 manifest, groups[f"consumer-{target}"])))
         self.assertEqual(47, len(qualify.expected_probe_cases(manifest, groups["jvm"])))
@@ -136,8 +136,8 @@ class HostedQualificationTests(unittest.TestCase):
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
                    "xcode_version": "26.4.1", "simulators": {}}
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
-        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 486,
-                "executed": 486, "failures": 0, "skipped": 0, "exit_code": 0}
+        good = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 1111,
+                "executed": 1111, "failures": 0, "skipped": 0, "exit_code": 0}
         consumer = {**good, "expected": 3, "executed": 3}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         self.assertEqual("PROBE_PASSED", hosted.hosted_status(
@@ -155,8 +155,8 @@ class HostedQualificationTests(unittest.TestCase):
         def frozen_digest(ids):
             return qualify.manifest_digest({**manifest, "groups": [group for group in manifest["groups"]
                                                             if group["id"] in ids]})
-        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 486,
-                  "executed": 486, "failures": 0, "skipped": 0, "exit_code": 0,
+        source = {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": 1111,
+                  "executed": 1111, "failures": 0, "skipped": 0, "exit_code": 0,
                   "manifest_sha256": frozen_digest(("core-macosArm64", "macosArm64"))}
         consumer = {**source, "expected": 3, "executed": 3,
                     "manifest_sha256": frozen_digest(("consumer-macosArm64",))}
