@@ -34,10 +34,10 @@ an 8 MiB bound and checks retained hashes before reporting a positive diagnostic
 A probe failure or incomplete sidecar gets an unpassed failure receipt, and
 the other API still runs.
 On macOS, a final `ESRCH` probe is retained in `rss.json` with its error and
-exit-observation times. It can count as a complete short diagnostic only when
-the selected process exits zero within that probe interval, earlier RSS samples
-exist, and the runner verifies the sidecar hash and timing. An earlier or
-unconfirmed probe error remains `unavailable_or_partial`.
+return-code check times. It can count as a complete short diagnostic only when
+the concurrent capture has already recorded a zero exit at the failed probe,
+earlier RSS samples exist, and the runner verifies the sidecar hash and timing.
+A later exit or an unconfirmed probe error remains `unavailable_or_partial`.
 Timing results remain in `scenarios`; memory results are in
 `memory_scenarios`. If staging fails, neither capture starts.
 

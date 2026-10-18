@@ -284,10 +284,30 @@ class HostedRawFileContract(unittest.TestCase):
         exec(compile(ast.Module(body=functions, type_ignores=[]),
                      str(RUNNER), "exec"), self.scope)
 
+    def test_later_zero_exit_does_not_prove_probe_time_exit(self):
+        row = {"monotonic_ns": 10, "error_observed_monotonic_ns": 11,
+               "exit_observed_monotonic_ns": 9_000_011, "exit_code": 0,
+               "errno": errno.ESRCH, "classification": "terminal_esrch_exit_confirmed",
+               "error": "[Errno 3] macOS process resident bytes unavailable"}
+        resident = {"method": "proc_pidinfo_task_resident", "samples": [[5, 4096]],
+                    "errors": [row]}
+        capture_receipt = {"rss_observation": {"errors": 1}}
+        execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 10_000_000,
+                     "termination": "natural", "exit_code": 0}
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture_receipt, execution, "macosArm64"))
+        falsely_claimed = {**row, "returncode_at_error": 0,
+                           "returncode_checked_monotonic_ns": 9_000_011}
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            {**resident, "errors": [falsely_claimed]}, capture_receipt,
+            execution, "macosArm64"))
+
     def test_terminal_esrch_requires_confirmed_exit_and_no_midrun_error(self):
         check = self.scope["resident_probe_errors_complete"]
         terminal = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
                     "exit_observed_monotonic_ns": 32, "exit_code": 0,
+                    "returncode_at_error": 0,
+                    "returncode_checked_monotonic_ns": 32,
                     "errno": errno.ESRCH, "classification": "terminal_esrch_exit_confirmed",
                     "error": "[Errno 3] macOS process resident bytes unavailable"}
         resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
@@ -450,6 +470,8 @@ class HostedRawFileContract(unittest.TestCase):
                     status = "unavailable_or_partial" if api == "direct_kotlin" else "observed_diagnostic"
                     terminal = {"monotonic_ns": 2, "error_observed_monotonic_ns": 3,
                                 "exit_observed_monotonic_ns": 4, "exit_code": 0,
+                                "returncode_at_error": 0,
+                                "returncode_checked_monotonic_ns": 4,
                                 "errno": errno.ESRCH,
                                 "classification": "terminal_esrch_exit_confirmed",
                                 "error": "[Errno 3] macOS process resident bytes unavailable"}

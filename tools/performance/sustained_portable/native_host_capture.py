@@ -23,21 +23,21 @@ def sample_native_resident(process, stop, interval_seconds=0.02, platform_name=N
         try:
             samples.append((timestamp, native_memory.read_rss_bytes(process.pid)))
         except (OSError, ValueError) as error:
+            error_observed = time.monotonic_ns()
+            returncode_at_error = process.returncode
+            returncode_checked = time.monotonic_ns()
             row = {"monotonic_ns": timestamp,
-                   "error_observed_monotonic_ns": time.monotonic_ns(),
+                   "error_observed_monotonic_ns": error_observed,
+                   "returncode_at_error": returncode_at_error,
+                   "returncode_checked_monotonic_ns": returncode_checked,
                    "error": str(error), "errno": getattr(error, "errno", None)}
             if (platform_name == "darwin" and isinstance(error, OSError)
-                    and error.errno == errno.ESRCH):
-                deadline = time.monotonic() + min(interval_seconds, 0.05)
-                while process.poll() is None and time.monotonic() < deadline:
-                    time.sleep(0.001)
-                exit_code = process.poll()
-                if exit_code is not None:
-                    row.update(classification="terminal_esrch_exit_confirmed",
-                               exit_observed_monotonic_ns=time.monotonic_ns(),
-                               exit_code=exit_code)
-                    errors.append(row)
-                    break
+                    and error.errno == errno.ESRCH and returncode_at_error == 0):
+                row.update(classification="terminal_esrch_exit_confirmed",
+                           exit_observed_monotonic_ns=returncode_checked,
+                           exit_code=returncode_at_error)
+                errors.append(row)
+                break
             errors.append(row)
         stop.wait(interval_seconds)
     terminal = (len(errors) == 1 and
