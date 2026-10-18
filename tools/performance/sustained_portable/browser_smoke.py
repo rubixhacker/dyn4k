@@ -85,6 +85,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             with self.server.resource_lock:
                 self.server.served[name] = actual
+                self.server.served_bytes[name] = len(payload)
                 self.server.resource_responses.append(
                     {"name": name, "sha256": actual, "bytes": len(payload)})
 
@@ -123,6 +124,7 @@ def browser_server(directory, page, bundle, target, handler=Handler):
     server.required_resources = required_resources(target)
     server.resource_lock = threading.Lock()
     server.served = {}
+    server.served_bytes = {}
     server.resource_responses = []
     server.resource_errors = []
     server.completed = threading.Event()
@@ -136,15 +138,19 @@ def validate_loaded_resources(server):
             errors = server.resource_errors
             responses = server.resource_responses
             served = server.served
+            served_bytes = server.served_bytes
             if type(errors) is not list or not all(type(error) is str for error in errors):
                 raise ValueError("browser resource errors must be a list of strings")
             if type(responses) is not list:
                 raise ValueError("browser resource responses must be a list")
             if type(served) is not dict:
                 raise ValueError("browser served map must be an object")
+            if type(served_bytes) is not dict:
+                raise ValueError("browser served bytes map must be an object")
             errors = list(errors)
             responses = [dict(item) if type(item) is dict else item for item in responses]
             served = dict(served)
+            served_bytes = dict(served_bytes)
         bundle = server.expected_bundle
         required = server.required_resources
     except AttributeError as error:
@@ -179,6 +185,8 @@ def validate_loaded_resources(server):
         loaded[name] = (digest, size)
     if served != {name: digest for name, (digest, _) in loaded.items()}:
         raise ValueError("browser served map differs from resource responses")
+    if served_bytes != {name: size for name, (_, size) in loaded.items()}:
+        raise ValueError("browser served bytes differ from resource responses")
     missing = required - loaded.keys()
     if missing:
         raise ValueError("browser missing required dependencies: " + ", ".join(sorted(missing)))
@@ -327,6 +335,7 @@ def run(args):
         "producer_bytes": len(raw),
         "completion_sha256": capture.digest(args.archive / "completion.raw"),
         "loaded_resources_sha256": server.served,
+        "loaded_resource_bytes": server.served_bytes,
         "resource_responses": server.resource_responses,
         "resource_errors": server.resource_errors,
         "stderr_sha256": capture.digest(args.archive / "stderr.raw"),

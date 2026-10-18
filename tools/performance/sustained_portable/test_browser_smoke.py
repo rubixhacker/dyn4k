@@ -167,6 +167,14 @@ class BrowserResourceBindingTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, omitted.replace(".", "\\.")):
                     browser_smoke.validate_loaded_resources(server)
 
+    def test_complete_http_fetch_records_the_sent_lengths(self):
+        server = self.serve()
+        for name in WASM_FILES:
+            self.assertEqual(self.get(server, name), ("original:" + name).encode())
+        browser_smoke.validate_loaded_resources(server)
+        self.assertEqual(server.served_bytes,
+                         {name: len(("original:" + name).encode()) for name in WASM_FILES})
+
 
 class BrowserResourceRecordTest(unittest.TestCase):
     def server(self):
@@ -176,6 +184,7 @@ class BrowserResourceRecordTest(unittest.TestCase):
         return SimpleNamespace(
             resource_lock=threading.Lock(), resource_errors=[],
             resource_responses=responses, served=dict(bundle),
+            served_bytes={item["name"]: item["bytes"] for item in responses},
             expected_bundle=bundle, required_resources=frozenset(WASM_FILES),
         )
 
@@ -241,6 +250,16 @@ class BrowserResourceRecordTest(unittest.TestCase):
         server = self.server()
         server.served["unknown.mjs"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "served"):
+            browser_smoke.validate_loaded_resources(server)
+
+    def test_positive_byte_claim_must_match_sent_length_map(self):
+        server = self.server()
+        server.resource_responses[0]["bytes"] -= 1
+        with self.assertRaisesRegex(ValueError, "served bytes"):
+            browser_smoke.validate_loaded_resources(server)
+        server = self.server()
+        server.served_bytes = {}
+        with self.assertRaisesRegex(ValueError, "served bytes"):
             browser_smoke.validate_loaded_resources(server)
 
 
