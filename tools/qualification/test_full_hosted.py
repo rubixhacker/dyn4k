@@ -2095,6 +2095,7 @@ class FullHostedTests(unittest.TestCase):
         rows = self.safari_diagnostic_rows()
         self.assertEqual(72, len(rows))
         self.assertEqual(72, len(set(rows)))
+        self.assertIn("0@-9223372036854775808", rows[0])
         full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
                                      candidate_repository=self.candidate_repository)
         archive = self.root.parent / (self.root.name + "-diagnostic.tar")
@@ -2104,7 +2105,7 @@ class FullHostedTests(unittest.TestCase):
             original = report.read_bytes()
             modified_ns = report.stat().st_mtime_ns
             for mutation in ("deleted", "duplicate", "truncated", "truncated-tail",
-                             "truncated-transform",
+                             "truncated-transform", "wrong-zero-sign",
                              "wrong-fixture",
                              "wrong-method", "wrong-phase", "wrong-order", "wrong-step"):
                 with self.subTest(configuration=lane["configuration"], mutation=mutation):
@@ -2128,6 +2129,14 @@ class FullHostedTests(unittest.TestCase):
                                          if field.startswith("a.transform="))
                         fields[transform] = "a.transform=1"
                         actual[0] = "\t".join(fields)
+                    elif mutation == "wrong-zero-sign":
+                        fields = actual[0].split("\t")
+                        transform = next(i for i, field in enumerate(fields)
+                                         if field.startswith("a.transform="))
+                        values = fields[transform].split("=", 1)[1].split(",")
+                        values[values.index("0@0")] = "-0@0"
+                        fields[transform] = "a.transform=" + ",".join(values)
+                        actual[0] = "\t".join(fields)
                     else:
                         old, new = {
                             "wrong-fixture": ("fixture=CirclePolygon", "fixture=CircleSlice"),
@@ -2150,7 +2159,7 @@ class FullHostedTests(unittest.TestCase):
                                 self.root, changed, manifest, consumer,
                                 candidate_repository=self.candidate_repository)
                         if mutation in ("deleted", "duplicate", "truncated", "truncated-tail",
-                                        "truncated-transform"):
+                                        "truncated-transform", "wrong-zero-sign"):
                             (self.root / "receipt.json").write_text(json.dumps(changed))
                             full_hosted.package_archive(self.root, archive)
                             with mock.patch.object(full_hosted, "load_corpus",
@@ -2249,6 +2258,18 @@ class FullHostedTests(unittest.TestCase):
                 output.text = "".join(changed)
                 with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
                     full_hosted.check_safari_diagnostic_suite(suite)
+
+    def test_safari_v2_number_requires_explicit_zero_sign_to_match_raw_bits(self):
+        for value in ("0@0", "0@-9223372036854775808",
+                      "-0@-9223372036854775808", "1@4607182418800017408",
+                      "NaN@9221120237041090560", "Infinity@9218868437227405312",
+                      "-Infinity@-4503599627370496"):
+            with self.subTest(value=value):
+                full_hosted.safari_v2_number(value, "a.transform")
+        for value in ("-0@0", "-0.0@0", "-0e2@0", "1@1"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "Safari diagnostic"):
+                    full_hosted.safari_v2_number(value, "a.transform")
 
     def test_public_safari_archive_rejects_resealed_product_substitutions(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")

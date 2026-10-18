@@ -349,8 +349,8 @@ def safari_v2_number(value, field):
         safari_v2_require(not math.isinf(number) or parts[0] in ("Infinity", "-Infinity"),
                           field)
         encoded = struct.unpack(">q", struct.pack(">d", number))[0]
-        safari_v2_require(bits == encoded or (number == 0.0 and bits in (0, -(1 << 63))),
-                          field)
+        safari_v2_require(bits == encoded or (
+            number == 0.0 and not parts[0].startswith("-") and bits == -(1 << 63)), field)
 
 
 def safari_v2_vector(value, field):
