@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1" android:versionName="performance-android-v1">
+    <instrumentation android:name="io.github.rubixhacker.dyn4k.performance.PerformanceInstrumentation"
+        android:targetPackage="io.github.rubixhacker.dyn4k.performance" />
+</manifest>
