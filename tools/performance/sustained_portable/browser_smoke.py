@@ -165,6 +165,9 @@ def validate_loaded_resources(server):
         type(name) is str and name in bundle for name in required
     ):
         raise ValueError("browser required resource set is malformed")
+    if not all(type(name) is str and name and type(size) is int and size > 0
+               for name, size in served_bytes.items()):
+        raise ValueError("browser served bytes map has invalid keys or values")
     if errors:
         raise ValueError("browser resource rejection: " + "; ".join(errors))
     loaded = {}
@@ -190,6 +193,12 @@ def validate_loaded_resources(server):
     missing = required - loaded.keys()
     if missing:
         raise ValueError("browser missing required dependencies: " + ", ".join(sorted(missing)))
+    return {
+        "loaded_resources_sha256": served,
+        "loaded_resource_bytes": served_bytes,
+        "resource_responses": responses,
+        "resource_errors": errors,
+    }
 
 
 def browser_page(target, args):
@@ -312,6 +321,20 @@ def run(args):
     raw = received["payload"] if received and received["kind"] == "complete" else b""
     (args.archive / "producer.raw").write_bytes(raw)
     (args.archive / "completion.raw").write_bytes(received["payload"] if received else b"")
+    try:
+        resource_state = validate_loaded_resources(server)
+    except ValueError as error:
+        failure = {
+            "qualification": "unpassed", "target": args.target + "Browser",
+            "scenario": scenario, "source_sha": source,
+            "completion_kind": received["kind"] if received else "timeout",
+            "producer_sha256": capture.digest(args.archive / "producer.raw"),
+            "producer_bytes": len(raw),
+            "completion_sha256": capture.digest(args.archive / "completion.raw"),
+            "resource_validation_error": str(error),
+        }
+        (args.archive / "capture.json").write_text(json.dumps(failure, indent=2) + "\n")
+        raise
     receipt = {
         "qualification": "unpassed", "target": args.target + "Browser",
         "scenario": scenario, "source_sha": source, "command": command,
@@ -334,10 +357,7 @@ def run(args):
         "producer_sha256": capture.digest(args.archive / "producer.raw"),
         "producer_bytes": len(raw),
         "completion_sha256": capture.digest(args.archive / "completion.raw"),
-        "loaded_resources_sha256": server.served,
-        "loaded_resource_bytes": server.served_bytes,
-        "resource_responses": server.resource_responses,
-        "resource_errors": server.resource_errors,
+        **resource_state,
         "stderr_sha256": capture.digest(args.archive / "stderr.raw"),
         "stderr_bytes": len(stderr),
         "browser_process_image": "unobserved_through_flatpak_wrapper",
@@ -353,12 +373,6 @@ def run(args):
         raise ValueError("browser completion timed out; raw archive retained")
     if received["kind"] == "error":
         raise ValueError(f"browser script error: {received['payload'][:200]!r}")
-    try:
-        validate_loaded_resources(server)
-    except ValueError as error:
-        receipt["resource_validation_error"] = str(error)
-        (args.archive / "capture.json").write_text(json.dumps(receipt, indent=2) + "\n")
-        raise
     try:
         capture.validate_protocol(
             raw, scenario, source, producer_tree, hashes, "development", nonce,

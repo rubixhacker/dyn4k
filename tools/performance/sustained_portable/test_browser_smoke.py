@@ -7,6 +7,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
@@ -261,6 +262,115 @@ class BrowserResourceRecordTest(unittest.TestCase):
         server.served_bytes = {}
         with self.assertRaisesRegex(ValueError, "served bytes"):
             browser_smoke.validate_loaded_resources(server)
+
+    def test_served_byte_map_rejects_equal_noninteger_values_and_nonplain_keys(self):
+        class StringName(str):
+            pass
+
+        for change in ("float", "bool", "zero", "negative", "string_subclass",
+                       "dict_subclass", "extra_key"):
+            with self.subTest(change=change):
+                server = self.server()
+                name = next(iter(server.served_bytes))
+                if change == "float":
+                    server.served_bytes[name] = float(server.served_bytes[name])
+                elif change == "bool":
+                    server.resource_responses[0]["bytes"] = 1
+                    server.served_bytes[name] = True
+                elif change == "zero":
+                    server.served_bytes[name] = 0
+                elif change == "negative":
+                    server.served_bytes[name] = -1
+                elif change == "string_subclass":
+                    server.served_bytes[StringName(name)] = server.served_bytes.pop(name)
+                elif change == "dict_subclass":
+                    server.served_bytes = type("ForgedMap", (dict,), {})(server.served_bytes)
+                else:
+                    server.served_bytes["unknown.mjs"] = 1
+                with self.assertRaisesRegex(ValueError, "served bytes"):
+                    browser_smoke.validate_loaded_resources(server)
+
+
+class BrowserRunFailureReceiptTest(unittest.TestCase):
+    def test_missing_internal_map_retains_raw_and_structured_receipt(self):
+        class FinishedProcess:
+            pid = 1
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def communicate(self, timeout):
+                return b"", b""
+
+        for missing in ("served_bytes", "served"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle_dir = root / "bundle"
+                bundle_dir.mkdir()
+                for name in JS_FILES:
+                    (bundle_dir / name).write_bytes(name.encode())
+                core = root / "core.bin"
+                kotlin = root / "kotlin.bin"
+                inventory = root / "inventory.json"
+                browser = root / "files/extra/chrome"
+                browser.parent.mkdir(parents=True)
+                for path in (core, kotlin, browser):
+                    path.write_bytes(b"fixture")
+                inventory.write_text("{}")
+                source = "a" * 40
+                raw = b"DYN4K\tCOMPLETE\tretained raw\n"
+                archive = root / "capture"
+                args = SimpleNamespace(
+                    archive=archive, target="js",
+                    scenario="pile.default.small.30hz.direct_kotlin",
+                    source_sha=source, steps=1, warmup=0,
+                    harness=str(bundle_dir / "dyn4k-performance-portable.js"),
+                    core=str(core), kotlin=str(kotlin), inventory=str(inventory),
+                )
+
+                def check_output(command, text):
+                    if command[0] == "git" and "rev-parse" in command:
+                        return source + "\n"
+                    if command[0] == "git" and "status" in command:
+                        return ""
+                    if command[:3] == ["flatpak", "info", "--show-commit"]:
+                        return "fixture-commit"
+                    if command[:3] == ["flatpak", "info", "--show-location"]:
+                        return str(root)
+                    raise AssertionError(command)
+
+                original_factory = browser_smoke.browser_server
+
+                def faulty_server(*factory_args):
+                    server = original_factory(*factory_args)
+                    server.received = {"kind": "complete", "payload": raw}
+                    server.completed.set()
+                    delattr(server, missing)
+                    return server
+
+                with mock.patch.object(browser_smoke.subprocess, "check_output",
+                                       side_effect=check_output), \
+                     mock.patch.object(browser_smoke.subprocess, "Popen",
+                                       return_value=FinishedProcess()), \
+                     mock.patch.object(browser_smoke.capture, "source_tree",
+                                       return_value="fixture-tree"), \
+                     mock.patch.object(browser_smoke.capture, "validate_inventory",
+                                       return_value={"gradle": "9.5.0", "kgp": "2.4.20",
+                                                     "compile_configuration": "development"}), \
+                     mock.patch.object(browser_smoke, "browser_server",
+                                       side_effect=faulty_server):
+                    with self.assertRaisesRegex(ValueError, "resource state is incomplete"):
+                        browser_smoke.run(args)
+
+                self.assertEqual((archive / "producer.raw").read_bytes(), raw)
+                self.assertEqual((archive / "completion.raw").read_bytes(), raw)
+                receipt = json.loads((archive / "capture.json").read_text())
+                self.assertEqual(receipt["qualification"], "unpassed")
+                self.assertEqual(receipt["source_sha"], source)
+                self.assertEqual(receipt["producer_sha256"], hashlib.sha256(raw).hexdigest())
+                self.assertIn("resource state is incomplete", receipt["resource_validation_error"])
+                self.assertNotIn("loaded_resource_bytes", receipt)
 
 
 if __name__ == "__main__":
