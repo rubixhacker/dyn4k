@@ -1,5 +1,6 @@
 import ast
 import base64
+import errno
 import hashlib
 import json
 from pathlib import Path
@@ -272,10 +273,47 @@ class HostedRawFileContract(unittest.TestCase):
     def setUp(self):
         (self.raw_node, self.sidecar_node, self.route_node, self.receipt_node,
          self.gradle_node, self.guard_node) = workflow_nodes()
-        self.scope = {"hashlib": hashlib, "json": json, "Path": Path, "sys": sys}
+        self.scope = {"hashlib": hashlib, "json": json, "Path": Path, "sys": sys,
+                      "errno": errno}
+        tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
+        resident_check = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                              and node.name == "resident_probe_errors_complete")
         functions = [self.raw_node] + ([self.sidecar_node] if self.sidecar_node else [])
+        functions.append(resident_check)
         exec(compile(ast.Module(body=functions, type_ignores=[]),
                      str(RUNNER), "exec"), self.scope)
+
+    def test_terminal_esrch_requires_confirmed_exit_and_no_midrun_error(self):
+        check = self.scope["resident_probe_errors_complete"]
+        terminal = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
+                    "exit_observed_monotonic_ns": 32, "exit_code": 0,
+                    "errno": errno.ESRCH, "classification": "terminal_esrch_exit_confirmed",
+                    "error": "[Errno 3] macOS process resident bytes unavailable"}
+        resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
+                    "errors": [terminal]}
+        capture_receipt = {"rss_observation": {"errors": 1}}
+        execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
+                     "termination": "natural", "exit_code": 0}
+        self.assertTrue(check(resident, capture_receipt, execution, "macosArm64"))
+        self.assertFalse(check(resident, capture_receipt, execution, "mingwX64"))
+        self.assertFalse(check({**resident, "samples": [[35, 4096]]},
+                               capture_receipt, execution, "macosArm64"))
+        self.assertFalse(check({**resident, "errors": [terminal, terminal]},
+                               capture_receipt, execution, "macosArm64"))
+        self.assertFalse(check({**resident, "errors": ["bad row"]},
+                               capture_receipt, execution, "macosArm64"))
+        self.assertFalse(check(resident, capture_receipt,
+                               {**execution, "ended_monotonic_ns": 31}, "macosArm64"))
+        self.assertFalse(check({**resident, "errors": [{**terminal,
+            "exit_observed_monotonic_ns": 50_000_032}]}, capture_receipt,
+            {**execution, "ended_monotonic_ns": 50_000_040}, "macosArm64"))
+        midrun = {**terminal, "errno": 5, "error": "[Errno 5] denied"}
+        self.assertFalse(check({**resident, "errors": [midrun]},
+                               capture_receipt, execution, "macosArm64"))
+        archived_unconfirmed = {"monotonic_ns": 674382974750,
+                                "error": "[Errno 3] macOS process resident bytes unavailable"}
+        self.assertFalse(check({**resident, "errors": [archived_unconfirmed]},
+                               capture_receipt, execution, "macosArm64"))
 
     def test_windows_image_control_uses_exact_inventory_executable(self):
         tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
@@ -409,15 +447,23 @@ class HostedRawFileContract(unittest.TestCase):
                 if "--mode" in argv and argv[argv.index("--mode") + 1] == "memory":
                     api = "direct_kotlin" if "direct_kotlin" in label else "compatibility"
                     status = "unavailable_or_partial" if api == "direct_kotlin" else "observed_diagnostic"
+                    terminal = {"monotonic_ns": 2, "error_observed_monotonic_ns": 3,
+                                "exit_observed_monotonic_ns": 4, "exit_code": 0,
+                                "errno": errno.ESRCH,
+                                "classification": "terminal_esrch_exit_confirmed",
+                                "error": "[Errno 3] macOS process resident bytes unavailable"}
                     (archive / "execution.json").write_text(json.dumps({
                         "pid": 123, "raw_collection": "selected_process_exited",
                         "termination": "natural", "exit_code": 0,
+                        "started_monotonic_ns": 0, "ended_monotonic_ns": 5,
                         "stdout_sha256": hashlib.sha256(b"producer output").hexdigest(),
                         "stderr_sha256": hashlib.sha256(b"").hexdigest()}))
                     (archive / "rss.json").write_text(json.dumps({
                         "pid": 123, "status": status,
+                        "method": "proc_pidinfo_task_resident",
                         "samples": [] if api == "direct_kotlin" else [[1, 4096]],
-                        "errors": [{"error": "probe denied"}] if api == "direct_kotlin" else []}))
+                        "errors": [{"error": "probe denied"}] if api == "direct_kotlin"
+                                  else [terminal]}))
                     (archive / "run.json").write_text(json.dumps({
                         "mode": "memory", "qualification": "unpassed"}))
                     (archive / "rss.csv").write_text(
@@ -431,6 +477,7 @@ class HostedRawFileContract(unittest.TestCase):
                         "execution_sha256": hashlib.sha256((archive / "execution.json").read_bytes()).hexdigest(),
                         "rss_observation": {"status": status,
                                             "samples": 0 if api == "direct_kotlin" else 1,
+                                            "errors": 1,
                                             "rss_json_sha256": hashlib.sha256(
                                                 (archive / "rss.json").read_bytes()).hexdigest()},
                         "managed_heap_observation": {
@@ -464,6 +511,8 @@ class HostedRawFileContract(unittest.TestCase):
                              "unavailable_or_partial")
             self.assertEqual(route["memory_scenarios"]["compatibility"]["status"],
                              "observed_diagnostic")
+            self.assertEqual(route["memory_scenarios"]["compatibility"]["terminal_rss_probe"]
+                             ["classification"], "terminal_esrch_exit_confirmed")
             failure = json.loads((evidence / "captures/memory/direct_kotlin-failure.json").read_text())
             self.assertEqual(failure["qualification"], "unpassed")
             self.assertEqual(failure["raw_collection"], "selected_process_exited")

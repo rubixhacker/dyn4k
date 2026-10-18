@@ -1,4 +1,5 @@
 import hashlib
+import errno
 import json
 import os
 from pathlib import Path
@@ -89,6 +90,32 @@ def sidecar_bytes(path):
     if len(snapshot) != before.st_size or identity(before) != identity(after):
         raise ValueError("Native memory sidecar changed during read")
     return snapshot
+
+def resident_probe_errors_complete(resident, capture, execution, selected_target):
+    errors = resident["errors"]
+    if not isinstance(errors, list):
+        return False
+    if capture["rss_observation"]["errors"] != len(errors):
+        return False
+    if not errors:
+        return True
+    if (selected_target != "macosArm64" or len(errors) != 1 or
+            resident["method"] != "proc_pidinfo_task_resident" or
+            execution["termination"] != "natural" or execution["exit_code"] != 0):
+        return False
+    row = errors[0]
+    if (not isinstance(row, dict) or
+            row.get("classification") != "terminal_esrch_exit_confirmed" or
+            row.get("errno") != errno.ESRCH or row.get("exit_code") != 0 or
+            "macOS process resident bytes unavailable" not in row.get("error", "")):
+        return False
+    stamps = (execution["started_monotonic_ns"], row["monotonic_ns"],
+              row["error_observed_monotonic_ns"], row["exit_observed_monotonic_ns"],
+              execution["ended_monotonic_ns"])
+    return (all(isinstance(stamp, int) for stamp in stamps) and
+            list(stamps) == sorted(stamps) and
+            stamps[3] - stamps[2] <= 50_000_000 and
+            all(sample[0] < row["monotonic_ns"] for sample in resident["samples"]))
 
 def execute(label, argv, timeout=300):
     output = evidence / label
@@ -344,8 +371,11 @@ try:
                             capture["rss_observation"]["status"] == "observed_diagnostic" and
                             resident["status"] == "observed_diagnostic" and
                             capture["rss_observation"]["samples"] == len(resident["samples"]) and
-                            len(resident["samples"]) > 0 and not resident["errors"]
+                            len(resident["samples"]) > 0 and
+                            resident_probe_errors_complete(resident, capture, execution, target)
                             else "unavailable_or_partial")
+                        if result["status"] == "observed_diagnostic" and resident["errors"]:
+                            result["terminal_rss_probe"] = resident["errors"][0]
                 except (OSError, ValueError, KeyError, TypeError, UnicodeError) as error:
                     result["error"] = str(error)
                 route["memory_scenarios"][api] = result
