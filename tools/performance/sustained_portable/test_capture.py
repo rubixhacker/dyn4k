@@ -1,7 +1,8 @@
 import copy
 import ctypes
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -649,6 +650,59 @@ class PortableCaptureTest(unittest.TestCase):
         self.assertEqual(result["swap"], "applied")
         self.assertEqual(result["mapped_image_identity"], "matched_original")
         self.assertEqual(result["stale_pid"], "rejected")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_writes_receipt_when_diagnostic_path_is_absent(self):
+        observer = capture.observed_process_image
+        def without_path(pid, selected):
+            image = observer(pid, selected)
+            image["path"] = None
+            image["path_error"] = "diagnostic path denied"
+            return image
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "path-swap.json"
+            with mock.patch.object(capture, "observed_process_image", side_effect=without_path), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    redirect_stdout(io.StringIO()):
+                host_image_adverse.main()
+            result = json.loads(output.read_text())
+        self.assertEqual(result["swap"], "applied")
+        self.assertEqual(result["mapped_image_identity"], "matched_original")
+        self.assertEqual(result["stale_pid"], "rejected")
+        self.assertIsNone(result["reported_path_sha256_after"])
+        self.assertEqual(result["path_error"], "diagnostic path denied")
+        self.assertIsNone(result["after"]["path"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_without_path_rejects_wrong_mapped_identity(self):
+        observer = capture.observed_process_image
+        def run_with_mutation(mutation):
+            observed = 0
+            def mutate_after(pid, selected):
+                nonlocal observed
+                image = observer(pid, selected)
+                observed += 1
+                image["path"] = None
+                image["path_error"] = "diagnostic path denied"
+                if observed == 2:
+                    image.update(mutation)
+                return image
+            with mock.patch.object(capture, "observed_process_image", side_effect=mutate_after):
+                return host_image_adverse.path_swap_control()
+        cases = (
+            {"sha256": "0" * 64},
+            {"identity_kind": "mapped_executable_vnode", "method": "proc_pidinfo_region_vnode",
+             "mapped_dev": 2, "selected_dev": 1, "mapped_ino": 3, "selected_ino": 3,
+             "mapped_size": 4096},
+            {"identity_kind": "mapped_executable_code", "method": "ReadProcessMemory_main_PE_code",
+             "mapped_code_sha256": "0" * 64, "matched_code_bytes": 10},
+        )
+        for mutation in cases:
+            with self.subTest(mutation=mutation):
+                result = run_with_mutation(mutation)
+                self.assertEqual(result["swap"], "applied")
+                self.assertEqual(result["mapped_image_identity"], "mismatched")
+                self.assertEqual(result["stale_pid"], "rejected")
 
     def test_rejects_nonfinite_and_negative_physical_diagnostics(self):
         payload = self.protocol()

@@ -43,11 +43,18 @@ def path_swap_control():
                 receipt["swap_error"] = str(error)
             selected = moved if receipt["swap"] == "applied" else executable
             receipt["after"] = capture.observed_process_image(process.pid, selected)
-            reported = Path(receipt["after"]["path"])
-            try:
-                receipt["reported_path_sha256_after"] = capture.digest(reported)
-            except OSError:
+            reported_path = receipt["after"].get("path")
+            if reported_path is None:
                 receipt["reported_path_sha256_after"] = None
+                receipt["path_error"] = receipt["after"].get("path_error") or \
+                    "diagnostic process path unavailable"
+            else:
+                if not isinstance(reported_path, str) or not reported_path:
+                    raise ValueError("invalid diagnostic process path")
+                try:
+                    receipt["reported_path_sha256_after"] = capture.digest(Path(reported_path))
+                except OSError:
+                    receipt["reported_path_sha256_after"] = None
             try:
                 capture.require_process_image(receipt["after"], original_sha)
                 receipt["mapped_image_identity"] = "matched_original"

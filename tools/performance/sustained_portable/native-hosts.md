@@ -4,6 +4,9 @@ Linux x64, Linux ARM64, Windows x64, and macOS ARM64 have Native executables.
 Each process runs the common direct or compatibility fixture. The Java
 comparator remains JVM-only. Short captures stay `qualification: unpassed`
 even when their protocol and process checks pass.
+If a diagnostic process path is absent, the path-swap receipt retains
+`path_error` and leaves `reported_path_sha256_after` null. The selected mapped
+identity, swap outcome, and stale-PID checks still decide the control.
 
 Use a clean checkout at the selected commit. `STAGED_REPO_URI` must point to
 the exact staged repository for that commit, with both `dyn4k-core` and `dyn4k`
