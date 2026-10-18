@@ -67,8 +67,8 @@ internal object WindowsCollisionTrace {
             "a.foci.world=${vectors(fociA)}", "b.foci.world=${vectors(fociB)}",
             "a.axes.withB=${vectors(axesA)}", "b.axes.withA=${vectors(axesB)}",
             "gjk.initial.centerDirection=${vector(centerDirection)}", "gjk.initial.effectiveDirection=${vector(initialDirection)}",
-            "clip.feature.a=${resultNormal?.let { feature(a.getFarthestFeature(it.copy(), ta)) } ?: "na"}",
-            "clip.feature.b=${resultNormal?.let { feature(b.getFarthestFeature(it.getNegative(), tb)) } ?: "na"}"
+            "clip.probe.feature.a=${resultNormal?.let { feature(a.getFarthestFeature(it.copy(), ta)) } ?: "na"}",
+            "clip.probe.feature.b=${resultNormal?.let { feature(b.getFarthestFeature(it.getNegative(), tb)) } ?: "na"}"
         )
         val directions = arrayOf(Vector2(1.0, 0.0), Vector2(-1.0, 0.0), Vector2(0.0, 1.0), Vector2(0.0, -1.0), initialDirection, resultNormal?.copy() ?: initialDirection.copy())
         for ((index, direction) in directions.withIndex()) {

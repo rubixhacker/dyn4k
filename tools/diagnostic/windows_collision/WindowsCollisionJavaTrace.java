@@ -104,8 +104,8 @@ final class WindowsCollisionJavaTrace {
         fields.add("b.axes.withA=" + vectors(axesB));
         fields.add("gjk.initial.centerDirection=" + vector(centerDirection));
         fields.add("gjk.initial.effectiveDirection=" + vector(initialDirection));
-        fields.add("clip.feature.a=" + (resultNormal == null ? "na" : feature(a.getFarthestFeature(resultNormal.copy(), ta))));
-        fields.add("clip.feature.b=" + (resultNormal == null ? "na" : feature(b.getFarthestFeature(resultNormal.getNegative(), tb))));
+        fields.add("clip.probe.feature.a=" + (resultNormal == null ? "na" : feature(a.getFarthestFeature(resultNormal.copy(), ta))));
+        fields.add("clip.probe.feature.b=" + (resultNormal == null ? "na" : feature(b.getFarthestFeature(resultNormal.getNegative(), tb))));
         Vector2[] directions = new Vector2[] {new Vector2(1.0, 0.0), new Vector2(-1.0, 0.0),
                 new Vector2(0.0, 1.0), new Vector2(0.0, -1.0), initialDirection,
                 resultNormal == null ? initialDirection.copy() : resultNormal.copy()};
