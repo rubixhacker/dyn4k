@@ -15,27 +15,77 @@ from urllib.parse import unquote, urlsplit
 
 import capture
 
+JS_SCRIPTS = (
+    "kotlin-kotlin-stdlib.js",
+    "kotlin_org_jetbrains_kotlin_kotlin_dom_api_compat.js",
+    "dyn4k-dyn4k-core.js", "dyn4k-dyn4k.js",
+    "dyn4k-performance-portable.js",
+)
+WASM_EXECUTABLES = (
+    "custom-formatters.js",
+    "dyn4k-performance-portable.import-object.mjs",
+    "dyn4k-performance-portable.js-builtins.mjs",
+    "dyn4k-performance-portable.mjs",
+    "dyn4k-performance-portable.wasm",
+)
+
 
 class Handler(SimpleHTTPRequestHandler):
-    page = b""
-    directory_path = Path(".")
+    def __init__(self, request, client_address, server):
+        super().__init__(request, client_address, server, directory=str(server.directory_path))
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(self.directory_path), **kwargs)
+    def read_resource(self, selected):
+        with selected.open("rb") as stream:
+            return stream.read()
+
+    def resource_error(self, message):
+        with self.server.resource_lock:
+            self.server.resource_errors.append(message)
 
     def do_GET(self):
         if self.path == "/":
+            page = self.server.page
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(self.page)))
+            self.send_header("Content-Length", str(len(page)))
             self.end_headers()
-            self.wfile.write(self.page)
+            self.wfile.write(page)
         else:
             name = unquote(urlsplit(self.path).path).lstrip("/")
-            selected = (self.directory_path / name).resolve()
-            if selected.is_file() and selected.is_relative_to(self.directory_path.resolve()):
-                self.server.served[name] = capture.digest(selected)
-            super().do_GET()
+            if name not in self.server.expected_bundle:
+                if name != "favicon.ico":
+                    self.resource_error(f"unknown resource: {name}")
+                self.send_error(404)
+                return
+            selected = (self.server.directory_path / name).resolve()
+            if not selected.is_relative_to(self.server.directory_path.resolve()) or not selected.is_file():
+                self.resource_error(f"missing resource: {name}")
+                self.send_error(404)
+                return
+            try:
+                payload = self.read_resource(selected)
+            except OSError:
+                self.resource_error(f"resource read failed: {name}")
+                self.send_error(500)
+                return
+            actual = hashlib.sha256(payload).hexdigest()
+            if actual != self.server.expected_bundle[name]:
+                self.resource_error(f"resource digest mismatch: {name}")
+                self.send_error(409)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(name))
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except OSError:
+                self.resource_error(f"resource response incomplete: {name}")
+                return
+            with self.server.resource_lock:
+                self.server.served[name] = actual
+                self.server.resource_responses.append(
+                    {"name": name, "sha256": actual, "bytes": len(payload)})
 
     def do_POST(self):
         if self.path not in ("/complete", "/error"):
@@ -54,6 +104,44 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+
+def required_resources(target):
+    if target == "js":
+        return frozenset(JS_SCRIPTS)
+    if target == "wasmJs":
+        return frozenset(WASM_EXECUTABLES)
+    raise ValueError(f"unsupported browser target: {target}")
+
+
+def browser_server(directory, page, bundle, target, handler=Handler):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.directory_path = Path(directory)
+    server.page = page
+    server.expected_bundle = dict(bundle)
+    server.required_resources = required_resources(target)
+    server.resource_lock = threading.Lock()
+    server.served = {}
+    server.resource_responses = []
+    server.resource_errors = []
+    server.completed = threading.Event()
+    server.received = None
+    return server
+
+
+def validate_loaded_resources(server):
+    with server.resource_lock:
+        errors = list(server.resource_errors)
+        responses = list(server.resource_responses)
+    if errors:
+        raise ValueError("browser resource rejection: " + "; ".join(errors))
+    loaded = {item["name"] for item in responses}
+    missing = server.required_resources - loaded
+    if missing:
+        raise ValueError("browser missing required dependencies: " + ", ".join(sorted(missing)))
+    if any(item["sha256"] != server.expected_bundle.get(item["name"])
+           for item in responses):
+        raise ValueError("browser resource differs from frozen build inventory")
 
 
 def browser_page(target, args):
@@ -75,10 +163,7 @@ def browser_page(target, args):
     if target == "js":
         scripts = "".join(
             f'<script src="/{name}"></script>'
-            for name in ("kotlin-kotlin-stdlib.js",
-                         "kotlin_org_jetbrains_kotlin_kotlin_dom_api_compat.js",
-                         "dyn4k-dyn4k-core.js", "dyn4k-dyn4k.js",
-                         "dyn4k-performance-portable.js")
+            for name in JS_SCRIPTS
         )
     else:
         scripts = '<script type="module" src="/dyn4k-performance-portable.mjs"></script>'
@@ -134,12 +219,7 @@ def run(args):
         "development", nonce,
     ]
     page = browser_page(args.target, producer_args)
-    Handler.page = page
-    Handler.directory_path = harness.parent
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    server.completed = threading.Event()
-    server.received = None
-    server.served = {}
+    server = browser_server(harness.parent, page, bundle, args.target)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     args.archive.mkdir(parents=True)
@@ -207,6 +287,8 @@ def run(args):
         "producer_bytes": len(raw),
         "completion_sha256": capture.digest(args.archive / "completion.raw"),
         "loaded_resources_sha256": server.served,
+        "resource_responses": server.resource_responses,
+        "resource_errors": server.resource_errors,
         "stderr_sha256": capture.digest(args.archive / "stderr.raw"),
         "stderr_bytes": len(stderr),
         "browser_process_image": "unobserved_through_flatpak_wrapper",
@@ -222,12 +304,12 @@ def run(args):
         raise ValueError("browser completion timed out; raw archive retained")
     if received["kind"] == "error":
         raise ValueError(f"browser script error: {received['payload'][:200]!r}")
-    needed = (["kotlin-kotlin-stdlib.js", "dyn4k-dyn4k-core.js",
-               "dyn4k-dyn4k.js", "dyn4k-performance-portable.js"]
-              if args.target == "js" else
-              ["dyn4k-performance-portable.mjs", "dyn4k-performance-portable.wasm"])
-    if any(server.served.get(name) != bundle.get(name) for name in needed):
-        raise ValueError("browser did not load the selected provider bundle")
+    try:
+        validate_loaded_resources(server)
+    except ValueError as error:
+        receipt["resource_validation_error"] = str(error)
+        (args.archive / "capture.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        raise
     try:
         capture.validate_protocol(
             raw, scenario, source, producer_tree, hashes, "development", nonce,

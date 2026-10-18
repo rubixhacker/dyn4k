@@ -29,6 +29,12 @@ leaves the raw archive and exits nonzero.
 The local server waits under real wall time for the page to post its final
 `COMPLETE` record, then archives the posted raw stream, exact files served,
 wrapper output, page, inventory, staged hashes, and Flatpak binary identity.
+For each fetched bundle resource the server reads one byte snapshot, checks it
+against the frozen target inventory, and sends that same snapshot. Its receipt
+records every successful response and every rejection. The browser route
+requires all five JS scripts, including DOM compatibility, or the Wasm entry,
+binary, custom formatters, import-object, and builtins modules. An unknown
+resource request or a missing required dependency rejects the capture.
 The controller terminates the wrapper after receipt, so its recorded exit is
 a controlled stop. The Flatpak wrapper does not expose a trusted browser
 process-image receipt. Incomplete or rejected browser runs retain their raw
@@ -43,6 +49,11 @@ Run the focused adverse controls with:
 ```sh
 python3 -m unittest discover -s tools/performance/sustained_portable -p 'test_*.py' -v
 ```
+
+Set `DYN4K_BROWSER_CONTROL_ARCHIVE` to a new absolute home directory when
+running those tests to retain the rejected HTTP response bytes, changed
+resource bytes, frozen inventory hashes, and rejection records for the
+omitted-import, lookup-to-read swap, and unknown-executable controls.
 
 The capture result is always `qualification: unpassed`. This module only
 accepts timing mode. A short run checks
