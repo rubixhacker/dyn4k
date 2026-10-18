@@ -165,6 +165,10 @@ and writes a decoy executable at the old path. Only an applied swap, matching
 mapped image, and rejected stale PID pass. A sharing denial, failed module
 read, or changed code stays unpassed. Hosted Windows execution must establish
 whether this control succeeds on the selected runner.
+The readiness check accepts only the exact source-bound record with LF or
+CRLF. It reads at most 129 bytes, retains at most 128 as hex, and records
+their read length and SHA-256. It also records a mismatch reason, the
+pre-cleanup exit status, and bounded remaining stdout and stderr.
 The hosted control resolves its private directory against
 both always-uploaded roots: the Native host evidence tree and the staged
 repository. It refuses overlap before copying and records the failed relation

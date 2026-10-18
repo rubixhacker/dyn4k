@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,11 @@ def checked(stage, action):
         return action()
     except (OSError, ValueError, RuntimeError) as error:
         raise AdverseStepError(stage, error) from error
+
+
+def bounded_bytes(value):
+    return {"bytes": len(value), "sha256": hashlib.sha256(value).hexdigest(),
+            "hex": value[:128].hex(), "truncated": len(value) > 128}
 
 
 def public_upload_roots():
@@ -117,15 +123,33 @@ def path_swap_control(receipt=None, control_image=None, control_sha256=None,
             if task_owned:
                 ready = {}
                 def read_ready():
-                    ready["line"] = process.stdout.readline()
+                    try:
+                        ready["line"] = process.stdout.readline(129)
+                    except (OSError, ValueError) as error:
+                        ready["error"] = str(error)
                 reader = threading.Thread(target=read_ready, daemon=True)
                 reader.start()
                 reader.join(timeout=3)
                 if reader.is_alive():
+                    receipt["control_ready_error"] = "readiness deadline exceeded"
                     raise AdverseStepError("wait_control_ready", ValueError(
                         "Native control did not report readiness before deadline"))
-                expected_ready = f"DYN4K_IMAGE_CONTROL_READY\t{control_source_sha}\n".encode()
-                if ready.get("line") != expected_ready:
+                if "error" in ready:
+                    receipt["control_ready_error"] = ready["error"]
+                    raise AdverseStepError("wait_control_ready", ValueError(
+                        "Native control readiness read failed"))
+                line = ready.get("line")
+                if not isinstance(line, bytes):
+                    receipt["control_ready_error"] = "readiness was not bytes"
+                    raise AdverseStepError("wait_control_ready", ValueError(
+                        "Native control readiness was not bytes"))
+                receipt["control_ready_record"] = bounded_bytes(line)
+                expected = f"DYN4K_IMAGE_CONTROL_READY\t{control_source_sha}".encode()
+                if line not in (expected + b"\n", expected + b"\r\n"):
+                    receipt["control_ready_error"] = (
+                        "readiness exceeds 128 bytes" if len(line) > 128 else
+                        "empty readiness" if not line else
+                        "readiness differs from exact LF/CRLF source record")
                     raise AdverseStepError("wait_control_ready", ValueError(
                         "Native control readiness differs from selected source"))
                 receipt["control_ready"] = "source_matched"
@@ -177,12 +201,19 @@ def path_swap_control(receipt=None, control_image=None, control_sha256=None,
                 receipt["mapped_image_identity"] = "mismatched"
                 receipt["identity_error"] = str(error)
         finally:
+            receipt["pre_cleanup_exit_code"] = process.poll()
             process.terminate()
             try:
-                process.communicate(timeout=3)
+                stdout_tail, stderr = process.communicate(timeout=3)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.communicate(timeout=3)
+                stdout_tail, stderr = process.communicate(timeout=3)
+            if task_owned:
+                receipt["control_stdout_tail"] = bounded_bytes(stdout_tail)
+                receipt["control_stderr"] = bounded_bytes(stderr)
+                if receipt.get("control_ready") == "source_matched" and (stdout_tail or stderr):
+                    receipt["control_ready"] = "unexpected_output"
+                    receipt["control_ready_error"] = "output followed the readiness record"
             receipt["exit_code"] = process.returncode
             try:
                 capture.observed_process_image(process.pid, moved if receipt["swap"] == "applied"
@@ -216,7 +247,8 @@ def main():
                 result["pe_mismatch"] = error.__cause__.detail
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
-    if result["mapped_image_identity"] != "matched_original" or result.get("stale_pid") != "rejected" or \
+    if (args.control_image and result.get("control_ready") != "source_matched") or \
+            result["mapped_image_identity"] != "matched_original" or result.get("stale_pid") != "rejected" or \
             result["swap"] not in (("applied",) if args.control_image else
                                    ("applied", "blocked_by_os")):
         raise SystemExit(1)

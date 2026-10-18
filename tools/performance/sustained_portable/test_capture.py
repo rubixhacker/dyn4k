@@ -1041,9 +1041,9 @@ class PortableCaptureTest(unittest.TestCase):
         source_sha = "a" * 40
         image = self.windows_pe_fixture()
         image_sha = hashlib.sha256(image).hexdigest()
+        ready_line = b"DYN4K_IMAGE_CONTROL_READY\t" + source_sha.encode() + b"\r\n"
         process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
-                                  stdout=io.BytesIO(b"DYN4K_IMAGE_CONTROL_READY\t" +
-                                                    source_sha.encode() + b"\n"),
+                                  stdout=io.BytesIO(ready_line),
                                   terminate=mock.Mock(),
                                   communicate=mock.Mock(return_value=(b"", b"")), returncode=1)
         with tempfile.TemporaryDirectory() as temporary:
@@ -1088,6 +1088,10 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertEqual(receipt["stale_pid"], "rejected")
             self.assertEqual(receipt["control_image_source"], str(source))
             self.assertEqual(receipt["original_sha256"], image_sha)
+            self.assertEqual(receipt["control_ready"], "source_matched")
+            self.assertEqual(receipt["control_ready_record"], {
+                "bytes": len(ready_line), "sha256": hashlib.sha256(ready_line).hexdigest(),
+                "hex": ready_line.hex(), "truncated": False})
             self.assertEqual(len(observed), 3)
             self.assertFalse(any(p.read_bytes() == image for p in artifact.rglob("*") if p.is_file()))
             process.terminate.assert_called_once()
@@ -1120,7 +1124,9 @@ class PortableCaptureTest(unittest.TestCase):
         image = self.windows_pe_fixture()
         image_sha = hashlib.sha256(image).hexdigest()
         source_sha = "a" * 40
-        for failure_kind in ("wrong_live_image", "stale_pid", "blocked_swap", "wrong_ready_source"):
+        for failure_kind in ("wrong_live_image", "stale_pid", "blocked_swap",
+                             "wrong_ready_source", "malformed_ready", "overlong_ready",
+                             "extra_ready_bytes", "extra_ready_output", "startup_error"):
             with self.subTest(failure_kind=failure_kind), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 source = root / "build" / "dyn4k-performance-portable.exe"
@@ -1130,11 +1136,25 @@ class PortableCaptureTest(unittest.TestCase):
                 home = root / "private-home"
                 home.mkdir()
                 ready_source = "0" * 40 if failure_kind == "wrong_ready_source" else source_sha
-                process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
-                                          stdout=io.BytesIO(b"DYN4K_IMAGE_CONTROL_READY\t" +
-                                                            ready_source.encode() + b"\n"),
+                ready_line = b"DYN4K_IMAGE_CONTROL_READY\t" + ready_source.encode() + b"\n"
+                if failure_kind == "wrong_ready_source":
+                    ready_line = ready_line[:-1] + b"\r\n"
+                elif failure_kind == "malformed_ready":
+                    ready_line = ready_line[:-1] + b"\r\r\n"
+                elif failure_kind == "overlong_ready":
+                    ready_line = b"DYN4K_IMAGE_CONTROL_READY\t" + b"x" * 200 + b"\n"
+                elif failure_kind == "extra_ready_bytes":
+                    ready_line = ready_line[:-1] + b" extra\n"
+                elif failure_kind == "startup_error":
+                    ready_line = b""
+                process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=(
+                                              1 if failure_kind == "startup_error" else None)),
+                                          stdout=io.BytesIO(ready_line),
                                           terminate=mock.Mock(),
-                                          communicate=mock.Mock(return_value=(b"", b"")),
+                                          communicate=mock.Mock(return_value=(
+                                              b"EXTRA\n" if failure_kind == "extra_ready_output" else b"",
+                                              b"Native startup failed\n" if failure_kind ==
+                                              "startup_error" else b"")),
                                           returncode=1)
                 observations = 0
                 def observe(pid, selected):
@@ -1175,8 +1195,24 @@ class PortableCaptureTest(unittest.TestCase):
                     self.assertEqual(receipt["stale_pid"], "incorrectly_observed")
                 elif failure_kind == "blocked_swap":
                     self.assertEqual(receipt["swap"], "blocked_by_os")
+                elif failure_kind == "extra_ready_output":
+                    self.assertEqual(receipt["control_ready"], "unexpected_output")
+                    self.assertEqual(receipt["control_stdout_tail"]["hex"], b"EXTRA\n".hex())
+                elif failure_kind == "startup_error":
+                    self.assertEqual(receipt["error_stage"], "wait_control_ready")
+                    self.assertEqual(receipt["control_ready_error"], "empty readiness")
+                    self.assertEqual(receipt["pre_cleanup_exit_code"], 1)
+                    self.assertEqual(receipt["control_stderr"]["hex"],
+                                     b"Native startup failed\n".hex())
                 else:
                     self.assertEqual(receipt["error_stage"], "wait_control_ready")
+                    self.assertIn("control_ready_record", receipt)
+                    self.assertIn("readiness", receipt["control_ready_error"])
+                    self.assertEqual(receipt["control_ready_record"]["sha256"],
+                                     hashlib.sha256(ready_line[:129]).hexdigest())
+                    self.assertLessEqual(receipt["control_ready_record"]["bytes"], 129)
+                if failure_kind != "startup_error":
+                    self.assertIsNone(receipt["pre_cleanup_exit_code"])
                 process.terminate.assert_called_once()
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "bounded real child cleanup")
