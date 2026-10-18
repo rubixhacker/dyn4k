@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import html
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
@@ -25,7 +27,7 @@ from frozen_weld_pulley import KEYS as WELD_PULLEY_KEYS, compare_case as compare
 from physical import nominal_free, sleep_wake_rows
 from prospective_compare import compare_host
 from reference_diagnostic import diagnostic, portable_case_id
-from receipt import Identity, Rejected, digest, records, seal
+from receipt import Identity, Rejected, digest, records, seal, verify as verify_receipt
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -444,18 +446,43 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
         executed = []
         with Path(execution_log).open(encoding="utf-8") as stream:
             for line in stream:
-                found = re.search(r'\bexecve\("([^"]+\.kexe)".*\)\s+=\s+0$', line)
+                found = re.search(r'\bexecve\("([^"]+\.kexe)", \[(.*?)\], .*\)\s+=\s+0$', line)
                 if found:
-                    executed.append(Path(found.group(1)).resolve())
+                    executed.append((Path(found.group(1)).resolve(),
+                                     re.findall(r'"([^"\n]*)"', found.group(2))))
         if len(executed) != 1:
             raise Rejected(f"expected one executed native test binary, found {len(executed)}")
-        if executed[0] != binary:
+        if executed[0][0] != binary:
             raise Rejected("executed native test binary does not match linked binary")
+        method = Path(log_path).stem.removeprefix("gradle-")
+        if method not in MATRIX_METHODS:
+            raise Rejected("native method identity is absent")
+        command = native_command(method, binary)
+        if executed[0][1] != command:
+            raise Rejected("executed native method command differs")
+        build_started = None
+        with Path(log_path).open(encoding="utf-8", errors="replace") as stream:
+            for line in stream:
+                if line.startswith("NUMERICAL_BUILD_STARTED_NS "):
+                    if build_started is not None:
+                        raise Rejected("native build start is ambiguous")
+                    build_started = int(line.split()[1])
+        if build_started is None or binary.stat().st_mtime_ns < build_started:
+            raise Rejected("native test binary is stale")
         if dependency is None:
             raise Rejected("staged dependency proof is absent")
+        lane = Path(log_path).parent
+        stream = lane / f"native-output-{method}.log"
+        xml = lane / "xml" / f"{method}.xml"
+        native_stream_xml(method, stream, xml)
         return {"host": host, "os": platform.platform(), "machine": platform.machine(),
                 "device": False, "executable": str(binary), "executable_sha256": digest(binary),
                 "version": platform.platform(), "process_executions": len(executed),
+                "worker_command": command,
+                "worker_command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
+                "build_log_sha256": digest(log_path),
+                "execution_log_sha256": digest(execution_log),
+                "native_output_sha256": digest(stream), "xml_sha256": digest(xml),
                 "dependency": _compiled_dependency_proof(host, log_path, Path(dependency))}
     needle = "Starting process 'command '" if host.startswith("node-") else "Starting process 'Gradle Test Executor"
     commands = []
@@ -508,7 +535,9 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
 
 def runtime_identity(row):
     return {key: value for key, value in row.items()
-            if key not in ("worker_command", "dependency", "bundle", "process_executions")}
+            if key not in ("worker_command", "worker_command_sha256", "dependency", "bundle",
+                           "process_executions", "build_log_sha256", "execution_log_sha256",
+                           "native_output_sha256", "xml_sha256")}
 
 
 def extract_xml(host, output, method=None, source=None):
@@ -527,7 +556,9 @@ def extract_xml(host, output, method=None, source=None):
     else:
         xml_dir = output / "xml"
         xml_dir.mkdir(exist_ok=True)
-        shutil.move(source, xml_dir / f"{method}.xml")
+        archived = xml_dir / f"{method}.xml"
+        if source.resolve() != archived.resolve():
+            shutil.move(source, archived)
     trace = output / "trace.jsonl"
     cases = output / "cases"
     cases.mkdir(exist_ok=True)
@@ -710,17 +741,22 @@ def check_exact_consistency(lane):
 def method_command(host, method, lane):
     if method not in MATRIX_METHODS:
         raise Rejected(f"unknown numerical matrix method: {method}")
-    command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
-               "--tests", f"portable.PortableMatrixTest.{method}",
+    task = ":linkDebugTestLinuxX64" if host == "linux-x64" else HOST_TASKS[host]
+    command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), task]
+    if host != "linux-x64":
+        command.extend(("--tests", f"portable.PortableMatrixTest.{method}"))
+    command.extend((
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
                "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g",
-               "--init-script", str(PROVENANCE_SCRIPT)]
+               "--init-script", str(PROVENANCE_SCRIPT)))
     if host == "jvm8":
         command.extend(("-PportableJvm8=true",
                         "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
     execution_log = None
-    if host == "linux-x64" or host == "jvm8" or host.startswith("node-"):
+    if host == "linux-x64":
+        command.append("-Pkotlin.compiler.execution.strategy=in-process")
+    if host == "jvm8" or host.startswith("node-"):
         tracer = shutil.which("strace")
         if tracer is None:
             raise Rejected("strace is unavailable for native process binding")
@@ -730,6 +766,85 @@ def method_command(host, method, lane):
         command = [tracer, "-f", "-s", "65535", "-e", calls, "-o",
                    str(execution_log), *command]
     return command, execution_log
+
+
+def native_command(method, binary):
+    if method not in MATRIX_METHODS:
+        raise Rejected(f"unknown numerical matrix method: {method}")
+    return [str(Path(binary).resolve()),
+            f"--ktest_filter=portable.PortableMatrixTest.{method}",
+            "--ktest_logger=GTEST"]
+
+
+def native_stream_xml(method, source, xml, create=False):
+    name = f"portable.PortableMatrixTest.{method}".encode()
+    header = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
+              b'<testsuite name="portable.PortableMatrixTest" tests="1" skipped="0" failures="0" errors="0">\n'
+              b'<testcase classname="portable.PortableMatrixTest" name="' +
+              html.escape(method).encode() + b'"/>\n<system-out><![CDATA[\n')
+    footer = b']]></system-out>\n</testsuite>\n'
+    started = finished = passed = rows = 0
+    state = 0
+    with Path(source).open("rb") as raw, Path(xml).open("xb" if create else "rb") as report:
+        def emit(value):
+            if create:
+                report.write(value)
+            elif report.read(len(value)) != value:
+                raise Rejected("native XML differs from raw stream")
+
+        emit(header)
+        for line in raw:
+            if not line.endswith(b"\n"):
+                raise Rejected("native output is truncated")
+            if line.startswith(b"[ RUN      ] "):
+                if state != 0 or line.rstrip(b"\r\n").split(b"] ", 1)[1] != name:
+                    raise Rejected("native test method start differs")
+                started += 1
+                state = 1
+            elif line.startswith(b"[       OK ] "):
+                if state != 1 or not line.startswith(b"[       OK ] " + name + b" ("):
+                    raise Rejected("native test method finish differs")
+                finished += 1
+                state = 2
+            elif line.startswith(b"[  PASSED  ] "):
+                if state != 2 or line.rstrip(b"\r\n") != b"[  PASSED  ] 1 tests.":
+                    raise Rejected("native test pass event differs")
+                passed += 1
+                state = 3
+            elif line.startswith((b"[  FAILED  ] ", b"[  SKIPPED ] ")):
+                raise Rejected("native test failed or skipped")
+            elif line.startswith((b"NUMERICAL_JSON ", b"NUMERICAL_PROBE_JSON ")):
+                if state != 1 or b"]]>" in line:
+                    raise Rejected("native numerical row is outside its test")
+                line.decode("utf-8")
+                emit(line)
+                if line.startswith(b"NUMERICAL_JSON "):
+                    rows += 1
+        emit(footer)
+        if not create and report.read(1):
+            raise Rejected("native XML has extra bytes")
+    if (started, finished, passed) != (1, 1, 1) or rows == 0:
+        raise Rejected("native test event stream is incomplete")
+    return rows
+
+
+def run_native_method(method, lane, binary, env):
+    tracer = shutil.which("strace")
+    if tracer is None:
+        raise Rejected("strace is unavailable for native process binding")
+    execution_log = lane / f"native-exec-{method}.log"
+    stream = lane / f"native-output-{method}.log"
+    command = [tracer, "-f", "-s", "65535", "-e", "trace=execve", "-o",
+               str(execution_log), *native_command(method, binary)]
+    with stream.open("xb") as output:
+        completed = subprocess.run(command, cwd=PORTABLE, env=env, stdout=output,
+                                   stderr=subprocess.STDOUT, check=False)
+    if completed.returncode:
+        raise Rejected(f"native method exited {completed.returncode}")
+    xml_dir = lane / "xml"
+    xml_dir.mkdir(exist_ok=True)
+    native_stream_xml(method, stream, xml_dir / f"{method}.xml", create=True)
+    return execution_log
 
 
 def execute(host, output, commit, source_sha256, reference_dirs,
@@ -765,27 +880,44 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         methods = []
         runtimes = []
         for method in MATRIX_METHODS:
-            started = __import__("time").time()
+            started = time.time_ns()
             command, execution_log = method_command(host, method, lane)
             log_path = lane / f"gradle-{method}.log"
             with log_path.open("x", encoding="utf-8") as log:
+                if host == "linux-x64":
+                    log.write(f"NUMERICAL_BUILD_STARTED_NS {started}\n")
+                    log.flush()
                 completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
                                            stderr=subprocess.STDOUT, check=False)
             method_result = {"method": method, "gradle_exit": completed.returncode,
                              "log_sha256": digest(log_path)}
-            if execution_log is not None and execution_log.is_file():
-                method_result["execution_log_sha256"] = digest(execution_log)
             methods.append(method_result)
             if completed.returncode:
                 outcome["gradle_exit"] = completed.returncode
                 outcome["status"] = "FAILED"
+            if host == "linux-x64" and not completed.returncode:
+                binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
+                if len(binaries) != 1 or binaries[0].stat().st_mtime_ns < started:
+                    method_result["reason"] = "native test binary is absent or stale"
+                    outcome["status"] = "FAILED"
+                    continue
+                try:
+                    execution_log = run_native_method(method, lane, binaries[0], env)
+                except Rejected as error:
+                    method_result["reason"] = str(error)
+                    outcome["status"] = "FAILED"
+                    continue
+            if execution_log is not None and execution_log.is_file():
+                method_result["execution_log_sha256"] = digest(execution_log)
             xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
-                "TEST-*PortableMatrixTest*.xml"))
-            if len(xml) != 1 or xml[0].stat().st_mtime < started:
+                "TEST-*PortableMatrixTest*.xml")) if host != "linux-x64" else [
+                    lane / "xml" / f"{method}.xml"]
+            if len(xml) != 1 or not xml[0].is_file() or xml[0].stat().st_mtime_ns < started:
                 method_result["reason"] = "matrix XML is missing or stale"
                 outcome["status"] = "FAILED"
                 continue
-            trace, row_attributes, row_counts = extract_xml(host, lane, method)
+            trace, row_attributes, row_counts = extract_xml(host, lane, method,
+                                                             xml[0] if host == "linux-x64" else None)
             method_result["xml"] = row_attributes
             method_result["xml_sha256"] = digest(lane / "xml" / f"{method}.xml")
             method_result["cases"] = row_counts["completed_cases"]
@@ -895,9 +1027,66 @@ def execute(host, output, commit, source_sha256, reference_dirs,
     return outcome
 
 
+def verify_linux_native_archive(output):
+    from baseline_capture import verify_case_slices, verify_xml_trace
+
+    commit, source_sha256 = clean_identity()
+    publication = json.loads((output / "publication.json").read_text())
+    if publication["candidate_commit"] != commit or publication["source_sha256"] != source_sha256 or \
+            digest(output / "publication.log") != publication["publication_log_sha256"]:
+        raise Rejected("native publication identity differs")
+    for name, expected in publication["artifact_sha256"].items():
+        if digest(STAGED / name) != expected:
+            raise Rejected("native staged publication differs")
+    lane = output / "linux-x64"
+    result = json.loads((lane / "result.json").read_text())
+    receipt = json.loads((lane / "receipt.json").read_text())
+    methods = result["methods"]
+    if [item["method"] for item in methods] != list(MATRIX_METHODS):
+        raise Rejected("native method inventory differs")
+    target_artifacts = artifacts("linux-x64")
+    artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
+    if receipt["artifact_sha256"] != artifact_sha256 or \
+            result["artifact_sha256"] != artifact_sha256:
+        raise Rejected("native staged artifact identity differs")
+    proofs = []
+    for item in methods:
+        method = item["method"]
+        if item["gradle_exit"] or item.get("cases") != len(method_case_ids(method)):
+            raise Rejected(f"native method did not complete: {method}")
+        for path, field in ((lane / f"gradle-{method}.log", "log_sha256"),
+                            (lane / f"native-exec-{method}.log", "execution_log_sha256"),
+                            (lane / "xml" / f"{method}.xml", "xml_sha256")):
+            if digest(path) != item[field]:
+                raise Rejected(f"native method file differs: {method}: {field}")
+        proof = runtime("linux-x64", lane / f"gradle-{method}.log",
+                        lane / f"native-exec-{method}.log", target_artifacts["target"])
+        if item.get("process") != proof:
+            raise Rejected(f"native method process proof differs: {method}")
+        proofs.append(proof)
+    identities = [runtime_identity(proof) for proof in proofs]
+    if any(identity != identities[0] for identity in identities[1:]):
+        raise Rejected("native methods used different runtime producers")
+    runtime_proof = {**identities[0], "method_executions": len(proofs),
+                     "dependency_sha256": artifact_sha256["target"],
+                     "method_process_sha256": hashlib.sha256(json.dumps(
+                         proofs, sort_keys=True).encode()).hexdigest()}
+    if receipt["runtime"] != runtime_proof or result["runtime"] != runtime_proof:
+        raise Rejected("native runtime inventory differs")
+    verify_xml_trace(lane, [{**item, "completed_cases": item["cases"]} for item in methods],
+                     result["raw_counts"], receipt["trace_sha256"])
+    verify_case_slices(lane, result["raw_counts"]["per_case"])
+    identity = Identity(commit, source_sha256, artifact_sha256, runtime_proof)
+    verify_receipt(receipt, lane / "trace.jsonl", declared_cases(), identity, target_artifacts)
+    return {"status": "PASSED_PRODUCER_REPLAY", "qualification": "UNPASSED",
+            "candidate_commit": commit, "methods": len(methods),
+            "cases": receipt["counts"]["executed_cases"]}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
+    parser.add_argument("--verify-linux-native-existing", action="store_true")
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
     parser.add_argument("--reference-dir", type=Path, action="append", default=[])
     parser.add_argument("--prospective-baseline", type=Path)
@@ -913,6 +1102,14 @@ def main():
     if args.arithmetic_captures is not None and args.prospective_baseline is None:
         parser.error("--arithmetic-captures requires --prospective-baseline")
     output = Path(args.output).resolve()
+    if args.verify_linux_native_existing:
+        try:
+            result = verify_linux_native_archive(output)
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        except (Rejected, OSError, ValueError, KeyError, TypeError) as error:
+            print(json.dumps({"status": "FAILED", "reason": str(error)}, sort_keys=True))
+            return 1
     if output.exists():
         parser.error("output already exists")
     try:

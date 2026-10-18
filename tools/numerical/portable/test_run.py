@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -180,28 +181,91 @@ class ExtractionTest(unittest.TestCase):
             root = Path(directory)
             binary = root / "build/bin/linuxX64/debugTest/test.kexe"
             binary.parent.mkdir(parents=True)
-            binary.write_bytes(b"native-test-binary")
+            method = "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure"
+            name = f"portable.PortableMatrixTest.{method}"
+            binary.write_text("#!/bin/sh\n" +
+                f"printf '[ RUN      ] {name}\\n'\n" +
+                "printf 'NUMERICAL_JSON {\"kind\":\"inputs\",\"id\":\"P-J-Angle-ratio-limits-off--1.0\"}\\n'\n" +
+                f"printf '[       OK ] {name} (1 ms)\\n'\n" +
+                "printf '[  PASSED  ] 1 tests.\\n'\n")
+            binary.chmod(0o755)
             artifact = root / "dyn4k-core-linuxx64.klib"
             artifact.write_bytes(b"staged native klib")
-            log = root / "gradle.log"
-            log.write_text("native test passed\n" +
+            lane = root / "lane"
+            lane.mkdir()
+            log = lane / f"gradle-{method}.log"
+            started = time.time_ns() - 1_000_000_000
+            log.write_text(f"NUMERICAL_BUILD_STARTED_NS {started}\n" +
                 self.compiler_proof(":compileKotlinLinuxX64", artifact) +
                 self.compiler_proof(":compileTestKotlinLinuxX64", artifact) +
                 self.compiler_proof(":linkDebugTestLinuxX64", artifact))
-            execution = root / "native-exec.log"
-            execution.write_text(f'123 execve("{binary}", ["test.kexe"], 0x1) = 0\n')
+            if run.shutil.which("strace") is None:
+                self.skipTest("strace is unavailable")
             with patch.object(run, "PORTABLE", root):
+                execution = run.run_native_method(method, lane, binary, os.environ.copy())
                 result = run.runtime("linux-x64", log, execution, dependency=artifact)
                 self.assertEqual(result["executable_sha256"], run.digest(binary))
                 self.assertEqual(result["executable"], str(binary.resolve()))
-                execution.write_text('123 execve("/tmp/other.kexe", [], 0x1) = 0\n')
+                self.assertEqual(result["worker_command"], run.native_command(method, binary))
+                captured = execution.read_text()
+                execution.write_text(captured.replace(str(binary), "/tmp/other.kexe"))
                 with self.assertRaisesRegex(Exception, "executed native test binary"):
                     run.runtime("linux-x64", log, execution, dependency=artifact)
-                execution.write_text(
-                    f'123 execve("{binary}", ["test.kexe"], 0x1) = 0\n'
-                    f'124 execve("{binary}", ["test.kexe"], 0x1) = 0\n')
+                execution.write_text(captured + captured)
                 with self.assertRaisesRegex(Exception, "one executed native test binary"):
                     run.runtime("linux-x64", log, execution, dependency=artifact)
+                execution.write_text(captured)
+                binary.write_text(binary.read_text() + "# replaced\n")
+                self.assertNotEqual(run.runtime("linux-x64", log, execution,
+                                    dependency=artifact), result)
+                log.write_text(log.read_text().replace(str(started), str(time.time_ns())))
+                with self.assertRaisesRegex(run.Rejected, "stale"):
+                    run.runtime("linux-x64", log, execution, dependency=artifact)
+
+    def test_native_stream_replay_rejects_incomplete_and_mutated_output(self):
+        method = "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure"
+        name = f"portable.PortableMatrixTest.{method}"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw = root / "native.log"
+            xml = root / "method.xml"
+            complete = (f"[ RUN      ] {name}\n"
+                        'NUMERICAL_JSON {"kind":"inputs","id":"P-J-Angle-ratio-limits-off--1.0"}\n'
+                        'NUMERICAL_JSON {"kind":"case-end","id":"P-J-Angle-ratio-limits-off--1.0"}\n'
+                        f"[       OK ] {name} (1 ms)\n"
+                        "[  PASSED  ] 1 tests.\n")
+            raw.write_text(complete)
+            run.native_stream_xml(method, raw, xml, create=True)
+            self.assertEqual(run.native_stream_xml(method, raw, xml), 2)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            archived = evidence / "xml" / f"{method}.xml"
+            archived.parent.mkdir()
+            run.native_stream_xml(method, raw, archived, create=True)
+            trace, attributes, counts = run.extract_xml("linux-x64", evidence, method, archived)
+            self.assertEqual(attributes["tests"], "1")
+            self.assertEqual(counts["completed_cases"], 1)
+            self.assertEqual(len(trace.read_text().splitlines()), 2)
+            for changed in (complete.removesuffix("\n"), complete.replace("[       OK ]", "[  FAILED  ]"),
+                            complete.replace(name, "portable.PortableMatrixTest.other"),
+                            complete.replace("[  PASSED  ] 1 tests.\n", "")):
+                raw.write_text(changed)
+                with self.assertRaises(run.Rejected):
+                    run.native_stream_xml(method, raw, xml)
+            raw.write_text(complete.replace("P-J-Angle", "P-J-Other"))
+            with self.assertRaisesRegex(run.Rejected, "XML differs"):
+                run.native_stream_xml(method, raw, xml)
+            raw.write_text(complete)
+            xml.write_bytes(xml.read_bytes()[:-10])
+            with self.assertRaisesRegex(run.Rejected, "XML differs"):
+                run.native_stream_xml(method, raw, xml)
+            wrong = root / "wrong.xml"
+            raw.write_text(complete.replace("P-J-Angle", "P-J-Other"))
+            run.native_stream_xml(method, raw, wrong, create=True)
+            wrong_evidence = root / "wrong-evidence"
+            wrong_evidence.mkdir()
+            with self.assertRaisesRegex(run.Rejected, "case order"):
+                run.extract_xml("linux-x64", wrong_evidence, method, wrong)
 
     def test_compiler_proof_accepts_resolved_publication_bytes_only(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -291,7 +355,12 @@ class ExtractionTest(unittest.TestCase):
             ordinary, ordinary_log = run.method_command("jvm", method, lane)
             self.assertIsNone(ordinary_log)
             self.assertNotIn("-Pkotlin.compiler.execution.strategy=in-process", ordinary)
-            for host in ("linux-x64", "node-js", "node-wasm-js", "node-wasm-wasi"):
+            native, native_log = run.method_command("linux-x64", method, lane)
+            self.assertIsNone(native_log)
+            self.assertIn(":linkDebugTestLinuxX64", native)
+            self.assertNotIn("--tests", native)
+            self.assertNotIn("linuxX64Test", native)
+            for host in ("node-js", "node-wasm-js", "node-wasm-wasi"):
                 traced, trace_log = run.method_command(host, method, lane)
                 self.assertEqual(traced[5], "trace=execve")
                 self.assertEqual(trace_log, lane / f"native-exec-{method}.log")
