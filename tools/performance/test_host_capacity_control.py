@@ -88,6 +88,115 @@ class HostCapacityControlTest(unittest.TestCase):
                 code = exc.code
         return code, json.loads(output.getvalue())
 
+    def replacement_fixture(self):
+        repository = self.root / "replacement-repository"
+        repository.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(repository), *args],
+                                           stderr=subprocess.PIPE).strip().decode()
+
+        git("init", "-q")
+        git("config", "user.name", "Host capacity test")
+        git("config", "user.email", "host-capacity@example.invalid")
+        source = repository / control.SOURCE_PATH
+        source.parent.mkdir(parents=True)
+        original = Path(control.__file__).read_bytes()
+        substituted = original + b"\n# same-type replacement fixture\n"
+        source.write_bytes(original)
+        git("add", control.SOURCE_PATH)
+        git("commit", "-qm", "original")
+        original_commit = git("rev-parse", "HEAD")
+        original_blob = git("rev-parse", f"{original_commit}:{control.SOURCE_PATH}")
+        source.write_bytes(substituted)
+        git("commit", "-qam", "substituted")
+        substituted_commit = git("rev-parse", "HEAD")
+        substituted_blob = git("rev-parse", f"{substituted_commit}:{control.SOURCE_PATH}")
+        git("checkout", "-q", original_commit)
+        executed = self.root / "executed.py"
+        executed.write_bytes(substituted)
+        return repository, executed, original_commit, substituted_commit, original_blob, substituted_blob
+
+    def test_public_replay_accepts_canonical_commit_without_replacement(self):
+        repository, _, original_commit, _, _, _ = self.replacement_fixture()
+        original = (repository / control.SOURCE_PATH).read_bytes()
+        executed = self.root / "canonical-executed.py"
+        executed.write_bytes(original)
+        self.commit = original_commit
+        record = copy.deepcopy(self.record)
+        record.update(source_commit=original_commit, tool_sha256=digest(original),
+                      tool_working_sha256=digest(original))
+        self.seal(record)
+        output = io.StringIO()
+        with patch.object(control, "ROOT", repository), \
+             patch.object(control, "__file__", str(executed)), \
+             patch.object(sys, "argv", ["host_capacity_control.py", "verify",
+                                       "--archive", str(self.archive),
+                                       "--trusted-key", str(self.key_path),
+                                       "--expected-source-commit", original_commit]), \
+             contextlib.redirect_stdout(output):
+            control.main()
+        self.assertEqual({"diagnostic": "verified", "qualification": "unpassed",
+                          "host_system": "Windows", "pid": 42,
+                          "terminal_peak_bytes": 2000,
+                          "terminal_metric_kind": "peak_working_set_bytes"},
+                         json.loads(output.getvalue()))
+
+    def test_public_replay_rejects_same_type_commit_and_blob_replacements(self):
+        (repository, executed, original_commit, substituted_commit,
+         original_blob, substituted_blob) = self.replacement_fixture()
+        self.commit = original_commit
+        substituted = executed.read_bytes()
+        (self.archive / "tool-executed.py").write_bytes(substituted)
+        record = copy.deepcopy(self.record)
+        record.update(source_commit=original_commit, tool_sha256=digest(substituted),
+                      tool_working_sha256=digest(substituted))
+        self.seal(record)
+        for original_oid, substitute_oid in ((original_commit, substituted_commit),
+                                             (original_blob, substituted_blob)):
+            with self.subTest(replaced=original_oid):
+                subprocess.run(["git", "-C", str(repository), "replace", original_oid,
+                                substitute_oid], check=True, stdout=subprocess.PIPE)
+                self.assertEqual(substituted, subprocess.check_output(
+                    ["git", "-C", str(repository), "show",
+                     f"{original_commit}:{control.SOURCE_PATH}"]))
+                output = io.StringIO()
+                with patch.object(control, "ROOT", repository), \
+                     patch.object(control, "__file__", str(executed)), \
+                     patch.object(sys, "argv", ["host_capacity_control.py", "verify",
+                                               "--archive", str(self.archive),
+                                               "--trusted-key", str(self.key_path),
+                                               "--expected-source-commit", original_commit]), \
+                     contextlib.redirect_stdout(output):
+                    with self.assertRaises(SystemExit) as exit_status:
+                        control.main()
+                self.assertEqual(1, exit_status.exception.code)
+                self.assertEqual("unpassed", json.loads(output.getvalue())["qualification"])
+                subprocess.run(["git", "-C", str(repository), "replace", "-d", original_oid],
+                               check=True, stdout=subprocess.PIPE)
+
+    def test_public_capture_rejects_replaced_commit_before_child_or_key_creation(self):
+        repository, executed, original_commit, substituted_commit, _, _ = self.replacement_fixture()
+        subprocess.run(["git", "-C", str(repository), "replace", original_commit,
+                        substituted_commit], check=True, stdout=subprocess.PIPE)
+        capture_archive = self.root / "replacement-capture"
+        capture_key = self.root / "replacement-capture.key"
+        output = io.StringIO()
+        with patch.object(control, "ROOT", repository), \
+             patch.object(control, "__file__", str(executed)), \
+             patch.object(control.platform, "system", return_value="Darwin"), \
+             patch.object(sys, "argv", ["host_capacity_control.py", "capture",
+                                       "--archive", str(capture_archive),
+                                       "--key-output", str(capture_key),
+                                       "--expected-source-commit", original_commit]), \
+             contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as exit_status:
+                control.main()
+        self.assertEqual(1, exit_status.exception.code)
+        self.assertEqual("unpassed", json.loads(output.getvalue())["qualification"])
+        self.assertFalse(capture_archive.exists())
+        self.assertFalse(capture_key.exists())
+
     def public_capture_with_delayed_child(self, child_source):
         if sys.platform != "linux":
             self.skipTest("local process oracle requires Linux /proc and wait4")

@@ -57,7 +57,23 @@ def signature(record, key):
 
 def source_at_commit(commit):
     require(bool(re.fullmatch(r"[0-9a-f]{40}", commit)), "source commit is invalid")
-    return subprocess.check_output(["git", "show", f"{commit}:{SOURCE_PATH}"], cwd=ROOT)
+    git = ["git", "--no-replace-objects"]
+    require(subprocess.check_output(git + ["rev-parse", "--show-object-format"],
+                                    cwd=ROOT).strip() == b"sha1",
+            "source repository object format differs")
+
+    def object_bytes(kind, oid):
+        raw = subprocess.check_output(git + ["cat-file", kind, oid], cwd=ROOT)
+        identity = hashlib.sha1(kind.encode() + b" " + str(len(raw)).encode() +
+                                b"\0" + raw).hexdigest()
+        require(identity == oid, f"source {kind} object identity differs")
+        return raw
+
+    object_bytes("commit", commit)
+    blob = subprocess.check_output(
+        git + ["rev-parse", "--verify", f"{commit}:{SOURCE_PATH}"], cwd=ROOT).strip()
+    require(bool(re.fullmatch(rb"[0-9a-f]{40}", blob)), "source blob ID is invalid")
+    return object_bytes("blob", blob.decode())
 
 
 def source_encoding(executed, committed):
@@ -166,7 +182,7 @@ def capture(archive, key_path, expected_commit):
     require(not archive.exists() or not any(archive.iterdir()), "diagnostic archive is not empty")
     require(not key_path.exists() and not key_path.is_relative_to(archive),
             "test-only key must be new and outside archive")
-    require(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
+    require(subprocess.check_output(["git", "--no-replace-objects", "rev-parse", "HEAD"], cwd=ROOT,
                                     text=True).strip() == expected_commit,
             "capture tool differs from exact source commit")
     committed_source = source_at_commit(expected_commit)
