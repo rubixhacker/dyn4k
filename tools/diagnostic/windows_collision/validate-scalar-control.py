@@ -43,13 +43,18 @@ def validate_source_vectors() -> None:
 
 
 def validate_java_invocation(runner_text: str) -> None:
-    invocation = re.compile(
-        r'^& \$java "-Djava\.io\.tmpdir=\$OutputDirectory" -cp "\$classes;\$jar" '
-        r'org\.dyn4j\.collision\.narrowphase\.WindowsCollisionScalarJavaControl '
-        r'\| Tee-Object -FilePath \$javaRaw$',
-        re.MULTILINE,
+    java_command = re.compile(r'^\s*&\s+\$java\b(?P<arguments>[^\r\n]*)$', re.MULTILINE)
+    control_class = re.compile(
+        r'(?<![A-Za-z0-9_.$])org\.dyn4j\.collision\.narrowphase\.'
+        r'WindowsCollisionScalarJavaControl(?![A-Za-z0-9_.$])'
     )
-    if len(invocation.findall(runner_text)) != 1:
+    tmpdir_argument = re.compile(r'(?<!\S)"-Djava\.io\.tmpdir=\$OutputDirectory"(?!\S)')
+    invocations = [
+        match.group("arguments")
+        for match in java_command.finditer(runner_text)
+        if control_class.search(match.group("arguments"))
+    ]
+    if len(invocations) != 1 or len(tmpdir_argument.findall(invocations[0])) != 1:
         raise ScalarValidationError("Java scalar invocation must pass the tmpdir property as one quoted argument")
 
 
@@ -121,12 +126,28 @@ def self_test() -> int:
         'org.dyn4j.collision.narrowphase.WindowsCollisionScalarJavaControl | Tee-Object -FilePath $javaRaw'
     )
     validate_java_invocation(valid_invocation)
-    try:
-        validate_java_invocation(valid_invocation.replace('"-Djava.io.tmpdir=$OutputDirectory"', '-Djava.io.tmpdir=$OutputDirectory'))
-    except ScalarValidationError:
-        pass
-    else:
-        raise AssertionError("unquoted Java tmpdir property was accepted")
+    formatted_invocation = (
+        '  &   $java   "-Djava.io.tmpdir=$OutputDirectory"   -cp "$classes;alternate.jar"  '
+        'org.dyn4j.collision.narrowphase.WindowsCollisionScalarJavaControl  |  '
+        'Tee-Object   -FilePath $javaRaw # harmless trailing comment'
+    )
+    validate_java_invocation(formatted_invocation)
+
+    def rejected_invocation(name: str, invocation: str) -> None:
+        try:
+            validate_java_invocation(invocation)
+        except ScalarValidationError:
+            return
+        raise AssertionError(f"adverse Java invocation was accepted: {name}")
+
+    rejected_invocation(
+        "unquoted tmpdir argument",
+        valid_invocation.replace('"-Djava.io.tmpdir=$OutputDirectory"', '-Djava.io.tmpdir=$OutputDirectory'),
+    )
+    rejected_invocation(
+        "different Java control class",
+        valid_invocation.replace("WindowsCollisionScalarJavaControl", "OtherJavaControl"),
+    )
     native = [_row("kotlin-native", *case) for case in EXPECTED]
     java = [_row("java", *case) for case in EXPECTED]
     validate("\n".join(native) + "\n", "\n".join(java) + "\n")
@@ -164,7 +185,7 @@ def self_test() -> int:
     ):
         if VERSION_TOKEN.search(value):
             raise AssertionError(f"adverse version token was accepted: {value}")
-    print(f"SCALAR_VALIDATOR_SELF_TEST_OK positive={len(valid_versions) + 1} adverse={len(cases) + 9} arithmetic=observations")
+    print(f"SCALAR_VALIDATOR_SELF_TEST_OK positive={len(valid_versions) + 2} adverse={len(cases) + 10} arithmetic=observations")
     return 0
 
 
