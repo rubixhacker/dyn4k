@@ -1,0 +1,99 @@
+{
+  "counts": {
+    "jvm_only_original_identities": 32,
+    "mapped_original_identities": 2353,
+    "mapped_original_methods": 2253,
+    "platform_only_methods": 3,
+    "related_supplemental_methods": 5,
+    "reviewed_source_linked_methods": 2258,
+    "supplemental_methods": 249,
+    "total_methods": 2505,
+    "unresolved_mappings": 0
+  },
+  "expected_host_executions": 15015,
+  "groups": [
+    {
+      "expected": 2444,
+      "host": "jvm",
+      "id": "core-jvm",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 61,
+      "host": "jvm",
+      "id": "jvm",
+      "module": "dyn4k"
+    },
+    {
+      "expected": 2444,
+      "host": "linuxX64",
+      "id": "core-linuxX64",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 58,
+      "host": "linuxX64",
+      "id": "linuxX64",
+      "module": "dyn4k"
+    },
+    {
+      "expected": 2444,
+      "host": "jsNode",
+      "id": "core-jsNode",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 58,
+      "host": "jsNode",
+      "id": "jsNode",
+      "module": "dyn4k"
+    },
+    {
+      "expected": 2444,
+      "host": "wasmJsNode",
+      "id": "core-wasmJsNode",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 58,
+      "host": "wasmJsNode",
+      "id": "wasmJsNode",
+      "module": "dyn4k"
+    },
+    {
+      "expected": 2444,
+      "host": "wasmWasiNode",
+      "id": "core-wasmWasiNode",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 58,
+      "host": "wasmWasiNode",
+      "id": "wasmWasiNode",
+      "module": "dyn4k"
+    },
+    {
+      "expected": 2444,
+      "host": "androidHost",
+      "id": "core-androidHost",
+      "module": "dyn4k-core"
+    },
+    {
+      "expected": 58,
+      "host": "androidHost",
+      "id": "androidHost",
+      "module": "dyn4k"
+    }
+  ],
+  "inventory_status": "MAPPED",
+  "kind": "full-common-corpus-inventory",
+  "manifest_sha256": "faf572be4de4be9f1edfbd09279525156a480cb1a61821b1663210e400bc100a",
+  "map_file_sha256": "d20877be61398e65037b0ec3d61134d9922248f608c7901ffe589fed8dff5496",
+  "original_source_files": 190,
+  "qualification_status": "NOT_RUN",
+  "review_reports": 16,
+  "schema": 1,
+  "source_files": 191,
+  "source_tree_sha256": "2f5fcb376ec9014b9d386eb9152350938bff9cccd6ba28d8af198cb93422c5a6",
+  "unresolved": []
+}
