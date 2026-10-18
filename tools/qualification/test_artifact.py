@@ -11,6 +11,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import artifact
@@ -469,6 +470,8 @@ class RawArtifactTests(unittest.TestCase):
                 artifact._full_original_path("mingwX64", unsafe)
 
     def test_full_hosted_fixture_replays_through_var_path_alias(self):
+        if os.name != "posix":
+            self.skipTest("POSIX /var path alias has no Windows equivalent")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             real_var = root / "private/var"
@@ -481,6 +484,14 @@ class RawArtifactTests(unittest.TestCase):
             sha = self._full_hosted_fixture(bundle)
             self.assertEqual("FULL_COMMON_PASSED", artifact.verify_full_hosted(
                 bundle, sha, Path(__file__).resolve().parents[2])["status"])
+
+    def test_var_alias_control_skips_simulated_windows(self):
+        windows = r"C:\runner\temp\private\var\candidate\build\staging-repository"
+        self.assertEqual("/fixture/C/runner/temp/private/var/candidate/build/staging-repository",
+                         fixture_original_path(windows, windows_host=True))
+        with patch.dict(globals(), {"os": SimpleNamespace(name="nt")}):
+            with self.assertRaisesRegex(unittest.SkipTest, "POSIX"):
+                self.test_full_hosted_fixture_replays_through_var_path_alias()
 
     def test_runner_contract_public_directory_and_tar_clis(self):
         with tempfile.TemporaryDirectory() as temporary:
