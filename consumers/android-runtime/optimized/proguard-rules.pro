@@ -1,0 +1,1 @@
+-keep class io.github.rubixhacker.dyn4k.optimized.OptimizedActivity { public <init>(); public void onCreate(android.os.Bundle); }

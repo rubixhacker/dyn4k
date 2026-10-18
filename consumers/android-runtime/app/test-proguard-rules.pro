@@ -1,0 +1,5 @@
+-keepattributes *Annotation*
+-keep class org.dyn4j.**Test { *; }
+-keep class io.github.rubixhacker.dyn4k.**Test { *; }
+-keep class *Consumer { *; }
+-keep class kotlin.** { *; }

@@ -1,0 +1,4 @@
+-keep class io.github.rubixhacker.dyn4k.runtime.RuntimeActivity { *; }
+-keep class org.dyn4j.** { *; }
+-keep class io.github.rubixhacker.dyn4k.** { *; }
+-keep class kotlin.** { *; }
