@@ -1,42 +1,53 @@
 # Independent gate archive verifier
 
-The verifier evaluates one exact Git commit and one approved runtime lane. It reads the complete suite manifest frozen at `6f983ad3a36bdc549c32f5d0883b0a47b28e1963`. It returns a SHA-256 result digest. Retain the result with its input archives.
-
-Run it with the candidate SHA, lane ID, and independently audited target binary hashes:
+Run `independent_gates.py` for one exact Git commit and one approved runtime lane. It reads the complete suite manifest from revision `6f983ad3a36bdc549c32f5d0883b0a47b28e1963`. Its result binds the candidate, lane, selected hashes, archive digests, gate outcomes, and numerical policy with SHA-256.
 
 ```sh
 python3 tools/qualification/independent_gates.py \
   --candidate-sha "$CANDIDATE_SHA" \
   --lane 'jvm:Java:minimum:no-optimize' \
-  --expected-artifacts /path/to/audited-target-hashes.json \
+  --expected-artifacts /audit/jvm-target-hashes.json \
+  --expected-all-target-artifacts /audit/all-21-target-hashes.json \
+  --expected-archive-digests /audit/archive-digests.json \
   --expected-runtime-identity 'selected runner identity' \
-  --archive duplicate-provider=/path/to/extracted-provider-archive
+  --archive staged-consumer=/archives/consumer \
+  --archive publication-contract=/archives/publication
 ```
 
-`--expected-artifacts` contains `dyn4k-core` and `dyn4k` SHA-256 values. Obtain them from an independently checked staged publication. Obtain `--expected-runtime-identity` from the selected runner record. Values copied from the same untrusted receipt do not provide independent checks. The evaluator also checks the raw Git tree against the exact candidate commit.
+The selected hash file maps `dyn4k-core` and `dyn4k` to audited binary SHA-256 values. The all-target file maps every approved target to those two binary hashes. The publication gate requires all 21 targets. The archive digest file maps gate names to `archive_digest(archive_path)` values. An independent archive auditor must record those digests before evaluation. Values copied from a producer receipt do not establish independent provenance. The evaluator cannot authenticate the auditor; the adapter must retain the independent audit record.
 
-An archive directory contains `receipt.json` and every raw file named in `files`. Each file entry has `path`, `sha256`, and original `mtime_ns`. The receipt has `schema: 1`, `candidate_sha`, `source_tree`, `artifact_hashes`, `lane`, and `runtime_identity`. It also has the lane's `target`, `runtime`, `version`, and `configuration`. Its `process` has a nonempty command, integer exit code, `started_ns`, and `finished_ns`. Optional `stdout` and `stderr` paths must name inventoried files. File times must fall within the process window. Extraction time does not replace the recorded original time. The verifier rejects unlisted files, duplicates, traversal, symbolic links, altered bytes, and wrong identities.
+The importable `evaluate(manifest, candidate_sha, lane_id, archives, repository, expected_artifact_hashes, expected_runtime_identity, expected_archive_digests, expected_all_target_hashes)` returns every applicable gate and all four global gates. `qualify.py` can pass the approved manifest and audited inputs without importing a producer status. The CLI exits zero only when every required gate passes. A bounded archive cannot turn a full 112-lane qualification green.
 
-The importable `evaluate(manifest, candidate_sha, lane_id, archives, repository, expected_artifact_hashes, expected_runtime_identity)` function returns `gates`, `status`, `manifest_sha256`, and `result_sha256`. `archives` maps gate names to extracted directories. `qualify.py` can call it with the approved manifest, independently audited hashes, and selected runner identity. Require every applicable gate and all four global gates to pass before passing a lane. A bounded result does not qualify 112 lanes.
+## Common raw archive
 
-| Gate | Raw verifier route | Current pass boundary |
-| --- | --- | --- |
-| staged-artifacts | Full staged repository through `qualify.audit_staging`, plus target hashes | All 21 target publications, metadata, sources, documentation, license, and sidecars must pass. |
-| staged-consumer | Existing `artifact.verify_bundle` for bounded archives; frozen consumer XML, graph, and resolved bytes for full receipts | A bounded archive is `NOT_RUN`. A full receipt needs the selected consumer task, exact cases, both binaries, and runtime/configuration binding. |
-| numerical-parity | `compare.compare` for every frozen fixture and raw candidate trace | All 14 fixture identities, counts, reference records, candidate records, and capture receipts must pass. |
-| physical-correctness | Approved phase ceilings over candidate traces after `compare.compare` | Every physical fixture and every represented state must pass. Default profile failures remain failures. |
-| unchanged-java-corpus | Candidate committed case manifest, pinned baseline Git sources, raw compile/run logs, provider graph, binaries, and JUnit XML | The producer has not committed `unchanged-java-corpus-cases.json`; absent evidence is `NOT_RUN`. |
-| java-source-compatibility | Candidate committed case manifest, exact Git sources, nine required probe scopes, raw compile/run logs, provider graph, binaries, and JUnit XML | The producer has not committed `java-source-compatibility-cases.json`; absent evidence is `NOT_RUN`. |
-| duplicate-provider | `qualify.check_providers` over raw dependency graph plus failing stderr and exit code | Both providers and the expected diagnostic must appear. |
-| migration-journeys | `journeys.verify_evidence` over the raw ten-journey archive | The pinned sample revision, ten distinct results, final candidate, and candidate JAR hash must agree. |
-| performance-resource | `verify_candidate_archive` raw and environment verifiers | Existing producer returns `qualification: unpassed`; verified raw records remain `NOT_RUN` for this gate. |
-| publication-contract | Full `qualify.audit_staging` and target binary hash comparison | All publications must pass the staged contract. |
-| independent-review | Two distinct raw CLI sessions with `turn_context.model = gpt-6-sol` | Standards and spec reports must target the exact final head and resolve every actionable finding. |
+Each archive contains `receipt.json` and every file listed in `receipt.files`. Each file entry has a safe relative path, SHA-256, and original nanosecond mtime. The extracted filesystem mtime must equal the recorded mtime and fall inside the process execution window. The auditor digest covers every extracted file's bytes, path, and filesystem mtime. The verifier rejects unlisted files, duplicate paths, traversal, symbolic links, changed bytes, changed mtimes, and wrong candidate or lane identities.
 
-The numerical receipt lists `fixtures` with `key`, `reference`, `candidate`, and `capture_receipt` paths. Its source digest is SHA-256 of the lowercase Git tree ID encoded as UTF-8. The comparator receives that digest and the independently audited `dyn4k-core` binary digest. Performance and migration producer archives belong under `evidence/`. The full staged repository belongs under `staged/`.
+A passing receipt binds the exact candidate SHA and Git tree, both selected target binary hashes, runtime identity, target, runtime, version, and configuration. Its process record includes a command, integer exit code, start and finish times, and raw output paths where the route requires them. Consumer, provider, and publication routes require a recognized launcher, exact lane marker, and raw task outcome in process output. Gradle routes also require task and build outcome lines. Consumer and provider output includes SHA-256 lines for the raw XML, graph, and resolved binaries it produced. These records only become evidence after an independent archive digest and artifact audit bind their origin.
 
-Java gate manifests belong under `tools/qualification/` at the candidate commit. Each has `schema: 1`, `kind`, `sources`, and `cases`. Source entries name a path and SHA-256. Case entries name `classname` and `name`. The unchanged corpus manifest also records baseline revision, 199 source files, and 2,171 test annotations. The source compatibility cases cover all nine scopes named in the verifier. A raw Java archive contains the copied sources under `sources/`, compile and run receipts, JUnit XML, provider graph, and both resolved binaries. No such committed producer manifest exists in this branch.
+No archive yields `NOT_RUN`. A complete external unavailability observation yields `UNAVAILABLE` with its reason. A malformed attempted pass or a raw failure yields `FAILED`. A producer `PASSED` string cannot replace raw files or audited provenance.
 
-`UNAVAILABLE` requires a separate receipt with the exact SHA and lane. It must give a concrete `reason`, `observed_by`, and positive `observed_at_ns`. It records an absent external runtime or service. No archive means `NOT_RUN`. A malformed or failing attempted archive is `FAILED`. A producer's `PASSED` string cannot replace raw prerequisites.
+## Gate routes
 
-The verifier does not authenticate an archive's origin. Pin the downloaded digest or runner provenance before trusting its receipt. Supply artifact hashes and runtime identity from separate selections. The current foundation bundle verifier cannot replay some older local bundles. Their probe JSON predates its per-group accounting fields. Those bundles remain historical evidence without a full lane pass.
+| Gate | Verifier and pass boundary |
+| --- | --- |
+| staged-artifacts | `qualify.audit_staging` verifies the full repository; both selected target binaries match the independent audit. |
+| staged-consumer | A frozen foundation consumer group or the approved full-suite case contract verifies XML identities, provider graph, resolved binary bytes, exact lane, and process output. Bounded foundation bundles remain `NOT_RUN`. |
+| numerical-parity | `compare.compare` replays all 14 frozen traces and capture receipts. The candidate and local checker, physical checker, and fixture catalog must match approved Git blobs. |
+| physical-correctness | Candidate sleep/wake phase checks report default and configured profiles separately. The known default baseline failure remains visible. Nominal and Weld/Pulley physical limits remain unapproved, so a configured result alone cannot pass this gate. |
+| unchanged-java-corpus | The reviewed `full_ci.py` archive verifier checks 2,385 original Java cases across 12 compile/runtime routes, pinned sources, case identities, logs, provider binaries, and raw archive seals. |
+| java-source-compatibility | The same reviewed archive verifier runs the strict 216-type, 3,078-declaration comparison and Java source projection checks against staged JVM and Android class archives. |
+| duplicate-provider | `qualify.check_providers` verifies both graph coordinates. The raw provider diagnostic, failing exit, exact lane output, and real dependency task must agree. |
+| migration-journeys | `journeys.verify_evidence` checks the archive seal. This verifier rehashes 42 unchanged Java sources, checks compiled class bytes and build commands, then reruns both scene validators from raw input, logs, frames, physics observations, and CCD counters for all ten journeys. |
+| performance-resource | The reviewed performance archive and reference environment verifiers run. Existing producer evidence still reports qualification unpassed. |
+| publication-contract | `qualify.audit_staging` checks publication metadata and files. Every binary in all 21 targets must match the separately audited all-target hash map. |
+| independent-review | Two distinct raw Sol sessions must contain exact-final-head standards and spec review outputs. Their actionable findings and resolutions must match the reports and committed evidence. |
+
+The full staged consumer fallback applies to every approved lane, including devices, browsers, and Wasmtime. Call `consumer_contract(manifest, lane_id)` to get its approved case set and digest. A fallback receipt sets `consumer_group` to `full-suite`, includes `consumer_contract_sha256`, and runs a command naming the lane. Its XML names every selected `case.id` in a `testcase id` attribute. The 13 frozen foundation groups keep their original classname/name XML contract where their runtime applies. Neither contract supplies missing device or browser execution.
+
+The Java archive receipt sets `producer` to `reviewed-full-ci`, `full_ci_archive` to a relative archive directory, and `full_ci_manifest_sha256` to that directory's `lane-manifest.json` digest. It lists both resolved publication binaries. The verifier executes the reviewed `full_ci.py` from pinned revision `00d2f949fd485287b737e905808bfb65be942733` against the transportable archive and checks its strict and corpus results. It does not accept a standalone compile summary or an invented case manifest.
+
+The migration archive includes `evidence/sources.sha256`, all 42 source files under `evidence/sources/`, compiled classes, and raw scene evidence. It also includes both providers' resolved JARs under `evidence/resolved/` and the pinned observer instrumentation JAR. Source and dependency hashes must match the producer's pinned inputs and the audited candidate core binary. Rewriting `summary.json` or resealing `evidence.sha256` cannot replace the raw validator checks.
+
+The independent-review raw sessions contain one final assistant JSON output with `kind: independent-review-result`, `review_kind`, `candidate_sha`, `verdict`, `assessment`, `reviewed_paths`, and full `findings`. Each report must match that raw output. Earlier structured raw findings must appear in the final output. A finding has an ID, severity, description, and a resolution with a committed evidence path and SHA-256 at the final head. Two empty report files cannot hide raw actionable findings.
+
+Historical local Java and migration archives exercise positive verifier paths in focused tests. Those tests include separate synthetic facade fixtures; they do not qualify the final candidate. No final 112-lane runtime set, all-target staging audit, approved joint physical limits, sustained performance result, or two resolved final-head reviews is supplied by this module.

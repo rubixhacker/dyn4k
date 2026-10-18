@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import importlib.util
+import io
 import json
-import math
 import os
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -25,9 +28,22 @@ LANE_GATES = frozenset(("staged-artifacts", "staged-consumer", "numerical-parity
                         "java-source-compatibility", "duplicate-provider"))
 GLOBAL_GATES = frozenset(("migration-journeys", "performance-resource",
                           "publication-contract", "independent-review"))
-JAVA_SCOPES = frozenset(("public-fields", "protected-state", "generic-signatures",
-                         "static-members", "null-behavior", "live-views",
-                         "iterator-mutation", "callback-reentry", "shared-identity"))
+APPROVED_POLICY = {
+    "tools/numerical/fixtures.json": "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c",
+    "tools/numerical/compare.py": "4310fe9ddad700bd591b7708cc1a61e9b307029ca97f5240b608a61fe0430fa3",
+    "tools/numerical/physical.py": "98ff243a02eece8a47a4faeda06385696174b2b10836e4e1315d6a13e22ee5ba",
+}
+APPROVED_MIGRATION = {
+    "tools/migration/journeys.py": "f5111af3f263691446eae984904232d26a1d9392d6fa26881225bf8c9079b9b9",
+    "tools/migration/validate_scene.py": "fa50bf08f0af86c173a4ec8775c4b6febb4b4c98099afd5dcb872ce97639ce6e",
+    "tools/migration/validate_plain.py": "7fac38d996ff369c95d44a944050439df54f715924b825406136b7591d5b3f38",
+}
+MIGRATION_DEPENDENCIES = {
+    "annotations-13.0.jar": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+    "kotlin-stdlib-2.4.20.jar": "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f",
+}
+REVIEWED_FULL_CI_REVISION = "00d2f949fd485287b737e905808bfb65be942733"
+REVIEWED_FULL_CI_SHA256 = "f8e0bda794d141b1418b76ccd712306b9c9f1d587446fe79fcb4697b57885ad7"
 
 
 def digest(value):
@@ -37,25 +53,12 @@ def digest(value):
 
 def load_approved_manifest(repository):
     raw = subprocess.check_output(
-        ["git", "-C", str(repository), "show",
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{APPROVED_MANIFEST_REVISION}:{MANIFEST_PATH}"], stderr=subprocess.PIPE)
     manifest = json.loads(raw)
     if digest(manifest) != APPROVED_MANIFEST_SHA256:
         raise ValueError("approved complete-suite manifest changed")
     return manifest
-
-
-def _committed_json(repository, revision, path):
-    try:
-        raw = subprocess.check_output(
-            ["git", "-C", str(repository), "show", f"{revision}:{path}"],
-            stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as error:
-        raise ValueError(f"committed gate manifest is absent: {path}") from error
-    value = json.loads(raw, object_pairs_hook=_strict_object)
-    if not qualify.finite_json(value):
-        raise ValueError(f"non-finite committed manifest: {path}")
-    return value
 
 
 def _result(gate, status, reason, **details):
@@ -127,6 +130,8 @@ def _inventory(root, receipt):
         if not isinstance(item, dict):
             raise ValueError("raw file inventory entry is invalid")
         relative = item.get("path")
+        if relative == "receipt.json":
+            raise ValueError("receipt cannot inventory itself")
         path = _file_path(root, relative)
         if relative in seen:
             raise ValueError(f"duplicate archive path: {relative}")
@@ -137,10 +142,70 @@ def _inventory(root, receipt):
         mtime = item.get("mtime_ns")
         if type(mtime) is not int or not started <= mtime <= finished:
             raise ValueError(f"raw file timestamp differs from execution: {relative}")
+        if path.stat().st_mtime_ns != mtime:
+            raise ValueError(f"raw file filesystem timestamp differs: {relative}")
     actual = _archive_paths(root)
     if actual != seen | {"receipt.json"}:
         raise ValueError("archive has unlisted, missing, or duplicate files")
     return digest({"receipt": receipt, "files": sorted(files, key=lambda item: item["path"])})
+
+
+def archive_digest(root):
+    root = Path(root)
+    paths = _archive_paths(root)
+    if "receipt.json" not in paths:
+        raise ValueError("raw receipt is absent")
+    return digest([{"path": name, "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest(),
+                    "mtime_ns": (root / name).stat().st_mtime_ns}
+                   for name in sorted(paths)])
+
+
+def consumer_contract(manifest, lane_id):
+    lane = manifest["lanes"][lane_id]
+    scopes = set(lane["case_scopes"])
+    cases = [item for item in manifest["cases"] if item["scope"] in scopes]
+    if not cases or len({item["id"] for item in cases}) != len(cases):
+        raise ValueError("approved staged consumer case contract is empty or duplicated")
+    return {"target": lane["target"], "runtime": lane["runtime"],
+            "version": lane["version"], "configuration": lane["configuration"],
+            "cases": cases}
+
+
+def _policy_binding(repository, candidate_sha):
+    return _source_binding(repository, candidate_sha, APPROVED_POLICY,
+                           "numerical approved policy/checker")
+
+
+def _source_binding(repository, candidate_sha, approved_paths, label):
+    for relative, approved in approved_paths.items():
+        local = Path(__file__).resolve().parents[2] / relative
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate_sha}:{relative}"],
+            stderr=subprocess.PIPE)
+        if (hashlib.sha256(local.read_bytes()).hexdigest() != approved
+                or hashlib.sha256(committed).hexdigest() != approved):
+            raise ValueError(f"{label} blob differs: {relative}")
+    return dict(approved_paths)
+
+
+def _numerical_modules(directory):
+    compare_spec = importlib.util.spec_from_file_location(
+        "dyn4k_approved_compare", directory / "compare.py")
+    compare = importlib.util.module_from_spec(compare_spec)
+    compare_spec.loader.exec_module(compare)
+    previous = sys.modules.get("compare")
+    sys.modules["compare"] = compare
+    try:
+        physical_spec = importlib.util.spec_from_file_location(
+            "dyn4k_approved_physical", directory / "physical.py")
+        physical = importlib.util.module_from_spec(physical_spec)
+        physical_spec.loader.exec_module(physical)
+    finally:
+        if previous is None:
+            del sys.modules["compare"]
+        else:
+            sys.modules["compare"] = previous
+    return compare, physical
 
 
 def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
@@ -148,7 +213,7 @@ def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
     if receipt.get("schema") != 1 or receipt.get("candidate_sha") != candidate_sha:
         raise ValueError("raw candidate SHA differs")
     source_tree = subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", f"{candidate_sha}^{{tree}}"],
+        ["git", "--no-replace-objects", "-C", str(repository), "rev-parse", f"{candidate_sha}^{{tree}}"],
         text=True, stderr=subprocess.PIPE).strip()
     if receipt.get("source_tree") != source_tree:
         raise ValueError("raw Git source tree differs from exact candidate")
@@ -178,8 +243,48 @@ def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
     return process
 
 
+def _process_proof(root, process, gate, lane_id):
+    command = process["command"]
+    executable = Path(command[0]).name.lower()
+    allowed = {"gradlew", "gradle", "adb", "xcrun", "node", "wasmtime",
+               "podman", "python", "python3", "java", "javac", "codex"}
+    if executable not in allowed:
+        raise ValueError(f"raw {gate} command has no recognized execution launcher")
+    if executable in {"python", "python3"} and not any(
+            arg.endswith((".py", ".sh")) for arg in command[1:]):
+        raise ValueError(f"raw {gate} Python command lacks an executable verifier")
+    if gate in ("staged-consumer", "duplicate-provider", "staged-artifacts",
+                "publication-contract"):
+        if executable not in {"gradlew", "gradle", "adb", "xcrun", "node",
+                              "wasmtime", "podman"}:
+            raise ValueError(f"raw {gate} command does not launch a consumer or staging task")
+        if "stdout" not in process:
+            raise ValueError(f"raw {gate} process output is missing")
+        output = _file_path(root, process["stdout"]).read_text()
+        if f"QUALIFICATION_LANE={lane_id}" not in output.splitlines():
+            raise ValueError(f"raw {gate} output lacks exact lane execution marker")
+        if executable in {"gradlew", "gradle"}:
+            if not re.search(r"(?m)^> Task :[^\s]+", output):
+                raise ValueError(f"raw {gate} Gradle task output is absent")
+            expected = "BUILD FAILED" if process["exit_code"] != 0 else "BUILD SUCCESSFUL"
+            if expected not in output:
+                raise ValueError(f"raw {gate} Gradle outcome is absent")
+        elif "QUALIFICATION_PROCESS_EXIT=" + str(process["exit_code"]) not in output.splitlines():
+            raise ValueError(f"raw {gate} runtime exit marker is absent")
+    return executable
+
+
+def _process_file_binding(root, process, relative, label):
+    path = _file_path(root, relative)
+    marker = f"QUALIFICATION_{label}_SHA256={hashlib.sha256(path.read_bytes()).hexdigest()}"
+    output = _file_path(root, process["stdout"]).read_text()
+    if marker not in output.splitlines():
+        raise ValueError(f"raw process output does not bind {relative}")
+
+
 def _duplicate_provider(root, receipt, process):
     graph_path = _file_path(root, receipt.get("provider_graph"))
+    _process_file_binding(root, process, receipt["provider_graph"], "PROVIDER_GRAPH")
     graph = graph_path.read_text()
     try:
         qualify.check_providers(graph)
@@ -192,13 +297,22 @@ def _duplicate_provider(root, receipt, process):
             raise ValueError("duplicate provider diagnostic or failure is absent") from error
     else:
         raise ValueError("both provider coordinates are absent from raw graph")
-    return "raw provider graph and failing diagnostic agree"
+    if not any("dependenc" in arg.lower() or "provider" in arg.lower()
+               for arg in process["command"][1:]):
+        raise ValueError("raw command does not run provider dependency diagnosis")
+    task = process["command"][-1].split(":")[-1]
+    output = _file_path(root, process["stdout"]).read_text()
+    if not any(line.startswith("> Task :") and line.split(":")[-1].split()[0] == task
+               for line in output.splitlines()):
+        raise ValueError("raw provider task output differs from executed command")
+    return "raw provider graph, command output, and failing diagnostic agree"
 
 
 def _external_unavailable(receipt, candidate_sha, lane_id, gate):
     reason = receipt.get("reason")
     if (receipt.get("schema") != 1 or receipt.get("candidate_sha") != candidate_sha
             or (gate not in GLOBAL_GATES and receipt.get("lane") != lane_id)
+            or (receipt.get("lane") is not None and receipt.get("lane") != lane_id)
             or not isinstance(reason, str) or not reason.strip()
             or not isinstance(receipt.get("observed_by"), str) or not receipt["observed_by"]
             or type(receipt.get("observed_at_ns")) is not int
@@ -208,8 +322,18 @@ def _external_unavailable(receipt, candidate_sha, lane_id, gate):
                    observation_sha256=digest(receipt))
 
 
+def _validated_all_target_hashes(hashes):
+    targets = {row["target"] for row in qualify.matrix()}
+    if (not isinstance(hashes, dict) or set(hashes) != targets
+            or any(not isinstance(value, dict) or set(value) != set(qualify.MODULES)
+                   or any(not SHA64.fullmatch(str(sha)) for sha in value.values())
+                   for value in hashes.values())):
+        raise ValueError("independently audited 21-target binary hash map is incomplete")
+    return hashes
+
+
 def _staged_publication(root, candidate_sha, lane, expected_artifact_hashes,
-                        repository):
+                        repository, expected_all_target_hashes=None):
     staging = root / "staged"
     if not staging.is_dir() or staging.is_symlink():
         raise ValueError("full staged repository is missing")
@@ -217,7 +341,7 @@ def _staged_publication(root, candidate_sha, lane, expected_artifact_hashes,
     if audit["status"] != "PASSED":
         raise ValueError("full staged publication audit failed: " + "; ".join(audit["errors"][:4]))
     license_bytes = subprocess.check_output(
-        ["git", "-C", str(repository), "show", f"{candidate_sha}:LICENSE.md"],
+        ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate_sha}:LICENSE.md"],
         stderr=subprocess.PIPE)
     for item in audit["artifacts"]:
         path = staging / item["path"]
@@ -228,12 +352,20 @@ def _staged_publication(root, candidate_sha, lane, expected_artifact_hashes,
             with zipfile.ZipFile(path) as package:
                 if package.read("META-INF/LICENSE.md") != license_bytes:
                     raise ValueError(f"embedded license differs from exact candidate: {item['path']}")
-    for module in qualify.MODULES:
-        binary = staging / qualify.target_binary_path(module, lane["target"])
-        if not binary.is_file() or binary.is_symlink():
-            raise ValueError(f"staged target binary is missing: {module}")
-        if qualify.digest(binary) != expected_artifact_hashes[module]:
-            raise ValueError(f"staged target binary differs from independent audit: {module}")
+    if expected_all_target_hashes is not None:
+        _validated_all_target_hashes(expected_all_target_hashes)
+        if expected_all_target_hashes[lane["target"]] != expected_artifact_hashes:
+            raise ValueError("selected target hashes differ from all-target audit")
+        selected = expected_all_target_hashes
+    else:
+        selected = {lane["target"]: expected_artifact_hashes}
+    for target, hashes in selected.items():
+        for module in qualify.MODULES:
+            binary = staging / qualify.target_binary_path(module, target)
+            if not binary.is_file() or binary.is_symlink():
+                raise ValueError(f"staged target binary is missing: {target}/{module}")
+            if qualify.digest(binary) != hashes[module]:
+                raise ValueError(f"staged target binary differs from independent audit: {target}/{module}")
     return f"full staged audit verified {len(audit['artifacts'])} publication files"
 
 
@@ -241,6 +373,8 @@ def _migration_journeys(root, candidate_sha, expected_artifact_hashes):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "migration"))
     try:
         import journeys
+        import validate_plain
+        import validate_scene
         report = journeys.verify_evidence(root / "evidence")
     finally:
         sys.path.pop(0)
@@ -257,13 +391,71 @@ def _migration_journeys(root, candidate_sha, expected_artifact_hashes):
                 for scene in journeys.SCENES} or
             any(case.get("status") != "PASSED" for case in cases)):
         raise ValueError("migration journey identities or outcomes differ")
+    source_manifest = _file_path(root, "evidence/sources.sha256").read_bytes()
+    if hashlib.sha256(source_manifest).hexdigest() != journeys.SOURCE_MANIFEST_SHA256:
+        raise ValueError("42 unchanged sample source identities differ from pinned manifest")
+    source_rows = source_manifest.decode().splitlines()
+    if len(source_rows) != 42 or len(set(source_rows)) != 42:
+        raise ValueError("42 unchanged Java source records are incomplete")
+    source_paths = []
+    for row in source_rows:
+        match = re.fullmatch(r"([0-9a-f]{64})  (.+\.java)", row)
+        if match is None:
+            raise ValueError("unchanged Java source manifest row is invalid")
+        source_paths.append(match[2])
+        if hashlib.sha256(_file_path(root, "evidence/sources/" + match[2]).read_bytes()).hexdigest() != match[1]:
+            raise ValueError(f"unchanged Java source bytes differ: {match[2]}")
+    if source_paths != sorted(source_paths):
+        raise ValueError("unchanged Java source manifest is not sorted")
+    sample_check = _json(_file_path(root, "evidence/sample-check.json"))
+    if (sample_check.get("status") != "PASSED" or sample_check.get("revision") != journeys.SAMPLE_REVISION
+            or sample_check.get("java_source_count") != 42
+            or sample_check.get("manifest_sha256") != journeys.SOURCE_MANIFEST_SHA256):
+        raise ValueError("migration post-run sample check differs")
     for provider in journeys.PROVIDERS:
         compiled = _json(root / "evidence" / provider / "compile" / "compile.json")
+        jar_hashes = dict(journeys.PINNED_JARS)
+        if provider == "candidate":
+            jar_hashes.pop("dyn4j-6.0.0.jar")
+            jar_hashes[journeys.CANDIDATE_JAR] = expected_artifact_hashes["dyn4k-core"]
+            jar_hashes.update(MIGRATION_DEPENDENCIES)
+        if (not isinstance(compiled.get("artifacts"), list)
+                or {item.get("name"): item.get("sha256") for item in compiled["artifacts"]
+                    if isinstance(item, dict)} != jar_hashes
+                or len(compiled["artifacts"]) != len(jar_hashes)):
+            raise ValueError(f"{provider} resolved dependency inventory differs")
+        for name, expected_hash in jar_hashes.items():
+            binary = _file_path(root, f"evidence/resolved/{provider}/{name}")
+            if hashlib.sha256(binary.read_bytes()).hexdigest() != expected_hash:
+                raise ValueError(f"{provider} resolved dependency differs: {name}")
         if (compiled.get("status") != "PASSED" or compiled.get("exit_code") != 0
                 or compiled.get("source_count") != 42
+                or compiled.get("source_manifest_sha256") != journeys.SOURCE_MANIFEST_SHA256
                 or not isinstance(compiled.get("command"), list)
+                or Path(compiled["command"][0]).name != "javac"
+                or "--release" not in compiled["command"]
+                or "8" not in compiled["command"]
+                or not all(any(arg.endswith(path) for arg in compiled["command"])
+                           for path in source_paths)
+                or not all(any(name in arg for arg in compiled["command"])
+                           for name in jar_hashes)
                 or not (root / "evidence" / provider / "compile" / "javac.log").is_file()):
             raise ValueError(f"{provider} unchanged Java compilation lacks raw success evidence")
+        classes = list((root / "evidence" / provider / "compile" / "classes").rglob("*.class"))
+        if (not classes or len(classes) != compiled.get("class_count")
+                or any(path.is_symlink() or not path.is_file() or path.stat().st_size == 0
+                       or path.read_bytes()[:4] != b"\xca\xfe\xba\xbe" for path in classes)):
+            raise ValueError(f"{provider} compiled class outputs differ")
+        if not _file_path(root, f"evidence/{provider}/compile/javac-version.log").read_text().strip():
+            raise ValueError(f"{provider} javac version output is missing")
+        observer = _json(_file_path(root, f"evidence/{provider}/observer-build.json"))
+        if (observer.get("status") != "PASSED" or observer.get("exit_code") != 0
+                or len(observer.get("commands", [])) != 3
+                or any(step.get("exit_code") != 0 for step in observer["commands"])):
+            raise ValueError(f"{provider} observer build lacks raw command evidence")
+    instrumentation = _file_path(root, "evidence/instrumentation/javassist-3.30.2-GA.jar")
+    if hashlib.sha256(instrumentation.read_bytes()).hexdigest() != journeys.JAVASSIST_SHA256:
+        raise ValueError("migration observer instrumentation differs from pinned JAR")
     for case in cases:
         for mode in ("plain", "observed"):
             observation = case.get(mode)
@@ -272,8 +464,11 @@ def _migration_journeys(root, candidate_sha, expected_artifact_hashes):
                 raise ValueError(f"{case['provider']} {case['scene']} {mode} did not execute")
             directory = root / "evidence" / case["provider"] / case["scene"] / mode
             invocation = _json(directory / "invocation.json")
-            if (not isinstance(invocation.get("command"), list)
-                    or not (directory / "container.log").is_file()):
+            command = invocation.get("command")
+            if (not isinstance(command, list) or command[:2] != ["podman", "run"]
+                    or not any(arg.endswith("run-plain-scene.sh" if mode == "plain" else "run-scene.sh") for arg in command)
+                    or case["scene"] not in command
+                    or not _file_path(root, (directory / "container.log").relative_to(root).as_posix()).read_text().strip()):
                 raise ValueError(f"{case['scene']} {mode} raw container invocation is missing")
             validation_name = "plain-validation.json" if mode == "plain" else "validation.json"
             validation = _json(directory / "evidence" / case["scene"] / validation_name)
@@ -283,7 +478,29 @@ def _migration_journeys(root, candidate_sha, expected_artifact_hashes):
                     or validation.get("unexecuted", validation.get("unexecuted_checks")) != 0
                     or validation.get("executed", validation.get("executed_checks", 0)) <= 0):
                 raise ValueError(f"{case['scene']} {mode} raw validation has incomplete checks")
-    candidate_jar = root / "evidence" / "resolved" / journeys.CANDIDATE_JAR
+            evidence = directory / "evidence" / case["scene"]
+            if mode == "plain":
+                replay = validate_plain.validate(case["scene"], evidence)
+            else:
+                log_text = _file_path(root, (evidence / "observer.log").relative_to(root).as_posix()).read_text()
+                input_text = _file_path(root, (evidence / "inputs.log").relative_to(root).as_posix()).read_text()
+                samples, errors = [], []
+                for number, line in enumerate(log_text.splitlines(), 1):
+                    if line.startswith("OBS_JSON "):
+                        try:
+                            samples.append(json.loads(line[len("OBS_JSON "):]))
+                        except (ValueError, TypeError) as error:
+                            errors.append(f"line {number}: {error}")
+                checks = validate_scene.checks_for(case["scene"], log_text, input_text, samples, errors)
+                replay = {"scene": case["scene"], "expected_checks": len(checks),
+                          "executed_checks": sum(item["status"] != "skipped" for item in checks),
+                          "passed_checks": sum(item["status"] == "passed" for item in checks),
+                          "failed_checks": sum(item["status"] == "failed" for item in checks),
+                          "unexecuted_checks": sum(item["status"] == "skipped" for item in checks),
+                          "samples": len(samples), "checks": checks, "parse_errors": errors}
+            if replay != validation or replay.get("failed", replay.get("failed_checks")) != 0:
+                raise ValueError(f"{case['scene']} {mode} raw scene, input, physics, or CCD evidence differs")
+    candidate_jar = root / "evidence" / "resolved" / "candidate" / journeys.CANDIDATE_JAR
     if (not candidate_jar.is_file() or candidate_jar.is_symlink() or
             qualify.digest(candidate_jar) != expected_artifact_hashes["dyn4k-core"]):
         raise ValueError("migration candidate JAR differs from audited staged artifact")
@@ -306,21 +523,75 @@ def _independent_review(root, candidate_sha, repository):
                        if item.get("type") == "turn_context"}
         session_ids = {item.get("payload", {}).get("id") for item in messages
                        if item.get("type") == "session_meta"}
-        if (turn_models != {"gpt-6-sol"} or len(session_ids) != 1
-                or candidate_sha not in raw_session or kind not in raw_session
-                or not any(item.get("type") == "response_item" for item in messages)):
+        if turn_models != {"gpt-6-sol"} or len(session_ids) != 1:
             raise ValueError(f"{kind} raw session does not prove one Sol review")
+        final_reviews = []
+        observed_findings = []
+        for item in messages:
+            if item.get("type") != "response_item":
+                continue
+            payload = item.get("payload", {})
+            if isinstance(payload.get("findings"), list):
+                observed_findings.extend(payload["findings"])
+            if payload.get("type") != "message" or payload.get("role") != "assistant":
+                continue
+            for part in payload.get("content", []):
+                if part.get("type") != "output_text":
+                    continue
+                try:
+                    value = json.loads(part.get("text", ""), object_pairs_hook=_strict_object)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(value, dict) and value.get("kind") == "independent-review-result":
+                    final_reviews.append(value)
+                elif isinstance(value, dict) and isinstance(value.get("findings"), list):
+                    observed_findings.extend(value["findings"])
+        if len(final_reviews) != 1:
+            raise ValueError(f"{kind} raw final review output is absent or ambiguous")
+        raw_review = final_reviews[0]
+        if (raw_review.get("review_kind") != kind
+                or raw_review.get("candidate_sha") != candidate_sha
+                or raw_review.get("findings") != report.get("findings")
+                or raw_review.get("verdict") != report.get("verdict")
+                or raw_review.get("assessment") != report.get("assessment")
+                or raw_review.get("reviewed_paths") != report.get("reviewed_paths")):
+            raise ValueError(f"{kind} raw review findings differ from report or exact final head")
+        required_paths = ({"AGENTS.md", "docs/agents/writing.md"} if kind == "standards"
+                          else {"docs/specs/complete-port.md",
+                                "docs/planning/acceptance-implementation.md"})
+        reviewed_paths = raw_review.get("reviewed_paths")
+        if (not isinstance(raw_review.get("assessment"), str)
+                or len(raw_review["assessment"].strip()) < 40
+                or not isinstance(reviewed_paths, list)
+                or not required_paths <= set(reviewed_paths)
+                or len(reviewed_paths) != len(set(reviewed_paths))):
+            raise ValueError(f"{kind} raw review has no substantive standards or spec assessment")
+        for path in reviewed_paths:
+            _file_path_name(path)
+            subprocess.check_output(["git", "--no-replace-objects", "-C", str(repository), "show",
+                                     f"{candidate_sha}:{path}"], stderr=subprocess.PIPE)
         session_id = next(iter(session_ids))
         if report.get("session_id") != session_id or session_id in sessions:
             raise ValueError("independent reviews repeat or misstate session identity")
         sessions.add(session_id)
-        findings = report.get("findings")
+        findings = raw_review.get("findings")
         if not isinstance(findings, list):
             raise ValueError(f"{kind} actionable findings are missing")
+        final_by_id = {finding.get("id"): finding for finding in findings
+                       if isinstance(finding, dict)}
+        for observed in observed_findings:
+            if (not isinstance(observed, dict) or observed.get("id") not in final_by_id
+                    or (observed.get("severity") is not None
+                        and observed["severity"] != final_by_id[observed["id"]].get("severity"))):
+                raise ValueError(f"{kind} raw actionable finding is absent from final review")
         ids = [finding.get("id") for finding in findings if isinstance(finding, dict)]
         if len(ids) != len(findings) or len(set(ids)) != len(ids):
             raise ValueError(f"{kind} finding identities are invalid")
         for finding in findings:
+            if (not isinstance(finding.get("severity"), str)
+                    or not isinstance(finding.get("description"), str)
+                    or not finding["description"].strip()):
+                raise ValueError(f"{kind} raw finding lacks actionable details")
             resolution = finding.get("resolution")
             if (not isinstance(resolution, dict)
                     or resolution.get("status") != "RESOLVED"
@@ -330,19 +601,20 @@ def _independent_review(root, candidate_sha, repository):
                 raise ValueError(f"{kind} actionable finding is unresolved")
             evidence = resolution["evidence"]
             _file_path_name(evidence)
-            committed = subprocess.run(
-                ["git", "-C", str(repository),
-                 "cat-file", "-e", f"{candidate_sha}:{evidence}"],
-                capture_output=True, check=False)
-            if committed.returncode:
-                raise ValueError(f"{kind} resolution evidence is absent from final head")
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate_sha}:{evidence}"],
+                stderr=subprocess.PIPE)
+            if hashlib.sha256(committed).hexdigest() != resolution.get("evidence_sha256"):
+                raise ValueError(f"{kind} resolution evidence differs from exact final head")
+        if raw_review.get("verdict") != "PASSED":
+            raise ValueError(f"{kind} raw reviewer verdict is not PASSED")
         reports.append(report)
     return f"{len(reports)} distinct Sol reviews verified against final head"
 
 
 def _bounded_bundle(root, candidate_sha, lane, expected_artifact_hashes, repository):
     manifest = json.loads(subprocess.check_output(
-        ["git", "-C", str(repository), "show",
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:tools/qualification/foundation-probes.json"],
         stderr=subprocess.PIPE))
     summary = artifact.verify_bundle(root, manifest, candidate_sha)
@@ -359,30 +631,41 @@ def _bounded_bundle(root, candidate_sha, lane, expected_artifact_hashes, reposit
     return summary
 
 
-def _staged_consumer(root, receipt, candidate_sha, lane, expected_artifact_hashes,
-                     repository, process):
+def _staged_consumer(root, receipt, candidate_sha, lane_id, lane,
+                     expected_artifact_hashes, repository, process, manifest):
     target = lane["target"]
     if target in ("js", "wasmJs", "wasmWasi"):
         suffix = {"js": "jsNode", "wasmJs": "wasmJsNode",
                   "wasmWasi": "wasmWasiNode"}[target]
-        if lane["runtime"] != "Node.js":
-            raise ValueError("no frozen staged consumer group for selected browser or WASI runtime")
-    elif target == "android":
-        raise ValueError("Android host consumer does not establish Android device execution")
     else:
         suffix = target
     group_id = f"consumer-{suffix}"
-    manifest = json.loads(subprocess.check_output(
-        ["git", "-C", str(repository), "show",
+    foundation = json.loads(subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:tools/qualification/foundation-probes.json"],
         stderr=subprocess.PIPE))
-    group = next((item for item in manifest["groups"] if item["id"] == group_id), None)
-    if group is None or receipt.get("consumer_group") != group_id:
-        raise ValueError("frozen staged consumer group is absent or misbound")
-    task = Path(group["report_pattern"]).parent.name
-    if not any(task in arg for arg in process["command"]):
-        raise ValueError("raw command does not execute selected consumer task")
+    group = next((item for item in foundation["groups"] if item["id"] == group_id), None)
+    foundation_route = group is not None and lane["runtime"] in ("Java", "Node.js", "Linux x64", "macOS ARM64", "Windows x64", "iOS simulator ARM64", "iOS simulator x64", "tvOS simulator ARM64", "watchOS simulator ARM64")
+    if foundation_route:
+        if receipt.get("consumer_group") != group_id:
+            raise ValueError("frozen staged consumer group differs")
+        task = Path(group["report_pattern"]).parent.name
+        if not any(arg.endswith(":" + task) or arg == task for arg in process["command"][1:]):
+            raise ValueError("raw command does not execute exact consumer task")
+        output = _file_path(root, process["stdout"]).read_text()
+        if not any(line.startswith("> Task :") and line.split(":")[-1].split()[0] == task
+                   for line in output.splitlines()):
+            raise ValueError("raw consumer task output differs from executed command")
+        expected = set(qualify.expected_probe_cases(foundation, group))
+    else:
+        contract = consumer_contract(manifest, lane_id)
+        if (receipt.get("consumer_group") != "full-suite"
+                or receipt.get("consumer_contract_sha256") != digest(contract)
+                or lane_id not in process["command"]):
+            raise ValueError("full staged consumer command or approved lane contract differs")
+        expected = {item["id"] for item in contract["cases"]}
     graph = _file_path(root, receipt.get("provider_graph")).read_text()
+    _process_file_binding(root, process, receipt["provider_graph"], "PROVIDER_GRAPH")
     providers = set(re.findall(r"io\.github\.rubixhacker:([^:\s]+):", graph))
     expected_providers = {qualify.target_publication_name(module, target)
                           for module in qualify.MODULES}
@@ -392,6 +675,8 @@ def _staged_consumer(root, receipt, candidate_sha, lane, expected_artifact_hashe
     if not isinstance(binaries, dict) or set(binaries) != set(qualify.MODULES):
         raise ValueError("both resolved external consumer binaries are required")
     for module, relative in binaries.items():
+        _process_file_binding(root, process, relative,
+                              "RESOLVED_" + module.upper().replace("-", "_"))
         if hashlib.sha256(_file_path(root, relative).read_bytes()).hexdigest() != expected_artifact_hashes[module]:
             raise ValueError(f"resolved external consumer artifact differs: {module}")
     reports = receipt.get("consumer_xml")
@@ -399,6 +684,7 @@ def _staged_consumer(root, receipt, candidate_sha, lane, expected_artifact_hashe
         raise ValueError("raw staged consumer XML report paths are missing or duplicate")
     observed = []
     for relative in reports:
+        _process_file_binding(root, process, relative, "CONSUMER_XML")
         suite = ET.fromstring(_file_path(root, relative).read_bytes())
         if suite.tag != "testsuite":
             raise ValueError("raw staged consumer XML root is not testsuite")
@@ -414,174 +700,122 @@ def _staged_consumer(root, receipt, candidate_sha, lane, expected_artifact_hashe
         if not 0 <= float(suite.get("time", "nan")) < float("inf"):
             raise ValueError("staged consumer XML suite time is invalid")
         for case in cases:
-            identity = case.get("classname"), case.get("name")
-            if not all(identity) or not 0 <= float(case.get("time", "nan")) < float("inf"):
+            identity = ((case.get("classname"), case.get("name"))
+                        if foundation_route else case.get("id"))
+            if (not identity or not 0 <= float(case.get("time", "nan")) < float("inf")
+                    or (foundation_route and not all(identity))):
                 raise ValueError("staged consumer XML case identity or time is invalid")
             observed.append(identity)
-    expected = set(qualify.expected_probe_cases(manifest, group))
     if len(observed) != len(set(observed)) or set(observed) != expected:
         raise ValueError("staged consumer case identities or counts differ from frozen manifest")
     return f"{len(observed)} raw external consumer cases and both resolved artifacts verified"
 
 
-def _java_cases(root, receipt, gate, candidate_sha, lane, repository,
-                expected_artifact_hashes):
-    if lane["target"] != "jvm":
-        raise ValueError(f"{gate} is only applicable to the JVM target")
-    path = f"tools/qualification/{gate}-cases.json"
-    frozen = _committed_json(repository, candidate_sha, path)
-    if (frozen.get("schema") != 1 or frozen.get("kind") != gate
-            or receipt.get("case_manifest_sha256") != digest(frozen)):
-        raise ValueError(f"{gate} committed case manifest differs from raw receipt")
-    sources, cases = frozen.get("sources"), frozen.get("cases")
-    if (not isinstance(sources, list) or not sources or
-            not isinstance(cases, list) or not cases):
-        raise ValueError(f"{gate} has no frozen sources or cases")
-    if gate == "unchanged-java-corpus":
-        inventory = _committed_json(repository, candidate_sha,
-                                    "docs/verification/baseline-inventory.json")
-        if (frozen.get("baseline_revision") != "058bf6d982a0fb89b54050f929f6ea9dae53b714"
-                or frozen.get("test_java_files") != 199
-                or frozen.get("test_annotations") != 2171
-                or len(sources) != 199 or len(cases) < 2171
-                or inventory.get("baseline", {}).get("commit") != frozen["baseline_revision"]
-                or {item.get("path") for item in sources if isinstance(item, dict)}
-                != set(inventory.get("test_java_files", []))):
-            raise ValueError("unchanged Java corpus inventory differs from pinned baseline")
-    else:
-        if {item.get("scope") for item in cases if isinstance(item, dict)} != JAVA_SCOPES:
-            raise ValueError("Java source compatibility probes omit a required scope")
-    source_paths = []
-    for item in sources:
-        if not isinstance(item, dict):
-            raise ValueError("frozen Java source record is invalid")
-        source = item.get("path")
-        _file_path_name(source)
-        source_paths.append(source)
-        recorded = item.get("sha256")
-        if not SHA64.fullmatch(str(recorded)):
-            raise ValueError(f"frozen Java source hash is invalid: {source}")
-        if gate == "java-source-compatibility":
-            committed = subprocess.check_output(
-                ["git", "-C", str(repository), "show", f"{candidate_sha}:{source}"],
-                stderr=subprocess.PIPE)
-            if hashlib.sha256(committed).hexdigest() != recorded:
-                raise ValueError(f"Java source differs from exact candidate: {source}")
-        else:
-            original = subprocess.check_output(
-                ["git", "-C", str(repository), "show",
-                 f"{frozen['baseline_revision']}:{source}"], stderr=subprocess.PIPE)
-            if hashlib.sha256(original).hexdigest() != recorded:
-                raise ValueError(f"unchanged Java source differs from pinned baseline: {source}")
-        if hashlib.sha256(_file_path(root, f"sources/{source}").read_bytes()).hexdigest() != recorded:
-            raise ValueError(f"raw Java source differs from frozen manifest: {source}")
-    if len(source_paths) != len(set(source_paths)):
-        raise ValueError("frozen Java source paths repeat")
-    expected = []
-    for item in cases:
-        if not isinstance(item, dict) or not item.get("classname") or not item.get("name"):
-            raise ValueError("frozen Java case identity is invalid")
-        expected.append((item["classname"], item["name"]))
-    if len(expected) != len(set(expected)):
-        raise ValueError("frozen Java case identities repeat")
-    outer = receipt["process"]
-    for stage in ("compilation", "execution"):
-        process = receipt.get(stage)
-        if (not isinstance(process, dict) or
-                not isinstance(process.get("command"), list) or not process["command"] or
-                process.get("exit_code") != 0 or
-                type(process.get("started_ns")) is not int or
-                type(process.get("finished_ns")) is not int or
-                not outer["started_ns"] <= process["started_ns"] <= process["finished_ns"] <= outer["finished_ns"]):
-            raise ValueError(f"{gate} raw {stage} command or time is invalid")
-        _file_path(root, process.get("log"))
-    graph = _file_path(root, receipt.get("provider_graph")).read_text()
-    providers = set(re.findall(r"io\.github\.rubixhacker:([^:\s]+):", graph))
-    if ("org.dyn4j:dyn4j" in graph or
-            {qualify.target_publication_name(module, "jvm") for module in qualify.MODULES}
-            - providers):
-        raise ValueError("Java consumer provider graph is incomplete or duplicated")
-    binaries = receipt.get("resolved_artifacts")
-    if not isinstance(binaries, dict) or set(binaries) != set(qualify.MODULES):
-        raise ValueError("Java consumer resolved artifacts are missing")
-    for module, relative in binaries.items():
-        if hashlib.sha256(_file_path(root, relative).read_bytes()).hexdigest() != expected_artifact_hashes[module]:
-            raise ValueError(f"Java consumer resolved binary differs: {module}")
-    reports = receipt.get("java_xml")
-    if not isinstance(reports, list) or not reports or len(reports) != len(set(reports)):
-        raise ValueError("Java case XML report paths are missing or duplicate")
-    observed = []
-    for relative in reports:
-        suite = ET.fromstring(_file_path(root, relative).read_bytes())
-        if suite.tag != "testsuite":
-            raise ValueError("Java XML root is not testsuite")
-        rows = list(suite.iter("testcase"))
-        counts = {"tests": len(rows),
-                  "failures": sum(row.find("failure") is not None for row in rows),
-                  "errors": sum(row.find("error") is not None for row in rows),
-                  "skipped": sum(row.find("skipped") is not None for row in rows)}
-        if (any(suite.get(key) is None or int(suite.get(key)) != value
-                for key, value in counts.items()) or
-                any(counts[key] for key in ("failures", "errors", "skipped")) or
-                not 0 <= float(suite.get("time", "nan")) < float("inf")):
-            raise ValueError("Java XML count, outcome, or duration differs")
-        for row in rows:
-            identity = (row.get("classname"), row.get("name"))
-            if not all(identity) or not 0 <= float(row.get("time", "nan")) < float("inf"):
-                raise ValueError("Java XML case identity or duration is invalid")
-            observed.append(identity)
-    if len(observed) != len(set(observed)) or set(observed) != set(expected):
-        raise ValueError("Java XML case identities or counts differ from committed manifest")
-    return f"{len(observed)} committed Java cases and raw compile/run evidence verified"
+def _java_full_ci(root, receipt, gate, candidate_sha, repository,
+                  expected_artifact_hashes):
+    if receipt.get("producer") != "reviewed-full-ci":
+        raise ValueError(f"{gate} requires the reviewed full_ci raw archive contract")
+    relative = receipt.get("full_ci_archive")
+    _file_path_name(relative)
+    archive = root / relative
+    manifest_file = _file_path(root, f"{relative}/lane-manifest.json")
+    manifest_sha = receipt.get("full_ci_manifest_sha256")
+    if (not SHA64.fullmatch(str(manifest_sha))
+            or hashlib.sha256(manifest_file.read_bytes()).hexdigest() != manifest_sha):
+        raise ValueError("reviewed full_ci manifest differs from independently pinned receipt")
+    verified_source = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{REVIEWED_FULL_CI_REVISION}:tools/compatibility/full_ci.py"],
+        stderr=subprocess.PIPE)
+    if hashlib.sha256(verified_source).hexdigest() != REVIEWED_FULL_CI_SHA256:
+        raise ValueError("reviewed full_ci verifier source differs")
+    evidence = _json(_file_path(root, f"{relative}/result.json"))
+    if evidence.get("archives", {}).get("staged_jvm_jar") != expected_artifact_hashes["dyn4k-core"]:
+        raise ValueError("reviewed Java corpus core JAR differs from independent staging audit")
+    resolved = receipt.get("resolved_artifacts")
+    if (not isinstance(resolved, dict) or set(resolved) != set(qualify.MODULES)
+            or any(hashlib.sha256(_file_path(root, path).read_bytes()).hexdigest()
+                   != expected_artifact_hashes[module]
+                   for module, path in resolved.items())):
+        raise ValueError("Java corpus resolved publications differ from independent staging audit")
+    with tempfile.TemporaryDirectory(prefix="dyn4k-reviewed-full-ci-") as temporary:
+        source_archive = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "archive", REVIEWED_FULL_CI_REVISION,
+             "tools/compatibility", "tools/baseline", "dyn4k-core/src/jvmConsumer/java"],
+            stderr=subprocess.PIPE)
+        with tarfile.open(fileobj=io.BytesIO(source_archive)) as package:
+            package.extractall(temporary, filter="data")
+        command = [sys.executable,
+                   str(Path(temporary) / "tools/compatibility/full_ci.py"),
+                   "verify", "--candidate-sha", candidate_sha,
+                   "--output", str(archive.resolve()),
+                   "--manifest-sha256", manifest_sha]
+        checked = subprocess.run(command, capture_output=True, text=True,
+                                 timeout=120, check=False)
+    if checked.returncode != 0:
+        raise ValueError("reviewed full_ci/strict raw verifier rejected archive: "
+                         + checked.stdout[-1000:] + checked.stderr[-300:])
+    verified = json.loads(checked.stdout, object_pairs_hook=_strict_object)
+    if verified.get("status") != "PASSED" or verified.get("corpus_files") != 24:
+        raise ValueError("reviewed full_ci/strict verifier did not pass full Java corpus")
+    return ("2,385 unchanged Java cases across 12 compile/runtime routes and "
+            "216-type strict source compatibility verified by reviewed full_ci")
 
 
 def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes,
                        physical_only=False):
     numerical_dir = Path(__file__).resolve().parents[1] / "numerical"
-    sys.path.insert(0, str(numerical_dir))
-    try:
-        import compare
-        import physical
-        catalog = _json(numerical_dir / "fixtures.json")
-        selected = {item["key"] for item in catalog["fixtures"]
-                    if not physical_only or "physical_phase_ceilings_m" in compare.load_fixture(item["key"])}
-        entries = receipt.get("fixtures")
-        if not isinstance(entries, list) or {item.get("key") for item in entries
-                                             if isinstance(item, dict)} != selected or len(entries) != len(selected):
-            raise ValueError("frozen numerical fixture identities or counts differ")
-        source_sha = hashlib.sha256(receipt["source_tree"].encode()).hexdigest()
-        for item in entries:
-            fixture = compare.load_fixture(item["key"])
-            reference = _file_path(root, item.get("reference"))
-            candidate = _file_path(root, item.get("candidate"))
-            capture = _file_path(root, item.get("capture_receipt"))
-            result = compare.compare(fixture, reference, candidate, capture,
-                                     source_sha, expected_artifact_hashes["dyn4k-core"],
-                                     candidate_sha)
-            if result["status"] == "UNPASSED":
-                raise IncompleteEvidence(
-                    f"{item['key']} has unapproved comparison channels: {result['unpassed_channels']}")
-            if result["status"] != "PASSED":
-                raise ValueError(f"{item['key']} numerical comparison {result['status']}: {result.get('reason', result.get('unpassed_channels'))}")
-            if physical_only:
-                phases = physical.phases_for_fixture(fixture)
-                states = 0
-                failed = 0
-                phase_index = 0
-                for _, row in compare.records(candidate):
-                    if row["kind"] != "state":
-                        continue
-                    while row["step"] > phases[phase_index][2]:
-                        phase_index += 1
-                    ceiling = fixture["physical_phase_ceilings_m"][phases[phase_index][0]]
-                    if physical.depth_for_state(row["state"]) > physical.Fraction(str(ceiling)):
-                        failed += 1
-                    states += 1
-                if states != fixture["counts"]["state"] or failed:
-                    raise ValueError(f"{item['key']} physical ceiling failed in {failed} of {states} states")
-        return f"{len(entries)} frozen {'physical' if physical_only else 'numerical'} fixture traces verified"
-    finally:
-        sys.path.pop(0)
+    compare, physical = _numerical_modules(numerical_dir)
+    catalog = _json(numerical_dir / "fixtures.json")
+    selected = {item["key"] for item in catalog["fixtures"]
+                if not physical_only or "physical_phase_ceilings_m" in compare.load_fixture(item["key"])}
+    entries = receipt.get("fixtures")
+    if not isinstance(entries, list) or {item.get("key") for item in entries
+                                         if isinstance(item, dict)} != selected or len(entries) != len(selected):
+        raise ValueError("frozen numerical fixture identities or counts differ")
+    source_sha = hashlib.sha256(receipt["source_tree"].encode()).hexdigest()
+    physical_profiles = {"default-sleep-wake": {"states": 0, "failures": 0},
+                         "configured-sleep-wake": {"states": 0, "failures": 0}}
+    for item in entries:
+        fixture = compare.load_fixture(item["key"])
+        reference = _file_path(root, item.get("reference"))
+        candidate = _file_path(root, item.get("candidate"))
+        capture = _file_path(root, item.get("capture_receipt"))
+        result = compare.compare(fixture, reference, candidate, capture,
+                                 source_sha, expected_artifact_hashes["dyn4k-core"],
+                                 candidate_sha)
+        if result["status"] == "UNPASSED" and not physical_only:
+            raise IncompleteEvidence(
+                f"{item['key']} has unapproved comparison channels: {result['unpassed_channels']}")
+        if result["status"] not in (("PASSED", "UNPASSED") if physical_only else ("PASSED",)):
+            raise ValueError(f"{item['key']} numerical comparison {result['status']}: {result.get('reason', result.get('unpassed_channels'))}")
+        if physical_only:
+            phases = physical.phases_for_fixture(fixture)
+            states = 0
+            failed = 0
+            phase_index = 0
+            for _, row in compare.records(candidate):
+                if row["kind"] != "state":
+                    continue
+                while row["step"] > phases[phase_index][2]:
+                    phase_index += 1
+                ceiling = fixture["physical_phase_ceilings_m"][phases[phase_index][0]]
+                if physical.depth_for_state(row["state"]) > physical.Fraction(str(ceiling)):
+                    failed += 1
+                states += 1
+            if states != fixture["counts"]["state"]:
+                raise ValueError(f"{item['key']} physical state count differs")
+            physical_profiles[fixture["profile"]]["states"] += states
+            physical_profiles[fixture["profile"]]["failures"] += failed
+    if physical_only:
+        physical_profiles["default-sleep-wake"]["candidate_status"] = (
+            "FAILED" if physical_profiles["default-sleep-wake"]["failures"] else "PASSED")
+        physical_profiles["configured-sleep-wake"]["candidate_status"] = (
+            "FAILED" if physical_profiles["configured-sleep-wake"]["failures"] else "PASSED")
+        physical_profiles["weld-pulley"] = {"candidate_status": "NOT_RUN", "reason": "approved joint physical limits and candidate traces are absent"}
+        physical_profiles["nominal"] = {"candidate_status": "NOT_RUN", "reason": "nominal physical quality limits are absent"}
+        return physical_profiles
+    return f"{len(entries)} frozen numerical fixture traces verified"
 
 
 class IncompleteEvidence(Exception):
@@ -611,14 +845,15 @@ def _performance_resource(root, candidate_sha):
 
 
 def evaluate(manifest, candidate_sha, lane_id, archives, repository,
-             expected_artifact_hashes=None, expected_runtime_identity=None):
+             expected_artifact_hashes=None, expected_runtime_identity=None,
+             expected_archive_digests=None, expected_all_target_hashes=None):
     repository = Path(repository)
     if digest(manifest) != APPROVED_MANIFEST_SHA256:
         raise ValueError("manifest differs from independently approved complete suite")
     if not isinstance(candidate_sha, str) or not SHA40.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be an exact commit")
     actual = subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", "--verify",
+        ["git", "--no-replace-objects", "-C", str(repository), "rev-parse", "--verify",
          f"{candidate_sha}^{{commit}}"], text=True, stderr=subprocess.PIPE).strip()
     if actual != candidate_sha:
         raise ValueError("candidate SHA does not identify the requested commit")
@@ -634,18 +869,29 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
     if not isinstance(archives, dict) or set(archives) - set(names):
         raise ValueError("archive map has an unknown or inapplicable gate")
     gates = {}
+    if expected_archive_digests is None:
+        expected_archive_digests = {}
+    if not isinstance(expected_archive_digests, dict) or set(expected_archive_digests) - set(names):
+        raise ValueError("independent archive digest map has an unknown gate")
     for gate in names:
         gates[gate] = evaluate_gate(gate, archives.get(gate), candidate_sha,
                                     lane_id, lane, repository,
                                     expected_artifact_hashes,
-                                    expected_runtime_identity)
+                                    expected_runtime_identity,
+                                    expected_archive_digests.get(gate),
+                                    expected_all_target_hashes, manifest)
     statuses = {item["status"] for item in gates.values()}
     status = next((state for state in ("FAILED", "UNAVAILABLE", "NOT_RUN")
                    if state in statuses), "PASSED")
     result = {"schema": 1, "kind": "independent-gate-verification",
               "candidate_sha": candidate_sha, "lane": lane_id,
               "manifest_sha256": digest(manifest),
+              "approved_numerical_blobs": dict(APPROVED_POLICY),
+              "approved_migration_blobs": dict(APPROVED_MIGRATION),
+              "reviewed_full_ci_revision": REVIEWED_FULL_CI_REVISION,
               "expected_artifact_hashes": expected_artifact_hashes,
+              "expected_all_target_hashes": expected_all_target_hashes,
+              "expected_archive_digests": expected_archive_digests,
               "expected_runtime_identity": expected_runtime_identity,
               "gates": gates, "status": status}
     result["result_sha256"] = digest(result)
@@ -653,8 +899,21 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
 
 
 def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
-                  expected_artifact_hashes, expected_runtime_identity):
+                  expected_artifact_hashes, expected_runtime_identity,
+                  expected_archive_digest=None, expected_all_target_hashes=None,
+                  manifest=None):
     if archive is None:
+        if gate == "physical-correctness":
+            return _result(gate, "NOT_RUN", "no raw candidate physical archive supplied",
+                           profiles={
+                               "default-sleep-wake": {"candidate_status": "NOT_RUN",
+                                                      "approved_reference_status": "FAILED_125847_OF_126000"},
+                               "configured-sleep-wake": {"candidate_status": "NOT_RUN",
+                                                         "approved_reference_status": "PASSED"},
+                               "weld-pulley": {"candidate_status": "NOT_RUN",
+                                               "reason": "physical quality limits are not approved"},
+                               "nominal": {"candidate_status": "NOT_RUN",
+                                           "reason": "physical quality limits are not approved"}})
         return _result(gate, "NOT_RUN", "no raw archive supplied")
     root = Path(archive)
     try:
@@ -674,6 +933,11 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             if {path.name for path in root.iterdir()} != {"receipt.json"}:
                 raise ValueError("unavailability receipt has unexpected raw files")
             return _external_unavailable(receipt, candidate_sha, lane_id, gate)
+        if receipt.get("status") == "PASSED":
+            if not SHA64.fullmatch(str(expected_archive_digest or "")):
+                raise ValueError("independent archive provenance digest is missing")
+            if archive_digest(root) != expected_archive_digest:
+                raise ValueError("independent archive provenance digest differs")
         archive_sha = _inventory(root, receipt)
         process = _binding(root, receipt, candidate_sha, lane_id, lane,
                            repository, expected_artifact_hashes,
@@ -684,8 +948,12 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             return _result(gate, "NOT_RUN", "producer records no execution",
                            archive_sha256=archive_sha)
         if receipt["status"] == "FAILED":
-            return _result(gate, "FAILED", "producer records a failed execution",
+            if process["exit_code"] == 0:
+                raise ValueError("producer reports failure but raw process exited successfully")
+            _process_proof(root, process, gate, lane_id)
+            return _result(gate, "FAILED", f"raw command exited {process['exit_code']}",
                            archive_sha256=archive_sha)
+        _process_proof(root, process, gate, lane_id)
         if gate == "duplicate-provider":
             reason = _duplicate_provider(root, receipt, process)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
@@ -693,26 +961,41 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             return _result(gate, "FAILED", f"raw command exited {process['exit_code']}",
                            archive_sha256=archive_sha)
         if gate in ("staged-artifacts", "publication-contract"):
+            if gate == "publication-contract" and expected_all_target_hashes is None:
+                raise ValueError("independently audited 21-target binary hash map is missing")
+            if gate == "publication-contract":
+                _validated_all_target_hashes(expected_all_target_hashes)
             reason = _staged_publication(root, candidate_sha, lane,
-                                         expected_artifact_hashes, repository)
+                                         expected_artifact_hashes, repository,
+                                         expected_all_target_hashes if gate == "publication-contract" else None)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "staged-consumer":
-            reason = _staged_consumer(root, receipt, candidate_sha, lane,
-                                      expected_artifact_hashes, repository, process)
+            reason = _staged_consumer(root, receipt, candidate_sha, lane_id, lane,
+                                      expected_artifact_hashes, repository, process, manifest)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate in ("unchanged-java-corpus", "java-source-compatibility"):
-            reason = _java_cases(root, receipt, gate, candidate_sha, lane,
-                                 repository, expected_artifact_hashes)
+            reason = _java_full_ci(root, receipt, gate, candidate_sha,
+                                   repository, expected_artifact_hashes)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "migration-journeys":
+            _source_binding(repository, candidate_sha, APPROVED_MIGRATION,
+                            "migration raw validator")
             reason = _migration_journeys(root, candidate_sha,
                                          expected_artifact_hashes)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate in ("numerical-parity", "physical-correctness"):
+            policy = _policy_binding(repository, candidate_sha)
             reason = _numerical_entries(
                 root, receipt, candidate_sha, expected_artifact_hashes,
                 physical_only=gate == "physical-correctness")
-            return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
+            if gate == "physical-correctness":
+                status = ("FAILED" if any(row["candidate_status"] == "FAILED" for row in reason.values())
+                          else "NOT_RUN")
+                return _result(gate, status,
+                               "default, configured, nominal, and joint physical obligations are reported separately",
+                               profiles=reason, archive_sha256=archive_sha, policy_sha256=policy)
+            return _result(gate, "PASSED", reason, archive_sha256=archive_sha,
+                           policy_sha256=policy)
         if gate == "performance-resource":
             reason = _performance_resource(root, candidate_sha)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
@@ -737,6 +1020,8 @@ def main(argv=None):
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--archive", action="append", default=[], metavar="GATE=PATH")
     parser.add_argument("--expected-artifacts", type=Path)
+    parser.add_argument("--expected-all-target-artifacts", type=Path)
+    parser.add_argument("--expected-archive-digests", type=Path)
     parser.add_argument("--expected-runtime-identity")
     args = parser.parse_args(argv)
     manifest = (json.loads(args.manifest.read_text()) if args.manifest
@@ -748,8 +1033,13 @@ def main(argv=None):
             parser.error("each --archive must be a unique GATE=PATH")
         archives[gate] = Path(path)
     hashes = json.loads(args.expected_artifacts.read_text()) if args.expected_artifacts else None
+    all_hashes = (json.loads(args.expected_all_target_artifacts.read_text())
+                  if args.expected_all_target_artifacts else None)
+    archive_digests = (json.loads(args.expected_archive_digests.read_text())
+                       if args.expected_archive_digests else None)
     result = evaluate(manifest, args.candidate_sha, args.lane, archives,
-                      args.repository, hashes, args.expected_runtime_identity)
+                      args.repository, hashes, args.expected_runtime_identity,
+                      archive_digests, all_hashes)
     print(json.dumps(result, sort_keys=True))
     return 0 if result["status"] == "PASSED" else 1
 
