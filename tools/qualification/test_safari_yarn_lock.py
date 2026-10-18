@@ -771,7 +771,8 @@ class SafariYarnLockTests(unittest.TestCase):
                               ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest",
                               f"-PqualificationInvocationId={command[-1].split('=')[1]}"], command)
             script = (output / "development/qualification.init.gradle").read_bytes()
-            self.assertEqual("6a0057de491e563866306c0eae7d2baf9c6f1e70ec52497120e6d563b04b3eec",
+            self.assertIn(b"if (false) {", script)
+            self.assertEqual("89b4d3d55fe205be2810aad578b039ca3a1ddab421e70691e28a423ed9259a64",
                              hashlib.sha256(script).hexdigest())
             self.generated(safari=True)
             self.write_logs()
@@ -1601,8 +1602,15 @@ class SafariYarnLockTests(unittest.TestCase):
     def test_full_hosted_production_uses_exact_flag_and_script(self):
         def failure(repository, output, command):
             self.assertEqual("-PqualificationProduction=true", command[-1])
-            self.assertEqual("eeaa1019f7b65efcfe2435f92425b2453bec947794a1db7090fcd8fa09479794",
-                             hashlib.sha256((output / "production/qualification.init.gradle").read_bytes()).hexdigest())
+            script = (output / "production/qualification.init.gradle").read_bytes()
+            self.assertIn(b"if (true) {", script)
+            self.assertIn(b"def testFileName = project.name + '-test.js'", script)
+            self.assertIn(b"if (project != project.rootProject) {", script)
+            self.assertIn(b"testFileName = project.rootProject.name + '-' + testFileName", script)
+            self.assertIn(b"'compileSync/js/test/testProductionExecutable/kotlin/' + testFileName))",
+                          script)
+            self.assertEqual("10788c388a223264f55ea0092a0af1bb8c5986ac23759433aa10dab035802954",
+                             hashlib.sha256(script).hexdigest())
             self.generated(safari=True)
             self.write_logs()
             return {"command": command, "pid": 123, "exit_code": 1,
