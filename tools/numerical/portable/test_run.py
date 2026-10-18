@@ -11,6 +11,16 @@ from cases import declared_cases
 
 
 class ExtractionTest(unittest.TestCase):
+    def test_prospective_cli_requires_external_attestation_before_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "capture"
+            arguments = ["run.py", "--output", str(output),
+                         "--prospective-baseline", str(Path(directory) / "baseline")]
+            with patch("sys.argv", arguments), self.assertRaises(SystemExit) as error:
+                run.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse(output.exists())
+
     @staticmethod
     def compiler_proof(task, artifact):
         return "NUMERICAL_PROOF_INPUT " + json.dumps({
