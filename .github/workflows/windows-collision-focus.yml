@@ -1,4 +1,4 @@
-name: Windows collision focus
+name: Temporary Windows Git Bash discovery probe
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ permissions:
 jobs:
   windows-collision-focus:
     runs-on: windows-2025
-    timeout-minutes: 90
+    timeout-minutes: 5
     steps:
       - name: Check out dispatched commit
         uses: actions/checkout@v4
@@ -32,22 +32,66 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -ne '${{ github.sha }}') {
             throw "Checkout revision mismatch: $actual"
           }
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-python@v5
         with:
-          distribution: temurin
-          java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Run focused native and pinned Java controls
-        shell: pwsh
-        timeout-minutes: 75
-        env:
-          DYN4K_COLLISION_ROUTE: ${{ inputs.route }}
+          python-version: '3.12'
+      - name: Record bounded Python Git and Bash discovery
+        shell: bash
         run: |
-          & (Join-Path $PWD 'tools/diagnostic/windows_collision/run-focused-controls.ps1') -Route $env:DYN4K_COLLISION_ROUTE
-      - name: Upload Windows collision evidence
+          python - <<'PY'
+          import json
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools/qualification")
+          from test_safari_yarn_lock import git_bash_from_git
+
+          installed = Path(r"C:\Program Files\Git")
+
+          def describe(command):
+              if command is None:
+                  return {"found": False}
+              path = Path(command).absolute()
+              try:
+                  relative = path.resolve().relative_to(installed.resolve())
+              except ValueError:
+                  relative = None
+              return {
+                  "found": True,
+                  "regular_file": path.is_file(),
+                  "relative_to_installed_git": (
+                      relative.as_posix()[:96] if relative is not None else None),
+                  "parent_kind": path.parent.name.lower()[:24],
+              }
+
+          git = shutil.which("git")
+          bash = shutil.which("bash")
+          result = {
+              "source_sha": os.environ["GITHUB_SHA"],
+              "git": describe(git),
+              "bash_on_path": describe(bash),
+              "installed_bash_regular_file": (installed / "bin/bash.exe").is_file(),
+          }
+          if git is not None:
+              try:
+                  selected = git_bash_from_git(git)
+              except (ValueError, FileNotFoundError) as error:
+                  result["fixture_lookup"] = type(error).__name__
+              else:
+                  result["fixture_lookup"] = "selected"
+                  result["selected_bash"] = describe(str(selected))
+          output = Path(os.environ["RUNNER_TEMP"]) / "windows-collision-focus"
+          output.mkdir(parents=True, exist_ok=True)
+          payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
+          (output / "git-bash-discovery.json").write_text(payload + "\n", encoding="utf-8")
+          print(payload)
+          PY
+      - name: Upload Windows Git Bash discovery evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-collision-focus-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-gitbash-discovery-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/windows-collision-focus/
           if-no-files-found: error
