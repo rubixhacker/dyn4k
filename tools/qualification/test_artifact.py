@@ -236,14 +236,19 @@ class RawArtifactTests(unittest.TestCase):
                               if any((case.get("classname"), case.get("name")) in selected_core_cases
                                      for case in ET.parse(path).getroot().iter("testcase")))
             original = source_xml.read_bytes()
+            original_mtime_ns = source_xml.stat().st_mtime_ns
 
-            def reject_changed_xml(label, edit):
+            def reject_changed_xml(label, edit, reason):
                 source_xml.write_bytes(original)
-                edit()
-                rejected = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
-                                                 matrix_path, repository / f"bundle-{label}")
-                self.assertEqual("PROBE_FAILED", rejected["status"])
-                source_xml.write_bytes(original)
+                try:
+                    edit()
+                    os.utime(source_xml, ns=(original_mtime_ns, original_mtime_ns))
+                    rejected = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
+                                                     matrix_path, repository / f"bundle-{label}")
+                    self.assertEqual("PROBE_FAILED", rejected["status"])
+                    self.assertIn(reason, rejected["reason"])
+                finally:
+                    source_xml.write_bytes(original)
 
             def rename_case():
                 suite = ET.parse(source_xml).getroot()
@@ -262,9 +267,11 @@ class RawArtifactTests(unittest.TestCase):
                 suite.set("tests", str(int(suite.get("tests")) - 1))
                 source_xml.write_bytes(ET.tostring(suite))
 
-            reject_changed_xml("renamed", rename_case)
-            reject_changed_xml("skipped", skip_case)
-            reject_changed_xml("partial", remove_case)
+            for label, edit, reason in (("renamed", rename_case, "missing selected cases"),
+                                        ("skipped", skip_case, "failed or skipped cases"),
+                                        ("partial", remove_case, "missing selected cases")):
+                with self.subTest(mutation=label):
+                    reject_changed_xml(label, edit, reason)
             source_xml.write_bytes(original)
             os.utime(source_xml, ns=(started - 1, started - 1))
             stale_xml = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
