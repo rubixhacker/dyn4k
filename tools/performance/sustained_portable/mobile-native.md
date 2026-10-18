@@ -83,17 +83,18 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --archive /absolute/new/archive/ios-native-direct --steps 30 --warmup 3
 ```
 
-The launcher checks Xcode 26.4.1, host architecture, simulator family, the raw
-link against its inventory hash, the recorded copy and signing derivation,
-and selected and installed app package bytes. The signed package executable
-is the selected process image. The launcher compares its hash and size with
+The launcher checks Xcode 26.4.1, host architecture, and simulator family.
+It checks the raw link against its inventory hash, the recorded copy and
+signing derivation, and selected and installed app package bytes. The signed
+package executable is the selected process image. The launcher compares its hash and size with
 the installed app and the live PID observation. It verifies the selected and
 installed app signatures and archives both command records. It also checks
-the observed `proc_pidpath` at the PID returned by `simctl launch` and
-the OS text mapping's device, inode, and size through `lsof -d txt`. The
+`proc_pidpath` at the PID returned by `simctl launch`. It checks the OS text
+mapping's device, inode, and size through `lsof -d txt`. The
 installed executable's SHA-256, size, and file identity must still match the
-selected signed package during observation. A second package scan after launch must
-match the build inventory. A missing or ambiguous text mapping fails closed.
+selected signed package during observation. A second package scan after
+launch must match the build inventory. A missing or ambiguous text mapping
+fails closed.
 The `lsof` bytes remain in `setup/apple-process-vnode.stdout.bin`. The command
 and its stderr remain in the matching setup records. Apple's distributed
 [lsof manual](https://github.com/apple-open-source/macos/blob/master/lsof/lsof/lsof.man)
