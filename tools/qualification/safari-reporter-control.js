@@ -5,6 +5,8 @@ const fragment = realFs.readFileSync(process.argv[2], 'utf8');
 const key = 'reporter:karma-kotlin-reporter';
 const pinned = '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347';
 const loadedPinned = '51b54a948f46db31ed64a1fd13f7d7cfe5aa8eabd6dc9886141f05c5384480d1';
+const browserPinned = '4805a14470bf3b9a523d5dd68275db24df6548a509e339dcad0f3c83f12d7962';
+const reconnectPinned = '56cae9b2607b43decc815a7b5cb343d4aed5ce3760aad4fc5af02e5fa883e99b';
 
 function OriginalReporter(decorate) {
     decorate(this);
@@ -28,11 +30,47 @@ function load(options = {}) {
     const config = {basePath: '/fixture/build/js/packages/dyn4k-dyn4k-core-test',
         plugins: options.missingReporter ? []
             : options.duplicateReporter ? [plugin, producer] : [plugin]};
+    let Browser = class {
+        constructor(id, socket) {
+            this.id = id;
+            this.name = 'Safari';
+            this.socket = socket;
+            this.activeSockets = [socket];
+            this.state = 'EXECUTING';
+            this.reconnectCalls = 0;
+        }
+        reconnect(newSocket, clientSaysReconnect) {
+            this.reconnectCalls++;
+            if (clientSaysReconnect && this.state === 'EXECUTING_DISCONNECTED') {
+                this.state = 'EXECUTING';
+            }
+            if (!this.activeSockets.some(socket => socket.id === newSocket.id)) {
+                this.activeSockets.push(newSocket);
+            }
+            return 'delegated';
+        }
+    };
+    let browserPath = '/fixture/karma/lib/browser.js';
+    let serverPath = '/fixture/karma/lib/server.js';
+    let realRequire;
+    if (options.realBrowserPath) {
+        realRequire = require('node:module').createRequire(options.realBrowserPath);
+        browserPath = realRequire.resolve('karma/lib/browser');
+        serverPath = realRequire.resolve('karma/lib/server');
+        assert.equal(browserPath, options.realBrowserPath);
+        realRequire(serverPath);
+        Browser = realRequire(browserPath);
+    }
+    const originalReconnect = Browser.prototype.reconnect;
     const fakeFs = {
         constants: realFs.constants,
         readFileSync(path) {
-            assert.equal(path, '/fixture/karma-kotlin-reporter.js');
-            return Buffer.from('producer fixture');
+            if (path === '/fixture/karma-kotlin-reporter.js') {
+                return Buffer.from('producer fixture');
+            }
+            assert.equal(path, browserPath);
+            return options.realBrowserPath ? realFs.readFileSync(path)
+                : Buffer.from('browser fixture');
         },
         lstatSync(path) {
             assert.equal(path, '/fixture/events');
@@ -74,26 +112,50 @@ function load(options = {}) {
             return count;
         }
     };
-    let hashes = 0;
     const fakeCrypto = {createHash: () => ({
-        update() { return this; },
-        digest: () => {
-            hashes++;
-            if (options.badHash || (hashes === 2 && options.badLoadedProducer)) {
+        update(value) { this.value = value; return this; },
+        digest() {
+            if (options.badHash || (options.badLoadedProducer &&
+                    this.value === Function.prototype.toString.call(OriginalReporter))) {
                 return '0'.repeat(64);
             }
-            return hashes === 1 ? pinned : loadedPinned;
+            if (this.value instanceof Buffer && this.value.toString() === 'producer fixture') {
+                return pinned;
+            }
+            if (this.value === Function.prototype.toString.call(OriginalReporter)) {
+                return loadedPinned;
+            }
+            if (this.value === Function.prototype.toString.call(originalReconnect)) {
+                return options.badReconnectImpl ? '0'.repeat(64) : reconnectPinned;
+            }
+            if (this.value instanceof Buffer && this.value.toString() === 'browser fixture') {
+                return options.badBrowserHash ? '0'.repeat(64) : browserPinned;
+            }
+            if (options.badBrowserHash && this.value instanceof Buffer) {
+                return '0'.repeat(64);
+            }
+            return require('node:crypto').createHash('sha256').update(this.value).digest('hex');
         }
     })};
     function fakeRequire(name) {
         if (name === 'node:fs') return fakeFs;
         if (name === 'node:crypto') return fakeCrypto;
         if (name === '/fixture/karma-kotlin-reporter.js') return producer;
+        if (name === browserPath) return Browser;
         throw new Error(`unexpected require: ${name}`);
     }
     fakeRequire.resolve = name => {
-        assert.equal(name, 'kotlin-web-helpers/dist/karma-kotlin-reporter');
-        return '/fixture/karma-kotlin-reporter.js';
+        if (name === 'kotlin-web-helpers/dist/karma-kotlin-reporter') {
+            return '/fixture/karma-kotlin-reporter.js';
+        }
+        if (name === 'karma/lib/browser') return browserPath;
+        assert.equal(name, 'karma/lib/server');
+        return serverPath;
+    };
+    const browserModule = {exports: Browser};
+    fakeRequire.cache = realRequire ? realRequire.cache : {
+        [browserPath]: browserModule,
+        [serverPath]: {children: options.wrongKarmaModule ? [] : [browserModule]}
     };
     const fakeProcess = {pid: 1234, env: options.trace ? {
         DYN4K_SAFARI_EVENT_TRACE_DIR: '/fixture/events',
@@ -105,7 +167,8 @@ function load(options = {}) {
     const reporter = new Reporter(instance => {
         instance.write = message => asynchronous.push(message);
     }, config, {});
-    return {reporter, output, traceOutput, asynchronous, calls, Reporter};
+    return {reporter, output, traceOutput, asynchronous, calls, Reporter,
+        Browser, originalReconnect};
 }
 
 if (process.argv[3] === '--real-stdout') {
@@ -119,8 +182,8 @@ if (process.argv[3] === '--real-stdout') {
 
 if (process.argv[3] === '--trace-control') {
     const actual = load({trace: true});
-    const old = {id: 'old-tab', name: 'Safari'};
-    const launched = {id: 'new-tab', name: 'Safari'};
+    const old = new actual.Browser('old-tab', {id: 'old-socket'});
+    const launched = new actual.Browser('new-tab', {id: 'new-socket'});
     actual.reporter.onRunStart([]);
     actual.reporter.onBrowserStart(old);
     actual.reporter.specSuccess(old, {description: 'capsuleSlice'});
@@ -136,19 +199,83 @@ if (process.argv[3] === '--trace-control') {
         .map(row => row.browser), ['old-tab', 'new-tab']);
     assert.deepEqual(records.filter(row => row.event === 'spec_checkpoint')
         .map(row => row.browser), ['old-tab', 'new-tab']);
+    const same = load({trace: true});
+    const browser = new same.Browser('same-tab', {id: 'socket-before'});
+    same.reporter.onBrowserStart(browser);
+    browser.state = 'EXECUTING_DISCONNECTED';
+    browser.activeSockets = [];
+    assert.equal(browser.reconnect({id: 'socket-after'}, true), 'delegated');
+    assert.equal(browser.reconnectCalls, 1);
+    assert.notEqual(same.Browser.prototype.reconnect, same.originalReconnect);
+    assert.equal(browser.state, 'EXECUTING');
+    assert.equal(browser.activeSockets[0].id, 'socket-after');
+    const reconnects = Buffer.concat(same.traceOutput).toString('utf8').trim()
+        .split('\n').map(line => JSON.parse(line))
+        .filter(row => row.event === 'socket_reconnect');
+    assert.equal(reconnects.length, 1, 'silent same-ID reconnect was not traced');
+    assert.equal(reconnects[0].browser, 'same-tab');
+    assert.equal(reconnects[0].before_state, 'EXECUTING_DISCONNECTED');
+    assert.equal(reconnects[0].after_state, 'EXECUTING');
+    assert.equal(reconnects[0].client_says_reconnect, true);
+    assert.notEqual(reconnects[0].socket_sha256, reconnects[0].original_socket_sha256);
+    assert.ok(!Buffer.concat(same.traceOutput).toString('utf8').includes('socket-after'));
+    assert.throws(() => load({trace: true, badBrowserHash: true}), /Karma Browser source mismatch/);
+    assert.throws(() => load({trace: true, badReconnectImpl: true}),
+        /Karma Browser reconnect implementation mismatch/);
+    assert.throws(() => load({trace: true, wrongKarmaModule: true}), /Karma Browser module mismatch/);
     assert.ok(records.every(row => row.invocation === '1'.repeat(32)));
     assert.equal(records.at(-1).event, 'run_complete');
     assert.throws(() => load({trace: true, linkedDirectory: true}), /unsafe/);
     const bounded = load({trace: true});
     assert.throws(() => {
         for (let i = 0; i < 600; i++) {
-            bounded.reporter.onBrowserStart({id: `browser-${i}`, name: 'Safari'});
+            bounded.reporter.onBrowserStart(
+                new bounded.Browser(`browser-${i}`, {id: `socket-${i}`}));
         }
     }, /trace exceeds bound/);
     process.exit(0);
 }
 
+if (process.argv[3] === '--real-karma-reconnect') {
+    const sourcePath = process.argv[4];
+    assert.ok(sourcePath, 'pinned Karma browser source path is required');
+    const actual = load({trace: true, realBrowserPath: sourcePath});
+    const events = [];
+    const emitter = new (require('node:events').EventEmitter)();
+    for (const name of ['browser_start', 'browser_register', 'browser_error',
+        'browser_complete']) emitter.on(name, () => events.push(name));
+    const before = new (require('node:events').EventEmitter)();
+    before.id = 'real-socket-before';
+    const after = new (require('node:events').EventEmitter)();
+    after.id = 'real-socket-after';
+    const browser = new actual.Browser('real-same-tab', 'Safari',
+        {add() {}, remove() {}}, emitter, before,
+        {setTimeout() {}, clearTimeout() {}}, 2000, 0, true, {});
+    actual.reporter.onBrowserStart(browser);
+    browser.state = actual.Browser.STATE_EXECUTING_DISCONNECTED;
+    browser.activeSockets = [];
+    assert.equal(browser.reconnect(after, true), undefined);
+    assert.deepEqual(events, [], 'pinned silent branch emitted reporter events');
+    assert.equal(browser.state, actual.Browser.STATE_EXECUTING);
+    assert.equal(browser.activeSockets[0], after);
+    assert.ok(after.listenerCount('result') > 0, 'pinned reconnect did not bind the socket');
+    const records = Buffer.concat(actual.traceOutput).toString('utf8').trim()
+        .split('\n').map(line => JSON.parse(line));
+    const reconnects = records.filter(row => row.event === 'socket_reconnect');
+    assert.equal(reconnects.length, 1);
+    assert.equal(reconnects[0].browser, 'real-same-tab');
+    assert.equal(reconnects[0].before_state, 'EXECUTING_DISCONNECTED');
+    assert.equal(reconnects[0].after_state, 'EXECUTING');
+    assert.notEqual(reconnects[0].original_socket_sha256,
+        reconnects[0].socket_sha256);
+    assert.ok(records.some(row => row.event === 'reconnect_hook_installed' &&
+        row.karma_browser_sha256 === browserPinned));
+    process.stdout.write('pinned silent reconnect traced with zero reporter events\n');
+    process.exit(0);
+}
+
 const normal = load({actions: [3, 'EINTR', 'EAGAIN', 2]});
+assert.equal(normal.Browser.prototype.reconnect, normal.originalReconnect);
 assert.deepEqual(normal.Reporter.$inject, OriginalReporter.$inject);
 const expected = [];
 for (let i = 0; i < 72; i++) {

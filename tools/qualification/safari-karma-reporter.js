@@ -94,7 +94,7 @@ function SafariLineReporter(baseReporterDecorator, karmaConfig, emitter) {
         let records = 0;
         let bytes = 0;
         const counts = new Map();
-        const trace = (event, browser, count) => {
+        const trace = (event, browser, count, connection) => {
             const record = {event, invocation, module: moduleName, node_pid: process.pid,
                 time_ms: Date.now()};
             if (browser) {
@@ -102,6 +102,7 @@ function SafariLineReporter(baseReporterDecorator, karmaConfig, emitter) {
                 record.name = String(browser.name).slice(0, 128);
             }
             if (count !== undefined) record.spec_count = count;
+            if (connection) Object.assign(record, connection);
             const raw = Buffer.from(JSON.stringify(record) + '\n', 'utf8');
             if (++records > 512 || bytes + raw.length > 65536) {
                 throw new Error('Safari event trace exceeds bound');
@@ -117,7 +118,54 @@ function SafariLineReporter(baseReporterDecorator, karmaConfig, emitter) {
             }
             bytes += raw.length;
         };
+        const socketHash = socket => {
+            if (!socket || typeof socket.id !== 'string' ||
+                    socket.id.length === 0 || socket.id.length > 128) {
+                throw new Error('Safari socket identity is unsafe');
+            }
+            return safariCrypto.createHash('sha256').update(socket.id).digest('hex');
+        };
         trace('reporter_init');
+        const browserPath = require.resolve('karma/lib/browser');
+        const serverPath = require.resolve('karma/lib/server');
+        const browserModule = require.cache[browserPath];
+        const serverModule = require.cache[serverPath];
+        const Browser = require(browserPath);
+        if (!browserModule || !serverModule ||
+                !Array.isArray(serverModule.children) ||
+                !serverModule.children.includes(browserModule) ||
+                browserModule.exports !== Browser ||
+                typeof Browser.prototype.reconnect !== 'function') {
+            throw new Error('Safari Karma Browser module mismatch');
+        }
+        const browserHash = safariCrypto.createHash('sha256')
+            .update(safariFs.readFileSync(browserPath)).digest('hex');
+        if (browserHash !== '4805a14470bf3b9a523d5dd68275db24df6548a509e339dcad0f3c83f12d7962') {
+            throw new Error('Safari Karma Browser source mismatch');
+        }
+        const originalReconnect = Browser.prototype.reconnect;
+        const reconnectHash = safariCrypto.createHash('sha256')
+            .update(Function.prototype.toString.call(originalReconnect)).digest('hex');
+        if (reconnectHash !== '56cae9b2607b43decc815a7b5cb343d4aed5ce3760aad4fc5af02e5fa883e99b') {
+            throw new Error('Safari Karma Browser reconnect implementation mismatch');
+        }
+        Browser.prototype.reconnect = function(newSocket, clientSaysReconnect) {
+            const beforeState = this.state;
+            const beforeSockets = this.activeSockets.length;
+            const result = originalReconnect.apply(this, arguments);
+            trace('socket_reconnect', this, counts.get(this.id) || 0, {
+                before_state: beforeState,
+                after_state: this.state,
+                before_active_sockets: beforeSockets,
+                after_active_sockets: this.activeSockets.length,
+                client_says_reconnect: clientSaysReconnect === true,
+                original_socket_sha256: socketHash(this.socket),
+                socket_sha256: socketHash(newSocket)
+            });
+            return result;
+        };
+        trace('reconnect_hook_installed', null, undefined,
+            {karma_browser_sha256: browserHash});
         const onRunStart = this.onRunStart;
         this.onRunStart = function(browsers) {
             trace('run_start');
@@ -125,7 +173,8 @@ function SafariLineReporter(baseReporterDecorator, karmaConfig, emitter) {
         };
         const onBrowserStart = this.onBrowserStart;
         this.onBrowserStart = function(browser) {
-            trace('browser_start', browser);
+            trace('browser_start', browser, undefined,
+                {original_socket_sha256: socketHash(browser.socket)});
             return onBrowserStart.apply(this, arguments);
         };
         const specSuccess = this.specSuccess;
