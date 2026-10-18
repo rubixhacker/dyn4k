@@ -1,5 +1,6 @@
 import copy
 import ctypes
+import errno
 from contextlib import ExitStack, redirect_stdout
 import hashlib
 import io
@@ -384,6 +385,93 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertEqual(receipt["rss_observation"]["rss_json_sha256"],
                              capture.digest(archive / "rss.json"))
 
+    def test_native_host_terminal_esrch_retains_raw_probe_and_live_samples(self):
+        if sys.platform != "linux":
+            self.skipTest("local live child control requires Linux")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inventory = root / "inventory.json"
+            inventory.write_text("{}\n")
+            archive = root / "archive"
+            archive.mkdir()
+            read_resident = native_memory.read_rss_bytes
+            calls = 0
+
+            def probe(pid):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return read_resident(pid)
+                time.sleep(0.16)
+                raise OSError(errno.ESRCH, "macOS process resident bytes unavailable")
+
+            observer = lambda process, stop: native_host_capture.sample_native_resident(
+                process, stop, platform_name="darwin")
+            with mock.patch.object(native_memory, "sample_while_alive", side_effect=observer), \
+                    mock.patch.object(native_memory, "read_rss_bytes", side_effect=probe):
+                receipt, stdout, _ = capture.run_process(
+                    [sys.executable, "-c", "import time; print('started', flush=True); "
+                     "time.sleep(0.09); print('finished', flush=True)"],
+                    archive, inventory, b"", 2, observe_memory=True)
+            series = json.loads((archive / "rss.json").read_text())
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual(receipt["termination"], "natural")
+            self.assertEqual(stdout, b"started\nfinished\n")
+            self.assertEqual((archive / "stdout.raw").read_bytes(), stdout)
+            self.assertEqual(series["status"], "observed_diagnostic")
+            self.assertGreaterEqual(len(series["samples"]), 1)
+            self.assertEqual(len(series["errors"]), 1)
+            terminal = series["errors"][0]
+            self.assertEqual(terminal["errno"], errno.ESRCH)
+            self.assertEqual(terminal["classification"], "terminal_esrch_exit_confirmed")
+            self.assertEqual(terminal["exit_code"], 0)
+            self.assertLessEqual(terminal["error_observed_monotonic_ns"],
+                                 terminal["exit_observed_monotonic_ns"])
+            self.assertLessEqual(terminal["exit_observed_monotonic_ns"],
+                                 receipt["ended_monotonic_ns"])
+            self.assertEqual(receipt["rss_observation"]["errors"], 1)
+            self.assertEqual(receipt["rss_observation"]["rss_json_sha256"],
+                             capture.digest(archive / "rss.json"))
+
+    def test_native_host_midrun_probe_error_stays_partial(self):
+        if sys.platform != "linux":
+            self.skipTest("local live child control requires Linux")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inventory = root / "inventory.json"
+            inventory.write_text("{}\n")
+            archive = root / "archive"
+            archive.mkdir()
+            read_resident = native_memory.read_rss_bytes
+            calls = 0
+
+            def probe(pid):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError(errno.ESRCH, "macOS process resident bytes unavailable")
+                return read_resident(pid)
+
+            observer = lambda process, stop: native_host_capture.sample_native_resident(
+                process, stop, platform_name="darwin")
+            with mock.patch.object(native_memory, "sample_while_alive", side_effect=observer), \
+                    mock.patch.object(native_memory, "read_rss_bytes", side_effect=probe):
+                receipt, stdout, _ = capture.run_process(
+                    [sys.executable, "-c", "import time; print('started', flush=True); "
+                     "time.sleep(0.18); print('finished', flush=True)"],
+                    archive, inventory, b"", 2, observe_memory=True)
+            series = json.loads((archive / "rss.json").read_text())
+            self.assertEqual((receipt["exit_code"], receipt["termination"]), (0, "natural"))
+            self.assertEqual(stdout, b"started\nfinished\n")
+            self.assertEqual(series["status"], "unavailable_or_partial")
+            self.assertEqual(len(series["errors"]), 1)
+            self.assertEqual(series["errors"][0]["errno"], errno.ESRCH)
+            self.assertNotIn("classification", series["errors"][0])
+            self.assertGreater(series["samples"][-1][0],
+                               series["errors"][0]["monotonic_ns"])
+            self.assertEqual(receipt["rss_observation"]["rss_json_sha256"],
+                             capture.digest(archive / "rss.json"))
+
     def test_native_memory_unavailable_is_explicit(self):
         class FakeProcess:
             pid = 17
@@ -524,6 +612,52 @@ class PortableCaptureTest(unittest.TestCase):
         inventory["resolved_artifacts"].append(inventory["resolved_artifacts"][0])
         with self.assertRaisesRegex(ValueError, "exactly two"):
             native_host_capture.selected_artifact(inventory, "dyn4k-core", "linuxArm64")
+
+    def test_native_host_cli_uses_terminal_observer_only_for_macos_memory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            inventory = Path(temporary) / "inventory.json"
+            inventory.write_text(json.dumps({
+                "target": "macosArm64", "build": "development",
+                "harness": "/selected/producer.kexe", "source_sha": "a" * 40}))
+            original_sampler = native_memory.sample_while_alive
+            for mode in ("timing", "memory"):
+                observed = {}
+
+                def dispatched():
+                    observed["argv"] = list(sys.argv)
+                    observed["sampler"] = native_memory.sample_while_alive
+
+                argv = [str(Path(native_host_capture.__file__)),
+                        "--archive", str(Path(temporary) / mode),
+                        "--inventory", str(inventory),
+                        "--publication-root", temporary,
+                        "--scenario", "separated.default.small.30hz.direct_kotlin",
+                        "--target", "macosArm64", "--build", "development",
+                        "--mode", mode, "--steps", "30", "--warmup", "3"]
+                with mock.patch.object(sys, "argv", argv), \
+                        mock.patch.object(native_host_capture.sys, "platform", "darwin"), \
+                        mock.patch.object(native_host_capture, "selected_artifact",
+                                          return_value="/selected/artifact.klib"), \
+                        mock.patch.object(capture, "main", side_effect=dispatched), \
+                        mock.patch.object(native_host_capture.subprocess, "call",
+                                          return_value=0) as subprocess_call:
+                    if mode == "memory":
+                        native_host_capture.main()
+                        self.assertEqual(observed["argv"][0],
+                                         str(Path(capture.__file__).resolve()))
+                        self.assertEqual(observed["argv"][observed["argv"].index("--runtime") + 1],
+                                         "/selected/producer.kexe")
+                        self.assertIs(observed["sampler"],
+                                      native_host_capture.sample_native_resident)
+                        subprocess_call.assert_not_called()
+                    else:
+                        with self.assertRaises(SystemExit) as exit_status:
+                            native_host_capture.main()
+                        self.assertEqual(exit_status.exception.code, 0)
+                        self.assertEqual(subprocess_call.call_args.args[0][0], sys.executable)
+                        self.assertEqual(subprocess_call.call_args.args[0][1],
+                                         str(Path(capture.__file__).resolve()))
+                self.assertIs(native_memory.sample_while_alive, original_sampler)
 
     def test_publication_receipt_rejects_resealed_source_archive(self):
         label, target = "dyn4k-core", "linuxX64"
