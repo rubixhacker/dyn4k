@@ -14,6 +14,7 @@ STAGED_NAME = "qualification-safari-reporter.js"
 PROJECTS = (Path("dyn4k-core"), Path("dyn4k"),
             Path("consumers/qualification/portable"))
 MAX_FRAGMENT_BYTES = 256 * 1024
+MAX_COMMITTED_OBJECT_BYTES = 16 * 1024 * 1024
 PACKAGES = {Path("dyn4k-core"): "dyn4k-dyn4k-core-test",
             Path("dyn4k"): "dyn4k-dyn4k-test",
             Path("consumers/qualification/portable"): "dyn4k-staged-portable-consumer-test"}
@@ -176,14 +177,94 @@ def validate_config(data, fragment, repository, project, configuration=None):
     return observed
 
 
+def committed_bytes(repository, candidate_sha, relative):
+    relative = Path(relative)
+    if (relative.is_absolute() or not relative.parts
+            or any(part in ("", ".", "..") for part in relative.parts)
+            or re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is None):
+        raise ValueError("invalid Safari candidate source path or commit")
+    command = ["git", "--no-replace-objects", "-C", str(repository)]
+    try:
+        if subprocess.check_output(command + ["rev-parse", "--show-object-format"],
+                                   stderr=subprocess.PIPE).strip() != b"sha1":
+            raise ValueError("Safari candidate requires SHA-1 Git objects")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("Safari candidate object format is unavailable") from error
+
+    objects = {}
+
+    def read_object(oid, expected_kind):
+        if oid in objects:
+            kind, raw = objects[oid]
+            if kind != expected_kind:
+                raise ValueError(f"Safari candidate object type differs: {oid}")
+            return raw
+        try:
+            size_raw = subprocess.check_output(command + ["cat-file", "-s", oid],
+                                               stderr=subprocess.PIPE, timeout=15).strip()
+            if re.fullmatch(rb"0|[1-9][0-9]*", size_raw) is None:
+                raise ValueError(f"Safari candidate object size is invalid: {oid}")
+            size = int(size_raw)
+            if size > MAX_COMMITTED_OBJECT_BYTES:
+                raise ValueError(f"Safari candidate object is oversized: {oid}")
+            response = subprocess.check_output(command + ["cat-file", "--batch"],
+                                               input=(oid + "\n").encode(),
+                                               stderr=subprocess.PIPE, timeout=15)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            raise ValueError(f"Safari candidate object is unavailable: {oid}") from error
+        header = f"{oid} {expected_kind} {size}\n".encode()
+        if not response.startswith(header) or len(response) != len(header) + size + 1 \
+                or response[-1:] != b"\n":
+            raise ValueError(f"Safari candidate object type or size differs: {oid}")
+        raw = response[len(header):-1]
+        identity = hashlib.sha1(expected_kind.encode() + b" " + str(size).encode()
+                                + b"\0" + raw).hexdigest()
+        if identity != oid:
+            raise ValueError(f"Safari candidate object identity differs: {oid}")
+        objects[oid] = (expected_kind, raw)
+        return raw
+
+    def tree_entries(oid):
+        raw = read_object(oid, "tree")
+        entries = {}
+        position = 0
+        while position < len(raw):
+            separator = raw.find(b" ", position)
+            end = raw.find(b"\0", separator + 1)
+            if separator < position or end < 0 or end + 21 > len(raw):
+                raise ValueError(f"Safari candidate tree entry is malformed: {oid}")
+            mode = raw[position:separator]
+            name = raw[separator + 1:end]
+            child = raw[end + 1:end + 21].hex()
+            if (not name or name in (b".", b"..") or b"/" in name
+                    or name in entries):
+                raise ValueError(f"Safari candidate tree has duplicate or invalid name: {oid}")
+            entries[name] = (mode, child)
+            position = end + 21
+        return entries
+
+    commit = read_object(candidate_sha, "commit")
+    first_line = commit.split(b"\n", 1)[0]
+    if re.fullmatch(rb"tree [0-9a-f]{40}", first_line) is None:
+        raise ValueError("Safari candidate commit tree is invalid")
+    tree = first_line[5:].decode()
+    for part in relative.parts[:-1]:
+        entry = tree_entries(tree).get(os.fsencode(part))
+        if entry is None or entry[0] != b"40000":
+            raise ValueError(f"Safari candidate source tree path differs: {relative}")
+        tree = entry[1]
+    entry = tree_entries(tree).get(os.fsencode(relative.parts[-1]))
+    if entry is None or entry[0] not in (b"100644", b"100755"):
+        raise ValueError(f"Safari candidate source is not a regular file: {relative}")
+    return read_object(entry[1], "blob")
+
+
 def committed_fragment(repository, candidate_sha):
     path = repository / SOURCE
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FRAGMENT_BYTES:
         raise ValueError("committed Safari reporter source is unsafe or oversized")
     current = path.read_bytes()
-    committed = subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "show",
-         f"{candidate_sha}:{SOURCE}"])
+    committed = committed_bytes(repository, candidate_sha, SOURCE)
     if current != committed:
         raise ValueError("Safari reporter source differs from candidate")
     return committed

@@ -465,11 +465,9 @@ def source_digest(repository, relative):
 def require_candidate(repository, candidate_sha):
     if git(repository, "rev-parse", "HEAD") != candidate_sha:
         raise ValueError("candidate SHA differs from checkout")
+    committed = safari_reporter.committed_bytes(repository, candidate_sha, TRACKED_LOCK)
     if git(repository, "status", "--porcelain=v1", "--untracked-files=all"):
         raise ValueError("dirty tracked or untracked source checkout")
-    committed = subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "show",
-         f"{candidate_sha}:{TRACKED_LOCK}"])
     if source_bytes(repository, TRACKED_LOCK) != committed:
         raise ValueError("tracked lock differs from candidate")
 
@@ -645,9 +643,8 @@ def capture(repository, candidate_sha, output, configuration=None):
     source_inputs = (TRACKED_LOCK, *SOURCE_INPUTS,
                      *(HOSTED_SOURCE_INPUTS if configuration else ()))
     files += [copy_file(repository, path, output, "inputs") for path in source_inputs[1:]]
-    committed_hashes = {path.as_posix(): hashlib.sha256(subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "show",
-         f"{candidate_sha}:{path}"])).hexdigest()
+    committed_hashes = {path.as_posix(): hashlib.sha256(
+        safari_reporter.committed_bytes(repository, candidate_sha, path)).hexdigest()
                         for path in source_inputs}
     captured_hashes = {Path(item["source_path"]).relative_to(repository).as_posix():
                        item["sha256"] for item in files}
@@ -809,9 +806,8 @@ def audit_capture(repository, candidate_sha, output):
         if (hashlib.sha256(data).hexdigest() != item.get("sha256")
                 or len(data) != item.get("size")):
             raise ValueError(f"hosted diagnostic raw file differs: {relative}")
-    committed = {path.as_posix(): hashlib.sha256(subprocess.check_output(
-        ["git", "--no-replace-objects", "-C", str(repository), "show",
-         f"{candidate_sha}:{path}"])).hexdigest()
+    committed = {path.as_posix(): hashlib.sha256(
+        safari_reporter.committed_bytes(repository, candidate_sha, path)).hexdigest()
                  for path in source_inputs}
     if (receipt.get("source_input_sha256") != committed
             or receipt.get("source_input_after_sha256") != committed):

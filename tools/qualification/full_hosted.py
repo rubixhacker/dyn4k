@@ -222,8 +222,7 @@ def candidate_checkout():
 
 def committed_input(repository, candidate_sha, relative):
     path = repository / relative
-    raw = subprocess.check_output(["git", "--no-replace-objects", "-C", str(repository), "show",
-                                   f"{candidate_sha}:{relative}"])
+    raw = safari_reporter.committed_bytes(repository, candidate_sha, relative)
     if path.read_bytes() != raw:
         raise ValueError(f"candidate source differs: {relative}")
     return raw
@@ -1019,7 +1018,10 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                 raise ValueError("staging command lacks root or target publication")
     for path in INPUTS:
         archived = archived_file(output, f"inputs/{path}")
-        if sha256(archived) != sha256(repository / path):
+        expected = (hashlib.sha256(committed_input(
+            repository, receipt["candidate_sha"], path)).hexdigest()
+            if target == "jsSafari" else sha256(repository / path))
+        if sha256(archived) != expected:
             raise ValueError("archived source input differs")
     expected_inputs = {f"inputs/{path}" for path in INPUTS}
     if {item["path"] for item in receipt["files"] if item["path"].startswith("inputs/")} != expected_inputs:

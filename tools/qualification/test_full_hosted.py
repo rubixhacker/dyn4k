@@ -16,6 +16,7 @@ from unittest import mock
 import full_hosted
 import qualify
 import test_publication
+from test_safari_yarn_lock import git_oid, replace_loose_object, write_loose_object
 
 
 class FullHostedTests(unittest.TestCase):
@@ -263,12 +264,17 @@ class FullHostedTests(unittest.TestCase):
         file = self.root / "tools/qualification/full-common-corpus.json"
         file.parent.mkdir(parents=True)
         file.write_bytes(b"sealed")
-        with mock.patch.object(full_hosted.subprocess, "check_output", return_value=b"sealed"):
-            self.assertEqual(b"sealed", full_hosted.committed_input(
-                self.root, "a" * 40, full_hosted.MANIFEST))
-            file.write_bytes(b"changed")
-            with self.assertRaisesRegex(ValueError, "candidate source differs"):
-                full_hosted.committed_input(self.root, "a" * 40, full_hosted.MANIFEST)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", str(file)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "sealed source"], check=True)
+        candidate = git_oid(self.root, "HEAD")
+        self.assertEqual(b"sealed", full_hosted.committed_input(
+            self.root, candidate, full_hosted.MANIFEST))
+        file.write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "candidate source differs"):
+            full_hosted.committed_input(self.root, candidate, full_hosted.MANIFEST)
 
     def test_process_receipt_records_real_pid_and_output_hashes(self):
         process = full_hosted.run_command(
@@ -1626,6 +1632,69 @@ class FullHostedTests(unittest.TestCase):
                         full_hosted.verify_raw_files(
                             self.root, changed, manifest, consumer,
                             candidate_repository=self.candidate_repository)
+
+    def test_public_safari_directory_and_tar_reject_duplicate_unrelated_source_entry(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        archive = self.root.parent / (self.root.name + "-duplicate-source.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                         candidate_repository=self.candidate_repository)
+            (self.root / "receipt.json").write_text(json.dumps(receipt))
+            full_hosted.package_archive(self.root, archive)
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+        tree = git_oid(self.candidate_repository,
+                       f"{receipt['candidate_sha']}:tools/qualification")
+        raw = subprocess.check_output(["git", "-C", str(self.candidate_repository),
+                                       "cat-file", "tree", tree])
+        first_end = raw.index(b"\0") + 21
+        self.assertNotIn(b"safari-karma-reporter.js\0", raw[:first_end])
+        write_loose_object(self.candidate_repository, tree, raw + raw[:first_end], "tree")
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                             candidate_repository=self.candidate_repository)
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                full_hosted.verify_transport_archive(
+                    archive, receipt["candidate_sha"], "jsSafari",
+                    candidate_repository=self.candidate_repository)
+
+    def test_public_safari_directory_and_tar_reject_corrupt_manifest_blob(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        relative = full_hosted.MANIFEST
+        source = self.candidate_repository / relative
+        altered = source.read_bytes() + b"\n"
+        source.write_bytes(altered)
+        subprocess.run(["git", "-C", str(self.candidate_repository), "add", relative],
+                       check=True)
+        subprocess.run(["git", "-C", str(self.candidate_repository), "-c",
+                        "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "alternate manifest bytes"], check=True)
+        changed = git_oid(self.candidate_repository, "HEAD")
+        subprocess.run(["git", "-C", str(self.candidate_repository), "checkout", "-q",
+                        "--detach", receipt["candidate_sha"]], check=True)
+        source.write_bytes(altered)
+        replace_loose_object(self.candidate_repository, git_oid(
+            self.candidate_repository, f"{receipt['candidate_sha']}:{relative}"),
+            git_oid(self.candidate_repository, f"{changed}:{relative}"), "blob")
+        subprocess.run(["git", "-C", str(self.candidate_repository), "update-index",
+                        "--assume-unchanged", relative], check=True)
+        (self.root / "inputs" / relative).write_bytes(altered)
+        receipt["files"] = full_hosted.archive_inventory(self.root)
+        archive = self.root.parent / (self.root.name + "-corrupt-manifest.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            with self.assertRaisesRegex(ValueError, "object identity differs"):
+                full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                             candidate_repository=self.candidate_repository)
+            with self.assertRaisesRegex(ValueError, "object identity differs"):
+                full_hosted.verify_transport_archive(
+                    archive, receipt["candidate_sha"], "jsSafari",
+                    candidate_repository=self.candidate_repository)
 
     def test_resealed_wrong_or_missing_toolchain_fails_directory_and_tar(self):
         receipt, manifest, consumer = self.full_archive()

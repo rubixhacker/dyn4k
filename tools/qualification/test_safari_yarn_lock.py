@@ -10,11 +10,32 @@ import sys
 import tempfile
 import time
 import unittest
+import zlib
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 import safari_yarn_lock
+
+
+def replace_loose_object(repository, advertised, source, kind):
+    raw = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "cat-file", kind, source])
+    write_loose_object(repository, advertised, raw, kind)
+
+
+def write_loose_object(repository, advertised, raw, kind):
+    slot = repository / ".git/objects" / advertised[:2] / advertised[2:]
+    slot.parent.mkdir(parents=True, exist_ok=True)
+    slot.unlink(missing_ok=True)
+    slot.write_bytes(zlib.compress(kind.encode() + b" " + str(len(raw)).encode()
+                                   + b"\0" + raw))
+
+
+def git_oid(repository, revision):
+    return subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "rev-parse", revision],
+        text=True).strip()
 
 
 LOCK_FAILURE = ("FAILURE: Build failed with an exception.\n\n"
@@ -1123,6 +1144,124 @@ class SafariYarnLockTests(unittest.TestCase):
         inventory = json.loads((context / "inventory.json").read_text())
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
         self.assertTrue(any(item["reason"] == "scan_failed" for item in inventory["inputs"]))
+
+    def test_public_context_rejects_corrupt_candidate_commit(self):
+        context, _ = self.context_fixture()
+        changed = self.altered_reporter_candidate()
+        replace_loose_object(self.repository, self.candidate, changed, "commit")
+        self.assertEqual("", safari_yarn_lock.git(
+            self.repository, "status", "--porcelain=v1", "--untracked-files=all"))
+        self.assert_public_context_rejects_invalid_candidate(context, "identity differs")
+
+    def altered_reporter_candidate(self):
+        reporter = self.repository / "tools/qualification/safari-karma-reporter.js"
+        reporter.write_bytes(reporter.read_bytes() + b"\n// altered reporter\n")
+        subprocess.run(["git", "-C", str(self.repository), "add", str(reporter)], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "altered reporter"], check=True)
+        changed = git_oid(self.repository, "HEAD")
+        subprocess.run(["git", "-C", str(self.repository), "checkout", "-q", "--detach",
+                        self.candidate], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "read-tree", changed + "^{tree}"],
+                       check=True)
+        reporter.write_bytes(subprocess.check_output(
+            ["git", "-C", str(self.repository), "show",
+             f"{changed}:tools/qualification/safari-karma-reporter.js"]))
+        self.write_valid_karma_configs()
+        return changed
+
+    def assert_public_context_rejects_invalid_candidate(self, context, detail):
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--input-context", str(self.raw_context), "--output", str(context),
+                     "--capture-context"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        inventory = json.loads((context / "inventory.json").read_text())
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "scan_failed"
+                            and detail in item.get("error", "") for item in inventory["inputs"]),
+                        inventory["inputs"])
+
+    def test_public_context_rejects_corrupt_root_tree(self):
+        context, _ = self.context_fixture()
+        changed = self.altered_reporter_candidate()
+        replace_loose_object(self.repository, git_oid(self.repository,
+                             self.candidate + "^{tree}"), git_oid(self.repository,
+                             changed + "^{tree}"), "tree")
+        self.assert_public_context_rejects_invalid_candidate(context, "identity differs")
+
+    def test_public_context_rejects_corrupt_intermediate_tree(self):
+        context, _ = self.context_fixture()
+        changed = self.altered_reporter_candidate()
+        path = "tools/qualification"
+        replace_loose_object(self.repository, git_oid(self.repository,
+                             f"{self.candidate}:{path}"), git_oid(self.repository,
+                             f"{changed}:{path}"), "tree")
+        self.assert_public_context_rejects_invalid_candidate(context, "identity differs")
+
+    def test_public_context_rejects_corrupt_reporter_blob(self):
+        context, _ = self.context_fixture()
+        changed = self.altered_reporter_candidate()
+        path = "tools/qualification/safari-karma-reporter.js"
+        replace_loose_object(self.repository, git_oid(self.repository,
+                             f"{self.candidate}:{path}"), git_oid(self.repository,
+                             f"{changed}:{path}"), "blob")
+        subprocess.run(["git", "-C", str(self.repository), "read-tree",
+                        self.candidate + "^{tree}"], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "update-index",
+                        "--assume-unchanged", path], check=True)
+        self.assertEqual("", safari_yarn_lock.git(
+            self.repository, "status", "--porcelain=v1", "--untracked-files=all"))
+        self.assert_public_context_rejects_invalid_candidate(context, "identity differs")
+
+    def test_public_context_rejects_corrupt_tracked_lock_blob(self):
+        context, _ = self.context_fixture()
+        self.write_valid_karma_configs()
+        path = "kotlin-js-store/yarn.lock"
+        lock = self.repository / path
+        lock.write_bytes(b"altered tracked lock\n")
+        subprocess.run(["git", "-C", str(self.repository), "add", path], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "altered lock"], check=True)
+        changed = git_oid(self.repository, "HEAD")
+        subprocess.run(["git", "-C", str(self.repository), "checkout", "-q", "--detach",
+                        self.candidate], check=True)
+        lock.write_bytes(b"altered tracked lock\n")
+        replace_loose_object(self.repository, git_oid(self.repository,
+                             f"{self.candidate}:{path}"), git_oid(self.repository,
+                             f"{changed}:{path}"), "blob")
+        subprocess.run(["git", "-C", str(self.repository), "update-index",
+                        "--assume-unchanged", path], check=True)
+        self.assertEqual("", safari_yarn_lock.git(
+            self.repository, "status", "--porcelain=v1", "--untracked-files=all"))
+        self.assert_public_context_rejects_invalid_candidate(context, "identity differs")
+
+    def test_public_context_rejects_duplicate_unrelated_tree_entry(self):
+        context, _ = self.context_fixture()
+        self.write_valid_karma_configs()
+        root = git_oid(self.repository, self.candidate + "^{tree}")
+        raw = subprocess.check_output(["git", "-C", str(self.repository),
+                                       "cat-file", "tree", root])
+        first_end = raw.index(b"\0") + 21
+        self.assertNotIn(b"tools\0", raw[:first_end])
+        duplicate_tree = subprocess.check_output(
+            ["git", "-C", str(self.repository), "hash-object", "--literally", "-w",
+             "-t", "tree", "--stdin"], input=raw + raw[:first_end], text=False).decode().strip()
+        commit = subprocess.check_output(["git", "-C", str(self.repository),
+                                          "cat-file", "commit", self.candidate])
+        changed = commit.replace(f"tree {root}\n".encode(),
+                                 f"tree {duplicate_tree}\n".encode(), 1)
+        duplicate_commit = subprocess.check_output(
+            ["git", "-C", str(self.repository), "hash-object", "--literally", "-w",
+             "-t", "commit", "--stdin"], input=changed, text=False).decode().strip()
+        subprocess.run(["git", "-C", str(self.repository), "update-ref", "HEAD",
+                        duplicate_commit], check=True)
+        self.candidate = duplicate_commit
+        self.assert_public_context_rejects_invalid_candidate(context, "duplicate")
 
     def test_context_scanner_requires_both_module_configs(self):
         context, _ = self.context_fixture()
