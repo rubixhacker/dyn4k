@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare
 import receipt
 import same_run
+import sleep_physical
 
 
 TOOL = Path(__file__).with_name("receipt.py")
@@ -76,14 +78,56 @@ class ReceiptConsumerTest(unittest.TestCase):
             with self.assertRaisesRegex(compare.Rejected, "unrecognized instrumented callback value"):
                 same_run.inspect(fixture, self.root / "unused")
 
-    def test_endpoint_copy_preserves_signed_zero(self):
+    def test_local_endpoint_copy_uses_finite_numeric_values(self):
         fixture = {"counts": {"state": 1, "outer-endpoint": 1}}
-        rows = [(0, {"kind": "state", "step": 1, "state": {"x": -0.0}}),
-                (1, {"kind": "outer-endpoint", "step": 1, "state": {"x": 0.0}})]
-        with patch.object(compare, "records", return_value=iter(rows)), \
-             patch.object(compare, "check_snapshot"):
-            with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
-                same_run.inspect(fixture, self.root / "unused")
+        trace = self.root / "endpoint.jsonl"
+        state = {"bodies": [], "x": 0.0}
+        for value, accepted in ((-0.0, True), (False, False), (0.001, False)):
+            rows = [{"kind": "state", "step": 1, "state": state},
+                    {"kind": "outer-endpoint", "step": 1,
+                     "state": {"bodies": [], "x": value}}]
+            trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            with self.subTest(value=value):
+                if accepted:
+                    self.assertEqual(same_run.inspect(fixture, trace)["endpoint_copies"], 1)
+                else:
+                    with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
+                        same_run.inspect(fixture, trace)
+        rows[1]["state"] = {"bodies": []}
+        trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
+            same_run.inspect(fixture, trace)
+        rows[1]["state"] = state
+        rows[1]["step"] = True
+        trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        with self.assertRaisesRegex(compare.Rejected, "outer endpoint is not a state copy"):
+            same_run.inspect(fixture, trace)
+
+    def test_physical_endpoint_copy_uses_finite_numeric_values(self):
+        fixture = {"counts": {"state": 1, "outer-endpoint": 1},
+                   "physical_phase_ceilings_m": {"rest": 0.0}}
+        trace = self.root / "physical-endpoint.jsonl"
+        state = {"bodies": [], "x": 0.0}
+        with patch.object(sleep_physical.physical, "phases_for_fixture",
+                          return_value=[("rest", 1, 1)]), \
+             patch.object(sleep_physical.physical, "depth_for_state",
+                          return_value=Fraction(0)):
+            for value, accepted in ((-0.0, True), (False, False), (0.001, False)):
+                rows = [{"kind": "state", "step": 1, "state": state},
+                        {"kind": "outer-endpoint", "step": 1,
+                         "state": {"bodies": [], "x": value}}]
+                trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+                with self.subTest(value=value):
+                    if accepted:
+                        self.assertEqual(sleep_physical.audit(trace, fixture)["endpoint_mappings"], 1)
+                    else:
+                        with self.assertRaisesRegex(compare.Rejected, "endpoint is not a copy"):
+                            sleep_physical.audit(trace, fixture)
+            rows[1]["state"] = state
+            rows[1]["step"] = True
+            trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            with self.assertRaisesRegex(compare.Rejected, "endpoint is not a copy"):
+                sleep_physical.audit(trace, fixture)
 
     def test_receipt_uses_recorder_process_and_loaded_engine(self):
         trace = self.root / "trace.jsonl.gz"

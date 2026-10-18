@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compare import Rejected, audit_reference, check_snapshot, compare, load_fixture
+from compare import Rejected, audit_reference, check_counts, check_snapshot, compare, load_fixture, records
 from inventory import classify_reference
 from physical import audit_physical
 
@@ -188,6 +188,30 @@ class ComparatorSeamTest(unittest.TestCase):
         rows[-1]["state"]["position"][0] = 999.0
         self.write_reference(rows)
         self.assertEqual("FAILED", audit_reference(self.fixture, self.root / "reference.jsonl.gz")["status"])
+
+    def test_endpoint_copy_rejects_boolean_numeric_aliases_and_indices(self):
+        self.fixture["counts"] = {"inputs": 1, "state": 1, "outer-endpoint": 1}
+        self.fixture["inner_per_outer"] = 1
+        rows = [self.rows[0], {"kind": "state", "step": 1, "state": {"x": 0.0}},
+                {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                 "state": {"x": -0.0}}]
+
+        def audit():
+            path = self.root / "endpoint.jsonl"
+            path.write_bytes(encoded(rows))
+            return check_counts(records(path), self.fixture, reference=False)
+
+        self.assertEqual(audit()["outer-endpoint"], 1)
+        for field, value in (("state", {"x": False}), ("state", {"x": 0.001}),
+                             ("step", True), ("outerStep", True)):
+            changed = json.loads(json.dumps(rows[-1]))
+            changed[field] = value
+            rows[-1] = changed
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                    Rejected, "outer endpoint does not copy"):
+                audit()
+            rows[-1] = {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
+                        "state": {"x": -0.0}}
 
     def test_exact_represented_geometry_uses_phase_ceiling(self):
         self.fixture["physical_phase_ceilings_m"] = {"rest-before": 0.001}

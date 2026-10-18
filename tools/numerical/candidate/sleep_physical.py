@@ -20,7 +20,8 @@ def audit(trace, fixture):
     for _, row in compare.records(trace):
         if row["kind"] == "outer-endpoint":
             endpoints += 1
-            if row["state"] != previous_state or row["step"] != checked:
+            if (not compare.same_run_alias(row["state"], previous_state) or
+                type(row["step"]) is not int or row["step"] != checked):
                 raise compare.Rejected("endpoint is not a copy of the current inner state")
         if row["kind"] != "state":
             continue

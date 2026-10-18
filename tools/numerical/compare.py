@@ -252,8 +252,9 @@ def check_counts(rows, fixture, *, reference):
         if kind == "outer-endpoint":
             group = fixture.get("inner_per_outer")
             if (type(group) is not int or group <= 0 or state_step % group or
+                type(row.get("step")) is not int or type(row.get("outerStep")) is not int or
                 row.get("step") != state_step or row.get("outerStep") != state_step // group or
-                row.get("state") != last_state):
+                not same_run_alias(row.get("state"), last_state)):
                 raise Rejected("outer endpoint does not copy the matching inner state")
         if kind == "instrumented-callback" and fixture.get("check_translation_aliases"):
             for snapshot in row.get("values", []):
