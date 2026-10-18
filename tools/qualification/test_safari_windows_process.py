@@ -1,3 +1,4 @@
+import ctypes
 import subprocess
 import os
 import sys
@@ -12,6 +13,186 @@ import safari_yarn_lock
 
 
 class SafariWindowsProcessTests(unittest.TestCase):
+    def test_resume_requires_unique_primary_thread_and_suspend_count_one(self):
+        closed = []
+
+        class Function:
+            def __init__(self, action):
+                self.action = action
+
+            def __call__(self, *arguments):
+                return self.action(*arguments)
+
+        def first(snapshot, pointer):
+            entry = ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint32))
+            entry[2] = 901
+            entry[3] = 345
+            return 1
+
+        kernel = mock.Mock(CreateToolhelp32Snapshot=Function(lambda *_: 777),
+                           Thread32First=Function(first),
+                           Thread32Next=Function(lambda *_: 0),
+                           OpenThread=Function(lambda access, inherit, tid: 888 if
+                                               (access, inherit, tid) == (2, 0, 901) else 0),
+                           ResumeThread=Function(lambda handle: 1),
+                           CloseHandle=Function(lambda handle: closed.append(handle) or 1))
+        process = mock.Mock(pid=345)
+        safari_yarn_lock._resume_suspended_windows_process(kernel, process)
+        self.assertEqual([888, 777], closed)
+
+        closed.clear()
+        kernel.ResumeThread = Function(lambda handle: 0)
+        with self.assertRaisesRegex(OSError, "cannot resume"):
+            safari_yarn_lock._resume_suspended_windows_process(kernel, process)
+        self.assertEqual([888, 777], closed)
+
+        closed.clear()
+        kernel.ResumeThread = Function(lambda handle: 1)
+        process.pid = 346
+        with self.assertRaisesRegex(OSError, "primary thread is missing"):
+            safari_yarn_lock._resume_suspended_windows_process(kernel, process)
+        self.assertEqual([777], closed)
+
+    def test_job_accounting_reads_active_process_count_or_fails_closed(self):
+        class Function:
+            def __init__(self, action):
+                self.action = action
+
+            def __call__(self, *arguments):
+                return self.action(*arguments)
+
+        def query(job, kind, pointer, size, returned):
+            self.assertEqual((789, 1, 48, None), (job, kind, size, returned))
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint32))[10] = 2
+            return 1
+
+        kernel = mock.Mock(QueryInformationJobObject=Function(query))
+        self.assertEqual(2, safari_yarn_lock._windows_job_active_count(kernel, 789))
+        kernel.QueryInformationJobObject = Function(lambda *_: 0)
+        with self.assertRaisesRegex(OSError, "cannot query"):
+            safari_yarn_lock._windows_job_active_count(kernel, 789)
+
+    def test_suspended_windows_launch_assigns_job_before_resume(self):
+        calls = []
+        unbound_child_started = []
+
+        class Stream:
+            def read(self, _size):
+                return b""
+
+            def close(self):
+                pass
+
+        class Process:
+            pid = 345
+            _handle = 456
+            returncode = 0
+            stdout = Stream()
+            stderr = Stream()
+
+            def wait(self, timeout):
+                return self.returncode
+
+        class Function:
+            def __init__(self, action):
+                self.action = action
+
+            def __call__(self, *arguments):
+                return self.action(*arguments)
+
+        def launch(_command, **kwargs):
+            calls.append(("launch_flags", kwargs["creationflags"]))
+            if not kwargs["creationflags"] & safari_yarn_lock.WINDOWS_CREATE_SUSPENDED:
+                unbound_child_started.append(True)
+            return Process()
+
+        def resume(_kernel, process):
+            calls.append(("resume", process.pid))
+
+        kernel = mock.Mock(CreateJobObjectW=Function(lambda *_: 789),
+                           SetInformationJobObject=Function(lambda *_: 1),
+                           AssignProcessToJobObject=Function(lambda *_:
+                                                             calls.append(("assign", 345)) or 1),
+                           QueryInformationJobObject=Function(lambda *_: 1),
+                           TerminateJobObject=Function(lambda *_: 1),
+                           CloseHandle=Function(lambda *_: 1))
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "capture"
+            output.mkdir()
+            with mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                   create=True), \
+                    mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(safari_yarn_lock, "os", proxy), \
+                    mock.patch.object(safari_yarn_lock.ctypes, "WinDLL", return_value=kernel,
+                                      create=True), \
+                    mock.patch.object(safari_yarn_lock, "_resume_suspended_windows_process",
+                                      side_effect=resume, create=True), \
+                    mock.patch.object(safari_yarn_lock, "_windows_job_active_count",
+                                      return_value=0, create=True):
+                result = safari_yarn_lock._run_lock_task_windows(
+                    Path(temporary), output, ["gradle"])
+        self.assertEqual(0, result["exit_code"])
+        self.assertFalse(unbound_child_started)
+        self.assertTrue(calls[0][1] & 0x00000004)
+        self.assertLess(calls.index(("assign", 345)), calls.index(("resume", 345)))
+
+    def test_complete_pipe_stream_rejects_active_detached_job_child(self):
+        calls = []
+
+        class Stream:
+            def read(self, _size):
+                return b""
+
+            def close(self):
+                pass
+
+        class Process:
+            pid = 345
+            _handle = 456
+            returncode = 0
+            stdout = Stream()
+            stderr = Stream()
+
+            def wait(self, timeout):
+                return self.returncode
+
+        class Function:
+            def __init__(self, action):
+                self.action = action
+
+            def __call__(self, *arguments):
+                return self.action(*arguments)
+
+        kernel = mock.Mock(CreateJobObjectW=Function(lambda *_: 789),
+                           SetInformationJobObject=Function(lambda *_: 1),
+                           AssignProcessToJobObject=Function(lambda *_: 1),
+                           QueryInformationJobObject=Function(lambda *_: 1),
+                           TerminateJobObject=Function(lambda job, code:
+                                                       calls.append(("terminate", job, code)) or 1),
+                           CloseHandle=Function(lambda handle:
+                                                calls.append(("close", handle)) or 1))
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "capture"
+            output.mkdir()
+            with mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                   create=True), \
+                    mock.patch.object(subprocess, "Popen", return_value=Process()), \
+                    mock.patch.object(safari_yarn_lock, "os", proxy), \
+                    mock.patch.object(safari_yarn_lock.ctypes, "WinDLL", return_value=kernel,
+                                      create=True), \
+                    mock.patch.object(safari_yarn_lock, "_resume_suspended_windows_process",
+                                      return_value=None, create=True), \
+                    mock.patch.object(safari_yarn_lock, "_windows_job_active_count",
+                                      return_value=1, create=True):
+                result = safari_yarn_lock._run_lock_task_windows(
+                    Path(temporary), output, ["gradle"])
+        self.assertTrue(result["stream_incomplete"])
+        self.assertIn(("terminate", 789, 1), calls)
+
     def test_reader_failure_is_incomplete_even_after_thread_exits(self):
         class FailingStream:
             def __init__(self, first):
@@ -156,6 +337,10 @@ class SafariWindowsProcessTests(unittest.TestCase):
                         mock.patch.object(safari_yarn_lock, "os", proxy), \
                         mock.patch.object(safari_yarn_lock.ctypes, "WinDLL", return_value=kernel,
                                           create=True), \
+                        mock.patch.object(safari_yarn_lock, "_resume_suspended_windows_process",
+                                          return_value=None), \
+                        mock.patch.object(safari_yarn_lock, "_windows_job_active_count",
+                                          return_value=1), \
                         mock.patch.object(safari_yarn_lock, "MAX_DRAIN_SECONDS", 0.05):
                     result = safari_yarn_lock._run_lock_task_windows(
                         Path(temporary), output, ["gradle"])
@@ -210,10 +395,10 @@ class SafariWindowsProcessTests(unittest.TestCase):
                     mock.patch.object(safari_yarn_lock, "os", proxy), \
                     mock.patch.object(safari_yarn_lock.ctypes, "WinDLL", return_value=kernel,
                                       create=True):
-                with self.assertRaisesRegex(OSError, "cannot bind.*Windows job"):
+                with self.assertRaisesRegex(OSError, "cannot bind.*before execution"):
                     safari_yarn_lock._run_lock_task_windows(Path(temporary), output, ["gradle"])
         self.assertEqual([789], closed)
-        self.assertEqual("taskkill", taskkill.call_args.args[0][0])
+        taskkill.assert_not_called()
         self.assertTrue(process.stdout.closed and process.stderr.closed)
 
     def test_threaded_process_capture_bounds_both_streams(self):

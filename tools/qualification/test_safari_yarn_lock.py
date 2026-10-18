@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 import zlib
 from contextlib import redirect_stdout
@@ -16,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 import safari_yarn_lock
+import safari_reporter
 
 
 def replace_loose_object(repository, advertised, source, kind):
@@ -678,6 +680,152 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertFalse(receipt["qualified"])
         with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
             safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_public_hosted_capture_records_staging_handle_failure_residue(self):
+        class Directory:
+            def __init__(self, source, relative):
+                self.path = source / relative
+
+            def child(self, name, removable=False):
+                raise OSError("injected Win32 stage handle failure")
+
+            def close(self):
+                pass
+
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--output", str(self.output), "--configuration", "development"]
+        fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+        with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}), \
+                mock.patch.object(safari_reporter, "os", proxy), \
+                mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(safari_yarn_lock, "run_lock_task") as runner, \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        runner.assert_not_called()
+        receipt = json.loads((self.output / "receipt.json").read_text())
+        stage = receipt["reporter_stage"]
+        self.assertEqual("STAGED_REPORTER_CHANGED", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        self.assertEqual("CHANGED", stage["status"])
+        self.assertEqual("LEFTOVER", stage["projects"]["dyn4k-core"])
+        self.assertEqual("dyn4k-core/karma.config.d", stage["forensic"][0]["path"])
+        self.assertTrue((self.repository / "dyn4k-core/karma.config.d").is_dir())
+
+    def test_public_hosted_capture_rejects_detached_job_child_with_closed_pipes(self):
+        class Process:
+            pid = 345
+            _handle = 456
+            returncode = 1
+
+            def __init__(self):
+                self.stdout = io.BytesIO(
+                    b"> Task :dyn4k-core:jsTestPackageJson\n"
+                    b"> Task :dyn4k:jsTestPackageJson\n"
+                    b"> Task :kotlinNpmInstall\n"
+                    b"> Task :kotlinStoreYarnLock FAILED\n")
+                self.stderr = io.BytesIO(LOCK_FAILURE.encode())
+
+            def wait(self, timeout):
+                return self.returncode
+
+        kernel = mock.Mock()
+        kernel.CreateJobObjectW.return_value = 789
+        kernel.SetInformationJobObject.return_value = 1
+        kernel.AssignProcessToJobObject.return_value = 1
+        kernel.TerminateJobObject.return_value = 1
+        kernel.CloseHandle.return_value = 1
+        unbound_child_started = []
+
+        def launch(_command, **kwargs):
+            if not kwargs["creationflags"] & 0x00000004:
+                unbound_child_started.append(True)
+            return Process()
+
+        def detached(repository, output, command):
+            self.generated(safari=True)
+            proxy = mock.Mock(wraps=os)
+            proxy.name = "nt"
+            with mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0, create=True), \
+                    mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(safari_yarn_lock, "os", proxy), \
+                    mock.patch.object(safari_yarn_lock.ctypes, "WinDLL", return_value=kernel,
+                                      create=True), \
+                    mock.patch.object(safari_yarn_lock, "_resume_suspended_windows_process",
+                                      create=True), \
+                    mock.patch.object(safari_yarn_lock, "_windows_job_active_count",
+                                      return_value=1, create=True):
+                return safari_yarn_lock._run_lock_task_windows(repository, output, command)
+
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--output", str(self.output), "--configuration", "development"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=detached), \
+                mock.patch.object(sys, "argv", arguments), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(1, safari_yarn_lock.main())
+        receipt = json.loads((self.output / "receipt.json").read_text())
+        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
+        self.assertTrue(receipt["process"]["stream_incomplete"])
+        self.assertFalse(receipt["qualified"])
+        self.assertFalse(unbound_child_started)
+        kernel.TerminateJobObject.assert_called_with(789, 1)
+        with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_public_full_hosted_receipt_records_staging_setup_residue(self):
+        hosted = safari_yarn_lock.full_hosted
+        for relative in (hosted.MAPPING, hosted.PAIRS):
+            path = self.repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixture\n")
+
+        class Directory:
+            def __init__(self, source, relative):
+                self.path = source / relative
+
+            def child(self, name, removable=False):
+                raise OSError("injected Win32 stage handle failure")
+
+            def close(self):
+                pass
+
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+        output = self.root / "full-hosted"
+        hashes = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
+        runtime = {"system": "Darwin", "machine": "arm64", "java_version": "21.0.12"}
+        manifest = {"source_files": [], "source_tree_sha256": "c" * 64}
+        with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}), \
+                mock.patch.object(safari_reporter, "os", proxy), \
+                mock.patch.object(hosted, "__file__", str(self.repository /
+                                  "tools/qualification/full_hosted.py")), \
+                mock.patch.object(hosted, "INPUTS", ("tools/qualification/safari_reporter.py",)), \
+                mock.patch.dict(hosted.CONFIGS, {"jsSafari": ("development",)}), \
+                mock.patch.object(hosted, "load_corpus", return_value=manifest), \
+                mock.patch.object(hosted.hosted, "discover_runtime", return_value=runtime), \
+                mock.patch.object(hosted.hosted, "runtime_status", return_value=("READY", "")), \
+                mock.patch.object(hosted.hosted, "gradle_wrapper", return_value="gradlew"), \
+                mock.patch.object(hosted.hosted, "tool_version", return_value="9.5.0"), \
+                mock.patch.object(hosted, "require_pinned_toolchain"), \
+                mock.patch.object(hosted, "run_command", return_value={"exit_code": 0}) as runner, \
+                mock.patch.object(hosted.hosted, "target_hashes", return_value=hashes), \
+                mock.patch.object(hosted.artifact, "capture_staging",
+                                  return_value=({}, None, {"js": hashes}, {})), \
+                mock.patch.object(hosted, "capture_dokka_output"):
+            receipt = hosted.run("jsSafari", self.candidate, output)
+        self.assertEqual("FAILED", receipt["status"])
+        lane = receipt["configurations"][0]
+        self.assertEqual("FAILED", lane["status"])
+        self.assertEqual("LEFTOVER", lane["safari_reporter_stage"]["source"]
+                         ["projects"]["dyn4k-core"])
+        self.assertEqual("dyn4k-core/karma.config.d", lane["safari_reporter_stage"]
+                         ["source"]["forensic"][0]["path"])
+        self.assertEqual(receipt, json.loads((output / "receipt.json").read_text()))
+        self.assertEqual(1, runner.call_count)
 
     def test_hosted_capture_rejects_reporter_source_changed_during_task(self):
         def changed(repository, output, command):

@@ -106,6 +106,14 @@ class ConfigBindingError(ValueError):
     pass
 
 
+class StageFailure(OSError):
+    def __init__(self, result):
+        self.result = result
+        failed = next((item.get("path", "") for item in result["forensic"]
+                       if item.get("error")), "karma.config.d")
+        super().__init__(f"Safari reporter staging residue: {str(failed)[:256]}")
+
+
 def config_relative(project):
     base = project if project == Path("consumers/qualification/portable") else Path()
     return base / "build/js/packages" / PACKAGES[project] / "karma.conf.js"
@@ -422,7 +430,7 @@ def _stage_windows(repository, projects, content, output, result):
                 root.close()
                 raise
             created.append((relative, root, None))
-            directory = root.child("karma.config.d")
+            directory = root.child("karma.config.d", removable=True)
             created[-1] = (relative, root, directory)
             with (stage_path / STAGED_NAME).open("xb") as staged:
                 staged.write(content)
@@ -482,15 +490,27 @@ def _stage_windows(repository, projects, content, output, result):
                         result["forensic"].append(_forensic_windows(
                             directory, name, output, relative / name))
             finally:
-                directory.close()
                 if not result.get("leftovers", {}).get(key):
                     try:
-                        (root.path / "karma.config.d").rmdir()
-                    except OSError as error:
+                        directory.remove_empty()
+                    except (OSError, ValueError) as error:
                         result["status"] = "CHANGED"
                         result["projects"][key] = "LEFTOVER"
                         result["forensic"].append({"path": str(relative / "karma.config.d"),
-                                                   "error": str(error)})
+                                                   "error": str(error)[:512]})
+                directory.close()
+                try:
+                    (root.path / "karma.config.d").lstat()
+                    residue = True
+                except FileNotFoundError:
+                    residue = False
+                except OSError:
+                    residue = True
+                if residue:
+                    result["status"] = "CHANGED"
+                    result["projects"][key] = "LEFTOVER"
+                    result["forensic"].append({"path": str(relative / "karma.config.d"),
+                                               "error": "staging directory remains after cleanup"})
                 root.close()
 
 
@@ -507,8 +527,13 @@ def stage(repository, candidate_sha, projects, output):
     result = {"status": "CLEAN", "source_sha256": hashlib.sha256(content).hexdigest(),
               "projects": {}, "forensic": []}
     if os.name == "nt":
-        with _stage_windows(repository, projects, content, output, result) as staged:
-            yield staged
+        try:
+            with _stage_windows(repository, projects, content, output, result) as staged:
+                yield staged
+        except (OSError, ValueError) as error:
+            if result["status"] != "CLEAN":
+                raise StageFailure(result) from error
+            raise
         return
     created = []
     try:

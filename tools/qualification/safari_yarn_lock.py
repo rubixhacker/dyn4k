@@ -38,6 +38,8 @@ MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PACKAGES = 128
 MAX_PROCESS_SECONDS = 600
 MAX_DRAIN_SECONDS = 5
+WINDOWS_KILL_JOB_ON_CLOSE = 0x00002000
+WINDOWS_CREATE_SUSPENDED = 0x00000004
 REQUIRED_PACKAGES = ("dyn4k-dyn4k-core", "dyn4k-dyn4k-core-test",
                      "dyn4k-dyn4k", "dyn4k-dyn4k-test")
 REQUIRED_PACKAGE_INPUTS = (Path("build/js/package.json"),) + tuple(
@@ -655,16 +657,88 @@ def run_lock_task(repository, output, command=None):
             "stderr_truncated": seen["stderr"] > MAX_FILE_BYTES}
 
 
+def _resume_suspended_windows_process(kernel, process):
+    class ThreadEntry(ctypes.Structure):
+        _fields_ = (("size", ctypes.c_uint32), ("usage", ctypes.c_uint32),
+                    ("thread_id", ctypes.c_uint32), ("owner_pid", ctypes.c_uint32),
+                    ("base_priority", ctypes.c_int32), ("delta_priority", ctypes.c_int32),
+                    ("flags", ctypes.c_uint32))
+
+    kernel.CreateToolhelp32Snapshot.argtypes = (ctypes.c_uint32, ctypes.c_uint32)
+    kernel.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    kernel.Thread32First.argtypes = (ctypes.c_void_p, ctypes.POINTER(ThreadEntry))
+    kernel.Thread32First.restype = ctypes.c_int
+    kernel.Thread32Next.argtypes = (ctypes.c_void_p, ctypes.POINTER(ThreadEntry))
+    kernel.Thread32Next.restype = ctypes.c_int
+    kernel.OpenThread.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+    kernel.OpenThread.restype = ctypes.c_void_p
+    kernel.ResumeThread.argtypes = (ctypes.c_void_p,)
+    kernel.ResumeThread.restype = ctypes.c_uint32
+    snapshot = kernel.CreateToolhelp32Snapshot(0x00000004, 0)
+    if snapshot in (None, ctypes.c_void_p(-1).value):
+        raise OSError("cannot snapshot suspended Safari diagnostic thread")
+    try:
+        entry = ThreadEntry()
+        entry.size = ctypes.sizeof(entry)
+        if not kernel.Thread32First(snapshot, ctypes.byref(entry)):
+            raise OSError("cannot enumerate suspended Safari diagnostic thread")
+        threads = []
+        deadline = time.monotonic() + MAX_DRAIN_SECONDS
+        while True:
+            if entry.owner_pid == process.pid:
+                threads.append(entry.thread_id)
+                if len(threads) != 1:
+                    raise OSError("suspended Safari diagnostic has multiple threads")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("suspended Safari diagnostic thread scan exceeded deadline")
+            if not kernel.Thread32Next(snapshot, ctypes.byref(entry)):
+                break
+        if len(threads) != 1:
+            raise OSError("suspended Safari diagnostic primary thread is missing")
+        thread = kernel.OpenThread(0x0002, 0, threads[0])
+        if not thread:
+            raise OSError("cannot open suspended Safari diagnostic primary thread")
+        try:
+            if kernel.ResumeThread(thread) != 1:
+                raise OSError("cannot resume suspended Safari diagnostic primary thread")
+        finally:
+            kernel.CloseHandle(thread)
+    finally:
+        kernel.CloseHandle(snapshot)
+
+
+def _windows_job_active_count(kernel, job):
+    class Accounting(ctypes.Structure):
+        _fields_ = (("total_user_time", ctypes.c_int64),
+                    ("total_kernel_time", ctypes.c_int64),
+                    ("period_user_time", ctypes.c_int64),
+                    ("period_kernel_time", ctypes.c_int64),
+                    ("page_faults", ctypes.c_uint32),
+                    ("total_processes", ctypes.c_uint32),
+                    ("active_processes", ctypes.c_uint32),
+                    ("terminated_processes", ctypes.c_uint32))
+
+    kernel.QueryInformationJobObject.argtypes = (ctypes.c_void_p, ctypes.c_int,
+                                                ctypes.c_void_p, ctypes.c_uint32,
+                                                ctypes.c_void_p)
+    kernel.QueryInformationJobObject.restype = ctypes.c_int
+    accounting = Accounting()
+    if not kernel.QueryInformationJobObject(job, 1, ctypes.byref(accounting),
+                                            ctypes.sizeof(accounting), None):
+        raise OSError("cannot query Safari diagnostic Windows job lifetime")
+    return accounting.active_processes
+
+
 def _run_lock_task_windows(repository, output, command):
     started = time.time_ns()
-    process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE,
-                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     job = None
     if os.name == "nt":
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.CreateJobObjectW.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p)
         kernel.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel.SetInformationJobObject.argtypes = (ctypes.c_void_p, ctypes.c_int,
+                                                  ctypes.c_void_p, ctypes.c_uint32)
+        kernel.SetInformationJobObject.restype = ctypes.c_int
         kernel.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
         kernel.AssignProcessToJobObject.restype = ctypes.c_int
         kernel.TerminateJobObject.argtypes = (ctypes.c_void_p, ctypes.c_uint)
@@ -672,18 +746,44 @@ def _run_lock_task_windows(repository, output, command):
         kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
         kernel.CloseHandle.restype = ctypes.c_int
         job = kernel.CreateJobObjectW(None, None)
-        if not job or not kernel.AssignProcessToJobObject(job, process._handle):
-            if job:
-                kernel.CloseHandle(job)
-            try:
-                killed = subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                        timeout=MAX_DRAIN_SECONDS, check=False)
-                if killed.returncode != 0 and process.poll() is None:
-                    process.kill()
-            except (OSError, subprocess.TimeoutExpired):
-                if process.poll() is None:
-                    process.kill()
+        if not job:
+            raise OSError("cannot create Safari diagnostic Windows job")
+        class BasicLimits(ctypes.Structure):
+            _fields_ = (("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
+                        ("flags", ctypes.c_uint32), ("minimum_working_set", ctypes.c_size_t),
+                        ("maximum_working_set", ctypes.c_size_t),
+                        ("active_limit", ctypes.c_uint32), ("affinity", ctypes.c_size_t),
+                        ("priority", ctypes.c_uint32), ("scheduling", ctypes.c_uint32))
+
+        class ExtendedLimits(ctypes.Structure):
+            _fields_ = (("basic", BasicLimits), ("io_counters", ctypes.c_uint64 * 6),
+                        ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                        ("peak_process_memory", ctypes.c_size_t),
+                        ("peak_job_memory", ctypes.c_size_t))
+
+        limits = ExtendedLimits()
+        limits.basic.flags = WINDOWS_KILL_JOB_ON_CLOSE
+        if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits),
+                                              ctypes.sizeof(limits)):
+            kernel.CloseHandle(job)
+            raise OSError("cannot set Safari diagnostic kill-on-close job limit")
+    try:
+        process = subprocess.Popen(
+            command, cwd=repository, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP |
+                          (WINDOWS_CREATE_SUSPENDED if job else 0))
+    except BaseException:
+        if job is not None:
+            kernel.CloseHandle(job)
+        raise
+    if job is not None:
+        try:
+            if not kernel.AssignProcessToJobObject(job, process._handle):
+                raise OSError("cannot assign suspended Safari diagnostic process to Windows job")
+            _resume_suspended_windows_process(kernel, process)
+        except BaseException as error:
+            kernel.TerminateJobObject(job, 1)
+            kernel.CloseHandle(job)
             try:
                 process.wait(timeout=MAX_DRAIN_SECONDS)
             except subprocess.TimeoutExpired:
@@ -691,7 +791,7 @@ def _run_lock_task_windows(repository, output, command):
                 process.wait(timeout=MAX_DRAIN_SECONDS)
             process.stdout.close()
             process.stderr.close()
-            raise OSError("cannot bind Safari diagnostic process tree to Windows job")
+            raise OSError("cannot bind Safari diagnostic process before execution") from error
 
     def terminate_tree():
         if job is not None and kernel.TerminateJobObject(job, 1):
@@ -742,6 +842,13 @@ def _run_lock_task_windows(repository, output, command):
         for thread in threads:
             thread.join(timeout=MAX_DRAIN_SECONDS)
         stream_incomplete = bool(reader_errors) or any(thread.is_alive() for thread in threads)
+        if job is not None:
+            try:
+                active = _windows_job_active_count(kernel, job)
+            except OSError:
+                active = 1
+            if active:
+                stream_incomplete = True
         if stream_incomplete and not timed_out:
             terminate_tree()
             for thread in threads:
@@ -855,9 +962,20 @@ def capture(repository, candidate_sha, output, configuration=None):
                                                receipt["invocation_id"])
         receipt["init_script_sha256"] = digest(init)
     if configuration:
-        with safari_reporter.stage(repository, candidate_sha,
-                                   (Path("dyn4k-core"), Path("dyn4k")), output) as reporter_stage:
-            process = run_lock_task(repository, output, expected_command)
+        try:
+            with safari_reporter.stage(repository, candidate_sha,
+                                       (Path("dyn4k-core"), Path("dyn4k")), output) as reporter_stage:
+                process = run_lock_task(repository, output, expected_command)
+        except safari_reporter.StageFailure as error:
+            for item in error.result["forensic"]:
+                if "archive_path" in item:
+                    files.append({"path": item["archive_path"], "sha256": item["sha256"],
+                                  "size": item["retained_size"]})
+            receipt.update(status="STAGED_REPORTER_CHANGED", reason=str(error),
+                           reporter_stage=error.result, files=files)
+            (output / "receipt.json").write_text(json.dumps(receipt, indent=2,
+                                                           sort_keys=True) + "\n")
+            return receipt
         receipt["reporter_stage"] = reporter_stage
         for item in reporter_stage["forensic"]:
             if "archive_path" in item:

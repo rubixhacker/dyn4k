@@ -1307,10 +1307,14 @@ def run(target, candidate_sha, output):
                 if target == "jsSafari":
                     lane["safari_reporter_stage"] = {}
                     lane["safari_karma_configs"] = {}
-                    with safari_reporter.stage(repository, candidate_sha,
-                                               (Path("dyn4k-core"), Path("dyn4k")), folder) as staged:
-                        lane["source_process"] = run_command(command, repository, folder / "source",
-                                                              lane["invocation_id"])
+                    try:
+                        with safari_reporter.stage(repository, candidate_sha,
+                                                   (Path("dyn4k-core"), Path("dyn4k")), folder) as staged:
+                            lane["source_process"] = run_command(
+                                command, repository, folder / "source", lane["invocation_id"])
+                    except safari_reporter.StageFailure as error:
+                        lane["safari_reporter_stage"]["source"] = error.result
+                        raise
                     lane["safari_reporter_stage"]["source"] = staged
                     if staged["status"] != "CLEAN":
                         raise ValueError("staged Safari source reporter changed")
@@ -1345,11 +1349,16 @@ def run(target, candidate_sha, output):
                 if target == "jsSafari":
                     consumer_command.append("-PqualificationSafari=true")
                 if target == "jsSafari":
-                    with safari_reporter.stage(repository, candidate_sha,
-                                               (Path("consumers/qualification/portable"),),
-                                               folder) as staged:
-                        lane["consumer_process"] = run_command(
-                            consumer_command, repository, folder / "consumer", lane["invocation_id"])
+                    try:
+                        with safari_reporter.stage(repository, candidate_sha,
+                                                   (Path("consumers/qualification/portable"),),
+                                                   folder) as staged:
+                            lane["consumer_process"] = run_command(
+                                consumer_command, repository, folder / "consumer",
+                                lane["invocation_id"])
+                    except safari_reporter.StageFailure as error:
+                        lane["safari_reporter_stage"]["consumer"] = error.result
+                        raise
                     lane["safari_reporter_stage"]["consumer"] = staged
                     if staged["status"] != "CLEAN":
                         raise ValueError("staged Safari consumer reporter changed")

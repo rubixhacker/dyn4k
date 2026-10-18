@@ -68,7 +68,7 @@ class SafariWindowsFileTests(unittest.TestCase):
                 def __init__(self, source, relative):
                     self.path = source / relative
 
-                def child(self, name):
+                def child(self, name, removable=False):
                     raise OSError("simulated handle-open failure after mkdir")
 
                 def close(self):
@@ -95,11 +95,14 @@ class SafariWindowsFileTests(unittest.TestCase):
                 def __init__(self, source, relative):
                     self.path = source / relative
 
-                def child(self, name):
+                def child(self, name, removable=False):
                     return Directory(self.path, Path(name))
 
                 def open_file(self, name):
                     return os.open(self.path / name, os.O_RDONLY)
+
+                def remove_empty(self):
+                    self.path.rmdir()
 
                 def close(self):
                     pass
@@ -114,6 +117,45 @@ class SafariWindowsFileTests(unittest.TestCase):
             self.assertEqual("CLEAN", result["status"])
             self.assertEqual("CLEAN", result["projects"]["dyn4k-core"])
             self.assertFalse((repository / "dyn4k-core/karma.config.d").exists())
+
+    def test_stage_close_swap_rejects_replacement_and_preserves_outside(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "source"
+            (repository / "dyn4k-core").mkdir(parents=True)
+            outside = root / "outside.txt"
+            outside.write_bytes(b"outside sentinel")
+            result = {"status": "CLEAN", "projects": {}, "forensic": []}
+
+            class Directory:
+                def __init__(self, source, relative, child=False):
+                    self.path = source / relative
+                    self.is_child = child
+
+                def child(self, name, removable=False):
+                    return Directory(self.path, Path(name), True)
+
+                def open_file(self, name):
+                    return os.open(self.path / name, os.O_RDONLY)
+
+                def remove_empty(self):
+                    self.path.rmdir()
+
+                def close(self):
+                    if self.is_child:
+                        if self.path.exists():
+                            self.path.rename(self.path.with_name("karma.config.d.moved"))
+                        self.path.mkdir()
+
+            fake_module = types.SimpleNamespace(LockedDirectory=Directory)
+            with mock.patch.dict(sys.modules, {"safari_windows_file": fake_module}):
+                with safari_reporter._stage_windows(
+                        repository, (Path("dyn4k-core"),), b"fragment", root, result):
+                    pass
+            self.assertEqual("CHANGED", result["status"])
+            self.assertEqual("LEFTOVER", result["projects"]["dyn4k-core"])
+            self.assertEqual(b"outside sentinel", outside.read_bytes())
+            self.assertTrue((repository / "dyn4k-core/karma.config.d").is_dir())
 
     def test_locked_chain_and_file_refuse_symlinks(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -149,6 +191,9 @@ class SafariWindowsFileTests(unittest.TestCase):
 
             functions = types.SimpleNamespace(CreateFileW=Function(create),
                                               GetFileInformationByHandle=Function(information),
+                                              SetFileInformationByHandle=Function(
+                                                  lambda handle, kind, pointer, size:
+                                                  os.rmdir(os.readlink(f"/proc/self/fd/{handle}")) or 1),
                                               CloseHandle=Function(lambda handle: os.close(handle) or 1))
             module_path = Path(__file__).with_name("safari_windows_file.py")
             spec = importlib.util.spec_from_file_location("safari_windows_file_control",
@@ -171,6 +216,11 @@ class SafariWindowsFileTests(unittest.TestCase):
                 os.close(descriptor)
             with self.assertRaises((OSError, ValueError)):
                 directory.open_file("linked.js")
+            empty = repository / "package/empty"
+            empty.mkdir()
+            with directory.child("empty", removable=True) as held:
+                held.remove_empty()
+            self.assertFalse(empty.exists())
         with self.assertRaises((OSError, ValueError)):
             module.LockedDirectory(repository, Path("linked"))
         self.assertEqual(b"outside\n", sentinel.read_bytes())
