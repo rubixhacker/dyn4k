@@ -59,8 +59,27 @@ class BrowserReporterStageTest(unittest.TestCase):
             original = suite.find("system-out").text
             rows = original.splitlines()
             self.assertEqual(72, len(rows))
+            partial = rows[0].split("\t")
+            transform = next(i for i, field in enumerate(partial)
+                             if field.startswith("a.transform="))
+            partial[transform] = "a.transform=1@4"
+
+            def wrong_bits(row: str, key: str) -> str:
+                fields = row.split("\t")
+                index = next(i for i, field in enumerate(fields)
+                             if field.startswith(key + "="))
+                fields[index] = re.sub(r"@-?\d+", "@4", fields[index], count=1)
+                return "\t".join(fields)
+
+            sat_row = next(i for i, row in enumerate(rows) if "\talgorithm=sat\t" in row)
             for mutation in (rows[:1] + rows[2:], rows + rows[:1],
-                             [rows[0].rsplit("\t", 1)[0], *rows[1:]]):
+                             [rows[0].rsplit("\t", 1)[0], *rows[1:]],
+                             ["\t".join(partial), *rows[1:]],
+                             [wrong_bits(rows[0], "a.transform"), *rows[1:]],
+                             [wrong_bits(rows[0], "a.shape.local"), *rows[1:]],
+                             [wrong_bits(rows[0], "epa.iteration.records"), *rows[1:]],
+                             [*rows[:sat_row], wrong_bits(rows[sat_row], "sat.candidates"),
+                              *rows[sat_row + 1:]]):
                 suite.find("system-out").text = "\n".join(mutation) + "\n"
                 ET.ElementTree(suite).write(report, encoding="unicode")
                 with self.assertRaisesRegex(ValueError, "diagnostic"):
@@ -487,12 +506,14 @@ class SourceCasesTest(unittest.TestCase):
             baseline = public_audit(source / "lane.json")
             self.assertEqual(0, baseline.returncode, baseline.stderr)
             for mutation in ("deleted_row", "duplicate_row", "truncated_row",
+                             "partial_numeric_value",
                              "changed_producer", "absent_producer"):
                 case_dir = Path(directory) / mutation
                 case_dir.mkdir()
                 lane, copied = self.copy_lane(source, str(case_dir))
                 module = lane["modules"]["dyn4k-core"]
-                if mutation.endswith("row"):
+                diagnostic_mutation = mutation.endswith("row") or mutation == "partial_numeric_value"
+                if diagnostic_mutation:
                     report = next(Path(item["path"]) for item in module["raw_xml"]
                                   if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
                     suite = ET.parse(report).getroot()
@@ -503,8 +524,14 @@ class SourceCasesTest(unittest.TestCase):
                         rows.pop(0)
                     elif mutation == "duplicate_row":
                         rows.append(rows[0])
-                    else:
+                    elif mutation == "truncated_row":
                         rows[0] = rows[0].rsplit("\t", 1)[0]
+                    else:
+                        fields = rows[0].split("\t")
+                        transform = next(i for i, field in enumerate(fields)
+                                         if field.startswith("a.transform="))
+                        fields[transform] = "a.transform=1@4"
+                        rows[0] = "\t".join(fields)
                     output.text = "\n".join(rows) + "\n"
                     ET.ElementTree(suite).write(report, encoding="unicode")
                     for item in module["raw_xml"]:
@@ -520,8 +547,40 @@ class SourceCasesTest(unittest.TestCase):
                 rejected = public_audit(copied / "lane.json")
                 with self.subTest(mutation=mutation):
                     self.assertEqual(1, rejected.returncode, rejected.stderr)
-                    self.assertIn("diagnostic" if mutation.endswith("row") else
+                    self.assertIn("diagnostic" if diagnostic_mutation else
                                   "reporter", rejected.stderr.lower())
+
+    def test_public_wasmtime_receipt_rejects_events_moved_to_stderr(self):
+        from runner import sha256
+
+        original = os.environ.get("DYN4K_BROWSER_WASI_WASMTIME_RECEIPT")
+        replay = os.environ.get("DYN4K_BROWSER_WASI_REPLAY_ROOT")
+        if original is None or replay is None:
+            self.skipTest("set retained Wasmtime receipt and its exact source replay checkout")
+        source = Path(original).parent
+        self.assertTrue((source / "lane.json").is_file(), source)
+        with tempfile.TemporaryDirectory() as directory:
+            lane, copied = self.copy_lane(source, directory)
+            receipt = copied / "lane.json"
+            self.save_copied_lane(lane, copied)
+            baseline = self.public_historical_audit(
+                receipt, Path(directory) / "baseline-auditor")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+
+            module = lane["modules"]["dyn4k-core"]
+            stdout = Path(module["raw_stdout"])
+            stderr = Path(module["raw_stderr"])
+            original_stdout = stdout.read_text()
+            self.assertIn("##teamcity[", original_stdout)
+            stdout.write_text("")
+            stderr.write_text(original_stdout + stderr.read_text())
+            module["raw_stdout_sha256"] = sha256(stdout)
+            module["raw_stderr_sha256"] = sha256(stderr)
+            self.save_copied_lane(lane, copied)
+            rejected = self.public_historical_audit(
+                receipt, Path(directory) / "mutant-auditor")
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("test identities", rejected.stderr)
 
     @staticmethod
     def public_historical_audit(

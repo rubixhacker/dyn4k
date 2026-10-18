@@ -10,6 +10,7 @@ import re
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -42,7 +43,7 @@ RUNTIME_VERSIONS = {
 }
 KARMA_EXECUTABLE_SUFFIX_SHA256 = {
     "js": "30e32fd8e9d76f66150967c36e0757749a0723eebccf936752b200d21892457e",
-    "wasmJs": "eafc366e9f363a4fdb247daab007ee69b3c7268dfa1d281a1bddd7efd7d82b4e",
+    "wasmJs": "7dc95f1876442be2141473ba1a99b11ad3005a70f704b5c5ce48cc011aadc203",
 }
 KARMA_HELPER_SHA256 = {
     "runner": "15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18",
@@ -94,6 +95,123 @@ COLLISION_DIAGNOSTIC_EPA_SCHEMA = (
     "index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:support:"
     "projection:delta:stop:equalDistanceEdgeIds:mirrorMatches"
 )
+DIAGNOSTIC_INTEGER = r"-?(?:0|[1-9]\d*)"
+DIAGNOSTIC_DECIMAL = r"(?:NaN|-?Infinity|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)"
+DIAGNOSTIC_NUMBER = rf"{DIAGNOSTIC_DECIMAL}@{DIAGNOSTIC_INTEGER}"
+DIAGNOSTIC_VECTOR = rf"{DIAGNOSTIC_NUMBER},{DIAGNOSTIC_NUMBER}"
+DIAGNOSTIC_VECTORS = rf"{DIAGNOSTIC_VECTOR}(?:;{DIAGNOSTIC_VECTOR})*"
+DIAGNOSTIC_BOOLEAN = r"(?:true|false)"
+DIAGNOSTIC_FEATURE = (
+    rf"(?:point:{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_VECTOR}|"
+    rf"edge:{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_VECTOR}:"
+    rf"{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_INTEGER}:"
+    rf"{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_VECTOR}|unknown:{DIAGNOSTIC_INTEGER})"
+)
+DIAGNOSTIC_POLYGON_EDGE = (
+    rf"{DIAGNOSTIC_INTEGER}:" + ":".join((DIAGNOSTIC_NUMBER,) * 7) +
+    rf":{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_NUMBER}:{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_VECTOR}"
+)
+DIAGNOSTIC_SHAPE_BASE = (
+    rf"center={DIAGNOSTIC_VECTOR}\|radius={DIAGNOSTIC_NUMBER}"
+)
+DIAGNOSTIC_SHAPE = (
+    rf"(?:kind=Circle\|{DIAGNOSTIC_SHAPE_BASE}\|circle\.radius={DIAGNOSTIC_NUMBER}|"
+    rf"kind=Capsule\|{DIAGNOSTIC_SHAPE_BASE}\|capsule\.length={DIAGNOSTIC_NUMBER}"
+    rf"\|capsule\.capRadius={DIAGNOSTIC_NUMBER}"
+    rf"\|capsule\.localFoci=(?:null|{DIAGNOSTIC_VECTORS})"
+    rf"\|capsule\.localAxis={DIAGNOSTIC_VECTOR}|"
+    rf"kind=Slice\|{DIAGNOSTIC_SHAPE_BASE}\|slice\.radius={DIAGNOSTIC_NUMBER}"
+    rf"\|slice\.theta={DIAGNOSTIC_NUMBER}\|slice\.circleCenter={DIAGNOSTIC_VECTOR}"
+    rf"\|slice\.rotation={DIAGNOSTIC_VECTOR}"
+    rf"\|slice\.upperEdge={DIAGNOSTIC_FEATURE}"
+    rf"\|slice\.lowerEdge={DIAGNOSTIC_FEATURE}|"
+    rf"kind=Segment\|{DIAGNOSTIC_SHAPE_BASE}\|segment\.length={DIAGNOSTIC_NUMBER}"
+    rf"\|vertices=(?:null|{DIAGNOSTIC_VECTORS})"
+    rf"\|normals=(?:null|{DIAGNOSTIC_VECTORS})|"
+    rf"kind=Polygon\|{DIAGNOSTIC_SHAPE_BASE}"
+    rf"\|vertices=(?:null|{DIAGNOSTIC_VECTORS})"
+    rf"\|normals=(?:null|{DIAGNOSTIC_VECTORS}))"
+)
+DIAGNOSTIC_INTERVAL = rf"{DIAGNOSTIC_VECTOR}"
+DIAGNOSTIC_SAT_CANDIDATE = (
+    rf"[01]:{DIAGNOSTIC_INTEGER}:(?:zero:{DIAGNOSTIC_VECTOR}|"
+    rf"separated:{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_INTERVAL}:{DIAGNOSTIC_INTERVAL}|"
+    rf"{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_INTERVAL}:{DIAGNOSTIC_INTERVAL}:"
+    rf"{DIAGNOSTIC_NUMBER}:{DIAGNOSTIC_BOOLEAN}:{DIAGNOSTIC_BOOLEAN}:"
+    rf"(?:na|{DIAGNOSTIC_NUMBER}):(?:na|{DIAGNOSTIC_NUMBER}):"
+    rf"{DIAGNOSTIC_NUMBER}:{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_BOOLEAN})"
+)
+DIAGNOSTIC_EPA_RECORD = (
+    rf"{DIAGNOSTIC_INTEGER}:(?:na|{DIAGNOSTIC_INTEGER}):"
+    rf"{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_VECTOR}:"
+    rf"{DIAGNOSTIC_VECTOR}:{DIAGNOSTIC_NUMBER}:{DIAGNOSTIC_VECTOR}:"
+    rf"{DIAGNOSTIC_NUMBER}:{DIAGNOSTIC_NUMBER}:"
+    rf"(?:continue|epsilon|iterationLimit):"
+    rf"(?:na|{DIAGNOSTIC_INTEGER}(?:,{DIAGNOSTIC_INTEGER})*)?:{DIAGNOSTIC_BOOLEAN}"
+)
+DIAGNOSTIC_VALUE_PATTERNS = {
+    **dict.fromkeys(("a.transform", "b.transform"),
+                    ",".join((DIAGNOSTIC_NUMBER,) * 6)),
+    **dict.fromkeys(("a.center.local", "b.center.local", "a.center.world",
+                     "b.center.world", "penetration.normal", "gjk.initial.centerDirection",
+                     "gjk.initial.effectiveDirection", "sat.winner.preOrientation",
+                     "sat.winner.finalAxis"), DIAGNOSTIC_VECTOR),
+    **dict.fromkeys(("manifold.normal", "epa.edge.a", "epa.edge.b", "epa.edge.normal",
+                     "epa.terminal.support"), rf"(?:na|{DIAGNOSTIC_VECTOR})"),
+    **dict.fromkeys(("a.foci.world", "b.foci.world", "a.axes.withB", "b.axes.withA"),
+                    rf"(?:null|{DIAGNOSTIC_VECTORS})"),
+    **dict.fromkeys(("a.shape.local", "b.shape.local"), DIAGNOSTIC_SHAPE),
+    **dict.fromkeys(("a.polygon.edgeArithmetic", "b.polygon.edgeArithmetic"),
+                    rf"(?:na|{DIAGNOSTIC_POLYGON_EDGE}(?:;{DIAGNOSTIC_POLYGON_EDGE})*)"),
+    **dict.fromkeys(("clip.probe.feature.a", "clip.probe.feature.b"),
+                    rf"(?:na|{DIAGNOSTIC_FEATURE})"),
+    **dict.fromkeys(("penetration.depth", "sat.winner.centerDot", "sat.winner.depth",
+                     "epa.replay.epsilon"), DIAGNOSTIC_NUMBER),
+    **dict.fromkeys(("epa.edge.distance", "epa.terminal.projection",
+                     "epa.terminal.delta"), rf"(?:na|{DIAGNOSTIC_NUMBER})"),
+    **dict.fromkeys(("epa.replay.iteration", "epa.replay.maxIterations",
+                     "sat.winner.index", "step"), DIAGNOSTIC_INTEGER),
+    **dict.fromkeys(("hit", "sat.replay.hit", "sat.replay.matchesResult",
+                     "sat.winner.orientationFlip", "epa.queue.reconstructedMatches"),
+                    DIAGNOSTIC_BOOLEAN),
+    **dict.fromkeys(("booleanHit", "clipped", "epa.replay.normalMatchesResult",
+                     "epa.replay.depthMatchesResult"), rf"(?:na|{DIAGNOSTIC_BOOLEAN})"),
+    "manifold.count": r"(?:na|[012])",
+    "sat.winner.source": r"(?:a|b|[01])",
+    "selection": r"(?:unavailable|epaSourceReplay|satSourceReplay)",
+    "epa.replay.stop": r"(?:notRun|epsilon|iterationLimit)",
+    "epa.replay.identity": "unobserved",
+    "epa.replay.simplex": rf"(?:{DIAGNOSTIC_VECTORS})?",
+    "epa.iteration.records": rf"(?:{DIAGNOSTIC_EPA_RECORD}(?:;{DIAGNOSTIC_EPA_RECORD})*)?",
+    "sat.candidates": rf"{DIAGNOSTIC_SAT_CANDIDATE}(?:;{DIAGNOSTIC_SAT_CANDIDATE})*",
+}
+DIAGNOSTIC_NUMBER_PARTS = re.compile(rf"({DIAGNOSTIC_DECIMAL})@({DIAGNOSTIC_INTEGER})")
+
+
+def verify_collision_value(key: str, value: str) -> None:
+    pattern = DIAGNOSTIC_VALUE_PATTERNS.get(key)
+    if pattern is None and re.fullmatch(r"support\.[0-5]\.(?:direction|a|b\.negated|minkowski)", key):
+        pattern = DIAGNOSTIC_VECTOR
+    if pattern is None and re.fullmatch(r"manifold\.point\.[01]\.(?:position|depth)", key):
+        pattern = DIAGNOSTIC_VECTOR if key.endswith("position") else DIAGNOSTIC_NUMBER
+    if pattern is None and re.fullmatch(r"manifold\.point\.[01]\.id", key):
+        pattern = (rf"(?:distance|indexed:{DIAGNOSTIC_INTEGER}:"
+                   rf"{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_INTEGER}:{DIAGNOSTIC_BOOLEAN})")
+    if pattern is None:
+        return
+    if re.fullmatch(pattern, value) is None:
+        raise ValueError(f"collision diagnostic {key} has incomplete numeric syntax")
+    for match in DIAGNOSTIC_NUMBER_PARTS.finditer(value):
+        decimal, bits_text = match.groups()
+        bits = int(bits_text)
+        if not -(1 << 63) <= bits < (1 << 63):
+            raise ValueError(f"collision diagnostic {key} has invalid raw bits")
+        raw = struct.unpack(">q", struct.pack(">d", float(decimal)))[0]
+        if decimal == "NaN":
+            if bits & 0x7ff0000000000000 != 0x7ff0000000000000 or bits & 0xfffffffffffff == 0:
+                raise ValueError(f"collision diagnostic {key} has invalid NaN bits")
+        elif raw != bits and not (float(decimal) == 0 and bits in (0, -(1 << 63))):
+            raise ValueError(f"collision diagnostic {key} has mismatched raw bits")
 
 
 def common_corpus_cases(root: Path, candidate_sha: str, module: str) -> set[tuple[str, str]]:
@@ -227,6 +345,8 @@ def verify_collision_diagnostics(suite: ET.Element) -> dict[str, object]:
         if any(not value for key, value in pairs if key not in (
                 "epa.replay.simplex", "epa.iteration.records", "sat.candidates")):
             raise ValueError("collision diagnostic v2 row has empty required content")
+        for key, value in pairs:
+            verify_collision_value(key, value)
         for i in range(point_count):
             point_id = fields[f"manifold.point.{i}.id"]
             if point_id != "distance" and re.fullmatch(
@@ -687,7 +807,7 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                                     "--invoke", "startUnitTests", str(linked)]
                 if module.get("command") != command_expected or module.get("exit_code") != 0:
                     raise ValueError(f"passing {name} Wasmtime invocation differs")
-                observed = verify_wasmtime_output(Path(module["raw_console"]).read_text(),
+                observed = verify_wasmtime_output(Path(module["raw_stdout"]).read_text(),
                                                   expected)
             else:
                 port = module["karma_port"]
