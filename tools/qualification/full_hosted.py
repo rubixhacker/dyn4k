@@ -138,7 +138,7 @@ def package_archive(output, archive):
                 packed.addfile(info, stream)
 
 
-def verify_transport_archive(archive, candidate_sha, target, candidate_repository=None):
+def verify_transport_archive(archive, candidate_sha, target=None, candidate_repository=None):
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary)
         names = set()
@@ -154,6 +154,8 @@ def verify_transport_archive(archive, candidate_sha, target, candidate_repositor
                 value = member.pax_headers.get("dyn4k.mtime_ns", "")
                 if not re.fullmatch(r"[0-9]+", value):
                     raise ValueError("transport archive file timestamp is absent")
+                if not math.isfinite(member.mtime) or int(member.mtime) != int(value) // 1_000_000_000:
+                    raise ValueError("transport archive PAX timestamp differs")
                 source = packed.extractfile(member)
                 if source is None:
                     raise ValueError("transport archive file bytes are absent")
@@ -167,7 +169,10 @@ def verify_transport_archive(archive, candidate_sha, target, candidate_repositor
         if "receipt.json" not in names:
             raise ValueError("transport archive receipt is absent")
         receipt = qualify.load_json_strict(output / "receipt.json")
-        if receipt.get("candidate_sha") != candidate_sha or receipt.get("target") != target:
+        if not isinstance(receipt, dict):
+            raise ValueError("full hosted receipt must be an object")
+        if receipt.get("candidate_sha") != candidate_sha or (
+                target is not None and receipt.get("target") != target):
             raise ValueError("transport archive candidate or target differs")
         verify_raw_files(output, receipt, candidate_repository=candidate_repository)
         return receipt
@@ -735,6 +740,7 @@ def verify_report_group(output, folder, group, checked, prefix):
 
 def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                      candidate_repository=None):
+    repository = candidate_repository or Path(__file__).resolve().parents[2]
     target = receipt.get("target")
     if (target not in TARGETS or receipt.get("status") != "FULL_COMMON_PASSED"
             or receipt.get("schema") != 2 or receipt.get("kind") != "hosted-full-common-corpus"
@@ -744,15 +750,14 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     if not isinstance(lanes, list) or [lane.get("configuration") for lane in lanes] != list(CONFIGS[target]):
         raise ValueError("both required configurations are absent, duplicated, or unordered")
     if manifest is None:
-        repository = Path(__file__).resolve().parents[2]
         manifest = load_corpus(repository, receipt["candidate_sha"])
     if consumer_manifest is None:
         consumer_manifest = qualify.load_json_strict(
-            Path(__file__).resolve().parents[2] / "tools/qualification/foundation-probes.json")
+            repository / "tools/qualification/foundation-probes.json")
     if (receipt.get("manifest_sha256") != canonical_hash(manifest)
             or receipt.get("source_tree_sha256") != manifest["source_tree_sha256"]
-            or receipt.get("map_sha256") != sha256(Path(__file__).resolve().parents[2] / MAPPING)
-            or receipt.get("reviewed_pairs_sha256") != sha256(Path(__file__).resolve().parents[2] / PAIRS)):
+            or receipt.get("map_sha256") != sha256(repository / MAPPING)
+            or receipt.get("reviewed_pairs_sha256") != sha256(repository / PAIRS)):
         raise ValueError("source or manifest hash differs")
     for module in qualify.MODULES:
         expected_cases(manifest, module)
@@ -804,7 +809,7 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                 raise ValueError("staging command lacks root or target publication")
     for path in INPUTS:
         archived = archived_file(output, f"inputs/{path}")
-        if sha256(archived) != sha256(Path(__file__).resolve().parents[2] / path):
+        if sha256(archived) != sha256(repository / path):
             raise ValueError("archived source input differs")
     expected_inputs = {f"inputs/{path}" for path in INPUTS}
     if {item["path"] for item in receipt["files"] if item["path"].startswith("inputs/")} != expected_inputs:

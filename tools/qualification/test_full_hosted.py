@@ -315,8 +315,9 @@ class FullHostedTests(unittest.TestCase):
             destination = repository / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(actual_repository / relative, destination)
-        shutil.copy2(actual_repository / "tools/qualification/stage.py",
-                     repository / "tools/qualification/stage.py")
+        for helper in ("stage.py", "independent_adapter.py", "full_suite_manifest.py"):
+            shutil.copy2(actual_repository / "tools/qualification" / helper,
+                         repository / "tools/qualification" / helper)
         shutil.copy2(actual_repository / "gradlew", repository / "gradlew")
         (repository / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
         subprocess.run(["git", "init", "-q", str(repository)], check=True)
@@ -403,7 +404,8 @@ class FullHostedTests(unittest.TestCase):
 
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.0",
                    "xcode_version": "26.4.1", "java_version": "21.0.12",
-                   "simulators": {"tvOS": [{"udid": simulator}]}}
+                   "simulators": {"tvOS": [{"udid": simulator,
+                                            "runtime": "com.apple.CoreSimulator.SimRuntime.tvOS-26-0"}]}}
         runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
                   "RUNNER_NAME": "synthetic-runner", "RUNNER_OS": "macOS",
                   "RUNNER_ARCH": "ARM64"}
@@ -454,6 +456,35 @@ class FullHostedTests(unittest.TestCase):
             directory_replay = subprocess.run(directory_command, cwd=clean,
                                               capture_output=True, text=True)
             self.assertEqual(0, directory_replay.returncode, directory_replay.stderr)
+            artifact_command = [sys.executable,
+                                str(clean / "tools/qualification/artifact.py"),
+                                "verify", "--candidate-sha", candidate,
+                                "--full-hosted", "--output"]
+            for bundle in (output, archive):
+                ingested = subprocess.run([*artifact_command, str(bundle)], cwd=clean,
+                                          capture_output=True, text=True)
+                self.assertEqual(0, ingested.returncode, ingested.stderr)
+                self.assertEqual("FULL_COMMON_PASSED", json.loads(ingested.stdout)["status"])
+            qualification_report = evidence / "qualification.json"
+            recorded = subprocess.run([
+                sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                "--candidate-sha", candidate, "--full-hosted-bundle", str(archive),
+                "--output", str(qualification_report)], cwd=clean,
+                capture_output=True, text=True)
+            self.assertEqual(1, recorded.returncode, recorded.stderr)
+            self.assertEqual("", recorded.stderr)
+            qualification = qualify.load_json_strict(qualification_report)
+            self.assertEqual(112, qualification["total"])
+            self.assertEqual(0, qualification["counts"]["PASSED"])
+            self.assertEqual(1, len(qualification["full_hosted_receipts"]))
+            self.assertEqual("FULL_COMMON_PASSED",
+                             qualification["full_hosted_receipts"][0]["status"])
+            scoped = qualification["full_hosted_receipts"][0]
+            self.assertEqual(2, len(scoped["configuration_lanes"]))
+            for gate in ("audit_status", "candidate_manifest_status",
+                         "complete_suite_status", "release_gate_status"):
+                self.assertEqual("NOT_RUN", scoped[gate])
+            self.assertEqual({"NOT_RUN"}, {lane["status"] for lane in qualification["lanes"]})
             rogue = clean / "dyn4k-core/build/dokka/html/index.html"
             rogue.parent.mkdir(parents=True)
             rogue.write_text("<html>untracked local replacement</html>")
@@ -535,6 +566,21 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(adverse_capability, capability_archive)
             with self.assertRaisesRegex(ValueError, metadata_rejection) as capability_tar_error:
                 full_hosted.verify_transport_archive(capability_archive, candidate, target)
+            for rejected_bundle in (adverse_dokka, adverse_dokka_archive,
+                                    unlisted_dokka, unlisted_archive,
+                                    adverse, adverse_archive,
+                                    adverse_capability, capability_archive):
+                rejected = subprocess.run([*artifact_command, str(rejected_bundle)],
+                                          cwd=clean, capture_output=True, text=True)
+                self.assertEqual(1, rejected.returncode, rejected_bundle)
+                self.assertIn("full hosted archive failed", rejected.stderr)
+            adverse_record = subprocess.run([
+                sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                "--candidate-sha", candidate, "--full-hosted-bundle",
+                str(adverse_dokka_archive), "--output", str(evidence / "adverse-record.json")],
+                cwd=clean, capture_output=True, text=True)
+            self.assertEqual(2, adverse_record.returncode)
+            self.assertIn("full hosted receipt failed", adverse_record.stderr)
             (evidence / "evidence.json").write_text(json.dumps({
                 "synthetic": True, "real_hosted_runtime": False,
                 "corpus_loader": "real_source_derived_candidate",
@@ -554,6 +600,9 @@ class FullHostedTests(unittest.TestCase):
                 "capability_tar_rejection": str(capability_tar_error.exception),
                 "clean_checkout_cli": replay.stdout.strip(),
                 "clean_checkout_directory_cli": directory_replay.stdout.strip(),
+                "qualification_total_lanes": qualification["total"],
+                "qualification_passed_lanes": qualification["counts"]["PASSED"],
+                "qualification_receipt_status": scoped["status"],
                 "rogue_local_dokka_cli": replay_with_rogue.stdout.strip(),
                 "dokka_page_archive_sha256": full_hosted.sha256(adverse_dokka_archive),
                 "dokka_page_rejection": adverse_replay.stderr.strip().splitlines()[-1],
@@ -631,9 +680,14 @@ class FullHostedTests(unittest.TestCase):
         self.addCleanup(checkout_patch.stop)
         test_publication.PublicationAuditTests().stage(self.candidate_repository, (target,))
         self.align_synthetic_docs(self.candidate_repository, target)
+        for relative in full_hosted.INPUTS:
+            destination = self.candidate_repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repository / relative, destination)
         subprocess.run(["git", "init", "-q", str(self.candidate_repository)], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "add", "LICENSE.md",
-                        "dyn4k-core/src", "dyn4k/src"], check=True)
+                        "dyn4k-core/src", "dyn4k/src", "tools", "build.gradle.kts",
+                        "consumers/qualification/portable/build.gradle.kts"], check=True)
         subprocess.run(["git", "-C", str(self.candidate_repository), "-c", "user.name=Fixture",
                         "-c", "user.email=fixture@example.invalid", "commit", "-qm", "candidate"],
                        check=True)
@@ -991,6 +1045,19 @@ class FullHostedTests(unittest.TestCase):
             packed.addfile(info)
         with self.assertRaisesRegex(ValueError, "unsafe archive path"):
             full_hosted.verify_transport_archive(archive, receipt["candidate_sha"], "mingwX64")
+        full_hosted.package_archive(self.root, archive)
+        altered_time = self.root.parent / (self.root.name + "-pax.tar")
+        self.addCleanup(altered_time.unlink, missing_ok=True)
+        with tarfile.open(archive, "r") as source, tarfile.open(altered_time, "w") as changed:
+            for member in source:
+                stream = source.extractfile(member)
+                if member.name == "receipt.json":
+                    member.mtime += 1
+                    member.pax_headers["mtime"] = str(member.mtime)
+                changed.addfile(member, stream)
+        with self.assertRaisesRegex(ValueError, "PAX timestamp differs"):
+            full_hosted.verify_transport_archive(
+                altered_time, receipt["candidate_sha"], "mingwX64")
 
 if __name__ == "__main__":
     unittest.main()
