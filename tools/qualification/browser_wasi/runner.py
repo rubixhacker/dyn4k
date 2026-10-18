@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -375,6 +377,7 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             ("raw_stdout", "raw_stdout_sha256"),
             ("raw_stderr", "raw_stderr_sha256"),
             ("linked_executable", "linked_sha256"),
+            ("karma_config", "karma_config_sha256"),
             ("browser_attestation", "browser_attestation_sha256"),
             ("result_json", "result_json_sha256"),
         ):
@@ -491,6 +494,13 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 observed = verify_wasmtime_output(Path(module["raw_console"]).read_text(),
                                                   expected)
             else:
+                if module.get("karma_port") is not None:
+                    port = module["karma_port"]
+                    if (type(port) is not int or not 1 <= port <= 65535
+                            or module.get("karma_config") != str(lane_dir / name / "karma.conf.js")
+                            or f"config.set({{port: {port}}});" not in
+                            Path(module["karma_config"]).read_text()):
+                        raise ValueError(f"passing {name} Karma port configuration differs")
                 production_marker = f"qualification test input: {source}"
                 markers = [line for line in Path(module["gradle_stdout"]).read_text().splitlines()
                            if line.startswith("qualification test input:")]
@@ -605,6 +615,27 @@ def gradle_command(root: Path, module: str, target: str,
     return args
 
 
+@contextmanager
+def isolated_karma_port(project_root: Path):
+    config_dir = project_root / "karma.config.d"
+    if config_dir.exists():
+        raise ValueError(f"Karma configuration directory is already present: {config_dir}")
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    content = f"config.set({{port: {port}}});\n"
+    config_dir.mkdir()
+    config_file = config_dir / "qualification-port.js"
+    try:
+        config_file.write_text(content)
+        yield port
+    finally:
+        if config_file.is_file() and config_file.read_text() == content:
+            config_file.unlink()
+        if config_dir.is_dir() and not any(config_dir.iterdir()):
+            config_dir.rmdir()
+
+
 def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
              runtime: str, role: str, configuration: str, binary: Path,
              expected_version: str) -> int:
@@ -660,7 +691,13 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             if target != "wasmWasi" and report_dir.exists():
                 shutil.rmtree(report_dir)
             started_ns = time.time_ns()
-            built = command(gradle, root, env)
+            if target == "wasmWasi":
+                built = command(gradle, root, env)
+                karma_port = None
+            else:
+                karma_root = root if module in MODULES else project
+                with isolated_karma_port(karma_root) as karma_port:
+                    built = command(gradle, root, env)
             finished_ns = time.time_ns()
             console = module_output / "gradle-console.log"
             console.write_text(built.stdout + built.stderr)
@@ -679,6 +716,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 "target": target, "runtime": runtime, "configuration": configuration,
                 "staging_receipt": str(receipt), "runtime_sha256": lane["runtime_sha256"],
                 "browser_token": token if runtime != "wasmtime" else None,
+                "karma_port": karma_port,
             }
             results[module] = evidence
             try:
@@ -688,6 +726,18 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 if not linked.is_file():
                     raise ValueError(f"missing linked test executable: {linked}")
                 if target != "wasmWasi":
+                    package = linked.stem
+                    karma_generated = (karma_root / "build" /
+                                       ("js" if target == "js" else "wasm") /
+                                       "packages" / package / "karma.conf.js")
+                    if (not karma_generated.is_file() or
+                            f"config.set({{port: {karma_port}}});" not in
+                            karma_generated.read_text()):
+                        raise ValueError("browser test did not load isolated Karma port")
+                    frozen_karma = module_output / "karma.conf.js"
+                    shutil.copy2(karma_generated, frozen_karma)
+                    evidence.update(karma_config=str(frozen_karma),
+                                    karma_config_sha256=sha256(frozen_karma))
                     marker = f"qualification test input: {linked}"
                     markers = [line for line in built.stdout.splitlines()
                                if line.startswith("qualification test input:")]

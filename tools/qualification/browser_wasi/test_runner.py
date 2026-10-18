@@ -347,6 +347,17 @@ class SourceCasesTest(unittest.TestCase):
                         with mock.patch("runner.candidate_identity"):
                             audit_lane_receipt(copied / "lane.json")
 
+    def test_browser_port_configuration_is_isolated_and_removed(self):
+        from runner import isolated_karma_port
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_karma_port(root) as port:
+                source = root / "karma.config.d/qualification-port.js"
+                self.assertIn(f"port: {port}", source.read_text())
+                self.assertGreater(port, 0)
+            self.assertFalse((root / "karma.config.d").exists())
+
     def test_existing_failed_lane_is_not_overwritten(self):
         from runner import run_lane
 
