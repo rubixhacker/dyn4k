@@ -1008,7 +1008,12 @@ tasks.matching {
 kotlin {
     jvmToolchain(21)
     jvm {
-        compilerOptions { jvmTarget.set(JvmTarget.JVM_1_8) }
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_1_8)
+            val mode = providers.gradleProperty("jvmCompilerMode").orElse("default").get()
+            require(mode == "default" || mode == "no-optimize") { "unknown JVM compiler mode: $mode" }
+            if (mode == "no-optimize") freeCompilerArgs.add("-Xno-optimize")
+        }
     }
     android {
         namespace = "org.dyn4j"
@@ -1040,7 +1045,9 @@ kotlin {
         }
     }
     wasmWasi { nodejs(); wasmtime() }
-    linuxX64()
+    linuxX64 {
+        binaries { test(setOf(NativeBuildType.RELEASE)) }
+    }
     linuxArm64()
     mingwX64()
     macosArm64()
@@ -1062,6 +1069,10 @@ kotlin {
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
     }
+}
+
+tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileKotlinJvm") {
+    doFirst { logger.lifecycle("JVM compiler flags ${project.path}: ${compilerOptions.freeCompilerArgs.get()}") }
 }
 
 if (providers.gradleProperty("qualificationProduction").orNull == "true") {
