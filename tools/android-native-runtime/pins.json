@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "source_reference": "5b1ac96e2afdc9324e19f23b693dec8ef013a5f6",
+  "adb_sha256": "a902be8f45c6c62e76c9efaf6947a0fa747c9cabd89a2ac8e0d16ecb30b3ed01",
+  "guest_fingerprint": "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys",
+  "artifacts": {
+    "dyn4k-core": "601d36a0ebbf804b64d710be600e5db92a350837ff8426f62a3cca44be7de447",
+    "dyn4k": "fcfe98608c3c600848d5cb19e3c9e9fc8bc70b7faeec02fda900e98846479354"
+  },
+  "executables": {
+    "debug": "0efe35e6bd1e0388aeb119a5236b57a03c3de32c5d1959b65725def910fe56ec",
+    "optimized": "a092bfd6230926e6911bcf4c04203253cd7b5b4de6f82f6919908a423ba850e9"
+  }
+}
