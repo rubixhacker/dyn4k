@@ -7,6 +7,18 @@ import prepare
 
 
 class GeneratedConsumerProvenanceTest(unittest.TestCase):
+    def test_android_copy_accepts_only_pinned_version_table_adaptation(self):
+        source = b'if ("1.8".equals(version)) return null;\n'
+        expected = (b'if ("1.8".equals(version)) return null;\n'
+                    b'        if ("0.9".equals(version)) return '
+                    b'"Attempt to invoke virtual method \'java.lang.String '
+                    b'java.lang.Class.getName()\' on a null object reference";\n')
+        self.assertEqual(prepare.android_consumer_source("CollisionModelConsumer", source), expected)
+        self.assertEqual(prepare.android_consumer_source("GeometryConsumer", source), source)
+        for invalid in (b"class CollisionModelConsumer {}\n", source + source):
+            with self.assertRaisesRegex(ValueError, "Android consumer version table"):
+                prepare.android_consumer_source("CollisionModelConsumer", invalid)
+
     def test_rejects_changed_generated_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -19,11 +31,15 @@ class GeneratedConsumerProvenanceTest(unittest.TestCase):
                 copy = root / relative_copy
                 source.parent.mkdir(parents=True, exist_ok=True)
                 copy.parent.mkdir(parents=True, exist_ok=True)
-                source.write_text("class " + Path(name).name + " {}\n")
-                copy.write_bytes(source.read_bytes())
+                source.write_text("class " + Path(name).name + " {}\n" +
+                                  ('if ("1.8".equals(version)) return null;\n'
+                                   if name == "CollisionModelConsumer" else ""))
+                copy.write_bytes(prepare.android_consumer_source(Path(name).name,
+                                                                  source.read_bytes()))
                 digest = hashlib.sha256(source.read_bytes()).hexdigest()
                 originals[str(relative_source)] = digest
-                generated[str(relative_copy)] = {"source": str(relative_source), "sha256": digest}
+                generated[str(relative_copy)] = {"source": str(relative_source),
+                                                 "sha256": hashlib.sha256(copy.read_bytes()).hexdigest()}
             manifest = {"consumer_sources": originals, "generated_consumer_sources": generated}
             self.assertEqual(prepare.verify_consumer_sources(root, manifest), generated)
             changed = root / next(iter(generated))
@@ -45,16 +61,19 @@ class GeneratedConsumerProvenanceTest(unittest.TestCase):
             root = Path(temporary)
             originals = {}
             generated = {}
-            digest = hashlib.sha256(b"same bytes\n").hexdigest()
+            same = b'if ("1.8".equals(version)) return null;\n'
+            digest = hashlib.sha256(same).hexdigest()
             for name in prepare.CONSUMERS:
                 source = Path("dyn4k-core/src/jvmConsumer/java") / (name + ".java")
                 copy = Path("consumers/android-runtime/app/build/generated/consumer-java") / (name + ".java")
                 for path in (source, copy):
                     target = root / path
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(b"same bytes\n")
+                    target.write_bytes(same if path == source else
+                                       prepare.android_consumer_source(Path(name).name, same))
                 originals[str(source)] = digest
-                generated[str(copy)] = {"source": str(source), "sha256": digest}
+                generated[str(copy)] = {"source": str(source),
+                                        "sha256": hashlib.sha256((root / copy).read_bytes()).hexdigest()}
             first, second = list(generated)[:2]
             generated[first]["source"] = generated[second]["source"]
             with self.assertRaisesRegex(ValueError, "mapping"):

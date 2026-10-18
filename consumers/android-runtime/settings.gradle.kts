@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 rootProject.name = "dyn4k-android-runtime"
 include(":app")
 include(":optimized")
+include(":full")

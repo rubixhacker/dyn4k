@@ -61,7 +61,7 @@ def main():
     if commit != prepared["candidate_commit"] or command(
             ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"]).strip():
         raise ValueError("optimized source is dirty or differs from prepared candidate commit")
-    for artifact in prepared["staged"].values():
+    for artifact in (*prepared["staged"].values(), *prepared["staged_roots"].values()):
         if sha256(Path(artifact["path"])) != artifact["sha256"]:
             raise ValueError("staged AAR checksum changed")
     verify_consumer_sources(root, prepared)
@@ -97,7 +97,8 @@ def main():
               "source_tree": command(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip(),
               "runtime": identity, "build_type": build_type,
               "prepared_manifest": {"path": str(args.prepared), "sha256": prepared_checksum},
-              "staged": prepared["staged"], "consumer_sources": prepared["consumer_sources"],
+              "staged": prepared["staged"], "staged_roots": prepared["staged_roots"],
+              "consumer_sources": prepared["consumer_sources"],
               "generated_consumer_sources": prepared["generated_consumer_sources"],
               "provider_graph": graph_snapshot,
               "app_apk": app_snapshot, "test_apk": test_snapshot}

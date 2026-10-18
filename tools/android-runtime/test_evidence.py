@@ -1,9 +1,23 @@
 import unittest
+import tempfile
+import hashlib
+from pathlib import Path
 
 from evidence import parse_instrumentation, validate_lane
+from run import verify_installed_apk
 
 
 class InstrumentationEvidenceTest(unittest.TestCase):
+    def test_installed_apk_hash_rejects_wrong_device_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            apk = Path(temporary) / "installed-base.apk"
+            apk.write_bytes(b"device APK")
+            digest = hashlib.sha256(b"device APK").hexdigest()
+            self.assertEqual(verify_installed_apk(apk, digest)["sha256"], digest)
+            apk.write_bytes(b"forged APK")
+            with self.assertRaisesRegex(ValueError, "installed APK differs"):
+                verify_installed_apk(apk, digest)
+
     def test_accepts_distinct_executed_consumer_and_portable_cases(self):
         raw = """INSTRUMENTATION_STATUS: class=ConsumerJourneyTest
 INSTRUMENTATION_STATUS: test=worldAndCallbacks

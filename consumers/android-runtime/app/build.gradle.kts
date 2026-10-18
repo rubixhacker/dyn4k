@@ -30,7 +30,7 @@ android {
     }
     testBuildType = providers.gradleProperty("runtimeTestBuildType").getOrElse("debug")
     testOptions { animationsDisabled = true }
-    sourceSets.getByName("androidTest").java.srcDir(layout.buildDirectory.dir("generated/consumer-java").get().asFile)
+    sourceSets.getByName("androidTestBaseline").java.srcDir(layout.buildDirectory.dir("generated/consumer-java").get().asFile)
 }
 
 dependencies {
@@ -44,6 +44,7 @@ dependencies {
     androidTestImplementation("com.google.errorprone:error_prone_annotations:2.50.0")
     androidTestImplementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.20")
     "androidTestCandidateImplementation"(files(providers.gradleProperty("portableSuiteJar").get()))
+    "androidTestCandidateImplementation"(files(rootProject.layout.projectDirectory.file("full/build/generated/full-consumers.jar")))
     "androidTestCandidateImplementation"("org.jetbrains.kotlin:kotlin-test-junit:2.4.20")
 }
 
