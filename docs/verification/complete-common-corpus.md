@@ -10,6 +10,8 @@ The reviewed original audit has 2,385 distinct executed Java identities. The che
 
 The existing selected probe retains 1,066 core JVM identities and 47 facade JVM identities. Its six-host selection totals 6,668 executions. It accepts other passing XML identities and therefore cannot detect a missing unselected World, joint, or detection test. The full gate requires every source-derived identity exactly once on each applicable host and rejects every unexpected identity.
 
+The source manifest keeps package and class names without a host prefix. Gradle's Linux, JS, and Wasm XML adds the task name to `classname`. The gate applies that prefix to each host's expected identities. Retained Linux World XML, SHA-256 `a0ab672ba4d1c3bbbfa9cfc41f20c6b3f92f23387831239ad491d9c63ea135bb`, has 65 identities within the current source inventory. Its two failures are historical diagnostics.
+
 ## Run at a combined source head
 
 Regenerate the manifest after any test-source change. Review and reconcile the original map if a reviewed mapping report changes. Then commit the manifest and map before starting the six-host run. The `run` command requires a clean checkout at the candidate SHA, deletes old matching XML, runs all 12 tasks with `--rerun-tasks`, records the invocation window, and writes the raw XML hashes into a binding receipt. The verifier checks the pinned original source and reviewed report hashes again. It writes `UNPASSED` if the command or any report fails.

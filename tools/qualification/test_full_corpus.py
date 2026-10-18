@@ -191,6 +191,16 @@ class FullCorpusGateTest(unittest.TestCase):
                            if group["id"] in {item["id"] for item in full_corpus.GROUPS}]
         self.assertEqual(6668, sum(len(qualify.expected_probe_cases(probe, group))
                                    for group in selected_groups))
+        for selected_group in selected_groups:
+            full_group = next(group for group in full_corpus.GROUPS
+                              if group["id"] == selected_group["id"])
+            self.assertTrue(set(qualify.expected_probe_cases(probe, selected_group)).issubset(
+                full_corpus.expected_cases(manifest, full_group)), selected_group["id"])
+        linux_group = next(group for group in full_corpus.GROUPS
+                           if group["id"] == "core-linuxX64")
+        self.assertIn(("linuxX64Test.org.dyn4j.coverage.world.core.CollisionWorldCoreCoverageTest",
+                       "createSuccess[linuxX64]"),
+                      full_corpus.expected_cases(manifest, linux_group))
         for group_id, minimum_full, selected_count in (("core-jvm", 2444, 1066),
                                                         ("jvm", 61, 47)):
             group = next(item for item in full_corpus.GROUPS if item["id"] == group_id)

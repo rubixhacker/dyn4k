@@ -22,6 +22,7 @@ HOSTS = (
 )
 GROUPS = tuple({"id": ("core-" if module == "dyn4k-core" else "") + host,
                 "module": module, "host": host, "suffix": suffix,
+                "class_prefix": "" if host in ("jvm", "androidHost") else task + ".",
                 "pattern": f"{module}/build/test-results/{task}/TEST-*.xml"}
                for host, task, suffix in HOSTS
                for module in ("dyn4k-core", "dyn4k"))
@@ -184,7 +185,8 @@ def source_tree_digest(source_files):
 
 
 def expected_cases(manifest, group):
-    return {(case["classname"], case["method"] + group["suffix"])
+    return {(group["class_prefix"] + case["classname"],
+             case["method"] + group["suffix"])
             for case in manifest["cases"]
             if case["module"] == group["module"] and group["host"] in case["hosts"]}
 
