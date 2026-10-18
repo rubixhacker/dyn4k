@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -132,14 +133,45 @@ def validate_completion(raw, nonce):
         raise ValueError("producer completion marker is missing")
 
 
-def simulator_protocol_bytes(raw, bundle_id, observed_pid):
-    first = raw.partition(b"\n")[0]
-    match = re.fullmatch(re.escape(bundle_id).encode() + rb": ([1-9][0-9]*)", first)
+def validate_simctl_launch_help(help_text):
+    if ("--stdout=<path>" not in help_text or "--stderr=<path>" not in help_text
+            or "Redirect the application's standard output to a file" not in help_text
+            or "Redirect the application's standard error to a file" not in help_text):
+        raise ValueError("selected simctl lacks separate app stdout/stderr redirection")
+
+
+def simulator_launch_pid(launch_stdout, bundle_id):
+    match = re.fullmatch(re.escape(bundle_id).encode() + rb": ([1-9][0-9]*)\r?\n",
+                         launch_stdout)
     if not match:
-        raise ValueError("simulator console PID header is missing or malformed")
-    if int(match.group(1)) != observed_pid:
+        raise ValueError("simulator OS launch receipt is missing, malformed, or ambiguous")
+    return int(match.group(1))
+
+
+def simulator_protocol_bytes(raw, launch_stdout, bundle_id, observed_pid):
+    if simulator_launch_pid(launch_stdout, bundle_id) != observed_pid:
         raise ValueError("simulator launch PID differs from observed process image")
-    raise ValueError("simctl --console stdout-to-PID origin is unverified; Mac control required")
+    if not raw.startswith(b"DYN4K\t"):
+        raise ValueError("simulator producer stdout contains non-protocol or spoofed launch text")
+    return raw
+
+
+def validate_installed_bundle(selected, installed):
+    def files(root):
+        if not root.is_dir() or root.is_symlink():
+            raise ValueError("simulator app package is missing or substituted")
+        result = {}
+        for item in root.rglob("*"):
+            if item.is_symlink():
+                raise ValueError("simulator app package contains a substituted symlink")
+            if item.is_file():
+                result[str(item.relative_to(root))] = capture.digest(item)
+        return result
+
+    expected = files(selected)
+    if not expected or files(installed) != expected:
+        raise ValueError("installed simulator package bytes differ from selected app")
+    return expected
 
 
 def validate_elf_abi(path, target):
@@ -226,31 +258,29 @@ def producer_arguments(scenario, inventory, artifacts, steps, warmup, nonce):
             artifacts["dyn4k"]["sha256"], inventory["build"], nonce]
 
 
-def apple_process_image(executable):
+def apple_process_path(pid):
     library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-    library.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32,
-                                     ctypes.c_void_p, ctypes.c_int]
-    library.proc_listpids.restype = ctypes.c_int
     library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
     library.proc_pidpath.restype = ctypes.c_int
-    pids = (ctypes.c_int * 65536)()
-    count = library.proc_listpids(1, 0, pids, ctypes.sizeof(pids)) // ctypes.sizeof(ctypes.c_int)
-    matches = []
-    for pid in pids[:count]:
-        if pid <= 0:
-            continue
-        buffer = ctypes.create_string_buffer(4096)
-        if library.proc_pidpath(pid, buffer, len(buffer)) > 0:
-            path = Path(os.fsdecode(buffer.value))
-            if path == executable and path.is_file() and capture.digest(path) == capture.digest(executable):
-                matches.append((pid, path))
-    if len(matches) != 1:
-        raise ValueError("installed simulator process image was not uniquely observable")
-    return {"pid": matches[0][0], "path": str(matches[0][1]),
-            "sha256": capture.digest(matches[0][1]), "method": "proc_listpids/proc_pidpath"}
+    buffer = ctypes.create_string_buffer(4096)
+    if library.proc_pidpath(pid, buffer, len(buffer)) <= 0:
+        return None
+    return Path(os.fsdecode(buffer.value))
 
 
-def run_simulator(args, inventory, harness, producer):
+def apple_process_image(executable, pid):
+    if pid <= 0:
+        raise ValueError("simulator OS launch PID is invalid")
+    path = apple_process_path(pid)
+    if path != executable or not path.is_file():
+        raise ValueError("simulator launch PID does not identify installed process image")
+    observed_sha = capture.digest(path)
+    validate_process_image(observed_sha, capture.digest(executable))
+    return {"pid": pid, "path": str(path), "sha256": observed_sha,
+            "method": "simctl-launch-pid/proc_pidpath"}
+
+
+def run_simulator(args, inventory, harness, producer, nonce):
     if not args.udid:
         raise ValueError("set --udid for the selected Apple simulator")
     xcode = setup_command(args.archive, "apple-xcode", ["xcodebuild", "-version"]).stdout
@@ -264,44 +294,91 @@ def run_simulator(args, inventory, harness, producer):
     expected_arch = "x86_64" if args.target == "iosX64" else "arm64"
     if architecture != [expected_arch]:
         raise ValueError("Apple executable architecture differs from selected simulator")
+    help_result = setup_command(args.archive, "apple-launch-help", ["xcrun", "simctl", "help", "launch"])
+    validate_simctl_launch_help(help_result.stdout + help_result.stderr)
     app = inventory["app_bundle"]
     bundle = inventory["bundle_id"]
     setup_command(args.archive, "apple-install", ["xcrun", "simctl", "install", args.udid, app], timeout=120)
     container = setup_command(args.archive, "apple-container",
                               ["xcrun", "simctl", "get_app_container", args.udid, bundle, "app"]).stdout.strip()
-    installed = Path(container) / harness.name
+    installed_app = Path(container)
+    installed = installed_app / harness.name
+    installed_bundle = validate_installed_bundle(Path(app), installed_app)
     if not installed.is_file() or capture.digest(installed) != capture.digest(harness):
-        raise ValueError("installed simulator package bytes differ from selected app")
-    launch = ["xcrun", "simctl", "launch", "--console", "--terminate-running-process",
+        raise ValueError("installed simulator executable differs from selected link")
+    data_container = Path(setup_command(args.archive, "apple-data-container",
+        ["xcrun", "simctl", "get_app_container", args.udid, bundle, "data"]).stdout.strip())
+    if not data_container.is_absolute() or not data_container.is_dir() or data_container.is_symlink():
+        raise ValueError("simulator app data container is missing or invalid")
+    stdout_path = data_container / f"dyn4k-performance-{nonce}.stdout"
+    stderr_path = data_container / f"dyn4k-performance-{nonce}.stderr"
+    if stdout_path.exists() or stderr_path.exists():
+        raise ValueError("simulator output paths already exist")
+    launch = ["xcrun", "simctl", "launch", f"--stdout={stdout_path}",
+              f"--stderr={stderr_path}", "--terminate-running-process",
               args.udid, bundle, *producer]
     started = time.monotonic_ns()
-    process = subprocess.Popen(launch, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
     image = None
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline and process.poll() is None:
-        try:
-            image = apple_process_image(installed)
-            break
-        except ValueError:
-            time.sleep(0.02)
     try:
-        stdout, stderr = process.communicate(timeout=args.timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate()
-        (args.archive / "stdout.bin").write_bytes(stdout)
-        (args.archive / "stderr.bin").write_bytes(stderr)
-        raise ValueError("simulator producer exceeded capture timeout")
-    (args.archive / "stdout.bin").write_bytes(stdout)
-    (args.archive / "stderr.bin").write_bytes(stderr)
+        setup_command(args.archive, "apple-launch", launch, timeout=args.timeout)
+        launch_stdout = (args.archive / "setup/apple-launch.stdout.bin").read_bytes()
+        pid = simulator_launch_pid(launch_stdout, bundle)
+        deadline = time.monotonic() + min(args.timeout, 15)
+        while time.monotonic() < deadline:
+            path = apple_process_path(pid)
+            if path == installed:
+                image = apple_process_image(installed, pid)
+                break
+            if path is not None:
+                raise ValueError("simulator launch PID identifies another process image")
+            time.sleep(0.005)
+        if image is None:
+            raise ValueError("simulator launch PID process image was not observable")
+        deadline = time.monotonic() + args.timeout
+        while time.monotonic() < deadline:
+            path = apple_process_path(pid)
+            if path is None:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError as error:
+                    raise ValueError("simulator process exit cannot be observed") from error
+                raise ValueError("simulator PID is alive without an observable image")
+            if path != installed:
+                raise ValueError("simulator process PID changed image before completion")
+            time.sleep(0.01)
+        else:
+            raise ValueError("simulator producer exceeded capture timeout")
+    finally:
+        output_error = None
+        for path, name in ((stdout_path, "stdout.bin"), (stderr_path, "stderr.bin")):
+            if path.is_symlink():
+                output_error = "simulator output path is a substituted symlink"
+                data = b""
+            else:
+                data = path.read_bytes() if path.is_file() else b""
+            (args.archive / name).write_bytes(data)
+        if output_error:
+            raise ValueError(output_error)
+    stdout = (args.archive / "stdout.bin").read_bytes()
+    stderr = (args.archive / "stderr.bin").read_bytes()
+    if not stdout_path.is_file() or not stderr_path.is_file():
+        raise ValueError("simulator redirected producer output is missing")
+    simulator_protocol_bytes(stdout, launch_stdout, bundle, image["pid"])
     ended = time.monotonic_ns()
-    validate_process_image(image["sha256"] if image else None, capture.digest(harness))
-    if process.returncode:
-        raise ValueError(f"simulator producer exited {process.returncode}: {stderr.decode(errors='replace')[:300]}")
-    return stdout, stderr, {"command": launch, "exit_code": process.returncode,
+    return stdout, stderr, {"command": launch, "launch_exit_code": 0,
+                            "app_exit_code": None,
                             "image": image, "runtime": device, "xcode": xcode.strip(),
                             "bundle_id": bundle,
                             "installed_image_sha256": capture.digest(installed),
+                            "installed_bundle_sha256": installed_bundle,
+                            "linked_sha256": inventory["linked_sha256"],
+                            "launch": {"pid": image["pid"], "method": "simctl-redirected-files",
+                                       "stdout_sha256": capture.digest(args.archive / "setup/apple-launch.stdout.bin")},
+                            "output": {"stdout_path": str(stdout_path), "stderr_path": str(stderr_path),
+                                       "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+                                       "stderr_sha256": hashlib.sha256(stderr).hexdigest()},
                             "started_ns": started, "ended_ns": ended}
 
 
@@ -328,6 +405,7 @@ def run_android(args, inventory, harness, producer, nonce):
     launch = prefix + ["shell", "sh -c " + shlex.quote(guest)]
     started = time.monotonic_ns()
     process = subprocess.Popen(launch, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+    stdout, stderr = b"", b""
     try:
         ready, _, _ = select.select([process.stdout], [], [], min(args.timeout, 15))
         if not ready:
@@ -357,13 +435,18 @@ def run_android(args, inventory, harness, producer, nonce):
     except Exception:
         process.kill()
         stdout, stderr = process.communicate()
-        (args.archive / "stdout.bin").write_bytes(stdout)
-        (args.archive / "stderr.bin").write_bytes(stderr)
         raise
     finally:
-        setup_command(args.archive, "android-remove", prefix + ["shell", "rm", "-f", remote], check=False)
-    (args.archive / "stdout.bin").write_bytes(stdout)
-    (args.archive / "stderr.bin").write_bytes(stderr)
+        (args.archive / "stdout.bin").write_bytes(stdout)
+        (args.archive / "stderr.bin").write_bytes(stderr)
+        try:
+            removal = setup_command(args.archive, "android-remove",
+                                    prefix + ["shell", "rm", "-f", remote], check=False)
+            cleanup = ({"status": "complete"} if removal.returncode == 0 else
+                       {"status": "failed", "error": f"android-remove exited {removal.returncode}"})
+        except (OSError, ValueError) as error:
+            cleanup = {"status": "failed", "error": str(error)}
+        (args.archive / "cleanup.json").write_text(json.dumps(cleanup, indent=2) + "\n")
     ended = time.monotonic_ns()
     if process.returncode:
         raise ValueError(f"Android producer exited {process.returncode}: {stderr.decode(errors='replace')[:300]}")
@@ -372,6 +455,7 @@ def run_android(args, inventory, harness, producer, nonce):
                                       "method": "procfs_exe/sha256sum"},
                             "runtime": runtime, "serial": serial, "adb_port": port,
                             "adb_sha256": capture.digest(adb), "deployed_sha256": deployed,
+                            "cleanup": cleanup,
                             "started_ns": started, "ended_ns": ended}
 
 
@@ -391,7 +475,7 @@ def run(args):
         (args.archive / "inventory.json").write_bytes(inventory_path.read_bytes())
         (args.archive / "input.json").write_text(json.dumps({"producer": producer, "nonce": nonce}, indent=2) + "\n")
         if args.target in APPLE_SIMULATORS:
-            stdout, stderr, process = run_simulator(args, inventory, harness, producer)
+            stdout, stderr, process = run_simulator(args, inventory, harness, producer, nonce)
         elif args.target in ANDROID_ABIS:
             stdout, stderr, process = run_android(args, inventory, harness, producer, nonce)
         else:
@@ -405,8 +489,28 @@ def run(args):
         receipt["artifacts"] = artifacts
         if process["ended_ns"] <= process["started_ns"] or process["image"]["pid"] <= 0:
             raise ValueError("process PID or monotonic interval is invalid")
-        protocol_bytes = (simulator_protocol_bytes(stdout, process["bundle_id"], process["image"]["pid"])
-                          if args.target in APPLE_SIMULATORS else stdout)
+        if args.target in APPLE_SIMULATORS:
+            launch_file = args.archive / "setup/apple-launch.stdout.bin"
+            if not launch_file.is_file():
+                raise ValueError("simulator OS launch receipt is missing")
+            launch = process.get("launch")
+            output = process.get("output")
+            if not isinstance(launch, dict) or launch.get("method") != "simctl-redirected-files":
+                raise ValueError("simulator OS launch receipt origin is missing")
+            if launch.get("stdout_sha256") != capture.digest(launch_file):
+                raise ValueError("simulator OS launch receipt bytes changed")
+            if launch.get("pid") != process["image"]["pid"]:
+                raise ValueError("simulator launch PID differs from observed process image")
+            if not isinstance(output, dict) or output.get("stdout_sha256") != hashlib.sha256(stdout).hexdigest() \
+                    or output.get("stderr_sha256") != hashlib.sha256(stderr).hexdigest():
+                raise ValueError("simulator redirected producer output bytes changed")
+            if process.get("linked_sha256") != inventory["linked_sha256"] \
+                    or process.get("installed_bundle_sha256") != inventory["bundle_sha256"]:
+                raise ValueError("simulator installed package or link differs from inventory")
+            protocol_bytes = simulator_protocol_bytes(
+                stdout, launch_file.read_bytes(), process["bundle_id"], process["image"]["pid"])
+        else:
+            protocol_bytes = stdout
         validate_completion(protocol_bytes, nonce)
         clocks, rows, provider, summary = capture.validate_protocol(
             protocol_bytes, scenario, inventory["source_sha"], inventory["producer_tree"],

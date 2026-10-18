@@ -58,6 +58,9 @@ Every executed setup command also writes `setup/<name>.stdout.bin`,
 `setup/<name>.stderr.bin`, and `setup/<name>.json` in the archive before its
 exit status or timeout is checked. The JSON records the command, exit status,
 timeout, and host monotonic interval. Commands not reached have no record.
+Android producer streams are archived before remote removal. The separate
+`cleanup.json` records removal success or failure; a cleanup timeout does not
+discard completed producer output.
 
 On macOS, select one of `iosSimulatorArm64`, `iosX64`,
 `tvosSimulatorArm64`, or `watchosSimulatorArm64`. Stage the corresponding
@@ -75,18 +78,24 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --archive /absolute/new/archive/ios-native-direct --steps 30 --warmup 3
 ```
 
-The launcher checks Xcode 26.4.1, host architecture, simulator family, app
-installation, installed image bytes, observed `proc_pidpath`, PID, and
-monotonic interval. A missing process observation fails the capture.
-Simulator protocol acceptance currently fails closed: `simctl launch
---console` stdout has no verified association to the observed process PID.
-Even a matching `bundle: PID` line cannot pass until a Mac control proves
-that line comes from `simctl` and cannot be supplied by app stdout. On a Mac,
-capture a real launch for each simulator family and compare the `simctl`
-reported PID with `proc_pidpath`; also inject app output that omits, spoofs,
-and mismatches that line. If the line is app controlled or has no reliable
-origin, use a separate OS launch receipt and app output channel before
-enabling protocol acceptance. Preserve the raw archive from each control.
+The launcher checks Xcode 26.4.1, host architecture, simulator family,
+selected and installed app package bytes, the linked executable, and the
+observed `proc_pidpath` at the PID returned by `simctl launch`. It checks the
+selected Xcode's `simctl help launch` for separate app stdout and stderr file
+redirection. The app writes to unique files in its data container. The OS
+launch receipt remains in `setup/apple-launch.stdout.bin`; the app streams
+are copied to `stdout.bin` and `stderr.bin`. A missing, ambiguous, spoofed,
+or mismatched OS receipt, process image, output file, or completion fails the
+capture. The app exit code is unavailable from this detached launch and is
+recorded as such. Apple directs users to the installed tool's help for its
+current behavior in the [Xcode command-line reference](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference).
+
+The separate redirect behavior and process lifetime still need an observed
+short capture on each matching hosted Mac simulator family. The Linux host
+cannot run `xcrun`. If a hosted `simctl` lacks the redirect flags, writes app
+bytes into the launch receipt, or ends the app before `proc_pidpath` can
+observe the PID, the adapter fails closed. Preserve the raw archive and
+report the exact unsupported behavior before changing the method.
 Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and
 `watchosDeviceArm64` app builds preserve source scope. Device deployment
 requires a selected physical device and signing identity. Their runtime
