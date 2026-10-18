@@ -1,6 +1,7 @@
 # Windows collision focus routes
 
 Dispatch `.github/workflows/windows-collision-focus.yml` at an exact reviewed commit and select one route.
+The workflow passes the selected route to `run-focused-controls.ps1`. It hashes that committed script in `control-source-sha256.txt` with the other control sources.
 
 - `historical-pc53` retains the original six fixture suites, the nine exact ordinary assertion failures, and the separate PC53 before/active/restored invocation. Its precision validator requires the historical nine-failure set. It is evidence about the earlier defect, not a production pass.
 - `corrected-production` requires all 24 original fixture cases and six diagnostic cases to pass in one `mingwX64Test` invocation. It retains the same 72 Native and 72 pinned dyn4j Java trace rows, seven Native/Java scalar rows, and the actual debugTest PE. The scalar gate requires seven ordered exact x/y inputs and well-formed raw computed fields. Computed scalar differences remain observations because `WindowsCollisionScalarControl.kt` calls plain `sqrt`. It compiles `SqrtOperationNativeProbe.kt` with the committed common and Native `NearestSqrt` sources in MinGW `-g`, default, and `-opt` modes. Each executable must finish with seven exact input rows, 18 neighbor rows, seven edge rows, and the complete PASS marker.

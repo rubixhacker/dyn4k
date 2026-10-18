@@ -604,14 +604,14 @@ def ordinary_selection_self_test():
     )
     diagnostic = repository / "dyn4k-core/diagnostic/windows-collision/WindowsCollisionPrecisionControlTest.kt"
     build = (repository / "dyn4k-core/build.gradle.kts").read_text(encoding="utf-8")
-    workflow = (repository / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
+    focused = (repository / "tools/diagnostic/windows_collision/run-focused-controls.ps1").read_text(encoding="utf-8")
     gate = (
         'if (providers.gradleProperty("windowsCollisionPrecisionDiagnostic").orNull == "true") {',
         'named("mingwX64Test") {',
         'kotlin.srcDir("diagnostic/windows-collision")',
     )
     if ordinary.exists() or not diagnostic.is_file() or not all(part in build for part in gate) \
-            or "-PwindowsCollisionPrecisionDiagnostic=true" not in workflow:
+            or "-PwindowsCollisionPrecisionDiagnostic=true" not in focused:
         raise AssertionError("the precision tests are not restricted to the diagnostic source route")
 
     sys.path.insert(0, str(repository / "tools/qualification"))

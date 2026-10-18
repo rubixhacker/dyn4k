@@ -32,13 +32,13 @@ def validate_source_vectors() -> None:
     kotlin_text = (source_dir / "WindowsCollisionScalarControl.kt").read_text(encoding="utf-8")
     java_text = (source_dir / "WindowsCollisionScalarJavaControl.java").read_text(encoding="utf-8")
     runner_text = (source_dir / "run-scalar-control.ps1").read_text(encoding="utf-8")
-    workflow_text = (source_dir.parents[2] / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
+    focused_text = (source_dir / "run-focused-controls.ps1").read_text(encoding="utf-8")
     kotlin_vectors = tuple((case_id, int(x), int(y)) for case_id, x, y in KOTLIN_VECTOR.findall(kotlin_text))
     java_vectors = tuple((case_id, int(x), int(y)) for case_id, x, y in JAVA_VECTOR.findall(java_text))
     if kotlin_vectors != EXPECTED or java_vectors != EXPECTED:
         raise ScalarValidationError("validator vectors differ from the committed Kotlin or Java control vectors")
-    if runner_text.count(VERSION_TOKEN.pattern) != 1 or workflow_text.count(VERSION_TOKEN.pattern) != 1:
-        raise ScalarValidationError("compiler version token checks differ across the runner and workflow")
+    if runner_text.count(VERSION_TOKEN.pattern) != 1 or focused_text.count(VERSION_TOKEN.pattern) != 1:
+        raise ScalarValidationError("compiler version token checks differ across the runner and focused script")
 
 
 def _parse(text: str, provider: str, label: str) -> list[tuple[str, str, str]]:
