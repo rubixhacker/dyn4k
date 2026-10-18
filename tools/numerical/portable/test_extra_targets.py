@@ -1,3 +1,4 @@
+import base64
 import json
 import hashlib
 import gzip
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +17,42 @@ from extra_targets import (ROUTES, Rejected, bounded_gradle_filter, browser_lock
                            browser_methods, collect_trace, isolated_karma_port, native_methods,
                            observed_counts, verify_inputs, verify_methods, verify_process,
                            wasmtime_methods)
+
+
+ARCHIVED_KARMA_TAILS = {
+    "js": (
+        "eNq1Vd2P0zgQf89fYUVUbaRNI5B4IBU6rWCRjjsE0i7ioRud3GSamnVsnz92KUv/d8axk6Z7q4MHyEMbj+fzN7+Z1FJsWbtU3LVMGPKS1KeCb9/Iulolp9Klcma30PCvYxoW8xtpORP5HWzyHXAF2hQNM7a4obqjebzVoKS2oOdZtkoGf1y2Lapj2HVC8Lnvf/1j9wpK8sMQts7RR06VAtF452ejh6JoYEsdt4TTvXR2vAjHktzHIHNFLSYm5mckvqFstp4196/Pry6u/nx3cShniqxndVWSWTXr5uTQOzsk1QNgfgd+KFa0vskxZ+VsgK8oSBTHeMnWidoyKUitgVr4FG5f9ZeLDIHlYKMuJulx7mTji2/gFrhUHQg79+BpMJLf4k3oBWo5DqaMDSIkFWj3TxSnvbDC34O3jeWhcnWWDLaDJx39jNrJIVRipNM1kI4qM+AULJe9SQBrwgww2Lzietn98dk8KY4NdwZjrdPgLkd3SA2KpEirow6IrcTbkqRKQ5ocsrE1iIOVkiM4W8oNjHLWCqnhE9WCifbI1OINZRwaYiWSRhuYVBFTKs7rGoxBK8I6z33MGCwlDfa8tnxPmCFOGKf6uWjI9UIKlCotkQF2T2hvTqQmDVasXW2d7p0ZMhpdZ0VSrRBK8uBBWKWyrGNfqWfFf+5jcVOdI3dPpEhgj31qFGf21c6JG5OWASPfQAwkJPZcQaDf28uPQoDPnOr9JXSslhzjrxYDQRchSBZZgSdjia0vtJb6Q88fTORn5x681TAhc2zmpLaTWRNwdxpkkWVTZWOpnUxvOPrSw6S/33zG+pYU29kOFQSlM3J6OvL0LlImgjXhoM9iEIdFkiETB2BG5sEXrJf5wTRxZJH8Uv3tB/b8jjKcAqQFOj70UxQaUJKLL1ZT7AMm1gDZatmRv3oUT3YCeke1t2ZiisPR/KJ+Dstp0slJk5LI0J21ypRF0TK7c5tlLbsiao3/zBgHpnj67MXzpxP/H6itd5f9xL2jKrz8DG2GXfo8b2Dj2h8x5rEwA3H+1zDGWY62r+H2CrdL5N6RJGHRvcFVImgHV9Apjtsb19OabnAPOwu5X8j9RsOP065KI2FOGePXK+B+EDGjFXJioJEBu7iPCZWPfx78GkyS73Wmpbo="
+    ),
+    "wasmJs": (
+        "eNq1Vm1v2zYQ/q5fQQgzJAO2hQ4o0MkYhqBOh6RpXSwe+sERAlo620wkkiOppJ7r/76jRNlyYjtdsOlDYh3v9eHdc0oFn7PFQOblgnFNfiXpvuD7dzJNht6+dCBLvQwV/FUyBWFwL0zOeP8RZv0l5BKUjjKmTXRPVUH77lSBFMqACrrdodf4y8VigeoYduoRfNbVX/uYlYSYvBjCpH300adSAs+s897WQxRlMKdlbkhOV6I024P6NSZrFySQ1GBiPOgR9wtlnWknW4/OJueTi0/nm7gjybSTJjHpJJ0iIJvK2cZLngDzf+CHYknT+z7mLEtTwxdFxIldPG9e8tQwwUmqgBr4Wp++rw7DbgvY9pODcfaY+GEVQgqRWZAyeIBcyAK4CXpHVBVokT+g9jFflbcyBx27Cz/8+Bxj3jpV/6hicuRkcyw/Bz8GT3reqfxOVaBc/v86ukPnSlDs1DrCDo2gXbLtRCVS0HoA/GEafBxPri4+307GY/z3++3o4o8gSbzNwTib4UGxbRktSpUCKajUTUPWAQdVTXVXtkYQNE5JdDMofrvTP0W7skqNAE392l0f3eEM2pr8FqrA5wJPY+JLBb636W5nABvJCJFjx81prmErZwsuFHylijO+2FFC9IGyHDJiBE6n0tCqwqUUnaUWKrQirLAkgxmDoSTD4UpNviJMk5LrUlYElJGbUHCUIsI4amZFaGVOhCIZVqzK1JSqcqbJ1uimG3nJEGF8iivCKqRhBfub2vF7du6Ka+vsSGJPikxhsfe1zJl5vyz5vfbjGiMPLxUDcYHNK6Ge88vrPzkHmzlVq2soWCpyjD8MGyYI6yDN7OObNsSk50oJ9aUaBEzkRwkWrFVDRUF36LVq2yM1Do/7QcJut62sDTUtmqxfbel1N49nd1jfgOJ1LpoKaqUe2X/b9emjaxkHVqsHbRaNuGbsLnZiA8zwJbAait3B5DuR3x2SluII5ozDFlSnNGiLTyPW1gzXJ5gR+8MuLTFvCAJb5PJ6/BlRsT3L5qswKHETWndZexs+NR8BF6+1zd691pLxC8Ffa3yn07G0l/VC0e6m96+6YRn4hr3N7BbT251nhLyy2+3skTJkPKQAbKJNxZj1sMXk/JtRFIPiDWZA5koU5GM1MXuLFr2j2qVumSIRZv/R7D5vx6A1kJ5jo6UxUsdRtGBmWc4GqSgip7X9z7QuQUdvfv7l7ZuW/y/UpMvril0/UVn/+BGKaD5Q3vYzmJWLl9jhUJiGJE4aNmO1tR3BwwQ3ybOxqZfaB1wbnBYwgULm+EmEq2hKZ7iCSwN9u4ur7YVffMvEP9gy1crGXcBdRkPsiaaNNJhw7RKKD39z2ZXnef8Afzx1EA=="
+    ),
+}
+
+
+def archived_karma_config(loaded, port, console, method, target="js"):
+    runner = loaded.parent.parent / "node_modules/kotlin-web-helpers/dist/kotlin-test-karma-runner.js"
+    settings = {"singleRun": True, "autoWatch": False, "basePath": str(loaded.parent.parent),
+                "files": [str(runner), str(loaded)],
+                "frameworks": ["webpack-output", "mocha", "webpack"],
+                "client": {"args": ["--include", f"portable.{extra_targets.expected_class(method)}.{method}"]},
+                "browsers": ["ChromeHeadless"], "customLaunchers": {},
+                "failOnFailingTestSuite": False, "failOnEmptyTestSuite": False,
+                "reporters": ["karma-kotlin-reporter"],
+                "preprocessors": {str(runner): ["webpack", "sourcemap"],
+                                  str(loaded): ["webpack", "sourcemap"]},
+                "proxies": {}, "webpackCopy": []}
+    if target == "wasmJs":
+        settings.update(customContextFile=str(runner.parent / "static/context.html"),
+                        customDebugFile=str(runner.parent / "static/debug.html"))
+    generated = zlib.decompress(base64.b64decode(ARCHIVED_KARMA_TAILS[target])).decode()
+    patch = extra_targets.KARMA_REPORTER_PATCH.replace(
+        "__NUMERICAL_CAPTURE__", json.dumps(str(console)))
+    return ("\nmodule.exports = function(config) {\n\nconfig.set("
+            + json.dumps(settings, indent=2) + ");\n" + generated
+            + "// portable-port.js\n" + f"config.set({{port: {port}}});\n"
+            + "config.set({pingTimeout: 28800000, browserNoActivityTimeout: 28800000, "
+            "browserDisconnectTimeout: 28800000, browserSocketTimeout: 28800000});\n"
+            + patch + "\n\n\n\n}\n")
 
 
 class ExtraTargetSeamTest(unittest.TestCase):
@@ -97,11 +135,7 @@ class ExtraTargetSeamTest(unittest.TestCase):
                 loaded.write_bytes(binary.read_bytes())
                 port = 43000 + index
                 config = slot / "karma.conf.js"
-                config.write_text(f'files: ["{loaded}"];\nconfig.set({{port: {port}}});\n'
-                                  "config.set({pingTimeout: 28800000, browserNoActivityTimeout: 28800000, "
-                                  "browserDisconnectTimeout: 28800000, browserSocketTimeout: 28800000});\n"
-                                  + extra_targets.KARMA_REPORTER_PATCH.replace(
-                                      "__NUMERICAL_CAPTURE__", json.dumps(str(console))))
+                config.write_text(archived_karma_config(loaded, port, console, method))
                 profile = f"/tmp/karma-synthetic-{index:02}"
                 launch = {"command": [str(runner), f"--user-data-dir={profile}"],
                           "runner_sha256": extra_targets.digest(runner), "pid": index + 1,
@@ -165,6 +199,23 @@ class ExtraTargetSeamTest(unittest.TestCase):
             good = check(manifest)
             self.assertEqual(good.returncode, 0, good.stderr)
             self.assertEqual(json.loads(good.stdout)["cases"], 332)
+            first_config = Path(invocations[0]["karma_config"])
+            original_config = first_config.read_text()
+            for override in (
+                'config.set({files: []});\n',
+                'config.set({customLaunchers: {ChromeHeadless: {base: "Firefox"}}});\n',
+                'config.set = function() {}; config.set({browsers: []});\n',
+            ):
+                first_config.write_text(original_config + override)
+                altered = json.loads(json.dumps(manifest))
+                altered["browser_invocations"][0]["karma_config_sha256"] = extra_targets.digest(first_config)
+                self.assertNotEqual(check(altered).returncode, 0, override)
+            first_config.write_text(original_config.replace(
+                f'"{invocations[0]["loaded_input"]["source_path"]}"', '"/dev/null"', 1))
+            altered = json.loads(json.dumps(manifest))
+            altered["browser_invocations"][0]["karma_config_sha256"] = extra_targets.digest(first_config)
+            self.assertNotEqual(check(altered).returncode, 0, "initial file set changed")
+            first_config.write_text(original_config)
             for change in (
                 lambda value: value["browser_invocations"].pop(),
                 lambda value: value["browser_invocations"].__setitem__(0, value["browser_invocations"][1]),
@@ -222,9 +273,10 @@ class ExtraTargetSeamTest(unittest.TestCase):
                 packaged_wasm.write_bytes(b"linked-wasm-binary")
                 linked_wasm = linked.with_suffix(".wasm")
                 linked_wasm.write_bytes(packaged_wasm.read_bytes())
-                old_source = item["loaded_input"]["source_path"]
                 config = Path(item["karma_config"])
-                config.write_text(config.read_text().replace(old_source, str(loader)))
+                config.write_text(archived_karma_config(
+                    loader, item["karma_port"], Path(item["console_source"]["path"]),
+                    item["method"], "wasmJs"))
                 item["karma_config_sha256"] = extra_targets.digest(config)
                 item["loaded_input"] = {"path": str(loader), "sha256": extra_targets.digest(loader),
                                         "source_path": str(loader)}
@@ -682,20 +734,23 @@ class ExtraTargetSeamTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             generated = root / "karma.conf.js"
-            generated.write_text("config.set({port: 9876});\n")
-            with self.assertRaisesRegex(Rejected, "isolated Karma port"):
-                extra_targets.verify_karma_port(generated, 43210)
-            generated.write_text("config.set({port: 43210});\n")
-            with self.assertRaisesRegex(Rejected, "timeout"):
-                extra_targets.verify_karma_port(generated, 43210)
-            generated.write_text("config.set({port: 43210});\n"
-                                 "config.set({pingTimeout: 28800000, browserNoActivityTimeout: 28800000, "
-                                 "browserDisconnectTimeout: 28800000, browserSocketTimeout: 28800000});\n")
-            with self.assertRaisesRegex(Rejected, "reporter"):
-                extra_targets.verify_karma_port(generated, 43210)
-            generated.write_text(generated.read_text() + extra_targets.KARMA_REPORTER_PATCH.replace(
-                "__NUMERICAL_CAPTURE__", json.dumps(str(root / "numerical.jsonl"))))
-            extra_targets.verify_karma_port(generated, 43210)
+            method = "geometryCollisionBoundaryAndScale"
+            console = root / "numerical.jsonl"
+            loaded = root / "kotlin/dyn4k-portable-numerical-consumer-test.js"
+            valid = archived_karma_config(loaded, 43210, console, method)
+            checks = {"target": "js", "method": method, "browser": "ChromeHeadless",
+                      "loaded_input": str(loaded)}
+            generated.write_text(valid.replace("port: 43210", "port: 9876"))
+            with self.assertRaises(Rejected):
+                extra_targets.verify_karma_port(generated, 43210, console, **checks)
+            generated.write_text(valid.replace("pingTimeout: 28800000", "pingTimeout: 100"))
+            with self.assertRaises(Rejected):
+                extra_targets.verify_karma_port(generated, 43210, console, **checks)
+            generated.write_text(valid.replace("LineSeparatedReporter", "DisabledReporter"))
+            with self.assertRaises(Rejected):
+                extra_targets.verify_karma_port(generated, 43210, console, **checks)
+            generated.write_text(valid)
+            extra_targets.verify_karma_port(generated, 43210, console, **checks)
 
     def test_wasmtime_case_and_trace_require_finished_success(self):
         with tempfile.TemporaryDirectory() as directory:

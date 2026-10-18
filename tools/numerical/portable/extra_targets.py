@@ -305,6 +305,11 @@ KARMA_REPORTER_PATCH = "\n".join((
     "",
 ))
 
+KARMA_GENERATED_TAIL_SHA256 = {
+    "js": "edc90d0da0d2baf2275bc356a7eb4920c1473630b6e72d3b4936db2113e2476e",
+    "wasmJs": "61783fa22a49cc19e2df19e2634a476f6eb7d012fda3785beec9b792bf5ee296",
+}
+
 
 @contextmanager
 def isolated_karma_port(project, excluded=(), numerical_output=None):
@@ -336,20 +341,60 @@ def isolated_karma_port(project, excluded=(), numerical_output=None):
             config_dir.rmdir()
 
 
-def verify_karma_port(generated, port, numerical_output=None):
+def verify_karma_port(generated, port, numerical_output=None, *, target, method, browser,
+                      loaded_input=None):
     if not generated.is_file():
         raise Rejected("browser test did not load isolated Karma port")
     content = generated.read_text()
-    if f"config.set({{port: {port}}});" not in content:
-        raise Rejected("browser test did not load isolated Karma port")
-    if not all(f"{key}: 28800000" in content for key in
-               ("pingTimeout", "browserNoActivityTimeout", "browserDisconnectTimeout",
-                "browserSocketTimeout")):
-        raise Rejected("browser test did not load long-method timeout")
+    opening = "\nmodule.exports = function(config) {\n\nconfig.set("
+    if not content.startswith(opening) or target not in KARMA_GENERATED_TAIL_SHA256 or \
+            browser not in ("ChromeHeadless", "Firefox"):
+        raise Rejected("browser Karma generated configuration differs")
+    try:
+        settings, length = json.JSONDecoder().raw_decode(content[len(opening):])
+    except ValueError as error:
+        raise Rejected("browser Karma initial settings are invalid") from error
+    rest = content[len(opening) + length:]
+    marker = "// portable-port.js\n"
+    if not rest.startswith(");\n") or rest.count(marker) != 1:
+        raise Rejected("browser Karma generated configuration differs")
+    generated_tail, portable_tail = rest[3:].split(marker)
+    if hashlib.sha256(generated_tail.encode()).hexdigest() != KARMA_GENERATED_TAIL_SHA256[target]:
+        raise Rejected("browser Karma generated configuration differs")
     patch = KARMA_REPORTER_PATCH.replace(
         "__NUMERICAL_CAPTURE__", json.dumps(str(numerical_output or Path(generated).parent / "numerical.jsonl")))
-    if patch not in content:
-        raise Rejected("browser test did not load line-separated reporter")
+    expected_portable = (f"config.set({{port: {port}}});\n"
+                         "config.set({pingTimeout: 28800000, browserNoActivityTimeout: 28800000, "
+                         "browserDisconnectTimeout: 28800000, browserSocketTimeout: 28800000});\n"
+                         + patch + "\n\n\n\n}\n")
+    if portable_tail != expected_portable:
+        raise Rejected("browser Karma port, timeout, or reporter differs")
+    suffix = ("/kotlin/dyn4k-portable-numerical-consumer-test.js" if target == "js" else
+              "/static/load.mjs")
+    if not isinstance(settings, dict) or not isinstance(settings.get("files"), list) or \
+            len(settings["files"]) != 2 or not all(isinstance(value, str) for value in settings["files"]):
+        raise Rejected("browser Karma file set differs")
+    runner, loader = settings["files"]
+    if not Path(runner).is_absolute() or not runner.endswith(
+            "/kotlin-web-helpers/dist/kotlin-test-karma-runner.js") or \
+            not Path(loader).is_absolute() or not loader.endswith(suffix) or \
+            (loaded_input is not None and loader != loaded_input):
+        raise Rejected("browser Karma selected input differs")
+    expected = {"singleRun": True, "autoWatch": False,
+                "basePath": str(Path(loader).parent.parent), "files": [runner, loader],
+                "frameworks": ["webpack-output", "mocha", "webpack"],
+                "client": {"args": ["--include", f"portable.{expected_class(method)}.{method}"]},
+                "browsers": [browser], "customLaunchers": {},
+                "failOnFailingTestSuite": False, "failOnEmptyTestSuite": False,
+                "reporters": ["karma-kotlin-reporter"],
+                "preprocessors": {runner: ["webpack", "sourcemap"],
+                                  loader: ["webpack", "sourcemap"]},
+                "proxies": {}, "webpackCopy": []}
+    if target == "wasmJs":
+        expected.update(customContextFile=str(Path(runner).parent / "static/context.html"),
+                        customDebugFile=str(Path(runner).parent / "static/debug.html"))
+    if settings != expected:
+        raise Rejected("browser Karma effective file set or launcher differs")
 
 
 def bounded_gradle_filter(route, enabled):
@@ -972,9 +1017,11 @@ def verify_browser_invocations(manifest, route, cases):
         if digest(config) != item["karma_config_sha256"]:
             raise Rejected("browser Karma configuration differs")
         console = item.get("console_source") if console_capture else None
-        verify_karma_port(config, port, console["path"] if console else None)
         linked = item["linked_executable"]
         loaded = item["loaded_input"]
+        verify_karma_port(config, port, console["path"] if console else None,
+                          target=route.target, method=method, browser=browser,
+                          loaded_input=loaded["source_path"])
         if digest(Path(linked["path"])) != linked["sha256"] or \
                 digest(Path(loaded["path"])) != loaded["sha256"] or \
                 f'"{loaded["source_path"]}"' not in config.read_text():
@@ -1213,7 +1260,9 @@ def capture_browser_methods(args, route, result, output, runner, runner_sha,
                                               "source_path": str(linked_source)}
             if build["exit_code"] or build["timed_out"]:
                 raise Rejected(f"browser method task failed: {method}")
-            verify_karma_port(Path(item["karma_config"]), port, console)
+            verify_karma_port(Path(item["karma_config"]), port, console,
+                              target=route.target, method=method,
+                              browser="ChromeHeadless" if route.runtime == "Chromium" else "Firefox")
             if args.configuration == "optimized" and \
                     f"portable numerical test input: {linked_source}" not in Path(build["log"]).read_text():
                 raise Rejected("optimized browser method did not select its linked output")
