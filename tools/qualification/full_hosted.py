@@ -1832,6 +1832,18 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     lanes = receipt.get("configurations")
     if not isinstance(lanes, list) or [lane.get("configuration") for lane in lanes] != list(CONFIGS[target]):
         raise ValueError("both required configurations are absent, duplicated, or unordered")
+    if target == "jsSafari":
+        if ("source_xml_diagnostic" in receipt
+                or any("source_xml_diagnostic" in lane for lane in lanes)):
+            raise ValueError("passed Safari receipt contains failed source XML diagnostic metadata")
+        files = receipt.get("files")
+        if isinstance(files, list) and any(
+                isinstance(item, dict) and isinstance(item.get("path"), str)
+                and PurePosixPath(item["path"]).parts[:2]
+                in (("development", "diagnostic"), ("production", "diagnostic"),
+                    ("diagnostic", "source-xml"))
+                for item in files):
+            raise ValueError("passed Safari receipt contains failed source XML diagnostic member")
     if not isinstance(receipt.get("gradle_user_home"), str) or not receipt["gradle_user_home"]:
         raise ValueError("Gradle user home receipt is absent")
     if original_path(target, receipt["gradle_user_home"]) != expected_gradle_home(target, receipt):

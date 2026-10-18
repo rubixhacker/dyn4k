@@ -2367,6 +2367,68 @@ class FullHostedTests(unittest.TestCase):
                             archive, changed["candidate_sha"], "jsSafari",
                             candidate_repository=self.candidate_repository)
 
+    def test_public_safari_pass_rejects_failed_source_xml_diagnostics(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        self.assertEqual(72, len(self.safari_diagnostic_rows()))
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        archive = self.root.parent / (self.root.name + "-passing-diagnostic.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        member = self.root / "development/diagnostic/source-xml/dyn4k-core/TEST-all.xml"
+        root_member = self.root / "diagnostic/source-xml/dyn4k-core/TEST-all.xml"
+        source = self.root / "development/xml/dyn4k-core/TEST-all.xml"
+        for mutation in ("unverified-with-member", "unverified-without-member",
+                         "member-without-metadata", "root-member-without-metadata",
+                         "unavailable-metadata",
+                         "top-level-metadata"):
+            with self.subTest(mutation=mutation):
+                changed = json.loads(json.dumps(receipt))
+                retained = (root_member if mutation == "root-member-without-metadata"
+                            else member)
+                if mutation in ("unverified-with-member", "member-without-metadata",
+                                "root-member-without-metadata"):
+                    retained.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, retained)
+                if mutation in ("unverified-with-member", "unverified-without-member",
+                                "unavailable-metadata"):
+                    lane = changed["configurations"][0]
+                    process = lane["source_process"]
+                    diagnostic = {"status": "UNVERIFIED", "validation_error":
+                                  "Safari diagnostic case identities differ",
+                                  "source_pid": process["pid"],
+                                  "invocation_id": process["invocation_id"],
+                                  "source_started_ns": process["started_ns"],
+                                  "source_finished_ns": process["finished_ns"],
+                                  "reports": []}
+                    if mutation == "unavailable-metadata":
+                        diagnostic = {"status": "UNAVAILABLE", "reason": "unsafe source XML",
+                                      "validation_error": diagnostic["validation_error"]}
+                    elif mutation == "unverified-with-member":
+                        diagnostic["reports"] = [{"module": "dyn4k-core",
+                                                  "path": member.relative_to(
+                                                      self.root / "development").as_posix(),
+                                                  "sha256": full_hosted.sha256(member),
+                                                  "size": member.stat().st_size,
+                                                  "modified_ns": member.stat().st_mtime_ns}]
+                    lane["source_xml_diagnostic"] = diagnostic
+                elif mutation == "top-level-metadata":
+                    changed["source_xml_diagnostic"] = {"status": "UNVERIFIED"}
+                changed["files"] = full_hosted.archive_inventory(self.root)
+                try:
+                    with self.assertRaisesRegex(ValueError, "passed Safari.*diagnostic"):
+                        full_hosted.verify_raw_files(
+                            self.root, changed, manifest, consumer,
+                            candidate_repository=self.candidate_repository)
+                    (self.root / "receipt.json").write_text(json.dumps(changed))
+                    full_hosted.package_archive(self.root, archive)
+                    with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                        with self.assertRaisesRegex(ValueError, "passed Safari.*diagnostic"):
+                            full_hosted.verify_transport_archive(
+                                archive, changed["candidate_sha"], "jsSafari",
+                                candidate_repository=self.candidate_repository)
+                finally:
+                    retained.unlink(missing_ok=True)
+
     def test_public_safari_directory_and_tar_bind_all_real_diagnostic_identities(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
         rows = self.safari_diagnostic_rows()
