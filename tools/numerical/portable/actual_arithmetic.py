@@ -397,6 +397,25 @@ def _source_archive(commit):
     return result.stdout
 
 
+def _check_local_binaries(files, runtime_executable):
+    try:
+        if files["artifact"] != _STAGED_JAR.read_bytes() or \
+                files["runtime"] != Path(runtime_executable).read_bytes():
+            raise CaptureRejected("local artifact or runtime differs")
+        class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
+            for name in classes.namelist():
+                if classes.read(name) != (class_root / name).read_bytes():
+                    raise CaptureRejected("local portable class differs")
+            actual_names = {f"{source_set}/{path.relative_to(class_root / source_set)}"
+                            for source_set in ("main", "test")
+                            for path in (class_root / source_set).rglob("*.class")}
+            if set(classes.namelist()) != actual_names:
+                raise CaptureRejected("local portable class inventory differs")
+    except (OSError, zipfile.BadZipFile) as error:
+        raise CaptureRejected("local binary evidence unavailable") from error
+
+
 def _check_process(files, runtime_executable):
     if type(runtime_executable) is not str or not runtime_executable.startswith("/"):
         raise CaptureRejected("runtime executable identity differs")
@@ -453,6 +472,7 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
         raise CaptureRejected("receipt input identity differs")
     if files["source"] != _source_archive(commit):
         raise CaptureRejected("source archive differs from candidate commit")
+    _check_local_binaries(files, runtime_executable)
     _check_process(files, runtime_executable)
     summary = verify_capture(files["xml"], method, expected_ids)
     return {"schema": "portable-arithmetic-capture-receipt/1",

@@ -14,6 +14,9 @@ class CaptureReceiptTest(unittest.TestCase):
         source = patch("actual_arithmetic._source_archive", return_value=b"source")
         source.start()
         self.addCleanup(source.stop)
+        binaries = patch("actual_arithmetic._check_local_binaries")
+        binaries.start()
+        self.addCleanup(binaries.stop)
 
     def fixture(self):
         xml = xml_for(fixture())
