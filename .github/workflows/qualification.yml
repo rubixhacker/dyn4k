@@ -2,6 +2,12 @@ name: Staged qualification evidence
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_diagnostics:
+        description: Run only Windows native and publication diagnostics
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - codex/port-qualification-harness
@@ -11,6 +17,7 @@ on:
 
 jobs:
   staged-jvm-and-linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,18 +184,7 @@ jobs:
   hosted-publications:
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - host: macos
-            runner: macos-26
-            targets: >-
-              --target macosArm64 --target iosArm64 --target iosSimulatorArm64
-              --target iosX64 --target tvosArm64 --target tvosSimulatorArm64
-              --target watchosArm64 --target watchosDeviceArm64
-              --target watchosSimulatorArm64
-          - host: windows
-            runner: windows-2025
-            targets: --target mingwX64
+      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}' || '{"include":[{"host":"macos","runner":"macos-26","targets":"--target macosArm64 --target iosArm64 --target iosSimulatorArm64 --target iosX64 --target tvosArm64 --target tvosSimulatorArm64 --target watchosArm64 --target watchosDeviceArm64 --target watchosSimulatorArm64"},{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     defaults:
@@ -214,7 +210,20 @@ jobs:
         run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
       - name: Harness regression tests
-        run: python -m unittest discover -s tools/qualification -p 'test_*.py' -v
+        run: |
+          if [[ "${{ matrix.host }}" == windows ]]; then
+            diagnostics="$RUNNER_TEMP/windows-publication-diagnostics"
+            mkdir -p "$diagnostics/logs"
+            set +e
+            python -m unittest discover -s tools/qualification -p 'test_*.py' -v \
+              > "$diagnostics/harness.stdout" 2> "$diagnostics/harness.stderr"
+            result=$?
+            set -e
+            printf '%s\n' "$result" > "$diagnostics/harness.exit-code"
+            exit "$result"
+          else
+            python -m unittest discover -s tools/qualification -p 'test_*.py' -v
+          fi
       - name: Stage hosted publications
         run: >-
           python tools/qualification/stage.py
@@ -249,18 +258,57 @@ jobs:
             ${{ runner.temp }}/artifact-audit.json
             build/staging-repository/.qualification/${{ matrix.host }}/
           if-no-files-found: error
+      - name: Collect Windows publication logs
+        if: always() && matrix.host == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostics="$RUNNER_TEMP/windows-publication-diagnostics"
+          mkdir -p "$diagnostics/logs"
+          errors="$diagnostics/logs/collection-errors.txt"
+          missing=0
+          if [[ -f build/staging-repository/.qualification/windows/stage.log ]]; then
+            cp -- build/staging-repository/.qualification/windows/stage.log "$diagnostics/logs/stage.log"
+          else
+            printf '%s\n' 'Missing expected Windows publication stage log.' >> "$errors"
+            missing=1
+          fi
+          gradle_home="$(cygpath -u "${GRADLE_USER_HOME:-$HOME/.gradle}")"
+          gradle_manifest="$RUNNER_TEMP/windows-publication-gradle-files"
+          if [[ -d "$gradle_home/daemon" ]]; then
+            (cd "$gradle_home" && find daemon -type f -name '*.out.log' -print0) > "$gradle_manifest"
+            if [[ -s "$gradle_manifest" ]]; then
+              mkdir -p "$diagnostics/logs/gradle-user-home"
+              (
+                cd "$gradle_home"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
+                done < "$gradle_manifest"
+              )
+            else
+              printf 'No Gradle daemon logs found under %s/daemon.\n' "$gradle_home" >> "$errors"
+              missing=1
+            fi
+          else
+            printf 'Missing expected Gradle daemon directory: %s/daemon\n' "$gradle_home" >> "$errors"
+            missing=1
+          fi
+          if [[ "$missing" -ne 0 ]]; then
+            cat "$errors" >&2
+            exit 1
+          fi
+      - name: Upload Windows publication logs
+        if: always() && matrix.host == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.host }}
+          path: ${{ runner.temp }}/windows-publication-diagnostics/
+          if-no-files-found: warn
 
   hosted-native:
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {target: macosArm64, runner: macos-26}
-          - {target: iosSimulatorArm64, runner: macos-26}
-          - {target: tvosSimulatorArm64, runner: macos-26}
-          - {target: watchosSimulatorArm64, runner: macos-26}
-          - {target: iosX64, runner: macos-26-intel}
-          - {target: mingwX64, runner: windows-2025}
+      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"target":"mingwX64","runner":"windows-2025"}]}' || '{"include":[{"target":"macosArm64","runner":"macos-26"},{"target":"iosSimulatorArm64","runner":"macos-26"},{"target":"tvosSimulatorArm64","runner":"macos-26"},{"target":"watchosSimulatorArm64","runner":"macos-26"},{"target":"iosX64","runner":"macos-26-intel"},{"target":"mingwX64","runner":"windows-2025"}]}') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
@@ -346,8 +394,87 @@ jobs:
           name: qualification-full-${{ github.sha }}-${{ matrix.target }}
           path: ${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar
           if-no-files-found: error
+      - name: Collect Windows native failure evidence
+        if: always() && matrix.target == 'mingwX64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostics="$RUNNER_TEMP/windows-native-diagnostics"
+          mkdir -p "$diagnostics/xml" "$diagnostics/logs"
+          errors="$diagnostics/logs/collection-errors.txt"
+          missing=0
+          xml_manifest="$RUNNER_TEMP/windows-native-xml-files"
+          find dyn4k-core dyn4k consumers/qualification/portable \
+            -path '*/build/test-results/*/TEST-*.xml' -type f -print0 > "$xml_manifest"
+          if [[ -s "$xml_manifest" ]]; then
+            while IFS= read -r -d '' relative; do
+              cp --parents -- "$relative" "$diagnostics/xml"
+            done < "$xml_manifest"
+          else
+            printf '%s\n' 'No native test XML reports found in expected project roots.' >> "$errors"
+            missing=1
+          fi
+          if [[ -f build/staging-repository/.qualification/mingwX64/stage.log ]]; then
+            cp -- build/staging-repository/.qualification/mingwX64/stage.log "$diagnostics/logs/stage.log"
+          else
+            printf '%s\n' 'Missing expected mingwX64 stage log.' >> "$errors"
+            missing=1
+          fi
+          full_hosted_root="$(cygpath -u "$RUNNER_TEMP/full-hosted-mingwX64")"
+          full_hosted_manifest="$RUNNER_TEMP/windows-native-full-hosted-files"
+          if [[ -d "$full_hosted_root" ]]; then
+            (cd "$full_hosted_root" && find . -type f \
+              \( -name stdout.txt -o -name stderr.txt \) -print0) > "$full_hosted_manifest"
+            if [[ -s "$full_hosted_manifest" ]]; then
+              mkdir -p "$diagnostics/logs/full-hosted"
+              (
+                cd "$full_hosted_root"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/full-hosted"
+                done < "$full_hosted_manifest"
+              )
+            else
+              printf 'No full-hosted stdout/stderr logs found under %s.\n' "$full_hosted_root" >> "$errors"
+              missing=1
+            fi
+          else
+            printf 'Missing expected full-hosted directory: %s\n' "$full_hosted_root" >> "$errors"
+            missing=1
+          fi
+          gradle_home="$(cygpath -u "${GRADLE_USER_HOME:-$HOME/.gradle}")"
+          gradle_manifest="$RUNNER_TEMP/windows-native-gradle-files"
+          if [[ -d "$gradle_home/daemon" ]]; then
+            (cd "$gradle_home" && find daemon -type f -name '*.out.log' -print0) > "$gradle_manifest"
+            if [[ -s "$gradle_manifest" ]]; then
+              mkdir -p "$diagnostics/logs/gradle-user-home"
+              (
+                cd "$gradle_home"
+                while IFS= read -r -d '' relative; do
+                  cp --parents -- "$relative" "$diagnostics/logs/gradle-user-home"
+                done < "$gradle_manifest"
+              )
+            else
+              printf 'No Gradle daemon logs found under %s/daemon.\n' "$gradle_home" >> "$errors"
+              missing=1
+            fi
+          else
+            printf 'Missing expected Gradle daemon directory: %s/daemon\n' "$gradle_home" >> "$errors"
+            missing=1
+          fi
+          if [[ "$missing" -ne 0 ]]; then
+            cat "$errors" >&2
+            exit 1
+          fi
+      - name: Upload Windows native failure evidence
+        if: always() && matrix.target == 'mingwX64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/windows-native-diagnostics/
+          if-no-files-found: warn
 
   safari-browser:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     runs-on: macos-26
     timeout-minutes: 120
     env:
