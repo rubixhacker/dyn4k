@@ -14,6 +14,19 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class SourceCasesTest(unittest.TestCase):
+    def test_committed_common_corpus_has_all_browser_and_wasi_cases(self):
+        from runner import common_corpus_cases
+
+        root = Path(__file__).resolve().parents[3]
+        candidate = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+        core = common_corpus_cases(root, candidate, "dyn4k-core")
+        facade = common_corpus_cases(root, candidate, "dyn4k")
+        self.assertEqual(2454, len(core))
+        self.assertEqual(58, len(facade))
+        self.assertIn(("org.dyn4j.coverage.world.core.PhysicsWorldCoreCoverageTest",
+                       "addBody"), core)
+
     def test_collects_each_public_test_identity_across_classes(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "Suite.kt"
@@ -190,6 +203,54 @@ class SourceCasesTest(unittest.TestCase):
             receipt.write_text(json.dumps({"status": "FAILED", "target": "wasmWasi",
                                            "modules": {"dyn4k-core": module}}))
             with self.assertRaisesRegex(ValueError, "digest"):
+                audit_lane_receipt(receipt)
+
+    def test_audit_rejects_forged_passing_wasmtime_receipt(self):
+        from runner import audit_lane_receipt
+
+        with tempfile.TemporaryDirectory() as directory:
+            lane_dir = Path(directory)
+            modules = {}
+            for name in ("dyn4k-core", "dyn4k", "consumer"):
+                folder = lane_dir / name
+                folder.mkdir()
+                evidence = {"status": "PASSED", "expected": 2454 if name == "dyn4k-core"
+                            else 58 if name == "dyn4k" else 1,
+                            "executed": 2454 if name == "dyn4k-core"
+                            else 58 if name == "dyn4k" else 1,
+                            "failures": 0, "skipped": 0}
+                for field, filename in (("gradle_console", "gradle-console.log"),
+                                        ("raw_console", "wasmtime-console.log"),
+                                        ("linked_executable", "linked-executable.wasm")):
+                    path = folder / filename
+                    path.write_text("BUILD SUCCESSFUL\n" if field == "gradle_console"
+                                    else "fake PASS\n")
+                    evidence[field] = str(path)
+                    digest_field = "linked_sha256" if field == "linked_executable" else field + "_sha256"
+                    evidence[digest_field] = hashlib.sha256(path.read_bytes()).hexdigest()
+                result = folder / "result.json"
+                result.write_text(json.dumps(evidence))
+                evidence["result_json"] = str(result)
+                evidence["result_json_sha256"] = hashlib.sha256(result.read_bytes()).hexdigest()
+                modules[name] = evidence
+            receipt = lane_dir / "lane.json"
+            receipt.write_text(json.dumps({"status": "PASSED", "target": "wasmWasi",
+                                           "modules": modules}))
+            with self.assertRaises(ValueError):
+                audit_lane_receipt(receipt)
+
+    def test_audit_rejects_tampered_receipt_seal(self):
+        from runner import audit_lane_receipt, sealed_lane
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "lane.json"
+            lane = sealed_lane({"status": "FAILED", "target": "wasmWasi", "modules": {},
+                                "reason": "runtime failed"})
+            receipt.write_text(json.dumps(lane))
+            audit_lane_receipt(receipt)
+            lane["reason"] = "claimed success"
+            receipt.write_text(json.dumps(lane))
+            with self.assertRaisesRegex(ValueError, "seal"):
                 audit_lane_receipt(receipt)
 
     def test_existing_failed_lane_is_not_overwritten(self):
