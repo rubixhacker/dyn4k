@@ -38,6 +38,7 @@ dependencies {
     "candidateImplementation"("io.github.rubixhacker:dyn4k-android:0.1.0-alpha.1")
     "candidateImplementation"("io.github.rubixhacker:dyn4k-core-android:0.1.0-alpha.1")
 
+    testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("junit:junit:4.13.2")

@@ -47,7 +47,9 @@ open class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The in
     }
 }
 
-private fun fixedSix(value: Double): String {
+internal expect fun fixedSix(value: Double): String
+
+internal fun portableFixedSix(value: Double): String {
     if (value.isNaN()) return "NaN"
     if (value == Double.POSITIVE_INFINITY) return "Infinity"
     if (value == Double.NEGATIVE_INFINITY) return "-Infinity"
