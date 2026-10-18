@@ -1,0 +1,79 @@
+{
+  "binding_path": "/tmp/dyn4k-full-common-corpus-rotation-gate-binding.json",
+  "binding_sha256": "b47a362683d139ff3115cd870ae7208e6c07fd9c7db7228fc0788def0e090fa0",
+  "candidate_artifact": "dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+  "candidate_artifact_sha256": "005b6a8a5926dfffa7b3dfd932db7662b6cacc4bfdbad1a0742d9dfcfaef651f",
+  "candidate_revision": "0681a8cd2e3f12327296a58da68bc8338224ea73",
+  "candidate_tree": "f76ec9d900137680784686ad62a7433617025f5a",
+  "groups": [
+    {
+      "expected": 2454,
+      "id": "core-jvm",
+      "reported": 2454
+    },
+    {
+      "expected": 61,
+      "id": "jvm",
+      "reported": 61
+    },
+    {
+      "expected": 2454,
+      "id": "core-linuxX64",
+      "reported": 2454
+    },
+    {
+      "expected": 58,
+      "id": "linuxX64",
+      "reported": 58
+    },
+    {
+      "expected": 2454,
+      "id": "core-jsNode",
+      "reported": 2454
+    },
+    {
+      "expected": 58,
+      "id": "jsNode",
+      "reported": 58
+    },
+    {
+      "expected": 2454,
+      "id": "core-wasmJsNode",
+      "reported": 2454
+    },
+    {
+      "expected": 58,
+      "id": "wasmJsNode",
+      "reported": 58
+    },
+    {
+      "expected": 2454,
+      "id": "core-wasmWasiNode",
+      "reported": 2454
+    },
+    {
+      "expected": 58,
+      "id": "wasmWasiNode",
+      "reported": 58
+    },
+    {
+      "expected": 2454,
+      "id": "core-androidHost",
+      "reported": 2454
+    },
+    {
+      "expected": 58,
+      "id": "androidHost",
+      "reported": 58
+    }
+  ],
+  "kind": "full-common-corpus",
+  "manifest_sha256": "cc3b5e7a987f2dad790ccf3525212f25657544651131d0d4ed1a249ba72af227",
+  "map_sha256": "d20877be61398e65037b0ec3d61134d9922248f608c7901ffe589fed8dff5496",
+  "origin": "/tmp/dyn4k-merge-complete-corpus-rotation-gate-wave",
+  "result_path": "/tmp/dyn4k-full-common-corpus-rotation-gate-result.json",
+  "result_sha256": "a15dd6da86273ec6448be7bd056fc68b0284b62c9072c0c2457c13f62dd02388",
+  "schema_version": 1,
+  "total_cases": 15075,
+  "upstream": "/tmp/dyn4k-named-module-baseline-source-058bf6d"
+}

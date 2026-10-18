@@ -9,6 +9,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import build_provenance
+import candidate_coverage
+
 
 MODULE_NAME = "org.dyn4j"
 EXPORTS = frozenset({
@@ -144,13 +147,25 @@ def main() -> None:
         ledger = json.loads(args.ledger.read_text())
         module = ledger["module"]
         candidate = module.get("candidate")
-        revision = command(["git", "rev-parse", "HEAD"]).stdout.strip()
+        source = ledger.get("candidate_source", {})
+        revision = source.get("revision")
         if (not isinstance(candidate, dict) or candidate.get("identity") != MODULE_NAME
                 or candidate.get("commit") != revision or candidate.get("artifact_sha256") != digest(args.jar)
                 or not isinstance(candidate.get("artifact"), str)
                 or (root / candidate["artifact"]).resolve() != args.jar.resolve()
+                or candidate.get("source_tree") != source.get("tree")
+                or candidate_coverage.check_source_candidate(candidate, root)
                 or digest(args.jar) == ledger["baseline"]["binary_sha256"]):
-            parser.error("staged JAR does not match the current module ledger mapping")
+            parser.error("staged JAR does not match the pinned module ledger mapping")
+        receipt_name = source.get("build_receipt")
+        if (not isinstance(receipt_name, str) or not receipt_name
+                or Path(receipt_name).is_absolute() or ".." in Path(receipt_name).parts):
+            parser.error("pinned candidate build receipt path is unsafe")
+        receipt_path = root / receipt_name
+        if (not receipt_path.is_file()
+                or digest(receipt_path) != source.get("build_receipt_sha256")
+                or build_provenance.verify(json.loads(receipt_path.read_text()), root, args.jar, source)):
+            parser.error("pinned candidate build receipt differs or fails replay")
         if any(digest(path) == ledger["baseline"]["binary_sha256"] for path in args.dependency):
             parser.error("baseline JAR cannot appear in candidate dependencies")
         report = {"schema_version": 1, "kind": args.mode, "baseline": ledger["baseline"],

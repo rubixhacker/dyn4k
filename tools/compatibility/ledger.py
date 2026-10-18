@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import gzip
 import json
 import re
 import subprocess
@@ -12,6 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baseline"))
 import verify as oracle
 import module_probe
 import execution_probe
+import candidate_coverage
+import signature_index
+import java_corpus
+import build_provenance
+import common_corpus_receipt
+import raw_signature_audit
+import portable_links
+import android_java_corpus
 
 
 MODULE_SOURCE = "src/main/java/module-info.java"
@@ -52,12 +61,11 @@ def require_baseline_test_inputs(observed: object, tests: dict[str, str],
         raise ValueError(f"baseline test input hashes differ: missing={missing}, extra={extra}, changed={changed}")
 
 
-def declaration_inventory(signatures: dict[str, str], production: dict[str, str]) -> dict[str, tuple[str, str]]:
+def declaration_inventory(signatures: dict[str, str], verbose_signatures: dict[str, str],
+                          production: dict[str, str]) -> dict[str, tuple[str, str, list[str] | None]]:
     result = {}
     for name, text in sorted(signatures.items()):
-        header = next((line.strip() for line in text.splitlines() if line.strip().endswith("{")), None)
-        if header is None:
-            raise ValueError(f"type header missing: {name}")
+        header, members = execution_probe.declarations(text, verbose_signatures[name], oracle)
         compiled = re.search(r'^Compiled from "([^"/]+\.java)"', text)
         if compiled is None:
             raise ValueError(f"source owner missing: {name}")
@@ -65,15 +73,12 @@ def declaration_inventory(signatures: dict[str, str], production: dict[str, str]
         source_file = f"src/main/java/{package}/{compiled.group(1)}"
         if source_file not in production:
             raise ValueError(f"source owner absent: {name}: {source_file}")
-        result[f"{name}|type"] = (source_file, header)
-        api = oracle.surface(text)
-        if api is None:
-            continue
-        for (member, parameters), signature in api[1].items():
-            key = f"{name}|{member}|{parameters}"
+        result[f"{name}|type"] = (source_file, header, None)
+        for (member, descriptor), (signature, flags) in members.items():
+            key = f"{name}|{member}|{descriptor}"
             if key in result:
                 raise ValueError(f"duplicate declaration: {key}")
-            result[key] = (source_file, signature)
+            result[key] = (source_file, signature, flags)
     return result
 
 
@@ -98,6 +103,9 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
             or saved["types"] != classes
             or saved["public_protected_jvm_signatures"] != signatures):
         raise ValueError("saved baseline inventory differs from pinned source or JAR")
+    verbose_classes, verbose_signatures = oracle.jar_types(jar, verbose=True)
+    if verbose_classes != classes or oracle.digest(jar) != oracle.BINARY_SHA256:
+        raise ValueError("verbose declaration surface differs from pinned JAR")
     production = {path: tracked_sha(source, path) for path in production_paths}
     tests = {path: tracked_sha(source, path) for path in test_paths}
     resources = {path: tracked_sha(source, path) for path in tracked_files(source, "src/test/resources")}
@@ -124,7 +132,7 @@ def reference(source: Path, jar: Path, sources_jar: Path, inventory: Path,
               "actual_executed_cases": run["actual_executed_cases"], "ignored": run["ignored"]}
     return {"baseline": baseline, "production": production, "tests": tests,
             "baseline_test_counts": counts,
-            "declarations": declaration_inventory(signatures, production), "module": module}
+            "declarations": declaration_inventory(signatures, verbose_signatures, production), "module": module}
 
 
 def generate(expected: dict) -> dict:
@@ -141,18 +149,25 @@ def generate(expected: dict) -> dict:
                    "candidate": None, "evidence": []}
                   for path, digest in expected["tests"].items()],
         "declarations": [{"id": key, "source_file": source_file, "signature": signature,
+                          **({"flags": flags} if flags is not None else {}),
                           "candidate": None, "evidence": []}
-                         for key, (source_file, signature) in expected["declarations"].items()],
+                         for key, (source_file, signature, flags) in expected["declarations"].items()],
     }
 
 
 def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
-                   source_sha256: str, reports: dict[Path, tuple[str, dict | None]]) -> str | None:
+                   source_sha256: str, reports: dict[Path, tuple[str, dict | None]],
+                   ledger_data: dict | None = None, replays: dict[Path, str | None] | None = None,
+                   baseline_source: Path | None = None) -> str | None:
     status = evidence.get("status")
-    if status not in {"missing", "unrun", "ignored", "unapproved_exception", "passed"}:
+    if status not in {"missing", "unrun", "failed", "ignored", "unapproved_exception", "passed"}:
         return "unknown evidence status"
     if status != "passed":
         return None
+    if (baseline.get("binary_sha256") == oracle.BINARY_SHA256
+            and (not isinstance(ledger_data, dict)
+                 or not isinstance(ledger_data.get("candidate_source"), dict))):
+        return "pinned candidate source provenance is missing"
     report_path = evidence.get("report")
     if not isinstance(report_path, str) or not report_path or Path(report_path).is_absolute() or ".." in Path(report_path).parts:
         return "passed evidence has no safe report path"
@@ -162,14 +177,17 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
     if report_file not in reports:
         content = report_file.read_bytes()
         try:
-            reports[report_file] = (sha256(content), json.loads(content))
-        except ValueError:
+            plain = gzip.decompress(content) if report_file.suffix == ".gz" else content
+            reports[report_file] = (sha256(content), json.loads(plain))
+        except (ValueError, OSError):
             reports[report_file] = (sha256(content), None)
     report_sha, report = reports[report_file]
     if report_sha != evidence.get("report_sha256"):
         return "passed evidence report is missing or changed"
     if not isinstance(report, dict):
         return "passed evidence report is invalid"
+    if baseline.get("binary_sha256") == oracle.BINARY_SHA256 and report.get("schema_version") != 3:
+        return "pinned candidate pass lacks replayable source and artifact provenance"
     candidate = item.get("candidate")
     if not isinstance(candidate, dict):
         return "passed evidence has no counterpart"
@@ -177,6 +195,34 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
     target = evidence.get("target")
     if not isinstance(kind, str) or not isinstance(target, str) or not target:
         return "passed evidence kind or target is missing"
+    if (report.get("schema_version") == 3 and kind == "java-signature"
+            and target == "jvm" and report.get("probe") == "javap-inventory-v1"):
+        if ledger_data is None or replays is None:
+            return "signature index lacks ledger context"
+        if report_file not in replays:
+            replays[report_file] = signature_index.validate_report(
+                report, ledger_data, root / candidate["artifact"], root)
+        if replays[report_file]:
+            return replays[report_file]
+        outcome = report.get("index", {}).get("outcomes", {}).get(item["id"])
+        if (not isinstance(outcome, dict) or outcome.get("passed") is not True
+                or outcome.get("source_sha256") != source_sha256
+                or item["id"] not in report["index"]["passed_identities"]):
+            return "signature index lacks a matching passed original identity"
+        return None
+    if (report.get("schema_version") == 3 and kind == "java-test"
+            and target == "jvm" and report.get("probe") == "unchanged-junit-xml-v1"):
+        if ledger_data is None or replays is None or baseline_source is None:
+            return "Java corpus receipt lacks pinned source context"
+        if report_file not in replays:
+            replays[report_file] = java_corpus.validate_report(
+                report, ledger_data, root, baseline_source, root / candidate["artifact"])
+        if replays[report_file]:
+            return replays[report_file]
+        if (candidate.get("identity") != item["id"]
+                or report.get("input_sha256", {}).get(item["id"]) != source_sha256):
+            return "Java corpus lacks matching unchanged original source identity"
+        return None
     required = (report.get("schema_version") == 2
                 and report.get("baseline") == baseline and report.get("candidate_identity") == candidate.get("identity")
                 and report.get("kind") == kind and report.get("target") == target
@@ -207,11 +253,12 @@ def check_evidence(item: dict, evidence: dict, root: Path, baseline: dict,
 
 
 def validate_module(item: object, expected: dict, baseline: dict, root: Path,
-                    candidate_revision: str | None) -> tuple[list[str], list[str]]:
+                    candidate_revision: str | None,
+                    provenance_error: str | None = None) -> tuple[list[str], list[str], set[str]]:
     invalid = []
     gaps = []
     if not isinstance(item, dict):
-        return ["module: executable obligation missing"], gaps
+        return ["module: executable obligation missing"], gaps, set()
     for field, value in expected.items():
         if item.get(field) != value:
             invalid.append(f"module: changed {field}")
@@ -239,7 +286,7 @@ def validate_module(item: object, expected: dict, baseline: dict, root: Path,
                 jar = None
     evidence = item.get("evidence")
     if not isinstance(evidence, list):
-        return invalid + ["module: evidence list missing"], gaps
+        return invalid + ["module: evidence list missing"], gaps, set()
     needed = {"module-descriptor", "named-module-consumer", "java8-classpath"}
     passed = set()
     seen = set()
@@ -253,12 +300,16 @@ def validate_module(item: object, expected: dict, baseline: dict, root: Path,
             continue
         seen.add(kind)
         status = record.get("status")
-        if status not in {"missing", "unrun", "ignored", "unapproved_exception", "passed"}:
+        if status not in {"missing", "unrun", "failed", "ignored", "unapproved_exception", "passed"}:
             invalid.append(f"module: {kind}: unknown evidence status")
         elif status != "passed":
             gaps.append(f"module: {kind}: {status}")
+        elif record.get("target") != "jvm":
+            invalid.append(f"module: {kind}: passed evidence target is missing or unsupported")
         elif jar is None:
             invalid.append(f"module: {kind}: passed evidence has no verified candidate JAR")
+        elif provenance_error:
+            invalid.append(f"module: {kind}: {provenance_error}")
         else:
             report_path = record.get("report")
             if (not isinstance(report_path, str) or not report_path or Path(report_path).is_absolute()
@@ -331,17 +382,118 @@ def validate_module(item: object, expected: dict, baseline: dict, root: Path,
                 passed.add(kind)
     for kind in sorted(needed - passed):
         gaps.append(f"module: module-info.java: unrun {kind}")
-    return invalid, gaps
+    return invalid, gaps, passed
 
 
-def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str | None = None) -> dict:
+def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str | None = None,
+             baseline_source: Path | None = None) -> dict:
     invalid = []
     gaps = []
     artifact_hashes = {}
     reports = {}
+    replays = {}
+    verified = {}
+    source_revision = candidate_revision
+    projection = None
+    source = ledger.get("candidate_source")
+    if source is not None:
+        if not isinstance(source, dict):
+            invalid.append("candidate source revision record is invalid")
+        else:
+            source_revision = source.get("revision")
+            artifact = source.get("artifact")
+            if (not isinstance(source_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", source_revision)
+                    or not isinstance(artifact, str) or not artifact
+                    or Path(artifact).is_absolute() or ".." in Path(artifact).parts):
+                invalid.append("candidate source revision or artifact path is invalid")
+            else:
+                try:
+                    projection = candidate_coverage.materialize(
+                        generate(expected), root, source_revision, root / artifact)
+                    projected_source = projection["candidate_source"]
+                    if (any(source.get(key) != value for key, value in projected_source.items())
+                            or set(source) - set(projected_source) - {"build_receipt", "build_receipt_sha256"}):
+                        invalid.append("candidate source revision, tree, or artifact differs")
+                except (OSError, ValueError, subprocess.CalledProcessError,
+                        subprocess.TimeoutExpired) as error:
+                    invalid.append(f"candidate source revision or artifact cannot be verified: {error}")
     if (ledger.get("schema_version") != 1 or ledger.get("baseline") != expected["baseline"]
             or ledger.get("baseline_test_counts") != expected.get("baseline_test_counts")):
         invalid.append("schema or pinned source/JAR identity differs")
+    review_receipts = ledger.get("review_receipts", {})
+    if not isinstance(review_receipts, dict) or set(review_receipts) - {"common_corpus", "raw_signature", "portable_links", "android_host"}:
+        invalid.append("review_receipts: unknown or invalid receipt kind")
+    else:
+        def reviewed_file(record: dict, path_key: str, sha_key: str) -> Path:
+            name = record.get(path_key)
+            if (not isinstance(name, str) or not name or Path(name).is_absolute()
+                    or ".." in Path(name).parts):
+                raise ValueError(f"{path_key} is missing or unsafe")
+            path = root / name
+            if not path.is_file() or sha256(path.read_bytes()) != record.get(sha_key):
+                raise ValueError(f"{path_key} is missing or changed")
+            return path
+
+        for kind, record in review_receipts.items():
+            if not isinstance(record, dict):
+                invalid.append(f"{kind}: review receipt is invalid")
+                continue
+            try:
+                path = reviewed_file(record, "path", "sha256")
+                if kind == "common_corpus":
+                    error = common_corpus_receipt.verify(json.loads(path.read_text()), ledger, root)
+                elif kind == "raw_signature":
+                    signature_path = reviewed_file(record, "signature", "signature_sha256")
+                    strict_path = reviewed_file(record, "strict", "strict_sha256")
+                    pinned_source = baseline_source or Path(record.get("baseline_source", ""))
+                    if not pinned_source.is_dir():
+                        raise ValueError("baseline_source is missing")
+                    error = raw_signature_audit.check(
+                        json.loads(path.read_text()), ledger,
+                        json.loads(gzip.decompress(signature_path.read_bytes())),
+                        json.loads(strict_path.read_text()), root, pinned_source)
+                elif kind == "portable_links":
+                    gate_path = reviewed_file(record, "gate", "gate_sha256")
+                    pinned_source = baseline_source or Path(record.get("baseline_source", ""))
+                    if not pinned_source.is_dir():
+                        raise ValueError("baseline_source is missing")
+                    raw_links = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+                    error = portable_links.check(json.loads(raw_links), ledger,
+                                                 json.loads(gate_path.read_text()),
+                                                 root, pinned_source)
+                elif kind == "android_host":
+                    build_path = reviewed_file(record, "build", "build_sha256")
+                    jvm_path = reviewed_file(record, "jvm", "jvm_sha256")
+                    strict_path = reviewed_file(record, "strict", "strict_sha256")
+                    pinned_source = baseline_source or Path(record.get("baseline_source", ""))
+                    if not pinned_source.is_dir():
+                        raise ValueError("baseline_source is missing")
+                    build = json.loads(build_path.read_text())
+                    strict = json.loads(strict_path.read_text())
+                    error = android_java_corpus.check(
+                        json.loads(path.read_text()), ledger, root, pinned_source, root,
+                        build, json.loads(jvm_path.read_text()))
+                    if not error:
+                        dependencies = []
+                        for name, checksum in strict["dependency_sha256"].items():
+                            dependency = Path(name)
+                            if not dependency.is_file() or candidate_coverage.digest(dependency) != checksum:
+                                raise ValueError(f"strict Android dependency missing or changed: {name}")
+                            dependencies.append(dependency)
+                        baseline_jar = raw_signature_audit.BASELINE_JAR
+                        if (not baseline_jar.is_file() or
+                                candidate_coverage.digest(baseline_jar) != ledger["baseline"]["binary_sha256"]):
+                            raise ValueError("pinned baseline JAR missing or changed")
+                        android_jar = root / build_provenance.ANDROID_ARTIFACT
+                        if oracle.compare_jars(baseline_jar, android_jar,
+                                               dependencies=dependencies) != strict:
+                            error = "strict Android source-visible comparison differs from replay"
+                else:
+                    continue
+                if error:
+                    invalid.append(f"{kind}: {error}")
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                invalid.append(f"{kind}: review receipt replay failed: {error}")
     for section in ("production", "tests", "declarations"):
         entries = ledger.get(section)
         if not isinstance(entries, list):
@@ -349,11 +501,25 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
             continue
         observed = {}
         mapped = set()
+        groups = {}
+        if section == "production" and source is not None:
+            for row in entries:
+                if isinstance(row, dict) and isinstance(row.get("candidate"), dict):
+                    identity = row["candidate"].get("identity")
+                    if isinstance(identity, str):
+                        groups.setdefault(identity, set()).add(row.get("id"))
+        projected = ({row["id"]: row for row in projection[section]}
+                     if projection is not None else {})
         for item in entries:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 invalid.append(f"{section}: invalid entry")
                 continue
             key = item["id"]
+            if projection is not None:
+                approved = projected.get(key)
+                if approved is None or any(item.get(field) != approved.get(field)
+                                           for field in ("candidate", "disposition", "reason")):
+                    invalid.append(f"{section}: {key}: changed source mapping or review disposition")
             if key in observed:
                 invalid.append(f"{section}: duplicate {key}")
             observed[key] = item
@@ -363,15 +529,20 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
             elif not isinstance(candidate, dict) or not isinstance(candidate.get("identity"), str) or not candidate["identity"]:
                 invalid.append(f"{section}: {key}: invalid candidate identity")
             else:
-                if candidate["identity"] in mapped:
+                if candidate["identity"] in mapped and not (section == "production" and source is not None):
                     invalid.append(f"{section}: duplicate candidate mapping {candidate['identity']}")
                 mapped.add(candidate["identity"])
+                if section == "production" and source is not None:
+                    if candidate.get("mapped_baseline_ids") != sorted(groups.get(candidate["identity"], set())):
+                        invalid.append(f"{section}: {key}: incomplete or ambiguous mapping group")
                 if not isinstance(candidate.get("commit"), str) or not re.fullmatch(r"[0-9a-f]{40}", candidate["commit"]):
                     invalid.append(f"{section}: {key}: invalid candidate commit")
-                elif candidate_revision and candidate["commit"] != candidate_revision:
+                elif source_revision and candidate["commit"] != source_revision:
                     invalid.append(f"{section}: {key}: stale candidate commit")
                 if not isinstance(candidate.get("artifact_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", candidate["artifact_sha256"]):
                     invalid.append(f"{section}: {key}: invalid candidate artifact SHA-256")
+                elif candidate["artifact_sha256"] == oracle.BINARY_SHA256:
+                    invalid.append(f"{section}: {key}: pinned baseline JAR cannot be a candidate artifact")
                 artifact = candidate.get("artifact")
                 if (not isinstance(artifact, str) or not artifact or Path(artifact).is_absolute()
                         or ".." in Path(artifact).parts):
@@ -398,15 +569,18 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
                     continue
                 source_key = item["source_file"] if section == "declarations" else key
                 source_sha = (expected["tests"] if section == "tests" else expected["production"]).get(source_key, "")
-                error = check_evidence(item, record, root, expected["baseline"], source_sha, reports)
+                error = check_evidence(item, record, root, expected["baseline"], source_sha,
+                                       reports, ledger, replays, baseline_source)
                 if error:
                     invalid.append(f"{section}: {key}: {error}")
                 elif record["status"] == "passed":
                     passing.add(record.get("kind"))
                 else:
-                    gaps.append(f"{section}: {key}: {record['status']}")
+                    reason = record.get("reason") or item.get("reason") or "no executable result"
+                    gaps.append(f"{section}: {key}: {record['status']}: {reason}")
             for kind in sorted(needed - passing):
-                gaps.append(f"{section}: {key}: unrun {kind}")
+                gaps.append(f"{section}: {key}: unrun {kind}: {item.get('reason') or 'no executable result'}")
+            verified[(section, key)] = passing
         expected_keys = set(expected[section])
         for key in sorted(expected_keys - set(observed)):
             invalid.append(f"{section}: omitted {key}")
@@ -416,7 +590,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
             item = observed[key]
             wanted = expected[section][key]
             if section == "declarations":
-                if (item.get("source_file"), item.get("signature")) != wanted:
+                if (item.get("source_file"), item.get("signature"), item.get("flags")) != wanted:
                     invalid.append(f"{section}: changed {key}")
             elif item.get("sha256") != wanted:
                 invalid.append(f"{section}: changed source SHA-256 {key}")
@@ -425,11 +599,84 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
                 owner = key.removeprefix(prefix).removesuffix(".java").replace("/", ".")
                 if item.get("owner_type") != owner:
                     invalid.append(f"{section}: changed owner {key}")
-    module_invalid, module_gaps = validate_module(ledger.get("module"), expected["module"],
-                                                   expected["baseline"], root, candidate_revision)
+    pinned_baseline = ledger.get("baseline")
+    provenance_error = ("pinned candidate source provenance is missing"
+                        if isinstance(pinned_baseline, dict)
+                        and pinned_baseline.get("binary_sha256") == oracle.BINARY_SHA256
+                        and not isinstance(source, dict) else None)
+    if source is not None and isinstance(source, dict):
+        receipt_name = source.get("build_receipt")
+        if (not isinstance(receipt_name, str) or not receipt_name
+                or Path(receipt_name).is_absolute() or ".." in Path(receipt_name).parts):
+            provenance_error = "candidate source build receipt path is missing or unsafe"
+        else:
+            receipt_path = root / receipt_name
+            if not receipt_path.is_file() or sha256(receipt_path.read_bytes()) != source.get("build_receipt_sha256"):
+                provenance_error = "candidate source build receipt is missing or changed"
+            else:
+                try:
+                    provenance_error = build_provenance.verify(
+                        json.loads(receipt_path.read_text()), root, root / source["artifact"], source)
+                except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+                    provenance_error = f"candidate source build receipt failed: {error}"
+    if projection is not None and any(ledger.get("module", {}).get(field) != projection["module"].get(field)
+                                      for field in ("candidate", "reason")):
+        invalid.append("module: changed source mapping or review disposition")
+    module_invalid, module_gaps, module_passed = validate_module(
+        ledger.get("module"), expected["module"], expected["baseline"], root,
+        source_revision, provenance_error)
     invalid.extend(module_invalid)
     gaps.extend(module_gaps)
+    obligation_details = []
+    required = {"production": ("implementation",), "tests": ("java-test",),
+                "declarations": ("java-signature", "common-portable")}
+    for section, kinds in required.items():
+        raw_entries = ledger.get(section)
+        entries = {item.get("id"): item for item in (raw_entries if isinstance(raw_entries, list) else [])
+                   if isinstance(item, dict)}
+        for key in expected[section]:
+            item = entries.get(key, {})
+            records = {record.get("kind"): record for record in (item.get("evidence") or [])
+                       if isinstance(record, dict)}
+            for kind in kinds:
+                if kind in verified.get((section, key), set()):
+                    status, reason = "passed", None
+                else:
+                    record = records.get(kind, {})
+                    status = ("missing" if item.get("candidate") is None else
+                              "invalid" if record.get("status") == "passed" else
+                              record.get("status", "unrun"))
+                    reason = record.get("reason") or item.get("reason") or "no executable result"
+                obligation_details.append({"section": section, "id": key, "kind": kind,
+                                           "status": status, "reason": reason})
+    for kind in ("module-descriptor", "named-module-consumer", "java8-classpath"):
+        module = ledger.get("module")
+        module = module if isinstance(module, dict) else {}
+        records = {record.get("kind"): record for record in (module.get("evidence") or [])
+                   if isinstance(record, dict)}
+        if kind in module_passed:
+            status, reason = "passed", None
+        else:
+            record = records.get(kind, {})
+            status = ("missing" if module.get("candidate") is None else
+                      "invalid" if record.get("status") == "passed" else
+                      record.get("status", "unrun"))
+            reason = record.get("reason") or module.get("reason") or "no executable result"
+        obligation_details.append({"section": "module", "id": "module-info.java",
+                                   "kind": kind, "status": status, "reason": reason})
+    obligation_counts = {"total": len(obligation_details),
+                         "passed": sum(item["status"] == "passed" for item in obligation_details),
+                         "unpassed": sum(item["status"] != "passed" for item in obligation_details)}
+    by_kind = {}
+    for item in obligation_details:
+        bucket = by_kind.setdefault(item["kind"], {"total": 0, "passed": 0, "unpassed": 0})
+        bucket["total"] += 1
+        bucket["passed" if item["status"] == "passed" else "unpassed"] += 1
+    obligation_counts["by_kind"] = by_kind
     return {"passed": not invalid and not gaps, "invalid": invalid, "gaps": gaps,
+            "candidate_source_revision": source_revision,
+            "obligation_counts": obligation_counts,
+            "unpassed_obligations": [item for item in obligation_details if item["status"] != "passed"],
             "missing_counterparts": sum("missing counterpart" in gap for gap in gaps),
             "counts": {**{name: len(expected[name]) for name in ("production", "tests", "declarations")},
                        "module": 1}}
@@ -454,7 +701,8 @@ def main() -> None:
         return
     candidate_revision = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
                                         capture_output=True, text=True).stdout.strip()
-    report = validate(json.loads(args.ledger.read_text()), expected, Path.cwd(), candidate_revision)
+    report = validate(json.loads(args.ledger.read_text()), expected, Path.cwd(),
+                      candidate_revision, args.source)
     report["candidate_revision"] = candidate_revision
     if args.report:
         args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

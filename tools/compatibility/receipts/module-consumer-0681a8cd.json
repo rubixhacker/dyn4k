@@ -1,0 +1,43 @@
+{
+  "artifact_sha256": "005b6a8a5926dfffa7b3dfd932db7662b6cacc4bfdbad1a0742d9dfcfaef651f",
+  "baseline": {
+    "binary_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+    "commit": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+    "sources_sha256": "83b47be47bdce27681139dab84937e0f586b70ab800dc494fbebed4b58893223"
+  },
+  "candidate_commit": "0681a8cd2e3f12327296a58da68bc8338224ea73",
+  "candidate_identity": "org.dyn4j",
+  "dependencies": [
+    {
+      "path": "build/ledger-deps/kotlin-stdlib-2.4.20.jar",
+      "sha256": "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f"
+    }
+  ],
+  "fixture_sha256": {
+    "example/Main.java": "2cd5a3ad610ccd7e1de179eefdf69d19196391438ee423e8f3eeac6c8abf391f",
+    "module-info.java": "acc256154b37acb90c2abc9113404f585edec3e900697dfd4ef56267240ea0ce"
+  },
+  "kind": "named-module-consumer",
+  "observed": {
+    "compile_exit_code": 0,
+    "compile_release": 9,
+    "java_version": "openjdk version \"21.0.12.1\" 2026-08-18 LTS",
+    "output": "Named module consumer passed\n",
+    "passed": true,
+    "provider_check": {
+      "expected_path": "/var/home/stewart/Workspace/dyn4k-port-ledger-coverage/dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+      "expected_sha256": "005b6a8a5926dfffa7b3dfd932db7662b6cacc4bfdbad1a0742d9dfcfaef651f",
+      "passed": true,
+      "providers": [
+        {
+          "path": "/var/home/stewart/Workspace/dyn4k-port-ledger-coverage/dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+          "sha256": "005b6a8a5926dfffa7b3dfd932db7662b6cacc4bfdbad1a0742d9dfcfaef651f"
+        }
+      ],
+      "reason": "single org.dyn4j provider"
+    },
+    "run_exit_code": 0
+  },
+  "schema_version": 1,
+  "source_sha256": "fcda5ce7579f9af3df0bee8fe21ec2331513768936c45436f5c53f26a5f8e8b8"
+}
