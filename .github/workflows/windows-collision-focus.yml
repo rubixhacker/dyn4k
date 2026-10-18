@@ -156,6 +156,7 @@ jobs:
           $precisionCommand = @(
             '.\gradlew.bat', ':dyn4k-core:mingwX64Test',
             '--tests', 'org.dyn4j.collision.narrowphase.WindowsCollisionPrecisionControlTest',
+            '-PwindowsCollisionPrecisionDiagnostic=true',
             '--no-daemon', '--rerun-tasks', '--console=plain', '--info'
           )
           $precisionCommand | Set-Content -Path (Join-Path $precision 'gradle-command.txt')
@@ -420,7 +421,8 @@ jobs:
             'tools/diagnostic/windows_collision/validate-precision-control.py'
             'tools/compatibility/windows_collision_focus.py'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt'
-            'dyn4k-core/src/mingwX64Test/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionPrecisionControlTest.kt'
+            'dyn4k-core/diagnostic/windows-collision/WindowsCollisionPrecisionControlTest.kt'
+            'dyn4k-core/build.gradle.kts'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CapsuleSliceTest.kt'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CirclePolygonTest.kt'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/shapes/a/CircleSegmentTest.kt'

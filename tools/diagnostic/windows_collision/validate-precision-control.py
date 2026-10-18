@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -89,8 +90,9 @@ def state_records(lines):
             raise ValueError(f"floating-point state read or restore failed for {id_}")
         if len({row["thread"] for row in (before, active, restored)}) != 1:
             raise ValueError(f"floating-point control moved threads for {id_}")
-        if active["x87cw"] & 0x0300 != 0x0200:
-            raise ValueError(f"x87 precision did not reach PC53 for {id_}")
+        expected_control_word = before["x87cw"] & ~0x0300 | 0x0200
+        if active["x87cw"] != expected_control_word:
+            raise ValueError(f"x87 control word differs beyond PC53 for {id_}")
         if before["mxcsr"] & ~0x3f != active["mxcsr"] & ~0x3f:
             raise ValueError(f"SSE control changed while setting PC53 for {id_}")
         if (before["x87cw"], before["mxcsr"] & ~0x3f) != (restored["x87cw"], restored["mxcsr"] & ~0x3f):
@@ -157,15 +159,14 @@ def scalar_records(lines, java_lines, states):
 
 
 def failure(case):
-    failed = case.find("failure")
     errored = case.find("error")
-    if failed is not None and errored is not None:
-        raise ValueError("a case has both failure and error")
-    detail = failed if failed is not None else errored
-    if detail is None:
+    if errored is not None:
+        raise ValueError(f"XML error is not an assertion failure: {case.attrib.get('name')}")
+    failed = case.find("failure")
+    if failed is None:
         return None
-    lines = (detail.text or "").splitlines()
-    return detail.attrib.get("message") or (lines[0] if lines else f"{detail.tag} without message")
+    lines = (failed.text or "").splitlines()
+    return failed.attrib.get("message") or (lines[0] if lines else "failure without message")
 
 
 def baseline_and_controlled(native_directory, controlled_root):
@@ -250,6 +251,93 @@ def validate(args):
           f"controlledRows={len(trace_rows)} scalarIDs={len(scalars)} stateRows={len(states)}")
 
 
+def xml_error_self_test():
+    controlled = ET.Element("testsuite")
+    for name in (*CONTROL_METHODS, "scalarVectorsPc53", "tracePc53"):
+        ET.SubElement(controlled, "testcase", name=f"{name}[mingwX64]")
+    with tempfile.TemporaryDirectory() as temporary:
+        native = Path(temporary)
+        methods = ("detectSat", "detectGjk", "gjkDistance", "getClipManifold")
+        for fixture in sorted({fixture for fixture, _ in CONTROL_METHODS.values()}):
+            suite = ET.Element("testsuite")
+            for method in methods:
+                case = ET.SubElement(suite, "testcase", name=f"{method}[mingwX64]")
+                if (fixture, method) in CONTROL_METHODS.values():
+                    ET.SubElement(case, "failure", message="original assertion")
+            ET.ElementTree(suite).write(native / (
+                f"TEST-mingwX64Test.org.dyn4j.coverage.collision.shapes.a.{fixture}Test.xml"
+            ), encoding="utf-8")
+        outcomes, _ = baseline_and_controlled(native, controlled)
+        assert len(outcomes) == 9 and all(item["baseline"] == "FAIL" and item["pc53"] == "PASS"
+                                          for item in outcomes)
+
+        report = native / "TEST-mingwX64Test.org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest.xml"
+        original_bytes = report.read_bytes()
+        suite = ET.fromstring(original_bytes)
+        case = next(case for case in suite.findall("testcase") if case.get("name") == "detectGjk[mingwX64]")
+        case.remove(case.find("failure"))
+        ET.SubElement(case, "error", message="runtime error")
+        ET.ElementTree(suite).write(report, encoding="utf-8")
+        try:
+            baseline_and_controlled(native, controlled)
+        except ValueError as error:
+            assert "XML error" in str(error)
+        else:
+            raise AssertionError("an original XML error counted as an assertion failure")
+        report.write_bytes(original_bytes)
+
+        controlled_case = controlled.find("testcase")
+        ET.SubElement(controlled_case, "error", message="control setup error")
+        try:
+            baseline_and_controlled(native, controlled)
+        except ValueError as error:
+            assert "XML error" in str(error)
+        else:
+            raise AssertionError("a controlled XML error counted as an assertion outcome")
+
+
+def ordinary_selection_self_test():
+    repository = Path(__file__).resolve().parents[3]
+    ordinary = repository / (
+        "dyn4k-core/src/mingwX64Test/kotlin/org/dyn4j/collision/narrowphase/"
+        "WindowsCollisionPrecisionControlTest.kt"
+    )
+    diagnostic = repository / "dyn4k-core/diagnostic/windows-collision/WindowsCollisionPrecisionControlTest.kt"
+    build = (repository / "dyn4k-core/build.gradle.kts").read_text(encoding="utf-8")
+    workflow = (repository / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
+    gate = (
+        'if (providers.gradleProperty("windowsCollisionPrecisionDiagnostic").orNull == "true") {',
+        'named("mingwX64Test") {',
+        'kotlin.srcDir("diagnostic/windows-collision")',
+    )
+    if ordinary.exists() or not diagnostic.is_file() or not all(part in build for part in gate) \
+            or "-PwindowsCollisionPrecisionDiagnostic=true" not in workflow:
+        raise AssertionError("the precision tests are not restricted to the diagnostic source route")
+
+    sys.path.insert(0, str(repository / "tools/qualification"))
+    import full_hosted
+
+    manifest = json.loads((repository / full_hosted.MANIFEST).read_text(encoding="utf-8"))
+    selected = full_hosted.expected_cases(manifest, "dyn4k-core")
+    extra = (CONTROL_SUITE, "tracePc53")
+    if extra in selected:
+        raise AssertionError("the frozen ordinary selection includes a diagnostic method")
+    with tempfile.TemporaryDirectory() as temporary:
+        report = Path(temporary) / "TEST-extra.xml"
+        suite = ET.Element("testsuite", tests="1", failures="0", errors="0", skipped="0", time="0.0")
+        ET.SubElement(suite, "testcase", classname=f"mingwX64Test.{CONTROL_SUITE}",
+                      name="tracePc53[mingwX64]", time="0.0")
+        ET.ElementTree(suite).write(report, encoding="utf-8")
+        modified = report.stat().st_mtime_ns
+        try:
+            full_hosted.read_reports([report], selected, "mingwX64", modified - 1, modified + 1)
+        except ValueError as error:
+            if str(extra) not in str(error):
+                raise AssertionError("ordinary selection rejected the report for another reason") from error
+        else:
+            raise AssertionError("ordinary full-hosted selection accepted an extra diagnostic method")
+
+
 def self_test():
     example = [
         "DYN4K_COLLISION_FP_STATE\tv1\tid=trace\tphase=before\tthread=7\tx87cw=895\tmxcsr=8064\tstatus=0\tsetStatus=na",
@@ -276,6 +364,7 @@ def self_test():
         [line.replace("phase=pc53\tthread=7", "phase=pc53\tthread=8") if "id=trace" in line else line for line in lines],
         [line.replace("phase=restored\tthread=7\tx87cw=895\tmxcsr=8064\tstatus=0", "phase=restored\tthread=7\tx87cw=895\tmxcsr=8064\tstatus=1") if "id=trace" in line else line for line in lines],
         [line.replace("phase=pc53\tthread=7\tx87cw=639", "phase=pc53\tthread=7\tx87cw=895") if "id=trace" in line else line for line in lines],
+        [line.replace("phase=pc53\tthread=7\tx87cw=639", "phase=pc53\tthread=7\tx87cw=1663") if "id=trace" in line else line for line in lines],
         [line.replace("phase=restored\tthread=7\tx87cw=895\tmxcsr=8064", "phase=restored\tthread=7\tx87cw=895\tmxcsr=16256") if "id=trace" in line else line for line in lines],
     ):
         try:
@@ -305,7 +394,9 @@ def self_test():
             pass
         else:
             raise AssertionError("an adverse scalar record was accepted")
-    print("PRECISION_CONTROL_SELF_TEST_OK cases=11")
+    xml_error_self_test()
+    ordinary_selection_self_test()
+    print("PRECISION_CONTROL_SELF_TEST_OK stateRows=33 scalarIDs=7 xmlErrorsRejected=2 ordinaryExtraRejected=1 roundingMutationRejected=1")
 
 
 def main():

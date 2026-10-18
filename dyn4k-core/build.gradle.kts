@@ -1068,6 +1068,11 @@ kotlin {
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
+        if (providers.gradleProperty("windowsCollisionPrecisionDiagnostic").orNull == "true") {
+            named("mingwX64Test") {
+                kotlin.srcDir("diagnostic/windows-collision")
+            }
+        }
     }
 }
 

@@ -136,9 +136,10 @@ class WindowsCollisionPrecisionControlTest {
                 if (readStatus == 0) active.__control_word else null,
                 if (readStatus == 0) mxcsr(active) else null, readStatus, setStatus)
             check(setStatus == 0 && readStatus == 0 &&
-                (active.__control_word.toInt() and 0x0300) == 0x0200 &&
+                active.__control_word.toInt() ==
+                    ((saved.__control_word.toInt() and 0xfcff) or 0x0200) &&
                 (mxcsr(active) and 0xffffffc0u) == (mxcsr(saved) and 0xffffffc0u)) {
-                "The x87 precision control did not enter PC53 for $id"
+                "The x87 control word differs beyond the requested PC53 setting for $id"
             }
             check(GetCurrentThreadId() == thread) { "The controlled body moved to a different thread for $id" }
             body()
