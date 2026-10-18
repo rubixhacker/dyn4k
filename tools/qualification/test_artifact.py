@@ -45,14 +45,26 @@ class RawArtifactTests(unittest.TestCase):
             started = time.time_ns() - 5_000_000_000
             finished = time.time_ns() + 5_000_000_000
 
-            def probe(ids, count):
+            def probe(ids, count, extra_reports=None):
                 selected = {**manifest, "groups": [groups[group_id] for group_id in ids]}
+                extra_reports = extra_reports or {}
+                summaries = []
+                for group_id in ids:
+                    selected_count = len(qualify.expected_probe_cases(manifest, groups[group_id]))
+                    summaries.append({"id": group_id, "expected": selected_count,
+                                      "executed": selected_count,
+                                      "reported": selected_count + extra_reports.get(group_id, 0),
+                                      "failures": 0, "errors": 0, "skipped": 0})
                 return {"candidate_sha": sha, "status": "PROBE_PASSED", "expected": count,
-                        "executed": count, "failures": 0, "skipped": 0, "exit_code": 0,
+                        "executed": count,
+                        "reported": sum(item["reported"] for item in summaries),
+                        "groups": summaries, "failures": 0, "errors": 0,
+                        "skipped": 0, "exit_code": 0,
                         "manifest_sha256": qualify.manifest_digest(selected),
                         "started_at_ns": started, "finished_at_ns": finished}
 
-            source = probe(("core-macosArm64", "macosArm64"), 1111)
+            source = probe(("core-macosArm64", "macosArm64"), 1111,
+                           {"core-macosArm64": 1})
             consumer = probe(("consumer-macosArm64",), 3)
             hosted = {"candidate_sha": sha, "target": target, "status": "PROBE_PASSED",
                       "runtime": {"system": "Darwin", "machine": "arm64",
@@ -74,10 +86,12 @@ class RawArtifactTests(unittest.TestCase):
                                                "counts": {"PASSED": 0, "FAILED": 0,
                                                           "UNAVAILABLE": 0, "NOT_RUN": 112}}))
 
-            def write_group(group_id):
+            def write_group(group_id, extras=()):
                 group = groups[group_id]
                 by_class = defaultdict(list)
                 for classname, name in qualify.expected_probe_cases(manifest, group):
+                    by_class[classname].append(name)
+                for classname, name in extras:
                     by_class[classname].append(name)
                 directory = repository / Path(group["report_pattern"]).parent
                 directory.mkdir(parents=True, exist_ok=True)
@@ -96,12 +110,14 @@ class RawArtifactTests(unittest.TestCase):
             self.assertEqual("PROBE_FAILED", missing["status"])
             self.assertIn("core-macosArm64", missing["reason"])
 
-            write_group("core-macosArm64")
+            write_group("core-macosArm64", [("supplemental.FullReportTest", "extra-pass")])
             complete = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
                                              matrix_path, repository / "bundle-complete")
             self.assertEqual("PROBE_PASSED", complete["status"])
             self.assertEqual(1114, complete["executed"])
+            self.assertEqual(1115, complete["reported"])
             self.assertEqual(1066, complete["groups"]["core-macosArm64"])
+            self.assertEqual(1067, complete["reported_groups"]["core-macosArm64"])
             self.assertEqual(4, len(complete["gav"]))
             self.assertEqual(4, len(list((repository / "bundle-complete/staged").rglob("*.pom"))))
             workflow_bundle = repository / "bundle-workflow"
@@ -201,7 +217,12 @@ class RawArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale report"):
                 artifact.verify_bundle(workflow_bundle, manifest, sha)
             inventory_path.write_bytes(inventory_bytes)
-            source_xml = next((repository / "dyn4k-core/build/test-results/macosArm64Test").glob("*.xml"))
+            selected_core_cases = set(qualify.expected_probe_cases(
+                manifest, groups["core-macosArm64"]))
+            source_xml = next(path for path in
+                              (repository / "dyn4k-core/build/test-results/macosArm64Test").glob("*.xml")
+                              if any((case.get("classname"), case.get("name")) in selected_core_cases
+                                     for case in ET.parse(path).getroot().iter("testcase")))
             original = source_xml.read_bytes()
 
             def reject_changed_xml(label, edit):
@@ -256,7 +277,7 @@ class RawArtifactTests(unittest.TestCase):
             staged_pom.write_bytes(pom_bytes)
             first_core = next((repository / "bundle-complete/xml/dyn4k-core/build/test-results/macosArm64Test").glob("*.xml"))
             first_core.unlink()
-            with self.assertRaisesRegex(ValueError, "partial|missing"):
+            with self.assertRaisesRegex(ValueError, "report counts|partial|missing"):
                 artifact.verify_bundle(repository / "bundle-complete", manifest, sha)
 
             hosted.update(status="UNAVAILABLE", reason="runner is unavailable")

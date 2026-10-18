@@ -6,7 +6,7 @@ Source: [dyn4j 6.0.0 at `058bf6d982a0fb89b54050f929f6ea9dae53b714`](https://gith
 
 ## Current portable cases
 
-`PortableFoundationCoverageTest` contains 24 additional common `@Test` cases. The new upstream-named classes contain 167 one-to-one common counterparts for the 169 assigned foundation and tree/reference/version identities. Two original Java identities require JVM-only execution for the precise reasons below. Of the other 446 geometry identities, 18 have partial consumer scenarios and 428 remain unported. The generic tests are supplementary to the one-to-one tests.
+`PortableFoundationCoverageTest` contains 24 additional common `@Test` cases. The new upstream-named classes contain 167 one-to-one common counterparts for the 169 assigned foundation and tree/reference/version identities. Two original Java identities require JVM-only execution for the precise reasons below. In the earlier validation tree `a5794e26f411f015a61febb8c76afa60c17769bf`, 18 of the other 446 geometry identities had partial consumer scenarios and 428 had no common counterpart. That figure describes the earlier slice only. At combined corpus head `f09176dee50d20c01eee69db22ee7aef456e4288`, the geometry factory and shape reports map 434 of those 446 identities to common tests (170 factory and 264 shape cases); the other 12 have exact JVM-only dispositions. The generic tests are supplementary to the one-to-one tests.
 
 ## Upstream identity map
 
@@ -344,7 +344,7 @@ Unported: `getAverageCenterArray`, `getAverageCenterList`, `getAverageCenterNull
 
 `AdaptiveDecimalTest` exercises a package-private baseline type. The first common test attempt compiled on JVM and failed on Android host with `IllegalAccessError` from the patched candidate archive. A package-scoped follow-up can port those cases; this public-seam suite does not count them.
 
-The bounded cases cover the 169 assigned identities with 167 portable counterparts and two JVM-only dispositions. They do not cover the remaining 446 geometry identities, unchanged sample applications, or the full 21-target qualification matrix.
+This earlier bounded slice covers the 169 assigned foundation and tree/reference/version identities with 167 portable counterparts and two JVM-only dispositions. The combined corpus portfolio now has dispositions for all 446 geometry identities as stated above; that inventory does not establish a combined-head six-host pass. Unchanged sample applications and the full 21-target qualification matrix remain outside this slice and unpassed here.
 
 ## Reproduction and evidence
 

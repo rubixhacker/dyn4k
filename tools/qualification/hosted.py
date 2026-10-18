@@ -125,21 +125,30 @@ def hosted_status(target, candidate_sha, runtime, source_probe, consumer_probe, 
             not qualify.SHA64.fullmatch(str(value)) for value in hashes.values()):
         return "PROBE_FAILED", "both staged target binary hashes are required"
     groups = {group["id"]: group for group in manifest["groups"]}
+    consumer_id = f"consumer-{target}"
     required = [(consumer_probe, len(qualify.expected_probe_cases(
-        manifest, groups[f"consumer-{target}"])), "staged consumer")]
+        manifest, groups[consumer_id])), "staged consumer", (consumer_id,))]
     if target != "jsSafari":
+        source_ids = (f"core-{target}", target)
         count = sum(len(qualify.expected_probe_cases(manifest, groups[group_id]))
-                    for group_id in (f"core-{target}", target))
-        required.insert(0, (source_probe, count, "source probe"))
-    for probe, expected, name in required:
+                    for group_id in source_ids)
+        required.insert(0, (source_probe, count, "source probe", source_ids))
+    for probe, expected, name, group_ids in required:
         if not isinstance(probe, dict):
             return "PROBE_FAILED", f"{name} report is missing"
         if (probe.get("candidate_sha") != candidate_sha
                 or probe.get("status") != "PROBE_PASSED"
                 or probe.get("expected") != expected or probe.get("executed") != expected
-                or probe.get("failures") != 0 or probe.get("skipped") != 0
+                or probe.get("failures") != 0 or probe.get("errors") != 0
+                or probe.get("skipped") != 0
+                or type(probe.get("reported")) is not int
+                or probe.get("reported") < expected
                 or probe.get("exit_code") != 0):
             return "PROBE_FAILED", f"{name} is stale, partial, failed, or skipped"
+        try:
+            qualify.validate_probe_accounting(probe, manifest, group_ids)
+        except ValueError as error:
+            return "PROBE_FAILED", f"{name} accounting is invalid: {error}"
     return "PROBE_PASSED", "frozen source and staged consumer cases executed"
 
 

@@ -2,7 +2,7 @@
 
 This report covers the original cases assigned to this branch under [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42). The worktree started at `41be662d8e8ba4c7f838d3f63371cd99347fb652` on `codex/port-coverage-detection`. The original source is dyn4j 6.0.0 revision `058bf6d982a0fb89b54050f929f6ea9dae53b714` at `/tmp/dyn4k-upstream-6.0.0`.
 
-The existing [source case map](../../dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/collision/detection/resources/source-case-map.tsv) gives the exact Java source file, source SHA-256, declaration line, and expanded JUnit identity for each case. Its SHA-256 remains `4978c0d85575222df3c53d8a5ac71a47858fe99c972db6914caaed043a2b8f43`. It still says `UNMAPPED` for these cases because combined review owns that frozen map. This report records the new disposition without changing it.
+The source case map gives the exact Java source file, source SHA-256, declaration line, and expanded JUnit identity for each case. At reviewed detection branch head `cfbff308aea21f4b869ad40eeb1e1d8bf136b1b8`, the pre-reconciliation map had SHA-256 `4978c0d85575222df3c53d8a5ac71a47858fe99c972db6914caaed043a2b8f43` and this slice's rows were still `UNMAPPED`. That is historical status. At combined corpus head `f09176dee50d20c01eee69db22ee7aef456e4288`, the reconciled 471-row map has SHA-256 `37d63f4e2227a4f793da1b59e4391f015ee7d45cf22e8d65ab66e699f3633f41`; it records 463 `PORTABLE`, eight `JVM_ONLY`, and zero `UNMAPPED` rows. This report's 145 cases are now `PORTABLE` in that map.
 
 ## Identity disposition
 

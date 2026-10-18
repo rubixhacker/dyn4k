@@ -10,12 +10,14 @@ The pinned dyn4j 6.0.0 sources contain 65 expanded `AbstractCollisionWorldTest` 
 - Candidate JVM JAR SHA-256: `128226a69d5d698df430546961db4332195d420c6c15d66f7bae1b84108e6755`.
 - `AbstractCollisionWorldTest.java` SHA-256: `09ec87320e4735908620144e8625af84b16d66a5b84f40e82c09db7c9e5246de`.
 - `AbstractPhysicsWorldTest.java` SHA-256: `31869a570fba5650c6c101d474e7bb7e773811c99ae6266a112b38c3451a5f58`.
-- `CollisionWorldCoreCoverageTest.kt` SHA-256: `cac02c05775bf9aeaef446d460990924d2433ba7691b44c3db5bf9814f5e553f`.
-- `PhysicsWorldCoreCoverageTest.kt` SHA-256: `b86c4fe70dda6bd99a31ed15c7b0783b660bae19315fc8db7c048bddfca29987`.
+- Historical provisional `CollisionWorldCoreCoverageTest.kt` SHA-256: `cac02c05775bf9aeaef446d460990924d2433ba7691b44c3db5bf9814f5e553f`.
+- Historical provisional `PhysicsWorldCoreCoverageTest.kt` SHA-256: `b86c4fe70dda6bd99a31ed15c7b0783b660bae19315fc8db7c048bddfca29987`.
+
+At combined corpus head `f09176dee50d20c01eee69db22ee7aef456e4288`, the current collision test SHA-256 is `7ba703197a0cfb0c2d5e7e39c1d8127c39ed38edd12c8f2021db4b69ac95ec92`, and the current physics test SHA-256 is `5a96863ea3e41eb37cf4640e67f382df20828c237d52f2ac7c6089ae52b895d7`. The four mapped body-view mutation checks retain the pinned Java `UnsupportedOperationException` expectation. The earlier common test bytes that expected `ClassCastException` are historical and are not the current assertions.
 
 The expected values come from the pinned Java assertions. Fixed geometry supplies independent checks: origin-centered overlap, one broadphase-only diagonal pair, translated AABBs and manifold points, ray direction and nearest-hit order, cast path reach, contact graph removal, sensor rest state, and solved contacts. No expected value is read from candidate output.
 
-The Kotlin read-only `List` view rejects a `MutableList` cast with `ClassCastException`. The unchanged Java source checks the baseline `UnsupportedOperationException` for list mutation. Both surfaces execute in their respective suites.
+The earlier Linux report observed `ClassCastException` when the read-only view could not cast to `MutableList`, before mutation began. The mapped common tests retain the pinned Java `UnsupportedOperationException` expectation. This Linux source behavior remains a separate production repair; the older observation does not change the expected exception or make the case pass.
 
 ## Prior provisional common host execution
 

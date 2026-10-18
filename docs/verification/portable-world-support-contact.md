@@ -10,6 +10,8 @@ This report covers 75 pinned dyn4j 6.0.0 JUnit identities: 63 world support case
 - Engine base: `6c533a5bbf3795514ce3a2ebb18d557bcc70045e`. Provisional JVM candidate JAR SHA-256: `128226a69d5d698df430546961db4332195d420c6c15d66f7bae1b84108e6755`. The JAR contains no corpus source changes.
 - The 75 identities were checked against `/tmp/dyn4k-full-java-probe/baseline-jdk8.log`. Each has one named common method. There are no unmatched or duplicate source identities.
 
+At combined corpus head `f09176dee50d20c01eee69db22ee7aef456e4288`, this report includes the approved hash-label repair from support head `b59cc40b0fa4e04626c2d8310e750566c3834e4b`. The current `ConstraintGraphCoverageTest.kt` bytes have SHA-256 `86c556f809276b7f92b70ad69547b940ef5b4be36440a2b855dbf30d715b906e`. The table below ties earlier six-host and focused results to their exact source revisions. No six-host result exists for the current combined source bytes.
+
 ## Current graph mapping repair
 
 Pinned `ConstraintGraphTest.java` SHA-256 `ca2d1d427042c929f88a375a732b22c6c56ebb0b346722fe2cf198606c4778d0` was compared checkpoint by checkpoint for the entire `clear` and `removeBody` methods. Their shared fixture adds circle (radius 1.0), equilateral triangle (size 0.5), and circle (radius 0.5) bodies in `a, b, c` order; adds angle joints `a-b, a-c, b-c`; then adds contact constraints in the same pair order, each using the bodies' fixtures. The portable fixture now follows that order.
