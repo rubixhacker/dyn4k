@@ -135,10 +135,14 @@ class SafariYarnLockTests(unittest.TestCase):
         finished = process.get("finished_ns")
         reason = receipt.get("reason")
         status = receipt.get("status")
+        status_category = ("expected" if status == "INCOMPLETE_LOG_CAPTURE" else
+                           "process_binding_rejected" if status == "PROCESS_BINDING_REJECTED"
+                           else "other")
+        reason_category = ("absent" if reason is None else "text"
+                           if isinstance(reason, str) else "other")
         detail = {
-            "status": status if isinstance(status, str) and re.fullmatch(
-                r"[A-Z_]{1,64}", status) else "<invalid-status>",
-            "reason": reason[:160] if isinstance(reason, str) else None,
+            "status_category": status_category,
+            "reason_category": reason_category,
             "command_identity": process.get("command") == expected_command,
             "pid": bounded_int(process.get("pid")),
             "pid_valid": isinstance(process.get("pid"), int) and process["pid"] > 0,
@@ -160,9 +164,9 @@ class SafariYarnLockTests(unittest.TestCase):
         }
         message = json.dumps(detail, sort_keys=True, separators=(",", ":"))
         if len(message) > 700:
-            detail["reason"] = "<omitted: diagnostic length bound>"
-            message = json.dumps(detail, sort_keys=True, separators=(",", ":"))
-        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"], message)
+            self.fail("process fixture diagnostic exceeded its fixed length bound")
+        if status != "INCOMPLETE_LOG_CAPTURE":
+            self.fail(message)
 
     def test_fixture_commits_exact_crlf_bytes(self):
         self.assertEqual("false", subprocess.check_output(
@@ -927,34 +931,41 @@ class SafariYarnLockTests(unittest.TestCase):
         self.output.mkdir()
         (self.output / "stdout.txt").write_bytes(
             b"> Task :dyn4k-core:jsTestPackageJson\nSECRET_LOG_BYTES\n")
-        receipt = {"status": "PROCESS_BINDING_REJECTED",
-                   "reason": "injected fixture reason " + "r" * 1000,
-                   "invocation_id": "a" * 32,
-                   "host": {"environment": "SECRET_ENVIRONMENT_VALUE"},
-                   "process": {"command": ["SECRET_COMMAND_VALUE"], "pid": 0,
-                               "started_ns": 2, "finished_ns": 1,
-                               "stream_incomplete": True, "timed_out": False}}
-        with mock.patch.dict(os.environ, {"SECRET_VAR": "SECRET_ENVIRONMENT_VALUE"}):
-            with self.assertRaises(AssertionError) as failure:
-                self.assert_incomplete_fixture_status(receipt)
-        message = str(failure.exception)
-        self.assertIn('"status":"PROCESS_BINDING_REJECTED"', message)
-        self.assertIn('"command_identity":false', message)
-        self.assertIn('"pid_valid":false', message)
-        self.assertIn('"timing_ordered":false', message)
-        self.assertIn('"task_markers":[true,false,false]', message)
-        self.assertIn('"stream_incomplete":true', message)
-        self.assertIn('"reason":"injected fixture reason ', message)
-        for secret in ("SECRET_ENVIRONMENT_VALUE", "SECRET_COMMAND_VALUE",
-                       "SECRET_LOG_BYTES"):
-            self.assertNotIn(secret, message)
-        self.assertLess(len(message), 900)
-        receipt["reason"] = "\U0001f600" * 1000
-        with self.assertRaises(AssertionError) as unicode_failure:
-            self.assert_incomplete_fixture_status(receipt)
-        unicode_message = str(unicode_failure.exception)
-        self.assertIn('"reason":"<omitted: diagnostic length bound>"', unicode_message)
-        self.assertLess(len(unicode_message), 900)
+        base = {"status": "PROCESS_BINDING_REJECTED", "invocation_id": "a" * 32,
+                "host": {"environment": "SECRET_ENVIRONMENT_VALUE",
+                         "path": "C:\\SECRET_HOST_PATH"},
+                "process": {"command": ["C:\\SECRET_COMMAND_VALUE"], "pid": 0,
+                            "started_ns": 2, "finished_ns": 1,
+                            "stream_incomplete": True, "timed_out": False}}
+        cases = (
+            ("short reason", {"reason": "C:\\SECRET_REASON_VALUE"},
+             "process_binding_rejected", "text"),
+            ("unexpected status", {"status": "SECRET_STATUS_VALUE" + "S" * 10000},
+             "other", "absent"),
+            ("long reason", {"reason": "\U0001f600" * 1000},
+             "process_binding_rejected", "text"),
+        )
+        for name, updates, status_category, reason_category in cases:
+            with self.subTest(case=name):
+                receipt = {**base, **updates}
+                with mock.patch.dict(os.environ,
+                                     {"SECRET_VAR": "SECRET_ENVIRONMENT_VALUE"}):
+                    with self.assertRaises(AssertionError) as failure:
+                        self.assert_incomplete_fixture_status(receipt)
+                message = str(failure.exception)
+                for secret in ("SECRET_ENVIRONMENT_VALUE", "SECRET_HOST_PATH",
+                               "SECRET_COMMAND_VALUE", "SECRET_LOG_BYTES",
+                               "SECRET_REASON_VALUE", "SECRET_STATUS_VALUE"):
+                    self.assertNotIn(secret, message)
+                self.assertNotIn("C:", message)
+                self.assertIn(f'"status_category":"{status_category}"', message)
+                self.assertIn(f'"reason_category":"{reason_category}"', message)
+                self.assertIn('"command_identity":false', message)
+                self.assertIn('"pid_valid":false', message)
+                self.assertIn('"timing_ordered":false', message)
+                self.assertIn('"task_markers":[true,false,false]', message)
+                self.assertIn('"stream_incomplete":true', message)
+                self.assertLess(len(message), 700)
 
     def test_public_hosted_capture_records_staging_handle_failure_residue(self):
         class Directory:
