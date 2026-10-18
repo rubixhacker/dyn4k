@@ -501,9 +501,22 @@ def capture(args):
     inventory = validate_inventory(inventory_path, args.target, args.build, args.source_sha,
                                    producer_tree, manifest_path, harness, core, kotlin, bundle,
                                    getattr(args, "publication_root", None))
+    source_link = None
+    if getattr(args, "source_link_receipt", None) is not None:
+        if args.target != "linuxX64":
+            raise ValueError("source-link trace receipt is limited to Linux x64")
+        import native_source_link
+        source_link = native_source_link.verify_receipt(
+            args.source_link_receipt, str(inventory_path), args.build)
+        native_source_link.require_selected_inputs(
+            source_link, args.build, inventory_path, hashes["runtime"],
+            {"dyn4k-core": hashes["core"], "dyn4k": hashes["kotlin"]})
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
     args.archive.mkdir(parents=True)
+    if source_link is not None:
+        receipt_path = args.archive / "source-link.json"
+        receipt_path.write_bytes(Path(args.source_link_receipt).read_bytes())
     publication_archive = []
     if inventory.get("publication_inputs"):
         directory = args.archive / "publication"
@@ -549,6 +562,13 @@ def capture(args):
         "publication_inputs": inventory.get("publication_inputs", []),
         "publication_archive": publication_archive,
         "source_to_link": "unpassed",
+        "source_link_trace": ({"receipt_sha256": digest(args.archive / "source-link.json"),
+                               "source_reads": len(source_link["source_files"]),
+                               "build": args.build,
+                               "publication_writes": source_link["observed_syscalls"]["publication"]["write"],
+                               "link_writes": source_link["observed_syscalls"][args.build]["write"],
+                               "scope": "observed source reads, fresh KLIB equality, resolved KLIB reads, executable bytes"}
+                              if source_link is not None else None),
         "command": command, "inputs": {
             label: {"path": str(path), "sha256": hashes[label]}
             for label, path in (("manifest", manifest_path), ("runtime", runtime),
@@ -635,6 +655,7 @@ def main():
     parser.add_argument("--kotlin", required=True)
     parser.add_argument("--inventory", required=True)
     parser.add_argument("--publication-root", type=Path)
+    parser.add_argument("--source-link-receipt", type=Path)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
     parser.add_argument("--host-timeout-seconds", type=float, default=45.0)

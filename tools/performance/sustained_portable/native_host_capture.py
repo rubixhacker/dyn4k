@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--publication-root", type=Path, required=True)
+    parser.add_argument("--source-link-receipt", type=Path)
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--target", choices=sorted(capture.NATIVE_HOST_TARGETS), required=True)
     parser.add_argument("--build", choices=("development", "optimized"), required=True)
@@ -39,6 +40,8 @@ def main():
                    "--kotlin", selected_artifact(inventory, "dyn4k", args.target),
                    "--steps", str(args.steps), "--warmup", str(args.warmup),
                    "--host-timeout-seconds", str(args.host_timeout_seconds)]
+        if args.source_link_receipt is not None:
+            command += ["--source-link-receipt", str(args.source_link_receipt)]
         raise SystemExit(subprocess.call(command))
     except (KeyError, ValueError, OSError) as error:
         parser.exit(1, f"qualification: unpassed; {error}\n")

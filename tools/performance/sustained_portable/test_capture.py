@@ -11,6 +11,7 @@ import zipfile
 
 import capture
 import native_host_capture
+import native_source_link
 import host_image_adverse
 
 
@@ -176,6 +177,33 @@ class PortableCaptureTest(unittest.TestCase):
             metadata.with_name(metadata.name + ".sha256").write_text(capture.digest(metadata))
             with self.assertRaisesRegex(ValueError, "source bytes"):
                 capture.validate_publication(root, label, target, capture.digest(klib))
+
+    def test_source_link_trace_requires_real_reads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = str(Path(temporary) / "source.kt")
+            output = str(Path(temporary) / "output.klib")
+            trace = Path(temporary) / "build.strace"
+            trace.write_text(
+                f'1 read(3<{source}>, "abc", 3) = 3\n'
+                f'1 write(4<{output}>, "abc", 3) = 3\n')
+            events = native_source_link.trace_events(trace, (source, output))
+            self.assertEqual(events["read"], [source])
+            self.assertEqual(events["write"], [output])
+            trace.write_text(f'1 openat(AT_FDCWD, "{source}", O_RDONLY) = 3<{source}>\n')
+            self.assertEqual(native_source_link.trace_events(trace, (source,))["read"], [])
+
+    def test_resealed_older_klib_cannot_claim_traced_selection(self):
+        receipt = {"publication": {"dyn4k-core": {"sha256": "a" * 64},
+                                   "dyn4k": {"sha256": "b" * 64}},
+                   "inventories": {"development": {"path": "/fresh/inventory.json",
+                                                   "executable_sha256": "c" * 64}}}
+        native_source_link.require_selected_inputs(
+            receipt, "development", "/fresh/inventory.json", "c" * 64,
+            {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64})
+        with self.assertRaisesRegex(ValueError, "lacks traced source-to-link provenance"):
+            native_source_link.require_selected_inputs(
+                receipt, "development", "/fresh/inventory.json", "c" * 64,
+                {"dyn4k-core": "d" * 64, "dyn4k": "b" * 64})
 
     def test_host_deadline_retains_raw_and_process_receipt(self):
         with tempfile.TemporaryDirectory() as directory:

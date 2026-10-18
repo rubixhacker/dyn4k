@@ -58,6 +58,44 @@ Repeat with `separated.default.small.30hz.compatibility` and a new archive.
 Use `NATIVE_BUILD=optimized` for the release executable and its inventory.
 The launcher rejects a target on the wrong host architecture.
 
+### Traced Linux x64 source and link inputs
+
+For a Linux x64 provenance receipt, create a clean detached checkout at the
+selected commit under home storage. Its four build output directories must
+not exist. Run the traced builder from that checkout with the pinned offline
+toolchain. Keep the trace archive and checkout together. The builder records
+each exact Gradle command, JDK and tracer hash, raw syscall trace, Gradle log,
+Kotlin source digests, freshly built and staged KLIB hashes, resolved link
+inputs, and both executable hashes.
+
+```sh
+git worktree add --detach /home/stewart/native-source-link-checkout COMMIT
+cd /home/stewart/native-source-link-checkout
+export TMPDIR=/home/stewart/native-source-link-tmp
+export JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/home/stewart/native-source-link-tmp
+python3 -B tools/performance/sustained_portable/native_source_link.py \
+  --archive /home/stewart/native-source-link-evidence \
+  --gradle /tmp/dyn4k-tools/gradle-9.5.0/bin/gradle \
+  --jdk /tmp/dyn4k-tools/jdk21 \
+  --older-core-klib /absolute/path/to/older-valid-linux-x64-core.klib
+```
+
+The older KLIB option is an adverse control. It reseals an isolated staged
+copy while leaving the current source archive intact. Pairwise publication
+validation must accept the old KLIB as a selected input, and the traced
+selection check must reject its provenance. The adverse copy and JSON result
+remain in the evidence archive. The builder does not edit the selected staged
+repository.
+
+Pass `--source-link-receipt /home/stewart/native-source-link-evidence/source-link.json`
+to `native_host_capture.py` for each short Linux x64 direct and compatibility
+capture in both builds. A capture verifies the raw trace hashes and exact
+selected KLIB and executable bytes before launch. It copies the receipt into
+the raw process archive; the large syscall traces remain in their retained
+shared archive. `source_to_link` and `qualification` remain `unpassed`:
+syscall tracing and fresh output equality show the observed build chain, but
+they do not cryptographically attest the compiler's internal byte transform.
+
 ## Windows x64 hosted runner
 
 Use a PowerShell session on Windows x64. Set paths to the pinned JDK, Gradle,
@@ -140,8 +178,9 @@ completion marker. Linux reads mapped executable bytes through procfs.
 Windows and macOS record only path metadata and fail closed on image identity.
 The host controller has a 45-second default deadline with terminate/kill
 cleanup; it retains raw stdout, stderr, stdin, inventory, publication inputs,
-and process/error receipt on timeout. A later independent source-to-compiler
-and link-time byte proof remains unpassed. A valid short capture does not satisfy memory,
+and process/error receipt on timeout. Linux x64 can retain a traced source
+read, fresh KLIB, resolved link read, and executable chain. Its internal
+compiler transformation remains unpassed. A valid short capture does not satisfy memory,
 allocation, plateau, noise, sustained duration, or performance budgets.
 
 The remaining iOS, tvOS, watchOS, and Android Native device and simulator
