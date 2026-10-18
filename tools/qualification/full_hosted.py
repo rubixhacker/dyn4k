@@ -1790,6 +1790,23 @@ def verify_process(output, folder, process, invocation, required_task=None):
         raise ValueError("archived process did not complete successfully")
 
 
+def verify_safari_mode_arguments(command, process_name, config=None):
+    for property_name, mode, required in (
+            ("qualificationSafari", "browser", process_name == "consumer"),
+            ("qualificationProduction", "production",
+             config == "production" and process_name in ("source", "consumer"))):
+        prefixes = (f"-P{property_name}", f"--project-prop={property_name}",
+                    f"-Dorg.gradle.project.{property_name}",
+                    f"--system-prop=org.gradle.project.{property_name}",
+                    f"org.gradle.project.{property_name}")
+        observed = [argument for argument in command if isinstance(argument, str)
+                    and (argument.startswith(prefixes) or argument == property_name
+                         or argument.startswith(f"{property_name}="))]
+        expected = [f"-P{property_name}=true"] if required else []
+        if observed != expected:
+            raise ValueError(f"Safari {process_name} {mode} mode differs")
+
+
 def verify_report_group(output, folder, group, checked, prefix):
     if (group.get("expected") != checked["expected"]
             or group.get("executed") != checked["executed"]
@@ -1919,6 +1936,8 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     if (not stage["command"] or original_path(target, stage["command"][0]) != wrapper
             or "--rerun-tasks" not in stage["command"]):
         raise ValueError("staging wrapper differs from checkout")
+    if target == "jsSafari":
+        verify_safari_mode_arguments(stage["command"], "stage")
     for item in receipt["files"]:
         if item["path"].startswith("staged/") and not (
                 stage["started_ns"] <= item["modified_ns"] <= stage["finished_ns"]):
@@ -2000,20 +2019,8 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
                     raise ValueError("test or graph init script is unbound")
             if process_name == "source" and f":dyn4k:{SOURCE_TASK[target]}" not in command:
                 raise ValueError("facade source test task is absent")
-            if target == "jsSafari" and process_name == "source" and config == "production" \
-                    and "-PqualificationProduction=true" not in command:
-                raise ValueError("Safari production source mode is absent")
-            if target == "jsSafari" and process_name == "consumer" \
-                    and "-PqualificationSafari=true" not in command:
-                raise ValueError("Safari consumer browser mode is absent")
-            if target == "jsSafari" and process_name == "consumer":
-                production_mode = [argument for argument in command
-                                   if isinstance(argument, str)
-                                   and argument.startswith("-PqualificationProduction")]
-                expected_mode = (["-PqualificationProduction=true"]
-                                 if config == "production" else [])
-                if production_mode != expected_mode:
-                    raise ValueError("Safari consumer production mode differs")
+            if target == "jsSafari":
+                verify_safari_mode_arguments(command, process_name, config)
         source_process = lane["source_process"]
         consumer_process = lane["consumer_process"]
         graph_process = lane["graph_process"]

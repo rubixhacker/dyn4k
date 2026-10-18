@@ -2367,6 +2367,66 @@ class FullHostedTests(unittest.TestCase):
                             archive, changed["candidate_sha"], "jsSafari",
                             candidate_repository=self.candidate_repository)
 
+    def test_public_safari_directory_and_tar_require_exact_mode_properties(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        self.assertEqual(72, len(self.safari_diagnostic_rows()))
+        archive = self.root.parent / (self.root.name + "-exact-modes.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+
+        changes = (("development", "consumer", "qualificationSafari", "false"),
+                   ("development", "consumer", "qualificationSafari", "missing"),
+                   ("production", "consumer", "qualificationSafari", "duplicate"),
+                   ("production", "consumer", "qualificationSafari", "bare"),
+                   ("production", "consumer", "qualificationSafari", "long-false"),
+                   ("production", "source", "qualificationProduction", "false"),
+                   ("production", "source", "qualificationProduction", "missing"),
+                   ("production", "source", "qualificationProduction", "duplicate"),
+                   ("production", "source", "qualificationProduction", "bare"),
+                   ("development", "source", "qualificationProduction", "true"),
+                   ("development", "consumer", "qualificationProduction", "false"),
+                   ("development", "source", "qualificationSafari", "true"),
+                   ("production", "graph", "qualificationProduction", "true"),
+                   ("development", "graph", "qualificationSafari", "false"),
+                   ("stage", "stage", "qualificationSafari", "true"))
+        for configuration, process, property_name, variant in changes:
+            with self.subTest(configuration=configuration, process=process,
+                              property_name=property_name, variant=variant):
+                changed = json.loads(json.dumps(receipt))
+                if process == "stage":
+                    command = changed["stage"]["command"]
+                else:
+                    lane = next(item for item in changed["configurations"]
+                                if item["configuration"] == configuration)
+                    command = lane[f"{process}_process"]["command"]
+                if variant == "missing":
+                    command.remove(f"-P{property_name}=true")
+                elif variant == "long-false":
+                    command.append(f"--project-prop={property_name}=false")
+                elif variant == "bare":
+                    command.append(f"-P{property_name}")
+                else:
+                    command.append(f"-P{property_name}=" +
+                                   ("false" if variant == "false" else "true"))
+                with self.assertRaisesRegex(ValueError, "Safari .* mode"):
+                    full_hosted.verify_raw_files(
+                        self.root, changed, manifest, consumer,
+                        candidate_repository=self.candidate_repository)
+                (self.root / "receipt.json").write_text(json.dumps(changed))
+                full_hosted.package_archive(self.root, archive)
+                with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                    with self.assertRaisesRegex(ValueError, "Safari .* mode"):
+                        full_hosted.verify_transport_archive(
+                            archive, changed["candidate_sha"], "jsSafari",
+                            candidate_repository=self.candidate_repository)
+
     def test_public_safari_pass_rejects_failed_source_xml_diagnostics(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
         self.assertEqual(72, len(self.safari_diagnostic_rows()))
