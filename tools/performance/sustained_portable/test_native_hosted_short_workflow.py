@@ -14,6 +14,16 @@ WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-
 RUNNER = Path(__file__).with_name("native_hosted_short_runner.py")
 RAW_LIMIT = 64 * 1024 * 1024
 RUN_EXPRESSION_LIMIT = 21000
+# This lock prevents unparsed YAML forms from bypassing the run-size scanner.
+# After a workflow edit, independently parse every run value before updating its digest.
+AUDITED_WORKFLOW_SHA256 = {
+    "full-hosted-mac-product-diagnostic.yml": "cef244e7f6ee8864313754dbd030e20fa34ec6d43dc3742b66b1b9f3a4191405",
+    "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
+    "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
+    "qualification.yml": "3f6fdd560b92f9252f2123b15aa35f60a92a1769a6022b96fed4ca0ee97545b4",
+    "safari-yarn-lock-diagnostic.yml": "beacdd4b213fbd2a2edbe4a54430a249a63fd33a1c598ef536f524fb3670de55",
+    "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
+}
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
     "MA0KLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tDQoNCkJ1aWxkIHRp"
@@ -24,6 +34,19 @@ WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "Y2FjaGVcd2luZG93c1xKYXZhX1RlbXVyaW4tSG90c3BvdF9qZGtcMjEuMC4xMi0xMDEuMFx4NjQgKG5vIERhZW1vbiBKVk0gc3Bl"
     "Y2lmaWVkLCB1c2luZyBjdXJyZW50IEphdmEgaG9tZSkNCk9TOiAgICAgICAgICAgIFdpbmRvd3MgU2VydmVyIDIwMjUgMTAuMCBh"
     "bWQ2NA0KDQo=")
+
+
+def verify_workflow_source_inventory(sources):
+    expected = set(AUDITED_WORKFLOW_SHA256)
+    actual = set(sources)
+    if actual != expected:
+        raise AssertionError(
+            f"workflow source inventory changed: added={sorted(actual - expected)}, "
+            f"removed={sorted(expected - actual)}")
+    for name in sorted(expected):
+        digest = hashlib.sha256(sources[name].encode("utf-8")).hexdigest()
+        if digest != AUDITED_WORKFLOW_SHA256[name]:
+            raise AssertionError(f"workflow source changed: {name}")
 
 
 def run_expression_upper_bounds(source):
@@ -135,20 +158,55 @@ class WorkflowExpressionLimit(unittest.TestCase):
                 self.assertEqual(len(bounds), 1)
                 self.assertGreaterEqual(bounds[0][1], RUN_EXPRESSION_LIMIT)
 
-    def test_native_run_is_below_limit_and_all_workflows_are_audited(self):
+    def workflow_sources(self):
         workflows = sorted(WORKFLOW.parent.glob("*.yml")) + sorted(WORKFLOW.parent.glob("*.yaml"))
         self.assertTrue(workflows)
+        return {workflow.name: workflow.read_text(encoding="utf-8") for workflow in workflows}
+
+    def audit_workflow_sources(self, sources):
+        verify_workflow_source_inventory(sources)
         checked = 0
         violations = []
-        for workflow in workflows:
-            for line, upper_bound in run_expression_upper_bounds(workflow.read_text()):
+        for name, source in sorted(sources.items()):
+            for line, upper_bound in run_expression_upper_bounds(source):
                 checked += 1
-                if workflow == WORKFLOW:
+                if name == WORKFLOW.name:
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
-                    violations.append((workflow.name, line, upper_bound))
+                    violations.append((name, line, upper_bound))
         self.assertGreaterEqual(checked, 67)
         self.assertEqual(violations, [])
+
+    def test_changed_workflow_sources_are_rejected(self):
+        sources = self.workflow_sources()
+        windows = "windows-collision-focus.yml"
+        payload = "x" * (RUN_EXPRESSION_LIMIT + 1)
+        job = "  expression_limit_adverse:\n    runs-on: ubuntu-latest\n    steps:\n"
+        cases = (
+            ("tagged", job + '      - !!map {"r\\u0075n": "' + payload + '"}\n'),
+            ("anchored", job + '      - &one {"r\\u0075n": "' + payload
+             + '"}\n      - *one\n'),
+            ("one character", " "),
+        )
+        for label, addition in cases:
+            with self.subTest(change=label):
+                changed = dict(sources)
+                changed[windows] += addition
+                with self.assertRaisesRegex(AssertionError, "workflow source"):
+                    self.audit_workflow_sources(changed)
+        added = dict(sources)
+        added["new-workflow.yml"] = ("name: new\non: workflow_dispatch\njobs:\n  control:\n"
+                                     "    runs-on: ubuntu-latest\n    steps:\n"
+                                     "      - run: echo new\n")
+        with self.assertRaisesRegex(AssertionError, "workflow source"):
+            self.audit_workflow_sources(added)
+        removed = dict(sources)
+        del removed[windows]
+        with self.assertRaisesRegex(AssertionError, "workflow source"):
+            self.audit_workflow_sources(removed)
+
+    def test_native_run_is_below_limit_and_all_workflows_are_audited(self):
+        self.audit_workflow_sources(self.workflow_sources())
 
 
 def workflow_nodes():
