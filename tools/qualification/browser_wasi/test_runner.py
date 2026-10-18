@@ -16,6 +16,78 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 class SourceCasesTest(unittest.TestCase):
     REVIEWED_SUCCESSOR = "8b0071563a31f7866f9fe8c3549ed284c9e7a092"
+    REVIEWED_ASSEMBLY = "0533142a1358b2eebb3c3f36ae3dc1a8b01d9667"
+
+    @staticmethod
+    def clone_candidate(directory: str, name: str, revision: str) -> Path:
+        source_root = Path(__file__).resolve().parents[3]
+        checkout = Path(directory) / name
+        subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+                        str(source_root), str(checkout)], check=True)
+        subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet",
+                        "--detach", revision], check=True)
+        return checkout
+
+    @staticmethod
+    def commit_candidate(checkout: Path, relative: str) -> str:
+        subprocess.run(["git", "-C", str(checkout), "add", "--", relative], check=True)
+        subprocess.run(["git", "-C", str(checkout),
+                        "-c", "user.name=Candidate Control",
+                        "-c", "user.email=candidate-control@example.invalid",
+                        "commit", "--quiet", "-m", "Adverse candidate control"], check=True)
+        return subprocess.check_output(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+
+    def test_public_candidate_accepts_exact_assembled_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "assembled", self.REVIEWED_ASSEMBLY)
+            accepted = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
+            self.assertEqual(0, accepted.returncode, accepted.stderr)
+            result = json.loads(accepted.stdout)
+            self.assertEqual("VERIFIED", result["status"])
+            self.assertEqual(self.REVIEWED_ASSEMBLY, result["candidate_sha"])
+            self.assertEqual(2521, result["suite_methods"])
+            self.assertEqual("e18d4ecb2898fbd3e1e0d8133ef725860e234c3d510e365641542f5b3572eefa",
+                             result["manifest_sha256"])
+            dishonest = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            self.assertEqual(1, dishonest.returncode)
+            self.assertIn("source SHA differs", dishonest.stderr)
+
+    def test_public_candidate_rejects_committed_generator_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "generator", self.REVIEWED_ASSEMBLY)
+            relative = "tools/qualification/full_corpus.py"
+            generator = checkout / relative
+            generator.write_bytes(generator.read_bytes() + b"\n# adverse generator mutation\n")
+            changed_sha = self.commit_candidate(checkout, relative)
+            rejected = self.public_candidate(checkout, changed_sha)
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("reviewed corpus generator differs", rejected.stderr)
+
+    def test_public_candidate_rejects_committed_corpus_map_and_test_source_mutations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name, relative in (
+                ("manifest", "tools/qualification/full-common-corpus.json"),
+                ("map", "tools/qualification/full-common-original-map.tsv"),
+                ("test-source", "dyn4k-core/src/commonTest/kotlin/org/dyn4j/coverage/world/core/PhysicsWorldCoreCoverageTest.kt"),
+            ):
+                checkout = self.clone_candidate(directory, name, self.REVIEWED_ASSEMBLY)
+                changed = checkout / relative
+                self.assertTrue(changed.is_file(), changed)
+                if name == "manifest":
+                    manifest = json.loads(changed.read_text())
+                    manifest["cases"].pop()
+                    manifest["counts"]["total_methods"] -= 1
+                    changed.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+                else:
+                    changed.write_bytes(changed.read_bytes() + b"\n")
+                changed_sha = self.commit_candidate(checkout, relative)
+                rejected = self.public_candidate(checkout, changed_sha)
+                self.assertEqual(1, rejected.returncode, f"{name}: {rejected.stderr}")
+                self.assertTrue(
+                    "corpus" in rejected.stderr or "map" in rejected.stderr,
+                    f"{name}: {rejected.stderr}",
+                )
 
     @staticmethod
     def public_candidate(root: Path, sha: str) -> subprocess.CompletedProcess[str]:
@@ -26,24 +98,19 @@ class SourceCasesTest(unittest.TestCase):
         )
 
     def test_public_candidate_accepts_exact_reviewed_source_and_rejects_mutants(self):
-        source_root = Path(__file__).resolve().parents[3]
         with tempfile.TemporaryDirectory() as directory:
-            checkout = Path(directory) / "reviewed-candidate"
-            subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
-                            str(source_root), str(checkout)], check=True)
-            subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet",
-                            "--detach", self.REVIEWED_SUCCESSOR], check=True)
-            exact = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            checkout = self.clone_candidate(directory, "reviewed-candidate", self.REVIEWED_ASSEMBLY)
+            exact = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(0, exact.returncode, exact.stderr)
             verified = json.loads(exact.stdout)
             self.assertEqual("VERIFIED", verified["status"])
-            self.assertEqual(self.REVIEWED_SUCCESSOR, verified["candidate_sha"])
+            self.assertEqual(self.REVIEWED_ASSEMBLY, verified["candidate_sha"])
             self.assertEqual(2521, verified["suite_methods"])
 
             generated = checkout / "consumers/qualification/browser-wasi/build/generated.txt"
             generated.parent.mkdir(parents=True)
             generated.write_text("generated output")
-            with_output = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            with_output = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(0, with_output.returncode, with_output.stderr)
 
             stale = self.public_candidate(checkout, "0" * 40)
@@ -52,12 +119,12 @@ class SourceCasesTest(unittest.TestCase):
 
             production = next((checkout / "dyn4k-core/src/commonMain/kotlin").rglob("*.kt"))
             production.write_bytes(production.read_bytes() + b"\n// source mutation\n")
-            changed = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            changed = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(1, changed.returncode)
             self.assertIn("dirty", changed.stderr)
             subprocess.run(["git", "-C", str(checkout), "update-index",
                             "--assume-unchanged", str(production)], check=True)
-            hidden_change = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            hidden_change = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(1, hidden_change.returncode, hidden_change.stderr)
             self.assertIn("committed source bytes differ", hidden_change.stderr)
             subprocess.run(["git", "-C", str(checkout), "update-index",
@@ -69,7 +136,7 @@ class SourceCasesTest(unittest.TestCase):
             ignored.write_text("package ignored\nclass UntrackedCandidateInput\n")
             (checkout / ".git/info/exclude").write_text(
                 "/dyn4k-core/src/commonMain/kotlin/**/UntrackedCandidateInput.kt\n")
-            untracked = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            untracked = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(1, untracked.returncode)
             self.assertIn("untracked candidate input", untracked.stderr)
             ignored.unlink()
@@ -84,7 +151,7 @@ class SourceCasesTest(unittest.TestCase):
             old_manifest["counts"]["total_methods"] = current_manifest["counts"]["total_methods"]
             (checkout / "tools/qualification/full-common-corpus.json").write_text(
                 json.dumps(old_manifest, sort_keys=True))
-            old_corpus = self.public_candidate(checkout, self.REVIEWED_SUCCESSOR)
+            old_corpus = self.public_candidate(checkout, self.REVIEWED_ASSEMBLY)
             self.assertEqual(1, old_corpus.returncode)
             self.assertTrue(
                 "dirty" in old_corpus.stderr or "corpus" in old_corpus.stderr,
@@ -95,11 +162,11 @@ class SourceCasesTest(unittest.TestCase):
 
             with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
                 with self.assertRaisesRegex(ValueError, "candidate commit bytes differ"):
-                    candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+                    candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
                 with mock.patch("runner.full_corpus.committed_bytes",
                                 side_effect=lambda root, sha, path: (root / path).read_bytes()):
                     with self.assertRaisesRegex(ValueError, "corpus differs from source tree"):
-                        candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+                        candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
 
             subprocess.run(["git", "-C", str(checkout), "restore",
                             "tools/qualification/full-common-corpus.json"], check=True)
@@ -109,7 +176,7 @@ class SourceCasesTest(unittest.TestCase):
                 b"io.github.rubixhacker:dyn4k-core:0.1.0-alpha.0"))
             with mock.patch("runner.full_corpus.candidate_checkout_problems", return_value=[]):
                 with self.assertRaisesRegex(ValueError, "consumer dependency pins differ"):
-                    candidate_identity(checkout, self.REVIEWED_SUCCESSOR)
+                    candidate_identity(checkout, self.REVIEWED_ASSEMBLY)
 
     @staticmethod
     def copy_lane(source: Path, directory: str) -> tuple[dict, Path]:
