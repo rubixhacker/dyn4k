@@ -1,7 +1,9 @@
 import ast
+import base64
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -10,6 +12,16 @@ import unittest
 
 WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-native-host-short.yml"
 RAW_LIMIT = 64 * 1024 * 1024
+WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
+    "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
+    "MA0KLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tDQoNCkJ1aWxkIHRp"
+    "bWU6ICAgIDIwMjYtMDQtMjggMTI6MDU6MzAgVVRDDQpSZXZpc2lvbjogICAgICAzZmUxMTdkNjhmMzkwNzc5MGYzODA5ZjEyMWFh"
+    "MzYzMDNhOTE1MWY4DQoNCktvdGxpbjogICAgICAgIDIuMy4yMA0KR3Jvb3Z5OiAgICAgICAgNC4wLjI5DQpBbnQ6ICAgICAgICAg"
+    "ICBBcGFjaGUgQW50KFRNKSB2ZXJzaW9uIDEuMTAuMTUgY29tcGlsZWQgb24gQXVndXN0IDI1IDIwMjQNCkxhdW5jaGVyIEpWTTog"
+    "IDIxLjAuMTIuMSAoRWNsaXBzZSBBZG9wdGl1bSAyMS4wLjEyLjErMS1MVFMpDQpEYWVtb24gSlZNOiAgICBDOlxob3N0ZWR0b29s"
+    "Y2FjaGVcd2luZG93c1xKYXZhX1RlbXVyaW4tSG90c3BvdF9qZGtcMjEuMC4xMi0xMDEuMFx4NjQgKG5vIERhZW1vbiBKVk0gc3Bl"
+    "Y2lmaWVkLCB1c2luZyBjdXJyZW50IEphdmEgaG9tZSkNCk9TOiAgICAgICAgICAgIFdpbmRvd3MgU2VydmVyIDIwMjUgMTAuMCBh"
+    "bWQ2NA0KDQo=")
 
 
 def workflow_nodes():
@@ -23,7 +35,11 @@ def workflow_nodes():
                   and node.target.id == "api")
     receipt = next(node for node in ast.walk(tree)
                    if isinstance(node, ast.Expr) and "route-result.json" in ast.unparse(node))
-    return raw, routes, receipt
+    gradle = next(node for node in ast.walk(tree)
+                  if isinstance(node, ast.If) and len(node.body) == 1
+                  and isinstance(node.body[0], ast.Raise)
+                  and "selected Gradle is not 9.5.0" in ast.unparse(node.body[0]))
+    return raw, routes, receipt, gradle
 
 
 class GrowingFile:
@@ -64,7 +80,7 @@ class UnreadableFile(GrowingFile):
 
 class HostedRawFileContract(unittest.TestCase):
     def setUp(self):
-        self.raw_node, self.route_node, self.receipt_node = workflow_nodes()
+        self.raw_node, self.route_node, self.receipt_node, self.gradle_node = workflow_nodes()
         self.scope = {"hashlib": hashlib, "json": json, "Path": Path, "sys": sys}
         exec(compile(ast.Module(body=[self.raw_node], type_ignores=[]),
                      str(WORKFLOW), "exec"), self.scope)
@@ -129,3 +145,28 @@ class HostedRawFileContract(unittest.TestCase):
                 self.assertEqual(receipt["qualification"], "unpassed")
                 self.assertEqual(receipt["raw_collection"], "incomplete")
             self.assertEqual(growing.read_bytes, 1)
+
+    def test_gradle_pin_accepts_exact_retained_windows_stdout(self):
+        raw = WINDOWS_GRADLE_STDOUT_8FA
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "6fec462855c154c098721f24957d78e23fc154eaf1550b3b1b1eadbbc0312f16")
+        self.assertEqual(len(raw), 608)
+        self.assertIn(b"Gradle 9.5.0\r\n", raw)
+
+        def accepts(output):
+            scope = {"gradle": output.decode(errors="replace"), "re": re}
+            try:
+                exec(compile(ast.Module(body=[self.gradle_node], type_ignores=[]),
+                             str(WORKFLOW), "exec"), scope)
+            except RuntimeError as error:
+                self.assertEqual(str(error), "selected Gradle is not 9.5.0")
+                return False
+            return True
+
+        self.assertTrue(accepts(raw))
+        self.assertTrue(accepts(raw.replace(b"\r\n", b"\n")))
+        self.assertTrue(accepts(raw.replace(b"\r\n", b"\r")))
+        for bad in (b"Gradle 9.5.0-rc-1\r\n", b"Gradle 9.5.0+vendor\r\n",
+                    b"Gradle 9.5.1\r\n", b"Gradle 9.6.0\r\n"):
+            self.assertFalse(accepts(raw.replace(b"Gradle 9.5.0\r\n", bad)))
+        self.assertFalse(accepts(raw + b"Gradle 9.6.0\r\n"))

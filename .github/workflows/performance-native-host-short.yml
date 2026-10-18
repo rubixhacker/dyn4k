@@ -247,7 +247,7 @@ jobs:
                   raise RuntimeError("selected JDK is not 21")
               wrapper = root / ("gradlew.bat" if host == "Windows" else "gradlew")
               gradle = require("setup/gradle", [wrapper, "--version"]).decode(errors="replace")
-              if not re.search(r"(?m)^Gradle 9\.5\.0$", gradle):
+              if [line for line in gradle.splitlines() if line.startswith("Gradle ")] != ["Gradle 9.5.0"]:
                   raise RuntimeError("selected Gradle is not 9.5.0")
               require("setup/python", [sys.executable, "--version"])
               if host == "Darwin":
