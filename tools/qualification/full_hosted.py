@@ -333,7 +333,7 @@ def test_products(project, target, configuration, process):
     if target in NATIVE:
         binary_mode = "releaseTest" if configuration == "optimized-opt" else "debugTest"
         root = project / "build/bin" / target / binary_mode
-        products = [path for path in root.rglob("*") if path.is_file()
+        products = [path for path in root.glob("*") if path.is_file()
                     and path.suffix in (".kexe", ".exe")]
     else:
         binary_mode = "Production" if configuration == "production" else "Development"

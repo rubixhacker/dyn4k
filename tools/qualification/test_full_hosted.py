@@ -164,6 +164,59 @@ class FullHostedTests(unittest.TestCase):
                                       {"started_ns": time.time_ns() + 1,
                                        "finished_ns": time.time_ns() + 2})
 
+    def test_mac_product_selects_direct_executable_beside_dsym(self):
+        for configuration, mode in (("debug-g", "debugTest"),
+                                    ("optimized-opt", "releaseTest")):
+            with self.subTest(configuration=configuration):
+                project = self.root / configuration
+                directory = project / "build/bin/macosArm64" / mode
+                direct = directory / "test.kexe"
+                dwarf = (directory / "test.kexe.dSYM/Contents/Resources/DWARF/test.kexe")
+                started = time.time_ns()
+                direct.parent.mkdir(parents=True)
+                direct.write_bytes(b"linked executable")
+                dwarf.parent.mkdir(parents=True)
+                dwarf.write_bytes(b"DWARF debug symbols")
+                process = {"started_ns": started, "finished_ns": time.time_ns(),
+                           "invocation_id": "synthetic", "exit_code": 0}
+                diagnostic_root = self.root / f"failed-{configuration}"
+                diagnostic = diagnostic_root / "product-inventory.json"
+                selected = full_hosted.collect_test_products(
+                    {"dyn4k-core": project}, "macosArm64", configuration,
+                    process, diagnostic, diagnostic_root)
+                self.assertEqual(str(direct), selected["dyn4k-core"]["path"])
+                self.assertEqual(full_hosted.sha256(direct),
+                                 selected["dyn4k-core"]["sha256"])
+                self.assertNotEqual(full_hosted.sha256(dwarf),
+                                    selected["dyn4k-core"]["sha256"])
+                self.assertFalse(diagnostic.exists())
+                with self.assertRaisesRegex(ValueError, "predates invocation"):
+                    full_hosted.test_products(
+                        project, "macosArm64", configuration,
+                        {"started_ns": direct.stat().st_mtime_ns + 1,
+                         "finished_ns": process["finished_ns"] + 1})
+                wrong_configuration = ("optimized-opt" if configuration == "debug-g"
+                                       else "debug-g")
+                for wrong_target, wrong_mode in (("iosArm64", configuration),
+                                                 ("macosArm64", wrong_configuration)):
+                    with self.assertRaisesRegex(ValueError, "exactly one"):
+                        full_hosted.test_products(project, wrong_target, wrong_mode, process)
+
+                duplicate = directory / "duplicate.kexe"
+                duplicate.write_bytes(b"second direct executable")
+                with self.assertRaisesRegex(ValueError, "exactly one.*product inventory"):
+                    full_hosted.collect_test_products(
+                        {"dyn4k-core": project}, "macosArm64", configuration,
+                        process, diagnostic, diagnostic_root)
+                self.assertTrue(diagnostic.exists())
+                entries = json.loads(diagnostic.read_text())["projects"]["dyn4k-core"]["entries"]
+                self.assertIn(dwarf.relative_to(project).as_posix(),
+                              {entry["path"] for entry in entries})
+                duplicate.unlink()
+                direct.unlink()
+                with self.assertRaisesRegex(ValueError, "exactly one"):
+                    full_hosted.test_products(project, "macosArm64", configuration, process)
+
     def test_missing_mac_product_retains_bounded_inventory_without_accepting_it(self):
         project = self.root / "dyn4k-core"
         product = project / "build/bin/macosArm64/debugTest/test"
