@@ -23,7 +23,7 @@ REFLECTIVE_FILTER_TYPES = (
     "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest$Sibling",
     "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest$Unrelated",
 )
-X86_DEXOPT_METHOD = "-neverinline class org.dyn4j.geometry.Matrix22 { public double normMax(); }"
+X86_DEXOPT_METHOD = "-keepclassmembers class org.dyn4j.geometry.Matrix22 { public double normMax(); }"
 FINGERPRINTS = {
     "36": "google/sdk_gphone64_x86_64/emu64xa:16/BE4B.251210.005/14574095:user/release-keys",
     "37": "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys",
