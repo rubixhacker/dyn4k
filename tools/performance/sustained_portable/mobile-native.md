@@ -2,9 +2,14 @@
 
 The consumer links the common five-family fixture for each selected mobile
 Native target. `portableMobileBuildInventory` records the committed source,
-resolved staged `dyn4k-core` and `dyn4k` target KLIBs, compiler mode, linked
+resolved staged `dyn4k-core` and `dyn4k` target KLIBs, compiler mode, raw linked
 executable, and package bytes. Apple targets produce a `.app` with a native
 executable and `Info.plist`. Simulator packages receive an ad hoc signature.
+The build checks that the copied app executable matches the raw link before
+signing. It verifies the signature, then records both byte identities and
+sizes in `image_derivation`. Apple's [code signing guidance](https://developer.apple.com/library/archive/technotes/tn2206/)
+states that signing modifies the main executable. A signed app executable can
+have a different SHA-256 and size from its raw `.kexe`.
 Android Native targets produce a device executable. The Java baseline stays
 on JVM.
 
@@ -78,12 +83,16 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --archive /absolute/new/archive/ios-native-direct --steps 30 --warmup 3
 ```
 
-The launcher checks Xcode 26.4.1, host architecture, simulator family,
-selected and installed app package bytes, the linked executable, and the
-observed `proc_pidpath` at the PID returned by `simctl launch`. It also checks
+The launcher checks Xcode 26.4.1, host architecture, simulator family, the raw
+link against its inventory hash, the recorded copy and signing derivation,
+and selected and installed app package bytes. The signed package executable
+is the selected process image. The launcher compares its hash and size with
+the installed app and the live PID observation. It verifies the selected and
+installed app signatures and archives both command records. It also checks
+the observed `proc_pidpath` at the PID returned by `simctl launch` and
 the OS text mapping's device, inode, and size through `lsof -d txt`. The
 installed executable's SHA-256, size, and file identity must still match the
-selected link during observation. A second package scan after launch must
+selected signed package during observation. A second package scan after launch must
 match the build inventory. A missing or ambiguous text mapping fails closed.
 The `lsof` bytes remain in `setup/apple-process-vnode.stdout.bin`. The command
 and its stderr remain in the matching setup records. Apple's distributed
@@ -111,6 +120,8 @@ Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and
 `watchosDeviceArm64` app builds preserve source scope. Device deployment
 requires a selected physical device and signing identity. Their runtime
 qualification remains unpassed until a matching signed launch is observed.
+The physical app build records an unsigned copy of the raw link; it does not
+claim a deployment signature.
 
 A valid short capture still has `qualification: unpassed`. It does not prove
 the 600-second sustained run, reference memory, allocation, plateau, noise,

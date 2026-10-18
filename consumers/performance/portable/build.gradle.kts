@@ -4,6 +4,7 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.security.MessageDigest
 
 fun gitValue(vararg arguments: String): String {
@@ -229,11 +230,19 @@ val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
         }
         val executable = project.file("build/bin/$target/${mode.lowercase()}Executable/dyn4k-performance-portable.kexe")
         check(executable.isFile) { "selected Apple mobile executable is missing: $executable" }
+        val linkedSha = sha256(executable)
+        val linkedSize = executable.length()
+        check(linkedSize > 0) { "selected Apple mobile executable is empty" }
         val app = project.file("build/mobile-app/$target/${mode.lowercase()}/Dyn4kPerformance.app")
         app.mkdirs()
         val image = app.resolve("Dyn4kPerformance")
         executable.copyTo(image, overwrite = true)
         image.setExecutable(true)
+        val copiedSha = sha256(image)
+        val copiedSize = image.length()
+        check(copiedSha == linkedSha && copiedSize == linkedSize) {
+            "Apple app copy differs from selected mobile link"
+        }
         val bundleId = "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}"
         val minimum = if (target == "watchosDeviceArm64") "26.0" else if (target.startsWith("watchos")) "8.0" else "15.0"
         val watchApplication = if (target.startsWith("watchos")) "<key>WKApplication</key><true/>" else ""
@@ -253,12 +262,33 @@ val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
 $watchApplication
 </dict></plist>
 """)
-        if ("Simulator" in target || target == "iosX64") {
-            val signing = ProcessBuilder("codesign", "--force", "--sign", "-", "--timestamp=none", app.absolutePath)
+        val simulator = "Simulator" in target || target == "iosX64"
+        val signCommand = if (simulator)
+            listOf("codesign", "--force", "--sign", "-", "--timestamp=none", app.absolutePath) else null
+        val verifyCommand = if (simulator)
+            listOf("codesign", "--verify", app.absolutePath) else null
+        if (signCommand != null && verifyCommand != null) {
+            val signing = ProcessBuilder(signCommand)
                 .redirectErrorStream(true).start()
             val output = signing.inputStream.bufferedReader().readText()
             check(signing.waitFor() == 0) { "simulator app signing failed: $output" }
+            val verification = ProcessBuilder(verifyCommand).redirectErrorStream(true).start()
+            val verificationOutput = verification.inputStream.bufferedReader().readText()
+            check(verification.waitFor() == 0) { "simulator app signature verification failed: $verificationOutput" }
         }
+        val derivation = mapOf(
+            "format" to "portable-apple-image-derivation-v1", "target" to target,
+            "build" to mobileBuild, "linked_path" to executable.canonicalPath,
+            "linked_sha256" to linkedSha, "linked_size" to linkedSize,
+            "copied_sha256" to copiedSha, "copied_size" to copiedSize,
+            "package_path" to app.canonicalPath,
+            "packaged_sha256" to sha256(image), "packaged_size" to image.length(),
+            "signing" to if (simulator) "ad_hoc" else "none",
+            "signing_command" to signCommand, "verification_command" to verifyCommand,
+            "codesign_verified" to simulator,
+        )
+        app.parentFile.resolve("image-derivation.json")
+            .writeText(JsonOutput.prettyPrint(JsonOutput.toJson(derivation)) + "\n")
     }
 }
 
@@ -292,6 +322,11 @@ tasks.register("portableMobileBuildInventory") {
             project.file("build/mobile-app/$target/${mode.lowercase()}/Dyn4kPerformance.app") else binaryDirectory
         val harness = if (apple) bundleDirectory.resolve("Dyn4kPerformance") else linked
         check(harness.isFile) { "selected mobile process image is missing: $harness" }
+        val imageDerivation = if (apple) {
+            val receipt = bundleDirectory.parentFile.resolve("image-derivation.json")
+            check(receipt.isFile) { "Apple image derivation receipt is missing" }
+            JsonSlurper().parse(receipt)
+        } else null
         val artifacts = configurations.getByName("${target}CompileKlibraries")
             .resolvedConfiguration.resolvedArtifacts.map {
                 mapOf("module" to it.moduleVersion.id.toString(), "path" to it.file.canonicalPath,
@@ -310,6 +345,7 @@ tasks.register("portableMobileBuildInventory") {
             "compile_configuration" to "${target}CompileKlibraries", "link_task" to linkTask,
             "resolved_artifacts" to artifacts, "linked_executable" to linked.canonicalPath,
             "linked_sha256" to sha256(linked), "harness" to harness.canonicalPath,
+            "image_derivation" to imageDerivation,
             "app_bundle" to if (apple) bundleDirectory.canonicalPath else null,
             "bundle_id" to if (apple) "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}" else null,
             "abi" to androidMobileTargets[target], "bundle_sha256" to bundle,
