@@ -1,5 +1,87 @@
 # Unchanged Java sample migration journeys
 
+## Fixed-input Billiards replay
+
+The fixed-input runner uses the pinned, unchanged `Billiards` class and its own
+`World`. It constructs the frame under Xvfb, calls the sample's `reset`, and
+steps 120 times at 1/60 second to let the rack sleep. It then sets the sample's
+shoot-key state, power to 0.3, and angle to 0.05 rad. It invokes the unchanged
+`render` and `handleEvents` methods. The sample sets the cue ball's speed to
+3 m/s in the direction of the cue. The fixed angle is part of the cue input.
+This action is a velocity assignment in the sample, not an impulse. The runner verifies the
+result before step zero. It keeps the sample's `ALL` continuous-detection mode
+and records the initial state and every one of 240 subsequent steps. Generated
+consumer classes hold the runner; none of the 42 pinned Java source files change.
+Both JVM processes use HotSpot's constant identity-hash mode (`-XX:hashCode=2`)
+to constrain hash-based iteration order. The pinned [OpenJDK 21u implementation](https://github.com/openjdk/jdk21u/blob/bb6b279495ceff8442dbd0225756b92d466d5309/src/hotspot/share/runtime/synchronizer.cpp#L3697-L3703)
+returns one for this mode. Each stream binds the selected mode, observed VM
+arguments, and a live identity-hash probe in its input record. The Java
+recorder rejects a missing or different flag or hash behavior. Every
+observation records Body and fixture identity hashes, the CCD broadphase pair
+order consumed by `solveTOI`, and the pair order accepted by the two-body TOI
+listener. The input record also contains the full post-reset state, the state
+after settling and before the cue action, and the broadphase pair order for
+each of the 120 settling steps. The comparison checks these records as fixed
+inputs before physics outcomes.
+The stream also records the engine JAR code source, Java home and version;
+stderr records the process start identity. This controlled JDK 21 profile does
+not establish that the ordinary-hash sample is deterministic on other JVMs.
+The runner executes each provider twice in separate processes. It records
+the first within-provider difference and fails the run if either stream
+changes. Each repeated stream has its own hash and appears in the evidence
+manifest.
+
+The comparison requires identical source identity, JVM hash mode, prelude,
+cue action, time step, CCD mode, observation points, body and joint counts,
+body order and flags,
+gravity, mass, inertia, damping, CCD pair order,
+contact event order and counts, and TOI event order and counts. It rejects
+missing channels, non-finite numbers, and runs with no contact or CCD hit.
+It checks that each event payload matches its cumulative callback counter.
+These finite screening limits were
+selected before the fixed-input run: 0.0001 m for body/contact position and
+depth (about 0.35% of the 0.028575 m ball radius), 0.001 m/s for velocity,
+0.0001 rad for angle, 0.001 rad/s for angular velocity, and 0.000001 of a step
+for TOI time. They are engineering comparison rules for this scene, not
+project-wide numerical acceptance. Detector invocation counts are recorded
+as diagnostics because they depend on broad-phase work; TOI hits and listener
+events are compared as outcomes. A failed comparison names its first exact
+step and channel without changing these limits.
+
+After staging and resolving the JVM artifacts, run:
+
+```bash
+python3 -B tools/migration/fixed_replay.py run \
+  --samples /tmp/dyn4k-migration-preflight/samples \
+  --resolved-root consumers/migration/build/resolved \
+  --repository build/staging-repository \
+  --output /tmp/dyn4k-migration-fixed-input \
+  --javac /tmp/dyn4k-tools/jdk21/bin/javac \
+  --jdk /tmp/dyn4k-tools/jdk21
+python3 -B tools/migration/journeys.py verify-evidence \
+  --output /tmp/dyn4k-migration-fixed-input
+```
+
+Each provider compiles all 42 sources with its resolved dependency set. The
+runner checks the candidate JAR against the staged publication and keeps each
+provider in a separate process. `stream.jsonl` stores raw input and outcome
+records; `comparison.json` stores the first divergence. `summary.json` binds
+the run to the candidate commit, source and artifact hashes, container image,
+JDK path, controls, and sorted raw-evidence manifest. The comparison command
+also supports direct negative controls for changed input, missing or changed
+hash mode, changed VM flag or hash behavior, missing or changed reset state,
+missing or changed prelude pair order, omitted steps, pair order, and
+changed artifact identity.
+
+Earlier ordinary-hash captures remain failed evidence at
+`/tmp/dyn4k-migration-fixed-input-ac44bf33-a/` and
+`/tmp/dyn4k-migration-fixed-input-ac44bf33-b/`. The latter first differs at
+`step[10].bodies[20].y`: baseline `-0.0007881630206406731 m`, candidate
+`+0.0010365761870935945 m`, beyond the prospective `0.0001 m` limit. The
+serial-hash captures at `/tmp/dyn4k-migration-fixed-input-f620a228-a/` and
+`/tmp/dyn4k-migration-fixed-input-f620a228-b/` also showed candidate
+nonrepeatability. A controlled-mode comparison does not replace these failures.
+
 This report covers the sample application subset of [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42). It follows the pinned [migration application research](https://github.com/rubixhacker/dyn4k/blob/4a0b829a66e8d4b49e652682590006df2ff6ed98/docs/research/migration-application.md). It does not qualify the full compatibility corpus or the 21 Kotlin targets.
 
 ## Combined-source run
