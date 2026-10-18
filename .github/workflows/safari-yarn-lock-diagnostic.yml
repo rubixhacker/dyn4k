@@ -23,6 +23,8 @@ jobs:
   capture:
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      SAFARI_BIN: ${{ github.workspace }}/tools/qualification/safari-launch.sh
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +47,8 @@ jobs:
         run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
       - name: Capture source Kotlin/JS lock generation
+        env:
+          DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context
         run: >-
           python tools/qualification/safari_yarn_lock.py
           --candidate-sha "${{ inputs.candidate_sha }}"
@@ -58,11 +62,36 @@ jobs:
               --candidate-sha "${{ inputs.candidate_sha }}" \
               --output "${{ runner.temp }}/safari-yarn-lock-diagnostic" --audit
           fi
+      - name: Capture Safari host and Karma context
+        if: always()
+        shell: bash
+        run: |
+          context="$RUNNER_TEMP/safari-launch-context"
+          mkdir -p "$context"
+          /bin/launchctl managername > "$context/session-after.txt" 2>&1 || true
+          /bin/ps -axo pid,ppid,state,comm > "$context/process-after.txt" 2>&1 || true
+          for source in build/js/packages dyn4k-core/build dyn4k/build; do
+            if [[ -d "$source" ]]; then
+              while IFS= read -r -d '' file; do
+                destination="$context/config/$file"
+                mkdir -p "$(dirname "$destination")"
+                cp "$file" "$destination"
+              done < <(find "$source" -path '*/node_modules' -prune -o -type f -name '*karma*.js' -print0)
+            fi
+          done
       - name: Retain raw lock diagnosis
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: safari-yarn-lock-${{ inputs.candidate_sha }}-${{ inputs.configuration }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/safari-yarn-lock-diagnostic/
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Retain Safari launch context
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-launch-context-${{ inputs.candidate_sha }}-${{ inputs.configuration }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/safari-launch-context/
           include-hidden-files: true
           if-no-files-found: error

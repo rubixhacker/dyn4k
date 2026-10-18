@@ -46,6 +46,15 @@ def hosted_task_markers(process):
     return (*HOSTED_TASK_MARKERS, final)
 
 
+def safari_capture_timeout(stdout, stderr):
+    return (b"Safari has not captured in 60000 ms, killing." in stdout
+            and re.search(rb"(?m)^> Task :(?:dyn4k-core|dyn4k):jsBrowserTest FAILED\r?$",
+                          stdout) is not None
+            and re.search(rb"Safari failed \d+ times \(timeout\)\. Giving up\.",
+                          stderr) is not None
+            and b"Errors occurred during launch of browser for testing." in stderr)
+
+
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -337,6 +346,9 @@ def capture(repository, candidate_sha, output, configuration=None):
         receipt["head_after"] = git(repository, "rev-parse", "HEAD")
         receipt["tracked_changes_after"] = git(repository, "status", "--porcelain=v1",
                                                  "--untracked-files=no")
+        stdout = (output / "stdout.txt").read_bytes()
+        lock_succeeded = re.search(rb"(?m)^> Task :kotlinStoreYarnLock\r?$", stdout) is not None
+        lock_failed = re.search(rb"(?m)^> Task :kotlinStoreYarnLock FAILED\r?$", stdout) is not None
         if (receipt["head_after_task"] != candidate_sha
                 or receipt["head_after"] != candidate_sha
                 or receipt["tracked_changes_after_task"] or receipt["tracked_changes_after"]
@@ -348,8 +360,8 @@ def capture(repository, candidate_sha, output, configuration=None):
                                 or not isinstance(process.get("started_ns"), int)
                                 or not isinstance(process.get("finished_ns"), int)
                                 or process["started_ns"] >= process["finished_ns"]
-                                or not all(marker in (output / "stdout.txt").read_bytes()
-                                           for marker in hosted_task_markers(process))):
+                                or not all(marker in stdout for marker in HOSTED_TASK_MARKERS)
+                                or not (lock_succeeded or lock_failed)):
             receipt["status"] = "PROCESS_BINDING_REJECTED"
         elif process.get("timed_out"):
             receipt["status"] = "PROCESS_TIMEOUT"
@@ -362,12 +374,19 @@ def capture(repository, candidate_sha, output, configuration=None):
         elif (receipt["missing_package_inputs"] or receipt["unexpected_package_inputs"]
               or receipt["package_count_exceeds_bound"] or receipt["package_graph_errors"]):
             receipt["status"] = "INCOMPLETE_PACKAGE_GRAPH"
-        elif process["exit_code"] == 0 and receipt["generated_sha256"] == receipt["tracked_sha256"]:
+        elif (process["exit_code"] == 0
+              and (not configuration or lock_succeeded)
+              and receipt["generated_sha256"] == receipt["tracked_sha256"]):
             receipt["status"] = "LOCK_MATCHED_DIAGNOSTIC_ONLY"
         elif (process["exit_code"] != 0
+              and (not configuration or lock_failed)
               and receipt["generated_sha256"] != receipt["tracked_sha256"]
               and lock_failure_signature(output / "stderr.txt")):
             receipt["status"] = "LOCK_MISMATCH_CAPTURED"
+        elif (configuration and process["exit_code"] != 0 and lock_succeeded
+              and receipt["generated_sha256"] == receipt["tracked_sha256"]
+              and safari_capture_timeout(stdout, (output / "stderr.txt").read_bytes())):
+            receipt["status"] = "SAFARI_CAPTURE_TIMEOUT"
         else:
             receipt["status"] = "OTHER_GRADLE_RESULT"
     except (OSError, ValueError) as error:

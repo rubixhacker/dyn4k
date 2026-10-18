@@ -1,6 +1,7 @@
 import json
 import hashlib
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -433,6 +434,46 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertIn("development/qualification.init.gradle",
                       [item["path"] for item in receipt["files"]])
 
+    def hosted_browser_failure(self, stderr):
+        def failure(repository, output, command):
+            self.generated(b"tracked lock\n", safari=True)
+            stdout = ("> Task :dyn4k-core:jsTestPackageJson\n"
+                      "> Task :dyn4k:jsTestPackageJson\n"
+                      "> Task :kotlinNpmInstall\n"
+                      "> Task :kotlinStoreYarnLock\n"
+                      "> Task :dyn4k:jsBrowserTest\n"
+                      "Safari has not captured in 60000 ms, killing.\n"
+                      "> Task :dyn4k:jsBrowserTest FAILED\n")
+            (output / "stdout.txt").write_text(stdout)
+            (output / "stderr.txt").write_text(stderr)
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2,
+                    "stdout_bytes_seen": len(stdout.encode()),
+                    "stderr_bytes_seen": len(stderr.encode()),
+                    "stdout_truncated": False, "stderr_truncated": False,
+                    "timed_out": False, "stream_incomplete": False}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            return safari_yarn_lock.capture(self.repository, self.candidate,
+                                            self.output, "development")
+
+    def test_full_hosted_browser_capture_timeout_is_unqualified(self):
+        receipt = self.hosted_browser_failure(
+            "Safari failed 2 times (timeout). Giving up.\n"
+            "Execution failed for task ':dyn4k:jsBrowserTest'.\n"
+            "> Errors occurred during launch of browser for testing.\n")
+        self.assertEqual("SAFARI_CAPTURE_TIMEOUT", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_full_hosted_source_failure_is_not_browser_capture_timeout(self):
+        receipt = self.hosted_browser_failure(
+            "Execution failed for task ':dyn4k:jsBrowserTest'.\n"
+            "> Test assertion failed.\n")
+        self.assertEqual("OTHER_GRADLE_RESULT", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+
     def test_full_hosted_production_uses_exact_flag_and_script(self):
         def failure(repository, output, command):
             self.assertEqual("-PqualificationProduction=true", command[-1])
@@ -544,8 +585,14 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("LOCK_MISMATCH_CAPTURED", json.loads(output.getvalue())["status"])
 
     def test_manual_workflow_has_separate_mac_route_and_uploads_failed_capture(self):
-        workflow = (Path(__file__).resolve().parents[2] /
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root /
                     ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
+        qualification = (root / ".github/workflows/qualification.yml").read_text()
+        qualified_launcher = re.search(r"(?m)^      SAFARI_BIN: (.+)$", qualification)
+        self.assertIsNotNone(qualified_launcher)
+        self.assertIn("    env:\n      SAFARI_BIN: " + qualified_launcher.group(1) + "\n",
+                      workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("runs-on: macos-26", workflow)
         self.assertIn("java-version: '21'", workflow)
@@ -557,6 +604,23 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertIn("tools/qualification/safari_yarn_lock.py", workflow)
         self.assertNotIn("kotlinUpgradeYarnLock", workflow)
         self.assertNotIn("yarnLockMismatchReport", workflow)
+
+    def test_manual_workflow_retains_separate_safari_launch_context(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root /
+                    ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
+        self.assertIn("DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context",
+                      workflow)
+        self.assertIn("- name: Capture source Kotlin/JS lock generation\n        env:\n"
+                      "          DYN4K_SAFARI_LAUNCH_CONTEXT:", workflow)
+        self.assertIn("name: safari-launch-context-${{ inputs.candidate_sha }}-", workflow)
+        self.assertIn("path: ${{ runner.temp }}/safari-launch-context/", workflow)
+        self.assertIn("if: always()", workflow)
+        launcher = (root / "tools/qualification/safari-launch.sh").read_text()
+        self.assertIn('DYN4K_SAFARI_LAUNCH_CONTEXT:-', launcher)
+        self.assertIn('exec /usr/bin/open -W -a /Applications/Safari.app "$1" \\\n'
+                      '    > "$context/open-$$.stdout" 2> "$context/open-$$.stderr"',
+                      launcher)
 
 
 if __name__ == "__main__":
