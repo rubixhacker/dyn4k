@@ -14,7 +14,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = ROOT / "docs/research/performance-manifest-v1.json"
-TARGETS = {"js", "wasmJs", "wasmWasi", "linuxX64"}
+NATIVE_HOST_TARGETS = {"linuxX64", "linuxArm64", "mingwX64", "macosArm64"}
+TARGETS = {"js", "wasmJs", "wasmWasi"} | NATIVE_HOST_TARGETS
 MODES = {"timing"}
 STEP_HEADER = ("step", "elapsed_ns", "mutation_ns", "lateness_ns", "body_count",
                "joint_count", "awake_count", "linear_speed_sum_m_per_s",
@@ -61,6 +62,62 @@ def bundle_hashes(harness):
     }
 
 
+def observed_process_image(pid):
+    if sys.platform.startswith("linux"):
+        path = Path(f"/proc/{pid}/exe")
+        return {"method": "procfs_exe", "path": os.readlink(path), "sha256": digest(path)}
+    if sys.platform == "darwin":
+        import ctypes
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        buffer = ctypes.create_string_buffer(4096)
+        length = library.proc_pidpath(pid, buffer, len(buffer))
+        if length <= 0:
+            raise OSError(ctypes.get_errno(), "proc_pidpath failed")
+        path = Path(os.fsdecode(buffer.value))
+        return {"method": "proc_pidpath", "path": str(path), "sha256": digest(path)}
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                       wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = wintypes.DWORD(len(buffer))
+            if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            path = Path(buffer.value)
+            return {"method": "QueryFullProcessImageNameW", "path": str(path),
+                    "sha256": digest(path)}
+        finally:
+            kernel.CloseHandle(handle)
+    raise OSError(f"no native process image observer for {sys.platform}")
+
+
+def require_native_host(target):
+    hosts = {
+        "linuxX64": ("linux", {"x86_64", "amd64"}),
+        "linuxArm64": ("linux", {"aarch64", "arm64"}),
+        "mingwX64": ("win32", {"amd64", "x86_64"}),
+        "macosArm64": ("darwin", {"arm64", "aarch64"}),
+    }
+    system, machines = hosts[target]
+    if not sys.platform.startswith(system) or platform.machine().lower() not in machines:
+        raise ValueError(f"{target} requires its matching Native host")
+
+
+def require_process_image(image, expected_sha):
+    if image is None or image["sha256"] != expected_sha:
+        raise ValueError("observed process image does not match runtime; raw archive retained")
+
+
 def validate_inventory(path, target, build, source_sha, producer_tree, manifest, harness,
                        core, kotlin, bundle):
     inventory = json.loads(path.read_text())
@@ -70,6 +127,13 @@ def validate_inventory(path, target, build, source_sha, producer_tree, manifest,
         "manifest_sha256": digest(manifest), "harness": str(harness),
         "bundle_sha256": bundle, "gradle": "9.5.0", "kgp": "2.4.20",
     }
+    if target in NATIVE_HOST_TARGETS:
+        mode = "debug" if build == "development" else "release"
+        expected.update({
+            "compile_configuration": f"{target}CompileKlibraries",
+            "compiler_mode": mode,
+            "link_task": f"link{mode.title()}Executable{target[0].upper()}{target[1:]}",
+        })
     if any(inventory.get(key) != value for key, value in expected.items()):
         raise ValueError("build inventory differs from selected source, build, or bundle")
     tracked = subprocess.check_output(
@@ -196,6 +260,8 @@ def validate_protocol(raw, scenario, source_sha, producer_tree, hashes, build, n
 def capture(args):
     if args.target not in TARGETS or args.mode not in MODES:
         raise ValueError("unsupported target or mode")
+    if args.target in NATIVE_HOST_TARGETS:
+        require_native_host(args.target)
     if args.steps < 1 or args.warmup < 0:
         raise ValueError("steps must be positive and warm-up nonnegative")
     if args.build not in ("development", "optimized"):
@@ -215,15 +281,25 @@ def capture(args):
     harness = required_file(args.harness, "harness")
     core = required_file(args.core, "core")
     kotlin = required_file(args.kotlin, "kotlin")
-    if args.target == "linuxX64" and runtime != harness:
+    if args.target in NATIVE_HOST_TARGETS and runtime != harness:
         raise ValueError("native runtime must be the exact executable harness")
-    if args.target != "linuxX64" and runtime == harness:
+    if args.target not in NATIVE_HOST_TARGETS and runtime == harness:
         raise ValueError("script target requires a separate runtime executable")
-    if args.target == "linuxX64":
+    if args.target in ("linuxX64", "linuxArm64"):
         with harness.open("rb") as stream:
             magic = stream.read(4)
         if magic != b"\x7fELF":
-            raise ValueError("linuxX64 harness must be an ELF executable")
+            raise ValueError("Linux Native harness must be an ELF executable")
+    elif args.target == "mingwX64":
+        with harness.open("rb") as stream:
+            magic = stream.read(2)
+        if magic != b"MZ":
+            raise ValueError("Windows Native harness must be a PE executable")
+    elif args.target == "macosArm64":
+        with harness.open("rb") as stream:
+            magic = stream.read(4)
+        if magic not in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
+            raise ValueError("macOS Native harness must be a Mach-O executable")
     elif args.target == "js" and harness.suffix != ".js":
         raise ValueError("JS harness must be a JavaScript entry")
     elif args.target in ("wasmJs", "wasmWasi") and harness.suffix != ".mjs":
@@ -255,7 +331,7 @@ def capture(args):
         scenario["api"], args.source_sha, hashes["core"], hashes["kotlin"],
         args.build, nonce,
     ]
-    command = [str(runtime)] + ([] if args.target == "linuxX64" else [str(harness)])
+    command = [str(runtime)] + ([] if args.target in NATIVE_HOST_TARGETS else [str(harness)])
     stdin_bytes = b""
     if args.target == "wasmWasi":
         stdin_bytes = ("\t".join(producer_args) + "\n").encode("utf-8")
@@ -265,12 +341,12 @@ def capture(args):
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                stdin=subprocess.PIPE if stdin_bytes else None,
                                cwd=ROOT, env=os.environ.copy())
-    image_path = Path(f"/proc/{process.pid}/exe")
     image = None
+    image_error = None
     try:
-        image = {"path": os.readlink(image_path), "sha256": digest(image_path)}
-    except OSError:
-        pass
+        image = observed_process_image(process.pid)
+    except OSError as error:
+        image_error = str(error)
     stdout, stderr = process.communicate(input=stdin_bytes if stdin_bytes else None)
     ended = time.monotonic_ns()
     (args.archive / "stdout.raw").write_bytes(stdout)
@@ -295,7 +371,8 @@ def capture(args):
         "stdin_bytes": len(stdin_bytes),
         "pid": process.pid, "host": platform.uname()._asdict(),
         "started_monotonic_ns": started, "ended_monotonic_ns": ended,
-        "observed_image": image, "exit_code": process.returncode,
+        "observed_image": image, "image_observation_error": image_error,
+        "exit_code": process.returncode,
         "raw": {"stdout_sha256": digest(args.archive / "stdout.raw"),
                 "stdout_bytes": len(stdout), "stderr_sha256": digest(args.archive / "stderr.raw"),
                 "stderr_bytes": len(stderr)},
@@ -311,8 +388,7 @@ def capture(args):
     (args.archive / "capture.json").write_text(json.dumps(process_record, indent=2) + "\n")
     if process.returncode != 0:
         raise ValueError(f"producer exited {process.returncode}; raw archive retained")
-    if image is None or image["sha256"] != hashes["runtime"]:
-        raise ValueError("observed process image does not match runtime; raw archive retained")
+    require_process_image(image, hashes["runtime"])
     try:
         clocks, steps, provider, run = validate_protocol(
             stdout, scenario, args.source_sha, producer_tree, hashes, args.build, nonce,

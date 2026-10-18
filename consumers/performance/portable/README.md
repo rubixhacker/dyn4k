@@ -17,7 +17,10 @@ directory for each process.
 `generatePortableIdentity` compiles the committed source SHA and producer Git
 tree into the executable. After a clean commit, `portableBuildInventory`
 records source file hashes, Gradle-resolved compile artifacts, and bundle
-hashes for the four available host executables. Launchers require that receipt
+hashes for the original Linux x64, JS, and Wasm executables. The
+`portableNativeHostBuildInventory` task selects one Linux x64, Linux ARM64,
+Windows x64, or macOS ARM64 executable and records its debug or release link
+task and compiler mode. Launchers require the matching receipt
 and compare it with current files. The runtime `LINK` marker is checked against
 the inventory independently of the command-line provider challenge. Browser
 captures also record the exact provider bundle files served to Chrome. The
@@ -47,5 +50,8 @@ No capture from this module is a performance pass.
 The project declares the common producer for JVM, Android JVM, JS, Wasm JS, Wasm
 WASI, Linux, Windows, Apple, and Android Native Kotlin targets. This does not claim
 execution on unavailable targets or provide an Android JVM application shell.
+The Native host routes have separate [runner instructions](../../../tools/performance/sustained_portable/native-hosts.md).
+The iOS, tvOS, watchOS, and Android Native targets still need application
+shells for devices or simulators, deployment, and process observations.
 Each target still needs its staged artifacts, runtime host, and full
 qualification evidence.

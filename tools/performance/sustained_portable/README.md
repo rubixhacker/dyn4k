@@ -17,10 +17,13 @@ at compilation rather than supplied by the launcher. `PROVIDER` remains a
 launch challenge response, not proof of loaded code. The staged engine
 artifacts' own source-build provenance needs an upstream publication receipt.
 
-The launcher accepts JS, Wasm JS, and Wasm WASI through Node, plus a Linux
-x64 ELF process. It hashes all files adjacent to the harness entry, including
-Wasm binaries, before launch. On Linux it reads `/proc/<pid>/exe` and
-compares that image with the selected runtime. The archive contains the
+The launcher accepts JS, Wasm JS, and Wasm WASI through Node, plus Linux x64,
+Linux ARM64, Windows x64, and macOS ARM64 Native processes. See the
+[Native host commands](native-hosts.md). It hashes all files adjacent to the
+harness entry, including Wasm binaries, before launch. On Linux it reads
+`/proc/<pid>/exe`; on Windows it uses `QueryFullProcessImageNameW`; on macOS
+it uses `proc_pidpath`. It compares the observed image bytes with the selected
+executable. The archive contains the
 raw streams, exit code, PID, monotonic host times, input hashes, linked identity,
 positive clock calibration, fixture reset, and activity. Invalid or incomplete output
 leaves the raw archive and exits nonzero.

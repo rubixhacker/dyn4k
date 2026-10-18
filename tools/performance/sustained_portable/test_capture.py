@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import unittest
 
 import capture
+import native_host_capture
 
 
 class PortableCaptureTest(unittest.TestCase):
@@ -94,6 +95,29 @@ class PortableCaptureTest(unittest.TestCase):
             capture.capture(request)
         with self.assertRaisesRegex(ValueError, "absolute regular file"):
             capture.required_file("relative.klib", "core")
+
+    def test_native_host_and_process_image_fail_closed(self):
+        wrong_host = "linuxArm64" if capture.sys.platform == "win32" else "mingwX64"
+        with self.assertRaisesRegex(ValueError, "matching Native host"):
+            capture.require_native_host(wrong_host)
+        with self.assertRaisesRegex(ValueError, "observed process image"):
+            capture.require_process_image(None, "a" * 64)
+        with self.assertRaisesRegex(ValueError, "observed process image"):
+            capture.require_process_image({"sha256": "b" * 64}, "a" * 64)
+        capture.require_process_image({"sha256": "a" * 64}, "a" * 64)
+
+    def test_native_host_selects_only_resolved_target_artifacts(self):
+        inventory = {"resolved_artifacts": [
+            {"module": "example:dyn4k-core-linuxarm64:1", "path": "/core.klib"},
+            {"module": "example:dyn4k-linuxarm64:1", "path": "/kotlin.klib"},
+        ]}
+        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k-core"),
+                         "/core.klib")
+        self.assertEqual(native_host_capture.selected_artifact(inventory, "dyn4k"),
+                         "/kotlin.klib")
+        inventory["resolved_artifacts"].append(inventory["resolved_artifacts"][0])
+        with self.assertRaisesRegex(ValueError, "one resolved dyn4k-core"):
+            native_host_capture.selected_artifact(inventory, "dyn4k-core")
 
     def test_rejects_nonfinite_and_negative_physical_diagnostics(self):
         payload = self.protocol()
@@ -188,6 +212,25 @@ class PortableCaptureTest(unittest.TestCase):
             capture.validate_inventory(receipt, "js", "development", source,
                                        capture.source_tree(), capture.MANIFEST, harness,
                                        core, kotlin, bundle)
+            bad_bundle = {harness.name: "0" * 64}
+            with self.assertRaisesRegex(ValueError, "source, build, or bundle"):
+                capture.validate_inventory(receipt, "js", "development", source,
+                                           capture.source_tree(), capture.MANIFEST, harness,
+                                           core, kotlin, bad_bundle)
+            inventory.update(target="linuxX64", compile_configuration="linuxX64CompileKlibraries",
+                             compiler_mode="debug", link_task="linkDebugExecutableLinuxX64")
+            receipt.write_text(json.dumps(inventory))
+            capture.validate_inventory(receipt, "linuxX64", "development", source,
+                                       capture.source_tree(), capture.MANIFEST, harness,
+                                       core, kotlin, bundle)
+            inventory["compiler_mode"] = "release"
+            receipt.write_text(json.dumps(inventory))
+            with self.assertRaisesRegex(ValueError, "source, build, or bundle"):
+                capture.validate_inventory(receipt, "linuxX64", "development", source,
+                                           capture.source_tree(), capture.MANIFEST, harness,
+                                           core, kotlin, bundle)
+            inventory.update(target="js", compiler_mode="debug")
+            receipt.write_text(json.dumps(inventory))
             core.write_bytes(b"substituted")
             with self.assertRaisesRegex(ValueError, "Gradle-resolved build input"):
                 capture.validate_inventory(receipt, "js", "development", source,
