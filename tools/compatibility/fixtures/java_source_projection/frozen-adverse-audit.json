@@ -1,0 +1,592 @@
+{
+  "added_member_risks": [
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.Epsilon",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.Epsilon$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.UnitConversion",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.UnitConversion$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.Unsafe",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.Unsafe$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.Version",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.Version$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.AbstractCollisionItem",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.AbstractCollisionItem$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.AbstractCollisionPair",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.AbstractCollisionPair$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.CollisionBody",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.CollisionBody$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.Collisions",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.Collisions$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.Filter",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.Filter$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.AbstractBroadphaseDetector",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.broadphase.AbstractBroadphaseDetector$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.BroadphaseDetector",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.broadphase.BroadphaseDetector$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.collision.broadphase.DynamicAABBTreeNode getLeft();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final void setLeft(org.dyn4j.collision.broadphase.DynamicAABBTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.collision.broadphase.DynamicAABBTreeNode getRight();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final void setRight(org.dyn4j.collision.broadphase.DynamicAABBTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.collision.broadphase.DynamicAABBTreeNode getParent();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final void setParent(org.dyn4j.collision.broadphase.DynamicAABBTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final int getHeight();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final void setHeight(int);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.broadphase.DynamicAABBTreeNode",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.geometry.AABB getAabb();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.continuous.ConservativeAdvancement",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.continuous.ConservativeAdvancement$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.continuous.TimeOfImpact",
+      "kind": "method",
+      "declaration": "public final void setDirect-dyn4k(double, org.dyn4j.collision.narrowphase.Separation);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.manifold.Manifold",
+      "kind": "method",
+      "declaration": "public final void appendPointDirect-dyn4k(org.dyn4j.collision.manifold.ManifoldPoint);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.manifold.Manifold",
+      "kind": "method",
+      "declaration": "public final void setNormalDirect-dyn4k(double, double);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.manifold.Manifold",
+      "kind": "method",
+      "declaration": "public final int pointCountDirect-dyn4k();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.manifold.ManifoldPoint",
+      "kind": "method",
+      "declaration": "public final void shiftPointDirect-dyn4k(org.dyn4j.geometry.Vector2);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.manifold.ManifoldPointId",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.manifold.ManifoldPointId$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.CircleDetector",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.narrowphase.CircleDetector$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.Epa",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.narrowphase.Epa$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.Gjk",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.narrowphase.Gjk$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.MinkowskiSumPoint",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.geometry.Vector2 supportPoint1-dyn4k();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.MinkowskiSumPoint",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.geometry.Vector2 supportPoint2-dyn4k();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.MinkowskiSumPoint",
+      "kind": "method",
+      "declaration": "public final org.dyn4j.geometry.Vector2 point-dyn4k();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.Penetration",
+      "kind": "method",
+      "declaration": "public final void setDirect-dyn4k(double, double, double);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.Raycast",
+      "kind": "method",
+      "declaration": "public final void setDirect-dyn4k(double, double, double, double, double);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.SegmentDetector",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.collision.narrowphase.SegmentDetector$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.collision.narrowphase.Separation",
+      "kind": "method",
+      "declaration": "public final void setDirect-dyn4k(double, double, double, double, double, double, double);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.BodyFixture",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.dynamics.BodyFixture$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.ContinuousDetectionMode",
+      "kind": "method",
+      "declaration": "public static kotlin.enums.EnumEntries<org.dyn4j.dynamics.ContinuousDetectionMode> getEntries();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.PhysicsBody",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.dynamics.PhysicsBody$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.Settings",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.dynamics.Settings$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.joint.AbstractJoint",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.dynamics.joint.AbstractJoint$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.dynamics.joint.Joint",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.dynamics.joint.Joint$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.exception.ValueOutOfRangeException",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.exception.ValueOutOfRangeException$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.AABB",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.AABB$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.AdaptiveDecimal",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.AdaptiveDecimal$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Capsule",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Capsule$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Ellipse",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Ellipse$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Feature",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Feature$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Geometry",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Geometry$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.HalfEllipse",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.HalfEllipse$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Interval",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Interval$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Mass",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Mass$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.MassType",
+      "kind": "method",
+      "declaration": "public static kotlin.enums.EnumEntries<org.dyn4j.geometry.MassType> getEntries();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Polygon",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Polygon$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.RobustGeometry",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.RobustGeometry$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Rotation",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Rotation$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Segment",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Segment$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Transform",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Transform$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Vector2",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Vector2$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.Vector3",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.Vector3$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.decompose.EarClipping",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.decompose.EarClipping$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.decompose.MonotoneChainType",
+      "kind": "method",
+      "declaration": "public static kotlin.enums.EnumEntries<org.dyn4j.geometry.decompose.MonotoneChainType> getEntries();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.decompose.MonotonePolygonType",
+      "kind": "method",
+      "declaration": "public static kotlin.enums.EnumEntries<org.dyn4j.geometry.decompose.MonotonePolygonType> getEntries();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.decompose.SweepLineVertexType",
+      "kind": "method",
+      "declaration": "public static kotlin.enums.EnumEntries<org.dyn4j.geometry.decompose.SweepLineVertexType> getEntries();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.hull.LinkedVertexHull",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.geometry.hull.LinkedVertexHull$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SegmentTreeNode getLeft();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public void setLeft(org.dyn4j.geometry.simplify.SegmentTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SegmentTreeNode getRight();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public void setRight(org.dyn4j.geometry.simplify.SegmentTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SegmentTreeNode getParent();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public void setParent(org.dyn4j.geometry.simplify.SegmentTreeNode);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public int getHeight();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public void setHeight(int);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SegmentTreeNode",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.AABB getAabb();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public int getIndex();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.Vector2 getPoint();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SimplePolygonVertex getPrev();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public void setPrev(org.dyn4j.geometry.simplify.SimplePolygonVertex);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SimplePolygonVertex getNext();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public void setNext(org.dyn4j.geometry.simplify.SimplePolygonVertex);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SegmentTreeLeaf getPrevSegment();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public void setPrevSegment(org.dyn4j.geometry.simplify.SegmentTreeLeaf);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public org.dyn4j.geometry.simplify.SegmentTreeLeaf getNextSegment();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.geometry.simplify.SimplePolygonVertex",
+      "kind": "method",
+      "declaration": "public void setNextSegment(org.dyn4j.geometry.simplify.SegmentTreeLeaf);"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$AABBBodyDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$AABBDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$CollisionDataIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$ConvexBodyDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$ConvexCastDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$ConvexDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$DetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$RaycastBodyDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractCollisionWorld$RaycastDetectIterator",
+      "kind": "method",
+      "declaration": "public java.lang.Void remove();"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.AbstractPhysicsWorld$WarmStartHandler",
+      "kind": "field",
+      "declaration": "public org.dyn4j.world.ContactCollisionData<T> data;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.CollisionWorld",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.world.CollisionWorld$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.PhysicsWorld",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.world.PhysicsWorld$Companion Companion;"
+    },
+    {
+      "origin": "declared",
+      "declaring_type": "org.dyn4j.world.ValueMixer",
+      "kind": "field",
+      "declaration": "public static final org.dyn4j.world.ValueMixer$Companion Companion;"
+    }
+  ]
+}
