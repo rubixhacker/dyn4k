@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -440,6 +441,63 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertTrue(result["timed_out"])
         self.assertLess(result["finished_ns"] - result["started_ns"], 3_000_000_000)
 
+    def test_posix_selector_setup_failure_stops_launched_process_group(self):
+        self.output.mkdir()
+        launched = []
+        real_popen = subprocess.Popen
+
+        def launch(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            launched.append(process)
+            return process
+
+        try:
+            with mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(safari_yarn_lock.selectors, "DefaultSelector",
+                                      side_effect=OSError("injected selector setup failure")):
+                with self.assertRaisesRegex(OSError, "selector setup failure"):
+                    safari_yarn_lock.run_lock_task(
+                        self.repository, self.output,
+                        [sys.executable, "-c", "import time; time.sleep(30)"])
+            self.assertEqual(1, len(launched))
+            self.assertIsNotNone(launched[0].poll())
+            self.assertTrue(launched[0].stdout.closed and launched[0].stderr.closed)
+        finally:
+            for process in launched:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+
+    def test_posix_selector_registration_failure_stops_launched_process_group(self):
+        self.output.mkdir()
+        launched = []
+        real_popen = subprocess.Popen
+        selector = safari_yarn_lock.selectors.DefaultSelector()
+        selector_type = type(selector)
+        selector.close()
+
+        def launch(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            launched.append(process)
+            return process
+
+        try:
+            with mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(selector_type, "register",
+                                      side_effect=OSError("injected selector registration failure")):
+                with self.assertRaisesRegex(OSError, "selector registration failure"):
+                    safari_yarn_lock.run_lock_task(
+                        self.repository, self.output,
+                        [sys.executable, "-c", "import time; time.sleep(30)"])
+            self.assertEqual(1, len(launched))
+            self.assertIsNotNone(launched[0].poll())
+            self.assertTrue(launched[0].stdout.closed and launched[0].stderr.closed)
+        finally:
+            for process in launched:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+
     def test_truncated_log_cannot_be_labeled_a_complete_mismatch(self):
         def failure(*args):
             self.generated()
@@ -782,6 +840,105 @@ class SafariYarnLockTests(unittest.TestCase):
                         self.assertFalse((self.repository / module / "karma.config.d").exists())
                     with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
                         safari_yarn_lock.audit_capture(self.repository, self.candidate, output)
+
+    def test_public_postlaunch_setup_failures_stop_children_and_record_receipts(self):
+        real_run = safari_yarn_lock.run_lock_task
+        real_popen = subprocess.Popen
+        real_start = threading.Thread.start
+        outside = self.root / "outside.txt"
+        outside.write_bytes(b"outside sentinel")
+        for platform_name in ("posix", "nt"):
+            with self.subTest(platform=platform_name):
+                output = self.root / f"capture-{platform_name}-postlaunch"
+                launched = []
+                calls = []
+                starts = 0
+                kernel = mock.Mock()
+                kernel.CreateJobObjectW.return_value = 789
+                kernel.SetInformationJobObject.return_value = 1
+                kernel.AssignProcessToJobObject.return_value = 1
+                kernel.CloseHandle.side_effect = lambda handle: calls.append(
+                    ("close", handle)) or 1
+
+                def terminate(job, code):
+                    calls.append(("terminate", job, code))
+                    if launched and launched[0].poll() is None:
+                        os.killpg(launched[0].pid, signal.SIGKILL)
+                    return 1
+
+                kernel.TerminateJobObject.side_effect = terminate
+
+                def launch(command, **kwargs):
+                    if not str(command[0]).endswith("/gradlew"):
+                        return real_popen(command, **kwargs)
+                    kwargs.pop("creationflags", None)
+                    kwargs["start_new_session"] = True
+                    process = real_popen(
+                        [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+                    launched.append(process)
+                    if platform_name == "nt":
+                        return mock.Mock(pid=process.pid, _handle=process.pid,
+                                         stdout=process.stdout, stderr=process.stderr,
+                                         wait=process.wait, poll=process.poll, kill=process.kill)
+                    return process
+
+                def start(thread):
+                    nonlocal starts
+                    starts += 1
+                    if starts == 2:
+                        raise RuntimeError("injected reader start failure")
+                    real_start(thread)
+
+                def run(repository, folder, command):
+                    if platform_name == "posix":
+                        with mock.patch.object(safari_yarn_lock.selectors,
+                                               "DefaultSelector", side_effect=OSError(
+                                                   "injected selector setup failure")):
+                            return real_run(repository, folder, command)
+                    proxy = mock.Mock(wraps=os)
+                    proxy.name = "nt"
+                    with mock.patch.object(safari_yarn_lock, "os", proxy), \
+                            mock.patch.object(safari_yarn_lock.ctypes, "WinDLL",
+                                              return_value=kernel, create=True), \
+                            mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                              create=True), \
+                            mock.patch.object(safari_yarn_lock,
+                                              "_resume_suspended_windows_process"), \
+                            mock.patch.object(threading.Thread, "start", start):
+                        return safari_yarn_lock._run_lock_task_windows(
+                            repository, folder, command)
+
+                arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                             "--output", str(output), "--configuration", "development"]
+                try:
+                    with mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                            mock.patch.object(safari_yarn_lock, "run_lock_task",
+                                              side_effect=run), \
+                            mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                            mock.patch.object(sys, "argv", arguments), \
+                            redirect_stdout(io.StringIO()):
+                        self.assertEqual(1, safari_yarn_lock.main())
+                    self.assertEqual(1, len(launched))
+                    self.assertIsNotNone(launched[0].poll())
+                    self.assertTrue(launched[0].stdout.closed and launched[0].stderr.closed)
+                    if platform_name == "nt":
+                        self.assertEqual(2, starts)
+                        self.assertIn(("terminate", 789, 1), calls)
+                        self.assertIn(("close", 789), calls)
+                    receipt = json.loads((output / "receipt.json").read_text())
+                    self.assertEqual("PROCESS_CAPTURE_FAILED", receipt["status"])
+                    self.assertFalse(receipt["qualified"])
+                    self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+                    for module in ("dyn4k-core", "dyn4k"):
+                        self.assertFalse((self.repository / module / "karma.config.d").exists())
+                    self.assertEqual(b"outside sentinel", outside.read_bytes())
+                    with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+                        safari_yarn_lock.audit_capture(self.repository, self.candidate, output)
+                finally:
+                    for process in launched:
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait(timeout=5)
 
     def test_public_hosted_capture_rejects_detached_job_child_with_closed_pipes(self):
         class Process:

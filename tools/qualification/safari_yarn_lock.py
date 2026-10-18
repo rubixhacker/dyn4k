@@ -604,6 +604,25 @@ def _run_lock_task_posix(repository, command, stdout, stderr):
     started = time.time_ns()
     process = subprocess.Popen(command, cwd=repository, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        result = _drain_lock_task_posix(process, command, stdout, stderr, started)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=MAX_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=MAX_DRAIN_SECONDS)
+        process.stdout.close()
+        process.stderr.close()
+    result["finished_ns"] = time.time_ns()
+    return result
+
+
+def _drain_lock_task_posix(process, command, stdout, stderr, started):
     deadline = time.monotonic() + MAX_PROCESS_SECONDS
     seen = {"stdout": 0, "stderr": 0}
     kept = {"stdout": 0, "stderr": 0}
@@ -649,8 +668,6 @@ def _run_lock_task_posix(repository, command, stdout, stderr):
             except ProcessLookupError:
                 pass
             process.wait(timeout=MAX_DRAIN_SECONDS)
-    process.stdout.close()
-    process.stderr.close()
     finished = time.time_ns()
     return {"command": command, "pid": process.pid, "exit_code": process.returncode,
             "started_ns": started, "finished_ns": finished,
@@ -758,25 +775,28 @@ def _run_lock_task_windows_opened(repository, command, stdout, stderr):
         job = kernel.CreateJobObjectW(None, None)
         if not job:
             raise OSError("cannot create Safari diagnostic Windows job")
-        class BasicLimits(ctypes.Structure):
-            _fields_ = (("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
-                        ("flags", ctypes.c_uint32), ("minimum_working_set", ctypes.c_size_t),
-                        ("maximum_working_set", ctypes.c_size_t),
-                        ("active_limit", ctypes.c_uint32), ("affinity", ctypes.c_size_t),
-                        ("priority", ctypes.c_uint32), ("scheduling", ctypes.c_uint32))
+        try:
+            class BasicLimits(ctypes.Structure):
+                _fields_ = (("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
+                            ("flags", ctypes.c_uint32), ("minimum_working_set", ctypes.c_size_t),
+                            ("maximum_working_set", ctypes.c_size_t),
+                            ("active_limit", ctypes.c_uint32), ("affinity", ctypes.c_size_t),
+                            ("priority", ctypes.c_uint32), ("scheduling", ctypes.c_uint32))
 
-        class ExtendedLimits(ctypes.Structure):
-            _fields_ = (("basic", BasicLimits), ("io_counters", ctypes.c_uint64 * 6),
-                        ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
-                        ("peak_process_memory", ctypes.c_size_t),
-                        ("peak_job_memory", ctypes.c_size_t))
+            class ExtendedLimits(ctypes.Structure):
+                _fields_ = (("basic", BasicLimits), ("io_counters", ctypes.c_uint64 * 6),
+                            ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                            ("peak_process_memory", ctypes.c_size_t),
+                            ("peak_job_memory", ctypes.c_size_t))
 
-        limits = ExtendedLimits()
-        limits.basic.flags = WINDOWS_KILL_JOB_ON_CLOSE
-        if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits),
-                                              ctypes.sizeof(limits)):
+            limits = ExtendedLimits()
+            limits.basic.flags = WINDOWS_KILL_JOB_ON_CLOSE
+            if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits),
+                                                  ctypes.sizeof(limits)):
+                raise OSError("cannot set Safari diagnostic kill-on-close job limit")
+        except BaseException:
             kernel.CloseHandle(job)
-            raise OSError("cannot set Safari diagnostic kill-on-close job limit")
+            raise
     try:
         process = subprocess.Popen(
             command, cwd=repository, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -786,36 +806,58 @@ def _run_lock_task_windows_opened(repository, command, stdout, stderr):
         if job is not None:
             kernel.CloseHandle(job)
         raise
-    if job is not None:
-        try:
-            if not kernel.AssignProcessToJobObject(job, process._handle):
-                raise OSError("cannot assign suspended Safari diagnostic process to Windows job")
-            _resume_suspended_windows_process(kernel, process)
-        except BaseException as error:
-            kernel.TerminateJobObject(job, 1)
-            kernel.CloseHandle(job)
+    threads = []
+    failed = True
+    try:
+        if job is not None:
             try:
-                process.wait(timeout=MAX_DRAIN_SECONDS)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=MAX_DRAIN_SECONDS)
-            process.stdout.close()
-            process.stderr.close()
-            raise OSError("cannot bind Safari diagnostic process before execution") from error
-
-    def terminate_tree():
-        if job is not None and kernel.TerminateJobObject(job, 1):
-            return
+                if not kernel.AssignProcessToJobObject(job, process._handle):
+                    raise OSError("cannot assign suspended Safari diagnostic process to Windows job")
+                _resume_suspended_windows_process(kernel, process)
+            except BaseException as error:
+                raise OSError("cannot bind Safari diagnostic process before execution") from error
+        result = _drain_lock_task_windows(process, command, stdout, stderr,
+                                          started, kernel if job is not None else None,
+                                          job, threads)
+        failed = False
+    finally:
         try:
-            killed = subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                    timeout=MAX_DRAIN_SECONDS, check=False)
-            if killed.returncode != 0 and process.poll() is None:
-                process.kill()
-        except (OSError, subprocess.TimeoutExpired):
-            if process.poll() is None:
-                process.kill()
+            if failed:
+                _terminate_windows_tree(kernel if job is not None else None, job, process)
+                try:
+                    process.wait(timeout=MAX_DRAIN_SECONDS)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=MAX_DRAIN_SECONDS)
+            for thread in threads:
+                if thread.ident is not None:
+                    thread.join(timeout=MAX_DRAIN_SECONDS)
+            if not any(thread.is_alive() for thread in threads):
+                process.stdout.close()
+                process.stderr.close()
+        finally:
+            if job is not None:
+                kernel.CloseHandle(job)
+    result["finished_ns"] = time.time_ns()
+    return result
 
+
+def _terminate_windows_tree(kernel, job, process):
+    if job is not None and kernel.TerminateJobObject(job, 1):
+        return
+    try:
+        killed = subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=MAX_DRAIN_SECONDS, check=False)
+        if killed.returncode != 0 and process.poll() is None:
+            process.kill()
+    except (OSError, subprocess.TimeoutExpired):
+        if process.poll() is None:
+            process.kill()
+
+
+def _drain_lock_task_windows(process, command, stdout, stderr, started,
+                             kernel, job, threads):
     seen = {"stdout": 0, "stderr": 0}
     kept = {"stdout": 0, "stderr": 0}
     reader_errors = []
@@ -832,17 +874,17 @@ def _run_lock_task_windows_opened(repository, command, stdout, stderr):
             except Exception as error:
                 reader_errors.append(f"{name}: {type(error).__name__}: {error}")
 
-        threads = [threading.Thread(target=drain, args=(name, source, destination),
-                                    daemon=True)
-                   for name, source, destination in (("stdout", process.stdout, stdout),
-                                                     ("stderr", process.stderr, stderr))]
+        threads.extend(threading.Thread(target=drain, args=(name, source, destination),
+                                        daemon=True)
+                       for name, source, destination in (("stdout", process.stdout, stdout),
+                                                         ("stderr", process.stderr, stderr)))
         for thread in threads:
             thread.start()
         try:
             process.wait(timeout=MAX_PROCESS_SECONDS)
         except subprocess.TimeoutExpired:
             timed_out = True
-            terminate_tree()
+            _terminate_windows_tree(kernel, job, process)
             try:
                 process.wait(timeout=MAX_DRAIN_SECONDS)
             except subprocess.TimeoutExpired:
@@ -859,14 +901,9 @@ def _run_lock_task_windows_opened(repository, command, stdout, stderr):
             if active:
                 stream_incomplete = True
         if stream_incomplete and not timed_out:
-            terminate_tree()
+            _terminate_windows_tree(kernel, job, process)
             for thread in threads:
                 thread.join(timeout=MAX_DRAIN_SECONDS)
-    if not any(thread.is_alive() for thread in threads):
-        process.stdout.close()
-        process.stderr.close()
-    if job is not None:
-        kernel.CloseHandle(job)
     finished = time.time_ns()
     return {"command": command, "pid": process.pid, "exit_code": process.returncode,
             "started_ns": started, "finished_ns": finished,
@@ -993,7 +1030,7 @@ def capture(repository, candidate_sha, output, configuration=None):
         (output / "receipt.json").write_text(json.dumps(receipt, indent=2,
                                                        sort_keys=True) + "\n")
         return receipt
-    except OSError as error:
+    except Exception as error:
         if reporter_stage is not None:
             receipt["reporter_stage"] = reporter_stage
             for item in reporter_stage["forensic"]:

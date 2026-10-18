@@ -1,6 +1,7 @@
 import ctypes
 import subprocess
 import os
+import signal
 import sys
 import tempfile
 import threading
@@ -13,6 +14,89 @@ import safari_yarn_lock
 
 
 class SafariWindowsProcessTests(unittest.TestCase):
+    def test_job_limit_setup_exception_closes_handle_before_launch(self):
+        kernel = mock.Mock()
+        kernel.CreateJobObjectW.return_value = 789
+        kernel.SetInformationJobObject.side_effect = OSError("injected job limit failure")
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "capture"
+            output.mkdir()
+            with mock.patch.object(safari_yarn_lock, "os", proxy), \
+                    mock.patch.object(safari_yarn_lock.ctypes, "WinDLL",
+                                      return_value=kernel, create=True), \
+                    mock.patch.object(subprocess, "Popen") as launch:
+                with self.assertRaisesRegex(OSError, "job limit failure"):
+                    safari_yarn_lock._run_lock_task_windows(
+                        Path(temporary), output, ["gradle"])
+            launch.assert_not_called()
+            kernel.CloseHandle.assert_called_once_with(789)
+
+    def test_second_reader_start_failure_stops_job_and_started_reader(self):
+        real_popen = subprocess.Popen
+        real_start = threading.Thread.start
+        launched = []
+        calls = []
+        starts = 0
+
+        def launch(_command, **kwargs):
+            kwargs.pop("creationflags")
+            process = real_popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                 start_new_session=True, **kwargs)
+            launched.append(process)
+            return mock.Mock(pid=process.pid, _handle=process.pid,
+                             stdout=process.stdout, stderr=process.stderr,
+                             wait=process.wait, poll=process.poll, kill=process.kill)
+
+        def start(thread):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("injected second reader start failure")
+            real_start(thread)
+
+        def terminate(job, code):
+            calls.append(("terminate", job, code))
+            if launched and launched[0].poll() is None:
+                os.killpg(launched[0].pid, signal.SIGKILL)
+            return 1
+
+        kernel = mock.Mock()
+        kernel.CreateJobObjectW.return_value = 789
+        kernel.SetInformationJobObject.return_value = 1
+        kernel.AssignProcessToJobObject.return_value = 1
+        kernel.TerminateJobObject.side_effect = terminate
+        kernel.CloseHandle.side_effect = lambda handle: calls.append(("close", handle)) or 1
+        proxy = mock.Mock(wraps=os)
+        proxy.name = "nt"
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "capture"
+                output.mkdir()
+                with mock.patch.object(subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+                                       create=True), \
+                        mock.patch.object(subprocess, "Popen", side_effect=launch), \
+                        mock.patch.object(threading.Thread, "start", start), \
+                        mock.patch.object(safari_yarn_lock, "os", proxy), \
+                        mock.patch.object(safari_yarn_lock.ctypes, "WinDLL",
+                                          return_value=kernel, create=True), \
+                        mock.patch.object(safari_yarn_lock,
+                                          "_resume_suspended_windows_process"):
+                    with self.assertRaisesRegex(RuntimeError, "second reader start failure"):
+                        safari_yarn_lock._run_lock_task_windows(
+                            Path(temporary), output, ["gradle"])
+                self.assertEqual(2, starts)
+                self.assertIn(("terminate", 789, 1), calls)
+                self.assertIn(("close", 789), calls)
+                self.assertIsNotNone(launched[0].poll())
+                self.assertTrue(launched[0].stdout.closed and launched[0].stderr.closed)
+        finally:
+            for process in launched:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+
     def test_log_open_failure_never_launches_windows_process_or_leaves_job(self):
         for failed_name in ("stdout.txt", "stderr.txt"):
             with self.subTest(failed_name=failed_name), tempfile.TemporaryDirectory() as temporary:
