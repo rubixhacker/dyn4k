@@ -30,6 +30,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Run focused native and pinned Java controls
         shell: pwsh
+        timeout-minutes: 75
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $false
@@ -37,6 +38,8 @@ jobs:
           $native = Join-Path $evidence 'native'
           $java = Join-Path $evidence 'java'
           New-Item -ItemType Directory -Force -Path $native, $java | Out-Null
+          $diagnosticDeadlineEpoch = [DateTimeOffset]::UtcNow.AddMinutes(60).ToUnixTimeSeconds()
+          Set-Content -Path (Join-Path $evidence 'diagnostic-deadline-epoch.txt') -Value $diagnosticDeadlineEpoch
           $gradleExit = $null
           $javaExit = -1
           $scalarExit = 1
@@ -134,6 +137,7 @@ jobs:
               --test-directory (Join-Path $PWD 'dyn4k-core/build/bin/mingwX64/debugTest') `
               --output-directory $testPeDirectory --gradle-log $nativeLog `
               --gradle-command $gradleCommandFile --build-file (Join-Path $PWD 'dyn4k-core/build.gradle.kts') `
+              --deadline-epoch $diagnosticDeadlineEpoch `
               1> $testPeStdout 2> $testPeStderr
             $testPeExit = $LASTEXITCODE
             if ($null -eq $testPeExit -or $testPeExit -ne 0) {
@@ -275,7 +279,7 @@ jobs:
           try {
             $modePwsh = Get-Command pwsh.exe -ErrorAction Stop
             & $modePwsh.Source -NoProfile -File .\tools\diagnostic\windows_collision\run-mode-controls.ps1 `
-              -OutputDirectory $modes 1> $modeStdout 2> $modeStderr
+              -OutputDirectory $modes -DeadlineEpoch $diagnosticDeadlineEpoch 1> $modeStdout 2> $modeStderr
             $modeExit = $LASTEXITCODE
             if ($null -eq $modeExit) { $modeExit = 1 }
           } catch {

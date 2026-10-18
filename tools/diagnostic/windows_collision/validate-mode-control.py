@@ -23,6 +23,12 @@ def read(directory: Path, name: str) -> str:
     return (directory / name).read_text(encoding="utf-8").strip()
 
 
+def exited_zero(directory: Path, name: str) -> None:
+    receipt = json.loads(read(directory, name))
+    if receipt.get("state") != "EXITED" or receipt.get("childExitCode") != 0:
+        raise ModeValidationError(f"{directory.name}: {name} is not a successful child exit")
+
+
 def validate(directory: Path) -> None:
     SCALAR["validate_source_vectors"]()
     source = SOURCE_DIRECTORY / "WindowsCollisionScalarControl.kt"
@@ -31,6 +37,9 @@ def validate(directory: Path) -> None:
         raise ModeValidationError("source hash differs from the seven-vector producer")
     if SCALAR["VERSION_TOKEN"].search(read(directory, "kotlin-native-version.txt")) is None:
         raise ModeValidationError("Kotlin/Native 2.4.20 version token is missing")
+    if read(directory, "version-exit-code.txt") != "0":
+        raise ModeValidationError("Kotlin/Native version command did not exit zero")
+    exited_zero(directory, "version-receipt.json")
     if read(directory, "mode-status.txt") != "OK":
         raise ModeValidationError("mode runner did not finish successfully")
 
@@ -38,6 +47,8 @@ def validate(directory: Path) -> None:
         mode = directory / name
         if read(mode, "compiler-exit-code.txt") != "0" or read(mode, "run-exit-code.txt") != "0":
             raise ModeValidationError(f"{name}: compiler or executable did not exit zero")
+        exited_zero(mode, "compiler-receipt.json")
+        exited_zero(mode, "run-receipt.json")
         command = json.loads(read(mode, "compiler-command.json"))
         arguments = command.get("arguments")
         if command.get("mode") != name or command.get("sourceSha256") != source_hash:
@@ -76,6 +87,10 @@ def self_test() -> int:
                 f"{source_hash}  tools/diagnostic/windows_collision/{source.name}\n", encoding="utf-8"
             )
             (directory / "kotlin-native-version.txt").write_text("Kotlin/Native: 2.4.20\n", encoding="utf-8")
+            (directory / "version-exit-code.txt").write_text("0\n", encoding="utf-8")
+            (directory / "version-receipt.json").write_text(
+                json.dumps({"state": "EXITED", "childExitCode": 0}), encoding="utf-8"
+            )
             (directory / "mode-status.txt").write_text("OK\n", encoding="utf-8")
             rows = "\n".join(SCALAR["_row"]("kotlin-native", *case) for case in SCALAR["EXPECTED"]) + "\n"
             for mode_name, flags in MODES:
@@ -83,6 +98,12 @@ def self_test() -> int:
                 mode.mkdir()
                 (mode / "compiler-exit-code.txt").write_text("0\n", encoding="utf-8")
                 (mode / "run-exit-code.txt").write_text("0\n", encoding="utf-8")
+                (mode / "compiler-receipt.json").write_text(
+                    json.dumps({"state": "EXITED", "childExitCode": 0}), encoding="utf-8"
+                )
+                (mode / "run-receipt.json").write_text(
+                    json.dumps({"state": "EXITED", "childExitCode": 0}), encoding="utf-8"
+                )
                 executable = mode / "windows-collision-scalar.exe"
                 executable.write_bytes(f"MZ{mode_name}".encode())
                 (mode / "executable-sha256.txt").write_text(
@@ -111,6 +132,10 @@ def self_test() -> int:
             ("failed compiler", lambda d: (d / "debug-g" / "compiler-exit-code.txt").write_text("1\n", encoding="utf-8")),
             ("failed runner", lambda d: (d / "optimized-opt" / "run-exit-code.txt").write_text("1\n", encoding="utf-8")),
             ("wrong source", lambda d: (d / "source-sha256.txt").write_text("0" * 64, encoding="utf-8")),
+            ("timed-out compiler", lambda d: (d / "debug-g" / "compiler-receipt.json").write_text(
+                json.dumps({"state": "TIMEOUT", "childExitCode": -9}), encoding="utf-8")),
+            ("timed-out executable", lambda d: (d / "optimized-opt" / "run-receipt.json").write_text(
+                json.dumps({"state": "TIMEOUT", "childExitCode": -9}), encoding="utf-8")),
         )
         for index, (label, mutate) in enumerate(adverse):
             directory = fixture(f"adverse-{index}")

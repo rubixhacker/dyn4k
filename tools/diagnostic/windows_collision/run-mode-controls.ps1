@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [Parameter(Mandatory = $true)][long]$DeadlineEpoch
 )
 
 Set-StrictMode -Version Latest
@@ -7,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $versionToken = '(?<![-A-Za-z0-9_~+/])2\.4\.20(?![-A-Za-z0-9_~+/]|\.[A-Za-z0-9])'
 $source = Join-Path $PSScriptRoot 'WindowsCollisionScalarControl.kt'
+$bounded = Join-Path $PSScriptRoot 'collect-test-pe.py'
 $konanHome = Join-Path $env:USERPROFILE '.konan/kotlin-native-prebuilt-windows-x86_64-2.4.20'
 $konanc = Join-Path $konanHome 'bin/kotlinc-native.bat'
 $modes = @(
@@ -19,8 +21,17 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 try {
     if (-not (Test-Path -LiteralPath $konanc -PathType Leaf)) { throw "Kotlin/Native compiler is missing: $konanc" }
-    $version = (& $konanc -version 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch $versionToken) {
+    $versionStdout = Join-Path $OutputDirectory 'version-stdout.log'
+    $versionStderr = Join-Path $OutputDirectory 'version-stderr.log'
+    $versionReceipt = Join-Path $OutputDirectory 'version-receipt.json'
+    & python $bounded run-bounded --timeout-seconds 30 --deadline-epoch $DeadlineEpoch `
+        --stdout $versionStdout --stderr $versionStderr --receipt $versionReceipt `
+        -- $konanc -version
+    $versionExit = $LASTEXITCODE
+    Set-Content -Path (Join-Path $OutputDirectory 'version-exit-code.txt') -Value $versionExit
+    $version = ((Get-Content -Raw -LiteralPath $versionStdout) +
+                (Get-Content -Raw -LiteralPath $versionStderr)).Trim()
+    if ($versionExit -ne 0 -or $version -notmatch $versionToken) {
         throw "Kotlin/Native version check failed: $version"
     }
     Set-Content -Path (Join-Path $OutputDirectory 'kotlin-native-version.txt') -Value $version
@@ -47,8 +58,11 @@ foreach ($mode in $modes) {
     $compilerExit = 1
     $compilerStdout = Join-Path $modeDirectory 'compiler-stdout.log'
     $compilerStderr = Join-Path $modeDirectory 'compiler-stderr.log'
+    $compilerReceipt = Join-Path $modeDirectory 'compiler-receipt.json'
     try {
-        & $konanc @compilerArguments 1> $compilerStdout 2> $compilerStderr
+        & python $bounded run-bounded --timeout-seconds 240 --deadline-epoch $DeadlineEpoch `
+            --stdout $compilerStdout --stderr $compilerStderr --receipt $compilerReceipt `
+            -- $konanc @compilerArguments
         $compilerExit = $LASTEXITCODE
         if ($null -eq $compilerExit) { $compilerExit = 1 }
     } catch {
@@ -64,14 +78,19 @@ foreach ($mode in $modes) {
     if ($compilerExit -ne 0 -or -not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         $failures.Add("$($mode.Name): compiler exit $compilerExit or PE unavailable")
         Set-Content -Path (Join-Path $modeDirectory 'run-exit-code.txt') -Value 'NOT_RUN'
+        [pscustomobject]@{ state = 'NOT_RUN'; reason = 'compiler failed or PE unavailable' } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $modeDirectory 'run-receipt.json')
         continue
     }
 
     $runExit = 1
     $runOutput = Join-Path $modeDirectory 'native-scalar.tsv'
     $runStderr = Join-Path $modeDirectory 'run-stderr.log'
+    $runReceipt = Join-Path $modeDirectory 'run-receipt.json'
     try {
-        & $executable 1> $runOutput 2> $runStderr
+        & python $bounded run-bounded --timeout-seconds 30 --deadline-epoch $DeadlineEpoch `
+            --stdout $runOutput --stderr $runStderr --receipt $runReceipt `
+            -- $executable
         $runExit = $LASTEXITCODE
         if ($null -eq $runExit) { $runExit = 1 }
     } catch {
