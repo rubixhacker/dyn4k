@@ -66,7 +66,8 @@ jobs:
                    "runner_os": os.environ["RUNNER_OS"], "host": platform.uname()._asdict(),
                    "run_id": os.environ["GITHUB_RUN_ID"],
                    "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-                   "qualification": "unpassed", "commands": {}, "scenarios": {}}
+                   "qualification": "unpassed", "commands": {}, "scenarios": {},
+                   "memory_scenarios": {}}
 
           def process_rows():
               listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,stat="],
@@ -108,6 +109,19 @@ jobs:
                   return {"bytes": after.st_size, "read_bytes": read_bytes,
                           "status": "changed_during_hash"}
               return {"bytes": read_bytes, "sha256": value.hexdigest()}
+
+          def sidecar_bytes(path):
+              before = path.stat()
+              if before.st_size > 8 * 1024 * 1024:
+                  raise ValueError("Native memory sidecar exceeds read limit")
+              with path.open("rb") as stream:
+                  snapshot = stream.read(before.st_size + 1)
+              after = path.stat()
+              identity = lambda row: (row.st_dev, row.st_ino, row.st_size,
+                                      row.st_mtime_ns, row.st_ctime_ns)
+              if len(snapshot) != before.st_size or identity(before) != identity(after):
+                  raise ValueError("Native memory sidecar changed during read")
+              return snapshot
 
           def execute(label, argv, timeout=300):
               output = evidence / label
@@ -294,41 +308,108 @@ jobs:
                   "--output", evidence / "setup/path-swap.json"], 45)
               route["path_swap_control_passed"] = image_control
               for api in ("direct_kotlin", "compatibility"):
-                  archive = (evidence / "captures" / api).resolve()
-                  label = f"captures/{api}-command"
-                  passed, _, _ = execute(label, [sys.executable, "-B",
-                      root / "tools/performance/sustained_portable/native_host_capture.py",
-                      "--inventory", inventory, "--publication-root", staging,
-                      "--target", target, "--build", build,
-                      "--scenario", f"separated.default.small.30hz.{api}",
-                      "--archive", archive, "--steps", "30", "--warmup", "3"], 120)
-                  route["scenarios"][api] = {"exit_zero": passed,
-                      "capture_receipt": (archive / "capture.json").is_file()}
-                  if not passed:
-                      raw = {}
-                      for name in ("stdout.raw", "stderr.raw"):
-                          path = archive / name
+                  for mode in ("timing", "memory"):
+                      base = evidence / "captures" / ("memory" if mode == "memory" else "")
+                      archive = (base / api).resolve()
+                      label = f"captures/{'memory/' if mode == 'memory' else ''}{api}-command"
+                      passed, _, _ = execute(label, [sys.executable, "-B",
+                          root / "tools/performance/sustained_portable/native_host_capture.py",
+                          "--inventory", inventory, "--publication-root", staging,
+                          "--target", target, "--build", build,
+                          "--scenario", f"separated.default.small.30hz.{api}",
+                          "--mode", mode, "--archive", archive,
+                          "--steps", "30", "--warmup", "3"], 120)
+                      receipt = archive / "capture.json"
+                      result = {"exit_zero": passed, "capture_receipt": receipt.is_file(),
+                                "archive": str(archive.relative_to(evidence))}
+                      if mode == "memory":
+                          result["status"] = "failed"
+                          result["sidecars"] = {
+                              name: (archive / name).is_file() for name in
+                              ("capture.json", "execution.json", "run.json",
+                               "stdout.raw", "stderr.raw", "rss.json", "rss.csv", "heap.csv")}
                           try:
-                              raw[name] = raw_file(path)
-                          except OSError as error:
-                              raw[name] = {"status": "unreadable", "error": str(error)}
-                      execution_path = archive / "execution.json"
-                      try:
-                          execution_receipt = json.loads(execution_path.read_text())
-                          raw_collection = (execution_receipt.get("raw_collection", "incomplete")
-                                            if isinstance(execution_receipt, dict) else "incomplete")
-                      except (OSError, ValueError, UnicodeError):
-                          raw_collection = "incomplete"
-                      if (route["commands"][label].get("error") == "timeout" or
-                              any("sha256" not in item for item in raw.values())):
-                          raw_collection = "incomplete"
-                      failure = {"qualification": "unpassed", "source_sha": sha,
-                                 "target": target, "build": build, "scenario": api,
-                                 "command": route["commands"][label], "raw": raw,
-                                 "raw_collection": raw_collection}
-                      (evidence / "captures" / f"{api}-failure.json").write_text(
-                          json.dumps(failure, indent=2) + "\n")
-              if not image_control or not all(row["exit_zero"] for row in route["scenarios"].values()):
+                              capture = json.loads(sidecar_bytes(receipt))
+                              execution = json.loads(sidecar_bytes(archive / "execution.json"))
+                              resident = json.loads(sidecar_bytes(archive / "rss.json"))
+                              run = json.loads(sidecar_bytes(archive / "run.json"))
+                              result.update(pid=execution["pid"],
+                                            process_image_identity=capture["process_image_identity"],
+                                            observed_image=capture["observed_image"],
+                                            rss_observation=capture["rss_observation"],
+                                            managed_heap_observation=capture["managed_heap_observation"])
+                              if passed:
+                                  checked = {name: raw_file(archive / name) for name in
+                                             ("execution.json", "stdout.raw", "stderr.raw",
+                                              "rss.json", "rss.csv", "heap.csv")}
+                                  if (any("sha256" not in item for item in checked.values()) or
+                                      checked["execution.json"]["sha256"] != capture["execution_sha256"] or
+                                      checked["stdout.raw"]["sha256"] != execution["stdout_sha256"] or
+                                      checked["stderr.raw"]["sha256"] != execution["stderr_sha256"] or
+                                      checked["rss.json"]["sha256"] !=
+                                          capture["rss_observation"]["rss_json_sha256"] or
+                                      checked["heap.csv"]["sha256"] !=
+                                          capture["managed_heap_observation"]["heap_csv_sha256"]):
+                                      raise ValueError("Native memory sidecar bytes differ from receipts")
+                                  rss_csv = sidecar_bytes(archive / "rss.csv").decode().splitlines()
+                                  if rss_csv != (["monotonic_ns,resident_bytes"] +
+                                                 [f"{stamp},{resident_bytes}" for stamp, resident_bytes
+                                                  in resident["samples"]]):
+                                      raise ValueError("Native resident CSV differs from sampled bytes")
+                                  if (capture["mode"] != "memory" or run["mode"] != "memory" or
+                                      capture["source_sha"] != sha or capture["target"] != target or
+                                      capture["build"] != build or capture["scenario"]["api"] != api or
+                                      execution["pid"] != capture["pid"] or resident["pid"] != execution["pid"] or
+                                      capture["process_image_identity"] != "observed" or
+                                      execution["raw_collection"] != "selected_process_exited" or
+                                      execution["termination"] != "natural" or execution["exit_code"] != 0 or
+                                      capture["managed_heap_observation"]["status"] !=
+                                          "observed_kotlin_heap_after_collection" or
+                                      capture["managed_heap_observation"]["stages"] != 3 or
+                                      run["qualification"] != "unpassed" or
+                                      any(not (archive / name).is_file() for name in
+                                          ("stdout.raw", "stderr.raw", "rss.csv", "heap.csv"))):
+                                      raise ValueError("Native memory receipt or sidecar identity differs")
+                                  result["status"] = (
+                                      "observed_diagnostic" if
+                                      capture["rss_observation"]["status"] == "observed_diagnostic" and
+                                      resident["status"] == "observed_diagnostic" and
+                                      capture["rss_observation"]["samples"] == len(resident["samples"]) and
+                                      len(resident["samples"]) > 0 and not resident["errors"]
+                                      else "unavailable_or_partial")
+                          except (OSError, ValueError, KeyError, TypeError, UnicodeError) as error:
+                              result["error"] = str(error)
+                          route["memory_scenarios"][api] = result
+                      else:
+                          route["scenarios"][api] = result
+                      if not passed or (mode == "memory" and result["status"] != "observed_diagnostic"):
+                          raw = {}
+                          for name in ("stdout.raw", "stderr.raw"):
+                              path = archive / name
+                              try:
+                                  raw[name] = raw_file(path)
+                              except OSError as error:
+                                  raw[name] = {"status": "unreadable", "error": str(error)}
+                          try:
+                              execution_receipt = json.loads(
+                                  sidecar_bytes(archive / "execution.json"))
+                              raw_collection = (execution_receipt.get("raw_collection", "incomplete")
+                                                if isinstance(execution_receipt, dict) else "incomplete")
+                          except (OSError, ValueError, UnicodeError):
+                              raw_collection = "incomplete"
+                          if (route["commands"][label].get("error") == "timeout" or
+                                  any("sha256" not in item for item in raw.values())):
+                              raw_collection = "incomplete"
+                          failure = {"qualification": "unpassed", "source_sha": sha,
+                                     "target": target, "build": build, "scenario": api,
+                                     "mode": mode, "command": route["commands"][label], "raw": raw,
+                                     "raw_collection": raw_collection, "result": result}
+                          (base / f"{api}-failure.json").write_text(
+                              json.dumps(failure, indent=2) + "\n")
+              if (not image_control or
+                      not all(row["exit_zero"] for row in route["scenarios"].values()) or
+                      not all(row["status"] == "observed_diagnostic"
+                              for row in route["memory_scenarios"].values())):
                   raise RuntimeError("one or more Native host controls failed")
           except (KeyError, ValueError, OSError, RuntimeError) as error:
               route["error"] = str(error)

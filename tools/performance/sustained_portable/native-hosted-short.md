@@ -15,6 +15,22 @@ executable and artifact identities. `captures/` retains each API's raw process
 archive, stdout, stderr, exit status, and capture receipt. The staged
 repository is uploaded with the route evidence.
 
+The workflow also runs `native_host_capture.py --mode memory` as a separate
+bounded process for each API. Memory archives live at
+`captures/memory/direct_kotlin/` and `captures/memory/compatibility/`.
+Their `execution.json` and `capture.json` retain the selected PID, mapped
+executable observation, exit, raw stream hashes, and input identities.
+`stdout.raw` and `stderr.raw` retain producer bytes. `rss.json` and `rss.csv`
+retain live resident-byte samples or probe errors. `heap.csv` retains the
+three validated post-collection managed heap checkpoints. The route result
+reports each memory status as `observed_diagnostic`,
+`unavailable_or_partial`, or `failed`. It reads JSON and CSV snapshots within
+an 8 MiB bound and checks retained hashes before reporting a positive diagnostic.
+A probe failure or incomplete sidecar gets an unpassed failure receipt, and
+the other API still runs.
+Timing results remain in `scenarios`; memory results are in
+`memory_scenarios`. If staging fails, neither capture starts.
+
 Each command writes stdout and stderr directly to files. On a POSIX deadline,
 the runner stops the wrapper group, finds descendants across sessions, kills
 them, and checks the observed PIDs. Windows uses bounded `taskkill /T /F`.
@@ -37,5 +53,7 @@ The observer can report `mapped_executable_vnode` on macOS and
 kinds when they match the selected executable. A `reported_path_only` value
 records a path; capture validation rejects it as process-image proof. These
 observation routes do not establish a sustained performance pass. The policy
-still has 0 of 28 validated sustained reference environments. Memory,
-allocation, reference, and release qualification also remain open.
+still has 0 of 28 validated sustained reference environments. Short memory
+captures do not establish allocation attribution, a post-cycle plateau,
+sustained duration, or a reference performance pass. Timing-only archives
+carry no memory result. Release qualification remains open.
