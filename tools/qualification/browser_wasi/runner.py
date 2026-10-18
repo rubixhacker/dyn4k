@@ -592,6 +592,55 @@ def prepare_consumer_lock(root: Path, expected_sha: str,
         raise ValueError("generated consumer lock copy differs from reviewed bytes")
 
 
+def capture_generated_consumer_lock(root: Path, destination: Path) -> dict[str, object]:
+    source = root / CONSUMER / "kotlin-js-store/yarn.lock"
+    if (source.is_symlink() or source.parent.is_symlink() or not source.is_file()
+            or destination.exists() or destination.is_symlink()):
+        raise ValueError("generated consumer lock observation source or destination differs")
+    before = sha256(source)
+    shutil.copyfile(source, destination)
+    captured = time.time_ns()
+    digest = sha256(destination)
+    if digest != before or sha256(source) != digest:
+        raise ValueError("generated consumer lock changed during observation")
+    return {"path": str(destination), "sha256": digest,
+            "source_path": str(source), "captured_ns": captured}
+
+
+def verify_consumer_lock_observation(observation: object, root: Path, destination: Path,
+                                     expected_digest: str, earliest_ns: int) -> None:
+    if not isinstance(observation, dict):
+        raise ValueError("execution-time consumer lock provenance is missing")
+    path = destination.resolve()
+    captured = observation.get("captured_ns")
+    if (set(observation) != {"path", "sha256", "source_path", "captured_ns"}
+            or observation.get("path") != str(destination)
+            or observation.get("source_path") != str(root / CONSUMER /
+                                                     "kotlin-js-store/yarn.lock")
+            or observation.get("sha256") != expected_digest
+            or type(captured) is not int or captured < earliest_ns
+            or path != destination or not path.is_file() or path.is_symlink()
+            or not earliest_ns <= path.stat().st_mtime_ns <= captured
+            or sha256(path) != expected_digest):
+        raise ValueError("execution-time consumer lock provenance differs")
+
+
+def finalize_consumer_lock(root: Path, sha: str, output: Path,
+                           lane: dict[str, object]) -> None:
+    expected = str(lane["consumer_lock_sha256"])
+    final = capture_generated_consumer_lock(root, output / "post-modules-consumer-yarn.lock")
+    lane["post_modules_consumer_lock"] = final
+    if final["sha256"] != expected:
+        raise ValueError("lane changed the reviewed consumer lock after modules")
+    candidate_identity(root, sha)
+    terminal = capture_generated_consumer_lock(root, output / "post-guard-consumer-yarn.lock")
+    lane["post_guard_consumer_lock"] = terminal
+    if terminal["sha256"] != expected:
+        raise ValueError("lane changed the reviewed consumer lock after final guard")
+    if sha256(root / CONSUMER / "kotlin-js-store/yarn.lock") != expected:
+        raise ValueError("lane changed the reviewed consumer lock after final observation")
+
+
 def consumer_lock_variant(target: str, runtime: str) -> str:
     return "firefox" if target == "js" and runtime == "firefox" else "chrome"
 
@@ -784,9 +833,20 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
 
     if "consumer_lock_retained" in lane:
         check(lane["consumer_lock_retained"], lane.get("consumer_lock_sha256"))
+    for observation in (lane.get("post_modules_consumer_lock"),
+                        lane.get("post_guard_consumer_lock")):
+        if observation is not None:
+            if not isinstance(observation, dict):
+                raise ValueError("invalid consumer lock observation")
+            check(observation.get("path"), observation.get("sha256"))
     for module in modules.values():
         if not isinstance(module, dict):
             raise ValueError("invalid module receipt")
+        observation = module.get("post_gradle_consumer_lock")
+        if observation is not None:
+            if not isinstance(observation, dict):
+                raise ValueError("invalid consumer lock observation")
+            check(observation.get("path"), observation.get("sha256"))
         for field, digest_field in (
             ("gradle_console", "gradle_console_sha256"),
             ("gradle_stdout", "gradle_stdout_sha256"),
@@ -846,19 +906,33 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
         sha = lane.get("candidate_sha")
         if not isinstance(sha, str):
             raise ValueError("passing lane has no candidate SHA")
-        if reviewed_consumer_lock(root, sha, "firefox") is not None:
-            variant = consumer_lock_variant(lane.get("target"), lane.get("runtime"))
-            raw_lock = reviewed_consumer_lock(root, sha, variant)
-            retained_lock = lane_dir / "consumer-yarn.lock"
-            if (raw_lock is None or lane.get("consumer_lock_variant") != variant
-                    or lane.get("consumer_lock_retained") != str(retained_lock)
-                    or lane.get("consumer_lock_sha256") != hashlib.sha256(raw_lock).hexdigest()
-                    or not retained_lock.is_file() or retained_lock.is_symlink()
-                    or retained_lock.read_bytes() != raw_lock):
-                raise ValueError("passing lane consumer lock provenance differs")
-            candidate_identity(root, sha, retained_consumer_lock=True)
-        else:
-            candidate_identity(root, sha)
+        if reviewed_consumer_lock(root, sha, "firefox") is None:
+            raise ValueError("passing lane has no execution-time consumer lock provenance")
+        variant = consumer_lock_variant(lane.get("target"), lane.get("runtime"))
+        raw_lock = reviewed_consumer_lock(root, sha, variant)
+        retained_lock = lane_dir / "consumer-yarn.lock"
+        if (raw_lock is None or lane.get("consumer_lock_variant") != variant
+                or lane.get("consumer_lock_retained") != str(retained_lock)
+                or lane.get("consumer_lock_sha256") != hashlib.sha256(raw_lock).hexdigest()
+                or not retained_lock.is_file() or retained_lock.is_symlink()
+                or retained_lock.read_bytes() != raw_lock):
+            raise ValueError("passing lane consumer lock provenance differs")
+        finished_times = [module.get("finished_ns") for module in modules.values()]
+        if any(type(value) is not int for value in finished_times):
+            raise ValueError("execution-time consumer lock provenance lacks module times")
+        expected_lock_digest = hashlib.sha256(raw_lock).hexdigest()
+        verify_consumer_lock_observation(
+            lane.get("post_modules_consumer_lock"), root,
+            lane_dir / "post-modules-consumer-yarn.lock", expected_lock_digest,
+            max(finished_times),
+        )
+        final = lane["post_modules_consumer_lock"]
+        verify_consumer_lock_observation(
+            lane.get("post_guard_consumer_lock"), root,
+            lane_dir / "post-guard-consumer-yarn.lock", expected_lock_digest,
+            final["captured_ns"],
+        )
+        candidate_identity(root, sha, retained_consumer_lock=True)
         stage_receipt = Path(str(lane.get("staging_receipt", ""))).resolve()
         if (not stage_receipt.is_file() or lane.get("staging_receipt_sha256") !=
                 sha256(stage_receipt) or lane.get("artifact_hashes") !=
@@ -907,6 +981,13 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
             if (type(started) is not int or type(finished) is not int
                     or started <= 0 or finished < started):
                 raise ValueError(f"passing {name} has no fresh invocation window")
+            verify_consumer_lock_observation(
+                module.get("post_gradle_consumer_lock"), root,
+                lane_dir / name / "post-gradle-consumer-yarn.lock",
+                expected_lock_digest, finished,
+            )
+            if module["post_gradle_consumer_lock"]["captured_ns"] > final["captured_ns"]:
+                raise ValueError("execution-time consumer lock provenance order differs")
             if module.get("gradle_command") != gradle_command(root, name, target, configuration):
                 raise ValueError(f"passing {name} Gradle configuration or task differs")
             source = linked_file(test_project(root, name), target, configuration, name)
@@ -1235,12 +1316,13 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
         prepare_consumer_lock(root, sha, lock_variant)
         candidate_identity(root, sha)
         selected_lock = reviewed_consumer_lock(root, sha, lock_variant)
-        if selected_lock is not None:
-            retained_lock = output / "consumer-yarn.lock"
-            retained_lock.write_bytes(selected_lock)
-            lane.update(consumer_lock_variant=lock_variant,
-                        consumer_lock_retained=str(retained_lock),
-                        consumer_lock_sha256=hashlib.sha256(selected_lock).hexdigest())
+        if selected_lock is None or reviewed_consumer_lock(root, sha, "firefox") is None:
+            raise ValueError("passing lane requires source-bound execution-time consumer lock provenance")
+        retained_lock = output / "consumer-yarn.lock"
+        retained_lock.write_bytes(selected_lock)
+        lane.update(consumer_lock_variant=lock_variant,
+                    consumer_lock_retained=str(retained_lock),
+                    consumer_lock_sha256=hashlib.sha256(selected_lock).hexdigest())
         lane["artifact_hashes"] = verified_stage(root, sha, receipt)
         if target == "js" and runtime == "firefox":
             verify_firefox_launcher_graph(root)
@@ -1319,9 +1401,11 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
             }
             results[module] = evidence
             try:
-                if (selected_lock is not None and
-                        sha256(root / CONSUMER / "kotlin-js-store/yarn.lock") !=
-                        lane["consumer_lock_sha256"]):
+                observed_lock = capture_generated_consumer_lock(
+                    root, module_output / "post-gradle-consumer-yarn.lock"
+                )
+                evidence["post_gradle_consumer_lock"] = observed_lock
+                if observed_lock["sha256"] != lane["consumer_lock_sha256"]:
                     raise ValueError(f"{module} changed the reviewed consumer lock")
                 if built.returncode:
                     raise ValueError(f"{module} Gradle task failed: {console}")
@@ -1427,11 +1511,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                 write_json(result_path, evidence)
                 evidence["result_json"] = str(result_path)
                 evidence["result_json_sha256"] = sha256(result_path)
-        candidate_identity(root, sha)
-        if (selected_lock is not None and
-                sha256(root / CONSUMER / "kotlin-js-store/yarn.lock") !=
-                lane["consumer_lock_sha256"]):
-            raise ValueError("lane changed the reviewed consumer lock")
+        finalize_consumer_lock(root, sha, output, lane)
         lane["status"] = "PASSED"
     except (OSError, ValueError, json.JSONDecodeError) as error:
         lane["reason"] = str(error)

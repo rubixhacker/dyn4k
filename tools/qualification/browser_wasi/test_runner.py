@@ -754,6 +754,139 @@ class SourceCasesTest(unittest.TestCase):
             finally:
                 generated.write_bytes(prior)
 
+    def test_public_legacy_lock_failure_cannot_be_resealed_passing(self):
+        original = os.environ.get("DYN4K_BROWSER_WASI_LEGACY_LOCK_FAILED_RECEIPT")
+        if original is None:
+            self.skipTest("set a retained real d7a lock-failed lane receipt")
+        source = Path(original).parent
+        lane = json.loads((source / "lane.json").read_text())
+        self.assertEqual("FAILED", lane["status"])
+        self.assertIn("yarn.lock", lane["reason"])
+
+        def audit(receipt):
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("runner.py")),
+                 "audit", "--receipt", str(receipt)],
+                capture_output=True, text=True, check=False,
+            )
+
+        original_audit = audit(source / "lane.json")
+        self.assertEqual(0, original_audit.returncode, original_audit.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            promoted, copied = self.copy_lane(source, directory)
+            promoted["status"] = "PASSED"
+            promoted.pop("reason", None)
+            self.save_copied_lane(promoted, copied)
+            rejected = audit(copied / "lane.json")
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("execution-time consumer lock provenance", rejected.stderr)
+
+    def test_public_pre_observation_pass_requires_new_lock_evidence(self):
+        original = os.environ.get("DYN4K_BROWSER_WASI_PRE_OBSERVATION_RECEIPT")
+        if original is None:
+            self.skipTest("set a real 0677 passing lane without post-task lock observations")
+        receipt = Path(original)
+        lane = json.loads(receipt.read_text())
+        self.assertEqual("PASSED", lane["status"])
+        self.assertEqual("firefox", lane["consumer_lock_variant"])
+        rejected = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("runner.py")),
+             "audit", "--receipt", str(receipt)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(1, rejected.returncode, rejected.stderr)
+        self.assertIn("execution-time consumer lock provenance", rejected.stderr)
+
+    def test_final_lock_observations_capture_post_module_and_post_guard_mutation(self):
+        import runner
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "source"
+            output = Path(directory) / "lane"
+            source = root / runner.CONSUMER / "kotlin-js-store/yarn.lock"
+            source.parent.mkdir(parents=True)
+            output.mkdir()
+            reviewed = b"reviewed generated lock\n"
+            source.write_bytes(reviewed)
+            expected = runner.sha256(source)
+            module = output / "dyn4k-core"
+            module.mkdir()
+            post_task = runner.capture_generated_consumer_lock(
+                root, module / "post-gradle-consumer-yarn.lock")
+            self.assertEqual(expected, post_task["sha256"])
+
+            source.write_bytes(b"mutation after all modules passed\n")
+            lane = {"consumer_lock_sha256": expected}
+            with mock.patch("runner.candidate_identity") as identity:
+                with self.assertRaisesRegex(ValueError, "after modules"):
+                    runner.finalize_consumer_lock(root, "a" * 40, output, lane)
+                identity.assert_not_called()
+            self.assertEqual(runner.sha256(source), lane["post_modules_consumer_lock"]["sha256"])
+            self.assertNotIn("post_guard_consumer_lock", lane)
+
+            source.write_bytes(reviewed)
+            other = output / "other"
+            other.mkdir()
+            late = {"consumer_lock_sha256": expected}
+            def mutate_during_guard(*_args):
+                source.write_bytes(b"mutation during final guard\n")
+            with mock.patch("runner.candidate_identity", side_effect=mutate_during_guard):
+                with self.assertRaisesRegex(ValueError, "after final guard"):
+                    runner.finalize_consumer_lock(root, "a" * 40, other, late)
+            self.assertEqual(expected, late["post_modules_consumer_lock"]["sha256"])
+            self.assertEqual(runner.sha256(source), late["post_guard_consumer_lock"]["sha256"])
+
+            source.write_bytes(reviewed)
+            good = output / "good"
+            good.mkdir()
+            positive = {"consumer_lock_sha256": expected}
+            with mock.patch("runner.candidate_identity"):
+                runner.finalize_consumer_lock(root, "a" * 40, good, positive)
+            self.assertEqual(expected, positive["post_modules_consumer_lock"]["sha256"])
+            self.assertEqual(expected, positive["post_guard_consumer_lock"]["sha256"])
+
+    def test_public_execution_time_lock_observations_reject_resealed_changes(self):
+        import runner
+
+        original = os.environ.get("DYN4K_BROWSER_WASI_OBSERVED_LOCK_RECEIPT")
+        if original is None:
+            self.skipTest("set a real passing lane with generated lock observations")
+        source = Path(original).parent
+        def audit(receipt):
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("runner.py")),
+                 "audit", "--receipt", str(receipt)],
+                capture_output=True, text=True, check=False,
+            )
+        baseline = audit(source / "lane.json")
+        self.assertEqual(0, baseline.returncode, baseline.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            for mutation in ("missing_post_task", "wrong_post_task", "missing_final",
+                             "wrong_final", "missing_post_guard", "wrong_order"):
+                lane, copied = self.copy_lane(source, directory)
+                if mutation == "missing_post_task":
+                    lane["modules"]["dyn4k-core"].pop("post_gradle_consumer_lock")
+                elif mutation == "wrong_post_task":
+                    observation = lane["modules"]["dyn4k-core"]["post_gradle_consumer_lock"]
+                    Path(observation["path"]).write_bytes(b"wrong generated lock\n")
+                    observation["sha256"] = runner.sha256(Path(observation["path"]))
+                elif mutation == "missing_final":
+                    lane.pop("post_modules_consumer_lock")
+                elif mutation == "wrong_final":
+                    observation = lane["post_modules_consumer_lock"]
+                    Path(observation["path"]).write_bytes(b"late generated lock mutation\n")
+                    observation["sha256"] = runner.sha256(Path(observation["path"]))
+                elif mutation == "missing_post_guard":
+                    lane.pop("post_guard_consumer_lock")
+                else:
+                    lane["post_guard_consumer_lock"]["captured_ns"] = 1
+                self.save_copied_lane(lane, copied)
+                rejected = audit(copied / "lane.json")
+                with self.subTest(mutation=mutation):
+                    self.assertEqual(1, rejected.returncode, rejected.stderr)
+                    self.assertIn("execution-time consumer lock provenance", rejected.stderr)
+                shutil.rmtree(copied)
+
     @classmethod
     def copy_resealed_diagnostic_depth(cls, source: Path, case: Path, value: str) -> Path:
         from runner import sha256
