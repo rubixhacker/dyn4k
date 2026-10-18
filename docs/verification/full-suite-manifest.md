@@ -18,4 +18,4 @@ Every lane requires staged target artifacts, an external staged consumer, numeri
 
 Each `independent_gates` entry names the requirement and its repository evidence sources. These paths identify the fixture, consumer, tool, or policy to evaluate. A later candidate must bind its actual observations and source hashes in a separate gate receipt.
 
-The current `qualify.py` full-lane evaluator reads all manifest cases without target selection and does not consume independent gate results. The adapter must call `select_lane` for each lane, compare exact observed case identities and counts with its `case_ids`, and require separate gate receipts. Until that integration and actual runtime evidence exist, this manifest alone qualifies no lane.
+The `qualify.py` full-lane evaluator uses the signed independent adapter when its raw archives, audit, signature, and trusted key are supplied. The adapter selects each lane from this manifest, compares exact observed case identities and counts, and checks separate gate receipts. Missing or invalid evidence cannot pass a lane. This manifest alone qualifies no lane.
