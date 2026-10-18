@@ -540,9 +540,13 @@ class RawArtifactTests(unittest.TestCase):
                 sys.executable, str(repository / "tools/qualification/qualify.py"), "record",
                 "--candidate-sha", sha, "--full-hosted-bundle", str(transport),
                 "--output", str(result)], cwd=repository, capture_output=True, text=True)
-            self.assertEqual(2, recorded.returncode)
-            self.assertIn("independently reviewed manifest", recorded.stderr)
-            self.assertFalse(result.exists())
+            self.assertEqual(1, recorded.returncode)
+            self.assertEqual("", recorded.stderr)
+            report = json.loads(result.read_text())
+            self.assertEqual(112, report["total"])
+            self.assertEqual(0, report["counts"]["PASSED"])
+            self.assertEqual({"NOT_RUN"}, {lane["status"] for lane in report["lanes"]})
+            self.assertEqual("UNPASSED", report["full_hosted_receipts"][0]["complete_suite_status"])
 
             for key, wrong in (("java_version", "17.0.1"),
                                ("gradle_version", "8.0"),

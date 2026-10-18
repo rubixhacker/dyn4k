@@ -35,7 +35,7 @@ POM_MODULE_DESCRIPTIONS = {
 APPLE_TARGETS = {"iosArm64", "iosSimulatorArm64", "iosX64", "macosArm64",
                  "tvosArm64", "tvosSimulatorArm64", "watchosArm64",
                  "watchosDeviceArm64", "watchosSimulatorArm64"}
-APPROVED_COMPLETE_SUITE_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94"
+APPROVED_COMPLETE_SUITE_SHA256 = "9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc"
 
 
 def matrix():

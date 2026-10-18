@@ -686,7 +686,7 @@ class QualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "corpus"):
             qualify.validate_complete_suite_bindings(suite, repository)
 
-    def test_complete_suite_matches_source_but_waits_for_approval(self):
+    def test_complete_suite_matches_source_and_approved_binding(self):
         repository = Path(__file__).resolve().parents[2]
         relative = "tools/qualification/full-suite-manifest.json"
         approved = repository / relative
@@ -694,11 +694,9 @@ class QualificationTests(unittest.TestCase):
             ["git", "-C", str(repository), "show",
              f"6f983ad3a36bdc549c32f5d0883b0a47b28e1963:{relative}"]))
         suite = json.loads(raw)
-        with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
-            qualify.validate_complete_suite_bindings(suite, repository)
-        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
-                               qualify.manifest_digest(suite)):
-            qualify.validate_complete_suite_bindings(suite, repository)
+        self.assertEqual("9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc",
+                         qualify.APPROVED_COMPLETE_SUITE_SHA256)
+        qualify.validate_complete_suite_bindings(suite, repository)
 
         import copy
         changes = (
@@ -731,11 +729,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual("9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc",
                          qualify.manifest_digest(suite))
         full_suite_manifest.validate_manifest(suite, repository)
-        with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
-            qualify.validate_complete_suite_bindings(suite, repository)
-        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
-                               qualify.manifest_digest(suite)):
-            qualify.validate_complete_suite_bindings(suite, repository)
+        qualify.validate_complete_suite_bindings(suite, repository)
 
         with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
                                "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"):

@@ -1,8 +1,8 @@
 # Independent gate archive verifier
 
-Run `independent_gates.py` for one exact Git commit and one approved runtime lane. It reads the reviewed 2,521-case manifest from revision `e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3`. It requires canonical JSON SHA-256 `dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94`. Its result binds the candidate, lane, hashes, archive digests, gate outcomes, and numerical policy. The earlier `7e828a` manifest and altered inventories fail before gate evaluation. The corpus has 201 source files, 2,385 original Java mappings, and 2,518 portable cases. Selection spans 21 targets, 28 target/runtime families, and 112 lanes.
+Run `independent_gates.py` for one exact Git commit and one approved runtime lane. It reads the reviewed manifest from revision `2f5eb2d40df2d8549bb45f137e9f6b2c258e6ada`. Its canonical JSON SHA-256 is `9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc`. The manifest contains 2,526 cases: 2,523 portable and three JVM-only. It retains 21 targets, 28 target/runtime families, and 112 lanes.
 
-The newly generated 2,526-case manifest has 2,523 portable cases and 202 source files. It is pending separate Sol review. The approved revision and digest above remain the gate pins; this intermediate reseal does not qualify the new manifest or any runtime lane.
+The approval covers source inventory and case selection. It does not pass a runtime lane or gate. Missing or changed source, map, pair, case, revision, or manifest bytes remain rejected.
 
 ```sh
 python3 tools/qualification/independent_gates.py \

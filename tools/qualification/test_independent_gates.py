@@ -24,10 +24,11 @@ sys.path.pop(0)
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "e35e3f1ec357b1c44b6d2b742e0d88bc2e91f767"
-MANIFEST_REV = "e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3"
-OLD_MANIFEST_REV = "44053b62f49c9f12f3be7540f93164a446bd0e61"
-MANIFEST_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94"
-OLD_MANIFEST_SHA256 = "7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095"
+MANIFEST_REV = "2f5eb2d40df2d8549bb45f137e9f6b2c258e6ada"
+MANIFEST_BLOB = "87276196a29af12296f9d14d156dbff1f9a774eb"
+OLD_MANIFEST_REV = "e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3"
+MANIFEST_SHA256 = "9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc"
+OLD_MANIFEST_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94"
 LANE = "jvm:Java:minimum:no-optimize"
 
 
@@ -39,6 +40,10 @@ class IndependentGateSeamTests(unittest.TestCase):
             cwd=ROOT))
 
     def test_approved_manifest_pin_is_reviewed_world_revision(self):
+        blob = subprocess.check_output(
+            ["git", "rev-parse", f"{MANIFEST_REV}:tools/qualification/full-suite-manifest.json"],
+            cwd=ROOT, text=True).strip()
+        self.assertEqual(MANIFEST_BLOB, blob)
         self.assertEqual(MANIFEST_REV, independent_gates.APPROVED_MANIFEST_REVISION)
         self.assertEqual(MANIFEST_SHA256, independent_gates.APPROVED_MANIFEST_SHA256)
         self.assertEqual(MANIFEST_SHA256, independent_gates.digest(self.manifest))
@@ -52,8 +57,19 @@ class IndependentGateSeamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
             current = json.loads((ROOT / "tools/qualification/full-suite-manifest.json").read_text())
-            for label, manifest in (("old", old), ("new-unapproved", current),
+            self.assertEqual(self.manifest, current)
+            five_ids = {case["id"] for case in self.manifest["cases"]} - {
+                case["id"] for case in old["cases"]}
+            self.assertEqual(5, len(five_ids))
+            missing_five = {**self.manifest, "cases": [
+                case for case in self.manifest["cases"] if case["id"] not in five_ids]}
+            extra_five = {**self.manifest, "cases": [
+                *self.manifest["cases"], *[
+                    {**self.manifest["cases"][-1], "id": f"extra-case-{index}"}
+                    for index in range(5)]]}
+            for label, manifest in (("old-2521", old),
                                     ("altered", {**self.manifest, "id": "altered"}),
+                                    ("missing-five", missing_five), ("extra-five", extra_five),
                                     ("wrong-inventory", {**self.manifest,
                                                          "cases": self.manifest["cases"][:-1]})):
                 path.write_text(json.dumps(manifest))
@@ -78,11 +94,11 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(28, len({(lane["target"], lane["runtime"])
                                   for lane in self.manifest["lanes"].values()}))
         self.assertEqual(112, len(self.manifest["lanes"]))
-        self.assertEqual(2521, len(self.manifest["cases"]))
+        self.assertEqual(2526, len(self.manifest["cases"]))
         corpus = json.loads((ROOT / "tools/qualification/full-common-corpus.json").read_text())
         self.assertEqual(2385, len(corpus["original_mappings"]))
         self.assertEqual(202, len(corpus["source_files"]))
-        self.assertEqual(2518, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
+        self.assertEqual(2523, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
         self.assertEqual(3, sum(case["scope"] == "jvm-only" for case in self.manifest["cases"]))
         historical = json.loads(subprocess.check_output(
             ["git", "show", "6c6faed0499d0ddc2fee4ae910e4f58d044130e0:tools/qualification/full-common-corpus.json"],
@@ -260,7 +276,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                                          selections, ROOT)
         self.assertEqual(112, assembled["required_lanes"])
         self.assertEqual("NOT_RUN", assembled["status"])
-        self.assertEqual(2521, assembled["selected_cases"][LANE])
+        self.assertEqual(2526, assembled["selected_cases"][LANE])
         self.assertEqual(assembled["result_sha256"], independent_gates.digest(
             {key: value for key, value in assembled.items() if key != "result_sha256"}))
         with tempfile.TemporaryDirectory() as temporary:
@@ -294,7 +310,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.manifest, candidate, selections, ROOT)
         self.assertEqual("PASSED", assembled["status"])
         self.assertEqual(112, len(assembled["qualify_adapter"]))
-        self.assertEqual(2521, len(assembled["qualify_adapter"][LANE]["case_results"]))
+        self.assertEqual(2526, len(assembled["qualify_adapter"][LANE]["case_results"]))
         self.assertEqual({"PASSED"}, {row["status"] for row in
                                         assembled["qualify_adapter"][LANE]["case_results"]})
         def incomplete(*args):
