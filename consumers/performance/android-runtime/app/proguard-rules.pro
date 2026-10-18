@@ -1,0 +1,2 @@
+-keep class performance.portable.Fixture { *; }
+-keep class performance.portable.Fixture$* { *; }

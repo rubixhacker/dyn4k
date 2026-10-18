@@ -16,7 +16,14 @@ android {
     }
     buildTypes {
         getByName("debug") { isMinifyEnabled = false }
+        getByName("release") {
+            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
+    testBuildType = providers.gradleProperty("performanceTestBuildType").getOrElse("debug")
+    lint { checkReleaseBuilds = false }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -31,7 +38,8 @@ dependencies {
 
 tasks.register("providerArtifacts") {
     doLast {
-        val artifacts = configurations.getByName("debugRuntimeClasspath")
+        val buildType = providers.gradleProperty("performanceTestBuildType").getOrElse("debug")
+        val artifacts = configurations.getByName("${buildType}RuntimeClasspath")
             .resolvedConfiguration.resolvedArtifacts
         for (artifact in artifacts) {
             val id = artifact.moduleVersion.id

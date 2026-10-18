@@ -1,3 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="dyn4k performance producer" />
+    <application android:label="dyn4k performance producer">
+        <provider android:name=".PerformanceEvidenceProvider"
+            android:authorities="io.github.rubixhacker.dyn4k.performance.evidence"
+            android:exported="true" />
+    </application>
 </manifest>

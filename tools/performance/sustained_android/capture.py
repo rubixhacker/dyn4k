@@ -19,6 +19,7 @@ ANDROID_FIXTURE = PROJECT / "app/src/main/kotlin/performance/portable/Fixture.kt
 APP_ID = "io.github.rubixhacker.dyn4k.performance"
 TEST_ID = APP_ID + ".test"
 RUNNER = APP_ID + ".PerformanceInstrumentation"
+EVIDENCE_AUTHORITY = APP_ID + ".evidence"
 VERSION = "0.1.0-alpha.1"
 STAGED = ("dyn4k-core-android", "dyn4k-android")
 JDK = Path("/tmp/dyn4k-tools/jdk21")
@@ -58,7 +59,7 @@ def require(condition, reason):
 
 
 def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
-                     steps, warmup, fixture, manifest, core, kotlin):
+                     steps, warmup, fixture, manifest, core, kotlin, build_type="debug"):
     case = select_case(json.loads(MANIFEST.read_text()), scenario)
     dynamic = case["dynamic_bodies"]
     family = case["family"]
@@ -67,9 +68,11 @@ def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
     expected_joints = (dynamic if family == "joint" else
                        (dynamic + 9) // 10 if family == "lifecycle" else 0)
     expected = {"nonce": nonce, "scenario": scenario, "source_commit": source,
+                "build_type": build_type,
                 "fixture_sha256": fixture, "manifest_sha256": manifest,
                 "core_aar_sha256": core, "kotlin_aar_sha256": kotlin,
                 "app_package": APP_ID, "test_package": TEST_ID,
+                "evidence_authority": EVIDENCE_AUTHORITY,
                 "provider_class": "org.dyn4j.world.World", "api_level": api,
                 "abi": abi, "fingerprint": fingerprint}
     require(rows and all(isinstance(row, dict) and row.get("schema") == 1 for row in rows),
@@ -176,25 +179,28 @@ def build(args):
     hashes = {name: sha(path) for name, path in staged.items()}
     env = dict(os.environ, JAVA_HOME=str(JDK), ANDROID_HOME=str(args.android_home))
     require((JDK / "bin/java").is_file() and GRADLE.is_file(), "pinned JDK or Gradle missing")
+    require(args.build_type in ("debug", "release"), "build type must be debug or release")
     java = command([str(JDK / "bin/java"), "-version"], env=env)
     require('version "21.' in java, "wrong JDK")
     gradle = command([str(GRADLE), "--version", "--offline"], env=env)
     require("Gradle 9.5" in gradle, "wrong Gradle")
-    build_log = PROJECT / "build" / "producer-build.log"
+    build_log = PROJECT / "build" / f"producer-build-{args.build_type}.log"
     build_log.parent.mkdir(parents=True, exist_ok=True)
+    variant = args.build_type.capitalize()
     log = command([str(GRADLE), "-p", str(PROJECT), ":app:providerArtifacts",
-                   ":app:assembleDebug", ":app:assembleDebugAndroidTest",
-                   "--offline", "--console=plain", f"-PstagingRepository={repository}"], build_log, env=env)
+                   f":app:assemble{variant}", f":app:assemble{variant}AndroidTest",
+                   "--offline", "--console=plain", f"-PstagingRepository={repository}",
+                   f"-PperformanceTestBuildType={args.build_type}"], build_log, env=env)
     providers = dict(match.groups() for line in log.splitlines()
                      if (match := re.fullmatch(r"DYN4K_PROVIDER ([^ ]+) (.+)", line)))
     require(set(providers) == set(STAGED) and
             all(sha(providers[name]) == hashes[name] for name in STAGED),
             "resolved provider bytes do not match staged AAR inputs")
     require({name: sha(path) for name, path in staged.items()} == hashes, "staged AAR changed during build")
-    app = PROJECT / "app/build/outputs/apk/debug/app-debug.apk"
-    test = PROJECT / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+    app = PROJECT / f"app/build/outputs/apk/{args.build_type}/app-{args.build_type}.apk"
+    test = PROJECT / f"app/build/outputs/apk/androidTest/{args.build_type}/app-{args.build_type}-androidTest.apk"
     require(app.is_file() and test.is_file(), "missing built APK pair")
-    receipt = {"schema": 1, "source_commit": args.source_commit,
+    receipt = {"schema": 1, "source_commit": args.source_commit, "build_type": args.build_type,
                "manifest_sha256": sha(MANIFEST), "fixture_sha256": sha(FIXTURE),
                "staging_repository": str(repository),
                "staged_aars": {name: {"path": str(path), "sha256": hashes[name]} for name, path in staged.items()},
@@ -223,6 +229,7 @@ def capture(args):
     require(sha(MANIFEST) == receipt["manifest_sha256"] and
             sha(FIXTURE) == receipt["fixture_sha256"] and
             sha(ANDROID_FIXTURE) == receipt["fixture_sha256"], "manifest or fixture changed")
+    require(receipt["build_type"] in ("debug", "release"), "invalid build type")
     for name, item in receipt["staged_aars"].items():
         require(name in STAGED and sha(item["path"]) == item["sha256"], "staged AAR substituted")
     require(set(receipt["staged_aars"]) == set(STAGED), "missing staged AAR")
@@ -285,6 +292,7 @@ def capture(args):
             require(installed_bytes.returncode == 0, "cannot read installed APK bytes")
             require(sha(remote) == receipt[f"{key}_apk"]["sha256"], "installed APK bytes differ")
         extras = {"scenario": args.scenario, "source_commit": receipt["source_commit"],
+                  "build_type": receipt["build_type"],
                   "manifest_sha256": receipt["manifest_sha256"],
                   "fixture_sha256": receipt["fixture_sha256"],
                   "core_aar_sha256": receipt["staged_aars"][STAGED[0]]["sha256"],
@@ -320,7 +328,8 @@ def capture(args):
                                                  "exit_code": instrument.returncode}
         report["host_monotonic"] = {"begin_ns": host_begin_ns, "end_ns": host_end_ns}
         result = stdout.decode("utf-8", "replace")
-        raw = run("records", "exec-out", "run-as", APP_ID, "cat", f"files/performance-{nonce}.jsonl", check=False)
+        raw = run("records", "exec-out", "content", "read", "--uri",
+                  f"content://{EVIDENCE_AUTHORITY}/performance-{nonce}.jsonl", check=False)
         rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
         require("FAILURES" not in result and "shortMsg=" not in result and rows,
                 "instrumentation failed or produced no records")
@@ -328,7 +337,8 @@ def capture(args):
                                api, abi, fingerprint, args.steps, args.warmup_steps,
                                receipt["fixture_sha256"], receipt["manifest_sha256"],
                                receipt["staged_aars"][STAGED[0]]["sha256"],
-                               receipt["staged_aars"][STAGED[1]]["sha256"])
+                               receipt["staged_aars"][STAGED[1]]["sha256"],
+                               receipt["build_type"])
         require(instrument.returncode == 0 and observed_pids == {pid},
                 "instrumentation process ID differs from observed guest process")
         report["pid"] = pid
@@ -349,6 +359,7 @@ def main():
     b.add_argument("--staging-repository", required=True)
     b.add_argument("--android-home", default=os.environ.get("ANDROID_HOME", "/var/home/stewart/Android/Sdk"))
     b.add_argument("--receipt", required=True)
+    b.add_argument("--build-type", choices=("debug", "release"), default="debug")
     c = sub.add_parser("capture")
     c.add_argument("--receipt", required=True)
     c.add_argument("--archive", required=True)

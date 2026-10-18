@@ -23,7 +23,9 @@ class CaptureControls(unittest.TestCase):
                     "scenario": self.scenario, "source_commit": self.source,
                     "fixture_sha256": "c" * 64, "manifest_sha256": "d" * 64,
                     "core_aar_sha256": "e" * 64, "kotlin_aar_sha256": "f" * 64,
+                    "build_type": "debug",
                     "app_package": capture.APP_ID, "test_package": capture.TEST_ID,
+                    "evidence_authority": capture.EVIDENCE_AUTHORITY,
                     "provider_class": "org.dyn4j.world.World", "pid": 123,
                     "api_level": 21, "abi": "x86_64", "fingerprint": "guest/build/1"}
         rows = [identity, {"schema": 1, "type": "construction", "phase": "warmup",
@@ -91,6 +93,14 @@ class CaptureControls(unittest.TestCase):
                 capture.validate_records(altered, self.scenario, self.source, self.nonce, 21,
                                          "x86_64", "guest/build/1", 2, 1,
                                          "c" * 64, "d" * 64, "e" * 64, "f" * 64)
+
+    def test_rejects_wrong_installed_build_configuration(self):
+        rows = self.records()
+        rows[0]["build_type"] = "release"
+        with self.assertRaisesRegex(ValueError, "identity"):
+            capture.validate_records(rows, self.scenario, self.source, self.nonce, 21,
+                                     "x86_64", "guest/build/1", 2, 1,
+                                     "c" * 64, "d" * 64, "e" * 64, "f" * 64)
 
     def test_rejects_baseline_stress_and_wrong_size(self):
         for scenario in ["separated.default.small.60hz.baseline",

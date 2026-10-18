@@ -9,8 +9,12 @@ resolved AAR bytes against the staged AAR bytes.
 python3 tools/performance/sustained_android/capture.py build \
   --source-commit "$(git rev-parse HEAD)" \
   --staging-repository "$PWD/build/staging-repository" \
+  --build-type debug \
   --receipt /tmp/dyn4k-performance-android-build.json
 ```
+
+Run `build` again with `--build-type release` and a separate receipt for the
+R8-optimized APK pair. Each capture uses the build type in its receipt.
 
 After the ART full-corpus owner releases its ADB lease, create and start an AVD
 whose name begins `dyn4k-performance-`. Use a separate ADB server port. The

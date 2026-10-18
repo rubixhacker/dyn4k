@@ -55,12 +55,14 @@ class PerformanceInstrumentation : Instrumentation() {
             val provider = org.dyn4j.world.World::class.java
             require(provider.name == "org.dyn4j.world.World")
             emit("identity", "nonce" to nonce, "scenario" to scenario,
+                 "build_type" to required("build_type"),
                  "source_commit" to required("source_commit"),
                  "manifest_sha256" to required("manifest_sha256"),
                  "fixture_sha256" to required("fixture_sha256"),
                  "core_aar_sha256" to required("core_aar_sha256"),
                  "kotlin_aar_sha256" to required("kotlin_aar_sha256"),
                  "app_package" to targetContext.packageName, "test_package" to context.packageName,
+                 "evidence_authority" to "io.github.rubixhacker.dyn4k.performance.evidence",
                  "provider_class" to provider.name, "pid" to Process.myPid(),
                  "api_level" to Build.VERSION.SDK_INT, "abi" to Build.SUPPORTED_ABIS[0],
                  "fingerprint" to Build.FINGERPRINT)
