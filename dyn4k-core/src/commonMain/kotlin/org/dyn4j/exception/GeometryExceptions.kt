@@ -48,6 +48,7 @@ open class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The in
 }
 
 internal expect fun fixedSix(value: Double): String
+internal expect fun formatInt(value: Int): String
 
 internal fun portableFixedSix(value: Double): String {
     if (value.isNaN()) return "NaN"
@@ -91,16 +92,16 @@ open class ValueOutOfRangeException : IllegalArgumentException {
         super("${fixedSix(value)} was supplied for $argumentName: $argumentName must be $boundType ${fixedSix(bound)}")
 
     constructor(argumentName: String, value: Int, boundType: String, bound: Int) :
-        super("$value was supplied for $argumentName: $argumentName must be $boundType $bound")
+        super("${formatInt(value)} was supplied for $argumentName: $argumentName must be $boundType ${formatInt(bound)}")
 
     constructor(argumentName1: String, value1: Double, boundType: String, argumentName2: String, value2: Double) :
         super("$argumentName1 must be $boundType $argumentName2: $argumentName1 was ${fixedSix(value1)} and $argumentName2 was ${fixedSix(value2)}")
 
     constructor(argumentName1: String, value1: Int, boundType: String, argumentName2: String, value2: Int) :
-        super("$argumentName1 must be $boundType $argumentName2: $argumentName1 was $value1 and $argumentName2 was $value2")
+        super("$argumentName1 must be $boundType $argumentName2: $argumentName1 was ${formatInt(value1)} and $argumentName2 was ${formatInt(value2)}")
 
     constructor(argumentName: String, value: Double) : super("$argumentName cannot be ${fixedSix(value)}")
-    constructor(argumentName: String, value: Int) : super("$argumentName cannot be $value")
+    constructor(argumentName: String, value: Int) : super("$argumentName cannot be ${formatInt(value)}")
 
     companion object {
         private const val serialVersionUID = -7115378379246433066L
