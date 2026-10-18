@@ -735,6 +735,24 @@ class PublicationAuditTests(unittest.TestCase):
                     changed = {**audit, "stage_receipt": relative}
                     with self.assertRaises(ValueError):
                         qualify.verify_audit_against_staging(changed, root)
+            for field, aliases in (
+                    ("stage_receipt", (".qualification/test/../test/receipt.json",
+                                       ".qualification//test/receipt.json")),
+                    ("stage_console", (".qualification/../.qualification/test/stage.log",
+                                       ".qualification/test//stage.log"))):
+                for relative in aliases:
+                    with self.subTest(field=field, alias=relative):
+                        self.assertEqual((staging / audit[field]).resolve(),
+                                         (staging / relative).resolve())
+                        self.assertTrue((staging / relative).is_file())
+                        changed = {**audit, field: relative}
+                        with self.assertRaisesRegex(ValueError, "canonical staging path"):
+                            qualify.verify_audit_against_staging(changed, root)
+            alias_audit = root / "alias-audit.json"
+            alias_audit.write_text(json.dumps({
+                **audit, "stage_receipt": ".qualification/test/../test/receipt.json"}))
+            with self.assertRaisesRegex(ValueError, "canonical staging path"):
+                publication.package(root, alias_audit, root / "alias-bundle")
             for relative in (r"C:\agent\dyn4k\artifact.jar",
                              r"\\server\share\artifact.jar"):
                 with self.subTest(artifact=relative):

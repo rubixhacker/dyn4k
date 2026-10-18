@@ -906,6 +906,9 @@ def verify_audit_against_staging(audit_data, repository, allow_pinned_content_co
                            repository / "LICENSE.md", *paths,
                            content_contract=audit_data.get("content_contract")
                            if allow_pinned_content_contract else None)
+    if (audit_data["stage_receipt"] != staged["stage_receipt"]
+            or audit_data["stage_console"] != staged["stage_console"]):
+        raise ValueError("staged audit task outcome differs from canonical staging path")
     observed_files = {item["path"]: item["sha256"] for item in staged["artifacts"]}
     recorded = audit_data.get("artifacts")
     if not isinstance(recorded, list) or any(not isinstance(item, dict) for item in recorded):
