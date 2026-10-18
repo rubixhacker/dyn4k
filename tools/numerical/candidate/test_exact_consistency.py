@@ -1,11 +1,13 @@
 import copy
 import gzip
 import hashlib
+import io
 import json
 import math
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +28,54 @@ HISTORICAL_CANONICAL_SHA256 = "ad492f782d450e425baf0ce5b41222577443bfa400ca59a28
 
 
 class CanonicalHistoricalSourceTest(unittest.TestCase):
+    def test_same_type_replacement_does_not_change_original_source_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            environment = dict(os.environ, GIT_AUTHOR_DATE="2020-01-01T00:00:00Z",
+                               GIT_COMMITTER_DATE="2020-01-01T00:00:00Z")
+
+            def git(*args):
+                return subprocess.run(["git", "-C", str(repository), *args],
+                                      env=environment, capture_output=True,
+                                      check=True).stdout.strip().decode()
+
+            git("init", "-q")
+            git("config", "user.name", "Numerical Test")
+            git("config", "user.email", "numerical@example.invalid")
+            source = repository / "source.txt"
+            source.write_bytes(b"original\n")
+            git("add", "source.txt")
+            git("commit", "-q", "-m", "original")
+            original = git("rev-parse", "HEAD")
+            source.write_bytes(b"replacement\n")
+            git("commit", "-q", "-am", "replacement")
+            replacement = git("rev-parse", "HEAD")
+            git("checkout", "-q", original)
+            git("replace", original, replacement)
+            self.assertEqual(git("cat-file", "-t", original), "commit")
+            raw = subprocess.run(["git", "-C", str(repository), "-c", "core.autocrlf=false",
+                                  "archive", "--format=tar", original],
+                                 env=environment, capture_output=True, check=True).stdout
+            canonical = subprocess.run(["git", "--no-replace-objects", "-C", str(repository),
+                                        "-c", "core.autocrlf=false", "archive", "--format=tar",
+                                        original], env=environment,
+                                       capture_output=True, check=True).stdout
+            with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
+                self.assertEqual(archive.extractfile("source.txt").read(), b"replacement\n")
+            with tarfile.open(fileobj=io.BytesIO(canonical)) as archive:
+                self.assertEqual(archive.extractfile("source.txt").read(), b"original\n")
+            self.assertNotEqual(hashlib.sha256(raw).digest(), hashlib.sha256(canonical).digest())
+            with patch.object(receipt, "ROOT", repository):
+                self.assertEqual(receipt.clean_commit(), original)
+                self.assertEqual(receipt.source_hash(), hashlib.sha256(canonical).hexdigest())
+                self.assertEqual(receipt.source_hash(original), hashlib.sha256(canonical).hexdigest())
+                self.assertEqual(exact.source_archive(original), hashlib.sha256(canonical).hexdigest())
+                tree = git("rev-parse", f"{original}^{{tree}}")
+                git("update-ref", "refs/replace/" + tree, replacement)
+                self.assertEqual(git("cat-file", "-t", tree), "commit")
+                with self.assertRaisesRegex(compare.Rejected, "not a commit"):
+                    exact.source_archive(tree)
+
     def test_historical_source_archive_is_canonical_across_git_configs(self):
         raw = {}
         for autocrlf in ("false", "true"):

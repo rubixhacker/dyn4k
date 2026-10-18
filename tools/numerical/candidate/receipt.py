@@ -35,7 +35,7 @@ def validate_source_commit(commit):
     if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise compare.Rejected("source revision")
     try:
-        kind = run("git", "cat-file", "-t", commit).strip()
+        kind = run("git", "--no-replace-objects", "cat-file", "-t", commit).strip()
     except (OSError, subprocess.CalledProcessError) as error:
         raise compare.Rejected("source revision unavailable") from error
     if kind != b"commit":
@@ -45,7 +45,8 @@ def validate_source_commit(commit):
 
 def source_hash(commit=CURRENT_SOURCE):
     try:
-        head = run("git", "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+        head = run("git", "--no-replace-objects", "rev-parse", "--verify",
+                   "HEAD^{commit}").decode().strip()
     except (OSError, subprocess.CalledProcessError) as error:
         raise compare.Rejected("source revision unavailable") from error
     validate_source_commit(head)
@@ -56,7 +57,8 @@ def source_hash(commit=CURRENT_SOURCE):
         if commit != head:
             raise compare.Rejected("source revision is not HEAD")
     try:
-        archive = run("git", "-c", "core.autocrlf=false", "archive", "--format=tar", commit)
+        archive = run("git", "--no-replace-objects", "-c", "core.autocrlf=false",
+                      "archive", "--format=tar", commit)
     except (OSError, subprocess.CalledProcessError) as error:
         raise compare.Rejected("source archive unavailable") from error
     return sha256(archive)
@@ -87,10 +89,11 @@ def inspect(trace, fixture):
 
 
 def clean_commit():
-    commit = run("git", "rev-parse", "HEAD").decode().strip()
+    commit = run("git", "--no-replace-objects", "rev-parse", "HEAD").decode().strip()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise compare.Rejected("candidate commit is not a full Git SHA")
-    status = run("git", "status", "--porcelain", "--untracked-files=all").decode()
+    status = run("git", "--no-replace-objects", "status", "--porcelain",
+                 "--untracked-files=all").decode()
     generated = ("/build/", "/.gradle/", "/__pycache__/", "/.kotlin/")
     dirty = [line for line in status.splitlines() if not any(part in line for part in generated)]
     if dirty:

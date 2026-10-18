@@ -375,7 +375,7 @@ def source_archive(commit):
     receipt.validate_source_commit(commit)
     digest = hashlib.sha256()
     try:
-        with subprocess.Popen(["git", "-c", "core.autocrlf=false", "archive",
+        with subprocess.Popen(["git", "--no-replace-objects", "-c", "core.autocrlf=false", "archive",
                                "--format=tar", commit], cwd=receipt.ROOT,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
             for block in iter(lambda: process.stdout.read(1024 * 1024), b""):
