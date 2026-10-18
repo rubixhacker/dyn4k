@@ -594,6 +594,37 @@ def verify_staging(output, receipt):
         raise ValueError("staged artifact archive inventory differs")
 
 
+def capture_dokka_output(repository, output, receipt):
+    modules = {}
+    for module in qualify.MODULES:
+        generated = repository / module / "build/dokka/html"
+        if not generated.is_dir() or generated.is_symlink():
+            raise ValueError(f"{module}: generated Dokka output is missing or unsafe")
+        entries = {}
+        for source in sorted(generated.rglob("*")):
+            if source.is_symlink():
+                raise ValueError(f"{module}: generated Dokka output has a symbolic link")
+            if source.is_file():
+                relative = source.relative_to(generated).as_posix()
+                relative_path(relative)
+                copied = archive_copy(source, output, f"dokka/{module}/{relative}")
+                entries[relative] = copied["sha256"]
+        if not entries:
+            raise ValueError(f"{module}: generated Dokka output is empty")
+        jar = archived_file(output, (Path("staged") / qualify.GROUP.replace(".", "/") /
+                                     module / qualify.VERSION /
+                                     f"{module}-{qualify.VERSION}-javadoc.jar").as_posix())
+        qualify.validate_generated_docs(jar, output / "dokka" / module,
+                                        committed_input(repository, receipt["candidate_sha"], "LICENSE.md"))
+        modules[module] = entries
+    receipt["dokka_provenance"] = {
+        "schema": 1, "candidate_sha": receipt["candidate_sha"],
+        "source_tree_sha256": receipt["source_tree_sha256"],
+        "stage_stdout_sha256": receipt["stage"]["stdout_sha256"],
+        "modules": modules,
+    }
+
+
 def verify_staged_content(output, receipt, repository):
     contract = receipt.get("staged_content_contract")
     if not isinstance(contract, dict):
@@ -614,14 +645,45 @@ def verify_staged_content(output, receipt, repository):
     docs = contract.get("api_docs_sha256")
     if not isinstance(docs, dict) or set(docs) != set(qualify.MODULES):
         raise ValueError("staged API documentation contract is invalid")
+    provenance = receipt.get("dokka_provenance")
+    stage = receipt.get("stage")
+    if (not isinstance(provenance, dict)
+            or set(provenance) != {"schema", "candidate_sha", "source_tree_sha256",
+                                   "stage_stdout_sha256", "modules"}
+            or provenance["schema"] != 1 or provenance["candidate_sha"] != candidate_sha
+            or provenance["source_tree_sha256"] != receipt.get("source_tree_sha256")
+            or not isinstance(stage, dict)
+            or provenance["stage_stdout_sha256"] != stage.get("stdout_sha256")
+            or not isinstance(provenance["modules"], dict)
+            or set(provenance["modules"]) != set(qualify.MODULES)):
+        raise ValueError("archived Dokka provenance differs from candidate or staging process")
+    expected_dokka = set()
     for module in qualify.MODULES:
         name = f"{module}-{qualify.VERSION}-javadoc.jar"
         relative = Path("staged") / qualify.GROUP.replace(".", "/") / module / qualify.VERSION / name
         jar = archived_file(output, relative.as_posix())
-        qualify.validate_generated_docs(jar, repository / module / "build/dokka/html",
-                                        license_bytes)
+        entries = provenance["modules"][module]
+        if not isinstance(entries, dict) or not entries:
+            raise ValueError("archived Dokka file inventory is absent")
+        for name, digest in entries.items():
+            path = relative_path(name)
+            if (path.as_posix() != name or not qualify.SHA64.fullmatch(str(digest))):
+                raise ValueError("archived Dokka file identity is invalid")
+            archive_name = f"dokka/{module}/{name}"
+            expected_dokka.add(archive_name)
+            archived = archived_file(output, archive_name)
+            if sha256(archived) != digest:
+                raise ValueError("archived Dokka file differs from provenance")
+            modified = archived.stat().st_mtime_ns
+            if not stage["started_ns"] <= modified <= stage["finished_ns"]:
+                raise ValueError("archived Dokka file predates staging invocation")
+        qualify.validate_generated_docs(jar, output / "dokka" / module, license_bytes)
         if sha256(jar) != docs[module]:
             raise ValueError("staged API documentation differs from audited checkout")
+    actual_dokka = {item["path"] for item in receipt["files"]
+                    if item["path"].startswith("dokka/")}
+    if actual_dokka != expected_dokka:
+        raise ValueError("archived Dokka file inventory differs")
     target = "js" if receipt["target"] == "jsSafari" else receipt["target"]
     audit = qualify.audit_staging(output / "staged", candidate_sha, [target], license_path,
                                   content_contract=contract)
@@ -951,6 +1013,7 @@ def run(target, candidate_sha, output):
              repository, output, [artifact_target], candidate_sha)
         if staged_hashes[artifact_target] != receipt["artifact_hashes"]:
             raise ValueError("staged artifact capture differs from target hashes")
+        capture_dokka_output(repository, output, receipt)
         for config in CONFIGS[target]:
             folder = output / config
             folder.mkdir()

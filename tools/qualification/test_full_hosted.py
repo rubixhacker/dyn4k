@@ -228,7 +228,9 @@ class FullHostedTests(unittest.TestCase):
         def stop_after_staging(*_args, **_kwargs):
             calls.append(1)
             if len(calls) == 1:
-                return {"exit_code": 0}
+                return {"exit_code": 0, "started_ns": 1,
+                        "finished_ns": time.time_ns() + 10**12,
+                        "stdout_sha256": "0" * 64}
             raise ValueError("fixture stops after staging capture")
 
         captured = []
@@ -265,6 +267,7 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.verify_staging(self.root / "captured", {
                 "target": target, "staged_gav": receipt["staged_gav"],
                 "artifact_hashes": receipt["artifact_hashes"], "files": staged})
+            receipt["files"] = full_hosted.archive_inventory(self.root / "captured")
             full_hosted.verify_staged_content(self.root / "captured", receipt, repository)
             name = qualify.target_publication_name("dyn4k-core", target)
             metadata = (self.root / "captured/staged" / qualify.GROUP.replace(".", "/") /
@@ -312,6 +315,8 @@ class FullHostedTests(unittest.TestCase):
             destination = repository / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(actual_repository / relative, destination)
+        shutil.copy2(actual_repository / "tools/qualification/stage.py",
+                     repository / "tools/qualification/stage.py")
         shutil.copy2(actual_repository / "gradlew", repository / "gradlew")
         (repository / ".gitattributes").write_bytes(b"*.kt -text\n*.java -text\n")
         subprocess.run(["git", "init", "-q", str(repository)], check=True)
@@ -344,7 +349,7 @@ class FullHostedTests(unittest.TestCase):
             return ET.tostring(root)
 
         def synthetic_command(command, _cwd, destination, invocation_id=None):
-            started = time.time_ns()
+            started = time.time_ns() - 10**9
             kind = destination.name
             configuration = destination.parent.name
             if kind == "stage":
@@ -389,15 +394,16 @@ class FullHostedTests(unittest.TestCase):
                 stdout = "DYN4K_RESOLVED_GRAPH=" + json.dumps(graph) + "\n"
             write(destination / "stdout.txt", stdout + "BUILD SUCCESSFUL\n")
             write(destination / "stderr.txt", "")
-            finished = time.time_ns()
+            finished = time.time_ns() + 10**9
             return {"command": command, "pid": 42, "exit_code": 0,
                     "invocation_id": invocation_id, "started_ns": started,
                     "finished_ns": finished,
                     "stdout_sha256": full_hosted.sha256(destination / "stdout.txt"),
                     "stderr_sha256": full_hosted.sha256(destination / "stderr.txt")}
 
-        runtime = {"system": "macOS", "machine": "arm64", "os_version": "15.0",
-                   "java_version": "21.0.12", "simulators": {"tvOS": [{"udid": simulator}]}}
+        runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.0",
+                   "xcode_version": "26.4.1", "java_version": "21.0.12",
+                   "simulators": {"tvOS": [{"udid": simulator}]}}
         runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
                   "RUNNER_NAME": "synthetic-runner", "RUNNER_OS": "macOS",
                   "RUNNER_ARCH": "ARM64"}
@@ -427,6 +433,66 @@ class FullHostedTests(unittest.TestCase):
             full_hosted.package_archive(output, archive)
             transported = full_hosted.verify_transport_archive(archive, candidate, target)
             self.assertEqual(receipt, transported)
+
+            clean = evidence / "clean-checkout"
+            subprocess.run(["git", "clone", "-q", "--no-local", str(repository), str(clean)],
+                           check=True)
+            subprocess.run(["git", "-C", str(clean), "checkout", "-q", "--detach", candidate],
+                           check=True)
+            for module in qualify.MODULES:
+                self.assertFalse((clean / module / "build/dokka/html").exists())
+            command = [sys.executable, str(clean / "tools/qualification/full_hosted.py"),
+                       "--verify-tar", "--candidate-sha", candidate, "--target", target,
+                       "--archive", str(archive)]
+            replay = subprocess.run(command, cwd=clean, capture_output=True, text=True)
+            self.assertEqual(0, replay.returncode, replay.stderr)
+            self.assertIn('"verified": true', replay.stdout)
+            directory_command = [sys.executable,
+                                 str(clean / "tools/qualification/full_hosted.py"),
+                                 "--verify", "--candidate-sha", candidate,
+                                 "--target", target, "--output", str(output)]
+            directory_replay = subprocess.run(directory_command, cwd=clean,
+                                              capture_output=True, text=True)
+            self.assertEqual(0, directory_replay.returncode, directory_replay.stderr)
+            rogue = clean / "dyn4k-core/build/dokka/html/index.html"
+            rogue.parent.mkdir(parents=True)
+            rogue.write_text("<html>untracked local replacement</html>")
+            replay_with_rogue = subprocess.run(command, cwd=clean, capture_output=True,
+                                               text=True)
+            self.assertEqual(0, replay_with_rogue.returncode, replay_with_rogue.stderr)
+
+            adverse_dokka = evidence / "adverse-dokka-page"
+            shutil.copytree(output, adverse_dokka)
+            page = adverse_dokka / "dokka/dyn4k-core/index.html"
+            page_mtime = page.stat().st_mtime_ns
+            page.write_text("<html>forged archived page</html>")
+            os.utime(page, ns=(page_mtime, page_mtime))
+            changed_dokka = qualify.load_json_strict(adverse_dokka / "receipt.json")
+            changed_dokka["dokka_provenance"]["modules"]["dyn4k-core"]["index.html"] = (
+                full_hosted.sha256(page))
+            changed_dokka["files"] = full_hosted.archive_inventory(adverse_dokka)
+            (adverse_dokka / "receipt.json").write_text(json.dumps(changed_dokka, sort_keys=True))
+            with self.assertRaisesRegex(ValueError, "documentation bytes differ"):
+                full_hosted.verify_raw_files(adverse_dokka, changed_dokka)
+            adverse_dokka_archive = evidence / "adverse-dokka-page.tar"
+            full_hosted.package_archive(adverse_dokka, adverse_dokka_archive)
+            adverse_replay = subprocess.run([*command[:-1], str(adverse_dokka_archive)],
+                                            cwd=clean, capture_output=True, text=True)
+            self.assertNotEqual(0, adverse_replay.returncode)
+            self.assertIn("documentation bytes differ", adverse_replay.stderr)
+
+            unlisted_dokka = evidence / "adverse-unlisted-dokka"
+            shutil.copytree(output, unlisted_dokka)
+            (unlisted_dokka / "dokka/dyn4k-core/unlisted.html").write_text("<html>extra</html>")
+            unlisted_receipt = qualify.load_json_strict(unlisted_dokka / "receipt.json")
+            with self.assertRaisesRegex(ValueError, "unlisted or missing archive member"):
+                full_hosted.verify_raw_files(unlisted_dokka, unlisted_receipt)
+            unlisted_archive = evidence / "adverse-unlisted-dokka.tar"
+            full_hosted.package_archive(unlisted_dokka, unlisted_archive)
+            unlisted_replay = subprocess.run([*command[:-1], str(unlisted_archive)],
+                                             cwd=clean, capture_output=True, text=True)
+            self.assertNotEqual(0, unlisted_replay.returncode)
+            self.assertIn("unlisted or missing archive member", unlisted_replay.stderr)
 
             adverse = evidence / "adverse-source"
             shutil.copytree(output, adverse)
@@ -486,6 +552,13 @@ class FullHostedTests(unittest.TestCase):
                 "capability_archive_sha256": full_hosted.sha256(capability_archive),
                 "capability_directory_rejection": str(capability_directory_error.exception),
                 "capability_tar_rejection": str(capability_tar_error.exception),
+                "clean_checkout_cli": replay.stdout.strip(),
+                "clean_checkout_directory_cli": directory_replay.stdout.strip(),
+                "rogue_local_dokka_cli": replay_with_rogue.stdout.strip(),
+                "dokka_page_archive_sha256": full_hosted.sha256(adverse_dokka_archive),
+                "dokka_page_rejection": adverse_replay.stderr.strip().splitlines()[-1],
+                "unlisted_dokka_archive_sha256": full_hosted.sha256(unlisted_archive),
+                "unlisted_dokka_rejection": unlisted_replay.stderr.strip().splitlines()[-1],
             }, indent=2, sort_keys=True) + "\n")
 
     def full_archive(self):
@@ -574,6 +647,7 @@ class FullHostedTests(unittest.TestCase):
         receipt["stage"] = process(self.root / "stage", None,
                                    ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                                    "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository")
+        full_hosted.capture_dokka_output(self.candidate_repository, self.root, receipt)
         group = next(group for group in consumer_manifest["groups"] if group["id"] == "consumer-mingwX64")
         consumer_cases = qualify.expected_probe_cases(consumer_manifest, group)
         for index, config in enumerate(full_hosted.CONFIGS[target]):
