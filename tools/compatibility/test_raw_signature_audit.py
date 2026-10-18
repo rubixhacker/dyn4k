@@ -45,6 +45,21 @@ class RawSignatureAuditTests(unittest.TestCase):
         })
         self.assertEqual(result["candidate_revision"], "0681a8cd2e3f12327296a58da68bc8338224ea73")
 
+    def test_unequal_raw_rows_have_separate_governing_acceptance(self):
+        result = raw_signature_audit.classify(self.ledger, self.signature, self.strict,
+                                              ROOT, UPSTREAM)
+        self.assertEqual(Counter(row["acceptance_disposition"] for row in result["rows"]), {
+            "source-compatible": 111,
+            "internal-behavior-equivalent": 29,
+            "documentation-only": 16,
+        })
+        self.assertTrue(all(row["raw_obligation_status"] == "unpassed"
+                            for row in result["rows"]))
+        self.assertTrue(all(row["acceptance_evidence"] for row in result["rows"]
+                            if row["acceptance_disposition"] != "unresolved"))
+        self.assertTrue(all(row["behavior_case"] for row in result["rows"]
+                            if row["category"] == "anonymous-behavior"))
+
     def test_deleting_or_swapping_a_raw_row_is_rejected(self):
         result = raw_signature_audit.classify(self.ledger, self.signature, self.strict,
                                               ROOT, UPSTREAM)

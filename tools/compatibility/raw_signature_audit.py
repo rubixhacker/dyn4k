@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "baseline"))
 import verify as oracle
 import candidate_coverage
+import common_corpus_receipt
 import signature_index
 
 
@@ -112,6 +113,10 @@ def classify(ledger: dict, signature: dict, strict: dict, root: Path,
     visible = set(strict["compared_api_types"])
     compatible = strict["compatible_differences"]
     audited = []
+    gate = json.loads((root / "tools/compatibility/receipts/full-common-0681a8cd.json").read_text())
+    gate_error = common_corpus_receipt.verify(gate, ledger, root)
+    if gate_error:
+        raise ValueError(f"common behavior gate differs: {gate_error}")
     for identity in sorted(by_id):
         if outcomes[identity]["passed"]:
             continue
@@ -193,6 +198,48 @@ def classify(ledger: dict, signature: dict, strict: dict, root: Path,
                 raise ValueError(f"unreviewed internal type header: {identity}")
         else:
             raise ValueError(f"unclassified raw signature difference: {identity}")
+        members = {key: value for key, value in outcomes.items()
+                   if key.startswith(name + "|") and key != identity}
+        if category == "strict-source-visible":
+            acceptance = "source-compatible"
+            acceptance_evidence = {
+                "kind": "strict-source-visible-comparison",
+                "strict_difference": differences[0],
+                "strict_comparison_sha256": canonical(strict),
+            }
+        elif category == "internal-type-header":
+            if not all(value["passed"] for value in members.values()):
+                raise ValueError(f"internal type has a differing member: {identity}")
+            acceptance = ("source-compatible" if rule == "visibility-widened"
+                          else "internal-behavior-equivalent")
+            acceptance_evidence = {
+                "kind": "classfile-header-and-member-inventory",
+                "passed_member_ids": sorted(members),
+                "candidate_header": candidate_header,
+                "source_sha256": [entry["sha256"] for entry in candidate["sources"]],
+            }
+        elif category == "package-documentation":
+            package_line = "package " + name.removesuffix(".package-info")
+            if not any(package_line in (root / entry["path"]).read_text()
+                       and "Copyright" in (root / entry["path"]).read_text()
+                       and "Redistribution and use" in (root / entry["path"]).read_text()
+                       for entry in candidate["sources"]):
+                raise ValueError(f"candidate package or legal notice is missing: {identity}")
+            acceptance = "documentation-only"
+            acceptance_evidence = {
+                "kind": "pinned-package-and-legal-source",
+                "baseline_source_sha256": next(item["sha256"] for item in ledger["production"]
+                                                       if item["id"] == row["source_file"]),
+                "candidate_sources": candidate["sources"],
+            }
+        else:
+            acceptance = "internal-behavior-equivalent"
+            acceptance_evidence = {
+                "kind": "executed-original-common-case",
+                "behavior_case": behavior,
+                "common_gate_result_sha256": gate["result_sha256"],
+                "common_gate_binding_sha256": gate["binding_sha256"],
+            }
         audited.append({"id": identity, "category": category, "baseline_source": row["source_file"],
                         "baseline_source_sha256": next(item["sha256"] for item in ledger["production"]
                                                        if item["id"] == row["source_file"]),
@@ -203,7 +250,9 @@ def classify(ledger: dict, signature: dict, strict: dict, root: Path,
                         "javap_stdout_sha256": [digest(value.encode()) for value in class_record["raw_stdout"]],
                         "strict_difference": differences[0] if differences else None,
                         "behavior_case": behavior, "interpretation": interpretation,
-                        "raw_obligation_status": "unpassed"})
+                        "raw_obligation_status": "unpassed",
+                        "acceptance_disposition": acceptance,
+                        "acceptance_evidence": acceptance_evidence})
     counts = Counter(row["category"] for row in audited)
     if len(audited) != 156 or dict(counts) != CATEGORIES:
         raise ValueError(f"raw difference category totals differ: {dict(counts)}")

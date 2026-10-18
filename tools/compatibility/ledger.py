@@ -21,6 +21,9 @@ import common_corpus_receipt
 import raw_signature_audit
 import portable_links
 import android_java_corpus
+import method_coverage
+import governing_disposition
+import governing_seams
 
 
 MODULE_SOURCE = "src/main/java/module-info.java"
@@ -395,6 +398,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
     verified = {}
     source_revision = candidate_revision
     projection = None
+    governing_summary = None
     source = ledger.get("candidate_source")
     if source is not None:
         if not isinstance(source, dict):
@@ -421,7 +425,9 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
             or ledger.get("baseline_test_counts") != expected.get("baseline_test_counts")):
         invalid.append("schema or pinned source/JAR identity differs")
     review_receipts = ledger.get("review_receipts", {})
-    if not isinstance(review_receipts, dict) or set(review_receipts) - {"common_corpus", "raw_signature", "portable_links", "android_host"}:
+    if not isinstance(review_receipts, dict) or set(review_receipts) - {
+            "common_corpus", "raw_signature", "portable_links", "android_host",
+            "method_coverage", "governing_seams", "governing_disposition"}:
         invalid.append("review_receipts: unknown or invalid receipt kind")
     else:
         def reviewed_file(record: dict, path_key: str, sha_key: str) -> Path:
@@ -488,6 +494,32 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
                         if oracle.compare_jars(baseline_jar, android_jar,
                                                dependencies=dependencies) != strict:
                             error = "strict Android source-visible comparison differs from replay"
+                elif kind == "method_coverage":
+                    corpus_path = reviewed_file(record, "corpus", "corpus_sha256")
+                    pinned_source = baseline_source or Path(record.get("baseline_source", ""))
+                    if not pinned_source.is_dir():
+                        raise ValueError("baseline_source is missing")
+                    error = method_coverage.check(json.loads(path.read_text()), ledger,
+                                                  json.loads(corpus_path.read_text()),
+                                                  root, pinned_source, replay=True)
+                elif kind == "governing_seams":
+                    error = governing_seams.check(json.loads(path.read_text()), ledger,
+                                                  root, replay=True)
+                elif kind == "governing_disposition":
+                    pinned_source = baseline_source or Path(record.get("baseline_source", ""))
+                    if not pinned_source.is_dir():
+                        raise ValueError("baseline_source is missing")
+                    raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+                    governing = json.loads(raw)
+                    error = governing_disposition.check(governing, ledger, root, pinned_source)
+                    if not error:
+                        governing_summary = {
+                            "source_implementation": governing["source_implementation"],
+                            "source_compatibility": governing["source_compatibility"],
+                            "behavior_coverage": governing["behavior_coverage"],
+                            "raw_diagnostics": governing["raw_diagnostics"],
+                            "target_qualification": governing["target_qualification"],
+                        }
                 else:
                     continue
                 if error:
@@ -675,6 +707,7 @@ def validate(ledger: dict, expected: dict, root: Path, candidate_revision: str |
     obligation_counts["by_kind"] = by_kind
     return {"passed": not invalid and not gaps, "invalid": invalid, "gaps": gaps,
             "candidate_source_revision": source_revision,
+            "governing_summary": governing_summary,
             "obligation_counts": obligation_counts,
             "unpassed_obligations": [item for item in obligation_details if item["status"] != "passed"],
             "missing_counterparts": sum("missing counterpart" in gap for gap in gaps),

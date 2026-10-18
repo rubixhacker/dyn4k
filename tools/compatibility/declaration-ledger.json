@@ -119834,6 +119834,22 @@
       "path": "tools/compatibility/receipts/full-common-0681a8cd.json",
       "sha256": "c9a48fb57fd12b4b946414564180be5f5b660eb8c270fc47f7dfad56212a4c80"
     },
+    "method_coverage": {
+      "baseline_source": "/tmp/dyn4k-baseline-cache/dyn4j-source",
+      "corpus": "tools/compatibility/receipts/java-corpus-0681a8cd/report.json",
+      "corpus_sha256": "e8ac74409a146f1be37b22940faba68eb0f6e66b9c8b192d25be7161c66afc84",
+      "path": "tools/compatibility/receipts/java-method-coverage-0681a8cd.json",
+      "sha256": "2ffae1b1e2901ef18acfe9935fd2d34bfa6b648b85a4135dd82e75bfffe04cff"
+    },
+    "governing_seams": {
+      "path": "tools/compatibility/receipts/governing-seams-0681a8cd.json",
+      "sha256": "98f6993a32efe9c7e6a8efc46443ee242caae77ac591410454d28501d140447b"
+    },
+    "governing_disposition": {
+      "baseline_source": "/tmp/dyn4k-baseline-cache/dyn4j-source",
+      "path": "tools/compatibility/receipts/governing-disposition-final-0681a8cd.json.gz",
+      "sha256": "2faa5dcea7e0dbe522c8c1159585e2b2789168408f208d6e65e355bf75fb9270"
+    },
     "portable_links": {
       "baseline_source": "/tmp/dyn4k-baseline-cache/dyn4j-source",
       "gate": "tools/compatibility/receipts/full-common-0681a8cd.json",
@@ -119843,8 +119859,8 @@
     },
     "raw_signature": {
       "baseline_source": "/tmp/dyn4k-baseline-cache/dyn4j-source",
-      "path": "tools/compatibility/receipts/raw-signature-audit-0681a8cd.json",
-      "sha256": "54455f128059ed845c80913b45e8895431638160e9a2cb93ef1595491c39332a",
+      "path": "tools/compatibility/receipts/raw-signature-governing-0681a8cd.json",
+      "sha256": "39d80bd5bdddfc6a3013e72bfefd3af37c8188069bcb5aa6373a4245784e05d4",
       "signature": "tools/compatibility/receipts/jvm-signatures-0681a8cd.json.gz",
       "signature_sha256": "22cef9e2bdadc7142c5871fbd2ab0d614a0f3673622a6630e091a940374623bc",
       "strict": "tools/compatibility/receipts/strict-jvm-0681a8cd.json",
