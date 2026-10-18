@@ -332,21 +332,41 @@ class PortableCaptureTest(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable_or_partial")
         self.assertEqual(result["samples"], [])
         self.assertGreaterEqual(len(result["errors"]), 1)
+        self.assertIn("denied", result["errors"][0]["error"])
 
     def test_macos_resident_probe_uses_task_info_bytes(self):
+        requested_sizes = []
+
         def pidinfo(pid, flavor, argument, pointer, size):
             self.assertEqual((pid, flavor, argument), (17, 4, 0))
+            requested_sizes.append(size)
+            if size != 96:
+                return 0
             info = ctypes.cast(pointer, ctypes.POINTER(native_memory._MacTaskInfo)).contents
             info.resident_size = 123456
-            return size
+            return 96
         library = SimpleNamespace(proc_pidinfo=mock.Mock(side_effect=pidinfo))
         with mock.patch.object(native_memory.sys, "platform", "darwin"), \
                 mock.patch.object(native_memory.ctypes, "CDLL", return_value=library):
             self.assertEqual(native_memory.read_rss_bytes(17), 123456)
+            self.assertEqual(requested_sizes, [96])
+            self.assertEqual(ctypes.sizeof(native_memory._MacTaskInfo), 96)
             library.proc_pidinfo.return_value = 0
             library.proc_pidinfo.side_effect = None
             with self.assertRaisesRegex(OSError, "resident bytes unavailable"):
                 native_memory.read_rss_bytes(17)
+
+    def test_macos_resident_probe_rejects_wrong_abi_size(self):
+        class ShortTaskInfo(ctypes.Structure):
+            _fields_ = [("values", ctypes.c_uint64 * 6),
+                        ("counts", ctypes.c_int32 * 10)]
+
+        with mock.patch.object(native_memory.sys, "platform", "darwin"), \
+                mock.patch.object(native_memory, "_MacTaskInfo", ShortTaskInfo), \
+                mock.patch.object(native_memory.ctypes, "CDLL") as load_library:
+            with self.assertRaisesRegex(ValueError, "ABI size is 88, expected 96"):
+                native_memory.read_rss_bytes(17)
+            load_library.assert_not_called()
 
     def test_windows_resident_probe_uses_working_set_bytes(self):
         def memory_info(handle, pointer, size):

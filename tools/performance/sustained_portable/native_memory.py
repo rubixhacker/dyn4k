@@ -10,7 +10,7 @@ class _MacTaskInfo(ctypes.Structure):
     _fields_ = [("virtual_size", ctypes.c_uint64),
                 ("resident_size", ctypes.c_uint64),
                 ("other", ctypes.c_uint64 * 4),
-                ("counts", ctypes.c_int32 * 10)]
+                ("counts", ctypes.c_int32 * 12)]
 
 
 class _WindowsMemoryCounters(ctypes.Structure):
@@ -27,13 +27,15 @@ def read_rss_bytes(pid):
             raise ValueError("Linux process resident pages are unavailable")
         resident = int(fields[1]) * os.sysconf("SC_PAGE_SIZE")
     elif sys.platform == "darwin":
+        info = _MacTaskInfo()
+        info_size = ctypes.sizeof(info)
+        if info_size != 96:
+            raise ValueError(f"macOS PROC_PIDTASKINFO ABI size is {info_size}, expected 96")
         library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
         library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
                                          ctypes.c_void_p, ctypes.c_int]
         library.proc_pidinfo.restype = ctypes.c_int
-        info = _MacTaskInfo()
-        if library.proc_pidinfo(pid, 4, 0, ctypes.byref(info), ctypes.sizeof(info)) != \
-                ctypes.sizeof(info):
+        if library.proc_pidinfo(pid, 4, 0, ctypes.byref(info), info_size) != info_size:
             raise OSError(ctypes.get_errno(), "macOS process resident bytes unavailable")
         resident = info.resident_size
     elif sys.platform == "win32":
