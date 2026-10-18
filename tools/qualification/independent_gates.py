@@ -19,8 +19,8 @@ import qualify
 import artifact
 
 
-APPROVED_MANIFEST_SHA256 = "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"
-APPROVED_MANIFEST_REVISION = "6f983ad3a36bdc549c32f5d0883b0a47b28e1963"
+APPROVED_MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
+APPROVED_MANIFEST_REVISION = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
 MANIFEST_PATH = "tools/qualification/full-suite-manifest.json"
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")

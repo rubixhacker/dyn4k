@@ -1,6 +1,8 @@
 import json
 import hashlib
 import gzip
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -22,7 +24,10 @@ sys.path.pop(0)
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "e35e3f1ec357b1c44b6d2b742e0d88bc2e91f767"
-MANIFEST_REV = "6f983ad3a36bdc549c32f5d0883b0a47b28e1963"
+MANIFEST_REV = "fa5a5d98fc5f85e27f1e30d2b0565caec9f8b3b9"
+OLD_MANIFEST_REV = "6f983ad3a36bdc549c32f5d0883b0a47b28e1963"
+MANIFEST_SHA256 = "bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240"
+OLD_MANIFEST_SHA256 = "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"
 LANE = "jvm:Java:minimum:no-optimize"
 
 
@@ -32,6 +37,50 @@ class IndependentGateSeamTests(unittest.TestCase):
         cls.manifest = json.loads(subprocess.check_output(
             ["git", "show", f"{MANIFEST_REV}:tools/qualification/full-suite-manifest.json"],
             cwd=ROOT))
+
+    def test_approved_manifest_pin_is_reviewed_world_revision(self):
+        self.assertEqual(MANIFEST_REV, independent_gates.APPROVED_MANIFEST_REVISION)
+        self.assertEqual(MANIFEST_SHA256, independent_gates.APPROVED_MANIFEST_SHA256)
+        self.assertEqual(MANIFEST_SHA256, independent_gates.digest(self.manifest))
+        self.assertEqual(self.manifest, independent_gates.load_approved_manifest(ROOT))
+
+    def test_public_cli_rejects_old_altered_and_wrong_revision_manifests(self):
+        old = json.loads(subprocess.check_output(
+            ["git", "show", f"{OLD_MANIFEST_REV}:tools/qualification/full-suite-manifest.json"],
+            cwd=ROOT))
+        self.assertEqual(OLD_MANIFEST_SHA256, independent_gates.digest(old))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "manifest.json"
+            for label, manifest in (("old", old),
+                                    ("altered", {**self.manifest, "id": "altered"})):
+                path.write_text(json.dumps(manifest))
+                with self.subTest(manifest=label), self.assertRaisesRegex(
+                        ValueError, "manifest differs from independently approved complete suite"):
+                    independent_gates.main(["--candidate-sha", BASE, "--lane", LANE,
+                                            "--manifest", str(path)])
+        with mock.patch.object(independent_gates, "APPROVED_MANIFEST_REVISION",
+                               OLD_MANIFEST_REV):
+            with self.assertRaisesRegex(ValueError, "approved complete-suite manifest changed"):
+                independent_gates.main(["--candidate-sha", BASE, "--lane", LANE])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(1, independent_gates.main(
+                ["--candidate-sha", BASE, "--lane", LANE]))
+        result = json.loads(output.getvalue())
+        self.assertEqual(MANIFEST_SHA256, result["manifest_sha256"])
+        self.assertEqual("NOT_RUN", result["status"])
+
+    def test_reviewed_manifest_selection_and_source_bindings(self):
+        self.assertEqual(21, len(self.manifest["targets"]))
+        self.assertEqual(28, len({(lane["target"], lane["runtime"])
+                                  for lane in self.manifest["lanes"].values()}))
+        self.assertEqual(112, len(self.manifest["lanes"]))
+        self.assertEqual(2515, len(self.manifest["cases"]))
+        corpus = json.loads((ROOT / "tools/qualification/full-common-corpus.json").read_text())
+        self.assertEqual(2385, len(corpus["original_mappings"]))
+        self.assertEqual(199, len(corpus["source_files"]))
+        self.assertEqual(2512, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
+        self.assertEqual(3, sum(case["scope"] == "jvm-only" for case in self.manifest["cases"]))
 
     def test_missing_archives_keep_every_declared_route_unpassed(self):
         result = independent_gates.evaluate(
@@ -60,17 +109,14 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(lane["target"], contract["target"])
                 self.assertTrue(contract["cases"])
 
-    def test_numerical_checker_and_limits_match_approved_candidate_blobs(self):
-        approved = independent_gates._policy_binding(ROOT, BASE)
-        self.assertEqual(set(independent_gates.APPROVED_POLICY), set(approved))
-        name = "tools/numerical/fixtures.json"
-        original = independent_gates.APPROVED_POLICY[name]
-        try:
-            independent_gates.APPROVED_POLICY[name] = "0" * 64
-            with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
-                independent_gates._policy_binding(ROOT, BASE)
-        finally:
-            independent_gates.APPROVED_POLICY[name] = original
+    def test_numerical_checker_and_limits_reject_local_policy_drift(self):
+        for path, approved in independent_gates.APPROVED_POLICY.items():
+            committed = subprocess.check_output(["git", "show", f"{BASE}:{path}"],
+                                                cwd=ROOT)
+            self.assertEqual(approved, hashlib.sha256(committed).hexdigest())
+        with self.assertRaisesRegex(ValueError,
+                                    "approved policy/checker blob differs: tools/numerical/compare.py"):
+            independent_gates._policy_binding(ROOT, BASE)
 
     def test_historical_numerical_source_adapter_matches_producer_git_archive(self):
         candidate = "cd21a4bd7d6731a096597f97966db9e02b9de448"
