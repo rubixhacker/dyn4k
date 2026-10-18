@@ -56,3 +56,13 @@ kotlin {
         commonTest.dependencies { implementation(kotlin("test")) }
     }
 }
+
+if (providers.gradleProperty("qualificationProduction").orNull == "true") {
+    tasks.named<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>("jsBrowserTest") {
+        dependsOn("jsTestTestProductionExecutableCompileSync")
+        inputFileProperty.set(layout.buildDirectory.file(
+            "compileSync/js/test/testProductionExecutable/kotlin/${rootProject.name}-test.js"
+        ))
+        doFirst { logger.lifecycle("qualification test input: ${inputFileProperty.get().asFile}") }
+    }
+}
