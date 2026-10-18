@@ -106,6 +106,37 @@ class FullSuiteManifestTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 full_suite_manifest.validate_manifest(self.manifest, repository)
 
+    def test_platform_expectation_helpers_are_bound_to_source_digest(self):
+        corpus = json.loads((ROOT / full_suite_manifest.CORPUS_PATH).read_text())
+        helpers = [
+            f"dyn4k-core/src/{source_set}/kotlin/org/dyn4j/world/WorldNestedViewRuntime.kt"
+            for source_set in ("androidHostTest", "jsTest", "nativeTest", "wasmJsTest",
+                               "wasmWasiTest")
+        ]
+        bound_paths = {item["path"] for item in corpus["source_files"]}
+        self.assertTrue(set(helpers) <= bound_paths, set(helpers) - bound_paths)
+
+        copied = [full_suite_manifest.CORPUS_PATH,
+                  "tools/qualification/full-common-original-map.tsv",
+                  "tools/qualification/full-common-reviewed-pairs.tsv"]
+        copied += [item["path"] for item in corpus["source_files"]]
+        copied += [path for paths in full_suite_manifest.GATE_SOURCES.values()
+                   for path in paths]
+        with tempfile.TemporaryDirectory() as scratch:
+            repository = Path(scratch)
+            for relative in copied:
+                path = repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes((ROOT / relative).read_bytes())
+            full_suite_manifest.validate_manifest(self.manifest, repository)
+            for relative in helpers:
+                with self.subTest(helper=relative):
+                    source = repository / relative
+                    source.write_bytes(source.read_bytes() + b"\n")
+                    with self.assertRaisesRegex(ValueError, "source"):
+                        full_suite_manifest.validate_manifest(self.manifest, repository)
+                    source.write_bytes((ROOT / relative).read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()

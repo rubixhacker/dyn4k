@@ -88,9 +88,8 @@ def read_corpus(repository):
     if any(counts.get(key) != value for key, value in expected_counts.items()):
         raise ValueError("frozen common corpus counts differ")
     source_files = corpus.get("source_files", [])
-    if (len(source_files) != 193 or
-            any(digest((repository / source["path"]).read_bytes()) != source["sha256"]
-                for source in source_files)):
+    scanned_files = full_corpus.scan_test_tree(repository)
+    if source_files != scanned_files:
         raise ValueError("common test source hash differs")
     scanned = full_corpus.scan_sources(repository)
     indexed = {(case["module"], case["classname"], case["method"]): case
@@ -102,7 +101,7 @@ def read_corpus(repository):
         if any(indexed.get(key, {}).get(field) != case[field] for field in
                ("source_set", "path", "sha256", "line", "hosts")):
             raise ValueError(f"common test source identity differs: {key}")
-    if full_corpus.source_tree_digest(full_corpus.scan_test_tree(repository)) != corpus["source_tree_sha256"]:
+    if full_corpus.source_tree_digest(scanned_files) != corpus["source_tree_sha256"]:
         raise ValueError("common test source tree differs")
     map_raw = (repository / full_corpus.MAP_PATH).read_bytes()
     map_rows = list(csv.DictReader(io.StringIO(map_raw.decode()), delimiter="\t"))
