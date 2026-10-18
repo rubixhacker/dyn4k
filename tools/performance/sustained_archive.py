@@ -658,6 +658,225 @@ def validate_process_clock(root, item, warm_clock, measured_clock, image_observe
         previous_end = end
 
 
+def validate_v2_sidecars(root, item, scenario, source_commit, fixture_sha256,
+                         provider_path, warm_clock, measured_clock, raw_rows, markers):
+    def unique_object(pairs):
+        result = {}
+        for name, value in pairs:
+            require(name not in result, "version 2 duplicate JSON key")
+            result[name] = value
+        return result
+
+    stems = ("allocation_v2", "memory_v2", "plateau_v2")
+    present = [stem for stem in stems if stem + "_path" in item or stem + "_sha256" in item]
+    if not present:
+        return None
+    require(set(present) == set(stems), "version 2 process sidecars are partial")
+    mode = item["mode"]
+    require(mode in ("allocation", "memory", "plateau"),
+            "version 2 sidecars claim an unsupported mode")
+    streams = {}
+    for stem in stems:
+        path = checked_file(root, item, stem + "_path", stem + "_sha256")
+        lines = path.read_text().splitlines()
+        require(len(lines) <= 100000 and all(line.strip() for line in lines),
+                "version 2 sidecar line inventory is invalid")
+        streams[stem] = [json.loads(line, object_pairs_hook=unique_object) for line in lines]
+        require(all(isinstance(row, dict) for row in streams[stem]),
+                "version 2 sidecar row is invalid")
+    allocation = streams["allocation_v2"]
+    memory = streams["memory_v2"]
+    plateau = streams["plateau_v2"]
+    expected_steps = 1 if mode == "plateau" else len(raw_rows)
+    shared = {"schema": 2, "pid": item["pid"], "nonce": item["clock_nonce"],
+              "source_commit": source_commit, "provider_sha256": sha256(provider_path),
+              "fixture_sha256": fixture_sha256, "clock_domain": "System.nanoTime",
+              "memory_unit": "byte", "api": scenario["api"], "mode": mode,
+              "family": scenario["family"], "variant": scenario["variant"],
+              "size": scenario["size"], "rate_hz": scenario["rate_hz"],
+              "measured_steps": expected_steps, "warmup_steps": len(warm_clock)}
+    kind = {"allocation_v2": "thread_allocation", "memory_v2": "memory_observation",
+            "plateau_v2": "create_use_dispose"}
+    extensions = {
+        "allocation_v2": {"phase", "step", "clock_ns", "thread_id",
+                          "counter_before_bytes", "counter_after_bytes",
+                          "allocation_bytes", "probe"},
+        "memory_v2": {"phase", "step", "clock_ns", "heap_used_bytes",
+                      "empty_heap_bytes", "managed_heap_delta_bytes",
+                      "managed_post_collection", "collection_count_delta",
+                      "buffer_pool_used_bytes", "rss_bytes", "native_workload_bytes",
+                      "attributed_workload_bytes", "native_attribution",
+                      "managed_provenance", "buffer_provenance", "qualification"},
+        "plateau_v2": {"cycle", "clock_ns", "heap_after_collection_bytes",
+                       "rss_after_collection_bytes", "collection_count",
+                       "managed_heap_delta_bytes", "buffer_pool_used_bytes",
+                       "native_workload_bytes", "attributed_workload_bytes",
+                       "reserved_runtime_bytes", "native_attribution", "qualification"}}
+    origin = json.loads(checked_file(root, item, "clock_origin_path",
+                                     "clock_origin_sha256").read_text())
+    receipt = json.loads(checked_file(root, item, "clock_origin_receipt_path",
+                                      "clock_origin_receipt_sha256").read_text())
+    low = receipt["host_before_ns"] - origin["runtime_ns"]
+    high = receipt["host_after_ns"] - origin["runtime_ns"]
+    for clock in [*warm_clock, *(measured_clock or ())]:
+        low = max(low, item["started_ns"] - int(clock["begin_ns"]))
+        high = min(high, item["ended_ns"] - int(clock["end_ns"]))
+    for stem, rows in streams.items():
+        previous = None
+        for row in rows:
+            require(set(row) == set(shared) | {"kind"} | extensions[stem] and
+                    all(type(row.get(field)) is type(value) and row[field] == value
+                        for field, value in {**shared, "kind": kind[stem]}.items()) and
+                    type(row.get("clock_ns")) is int and
+                    row["clock_ns"] >= origin["runtime_ns"] and
+                    (previous is None or row["clock_ns"] > previous),
+                    "version 2 process, provider, fixture, or clock binding differs")
+            stamp = row["clock_ns"]
+            low = max(low, item["started_ns"] - stamp)
+            high = min(high, item["ended_ns"] - stamp)
+            require(low <= high, "version 2 clock lies outside observed process interval")
+            previous = stamp
+    if mode == "plateau":
+        expected_allocation = [("plateau", cycle) for cycle in range(100)]
+        require(not memory and len(plateau) == 100 and
+                [row.get("cycle") for row in plateau] == list(range(100)),
+                "version 2 plateau cycle count or order differs")
+    else:
+        expected_allocation = ([('construction', 0)] +
+                               [('warmup', step) for step in range(len(warm_clock))] +
+                               [('measure', step) for step in range(len(raw_rows))])
+        require(not plateau, "version 2 plateau stream in measurement mode")
+    require([(row.get("phase"), row.get("step")) for row in allocation] ==
+            expected_allocation, "version 2 allocation phases or count differ")
+    previous_counter = None
+    thread = None
+    for row in allocation:
+        before = row.get("counter_before_bytes")
+        after = row.get("counter_after_bytes")
+        require(type(before) is int and type(after) is int and 0 <= before <= after and
+                (previous_counter is None or before >= previous_counter) and
+                type(row.get("allocation_bytes")) is int and
+                row["allocation_bytes"] == after - before and
+                type(row.get("thread_id")) is int and row["thread_id"] > 0 and
+                (thread is None or row["thread_id"] == thread) and
+                row.get("probe") ==
+                "com.sun.management.ThreadMXBean.getThreadAllocatedBytes",
+                "version 2 allocation counter or thread differs")
+        previous_counter = after
+        thread = row["thread_id"]
+    if mode != "plateau":
+        require(all(allocation[1 + step]["clock_ns"] >= int(clock["end_ns"])
+                    for step, clock in enumerate(warm_clock)) and
+                all(allocation[1 + step]["clock_ns"] <
+                    int(warm_clock[step + 1]["begin_ns"])
+                    for step in range(len(warm_clock) - 1)) and
+                all(allocation[1 + len(warm_clock) + step]["clock_ns"] >=
+                    int(clock["end_ns"]) for step, clock in enumerate(measured_clock)) and
+                all(allocation[1 + len(warm_clock) + step]["clock_ns"] <
+                    int(measured_clock[step + 1]["begin_ns"])
+                    for step in range(len(measured_clock) - 1)) and
+                allocation[0]["clock_ns"] < int(warm_clock[0]["begin_ns"]) and
+                allocation[0]["allocation_bytes"] ==
+                    int(markers["construction_allocated_bytes"]) and
+                all(allocation[1 + len(warm_clock) + step]["allocation_bytes"] ==
+                    int(raw["allocation_bytes"]) for step, raw in enumerate(raw_rows)),
+                "version 2 allocation clock or raw counter differs")
+    else:
+        require(allocation[0]["clock_ns"] >= int(warm_clock[-1]["end_ns"]),
+                "version 2 plateau precedes warm-up")
+    if mode == "memory":
+        expected_memory = ([('empty', 0), ('construction', 0)] +
+                           [('warmup', step) for step in range(len(warm_clock))] +
+                           [('retained', 0)] +
+                           [('measure', step) for step in range(len(raw_rows))])
+        require([(row.get("phase"), row.get("step")) for row in memory] ==
+                expected_memory, "version 2 memory phases or count differ")
+        empty_heap = memory[0].get("heap_used_bytes")
+        require(type(empty_heap) is int and empty_heap >= 0 and
+                memory[0]["clock_ns"] < allocation[0]["clock_ns"] and
+                memory[1]["clock_ns"] >= allocation[0]["clock_ns"] and
+                memory[2 + len(warm_clock)]["clock_ns"] >=
+                    int(warm_clock[-1]["end_ns"]) and
+                memory[2 + len(warm_clock)]["clock_ns"] <
+                    int(measured_clock[0]["begin_ns"]),
+                "version 2 memory clock or empty baseline differs")
+        for position, row in enumerate(memory):
+            retained = row["phase"] == "retained"
+            require(type(row.get("heap_used_bytes")) is int and
+                    row["heap_used_bytes"] >= 0 and
+                    row.get("empty_heap_bytes") == empty_heap and
+                    row.get("managed_heap_delta_bytes") ==
+                    row["heap_used_bytes"] - empty_heap and
+                    row.get("managed_post_collection") is retained and
+                    (type(row.get("collection_count_delta")) is int and
+                     row["collection_count_delta"] > 0 and
+                     row["collection_count_delta"] ==
+                     int(markers["retained_collection_count_delta"]) if retained else
+                     row.get("collection_count_delta") is None) and
+                    row.get("native_workload_bytes") is None and
+                    row.get("attributed_workload_bytes") is None and
+                    row.get("native_attribution") == "unsupported" and
+                    row.get("managed_provenance") ==
+                    "Runtime.totalMemory minus freeMemory delta from empty same process; includes unrelated heap objects" and
+                    row.get("buffer_provenance") ==
+                    "BufferPoolMXBean process total; not workload attribution" and
+                    row.get("qualification") == "unpassed" and
+                    type(row.get("rss_bytes")) is int and row["rss_bytes"] >= -1 and
+                    (row.get("buffer_pool_used_bytes") is None or
+                     type(row["buffer_pool_used_bytes"]) is int and
+                     row["buffer_pool_used_bytes"] >= 0),
+                    "version 2 memory attribution or collection proof differs")
+            if row["phase"] == "warmup":
+                require(row["clock_ns"] >= int(warm_clock[row["step"]]["end_ns"]) and
+                        row["clock_ns"] >= allocation[1 + row["step"]]["clock_ns"],
+                        "version 2 warm-up memory clock differs")
+            if row["phase"] == "measure":
+                step = row["step"]
+                require(row["clock_ns"] >= int(measured_clock[step]["end_ns"]) and
+                        row["clock_ns"] >=
+                        allocation[1 + len(warm_clock) + step]["clock_ns"] and
+                        row["heap_used_bytes"] == int(raw_rows[step]["heap_used_bytes"]) and
+                        row["rss_bytes"] == int(raw_rows[step]["rss_bytes"]),
+                        "version 2 measured memory differs from raw step")
+    else:
+        require(not memory, "version 2 memory stream in wrong mode")
+    if mode == "plateau":
+        previous_count = None
+        for cycle, (record, allocated, raw) in enumerate(zip(plateau, allocation, raw_rows)):
+            count = record.get("collection_count")
+            require(type(count) is int and count > 0 and
+                    (previous_count is None or count > previous_count) and
+                    type(record.get("heap_after_collection_bytes")) is int and
+                    record["heap_after_collection_bytes"] >= 0 and
+                    type(record.get("rss_after_collection_bytes")) is int and
+                    record["rss_after_collection_bytes"] >= -1 and
+                    type(record.get("managed_heap_delta_bytes")) is int and
+                    type(record.get("buffer_pool_used_bytes")) is int and
+                    record["buffer_pool_used_bytes"] >= 0 and
+                    record["clock_ns"] >= allocated["clock_ns"] and
+                    (cycle == 99 or record["clock_ns"] <
+                     allocation[cycle + 1]["clock_ns"]) and
+                    int(raw["cycle"]) == cycle and
+                    int(raw["collection_count"]) == count and
+                    int(raw["heap_after_collection_bytes"]) ==
+                    record.get("heap_after_collection_bytes") and
+                    int(raw["rss_after_collection_bytes"]) ==
+                    record.get("rss_after_collection_bytes") and
+                    all(int(raw[field]) == -1 for field in
+                        ("managed_bytes", "native_bytes", "attributed_workload_bytes",
+                         "reserved_runtime_bytes")) and
+                    record.get("native_workload_bytes") is None and
+                    record.get("attributed_workload_bytes") is None and
+                    record.get("reserved_runtime_bytes") is None and
+                    record.get("native_attribution") == "unsupported" and
+                    record.get("qualification") == "unpassed",
+                    "version 2 plateau collection, raw cycle, or attribution differs")
+            previous_count = count
+    return {"allocation_rows": len(allocation), "memory_rows": len(memory),
+            "plateau_cycles": len(plateau), "memory_attribution": "unavailable",
+            "qualification": "unpassed"}
+
+
 def capture_key(item):
     kind = item["kind"]
     if kind in ("measure", "report"):
@@ -764,6 +983,10 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
         validate_process_clock(root, item, warm_clock_rows, None,
                                image_receipt["observed_ns"])
         rows = csv_rows(raw, PLATEAU_FIELDS)
+        validate_v2_sidecars(root, item, scenario, item["source_commit"],
+                             approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+                             checked_file(root, item, "provider_path", "provider_sha256"),
+                             warm_clock_rows, None, rows, markers)
         validate_plateau(rows, policy["sustained"]["create_use_dispose_cycles"])
         return rows, markers
     if item["kind"] == "report":
@@ -776,6 +999,10 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     validate_clock(clock_rows, rows, hz, duration)
     validate_process_clock(root, item, warm_clock_rows, clock_rows,
                            image_receipt["observed_ns"])
+    validate_v2_sidecars(root, item, scenario, item["source_commit"],
+                         approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+                         checked_file(root, item, "provider_path", "provider_sha256"),
+                         warm_clock_rows, clock_rows, rows, markers)
     if "resource_path" in item or "run_path" in item:
         require("resource_path" in item and "run_path" in item,
                 "versioned resource or run sidecar is partial")
@@ -1030,6 +1257,7 @@ def _verify_archive(root, key, expected_source_commit, policy):
     indexed_files = {item[field] for item in captures for field in
                      ("raw_path", "stderr_path", "provider_path", "clock_path",
                       "warmup_clock_path", "memory_path", "resource_path", "run_path",
+                      "allocation_v2_path", "memory_v2_path", "plateau_v2_path",
                       "stress_monitor_path", "stress_monitor_receipt_path", "clock_origin_path",
                       "clock_origin_receipt_path", "process_image_receipt_path")
                      if field in item}
@@ -1295,6 +1523,8 @@ def capture_one(root, job, key):
     provider = folder / "provider.json"
     image_receipt_path = folder / "process-image.json"
     memory = folder / "memory.csv"
+    v2_sidecars = {stem: folder / (stem.replace("_", "-") + ".jsonl") for stem in
+                   ("allocation_v2", "memory_v2", "plateau_v2")}
     resource = folder / "resource.csv"
     run_summary = folder / "run.json"
     clock = folder / "clock.csv"
@@ -1316,6 +1546,9 @@ def capture_one(root, job, key):
                         "DYN4K_SOURCE_COMMIT": index["source_commit"],
                         "DYN4K_ARTIFACT_HASHES_JSON": json.dumps(hashes[job["row_id"]]),
                         "DYN4K_BASELINE_SHA256": policy["baseline_jar_sha256"]})
+    if job["mode"] in ("allocation", "memory", "plateau"):
+        environment.update({"DYN4K_" + stem.upper() + "_JSONL": str(path)
+                            for stem, path in v2_sidecars.items()})
     started = time.monotonic_ns()
     with raw.open("wb") as stdout, stderr.open("wb") as error:
         process = subprocess.Popen(command, stdout=stdout, stderr=error, env=environment)
@@ -1505,6 +1738,10 @@ def capture_one(root, job, key):
     if memory.is_file():
         item.update(memory_path=str(memory.relative_to(root)),
                     memory_sha256=sha256(memory))
+    for stem, path in v2_sidecars.items():
+        if path.is_file():
+            item[stem + "_path"] = str(path.relative_to(root))
+            item[stem + "_sha256"] = sha256(path)
     if resource.is_file():
         item.update(resource_path=str(resource.relative_to(root)),
                     resource_sha256=sha256(resource))
@@ -1597,6 +1834,9 @@ def merge_parts(output, parts, key, policy=None):
                                        ("clock_path", "clock_sha256"),
                                        ("warmup_clock_path", "warmup_clock_sha256"),
                                        ("memory_path", "memory_sha256"),
+                                       ("allocation_v2_path", "allocation_v2_sha256"),
+                                       ("memory_v2_path", "memory_v2_sha256"),
+                                       ("plateau_v2_path", "plateau_v2_sha256"),
                                        ("resource_path", "resource_sha256"),
                                        ("run_path", "run_sha256"),
                                        ("stress_monitor_path", "stress_monitor_sha256"),

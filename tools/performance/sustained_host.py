@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import contextlib
 import csv
 import hashlib
 import hmac
 import json
-import io
 import os
 import secrets
 import shutil
@@ -14,26 +12,50 @@ import sys
 import time
 from pathlib import Path
 
+import candidate_runner as candidate
 from bounded_adapter import require_committed_sources, snapshot, verified_file
 from candidate_runner import (API, CORE, FLAGS, IDENTITY, ROOT, STAGING, hash_path,
-                              prepare, read_paths, source_trees)
+                              read_paths, source_trees)
 from manifest import manifest
 from measure import sha256, validate_csv
 from sustained_archive import (PROCESS_IMAGE_METHODS, canonical, observed_host,
                                observe_process_image, require, require_external_key,
-                               signature, validate_process_clock)
+                               signature, validate_process_clock, validate_v2_sidecars)
 
 
 ROUTES = ("baseline", "direct_kotlin", "compatibility")
+DIAGNOSTIC_MODES = ("timing", "allocation", "memory", "plateau")
+V2_FILES = (("allocation_v2", "allocation-v2.jsonl", "DYN4K_ALLOCATION_V2_JSONL"),
+            ("memory_v2", "memory-v2.jsonl", "DYN4K_MEMORY_V2_JSONL"),
+            ("plateau_v2", "plateau-v2.jsonl", "DYN4K_PLATEAU_V2_JSONL"))
 SOURCE = ROOT / "tools/performance/sustained_jvm"
-STAGE = ["./gradlew", "--no-daemon", ":dyn4k-core:publishJvmPublicationToStagingRepository",
-         ":dyn4k:publishJvmPublicationToStagingRepository"]
+LEGACY_STAGE = ["./gradlew", "--no-daemon",
+                ":dyn4k-core:publishJvmPublicationToStagingRepository",
+                ":dyn4k:publishJvmPublicationToStagingRepository"]
+STAGE = ["./gradlew", "--no-daemon", "--offline",
+         ":dyn4k-core:publishJvmPublicationToStagingRepository",
+         ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
+         ":dyn4k:publishJvmPublicationToStagingRepository",
+         ":dyn4k:publishKotlinMultiplatformPublicationToStagingRepository"]
 FORBIDDEN_JAVA_ENV = ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH")
 
 
 def fixture_hash(policy):
     return hashlib.sha256(canonical({"fixture": policy["fixture"],
                                      "joint_parameters": policy["joint_parameters"]})).hexdigest()
+
+
+def configure_producer(root):
+    global ROOT, SOURCE, STAGING, IDENTITY
+    ROOT = Path(root).resolve(strict=True)
+    SOURCE = ROOT / "tools/performance/sustained_jvm"
+    candidate.ROOT = ROOT
+    candidate.CONSUMER = ROOT / "consumers/performance"
+    candidate.STAGING = ROOT / "build/staging-repository"
+    candidate.PATHS = candidate.CONSUMER / "build/candidate-paths.tsv"
+    candidate.IDENTITY = candidate.CONSUMER / "build/candidate-identity.json"
+    STAGING = candidate.STAGING
+    IDENTITY = candidate.IDENTITY
 
 
 def _run_build(command, output, env):
@@ -70,8 +92,9 @@ def _build(args, root, env):
     _run_build([str(args.jar), "--create", "--file", str(adapter), "-C",
                 str(adapter_class.parents[1]), "performance/SustainedDirectPilotKt.class"],
                build / "adapter-jar", env)
-    with contextlib.redirect_stdout(io.StringIO()):
-        prepare(str(args.java), args.expected_source_commit)
+    _run_build([sys.executable, str(ROOT / "tools/performance/candidate_runner.py"),
+                "prepare", str(args.java), args.expected_source_commit],
+               build / "prepare", env)
     identity = json.loads(IDENTITY.read_text())
     artifacts = {"core": sha256(STAGING / CORE), "kotlin": sha256(STAGING / API)}
     receipt = {"schema": 1, "status": "built_from_exact_source",
@@ -93,6 +116,8 @@ def _build(args, root, env):
 
 
 def capture(args, key):
+    if args.producer_root:
+        configure_producer(args.producer_root)
     policy = manifest()
     require(os.name == "posix" and sys.platform.startswith("linux"),
             "available-host producer requires the validated Linux process probe")
@@ -116,7 +141,7 @@ def capture(args, key):
         env.pop(name, None)
     identity, harness, adapter, receipt_path, receipt = _build(args, root, env)
     require_committed_sources(identity, args.expected_source_commit)
-    paths = read_paths()
+    paths = read_paths(candidate.PATHS)
     require(identity["paths"] == {route: [str(path) for path in values]
                                   for route, values in paths.items()},
             "candidate classpath differs")
@@ -129,7 +154,17 @@ def capture(args, key):
     copied = [snapshot(root, path, f"{i:03d}") for i, path in enumerate(inputs)]
     snapshots = {item["source_path"]: item for item in copied}
     source_hashes = {str(path): hash_path(path) for path in inputs if path.exists()}
-    index = {"schema": 1, "route": "sustained-jvm-host-v1",
+    modes = args.modes.split(",")
+    require(modes and len(modes) == len(set(modes)) and
+            all(mode in DIAGNOSTIC_MODES for mode in modes),
+            "diagnostic mode inventory differs")
+    version = 1 if modes == ["timing"] else 2
+    if version == 2:
+        require("TMPDIR" in os.environ, "version 2 capture needs home-backed TMPDIR")
+        java_tmpdir = Path(os.environ["TMPDIR"]).resolve(strict=True)
+        require(java_tmpdir.is_dir() and java_tmpdir.is_relative_to(Path.home().resolve()),
+                "version 2 capture needs home-backed TMPDIR")
+    index = {"schema": version, "route": f"sustained-jvm-host-v{version}",
              "producer_root": str(ROOT),
              "manifest_sha256": sha256(ROOT / "docs/research/performance-manifest-v1.json"),
              "source_commit": args.expected_source_commit,
@@ -137,18 +172,22 @@ def capture(args, key):
              "host": observed_host(), "seconds": args.seconds,
              "warmup_seconds": args.warmup_seconds,
              "fixture_sha256": fixture_hash(policy),
+             **({"modes": modes, "java_tmpdir": str(java_tmpdir)} if version == 2 else {}),
              "candidate_identity": identity, "build_receipt": receipt,
              "inputs": copied, "captures": []}
-    for route in ROUTES:
-        folder = root / "runs" / route
+    for mode, route in ((mode, route) for mode in modes for route in ROUTES):
+        folder = root / "runs" / mode / route if version == 2 else root / "runs" / route
         folder.mkdir(parents=True)
-        tail = ["separated", "default", "small", "30", str(30 * args.seconds),
-                "timing", str(30 * args.warmup_seconds)]
+        tail = ["separated", "default", "small", "30",
+                str(1 if mode == "plateau" else 30 * args.seconds),
+                mode, str(30 * args.warmup_seconds)]
         classpath = ([harness, baseline] if route == "baseline" else
                      [adapter, *paths["direct_kotlin"]] if route == "direct_kotlin" else
                      [harness, *paths["compatibility"]])
         main = "performance.SustainedDirectPilotKt" if route == "direct_kotlin" else "SustainedPilot"
-        command = [str(java), *FLAGS, "-cp", os.pathsep.join(map(str, classpath)),
+        java_flags = [*FLAGS, *(["-Djava.io.tmpdir=" + index["java_tmpdir"]]
+                               if version == 2 else [])]
+        command = [str(java), *java_flags, "-cp", os.pathsep.join(map(str, classpath)),
                    main, *tail, route]
         outputs = {name: folder / filename for name, filename in
                    (("raw", "steps.csv"), ("stderr", "stderr.raw"),
@@ -156,6 +195,8 @@ def capture(args, key):
                     ("resource", "resource.csv"), ("provider", "provider.json"),
                     ("run", "run.json"), ("clock_origin", "clock-origin.json"),
                     ("clock_origin_receipt", "clock-origin-receipt.json"))}
+        if mode != "timing":
+            outputs.update({stem: folder / filename for stem, filename, _ in V2_FILES})
         clock_nonce = secrets.token_hex(16)
         run_env = dict(env)
         run_env.update(DYN4K_CLOCK_CSV=str(outputs["clock"]),
@@ -168,6 +209,8 @@ def capture(args, key):
                        DYN4K_SOURCE_COMMIT=args.expected_source_commit,
                        DYN4K_BASELINE_SHA256=policy["baseline_jar_sha256"],
                        DYN4K_ARTIFACT_HASHES_JSON=json.dumps(receipt["artifact_sha256"], sort_keys=True))
+        if mode != "timing":
+            run_env.update({variable: str(outputs[stem]) for stem, _, variable in V2_FILES})
         start = time.monotonic_ns()
         with outputs["raw"].open("wb") as out, outputs["stderr"].open("wb") as err:
             process = subprocess.Popen(command, cwd=ROOT, env=run_env, stdout=out, stderr=err)
@@ -223,7 +266,7 @@ def capture(args, key):
         image_path.write_text(json.dumps(observed, sort_keys=True) + "\n")
         record = {"api": route, "scenario_id": f"separated.default.small.30hz.{route}",
                   "seconds": args.seconds, "warmup_seconds": args.warmup_seconds,
-                  "mode": "timing", "command": command,
+                  "mode": mode, "command": command,
                   "classpath": list(map(str, classpath)), "pid": process.pid,
                   "started_ns": start, "ended_ns": end, "exit_code": code,
                   "termination_reason": termination, "clock_nonce": clock_nonce}
@@ -265,7 +308,9 @@ def verify(root, key, expected_commit):
     require(hmac.compare_digest(index.get("signature", ""), signature(index, key)),
             "archive signature differs")
     policy = manifest()
-    require(index["schema"] == 1 and index["route"] == "sustained-jvm-host-v1" and
+    version = index.get("schema")
+    require(version in (1, 2) and
+            index.get("route") == f"sustained-jvm-host-v{version}" and
             index["source_commit"] == expected_commit and
             index["source_trees"] == source_trees(expected_commit) and
             index["manifest_sha256"] == sha256(ROOT / "docs/research/performance-manifest-v1.json") and
@@ -273,6 +318,13 @@ def verify(root, key, expected_commit):
             "source, manifest, or fixture differs")
     require(1 <= index["seconds"] <= 5 and 1 <= index["warmup_seconds"] <= 5,
             "diagnostic duration differs")
+    modes = ["timing"] if version == 1 else index.get("modes")
+    require(isinstance(modes, list) and modes and
+            len(modes) == len(set(modes)) and
+            all(mode in DIAGNOSTIC_MODES for mode in modes) and
+            (version != 2 or isinstance(index.get("java_tmpdir"), str) and
+             Path(index["java_tmpdir"]).is_absolute()),
+            "diagnostic mode inventory differs")
     inputs = {item["source_path"]: item for item in index["inputs"]}
     require(len(inputs) == len(index["inputs"]), "duplicate input")
     producer_root = Path(index["producer_root"])
@@ -322,7 +374,9 @@ def verify(root, key, expected_commit):
             receipt["schema"] == 1 and receipt["status"] == "built_from_exact_source" and
             receipt["source_commit"] == expected_commit and
             receipt["source_trees"] == index["source_trees"] and
-            receipt["stage_command"] == STAGE and receipt["stage_exit_code"] == 0 and
+            receipt["stage_command"] in (STAGE, LEGACY_STAGE) and
+            (version == 1 or receipt["stage_command"] == STAGE) and
+            receipt["stage_exit_code"] == 0 and
             receipt["consumer_command"] == expected_consumer and
             receipt["javac_command"] == expected_javac and
             receipt["target"] == "jvm" and receipt["configuration"] == "development" and
@@ -354,25 +408,38 @@ def verify(root, key, expected_commit):
     java = identity["java"]
     require(inputs[java]["sha256"] == identity["sha256"].get(java, inputs[java]["sha256"]),
             "runtime bytes differ")
-    require(len(index["captures"]) == 3 and
-            [item["api"] for item in index["captures"]] == list(ROUTES),
-            "executed API routes differ")
+    require([(item["mode"], item["api"]) for item in index["captures"]] ==
+            [(mode, route) for mode in modes for route in ROUTES],
+            "executed API routes or modes differ")
+    indexed_files = {item[stem + "_path"] for item in index["captures"] for stem in
+                     ("raw", "stderr", "clock", "warmup_clock", "resource", "provider",
+                      "run", "clock_origin", "clock_origin_receipt", "process_image_receipt",
+                      "allocation_v2", "memory_v2", "plateau_v2") if stem + "_path" in item}
+    actual_files = {str(path.relative_to(root)) for path in (root / "runs").rglob("*")
+                    if path.is_file()}
+    require(indexed_files == actual_files, "unindexed or missing process sidecar")
+    executed = {mode: {"status": "executed_unqualified", "routes": 0}
+                for mode in modes if mode != "timing"}
     for item in index["captures"]:
         route = item["api"]
+        mode = item["mode"]
         require(item["scenario_id"] == f"separated.default.small.30hz.{route}" and
                 item["scenario_id"] in {case["id"] for case in policy["scenarios"]} and
                 item["seconds"] == index["seconds"] and
-                item["warmup_seconds"] == index["warmup_seconds"] and
-                item["mode"] == "timing", "scenario or duration differs")
+                item["warmup_seconds"] == index["warmup_seconds"],
+                "scenario or duration differs")
         classpath = ([harness["source_path"], next(source for source in inputs
                       if inputs[source].get("sha256") == policy["baseline_jar_sha256"])]
                      if route == "baseline" else
                      [adapter["source_path"], *identity["paths"]["direct_kotlin"]]
                      if route == "direct_kotlin" else
                      [harness["source_path"], *identity["paths"]["compatibility"]])
-        tail = ["separated", "default", "small", "30", str(30 * index["seconds"]),
-                "timing", str(30 * index["warmup_seconds"])]
-        command = [java, *FLAGS, "-cp", os.pathsep.join(classpath),
+        tail = ["separated", "default", "small", "30",
+                str(1 if mode == "plateau" else 30 * index["seconds"]),
+                mode, str(30 * index["warmup_seconds"])]
+        java_flags = [*FLAGS, *(["-Djava.io.tmpdir=" + index["java_tmpdir"]]
+                               if version == 2 else [])]
+        command = [java, *java_flags, "-cp", os.pathsep.join(classpath),
                    "performance.SustainedDirectPilotKt" if route == "direct_kotlin" else "SustainedPilot",
                    *tail, route]
         require(item["command"] == command and item["classpath"] == classpath and
@@ -388,15 +455,18 @@ def verify(root, key, expected_commit):
                 image["executable_path"] == java,
                 "executed process image differs")
         raw_path = verified_file(root, item, "raw")
-        validate_csv(raw_path, "separated", "default", "small", 30,
-                     30 * index["seconds"], "timing")
+        if mode != "plateau":
+            validate_csv(raw_path, "separated", "default", "small", 30,
+                         30 * index["seconds"], mode)
         raw = _rows(raw_path)
         stderr = verified_file(root, item, "stderr").read_text()
-        require("#fixture_reset_after_warmup=1" in stderr and
+        require((mode == "plateau" or "#fixture_reset_after_warmup=1" in stderr) and
                 len([line for line in stderr.splitlines() if line and line[0].isdigit()]) ==
                 30 * index["warmup_seconds"], "fixture reset or warm-up samples differ")
-        measured_clock = _rows(verified_file(root, item, "clock"))
-        _clock(measured_clock, raw, "clock")
+        measured_clock = (None if mode == "plateau" else
+                          _rows(verified_file(root, item, "clock")))
+        if measured_clock is not None:
+            _clock(measured_clock, raw, "clock")
         warm_clock = _rows(verified_file(root, item, "warmup_clock"))
         require(len(warm_clock) == 30 * index["warmup_seconds"],
                 "warm-up clock sample count differs")
@@ -404,21 +474,31 @@ def verify(root, key, expected_commit):
         validate_process_clock(root, item, warm_clock, measured_clock,
                                image["observed_ns"])
         resource = _rows(verified_file(root, item, "resource"))
-        require([row["phase"] for row in resource] ==
-                ["empty", "construction"] + ["warmup"] * len(warm_clock) +
-                ["measure"] * len(raw) and
-                [int(row["step"]) for row in resource[2:2 + len(warm_clock)]] ==
-                list(range(len(warm_clock))) and
-                [int(row["step"]) for row in resource[2 + len(warm_clock):]] ==
-                list(range(len(raw))) and
-                all(int(row["heap_used_bytes"]) >= 0 and int(row["rss_bytes"]) >= -1
-                    for row in resource), "resource stream differs")
-        measured = [row for row in resource if row["phase"] == "measure"]
-        require(all(int(row["heap_used_bytes"]) == int(step["heap_used_bytes"]) and
-                    int(row["rss_bytes"]) == int(step["rss_bytes"]) and
-                    int(row["allocation_bytes"]) == int(step["allocation_bytes"])
-                    for row, step in zip(measured, raw)), "resource and raw samples differ")
-        provider = json.loads(verified_file(root, item, "provider").read_text())
+        if mode == "plateau":
+            require(not resource and "run_path" not in item and "clock_path" not in item and
+                    len(raw) == 100 and
+                    [int(row["cycle"]) for row in raw] == list(range(100)),
+                    "plateau raw cycle or sidecar inventory differs")
+        else:
+            require("run_path" in item and "clock_path" in item,
+                    "measured run sidecar is missing")
+        if mode != "plateau":
+            require([row["phase"] for row in resource] ==
+                    ["empty", "construction"] + ["warmup"] * len(warm_clock) +
+                    ["measure"] * len(raw) and
+                    [int(row["step"]) for row in resource[2:2 + len(warm_clock)]] ==
+                    list(range(len(warm_clock))) and
+                    [int(row["step"]) for row in resource[2 + len(warm_clock):]] ==
+                    list(range(len(raw))) and
+                    all(int(row["heap_used_bytes"]) >= 0 and int(row["rss_bytes"]) >= -1
+                        for row in resource), "resource stream differs")
+            measured = [row for row in resource if row["phase"] == "measure"]
+            require(all(int(row["heap_used_bytes"]) == int(step["heap_used_bytes"]) and
+                        int(row["rss_bytes"]) == int(step["rss_bytes"]) and
+                        int(row["allocation_bytes"]) == int(step["allocation_bytes"])
+                        for row, step in zip(measured, raw)), "resource and raw samples differ")
+        provider_path = verified_file(root, item, "provider")
+        provider = json.loads(provider_path.read_text())
         require(provider["pid"] == item["pid"] and
                 provider["runtime_sha256"] == image["sha256"] and
                 provider["source_commit"] == expected_commit and provider["api"] == route and
@@ -433,23 +513,39 @@ def verify(root, key, expected_commit):
                     if route == "direct_kotlin" else harness["sha256"]) and
                 provider["loaded_fixture_sha256"] == index["fixture_sha256"],
                 "loaded provider or resource identity differs")
-        run = json.loads(verified_file(root, item, "run").read_text())
-        awake = sum(int(row["awake_count"]) > 0 for row in raw)
-        require(run["api"] == route and run["mode"] == "timing" and
-                run["sample_count"] == len(raw) and
-                run["warmup_count"] == len(warm_clock) and
-                run["measured_wall_ns"] >= (len(raw) - 1) * 1_000_000_000 // 30 and
-                run["measured_wall_ns"] >=
-                int(measured_clock[-1]["end_ns"]) - int(measured_clock[0]["begin_ns"]) and
-                run["measured_wall_ns"] <= item["ended_ns"] - item["started_ns"] and
-                run["status"] == "complete", "run sample or duration differs")
-        require(run["active_steps"] == awake and awake > 0,
-                "run activity differs")
-        require(run["memory_attribution"] == "unvalidated" and
-                run["peak_heap_used_bytes"] == max(int(row["heap_used_bytes"]) for row in resource) and
-                run["peak_rss_bytes"] == max(int(row["rss_bytes"]) for row in resource),
-                "resource summary differs")
-    return {"raw_audit": "verified", "qualification": "unpassed", "executed_routes": 3,
+        if mode != "plateau":
+            run = json.loads(verified_file(root, item, "run").read_text())
+            awake = sum(int(row["awake_count"]) > 0 for row in raw)
+            require(run["api"] == route and run["mode"] == mode and
+                    run["sample_count"] == len(raw) and
+                    run["warmup_count"] == len(warm_clock) and
+                    run["measured_wall_ns"] >= (len(raw) - 1) * 1_000_000_000 // 30 and
+                    run["measured_wall_ns"] >=
+                    int(measured_clock[-1]["end_ns"]) - int(measured_clock[0]["begin_ns"]) and
+                    run["measured_wall_ns"] <= item["ended_ns"] - item["started_ns"] and
+                    run["status"] == "complete", "run sample or duration differs")
+            require(run["active_steps"] == awake and awake > 0,
+                    "run activity differs")
+            require(run["memory_attribution"] == "unvalidated" and
+                    run["peak_heap_used_bytes"] == max(int(row["heap_used_bytes"]) for row in resource) and
+                    run["peak_rss_bytes"] == max(int(row["rss_bytes"]) for row in resource),
+                    "resource summary differs")
+        if mode != "timing":
+            require(all(stem + "_path" in item and stem + "_sha256" in item
+                        for stem, _, _ in V2_FILES),
+                    "version 2 process sidecars are absent or partial")
+            markers = dict(line[1:].split("=", 1) for line in stderr.splitlines()
+                           if line.startswith("#") and "=" in line)
+            scenario = next(case for case in policy["scenarios"]
+                            if case["id"] == item["scenario_id"])
+            audit = validate_v2_sidecars(root, item, scenario, expected_commit,
+                                         index["fixture_sha256"], provider_path,
+                                         warm_clock, measured_clock, raw, markers)
+            require(audit is not None, "version 2 process sidecars are absent")
+            executed[mode]["routes"] += 1
+    return {"raw_audit": "verified", "qualification": "unpassed",
+            "executed_routes": len(index["captures"]),
+            **({"executed_modes": executed} if version == 2 else {}),
             "source_commit": expected_commit,
             "missing_qualification": ["600-second duration", "three fresh repeats per case",
                                       "all 999 scenarios", "validated reference rows",
@@ -463,8 +559,10 @@ def restore_consumer_build(java, source_commit):
                              "writeCandidateClasspath", "--offline", "--rerun-tasks"],
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     require(result.returncode == 0, f"consumer build restoration failed: {result.stderr}")
-    with contextlib.redirect_stdout(io.StringIO()):
-        prepare(str(Path(java).resolve()), source_commit)
+    prepared = subprocess.run([sys.executable, str(ROOT / "tools/performance/candidate_runner.py"),
+                               "prepare", str(Path(java).resolve()), source_commit],
+                              cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+    require(prepared.returncode == 0, f"candidate identity restoration failed: {prepared.stderr}")
 
 
 def main():
@@ -478,6 +576,8 @@ def main():
     parser.add_argument("--baseline")
     parser.add_argument("--seconds", type=int, default=1)
     parser.add_argument("--warmup-seconds", type=int, default=1)
+    parser.add_argument("--modes", default="timing")
+    parser.add_argument("--producer-root")
     args = parser.parse_args()
     try:
         require_external_key(args.trusted_key, [args.archive])

@@ -690,6 +690,19 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertNotEqual(0, status)
         self.assertIn("stress monitor stream", result["reason"])
 
+    def test_public_full_verifier_rejects_partial_version_two_process_stream(self):
+        root, index_path, index = self.changed_archive("partial-version-two-stream")
+        item = next(record for record in index["captures"]
+                    if record["kind"] == "measure" and record["mode"] == "allocation")
+        path = root / Path(item["raw_path"]).with_name("allocation-v2.jsonl")
+        path.write_text("{}\n")
+        item["allocation_v2_path"] = str(path.relative_to(root))
+        item["allocation_v2_sha256"] = sha256(path)
+        self.reseal(index_path, index)
+        status, result = self.cli_verify(root)
+        self.assertNotEqual(0, status)
+        self.assertIn("version 2 process sidecars are partial", result["reason"])
+
     def test_public_verify_accepts_off_host_runner_and_harness_archive_bytes(self):
         root, path, index = self.changed_archive("remote-runner")
         self.remote_sources(root, index)
