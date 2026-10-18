@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import gzip
+import hashlib
 import os
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import candidate_coverage
 import build_provenance
@@ -21,6 +23,85 @@ ROOT = Path(__file__).resolve().parents[2]
 JAR = ROOT / "dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar"
 ANDROID_ORIGIN = ROOT
 ANDROID_JAR = ANDROID_ORIGIN / "dyn4k-core/build/intermediates/aar_main_jar/androidMain/syncAndroidMainLibJars/classes.jar"
+
+
+class BuildProvenanceArchiveTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home())))
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / ".gitattributes").write_text("* text=auto\ngradlew -text\n")
+        (self.root / ".gitignore").write_text("dyn4k-core/build/\n")
+        self.source = b"first line\nsecond line\n"
+        (self.root / "README.md").write_bytes(self.source)
+        wrapper = self.root / "gradlew"
+        wrapper.write_text("#!/bin/sh\nmkdir -p dyn4k-core/build/libs\n"
+                           "sha256sum README.md\n"
+                           "cp README.md dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar\n")
+        wrapper.chmod(0o755)
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        self.commit()
+        self.historical = candidate_coverage.git(self.root, "rev-parse", "HEAD")
+        (self.root / "HISTORY.md").write_bytes(b"later commit\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "HISTORY.md"], check=True)
+        self.commit()
+        self.current = candidate_coverage.git(self.root, "rev-parse", "HEAD")
+        self.artifact = self.root / build_provenance.ARTIFACT
+        self.artifact.parent.mkdir(parents=True)
+        self.artifact.write_bytes(self.source)
+        subprocess.run(["git", "-C", str(self.root), "config", "core.autocrlf", "true"], check=True)
+
+    def commit(self):
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Build Test",
+                        "-c", "user.email=build-test@example.invalid", "commit", "-qm",
+                        "source fixture"], check=True)
+
+    def test_probe_exports_canonical_bytes_for_current_and_historical_source(self):
+        expected = hashlib.sha256(self.source).hexdigest()
+        for revision in (self.historical, self.current):
+            with self.subTest(revision=revision), \
+                    patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+                proof = build_provenance.probe(self.root, revision, self.artifact)
+                self.assertTrue(proof["passed"], proof.get("reason"))
+                self.assertEqual(proof["revision"], revision)
+                self.assertEqual(proof["rebuilt_sha256"], expected)
+                self.assertIn(expected + "  README.md", proof["build_stdout"])
+
+    def test_replayed_build_rejects_changed_source_pin_and_artifact(self):
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+            proof = build_provenance.probe(self.root, self.current, self.artifact)
+            self.assertTrue(proof["passed"])
+            source = {"revision": self.current, "tree": proof["source_tree"],
+                      "artifact": build_provenance.ARTIFACT,
+                      "artifact_sha256": proof["artifact_sha256"]}
+            self.assertIsNone(build_provenance.verify(proof, self.root, self.artifact, source))
+            for changed in ({**source, "revision": self.historical},
+                            {**source, "tree": "0" * 40},
+                            {**source, "artifact_sha256": "0" * 64}):
+                with self.subTest(changed=changed):
+                    self.assertIsNotNone(build_provenance.verify(
+                        proof, self.root, self.artifact, changed))
+            self.artifact.write_bytes(b"altered candidate artifact\n")
+            changed_artifact = build_provenance.probe(self.root, self.current, self.artifact)
+            self.assertFalse(changed_artifact["passed"])
+            self.assertNotEqual(changed_artifact["rebuilt_sha256"],
+                                changed_artifact["artifact_sha256"])
+
+    def test_rebuild_uses_exact_commit_even_with_git_replace_object(self):
+        (self.root / "README.md").write_bytes(b"replacement source\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "README.md"], check=True)
+        self.commit()
+        replacement = candidate_coverage.git(self.root, "rev-parse", "HEAD")
+        subprocess.run(["git", "-C", str(self.root), "replace", self.current, replacement],
+                       check=True)
+        expected_tree = candidate_coverage.git(
+            self.root, "--no-replace-objects", "rev-parse", f"{self.current}^{{tree}}")
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+            proof = build_provenance.probe(self.root, self.current, self.artifact)
+        self.assertTrue(proof["passed"], proof.get("reason"))
+        self.assertEqual(proof["source_tree"], expected_tree)
+        self.assertEqual(proof["rebuilt_sha256"], hashlib.sha256(self.source).hexdigest())
 
 
 @unittest.skipUnless(JAR.is_file(), "candidate JVM JAR not built")

@@ -31,7 +31,7 @@ def identity(root: Path, revision: str, artifact: Path) -> dict:
     artifact = artifact.resolve()
     if artifact != root / ARTIFACT:
         raise ValueError("candidate artifact path differs from the allowlisted JVM build output")
-    if git(root, "rev-parse", f"{revision}^{{commit}}") != revision:
+    if git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{commit}}") != revision:
         raise ValueError("candidate source revision is invalid")
     java = java_home() / "bin/java"
     if not java.is_file():
@@ -40,7 +40,7 @@ def identity(root: Path, revision: str, artifact: Path) -> dict:
     if not version.startswith('openjdk version "21.'):
         raise ValueError("source rebuild requires JDK 21")
     return {"schema_version": 1, "revision": revision,
-            "source_tree": git(root, "rev-parse", f"{revision}^{{tree}}"),
+            "source_tree": git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{tree}}"),
             "artifact": ARTIFACT, "artifact_sha256": digest(artifact),
             "gradle_wrapper_sha256": digest(root / "gradlew"),
             "java": str(java), "java_sha256": digest(java),
@@ -66,7 +66,8 @@ def probe(root: Path, revision: str, artifact: Path) -> dict:
 def _probe(root: Path, revision: str, artifact: Path, record: dict,
            command: list[str], artifact_name: str) -> dict:
     before = record["artifact_sha256"]
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", revision],
+    archive = subprocess.run(["git", "--no-replace-objects", "-C", str(root),
+                              "-c", "core.autocrlf=false", "archive", "--format=tar", revision],
                              check=True, capture_output=True).stdout
     with tempfile.TemporaryDirectory(prefix="dyn4k-ledger-build-") as directory:
         checkout = Path(directory)
@@ -101,7 +102,7 @@ def identity_variant(root: Path, revision: str, artifact: Path, variant: str) ->
     artifact = artifact.resolve()
     if artifact != root / ANDROID_ARTIFACT:
         raise ValueError("candidate Android artifact path differs from the allowlisted build output")
-    if git(root, "rev-parse", f"{revision}^{{commit}}") != revision:
+    if git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{commit}}") != revision:
         raise ValueError("candidate Android source revision is invalid")
     java = java_home() / "bin/java"
     if not java.is_file():
@@ -111,7 +112,7 @@ def identity_variant(root: Path, revision: str, artifact: Path, variant: str) ->
     if not version.startswith('openjdk version "21.'):
         raise ValueError("Android source rebuild requires JDK 21")
     return {"schema_version": 1, "variant": "android", "revision": revision,
-            "source_tree": git(root, "rev-parse", f"{revision}^{{tree}}"),
+            "source_tree": git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{tree}}"),
             "artifact": ANDROID_ARTIFACT, "artifact_sha256": digest(artifact),
             "gradle_wrapper_sha256": digest(root / "gradlew"),
             "java": str(java), "java_sha256": digest(java),
