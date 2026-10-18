@@ -15,6 +15,7 @@ import compare
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import nominal_zero
 import receipt
+import exact_consistency
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -148,7 +149,8 @@ def audit_pair(fixture, reference, candidate, per_step):
             bodies = [selected_body(row, step) for _, row in pair]
             current = []
             measured = []
-            per_step_result = {"step": step, "position": [], "velocity": [],
+            per_step_result = {"step": step, "position": [], "position_differential": [],
+                               "velocity": [], "velocity_differential": [],
                                "rotation_analytic": [], "rotation_differential": []}
             for provider, body in zip(("reference", "candidate"), bodies, strict=True):
                 transform = body["transform"]
@@ -168,7 +170,9 @@ def audit_pair(fixture, reference, candidate, per_step):
                     cap = Fraction("1e-10")
                     position["analytic_checks"] += 1
                     per_step_result["position"].append({"provider": provider, "axis": axis,
-                                                          "analytic_error": str(error)})
+                                                          "analytic_error": str(error),
+                                                          "cap": str(cap),
+                                                          "verdict": "PASS" if error <= cap else "FAIL"})
                     if error > cap:
                         record_failure(position, provider + ".analytic." + str(axis), step, error, cap)
                 velocities = body["velocity"]
@@ -180,7 +184,9 @@ def audit_pair(fixture, reference, candidate, per_step):
                         (Fraction(1, 4), Fraction(-1, 8), Fraction(1, 2)), strict=True)):
                     velocity["constant_checks"] += 1
                     per_step_result["velocity"].append({"provider": provider, "axis": axis,
-                                                          "error": str(abs(actual - expected))})
+                                                          "error": str(abs(actual - expected)),
+                                                          "cap": "0",
+                                                          "verdict": "PASS" if actual == expected else "FAIL"})
                     if actual != expected:
                         record_failure(velocity, provider + ".constant." + str(axis), step,
                                        abs(actual - expected), 0)
@@ -193,11 +199,17 @@ def audit_pair(fixture, reference, candidate, per_step):
                 error = abs(measured[0][0][axis] - measured[1][0][axis])
                 cap = Fraction("2e-10")
                 position["differential_checks"] += 1
+                per_step_result["position_differential"].append({"axis": axis,
+                    "error": str(error), "cap": str(cap),
+                    "verdict": "PASS" if error <= cap else "FAIL"})
                 if error > cap:
                     record_failure(position, "differential." + str(axis), step, error, cap)
             for axis in range(3):
                 error = abs(measured[0][1][axis] - measured[1][1][axis])
                 velocity["differential_checks"] += 1
+                per_step_result["velocity_differential"].append({"axis": axis,
+                    "error": str(error), "cap": "0",
+                    "verdict": "PASS" if not error else "FAIL"})
                 if error:
                     record_failure(velocity, "differential." + str(axis), step, error, 0)
             theta_i = oracle.Interval.rational(step * oracle.ALPHA)
@@ -268,7 +280,33 @@ def verify(args):
     reference = compare.audit_reference(fixture, args.reference)
     require(reference["status"] == "PASSED", "frozen nominal reference differs")
     counts = receipt.inspect(args.trace, fixture)
-    bound = receipt.verify(args, fixture, counts)
+    if args.diagnostic_result:
+        require(args.artifact and args.source_commit, "diagnostic source and artifact are required")
+        diagnostic = compare.parse(Path(args.diagnostic_result).read_bytes())
+        observed = exact_consistency.identity(args.trace, args.artifact, args.source_commit,
+                                               sorted((ROOT / "tools/numerical/candidate/calibration").glob("*.java")) +
+                                               [ROOT / "tools/numerical/candidate/runtime/RuntimeStamp.java"])
+        require(diagnostic.get("identity") == observed and
+                diagnostic.get("comparison", {}).get("status") == "PASSED" and
+                diagnostic.get("reference", {}).get("status") == "PASSED",
+                "source-bound diagnostic identity or comparison differs")
+        bound = compare.parse(Path(args.receipt).read_bytes())
+        expected_runtime = dict(observed["runtime"])
+        expected_runtime["process_command_sha256"] = observed["process_sha256"]
+        expected_runtime["runtime_stamp_sha256"] = observed["runtime_stamp_sha256"]
+        require(set(bound) == receipt.RECEIPT_FIELDS and
+                bound["source_hash_method"] == "SHA-256 of git archive --format=tar source_commit" and
+                bound["artifact_path"] == observed["artifact_path"] and
+                bound["build_config_sha256"] == receipt.build_config_hash() and
+                bound["runtime"] == expected_runtime,
+                "source-bound diagnostic receipt differs")
+        compare.load_receipt(args.receipt, args.trace, fixture,
+                             observed["source_archive_sha256"], observed["artifact_sha256"],
+                             args.source_commit, counts)
+        scope = "SOURCE_BOUND_STAGED_JVM_DIAGNOSTIC_NOT_FINAL_BRANCH"
+    else:
+        bound = receipt.verify(args, fixture, counts)
+        scope = "RECEIPT_BOUND_STAGED_JVM_NOMINAL_PHYSICAL"
     runtime = bound["runtime"]
     require(runtime["java_version"].startswith("21.") and
             Path(runtime["process_command"]).resolve() ==
@@ -276,7 +314,7 @@ def verify(args):
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=False)
     result = audit_pair(fixture, args.reference, args.trace, output / "per-step.jsonl.gz")
-    result.update({"scope": "RECEIPT_BOUND_STAGED_JVM_NOMINAL_PHYSICAL",
+    result.update({"scope": scope,
                    "candidate_commit": bound["candidate_commit"],
                    "source_sha256": bound["source_sha256"],
                    "artifact_sha256": bound["artifact_sha256"],
@@ -299,6 +337,9 @@ def main():
     parser.add_argument("--reference", required=True)
     parser.add_argument("--jdk-home", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--diagnostic-result")
+    parser.add_argument("--artifact")
+    parser.add_argument("--source-commit")
     args = parser.parse_args()
     try:
         require(args.fixture == "nominal-free-motion", "nominal fixture differs")

@@ -3,8 +3,10 @@ import gzip
 import hashlib
 import json
 import math
+import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -78,6 +80,14 @@ class NominalQualityTest(unittest.TestCase):
         self.assertEqual(result["position"]["analytic_checks"], 4)
         self.assertEqual(result["rotation"]["analytic_checks"], 8)
         self.assertEqual(result["positive_zero_checks"], {"reference": 6, "candidate": 6})
+        with gzip.open(self.root / "per-step-1.jsonl.gz", "rt") as evidence:
+            step = json.loads(next(evidence))
+            self.assertEqual(step["position_differential"],
+                             [{"axis": 0, "error": "0", "cap": "1/5000000000", "verdict": "PASS"},
+                              {"axis": 1, "error": "0", "cap": "1/5000000000", "verdict": "PASS"}])
+            self.assertEqual(step["velocity_differential"],
+                             [{"axis": axis, "error": "0", "cap": "0", "verdict": "PASS"}
+                              for axis in range(3)])
 
     def test_position_velocity_and_positive_zero_mutants_reject(self):
         def move(rows):
@@ -108,6 +118,37 @@ class NominalQualityTest(unittest.TestCase):
                        lambda rows: rows[-1]["state"]["bodies"][0].__setitem__("rotationIncrementSum", math.nan)):
             with self.subTest(change=change), self.assertRaises(nominal_quality.Invalid):
                 self.audit(change)
+
+    @unittest.skipUnless(os.environ.get("NOMINAL_PHYSICAL_DIAGNOSTIC"),
+                         "retained source-bound JVM capture is not selected")
+    def test_retained_diagnostic_rejects_source_artifact_process_and_trace_mutations(self):
+        root = Path(os.environ["NOMINAL_PHYSICAL_DIAGNOSTIC"])
+        diagnostic = json.loads((root / "comparison/result.json").read_text())
+        bound = json.loads((root / "comparison/receipt.json").read_text())
+        identity = diagnostic["identity"]
+        trace = root / "capture/L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz"
+        reference = Path(os.environ["NOMINAL_PHYSICAL_REFERENCE"])
+        changes = (
+            ("source", "receipt", lambda row: row.__setitem__("source_sha256", "0" * 64)),
+            ("artifact", "receipt", lambda row: row.__setitem__("artifact_sha256", "0" * 64)),
+            ("process", "receipt", lambda row: row["runtime"].__setitem__("process_id", "0")),
+            ("trace", "result", lambda row: row["identity"].__setitem__("trace_sha256", "0" * 64)),
+        )
+        for name, target, change in changes:
+            with self.subTest(name=name):
+                observed = copy.deepcopy(bound if target == "receipt" else diagnostic)
+                change(observed)
+                mutant = self.root / (name + ".json")
+                mutant.write_text(json.dumps(observed))
+                args = types.SimpleNamespace(
+                    fixture="nominal-free-motion", trace=trace,
+                    receipt=mutant if target == "receipt" else root / "comparison/receipt.json",
+                    reference=reference, jdk_home=identity["runtime"]["java_home"],
+                    output=self.root / (name + "-output"),
+                    diagnostic_result=mutant if target == "result" else root / "comparison/result.json",
+                    artifact=identity["artifact_path"], source_commit=identity["source_commit"])
+                with self.assertRaises(nominal_quality.Invalid):
+                    nominal_quality.verify(args)
 
 
 if __name__ == "__main__":
