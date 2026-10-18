@@ -294,7 +294,7 @@ class RawArtifactTests(unittest.TestCase):
             self.assertTrue(all(":current:" in lane for lane in scoped["configuration_lanes"]))
             self.assertTrue(all(item["complete_lane_status"] == "NOT_RUN"
                                 for item in scoped["observed_cases"]))
-            self.assertEqual(2460, len(scoped["observed_cases"][0]
+            self.assertEqual(2465, len(scoped["observed_cases"][0]
                                        ["common_case_ids"]["dyn4k-core"]))
             self.assertEqual(58, len(scoped["observed_cases"][0]
                                      ["common_case_ids"]["dyn4k"]))
@@ -540,11 +540,9 @@ class RawArtifactTests(unittest.TestCase):
                 sys.executable, str(repository / "tools/qualification/qualify.py"), "record",
                 "--candidate-sha", sha, "--full-hosted-bundle", str(transport),
                 "--output", str(result)], cwd=repository, capture_output=True, text=True)
-            self.assertEqual(1, recorded.returncode)
-            self.assertEqual({"PASSED": 0, "FAILED": 0, "UNAVAILABLE": 0,
-                              "NOT_RUN": 112}, json.loads(recorded.stdout))
-            self.assertEqual(2, len(json.loads(result.read_text())
-                                    ["full_hosted_receipts"][0]["configuration_lanes"]))
+            self.assertEqual(2, recorded.returncode)
+            self.assertIn("independently reviewed manifest", recorded.stderr)
+            self.assertFalse(result.exists())
 
             for key, wrong in (("java_version", "17.0.1"),
                                ("gradle_version", "8.0"),

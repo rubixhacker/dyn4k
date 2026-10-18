@@ -51,7 +51,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(OLD_MANIFEST_SHA256, independent_gates.digest(old))
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
-            for label, manifest in (("old", old),
+            current = json.loads((ROOT / "tools/qualification/full-suite-manifest.json").read_text())
+            for label, manifest in (("old", old), ("new-unapproved", current),
                                     ("altered", {**self.manifest, "id": "altered"}),
                                     ("wrong-inventory", {**self.manifest,
                                                          "cases": self.manifest["cases"][:-1]})):
@@ -80,7 +81,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(2521, len(self.manifest["cases"]))
         corpus = json.loads((ROOT / "tools/qualification/full-common-corpus.json").read_text())
         self.assertEqual(2385, len(corpus["original_mappings"]))
-        self.assertEqual(201, len(corpus["source_files"]))
+        self.assertEqual(202, len(corpus["source_files"]))
         self.assertEqual(2518, sum(case["scope"] == "portable" for case in self.manifest["cases"]))
         self.assertEqual(3, sum(case["scope"] == "jvm-only" for case in self.manifest["cases"]))
         historical = json.loads(subprocess.check_output(

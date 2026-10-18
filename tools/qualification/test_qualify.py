@@ -631,7 +631,7 @@ class QualificationTests(unittest.TestCase):
                     "reviewed_pairs_sha256": "e" * 64,
                     "configurations": [{"configuration": config,
                                         "source": [{"module": "dyn4k-core",
-                                                    "case_ids": [str(n) for n in range(2460)]},
+                                                    "case_ids": [str(n) for n in range(2465)]},
                                                    {"module": "dyn4k",
                                                     "case_ids": [str(n) for n in range(58)]}],
                                         "consumer": {"case_ids": ["one", "two", "three"]}}
@@ -686,7 +686,7 @@ class QualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "corpus"):
             qualify.validate_complete_suite_bindings(suite, repository)
 
-    def test_complete_suite_matches_entire_approved_manifest(self):
+    def test_complete_suite_matches_source_but_waits_for_approval(self):
         repository = Path(__file__).resolve().parents[2]
         relative = "tools/qualification/full-suite-manifest.json"
         approved = repository / relative
@@ -694,7 +694,11 @@ class QualificationTests(unittest.TestCase):
             ["git", "-C", str(repository), "show",
              f"6f983ad3a36bdc549c32f5d0883b0a47b28e1963:{relative}"]))
         suite = json.loads(raw)
-        qualify.validate_complete_suite_bindings(suite, repository)
+        with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
+            qualify.validate_complete_suite_bindings(suite, repository)
+        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
+                               qualify.manifest_digest(suite)):
+            qualify.validate_complete_suite_bindings(suite, repository)
 
         import copy
         changes = (
@@ -718,16 +722,20 @@ class QualificationTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         suite = json.loads((repository / full_suite_manifest.MANIFEST_PATH).read_text())
         corpus = json.loads((repository / full_suite_manifest.CORPUS_PATH).read_text())
-        self.assertEqual(2521, len(suite["cases"]))
-        self.assertEqual(2521, len({case["id"] for case in suite["cases"]}))
-        self.assertEqual(2521, len(corpus["cases"]))
+        self.assertEqual(2526, len(suite["cases"]))
+        self.assertEqual(2526, len({case["id"] for case in suite["cases"]}))
+        self.assertEqual(2526, len(corpus["cases"]))
         self.assertEqual(2385, len(corpus["original_mappings"]))
         self.assertEqual(2385, len({row["original"] for row in corpus["original_mappings"]}))
-        self.assertEqual(201, len(corpus["source_files"]))
-        self.assertEqual("dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94",
+        self.assertEqual(202, len(corpus["source_files"]))
+        self.assertEqual("9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc",
                          qualify.manifest_digest(suite))
         full_suite_manifest.validate_manifest(suite, repository)
-        qualify.validate_complete_suite_bindings(suite, repository)
+        with self.assertRaisesRegex(ValueError, "independently reviewed manifest"):
+            qualify.validate_complete_suite_bindings(suite, repository)
+        with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
+                               qualify.manifest_digest(suite)):
+            qualify.validate_complete_suite_bindings(suite, repository)
 
         with mock.patch.object(qualify, "APPROVED_COMPLETE_SUITE_SHA256",
                                "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"):

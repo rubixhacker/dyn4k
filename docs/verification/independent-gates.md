@@ -2,6 +2,8 @@
 
 Run `independent_gates.py` for one exact Git commit and one approved runtime lane. It reads the reviewed 2,521-case manifest from revision `e8b72ff86ca367dffa26b6bbab38f25e7aa0abc3`. It requires canonical JSON SHA-256 `dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28cd5b0e94`. Its result binds the candidate, lane, hashes, archive digests, gate outcomes, and numerical policy. The earlier `7e828a` manifest and altered inventories fail before gate evaluation. The corpus has 201 source files, 2,385 original Java mappings, and 2,518 portable cases. Selection spans 21 targets, 28 target/runtime families, and 112 lanes.
 
+The newly generated 2,526-case manifest has 2,523 portable cases and 202 source files. It is pending separate Sol review. The approved revision and digest above remain the gate pins; this intermediate reseal does not qualify the new manifest or any runtime lane.
+
 ```sh
 python3 tools/qualification/independent_gates.py \
   --candidate-sha "$CANDIDATE_SHA" \

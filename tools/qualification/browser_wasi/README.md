@@ -1,6 +1,6 @@
 # Browser and Wasmtime qualification
 
-This runner checks the staged `dyn4k-core` and `dyn4k` publications on the assigned web runtimes. Each applicable lane must execute all 2,460 core and 58 facade cases from the committed `full-common-corpus.json`. It checks the manifest against the committed original map, reviewed pair file, and current test source tree. Candidate preflight also compares production and consumer source bytes with their committed Git blobs. A separate consumer resolves both staged modules and steps a world. Its test checks shared body identity, collision detection, and contact callbacks.
+This runner checks the staged `dyn4k-core` and `dyn4k` publications on the assigned web runtimes. Each applicable lane must execute all 2,465 core and 58 facade cases from the committed `full-common-corpus.json`. It checks the manifest against the committed original map, reviewed pair file, and current test source tree. Candidate preflight also compares production and consumer source bytes with their committed Git blobs. A separate consumer resolves both staged modules and steps a world. Its test checks shared body identity, collision detection, and contact callbacks.
 
 Run against a clean candidate commit with JDK 21. First check its committed corpus, test sources, reviewed map, and consumer pins:
 

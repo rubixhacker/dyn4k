@@ -75,7 +75,7 @@ def common_corpus_cases(root: Path, candidate_sha: str, module: str) -> set[tupl
         raise ValueError("full common corpus differs from source tree or reviewed map")
     cases = {(case["classname"], case["method"]) for case in manifest["cases"]
              if case["module"] == module and case["source_set"] == "commonTest"}
-    required = 2460 if module == "dyn4k-core" else 58
+    required = 2465 if module == "dyn4k-core" else 58
     if len(cases) != required:
         raise ValueError(f"full common corpus count differs: {module} {len(cases)}")
     return cases
@@ -282,8 +282,8 @@ def candidate_identity(root: Path, expected_sha: str) -> None:
     facade = common_corpus_cases(root, expected_sha, "dyn4k")
     manifest = json.loads((root / full_corpus.MANIFEST_PATH).read_bytes())
     counts = manifest["counts"]
-    if (counts["total_methods"] != 2521 or counts["unresolved_mappings"] != 0
-            or len(manifest["cases"]) != 2521
+    if (counts["total_methods"] != 2526 or counts["unresolved_mappings"] != 0
+            or len(manifest["cases"]) != 2526
             or len([case for case in manifest["cases"] if case["source_set"] == "jvmTest"]) != 3
             or core != source_cases(root / "dyn4k-core/src/commonTest/kotlin")
             or facade != source_cases(root / "dyn4k/src/commonTest/kotlin")):
