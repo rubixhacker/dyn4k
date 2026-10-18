@@ -664,7 +664,7 @@ class FullHostedTests(unittest.TestCase):
         for module in qualify.MODULES:
             source = repository / module / "src/commonMain/kotlin/api/Type.kt"
             source.parent.mkdir(parents=True)
-            source.write_text("// Fixture notice\npackage api\nclass Type\n")
+            source.write_bytes(b"// Fixture notice\npackage api\nclass Type\n")
         manifest = json.loads((actual_repository / full_hosted.MANIFEST).read_text())
         for item in manifest["source_files"]:
             destination = repository / item["path"]
