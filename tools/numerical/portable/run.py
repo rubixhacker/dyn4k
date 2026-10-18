@@ -15,6 +15,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import declared_cases
+from exact_consistency import audit_trace
 from physical import nominal_free, sleep_wake_rows
 from reference_diagnostic import diagnostic, portable_case_id
 from receipt import Identity, Rejected, digest, records, seal
@@ -272,6 +273,27 @@ def compare_frozen(lane, reference_dirs):
     return results
 
 
+def _audit_exact_one(job):
+    trace, case_id, outer_hz, configured = job
+    return audit_trace(trace, case_id, outer_hz, configured)
+
+
+def check_exact_consistency(lane):
+    jobs = [(lane / "cases" / f"contacts-default-{hz}.jsonl",
+             f"S-sleep-wake-hz{hz}", hz, False) for hz in (30, 60, 120)]
+    jobs += [(lane / "cases" / f"contacts-configured-{hz}-r{repetition}.jsonl",
+              f"Q-sleep-wake-outer{hz}-repeat{repetition}", hz, True)
+             for hz in (30, 60, 120) for repetition in (1, 2)]
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        cases = list(pool.map(_audit_exact_one, jobs))
+    result = {"status": "PASSED" if all(item["status"] == "PASSED" for item in cases)
+              else "FAILED", "cases": cases, "qualification": "UNPASSED",
+              "semantic_source_revision": "44dd7cf05502fa4b5fdc3523e3271c3cba335de8"}
+    (lane / "exact-consistency.json").write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
 def execute(host, output, commit, source_sha256, reference_dirs):
     lane = output / host
     lane.mkdir(parents=True, exist_ok=False)
@@ -370,6 +392,8 @@ def execute(host, output, commit, source_sha256, reference_dirs):
             records(lane / "cases" / f"{case_id}.jsonl", allow_tagged_nonfinite=True)
             for case_id in sleep_ids if (lane / "cases" / f"{case_id}.jsonl").is_file()))
         outcome["sleep_wake_physical"] = sleep
+        exact_consistency = check_exact_consistency(lane)
+        outcome["exact_consistency"] = exact_consistency
         if outcome["status"] == "FAILED":
             raise Rejected("one or more method tasks failed or lacked current XML")
         if any(int(attributes.get(key, "-1")) != expected for key, expected in
@@ -385,6 +409,9 @@ def execute(host, output, commit, source_sha256, reference_dirs):
         if physical["status"] != "PASSED" or sleep["status"] != "PHYSICAL_PASSED":
             outcome["status"] = "FAILED"
             outcome["reason"] = "physical diagnostic failed"
+        if exact_consistency["status"] != "PASSED":
+            outcome["status"] = "FAILED"
+            outcome["reason"] = "exact consistency diagnostic failed"
     except (Rejected, OSError, ValueError, KeyError) as error:
         outcome["status"] = "FAILED"
         outcome["reason"] = str(error)
