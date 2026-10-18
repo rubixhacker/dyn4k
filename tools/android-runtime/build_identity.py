@@ -28,9 +28,10 @@ def current_java():
     if not binary.is_file():
         raise ValueError("pinned JDK 21 binary missing")
     output = subprocess.run([str(binary), "-version"], text=True, capture_output=True, check=True)
-    if not re.search(r'(?m)^openjdk version "21\.', output.stderr):
+    versions = re.findall(r'(?m)^openjdk version "21\.[^\r\n]*', output.stderr)
+    if len(versions) != 1:
         raise ValueError("wrong pinned JDK version")
-    return {"java_home": JDK_HOME, "java_version": output.stderr.splitlines()[0],
+    return {"java_home": JDK_HOME, "java_version": versions[0],
             "gradle_version": GRADLE_VERSION}
 
 

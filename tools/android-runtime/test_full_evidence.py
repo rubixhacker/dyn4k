@@ -1,9 +1,11 @@
 import unittest
 import tempfile
 import json
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
+import build_identity
 import full_evidence
 import run_full
 from android_corpus import FINGERPRINTS
@@ -48,6 +50,16 @@ def complete_graph(providers):
 
 
 class FullInstalledEvidenceTest(unittest.TestCase):
+    def test_current_java_records_version_after_java_tool_options_notice(self):
+        stderr = ("Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/home/task/tmp\n"
+                  'openjdk version "21.0.12.1" 2025-07-15 LTS\n')
+        with patch.dict("os.environ", {"JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}), \
+                patch.object(Path, "is_file", return_value=True), \
+                patch.object(build_identity.subprocess, "run",
+                             return_value=SimpleNamespace(stderr=stderr)):
+            self.assertEqual(build_identity.current_java()["java_version"],
+                             'openjdk version "21.0.12.1" 2025-07-15 LTS')
+
     def test_provider_graph_rejects_wrong_coordinates_second_provider_and_missing_graph(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

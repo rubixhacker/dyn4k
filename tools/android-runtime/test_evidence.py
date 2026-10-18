@@ -4,10 +4,33 @@ import hashlib
 from pathlib import Path
 
 from evidence import parse_instrumentation, validate_lane
-from run import verify_installed_apk
+from run import instrumentation_filter, verify_installed_apk
 
 
 class InstrumentationEvidenceTest(unittest.TestCase):
+    def test_api21_candidate_uses_exact_short_testfile_argument(self):
+        portable = [f"org.dyn4j.coverage.LongPortableCase{index:03d}Test"
+                    for index in range(171)]
+        prepared = {"portable_classes": portable}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            classes, arguments, selection = instrumentation_filter(
+                prepared, "candidate", "debug", "21", directory)
+            self.assertEqual(len(classes), 173)
+            self.assertEqual(arguments, ["-e", "testFile",
+                                         "/data/local/tmp/dyn4k-candidate-debug-classes.txt"])
+            self.assertEqual(selection.read_text().splitlines(), list(classes))
+            self.assertGreater(selection.stat().st_size, 4096)
+            _, newer_arguments, newer_selection = instrumentation_filter(
+                prepared, "candidate", "debug", "37", directory)
+            self.assertEqual(newer_arguments, ["-e", "class", ",".join(classes)])
+            self.assertIsNone(newer_selection)
+            baseline_classes, baseline_arguments, baseline_selection = instrumentation_filter(
+                prepared, "baseline", "debug", "21", directory)
+            self.assertEqual(baseline_arguments,
+                             ["-e", "class", ",".join(baseline_classes)])
+            self.assertIsNone(baseline_selection)
+
     def test_installed_apk_hash_rejects_wrong_device_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             apk = Path(temporary) / "installed-base.apk"

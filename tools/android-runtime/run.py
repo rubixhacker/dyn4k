@@ -33,6 +33,16 @@ def instrumentation_classes(prepared, flavor):
     return tuple(sorted(selected))
 
 
+def instrumentation_filter(prepared, flavor, build_type, expected_api, directory):
+    classes = instrumentation_classes(prepared, flavor)
+    if expected_api != "21" or flavor != "candidate":
+        return classes, ["-e", "class", ",".join(classes)], None
+    selection = directory / "selected-classes.txt"
+    selection.write_text("".join(name + "\n" for name in classes))
+    device_path = f"/data/local/tmp/dyn4k-{flavor}-{build_type}-classes.txt"
+    return classes, ["-e", "testFile", device_path], selection
+
+
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -70,7 +80,8 @@ def apk_path(app, flavor, build_type, test):
     return files[0]
 
 
-def run_lane(root, prepared, portable, flavor, build_type, evidence_root, adb, prepared_path, prepared_checksum):
+def run_lane(root, prepared, portable, flavor, build_type, expected_api, evidence_root,
+             adb, prepared_path, prepared_checksum):
     app = root / "consumers/android-runtime/app"
     apk = apk_path(app, flavor, build_type, False)
     test_apk = apk_path(app, flavor, build_type, True)
@@ -134,10 +145,22 @@ def run_lane(root, prepared, portable, flavor, build_type, evidence_root, adb, p
                    if "(target=" + package + ")" in line]
         if len(runners) != 1:
             raise ValueError(f"instrumentation runner mismatch: {runners}")
-        classes = instrumentation_classes(prepared, flavor)
+        classes, selection_arguments, selection = instrumentation_filter(
+            prepared, flavor, build_type, expected_api, directory)
         result["selected_classes"] = classes
+        if selection is not None:
+            selection_hash = sha256(selection)
+            result["selection_file"] = {"path": str(selection), "sha256": selection_hash,
+                                        "device_path": selection_arguments[2]}
+            command(adb + ["push", str(selection), selection_arguments[2]],
+                    directory / "push-selected-classes.txt")
+            pulled_selection = directory / "installed-selected-classes.txt"
+            command(adb + ["pull", selection_arguments[2], str(pulled_selection)],
+                    directory / "pull-selected-classes.txt")
+            if sha256(selection) != selection_hash or sha256(pulled_selection) != selection_hash:
+                raise ValueError("installed test class selection differs from prepared classes")
         instrument = subprocess.run(adb + ["shell", "am", "instrument", "-w", "-r",
-                                       "-e", "class", ",".join(classes), runners[0]],
+                                       *selection_arguments, runners[0]],
                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         raw = instrument.stdout
         (directory / "instrumentation.txt").write_text(raw)
@@ -149,6 +172,8 @@ def run_lane(root, prepared, portable, flavor, build_type, evidence_root, adb, p
             expected_instrumentation.add("io.github.rubixhacker.dyn4k.runtime.StagedKotlinConsumerTest#sharedMutableIdentity")
             expected_instrumentation.update(case.split(":", 1)[1] for case in portable)
         validate_lane(parsed, set(), expected_instrumentation, instrument.returncode)
+        if selection is not None and sha256(selection) != selection_hash:
+            raise ValueError("test class selection changed during installed run")
         if flavor == "candidate":
             result["portable_case_ids"] = sorted(portable)
         verify_consumer_sources(root, prepared)
@@ -206,7 +231,8 @@ def main():
         raise ValueError(f"unexpected Android image fingerprint: {identity}")
     evidence_root = args.output.resolve()
     evidence_root.mkdir(parents=True, exist_ok=True)
-    lanes = [run_lane(root, prepared, portable, flavor, args.build_type, evidence_root, adb,
+    lanes = [run_lane(root, prepared, portable, flavor, args.build_type, args.expected_api,
+                      evidence_root, adb,
                       args.prepared, prepared_checksum)
              for flavor in ("baseline", "candidate")]
     tree = command(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip()
