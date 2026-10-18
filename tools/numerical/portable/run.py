@@ -659,6 +659,31 @@ def check_exact_consistency(lane):
     return result
 
 
+def method_command(host, method, lane):
+    if method not in MATRIX_METHODS:
+        raise Rejected(f"unknown numerical matrix method: {method}")
+    command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
+               "--tests", f"portable.PortableMatrixTest.{method}",
+               f"-PportableRepository={ROOT / 'build/staging-repository'}",
+               "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
+               "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g",
+               "--init-script", str(PROVENANCE_SCRIPT)]
+    if host == "jvm8":
+        command.extend(("-PportableJvm8=true",
+                        "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
+    execution_log = None
+    if host == "linux-x64" or host == "jvm8" or host.startswith("node-"):
+        tracer = shutil.which("strace")
+        if tracer is None:
+            raise Rejected("strace is unavailable for native process binding")
+        execution_log = lane / f"native-exec-{method}.log"
+        calls = "trace=process,openat" if host == "jvm8" else "trace=execve"
+        command.append("-Pkotlin.compiler.execution.strategy=in-process")
+        command = [tracer, "-f", "-s", "65535", "-e", calls, "-o",
+                   str(execution_log), *command]
+    return command, execution_log
+
+
 def execute(host, output, commit, source_sha256, reference_dirs,
             prospective_baseline=None, frozen_baseline=None,
             frozen_attestation=None, prospective_attestation=None,
@@ -693,25 +718,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         runtimes = []
         for method in MATRIX_METHODS:
             started = __import__("time").time()
-            command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), HOST_TASKS[host],
-                       "--tests", f"portable.PortableMatrixTest.{method}",
-                       f"-PportableRepository={ROOT / 'build/staging-repository'}",
-                       "--rerun-tasks", "--no-daemon", "--console=plain", "--info",
-                       "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g",
-                       "--init-script", str(PROVENANCE_SCRIPT)]
-            if host == "jvm8":
-                command.extend(("-PportableJvm8=true",
-                                "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
+            command, execution_log = method_command(host, method, lane)
             log_path = lane / f"gradle-{method}.log"
-            execution_log = None
-            if host == "linux-x64" or host == "jvm8" or host.startswith("node-"):
-                tracer = shutil.which("strace")
-                if tracer is None:
-                    raise Rejected("strace is unavailable for native process binding")
-                execution_log = lane / f"native-exec-{method}.log"
-                calls = "trace=process,openat" if host == "jvm8" else "trace=execve"
-                command = [tracer, "-f", "-s", "65535", "-e", calls, "-o",
-                           str(execution_log), *command]
             with log_path.open("x", encoding="utf-8") as log:
                 completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
                                            stderr=subprocess.STDOUT, check=False)

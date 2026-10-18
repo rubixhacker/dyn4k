@@ -272,6 +272,60 @@ class ExtractionTest(unittest.TestCase):
         self.assertIn('version "1.8.', result["version"])
         self.assertEqual(result["dependency"]["dependency_sha256"], staged_sha)
 
+    def test_traced_jvm8_method_uses_local_in_process_compiler(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run.shutil, "which", return_value="/usr/bin/strace"):
+            lane = Path(directory)
+            method = "freeMotionForcesDampingAndRestitution"
+            command, execution_log = run.method_command("jvm8", method, lane)
+            self.assertEqual(command[:7], ["/usr/bin/strace", "-f", "-s", "65535",
+                                           "-e", "trace=process,openat", "-o"])
+            self.assertEqual(command[7], str(execution_log))
+            self.assertEqual(execution_log, lane / f"native-exec-{method}.log")
+            self.assertEqual(command.count("-Pkotlin.compiler.execution.strategy=in-process"), 1)
+            self.assertIn(f"portable.PortableMatrixTest.{method}", command)
+            self.assertIn("-PportableJvm8=true", command)
+            self.assertIn("-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8", command)
+            self.assertIn("--init-script", command)
+            ordinary, ordinary_log = run.method_command("jvm", method, lane)
+            self.assertIsNone(ordinary_log)
+            self.assertNotIn("-Pkotlin.compiler.execution.strategy=in-process", ordinary)
+            for host in ("linux-x64", "node-js", "node-wasm-js", "node-wasm-wasi"):
+                traced, trace_log = run.method_command(host, method, lane)
+                self.assertEqual(traced[5], "trace=execve")
+                self.assertEqual(trace_log, lane / f"native-exec-{method}.log")
+                self.assertEqual(traced.count("-Pkotlin.compiler.execution.strategy=in-process"), 1)
+
+    def test_traced_method_rejects_missing_tracer_and_unknown_method(self):
+        with patch.object(run.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(run.Rejected, "strace is unavailable"):
+                run.method_command("jvm8", "freeMotionForcesDampingAndRestitution",
+                                   Path("/tmp/unused"))
+        with self.assertRaisesRegex(run.Rejected, "unknown numerical matrix method"):
+            run.method_command("jvm8", "unrecorded", Path("/tmp/unused"))
+
+    def test_java_8_worker_open_proof_requires_staged_jar_in_worker_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "dyn4k-core-jvm.jar"
+            staged.write_bytes(b"staged")
+            other = root / "dyn4k-core-other.jar"
+            other.write_bytes(b"other")
+            executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
+            execution = root / "native-exec.log"
+            prefix = (f'123 execve("{executable}", ["java", "GradleWorkerMain"], 0x1) = 0\n'
+                      '123 clone(child_stack=NULL, flags=CLONE_VM) = 124\n')
+            execution.write_text(prefix +
+                                 f'124 openat(AT_FDCWD, "{staged}", O_RDONLY) = 4\n')
+            command = [str(executable)]
+            proof = run._java_worker_open_proof(command, staged, execution)
+            self.assertEqual(proof["worker_pid"], "123")
+            self.assertEqual(proof["opened_artifact_sha256"], run.digest(staged))
+            execution.write_text(prefix +
+                                 f'124 openat(AT_FDCWD, "{other}", O_RDONLY) = 4\n')
+            with self.assertRaisesRegex(run.Rejected, "only the staged dependency"):
+                run._java_worker_open_proof(command, staged, execution)
+
     def test_java_8_worker_cannot_certify_jvm_21_route(self):
         executable = Path("/tmp/dyn4k-tools/jdk8/bin/java")
         if not executable.is_file():
