@@ -135,6 +135,43 @@ class BaselineCaptureSeamTest(unittest.TestCase):
                 injected.symlink_to(test_payload)
                 with self.assertRaisesRegex(Exception, "link or special file"):
                     baseline_capture.baseline_runtime(log, jar, proof, recorded)
+                injected.unlink()
+                library = proof / "classpath-entries/04/payload"
+                manifest = "Manifest-Version: 1.0\nMulti-Release: true\n\n"
+                for name in (
+                    "META-INF/versions/9/org/dyn4j/geometry/Vector2.class",
+                    "META-INF/versions/21/org/dyn4j/geometry/Vector2.class",
+                    "META-INF/versions/22/org/dyn4j/geometry/Vector2.class",
+                    "META-INF/versions/not-a-version/org/dyn4j/geometry/Vector2.class",
+                    "META-INF/versions/08/org/dyn4j/geometry/Vector2.class",
+                    "META-INF/versions/9//org/dyn4j/geometry/Vector2.class",
+                ):
+                    with self.subTest(versioned_class=name):
+                        with zipfile.ZipFile(library, "w") as archive:
+                            archive.writestr("META-INF/MANIFEST.MF", manifest)
+                            archive.writestr(name, b"old dyn4j class")
+                        resealed = json.loads(json.dumps(recorded))
+                        resealed["dependency"]["classpath_entries"][4]["files"][
+                            "payload"] = digest(library)
+                        with self.assertRaisesRegex(Exception, "versioned dyn4j provider"):
+                            baseline_capture.baseline_runtime(log, jar, proof, resealed)
+                with zipfile.ZipFile(library, "w") as archive:
+                    archive.writestr(
+                        "META-INF/versions/9/org/dyn4j/geometry/Vector2.class",
+                        b"old dyn4j class")
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["classpath_entries"][4]["files"][
+                    "payload"] = digest(library)
+                with self.assertRaisesRegex(Exception, "versioned dyn4j provider"):
+                    baseline_capture.baseline_runtime(log, jar, proof, resealed)
+                with zipfile.ZipFile(library, "w") as archive:
+                    archive.writestr("META-INF/MANIFEST.MF", manifest)
+                    archive.writestr("META-INF/versions/9/fixture/Example.class", b"fixture")
+                resealed = json.loads(json.dumps(recorded))
+                resealed["dependency"]["classpath_entries"][4]["files"][
+                    "payload"] = digest(library)
+                self.assertEqual(resealed, baseline_capture.baseline_runtime(
+                    log, jar, proof, resealed))
 
     def test_fixture_hash_binds_baseline_operation_tap(self):
         with tempfile.TemporaryDirectory() as directory:

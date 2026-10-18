@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import zipfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -263,6 +264,17 @@ def _entry_files(root):
     return files
 
 
+def _has_versioned_dyn4j_class(path):
+    if not zipfile.is_zipfile(path):
+        return False
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if name.startswith("META-INF/versions/") and "/org/dyn4j/" in name and \
+                    name.endswith(".class"):
+                return True
+    return False
+
+
 def _classpath_archive(entries, proof_dir, expected, capture, stub_origin, jar_origin,
                        pinned, tap, jar):
     if len(entries) != len(CLASSPATH_ENTRY_NAMES) or [path.name for path in entries] != list(
@@ -311,6 +323,8 @@ def _classpath_archive(entries, proof_dir, expected, capture, stub_origin, jar_o
                          for name, data in sorted(files.items())}}
         inventory.append(row)
         classes = _provider_classes(payload)
+        if kind == "file" and _has_versioned_dyn4j_class(payload):
+            raise Rejected("baseline archived classpath has a versioned dyn4j provider")
         if index == 2:
             if classes != tap:
                 raise Rejected("baseline archived main output has unexpected dyn4j classes")
