@@ -1,6 +1,7 @@
 package org.dyn4j.collision.narrowphase
 
 import kotlin.math.abs
+import kotlin.math.sqrt
 import org.dyn4j.geometry.Capsule
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Convex
@@ -8,6 +9,7 @@ import org.dyn4j.geometry.EdgeFeature as GeometryEdgeFeature
 import org.dyn4j.geometry.Feature
 import org.dyn4j.geometry.Interval
 import org.dyn4j.geometry.PointFeature
+import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.Segment
 import org.dyn4j.geometry.Slice
 import org.dyn4j.geometry.Transform
@@ -19,6 +21,27 @@ internal object WindowsCollisionTrace {
     fun vector(value: Vector2) = "${number(value.x)},${number(value.y)}"
     fun vectors(values: Array<Vector2>?) = values?.joinToString(";") { vector(it) } ?: "null"
     fun values(values: DoubleArray) = values.joinToString(",") { number(it) }
+
+    fun polygonEdges(shape: Convex): String {
+        if (shape !is Polygon) return "na"
+        val vertices = shape.getVertices()
+        val normals = shape.getNormals()
+        return vertices.indices.joinToString(";") { index ->
+            val next = vertices[(index + 1) % vertices.size]
+            val dx = next.x - vertices[index].x
+            val dy = next.y - vertices[index].y
+            val nx = dy
+            val ny = -dx
+            val xx = nx * nx
+            val yy = ny * ny
+            val sum = xx + yy
+            val root = sqrt(sum)
+            val reciprocal = 1.0 / root
+            val normalized = Vector2(nx, ny)
+            val returnedRoot = normalized.normalize()
+            "$index:${number(dx)}:${number(dy)}:${number(xx)}:${number(yy)}:${number(sum)}:${number(root)}:${number(reciprocal)}:${number(nx * reciprocal)},${number(ny * reciprocal)}:${number(returnedRoot)}:${vector(normalized)}:${vector(normals[index])}"
+        }
+    }
 
     fun shape(shape: Convex): String {
         val parts = mutableListOf("kind=${shape::class.simpleName}", "center=${vector(shape.getCenter())}", "radius=${number(shape.getRadius())}")
@@ -64,6 +87,7 @@ internal object WindowsCollisionTrace {
         val initialDirection = if (centerDirection.isZero()) Vector2(1.0, 0.0) else centerDirection.copy()
         val fields = mutableListOf(
             "a.shape.local=${shape(a)}", "b.shape.local=${shape(b)}",
+            "a.polygon.edgeArithmetic=${polygonEdges(a)}", "b.polygon.edgeArithmetic=${polygonEdges(b)}",
             "a.foci.world=${vectors(fociA)}", "b.foci.world=${vectors(fociB)}",
             "a.axes.withB=${vectors(axesA)}", "b.axes.withA=${vectors(axesB)}",
             "gjk.initial.centerDirection=${vector(centerDirection)}", "gjk.initial.effectiveDirection=${vector(initialDirection)}",
