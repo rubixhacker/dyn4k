@@ -970,16 +970,17 @@ class SafariYarnLockTests(unittest.TestCase):
         return context, package
 
     def write_valid_karma_configs(self, mode="development"):
+        repository = self.repository.resolve()
         reporter = (self.repository /
                     "tools/qualification/safari-karma-reporter.js").read_text()
         for module in ("dyn4k-core", "dyn4k"):
             package = f"dyn4k-{module}-test"
-            package_root = self.repository / "build/js/packages" / package
+            package_root = repository / "build/js/packages" / package
             package_root.mkdir(parents=True, exist_ok=True)
-            runner = str(self.repository / "build/js/node_modules/kotlin-web-helpers/dist"
+            runner = str(repository / "build/js/node_modules/kotlin-web-helpers/dist"
                          / "kotlin-test-karma-runner.js")
             if mode == "production":
-                source = str(self.repository / module / "build/compileSync/js/test"
+                source = str(repository / module / "build/compileSync/js/test"
                              / "testProductionExecutable/kotlin" / f"{package}.js")
             else:
                 source = str(package_root / "kotlin" / f"{package}.js")
@@ -1049,6 +1050,15 @@ class SafariYarnLockTests(unittest.TestCase):
                             for item in inventory["inputs"]))
         self.assertEqual(inventory, json.loads((context / "inventory.json").read_text()))
         self.assert_context_upload_bound(context)
+
+    def test_public_context_accepts_canonical_config_with_aliased_repository(self):
+        alias = self.root / "source-alias"
+        alias.symlink_to(self.repository, target_is_directory=True)
+        self.repository = alias
+        context, _ = self.context_fixture("-aliased-repository")
+        self.write_valid_karma_configs()
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_COMPLETE", inventory["status"], inventory["inputs"])
 
     def test_context_scanner_ignores_irrelevant_klib_cache(self):
         context, _ = self.context_fixture()
@@ -1304,23 +1314,28 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertTrue(any(item["reason"] == "duplicate_inode"
                             for item in inventory["inputs"]))
 
-    def test_context_scanner_rejects_file_count_and_symlink_traversal(self):
+    def test_context_scanner_rejects_symlink_traversal(self):
         context, package = self.context_fixture()
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "outside-karma.js").write_text("outside\n")
         (package / "linked").symlink_to(outside, target_is_directory=True)
         (package / "linked-karma.js").symlink_to(outside / "outside-karma.js")
+        inventory = self.capture_context(context)
+        self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
+        self.assertTrue(any(item["reason"] == "symlink" for item in inventory["inputs"]))
+        self.assertFalse((context / "config" / safari_yarn_lock.CONTEXT_ROOTS[0]
+                          / "linked/outside-karma.js").exists())
+
+    def test_context_scanner_rejects_file_count(self):
+        context, package = self.context_fixture()
         (package / "a-karma.js").write_text("a\n")
         (package / "b-karma.js").write_text("b\n")
         with mock.patch.object(safari_yarn_lock, "CONTEXT_MAX_FILES", 1):
             inventory = self.capture_context(context)
         self.assertEqual("CONTEXT_INCOMPLETE", inventory["status"])
-        self.assertTrue(any(item["reason"] == "symlink" for item in inventory["inputs"]))
         self.assertTrue(any(item["reason"] == "file_count_limit"
                             for item in inventory["inputs"]))
-        self.assertFalse((context / "config" / safari_yarn_lock.CONTEXT_ROOTS[0]
-                          / "linked/outside-karma.js").exists())
         self.assertLessEqual(inventory["copied_files"], 1)
 
     def test_context_scanner_rejects_symlink_root(self):

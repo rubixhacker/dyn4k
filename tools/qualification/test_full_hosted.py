@@ -97,9 +97,12 @@ class FullHostedTests(unittest.TestCase):
 
     def test_public_safari_route_stages_and_archives_source_and_consumer_reporters(self):
         source_tree = Path(__file__).resolve().parents[2]
+        alias = self.root / "temporary-path-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.root = alias
         for configuration in ("development", "production", "missing", "symlink"):
             with self.subTest(configuration=configuration):
-                repository = self.root / f"source-{configuration}"
+                repository = (self.root / f"source-{configuration}").resolve()
                 consumer = repository / "consumers/qualification/portable"
                 for project in ("dyn4k-core", "dyn4k"):
                     (repository / project).mkdir(parents=True)
