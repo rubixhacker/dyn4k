@@ -32,6 +32,12 @@ OLD_MANIFEST_SHA256 = "dfafb566e19962dacafd0f18e6ff5374b2c30b0c10e1a0c522169c28c
 LANE = "jvm:Java:minimum:no-optimize"
 
 
+def checkout_matches_commit(paths):
+    return all((ROOT / path).read_bytes() == subprocess.check_output(
+        ["git", "--no-replace-objects", "show", f"HEAD:{path}"], cwd=ROOT)
+        for path in paths)
+
+
 class IndependentGateSeamTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -137,15 +143,20 @@ class IndependentGateSeamTests(unittest.TestCase):
         current = "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f"
         path = "tools/numerical/compare.py"
         self.assertEqual(current, independent_gates.APPROVED_POLICY[path])
-        self.assertEqual(current, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+        self.assertEqual(current, hashlib.sha256(subprocess.check_output(
+            ["git", "show", f"HEAD:{path}"], cwd=ROOT)).hexdigest())
         self.assertEqual(current, hashlib.sha256(subprocess.check_output(
             ["git", "show", f"8a5c4681838aa1eb1f08ebfb7aa54d6616bb3977:{path}"],
             cwd=ROOT)).hexdigest())
         historical = "cd21a4bd7d6731a096597f97966db9e02b9de448"
         current_source = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                                  cwd=ROOT, text=True).strip()
-        self.assertEqual(current, independent_gates._policy_binding(ROOT, historical)[path])
-        self.assertEqual(current, independent_gates._policy_binding(ROOT, current_source)[path])
+        if checkout_matches_commit(independent_gates.APPROVED_POLICY):
+            self.assertEqual(current, independent_gates._policy_binding(ROOT, historical)[path])
+            self.assertEqual(current, independent_gates._policy_binding(ROOT, current_source)[path])
+        else:
+            with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
+                independent_gates._policy_binding(ROOT, current_source)
         for path, approved in independent_gates.APPROVED_POLICY.items():
             committed = subprocess.check_output(["git", "show", f"{BASE}:{path}"],
                                                 cwd=ROOT)
@@ -177,9 +188,20 @@ class IndependentGateSeamTests(unittest.TestCase):
 
     def test_historical_numerical_source_adapter_matches_producer_git_archive(self):
         candidate = "cd21a4bd7d6731a096597f97966db9e02b9de448"
-        self.assertEqual(
-            "7958113412c14be8e106706a77871eba4dc8c4e1335c38fd01c7b9e18d26e12d",
-            independent_gates.verified_numerical_source_sha256(ROOT, candidate))
+        def archive_sha(autocrlf):
+            return hashlib.sha256(subprocess.check_output(
+                ["git", "-c", f"core.autocrlf={autocrlf}", "--no-replace-objects",
+                 "-C", str(ROOT), "archive", "--format=tar", candidate])).hexdigest()
+
+        self.assertEqual("7958113412c14be8e106706a77871eba4dc8c4e1335c38fd01c7b9e18d26e12d",
+                         archive_sha("false"))
+        self.assertEqual("371f767bb7e78c0203102f491ac1c7577177b7b7c91887030413af2e72466a05",
+                         archive_sha("true"))
+        configured = hashlib.sha256(subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(ROOT), "archive", "--format=tar",
+             candidate])).hexdigest()
+        self.assertEqual(configured,
+                         independent_gates.verified_numerical_source_sha256(ROOT, candidate))
 
     def test_prospective_and_joint_obligations_are_separate_when_unexecuted(self):
         gates = independent_gates.evaluate(self.manifest, BASE, LANE, {}, ROOT)["gates"]
@@ -268,7 +290,8 @@ class IndependentGateSeamTests(unittest.TestCase):
             self.assertEqual("FAILED", outcome["candidate_status"])
 
     def test_assembly_requires_every_selected_lane_and_digest_bound_results(self):
-        candidate = "a17d7cfce8b8abb8cdc4c5f5f31285f74c9b7149"
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
         with self.assertRaisesRegex(ValueError, "112"):
             independent_gates.evaluate_assembly(self.manifest, candidate, {}, ROOT)
         selections = {lane: {"archives": {}} for lane in self.manifest["lanes"]}
@@ -364,6 +387,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                                             cwd=ROOT, text=True).strip()
         verifier = ROOT / "tools/performance/sustained_archive.py"
         policy = ROOT / "docs/research/performance-manifest-v1.json"
+        guarded_paths = ["tools/performance/sustained_archive.py",
+                         "tools/performance/manifest.py", "tools/performance/measure.py",
+                         "tools/performance/analyze.py", "tools/performance/candidate_runner.py",
+                         "tools/performance/stress_monitor.py",
+                         "docs/research/performance-manifest-v1.json"]
+        checkout_bound = checkout_matches_commit(guarded_paths)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "archive"
             root.mkdir()
@@ -380,16 +409,23 @@ class IndependentGateSeamTests(unittest.TestCase):
                      hashlib.sha256((evidence / "archive.json").read_bytes()).hexdigest()},
                      "verifier_sha256": hashlib.sha256(verifier.read_bytes()).hexdigest(),
                      "policy_sha256": hashlib.sha256(policy.read_bytes()).hexdigest()}
-            with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
-                                        "unpassed policy"):
-                independent_gates._performance_resource(
-                    root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
-                    scope, ROOT, key)
+            if checkout_bound:
+                with self.assertRaisesRegex(independent_gates.IncompleteEvidence,
+                                            "unpassed policy"):
+                    independent_gates._performance_resource(
+                        root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
+                        scope, ROOT, key)
+            else:
+                with self.assertRaisesRegex(ValueError, "sustained performance verifier source differs"):
+                    independent_gates._performance_resource(
+                        root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
+                        scope, ROOT, key)
             scope["verifier_sha256"] = "0" * 64
-            with self.assertRaisesRegex(ValueError, "independently approved verifier"):
-                independent_gates._performance_resource(
-                    root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
-                    scope, ROOT, key)
+            if checkout_bound:
+                with self.assertRaisesRegex(ValueError, "independently approved verifier"):
+                    independent_gates._performance_resource(
+                        root, candidate, {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
+                        scope, ROOT, key)
 
     def test_producer_scope_is_part_of_digest_bound_public_result(self):
         scope = {"candidate_sha": BASE, "target": "jvm", "runtime": "Java",
@@ -490,7 +526,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                         "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
                        for case in identities]}
         with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(ValueError, "raw archive file is missing"):
+            checker_paths = [f"tools/numerical/portable/{name}" for name in
+                             independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
+            checker_paths.append(independent_gates.PROSPECTIVE_POLICY_PATH)
+            expected = ("raw archive file is missing" if checkout_matches_commit(checker_paths)
+                        else "prospective policy/checker blob differs")
+            with self.assertRaisesRegex(ValueError, expected):
                 independent_gates.verify_prospective_case_subgates(
                     Path(temporary), receipt, ROOT, candidate,
                     {"dyn4k-core": "a" * 64},
@@ -512,9 +553,18 @@ class IndependentGateSeamTests(unittest.TestCase):
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
             (current, independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
         )
+        checker_paths = [f"tools/numerical/portable/{name}" for name in
+                         independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
+        checker_paths.append(independent_gates.PROSPECTIVE_POLICY_PATH)
+        checkout_bound = checkout_matches_commit(checker_paths)
         for revision, blobs in windows:
             with self.subTest(revision=revision):
-                independent_gates._prospective_checker_binding(ROOT, revision)
+                if checkout_bound:
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+                else:
+                    with self.assertRaisesRegex(ValueError,
+                                                "prospective policy/checker blob differs"):
+                        independent_gates._prospective_checker_binding(ROOT, revision)
                 for filename, approved in blobs.items():
                     path = f"tools/numerical/portable/{filename}"
                     self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
@@ -532,14 +582,16 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(
                     ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
-            independent_gates._prospective_checker_binding(ROOT, current)
+            if checkout_bound:
+                independent_gates._prospective_checker_binding(ROOT, current)
         with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_POLICY_CHECKERS,
                              {"cases.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(
                     ROOT, independent_gates.PROSPECTIVE_POLICY_REVISION)
-            independent_gates._prospective_checker_binding(
-                ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
+            if checkout_bound:
+                independent_gates._prospective_checker_binding(
+                    ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
         with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_CHECKERS,
                              {"prospective_compare.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
@@ -551,10 +603,25 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual("5b750850277a6e9d494483dc5fa2791b6d292233", revision)
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                           cwd=ROOT, text=True).strip()
-        independent_gates._prospective_checker_binding(ROOT, current)
+        checker_paths = [f"tools/numerical/portable/{name}" for name in
+                         independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
+        checker_paths.append(independent_gates.PROSPECTIVE_POLICY_PATH)
+        if checkout_matches_commit(checker_paths):
+            independent_gates._prospective_checker_binding(ROOT, current)
+        else:
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current)
+        producer_paths = [f"tools/numerical/portable/{name}" for name in
+                          independent_gates.APPROVED_P2_PRODUCERS]
+        producer_bound = checkout_matches_commit(producer_paths)
         for candidate in (historical, f"{revision}^", revision, current):
             with self.subTest(candidate=candidate):
-                independent_gates._p2_producer_binding(ROOT, candidate)
+                if producer_bound:
+                    independent_gates._p2_producer_binding(ROOT, candidate)
+                else:
+                    with self.assertRaisesRegex(ValueError,
+                                                "reviewed P2 raw producer blob differs"):
+                        independent_gates._p2_producer_binding(ROOT, candidate)
         with self.assertRaisesRegex(ValueError, "predates reviewed P2 raw producer"):
             independent_gates._p2_producer_binding(
                 ROOT, independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION)
@@ -672,7 +739,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                       "arithmetic": "arithmetic"}
             receipt = {"prospective_bridge": bridge}
             verified_runtime = {"host": "jvm", "os": "test-host", "machine": "x86_64",
-                                "device": False, "executable": "/tmp/dyn4k-tools/jdk21/bin/java",
+                                "device": False, "executable": str(parent / "jdk21/bin/java"),
                                 "executable_sha256": "e" * 64,
                                 "version": 'openjdk version "21.0.1"',
                                 "method_executions": 15,
@@ -900,7 +967,8 @@ class IndependentGateSeamTests(unittest.TestCase):
             root = Path(temporary)
             started = time.time_ns() - 1_000_000
             (root / "stdout.txt").write_text("performance runner started\n")
-            os.utime(root / "stdout.txt", ns=(started + 1, started + 1))
+            os.utime(root / "stdout.txt", ns=(started + 1_000_000, started + 1_000_000))
+            observed_mtime = (root / "stdout.txt").stat().st_mtime_ns
             scope = {"candidate_sha": BASE, "target": "jvm", "runtime": "Java",
                      "runtime_identity": "JDK 21 benchmark host",
                      "artifact_hashes": {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64},
@@ -916,7 +984,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                    "finished_ns": started + 2_000_000, "stdout": "stdout.txt"},
                        "files": [{"path": "stdout.txt",
                                   "sha256": hashlib.sha256((root / "stdout.txt").read_bytes()).hexdigest(),
-                                  "mtime_ns": started + 1}]}
+                                  "mtime_ns": observed_mtime}]}
             (root / "receipt.json").write_text(json.dumps(receipt))
             pin = independent_gates.archive_digest(root)
 
@@ -1057,7 +1125,9 @@ class IndependentGateSeamTests(unittest.TestCase):
                           for name in ("graph.txt", "stderr.txt", "stdout.txt")],
             }
             for name in ("graph.txt", "stderr.txt", "stdout.txt"):
-                os.utime(root / name, ns=(started + 1, started + 1))
+                os.utime(root / name, ns=(started + 1_000_000, started + 1_000_000))
+            for file in receipt["files"]:
+                file["mtime_ns"] = (root / file["path"]).stat().st_mtime_ns
             (root / "receipt.json").write_text(json.dumps(receipt))
 
             def status():
@@ -1106,7 +1176,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             receipt["files"][0]["mtime_ns"] = finished + 1
             (root / "receipt.json").write_text(json.dumps(receipt))
             self.assertEqual("FAILED", status()["status"])
-            receipt["files"][0]["mtime_ns"] = started + 1
+            receipt["files"][0]["mtime_ns"] = (root / "graph.txt").stat().st_mtime_ns
             receipt["files"].append(dict(receipt["files"][0]))
             (root / "receipt.json").write_text(json.dumps(receipt))
             self.assertEqual("FAILED", status()["status"])
@@ -1147,7 +1217,8 @@ class IndependentGateSeamTests(unittest.TestCase):
             root = Path(temporary)
             (root / "stdout.txt").write_text("execution\n")
             started = time.time_ns() - 1_000_000
-            os.utime(root / "stdout.txt", ns=(started + 1, started + 1))
+            os.utime(root / "stdout.txt", ns=(started + 1_000_000, started + 1_000_000))
+            observed_mtime = (root / "stdout.txt").stat().st_mtime_ns
             receipt = {
                 "schema": 1, "status": "PASSED", "candidate_sha": BASE,
                 "source_tree": subprocess.check_output(
@@ -1161,7 +1232,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                             "stdout": "stdout.txt"},
                 "files": [{"path": "stdout.txt",
                            "sha256": hashlib.sha256((root / "stdout.txt").read_bytes()).hexdigest(),
-                           "mtime_ns": started + 1}],
+                           "mtime_ns": observed_mtime}],
             }
             for field, wrong in (("candidate_sha", "f" * 40), ("lane", "other")):
                 receipt[field] = wrong
@@ -1231,10 +1302,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                     f"{kind}.json": hashlib.sha256((root / f"{kind}.json").read_bytes()).hexdigest()
                     for kind in ("standards", "spec") if (root / f"{kind}.json").is_file()}
                 for file in files:
-                    os.utime(file, ns=(started + 1, started + 1))
+                    os.utime(file, ns=(started + 1_000_000, started + 1_000_000))
                 receipt["files"] = [{"path": file.name,
                                      "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
-                                     "mtime_ns": started + 1} for file in files]
+                                     "mtime_ns": file.stat().st_mtime_ns} for file in files]
                 (root / "receipt.json").write_text(json.dumps(receipt))
 
             def status():
@@ -1366,10 +1437,10 @@ class IndependentGateSeamTests(unittest.TestCase):
             def write():
                 for file in root.iterdir():
                     if file.name != "receipt.json":
-                        os.utime(file, ns=(started + 1, started + 1))
+                        os.utime(file, ns=(started + 1_000_000, started + 1_000_000))
                 receipt["files"] = [{"path": file.name,
                                      "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
-                                     "mtime_ns": started + 1}
+                                     "mtime_ns": file.stat().st_mtime_ns}
                                     for file in root.iterdir() if file.name != "receipt.json"]
                 (root / "receipt.json").write_text(json.dumps(receipt))
 
@@ -1443,7 +1514,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             started = time.time_ns() - 1_000_000
             files = [file for file in root.iterdir()]
             for file in files:
-                os.utime(file, ns=(started + 1, started + 1))
+                os.utime(file, ns=(started + 1_000_000, started + 1_000_000))
             receipt = {"schema": 1, "status": "PASSED", "candidate_sha": BASE,
                        "source_tree": subprocess.check_output(
                            ["git", "rev-parse", f"{BASE}^{{tree}}"], cwd=ROOT, text=True).strip(),
@@ -1459,7 +1530,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                        "resolved_artifacts": {"dyn4k-core": "core.bin", "dyn4k": "api.bin"},
                        "files": [{"path": file.name,
                                   "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
-                                  "mtime_ns": started + 1} for file in files]}
+                                  "mtime_ns": file.stat().st_mtime_ns} for file in files]}
             (root / "receipt.json").write_text(json.dumps(receipt))
             def result():
                 return independent_gates.evaluate(
@@ -1469,8 +1540,9 @@ class IndependentGateSeamTests(unittest.TestCase):
             self.assertEqual("PASSED", result()["status"], result()["reason"])
             suite.find("testcase").set("id", "invented:case")
             (root / "consumer.xml").write_bytes(ET.tostring(suite))
-            os.utime(root / "consumer.xml", ns=(started + 1, started + 1))
+            os.utime(root / "consumer.xml", ns=(started + 1_000_000, started + 1_000_000))
             receipt["files"][0]["sha256"] = hashlib.sha256((root / "consumer.xml").read_bytes()).hexdigest()
+            receipt["files"][0]["mtime_ns"] = (root / "consumer.xml").stat().st_mtime_ns
             (root / "receipt.json").write_text(json.dumps(receipt))
             self.assertEqual("FAILED", result()["status"])
 
@@ -1564,10 +1636,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                            "dyn4k": "facade.bin"}}
             files = [path for path in root.rglob("*") if path.is_file()]
             for path in files:
-                os.utime(path, ns=(started + 1, started + 1))
+                os.utime(path, ns=(started + 1_000_000, started + 1_000_000))
             receipt["files"] = [{"path": path.relative_to(root).as_posix(),
                                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                                 "mtime_ns": started + 1} for path in files]
+                                 "mtime_ns": path.stat().st_mtime_ns} for path in files]
             (root / "receipt.json").write_text(json.dumps(receipt))
             pin = independent_gates.archive_digest(root)
             corpus = evidence["corpus"]
@@ -1622,11 +1694,11 @@ class IndependentGateSeamTests(unittest.TestCase):
                     adverse_receipt = {**receipt}
                     adverse_files = [path for path in adverse.rglob("*") if path.is_file()]
                     for path in adverse_files:
-                        os.utime(path, ns=(started + 1, started + 1))
+                        os.utime(path, ns=(started + 1_000_000, started + 1_000_000))
                     adverse_receipt["files"] = [
                         {"path": path.relative_to(adverse).as_posix(),
                          "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                         "mtime_ns": started + 1} for path in adverse_files]
+                         "mtime_ns": path.stat().st_mtime_ns} for path in adverse_files]
                     (adverse / "receipt.json").write_text(json.dumps(adverse_receipt))
                     altered_pin = independent_gates.archive_digest(adverse)
                     rejected = independent_gates.evaluate(
@@ -1700,7 +1772,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             finished = time.time_ns() + 1_000_000_000
             files = [path for path in root.rglob("*") if path.is_file()]
             for path in files:
-                os.utime(path, ns=(started + 1, started + 1))
+                os.utime(path, ns=(started + 1_000_000, started + 1_000_000))
             receipt = {"schema": 1, "status": "PASSED",
                        "candidate_sha": report["candidate_commit"],
                        "source_tree": subprocess.check_output(
@@ -1714,7 +1786,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                    "exit_code": 0, "started_ns": started, "finished_ns": finished},
                        "files": [{"path": path.relative_to(root).as_posix(),
                                   "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                                  "mtime_ns": started + 1} for path in files]}
+                                  "mtime_ns": path.stat().st_mtime_ns} for path in files]}
             (root / "receipt.json").write_text(json.dumps(receipt))
             pin = independent_gates.archive_digest(root)
             selected = independent_gates.evaluate(
