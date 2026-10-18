@@ -28,6 +28,19 @@ def same_value(left, right):
     return left == right
 
 
+def same_run_alias(left, right):
+    if type(left) in (int, float) or type(right) in (int, float):
+        return (type(left) in (int, float) and type(right) in (int, float) and
+                math.isfinite(left) and math.isfinite(right) and left == right)
+    if isinstance(left, list) or isinstance(right, list):
+        return (type(left) is list and type(right) is list and len(left) == len(right) and
+                all(same_run_alias(a, b) for a, b in zip(left, right)))
+    if isinstance(left, dict) or isinstance(right, dict):
+        return (type(left) is dict and type(right) is dict and left.keys() == right.keys() and
+                all(same_run_alias(left[key], right[key]) for key in left))
+    return type(left) is type(right) and left == right
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -105,23 +118,23 @@ def check_translation_aliases(state):
                 continue
             transform = body[name]
             translation = transform["getTranslation"]
-            if (len(translation) != 2 or not same_value(transform["getTranslationX"], translation[0]) or
-                not same_value(transform["getTranslationY"], translation[1])):
+            if (len(translation) != 2 or not same_run_alias(transform["getTranslationX"], translation[0]) or
+                not same_run_alias(transform["getTranslationY"], translation[1])):
                 raise Rejected("translation getter alias differs")
             if "getValues" in transform:
                 values = transform["getValues"]
-                if (len(values) != 6 or not same_value(values[2], translation[0]) or
-                    not same_value(values[5], translation[1]) or
-                    not same_value(values[0], transform["getCost"]) or
-                    not same_value(values[1], -transform["getSint"]) or
-                    not same_value(values[3], transform["getSint"]) or
-                    not same_value(values[4], transform["getCost"])):
+                if (len(values) != 6 or not same_run_alias(values[2], translation[0]) or
+                    not same_run_alias(values[5], translation[1]) or
+                    not same_run_alias(values[0], transform["getCost"]) or
+                    not same_run_alias(values[1], -transform["getSint"]) or
+                    not same_run_alias(values[3], transform["getSint"]) or
+                    not same_run_alias(values[4], transform["getCost"])):
                     raise Rejected("matrix getter alias differs")
-        if "fixedOriginPosition" in body and not same_value(
+        if "fixedOriginPosition" in body and not same_run_alias(
             body["fixedOriginPosition"], body["transform"]["getTranslation"]
         ):
             raise Rejected("fixed origin position alias differs")
-        if "worldCenter" in body and not same_value(
+        if "worldCenter" in body and not same_run_alias(
             body["worldCenter"], body["transform"]["getTranslation"]
         ):
             raise Rejected("world center alias differs")
@@ -169,7 +182,7 @@ def check_body_getters(body):
                           ("getTorque", "torque"),
                           ("getAccumulatedForce", "accumulatedForce"),
                           ("getAccumulatedTorque", "accumulatedTorque")):
-        if getter in properties and field in body and not same_value(properties[getter], body[field]):
+        if getter in properties and field in body and not same_run_alias(properties[getter], body[field]):
             raise Rejected(f"body getter alias differs: {getter}")
     if "getChangeInPosition" in properties:
         current = body["transform"]["getTranslation"]

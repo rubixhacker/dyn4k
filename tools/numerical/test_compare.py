@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from compare import audit_reference, compare, load_fixture
+from compare import Rejected, audit_reference, check_snapshot, compare, load_fixture
 from inventory import classify_reference
 from physical import audit_physical
 
@@ -533,7 +533,7 @@ class ComparatorSeamTest(unittest.TestCase):
         self.assertEqual("FAILED", self.result()["status"])
         self.assertIn("matrix getter alias", self.result()["reason"])
 
-    def test_matrix_alias_preserves_signed_zero(self):
+    def test_same_run_matrix_alias_accepts_zero_sign_and_rejects_nonzero(self):
         selected = load_fixture("configured-30-r1")
         self.fixture["rules"] = selected["rules"]
         self.fixture["derived_rules"] = selected["derived_rules"]
@@ -553,8 +553,23 @@ class ComparatorSeamTest(unittest.TestCase):
         altered = json.loads(json.dumps(rows))
         altered[2]["state"]["bodies"][0]["transform"]["getValues"][1] = 0.0
         self.write_candidate(altered)
+        self.assertEqual("PASSED", self.result()["status"])
+        altered[2]["state"]["bodies"][0]["transform"]["getValues"][1] = 0.001
+        self.write_candidate(altered)
         self.assertEqual("FAILED", self.result()["status"])
         self.assertIn("matrix getter alias", self.result()["reason"])
+
+    def test_snapshot_duplicate_getters_compare_finite_numeric_values(self):
+        state = {"bodies": [{"id": "b1", "force": [-0.0, 0.0],
+                             "properties": {"getForce": [0.0, -0.0]},
+                             "transform": {"getTranslation": [0.0, 0.0],
+                                           "getTranslationX": -0.0, "getTranslationY": 0.0,
+                                           "getCost": 1.0, "getSint": 0.0,
+                                           "getValues": [1.0, 0.0, 0.0, -0.0, 1.0, 0.0]}}]}
+        check_snapshot(state)
+        state["bodies"][0]["properties"]["getForce"][0] = 0.01
+        with self.assertRaisesRegex(Rejected, "body getter alias differs: getForce"):
+            check_snapshot(state)
 
     def test_explicit_nominal_cosine_cap_keeps_precedence(self):
         self.fixture["rules"] = [
