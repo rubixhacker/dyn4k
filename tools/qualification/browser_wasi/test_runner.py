@@ -53,6 +53,20 @@ class SourceCasesTest(unittest.TestCase):
             self.assertEqual(1, dishonest.returncode)
             self.assertIn("source SHA differs", dishonest.stderr)
 
+    def test_public_candidate_accepts_current_resealed_source(self):
+        source_root = Path(__file__).resolve().parents[3]
+        current = subprocess.check_output(
+            ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = self.clone_candidate(directory, "resealed", current)
+            accepted = self.public_candidate(checkout, current)
+            self.assertEqual(0, accepted.returncode, accepted.stderr)
+            result = json.loads(accepted.stdout)
+            self.assertEqual("VERIFIED", result["status"])
+            self.assertEqual(2521, result["suite_methods"])
+            self.assertEqual("3275e1140f6ae535487fa2896dfa2ab8a2e6e3d64bac0c02a28b8ea62d756cf7",
+                             result["manifest_sha256"])
+
     def test_public_candidate_rejects_committed_generator_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             checkout = self.clone_candidate(directory, "generator", self.REVIEWED_ASSEMBLY)
