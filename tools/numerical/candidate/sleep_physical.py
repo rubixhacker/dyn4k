@@ -13,6 +13,9 @@ from receipt import load_fixture, verify
 
 def audit(trace, fixture):
     phases = physical.phases_for_fixture(fixture)
+    start_step = fixture.get("start_step", 0)
+    if type(start_step) is not int or start_step < 0:
+        raise compare.Rejected("invalid fixture start step")
     phase_index = 0
     checked = failed = endpoints = 0
     first_failure = None
@@ -21,12 +24,12 @@ def audit(trace, fixture):
         if row["kind"] == "outer-endpoint":
             endpoints += 1
             if (not compare.same_run_alias(row["state"], previous_state) or
-                type(row["step"]) is not int or row["step"] != checked):
+                not compare.endpoint_index_matches(row, fixture, checked, endpoints)):
                 raise compare.Rejected("endpoint is not a copy of the current inner state")
         if row["kind"] != "state":
             continue
         checked += 1
-        if row["step"] != checked:
+        if type(row.get("step")) is not int or row["step"] != start_step + checked:
             raise compare.Rejected("candidate state sequence differs")
         previous_state = row["state"]
         while checked > phases[phase_index][2]:

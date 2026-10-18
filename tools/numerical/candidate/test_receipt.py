@@ -79,12 +79,12 @@ class ReceiptConsumerTest(unittest.TestCase):
                 same_run.inspect(fixture, self.root / "unused")
 
     def test_local_endpoint_copy_uses_finite_numeric_values(self):
-        fixture = {"counts": {"state": 1, "outer-endpoint": 1}}
+        fixture = {"counts": {"state": 1, "outer-endpoint": 1}, "inner_per_outer": 1}
         trace = self.root / "endpoint.jsonl"
         state = {"bodies": [], "x": 0.0}
         for value, accepted in ((-0.0, True), (False, False), (0.001, False)):
             rows = [{"kind": "state", "step": 1, "state": state},
-                    {"kind": "outer-endpoint", "step": 1,
+                    {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
                      "state": {"bodies": [], "x": value}}]
             trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
             with self.subTest(value=value):
@@ -105,6 +105,7 @@ class ReceiptConsumerTest(unittest.TestCase):
 
     def test_physical_endpoint_copy_uses_finite_numeric_values(self):
         fixture = {"counts": {"state": 1, "outer-endpoint": 1},
+                   "inner_per_outer": 1,
                    "physical_phase_ceilings_m": {"rest": 0.0}}
         trace = self.root / "physical-endpoint.jsonl"
         state = {"bodies": [], "x": 0.0}
@@ -114,7 +115,7 @@ class ReceiptConsumerTest(unittest.TestCase):
                           return_value=Fraction(0)):
             for value, accepted in ((-0.0, True), (False, False), (0.001, False)):
                 rows = [{"kind": "state", "step": 1, "state": state},
-                        {"kind": "outer-endpoint", "step": 1,
+                        {"kind": "outer-endpoint", "step": 1, "outerStep": 1,
                          "state": {"bodies": [], "x": value}}]
                 trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
                 with self.subTest(value=value):
@@ -128,6 +129,114 @@ class ReceiptConsumerTest(unittest.TestCase):
             trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
             with self.assertRaisesRegex(compare.Rejected, "endpoint is not a copy"):
                 sleep_physical.audit(trace, fixture)
+
+    def test_local_endpoint_indices_and_input_scope(self):
+        fixture = {"counts": {"state": 2, "outer-endpoint": 1},
+                   "start_step": 10, "inner_per_outer": 2}
+        rows = [{"kind": "inputs", "id": "changed", "value": 123},
+                {"kind": "state", "step": 11, "state": {"bodies": [], "x": 0.0}},
+                {"kind": "state", "step": 12, "state": {"bodies": [], "x": 0.0}},
+                {"kind": "outer-endpoint", "step": 12, "outerStep": 1,
+                 "state": {"bodies": [], "x": -0.0}}]
+        trace = self.root / "local-indices.jsonl"
+
+        def inspect():
+            trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            return same_run.inspect(fixture, trace)
+
+        self.assertEqual(inspect()["endpoint_copies"], 1)
+        for index, field, value in ((1, "step", 12), (1, "step", True),
+                                    (2, "step", 13), (2, "step", True),
+                                    (3, "step", 11), (3, "step", True),
+                                    (3, "outerStep", 2), (3, "outerStep", True)):
+            original = rows[index][field]
+            rows[index][field] = value
+            with self.subTest(index=index, field=field, value=value), self.assertRaises(compare.Rejected):
+                inspect()
+            rows[index][field] = original
+            del rows[index][field]
+            with self.subTest(index=index, field=field, value="missing"), self.assertRaises(compare.Rejected):
+                inspect()
+            rows[index][field] = original
+        for group in (None, 0, True, -1):
+            changed = dict(fixture)
+            if group is None:
+                changed.pop("inner_per_outer")
+            else:
+                changed["inner_per_outer"] = group
+            with self.subTest(group=group), self.assertRaises(compare.Rejected):
+                same_run.inspect(changed, trace)
+        rows[2], rows[3] = rows[3], rows[2]
+        with self.assertRaises(compare.Rejected):
+            inspect()
+        rows[2], rows[3] = rows[3], rows[2]
+        rows[0]["value"] = 456
+        self.assertEqual(inspect()["endpoint_copies"], 1)
+
+    def test_physical_endpoint_indices(self):
+        fixture = {"counts": {"state": 2, "outer-endpoint": 1},
+                   "start_step": 10, "inner_per_outer": 2,
+                   "physical_phase_ceilings_m": {"rest": 0.0}}
+        rows = [{"kind": "state", "step": 11, "state": {"bodies": [], "x": 0.0}},
+                {"kind": "state", "step": 12, "state": {"bodies": [], "x": 0.0}},
+                {"kind": "outer-endpoint", "step": 12, "outerStep": 1,
+                 "state": {"bodies": [], "x": -0.0}}]
+        trace = self.root / "physical-indices.jsonl"
+
+        def audit():
+            trace.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            return sleep_physical.audit(trace, fixture)
+
+        with patch.object(sleep_physical.physical, "phases_for_fixture",
+                          return_value=[("rest", 1, 2)]), \
+             patch.object(sleep_physical.physical, "depth_for_state",
+                          return_value=Fraction(0)):
+            self.assertEqual(audit()["endpoint_mappings"], 1)
+            for index, field, value in ((0, "step", 12), (0, "step", True),
+                                        (1, "step", 13), (1, "step", True),
+                                        (2, "step", 11), (2, "step", True),
+                                        (2, "outerStep", 2), (2, "outerStep", True)):
+                original = rows[index][field]
+                rows[index][field] = value
+                with self.subTest(index=index, field=field, value=value), self.assertRaises(compare.Rejected):
+                    audit()
+                rows[index][field] = original
+                del rows[index][field]
+                with self.subTest(index=index, field=field, value="missing"), self.assertRaises(compare.Rejected):
+                    audit()
+                rows[index][field] = original
+            for group in (None, 0, True, -1):
+                changed = dict(fixture)
+                if group is None:
+                    changed.pop("inner_per_outer")
+                else:
+                    changed["inner_per_outer"] = group
+                with self.subTest(group=group), self.assertRaises(compare.Rejected):
+                    sleep_physical.audit(trace, changed)
+            rows[1], rows[2] = rows[2], rows[1]
+            with self.assertRaises(compare.Rejected):
+                audit()
+
+    def test_same_run_cli_reports_unbound_scope(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        output = StringIO()
+        with patch.object(sys, "argv", ["same_run.py", "--fixture", "tiny", "--trace", "unused"]), \
+             patch.object(same_run, "load_fixture", return_value={}), \
+             patch.object(same_run, "inspect", return_value={"states": 1}), \
+             redirect_stdout(output), self.assertRaises(SystemExit) as exit_code:
+            same_run.main()
+        self.assertEqual(exit_code.exception.code, 0)
+        self.assertEqual(json.loads(output.getvalue())["scope"], "UNBOUND_DIAGNOSTIC")
+        output = StringIO()
+        with patch.object(sys, "argv", ["same_run.py", "--fixture", "tiny", "--trace", "unused"]), \
+             patch.object(same_run, "load_fixture", return_value={}), \
+             patch.object(same_run, "inspect", side_effect=compare.Rejected("invalid")), \
+             redirect_stdout(output), self.assertRaises(SystemExit) as exit_code:
+            same_run.main()
+        self.assertEqual(exit_code.exception.code, 1)
+        self.assertEqual(json.loads(output.getvalue())["scope"], "UNBOUND_DIAGNOSTIC")
 
     def test_receipt_uses_recorder_process_and_loaded_engine(self):
         trace = self.root / "trace.jsonl.gz"

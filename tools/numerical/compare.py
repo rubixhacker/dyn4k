@@ -220,9 +220,23 @@ def check_fixed_body_callback_velocities(event, fixture):
                 raise Rejected(f"fixed callback body velocity is not zero: {name}")
 
 
+def endpoint_index_matches(row, fixture, state_count, endpoint_count):
+    group = fixture.get("inner_per_outer")
+    start_step = fixture.get("start_step", 0)
+    return (type(group) is int and group > 0 and
+            type(start_step) is int and start_step >= 0 and
+            type(state_count) is int and state_count > 0 and state_count % group == 0 and
+            type(endpoint_count) is int and endpoint_count == state_count // group and
+            type(row.get("step")) is int and row["step"] == start_step + state_count and
+            type(row.get("outerStep")) is int and row["outerStep"] == state_count // group)
+
+
 def check_counts(rows, fixture, *, reference):
     counts = Counter()
-    state_step = fixture.get("start_step", 0)
+    start_step = fixture.get("start_step", 0)
+    if type(start_step) is not int or start_step < 0:
+        raise Rejected("invalid fixture start step")
+    state_step = start_step
     event_step = 0
     event_order = -1
     input_seen = False
@@ -244,16 +258,13 @@ def check_counts(rows, fixture, *, reference):
             raise Rejected("record precedes input")
         if kind == "state":
             state_step += 1
-            if row.get("step") != state_step:
+            if type(row.get("step")) is not int or row["step"] != state_step:
                 raise Rejected("missing or reordered state")
             last_state = row.get("state")
             if fixture.get("check_translation_aliases"):
                 check_snapshot(last_state)
         if kind == "outer-endpoint":
-            group = fixture.get("inner_per_outer")
-            if (type(group) is not int or group <= 0 or state_step % group or
-                type(row.get("step")) is not int or type(row.get("outerStep")) is not int or
-                row.get("step") != state_step or row.get("outerStep") != state_step // group or
+            if (not endpoint_index_matches(row, fixture, counts["state"], counts["outer-endpoint"]) or
                 not same_run_alias(row.get("state"), last_state)):
                 raise Rejected("outer endpoint does not copy the matching inner state")
         if kind == "instrumented-callback" and fixture.get("check_translation_aliases"):

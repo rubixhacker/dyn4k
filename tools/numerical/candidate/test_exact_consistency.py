@@ -61,6 +61,12 @@ class ExactConsistencyAdverseTest(unittest.TestCase):
             trace.write_bytes(b"".join(rows))
             return exact.audit_trace(trace, self.fixture)
 
+    def test_qualifying_six_group_path_rejects_changed_frozen_input(self):
+        changed = copy.deepcopy(self.input)
+        changed["dt"] *= 2
+        with self.assertRaisesRegex(compare.Rejected, "frozen input identity"):
+            self.audit_rows([(json.dumps(changed) + "\n").encode()])
+
     def test_fixed_floor_group_rejects_pose_mutation(self):
         exact.numeric_vector([-0.0, -0.25], [0.0, -0.25], "floor pose")
         exact.exact([-0.0, -0.25], [0.0, -0.25], "translation alias")

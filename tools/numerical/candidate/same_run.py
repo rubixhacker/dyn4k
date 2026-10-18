@@ -12,16 +12,21 @@ from receipt import load_fixture
 def inspect(fixture, trace):
     states = endpoints = callbacks = 0
     previous_state = None
+    start_step = fixture.get("start_step", 0)
+    if type(start_step) is not int or start_step < 0:
+        raise compare.Rejected("invalid fixture start step")
     for _, row in compare.records(trace):
         kind = row.get("kind")
         if kind == "state":
             compare.check_snapshot(row["state"])
             states += 1
+            if type(row.get("step")) is not int or row["step"] != start_step + states:
+                raise compare.Rejected("candidate state sequence differs")
             previous_state = row["state"]
         elif kind == "outer-endpoint":
             endpoints += 1
             if (not compare.same_run_alias(row["state"], previous_state) or
-                type(row["step"]) is not int or row["step"] != states):
+                not compare.endpoint_index_matches(row, fixture, states, endpoints)):
                 raise compare.Rejected("outer endpoint is not a state copy")
         elif kind == "instrumented-callback":
             values = row.get("values")
@@ -51,10 +56,11 @@ def main():
     args = parser.parse_args()
     try:
         fixture = load_fixture(args.fixture, Path(__file__).resolve().parents[1] / "fixtures.json")
-        result = {"status": "LOCAL_ALIAS_PASSED", "scope": "CANDIDATE_STAGED_JVM",
+        result = {"status": "LOCAL_ALIAS_PASSED", "scope": "UNBOUND_DIAGNOSTIC",
                   **inspect(fixture, args.trace)}
     except (compare.Rejected, OSError, KeyError, TypeError, ValueError) as error:
-        result = {"status": "LOCAL_ALIAS_FAILED", "reason": str(error)}
+        result = {"status": "LOCAL_ALIAS_FAILED", "scope": "UNBOUND_DIAGNOSTIC",
+                  "reason": str(error)}
     print(json.dumps(result, sort_keys=True))
     raise SystemExit(0 if result["status"] == "LOCAL_ALIAS_PASSED" else 1)
 
