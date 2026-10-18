@@ -21,8 +21,23 @@ class AdverseStepError(ValueError):
 def checked(stage, action):
     try:
         return action()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         raise AdverseStepError(stage, error) from error
+
+
+def public_upload_roots():
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if not runner_temp or not workspace:
+        if runner_temp or workspace or os.environ.get("GITHUB_ACTIONS") == "true":
+            raise ValueError("both RUNNER_TEMP and GITHUB_WORKSPACE are required on hosted runs")
+        return {}
+    if not Path(runner_temp).is_absolute() or not Path(workspace).is_absolute():
+        raise ValueError("public upload root inputs must be absolute")
+    return {
+        "native_host_evidence": (Path(runner_temp) / "performance-native-host-short").resolve(),
+        "staging_repository": (Path(workspace) / "build" / "staging-repository").resolve(),
+    }
 
 
 def path_swap_control(receipt=None):
@@ -34,9 +49,21 @@ def path_swap_control(receipt=None):
     else:
         source = Path("/bin/sleep")
         arguments = ["10"]
-    with tempfile.TemporaryDirectory(prefix="dyn4k-image-adverse-", dir=Path.home()) as temporary:
-        executable = Path(temporary) / source.name
-        moved = Path(temporary) / ("original-" + source.name)
+    roots = checked("resolve_public_upload_roots", public_upload_roots)
+    home = checked("select_private_directory", lambda: Path.home().resolve())
+    with checked("create_private_directory", lambda: tempfile.TemporaryDirectory(
+            prefix="dyn4k-image-adverse-", dir=home)) as temporary:
+        private = checked("resolve_private_directory", lambda: Path(temporary).resolve(strict=True))
+        relations = {name: "overlap" if private.is_relative_to(root) or root.is_relative_to(private)
+                     else "disjoint" for name, root in roots.items()}
+        receipt.update({"private_directory": str(private),
+                        "public_upload_roots": {name: str(root) for name, root in roots.items()},
+                        "public_upload_root_relation": relations})
+        if "overlap" in relations.values():
+            raise AdverseStepError("validate_private_directory", ValueError(
+                "private executable directory overlaps a public upload root"))
+        executable = private / source.name
+        moved = private / ("original-" + source.name)
         checked("copy_image", lambda: shutil.copyfile(source, executable))
         if os.name == "posix":
             checked("make_executable", lambda: os.chmod(executable, 0o700))

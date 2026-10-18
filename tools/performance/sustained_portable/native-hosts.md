@@ -160,7 +160,11 @@ probe succeeds for the Kotlin/Native executable on the selected runner.
 The path-swap child is a copied `System32\ping.exe`; Python only runs the
 control script. It exercises a different PE from the staged dyn4k executable.
 The executable copy stays in a private temporary home directory until the
-child exits. The uploaded JSON contains its SHA-256 and size, not its bytes.
+child exits. On the hosted route, the control resolves this directory against
+both always-uploaded roots: the Native host evidence tree and the staged
+repository. It refuses overlap before copying and records the failed relation
+in JSON. Missing hosted roots or an unavailable home also leave a failed JSON
+receipt. The uploaded JSON contains the selected SHA-256 and size, not its bytes.
 On a code mismatch, the JSON also retains PE image, section, and relocation
 metadata; the first unmatched RVA and file offset; bounded selected and mapped
 byte windows; load bases; section hashes; and cleanup status. The mismatch

@@ -947,8 +947,10 @@ class PortableCaptureTest(unittest.TestCase):
             source = root / "private" / "System32" / "ping.exe"
             source.parent.mkdir(parents=True)
             source.write_bytes(image)
-            artifact = root / "uploaded"
+            artifact = root / "runner" / "performance-native-host-short"
             output = artifact / "setup" / "path-swap.json"
+            private_home = root / "private-home"
+            private_home.mkdir()
             launched = []
 
             def launch(command, **kwargs):
@@ -959,6 +961,9 @@ class PortableCaptureTest(unittest.TestCase):
                 return process
 
             with mock.patch.dict(os.environ, {"SystemRoot": str(root / "private")}), \
+                    mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                                 "GITHUB_WORKSPACE": str(root / "workspace")}), \
+                    mock.patch.object(Path, "home", return_value=private_home), \
                     mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
                     mock.patch.object(host_image_adverse.subprocess, "Popen", side_effect=launch), \
                     mock.patch.object(host_image_adverse.time, "sleep"), \
@@ -980,10 +985,105 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertEqual(receipt["error_stage"], "observe_before")
             self.assertEqual(receipt["mapped_image_identity"], "unobserved")
             self.assertEqual(receipt["stale_pid"], "rejected")
+            self.assertEqual(receipt["public_upload_root_relation"],
+                             {"native_host_evidence": "disjoint",
+                              "staging_repository": "disjoint"})
+            self.assertEqual(receipt["public_upload_roots"],
+                             {"native_host_evidence": str(artifact.resolve()),
+                              "staging_repository": str((root / "workspace" / "build" /
+                                                         "staging-repository").resolve())})
             self.assertEqual(len(launched), 1)
             self.assertFalse(launched[0].exists())
             process.terminate.assert_called_once()
             process.communicate.assert_called_once_with(timeout=3)
+
+    def test_windows_path_swap_rejects_both_upload_roots_before_interrupted_copy(self):
+        code = "\n".join((
+            "import os, sys",
+            "sys.path.insert(0, sys.argv[1])",
+            "import host_image_adverse",
+            "from pathlib import Path",
+            "from unittest import mock",
+            "host_image_adverse.sys.platform = 'win32'",
+            "host_image_adverse.subprocess.Popen = lambda *a, **k: os._exit(77)",
+            "with mock.patch.object(Path, 'home', return_value=Path(sys.argv[3])):",
+            "    sys.argv = ['host_image_adverse.py', '--output', sys.argv[2]]",
+            "    host_image_adverse.main()",
+        ))
+        cases = [("native_host_evidence", False), ("staging_repository", False)]
+        if os.name == "posix":
+            cases.append(("native_host_evidence", True))
+        for selected_root, via_symlink in cases:
+            with self.subTest(selected_root=selected_root, via_symlink=via_symlink), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / "system" / "System32" / "ping.exe"
+                source.parent.mkdir(parents=True)
+                image = b"MZ" + b"synthetic-control" * 200
+                source.write_bytes(image)
+                evidence = root / "runner" / "performance-native-host-short"
+                staging = root / "workspace" / "build" / "staging-repository"
+                evidence.mkdir(parents=True)
+                staging.mkdir(parents=True)
+                output = evidence / "setup" / "path-swap.json"
+                roots = {"native_host_evidence": evidence, "staging_repository": staging}
+                home = roots[selected_root]
+                if via_symlink:
+                    home = root / "home-link"
+                    home.symlink_to(roots[selected_root], target_is_directory=True)
+                environment = {**os.environ, "HOME": str(home),
+                               "SystemRoot": str(root / "system"),
+                               "RUNNER_TEMP": str(root / "runner"),
+                               "GITHUB_WORKSPACE": str(root / "workspace"),
+                               "GITHUB_ACTIONS": "true"}
+                run = subprocess.run([sys.executable, "-B", "-c", code,
+                                      str(Path(__file__).parent), str(output), str(home)],
+                                     env=environment, capture_output=True, timeout=10)
+                self.assertEqual(run.returncode, 1, run.stderr.decode(errors="replace"))
+                self.assertTrue(output.exists(), run.stderr.decode(errors="replace"))
+                receipt = json.loads(output.read_text())
+                self.assertEqual(receipt["error_stage"], "validate_private_directory")
+                self.assertEqual(receipt["public_upload_root_relation"][selected_root], "overlap")
+                self.assertEqual(receipt["mapped_image_identity"], "unobserved")
+                self.assertEqual(receipt["swap"], "unavailable")
+                self.assertFalse(any(p.read_bytes() == image for public in roots.values()
+                                     for p in public.rglob("*") if p.is_file()))
+                self.assertEqual(source.read_bytes(), image)
+
+    def test_path_swap_home_failure_retains_structured_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "runner" / "performance-native-host-short" / "setup" / "path-swap.json"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                              "GITHUB_WORKSPACE": str(root / "workspace")}), \
+                    mock.patch.object(Path, "home", side_effect=RuntimeError("home unavailable")), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    host_image_adverse.main()
+            self.assertEqual(failure.exception.code, 1)
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["error_stage"], "select_private_directory")
+            self.assertIn("home unavailable", receipt["error"])
+            self.assertEqual(receipt["mapped_image_identity"], "unobserved")
+            self.assertEqual(receipt["swap"], "unavailable")
+
+    def test_path_swap_missing_hosted_upload_root_retains_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "runner" / "performance-native-host-short" / "setup" / "path-swap.json"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                              "GITHUB_WORKSPACE": "", "GITHUB_ACTIONS": "true"}), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    host_image_adverse.main()
+            self.assertEqual(failure.exception.code, 1)
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["error_stage"], "resolve_public_upload_roots")
+            self.assertEqual(receipt["mapped_image_identity"], "unobserved")
+            self.assertEqual(receipt["swap"], "unavailable")
+            self.assertFalse(any(p.suffix.lower() == ".exe" for p in root.rglob("*")))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
     def test_path_swap_writes_receipt_when_diagnostic_path_is_absent(self):
