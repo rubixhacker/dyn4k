@@ -26,14 +26,26 @@ package org.dyn4j.exception
 
 import kotlin.math.abs
 
-open class EmptyCollectionException(argumentName: String) : IllegalArgumentException("$argumentName cannot be empty")
+open class EmptyCollectionException(argumentName: String) : IllegalArgumentException("$argumentName cannot be empty") {
+    private companion object {
+        private const val serialVersionUID = 3188055341987092721L
+    }
+}
 
 open class NullElementException : NullPointerException {
     constructor(argumentName: String, index: Int) : super("$argumentName contains a null element at index $index")
     constructor(argumentName: String) : super("$argumentName contains a null element")
+
+    private companion object {
+        private const val serialVersionUID = 4560521220204618552L
+    }
 }
 
-open class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The index $index is out of bounds")
+open class InvalidIndexException(index: Int) : IndexOutOfBoundsException("The index $index is out of bounds") {
+    private companion object {
+        private const val serialVersionUID = 1297019115982655104L
+    }
+}
 
 private fun fixedSix(value: Double): String {
     if (value.isNaN()) return "NaN"
@@ -89,6 +101,7 @@ open class ValueOutOfRangeException : IllegalArgumentException {
     constructor(argumentName: String, value: Int) : super("$argumentName cannot be $value")
 
     companion object {
+        private const val serialVersionUID = -7115378379246433066L
         const val MUST_BE_GREATER_THAN = "greater than"
         const val MUST_BE_GREATER_THAN_OR_EQUAL_TO = "greater than or equal to"
         const val MUST_BE_LESS_THAN = "less than"

@@ -24,4 +24,8 @@
  */
 package org.dyn4j.exception
 
-open class ArgumentNullException(argumentName: String) : NullPointerException(argumentName + " cannot be null")
+open class ArgumentNullException(argumentName: String) : NullPointerException(argumentName + " cannot be null") {
+    private companion object {
+        private const val serialVersionUID = 7104871716542808869L
+    }
+}

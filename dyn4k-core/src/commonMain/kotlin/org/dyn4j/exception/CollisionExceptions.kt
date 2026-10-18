@@ -31,10 +31,22 @@ internal fun copyExceptionMessage(sourceName: String, copyName: String) =
 expect open class CopyException(sourceName: String, copyName: String) : ClassCastException
 
 open class ObjectAlreadyExistsException(argumentName: String, objectValue: Any?, owner: Any?) :
-    IllegalArgumentException("$argumentName is set to an object: $objectValue that already exists in: $owner")
+    IllegalArgumentException("$argumentName is set to an object: $objectValue that already exists in: $owner") {
+    private companion object {
+        private const val serialVersionUID = 3414084132509765709L
+    }
+}
 
 open class ObjectAlreadyOwnedException(argumentName: String, objectValue: Any?, owner: Any?) :
-    IllegalArgumentException("The object given for $argumentName: $objectValue is already owned by another object: $objectValue")
+    IllegalArgumentException("The object given for $argumentName: $objectValue is already owned by another object: $objectValue") {
+    private companion object {
+        private const val serialVersionUID = -7471557485578931121L
+    }
+}
 
 open class SameObjectException(argumentName1: String, argumentName2: String, objectValue: Any?) :
-    IllegalArgumentException("$argumentName1 and $argumentName2 cannot be the same object. Both were: $objectValue")
+    IllegalArgumentException("$argumentName1 and $argumentName2 cannot be the same object. Both were: $objectValue") {
+    private companion object {
+        private const val serialVersionUID = -2844289260493601312L
+    }
+}
