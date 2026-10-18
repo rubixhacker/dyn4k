@@ -28,6 +28,8 @@ ENGINE_SOURCES = (
     "dyn4k-core/src/wasmWasiMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt",
 )
 PROBE_SOURCE = "tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt"
+JVM_PROBE_SOURCE = "tools/diagnostic/windows_collision/SqrtOperationJvmProbe.java"
+PROBE_SOURCES = (PROBE_SOURCE, JVM_PROBE_SOURCE)
 PROBE_INPUTS = (
     ("CirclePolygon.edge3", 4598175219545276415, 4602678819172646911),
     ("CapsuleSlice.epa4", 4607182418800017407, 4607182418800017407),
@@ -332,28 +334,40 @@ def corrected_scalar_rows(native_text, java_text):
     SCALAR["validate"](native_text, java_text)
     native = native_text.splitlines()
     java = java_text.splitlines()
-    compared = []
+    observations = []
     fields = ("provider", "id", *SCALAR_INPUT_FIELDS, *SCALAR_RESULT_FIELDS, "normalized")
+    computed_fields = ("xSquared", "ySquared", "sum", *SCALAR_RESULT_FIELDS)
     for native_line, java_line in zip(native, java, strict=True):
         n = keyed_line(native_line, "DYN4K_COLLISION_SCALAR", fields)
         j = keyed_line(java_line, "DYN4K_COLLISION_SCALAR", fields)
         if n["provider"] != "kotlin-native" or j["provider"] != "java" or n["id"] != j["id"]:
             raise ValueError("corrected scalar provider or ID differs")
-        for field in (*SCALAR_INPUT_FIELDS, *SCALAR_RESULT_FIELDS):
-            if raw_bits(n[field], f"Native {n['id']}.{field}") != raw_bits(j[field], f"Java {n['id']}.{field}"):
-                raise ValueError(f"corrected Native/Java scalar bits differ: {n['id']}.{field}")
+        bits = {}
         normalized_bits = []
         for row in (n, j):
+            provider = row["provider"]
+            bits[provider] = {field: raw_bits(row[field], f"{provider} {row['id']}.{field}")
+                              for field in (*SCALAR_INPUT_FIELDS, *SCALAR_RESULT_FIELDS)}
             normalized = row["normalized"].split(",")
             if len(normalized) != 2:
                 raise ValueError("corrected normalized scalar pair is incomplete")
-            normalized_bits.append(tuple(raw_bits(value, f"{row['provider']} normalized") for value in normalized))
-        if normalized_bits[0] != normalized_bits[1]:
-            raise ValueError(f"corrected Native/Java normalized bits differ: {n['id']}")
-        compared.append(n["id"])
-    if tuple(compared) != SCALAR_IDS:
+            normalized_bits.append(tuple(raw_bits(value, f"{provider} normalized") for value in normalized))
+        for field in ("x", "y"):
+            if bits["kotlin-native"][field] != bits["java"][field]:
+                raise ValueError(f"corrected Native/Java input bits differ: {n['id']}.{field}")
+        observations.append({
+            "id": n["id"],
+            "inputBits": {field: bits["java"][field] for field in ("x", "y")},
+            "native": {field: n[field] for field in (*computed_fields, "normalized")},
+            "java": {field: j[field] for field in (*computed_fields, "normalized")},
+            "computedBitEqual": {
+                **{field: bits["kotlin-native"][field] == bits["java"][field] for field in computed_fields},
+                "normalized": normalized_bits[0] == normalized_bits[1],
+            },
+        })
+    if tuple(row["id"] for row in observations) != SCALAR_IDS:
         raise ValueError("corrected scalar row order differs")
-    return compared
+    return observations
 
 
 def corrected_source_hashes(directory, source_sha):
@@ -364,7 +378,7 @@ def corrected_source_hashes(directory, source_sha):
     if head != source_sha:
         raise ValueError("candidate source SHA differs from checkout")
     lines = (Path(directory) / "source-sha256.txt").read_text(encoding="utf-8").splitlines()
-    paths = (*ENGINE_SOURCES, PROBE_SOURCE)
+    paths = (*ENGINE_SOURCES, *PROBE_SOURCES)
     if len(lines) != len(paths):
         raise ValueError("corrected source hash receipt is incomplete")
     for line, relative in zip(lines, paths, strict=True):
@@ -421,12 +435,13 @@ def corrected_probe_rows(text):
 
 def corrected_probe_modes(directory):
     root = Path(directory)
+    modes = (("debug-g", ("-g",)), ("default", ()), ("optimized-opt", ("-opt",)))
     if (root / "probe-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
         raise ValueError("corrected probe runner did not complete")
-    if {path.name for path in root.iterdir() if path.is_dir()} != {"debug-g", "optimized-opt"}:
+    if {path.name for path in root.iterdir() if path.is_dir()} != {name for name, _ in modes}:
         raise ValueError("corrected probe mode set differs")
     results = {}
-    for name, flag in (("debug-g", "-g"), ("optimized-opt", "-opt")):
+    for name, flags in modes:
         mode = root / name
         for phase in ("compiler", "run"):
             if (mode / f"{phase}-exit-code.txt").read_text(encoding="utf-8").strip() != "0":
@@ -443,12 +458,13 @@ def corrected_probe_modes(directory):
         arguments = command.get("arguments")
         if command.get("mode") != name or Path(command.get("executable", "")).name.lower() != "kotlinc-native.bat":
             raise ValueError(f"{name} compiler identity differs")
-        if not isinstance(arguments, list) or len(arguments) != 10:
+        if not isinstance(arguments, list) or len(arguments) != 9 + len(flags):
             raise ValueError(f"{name} compiler argument count differs")
         common, native, probe = arguments[2:5]
         if arguments[:2] != ["-Xmulti-platform", f"-Xcommon-sources={common}"] or \
-                arguments[5:9] != ["-target", "mingw_x64", flag, "-o"] or \
-                Path(arguments[9]).resolve() != (mode / "sqrt-operation-probe").resolve():
+                arguments[5:7] != ["-target", "mingw_x64"] or \
+                arguments[7:-2] != list(flags) or arguments[-2] != "-o" or \
+                Path(arguments[-1]).resolve() != (mode / "sqrt-operation-probe").resolve():
             raise ValueError(f"{name} compiler mode, target, or output differs")
         for actual, expected in zip((common, native, probe), (ENGINE_SOURCES[1], ENGINE_SOURCES[2], PROBE_SOURCE), strict=True):
             if Path(actual).resolve() != (REPO / expected).resolve():
@@ -462,7 +478,7 @@ def corrected_probe_modes(directory):
         if results[f"{name}-run-receipt"].get("command") != [str(executable)]:
             raise ValueError(f"{name} executed PE differs from retained PE")
         results[name] = corrected_probe_rows((mode / "probe-stdout.tsv").read_text(encoding="utf-8"))
-    return {name: results[name] for name in ("debug-g", "optimized-opt")}
+    return {name: results[name] for name, _ in modes}
 
 
 def validate_corrected(args):
@@ -526,11 +542,13 @@ def validate_corrected(args):
     modes = corrected_probe_modes(probe)
     result = {"route": "corrected-production", "sourceSha": args.source_sha,
               "originalAndDiagnosticPasses": len(cases), "nativeTraceRows": native_rows,
-              "javaTraceRows": java_rows, "scalarIDs": scalars, "engineSourceHashes": source_count - 1,
+              "javaTraceRows": java_rows, "scalarIDs": [row["id"] for row in scalars],
+              "scalarObservations": scalars, "engineSourceHashes": source_count - len(PROBE_SOURCES),
+              "probeSourceHashes": len(PROBE_SOURCES),
               "debugTestPeSha256": test_hash, "probeModes": modes}
     Path(args.result).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print("CORRECTED_COLLISION_RECORDS_OK xmlCases=30 originalFailures=0 "
-          "nativeRows=72 javaRows=72 scalarIDs=7 probeModes=2 engineSources=8")
+          "nativeRows=72 javaRows=72 scalarIDs=7 probeModes=3 engineSources=8 probeSources=2")
 
 
 def xml_error_self_test():

@@ -407,26 +407,33 @@ jobs:
               'dyn4k-core/src/jsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
               'dyn4k-core/src/wasmJsMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
               'dyn4k-core/src/wasmWasiMain/kotlin/org/dyn4j/geometry/NearestSqrtPlatform.kt'
+            )
+            $probeSources = @(
               'tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt'
+              'tools/diagnostic/windows_collision/SqrtOperationJvmProbe.java'
             )
             try {
-              $hashLines = foreach ($relativeSource in $engineSources) {
+              $hashLines = foreach ($relativeSource in ($engineSources + $probeSources)) {
                 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PWD $relativeSource) -ErrorAction Stop).Hash.ToLowerInvariant()
                 "$hash  $relativeSource"
               }
               $hashLines | Set-Content -Path (Join-Path $correctedProbe 'source-sha256.txt')
               $commonSource = Join-Path $PWD $engineSources[1]
               $nativeSource = Join-Path $PWD $engineSources[2]
-              $probeSource = Join-Path $PWD $engineSources[8]
+              $probeSource = Join-Path $PWD $probeSources[0]
               if (-not (Test-Path -LiteralPath $konanc -PathType Leaf)) { throw 'Pinned Kotlin/Native compiler is unavailable' }
               $correctedFailures = [System.Collections.Generic.List[string]]::new()
-              foreach ($probeMode in @(@{ Name = 'debug-g'; Flag = '-g' }, @{ Name = 'optimized-opt'; Flag = '-opt' })) {
+              foreach ($probeMode in @(
+                @{ Name = 'debug-g'; Flags = @('-g') }
+                @{ Name = 'default'; Flags = @() }
+                @{ Name = 'optimized-opt'; Flags = @('-opt') }
+              )) {
                 $probeModeDirectory = Join-Path $correctedProbe $probeMode.Name
                 New-Item -ItemType Directory -Force -Path $probeModeDirectory | Out-Null
                 $outputBase = Join-Path $probeModeDirectory 'sqrt-operation-probe'
                 $probePe = "$outputBase.exe"
                 $arguments = @('-Xmulti-platform', "-Xcommon-sources=$commonSource", $commonSource, $nativeSource, $probeSource,
-                  '-target', 'mingw_x64', $probeMode.Flag, '-o', $outputBase)
+                  '-target', 'mingw_x64') + $probeMode.Flags + @('-o', $outputBase)
                 [pscustomobject]@{ mode = $probeMode.Name; executable = $konanc; arguments = $arguments } |
                   ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $probeModeDirectory 'compiler-command.json')
                 $compileExit = 1
@@ -572,6 +579,7 @@ jobs:
             'tools/diagnostic/windows_collision/validate-mode-control.py'
             'tools/diagnostic/windows_collision/validate-precision-control.py'
             'tools/diagnostic/windows_collision/SqrtOperationNativeProbe.kt'
+            'tools/diagnostic/windows_collision/SqrtOperationJvmProbe.java'
             'tools/compatibility/windows_collision_focus.py'
             'dyn4k-core/src/commonTest/kotlin/org/dyn4j/collision/narrowphase/WindowsCollisionIntermediateDiagnosticTest.kt'
             'dyn4k-core/diagnostic/windows-collision/WindowsCollisionPrecisionControlTest.kt'

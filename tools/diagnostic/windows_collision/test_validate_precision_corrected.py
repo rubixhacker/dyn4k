@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import runpy
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -71,7 +72,7 @@ def xml_fixture(directory):
 
 def probe_fixture(directory):
     (directory / "probe-exit-code.txt").write_text("0\n", encoding="utf-8")
-    for name, flag in (("debug-g", "-g"), ("optimized-opt", "-opt")):
+    for name, flags in (("debug-g", ["-g"]), ("default", []), ("optimized-opt", ["-opt"])):
         mode = directory / name
         mode.mkdir()
         executable = mode / "sqrt-operation-probe.exe"
@@ -80,7 +81,7 @@ def probe_fixture(directory):
             f"{hashlib.sha256(executable.read_bytes()).hexdigest()}  sqrt-operation-probe.exe\n", encoding="utf-8")
         sources = [str(REPO / path) for path in (V["ENGINE_SOURCES"][1], V["ENGINE_SOURCES"][2], V["PROBE_SOURCE"])]
         arguments = ["-Xmulti-platform", f"-Xcommon-sources={sources[0]}", *sources,
-                     "-target", "mingw_x64", flag, "-o", str(mode / "sqrt-operation-probe")]
+                     "-target", "mingw_x64", *flags, "-o", str(mode / "sqrt-operation-probe")]
         compiler = "/pinned/bin/kotlinc-native.bat"
         (mode / "compiler-command.json").write_text(
             json.dumps({"mode": name, "executable": compiler, "arguments": arguments}), encoding="utf-8")
@@ -126,17 +127,42 @@ class CorrectedControlTest(unittest.TestCase):
     def test_seven_scalar_bits_and_adverse(self):
         native, java = scalar_rows("kotlin-native"), scalar_rows("java")
         self.assertEqual(len(V["corrected_scalar_rows"](native, java)), 7)
-        self.reject(lambda: V["corrected_scalar_rows"](native.replace("sqrt=0.49999999999999994@4602678819172646911",
-                                                                    "sqrt=0.5@4602678819172646912", 1), java))
         self.reject(lambda: V["corrected_scalar_rows"]("\n".join(native.splitlines()[:-1]), java))
+
+    def test_retained_debug_scalar_divergence_is_observation(self):
+        source = Path(__file__).with_name("testdata")
+        native = (source / "c0d-debug-g-native-scalar.tsv").read_text(encoding="utf-8")
+        java = (source / "c0d-java-scalar.tsv").read_text(encoding="utf-8")
+        self.assertEqual(hashlib.sha256(native.encode()).hexdigest(),
+                         "4ff346c6ddddd0c3cd20e352f0064334fea686fb9b2f4c8ad5cfe8a7609d8b06")
+        self.assertEqual(hashlib.sha256(java.encode()).hexdigest(),
+                         "b448b87180b11a8174e82e6e453ed95f08ea4f507575194a8c33752a90b2303e")
+        SCALAR["validate"](native, java)
+        observations = V["corrected_scalar_rows"](native, java)
+        self.assertEqual([row["id"] for row in observations], list(V["SCALAR_IDS"]))
+        self.assertEqual(observations[0]["native"]["sqrt"], "0.5@4602678819172646912")
+        self.assertEqual(observations[0]["java"]["sqrt"], "0.49999999999999994@4602678819172646911")
+        self.assertEqual(sum(row["native"]["sqrt"] != row["java"]["sqrt"] for row in observations), 7)
+        self.assertEqual(sum(not row["computedBitEqual"]["sqrt"] for row in observations), 7)
+        self.reject(lambda: V["corrected_scalar_rows"](native.replace(
+            "x=-0.4330127018922194@-4621899953565315924", "x=0.0@0", 1), java))
+        self.reject(lambda: V["corrected_scalar_rows"]("\n".join(native.splitlines()[:-1]), java))
+        lines = native.splitlines()
+        lines[0], lines[1] = lines[1], lines[0]
+        self.reject(lambda: V["corrected_scalar_rows"]("\n".join(lines), java))
+        self.reject(lambda: V["corrected_scalar_rows"](native.replace(
+            "xSquared=0.18750000000000008@4595923419731591171",
+            "xSquared=0.0@4595923419731591171", 1), java))
+        self.reject(lambda: V["corrected_scalar_rows"](native.replace(
+            "\treciprocal=2.0@4611686018427387904", "", 1), java))
 
     def test_committed_source_hashes_and_adverse(self):
         source_sha = subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip()
-        paths = (*V["ENGINE_SOURCES"], V["PROBE_SOURCE"])
+        paths = (*V["ENGINE_SOURCES"], *V["PROBE_SOURCES"])
         lines = [f"{hashlib.sha256((REPO / path).read_bytes()).hexdigest()}  {path}" for path in paths]
         receipt = self.root / "source-sha256.txt"
         receipt.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assertEqual(V["corrected_source_hashes"](self.root, source_sha), 9)
+        self.assertEqual(V["corrected_source_hashes"](self.root, source_sha), 10)
         receipt.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
         self.reject(lambda: V["corrected_source_hashes"](self.root, source_sha))
         receipt.write_text("\n".join(["0" * 64 + "  " + paths[0], *lines[1:]]) + "\n", encoding="utf-8")
@@ -184,7 +210,7 @@ class CorrectedControlTest(unittest.TestCase):
         probe = self.root / "probe"
         probe.mkdir()
         probe_fixture(probe)
-        paths = (*V["ENGINE_SOURCES"], V["PROBE_SOURCE"])
+        paths = (*V["ENGINE_SOURCES"], *V["PROBE_SOURCES"])
         (probe / "source-sha256.txt").write_text(
             "\n".join(f"{hashlib.sha256((REPO / path).read_bytes()).hexdigest()}  {path}" for path in paths) + "\n",
             encoding="utf-8")
@@ -198,7 +224,8 @@ class CorrectedControlTest(unittest.TestCase):
             V["validate_corrected"](args)
             trace_validator.assert_called_once()
             result = json.loads(Path(args.result).read_text(encoding="utf-8"))
-            self.assertEqual((result["originalAndDiagnosticPasses"], result["engineSourceHashes"]), (30, 8))
+            self.assertEqual((result["originalAndDiagnosticPasses"], result["engineSourceHashes"],
+                              result["probeSourceHashes"], len(result["probeModes"])), (30, 8, 2, 3))
             (native / "gradle-exit-code.txt").write_text("1\n", encoding="utf-8")
             self.reject(lambda: V["validate_corrected"](args))
             (native / "gradle-exit-code.txt").write_text("0\n", encoding="utf-8")
@@ -212,7 +239,7 @@ class CorrectedControlTest(unittest.TestCase):
 
     def test_probe_modes_and_adverse(self):
         probe_fixture(self.root)
-        self.assertEqual(len(V["corrected_probe_modes"](self.root)), 2)
+        self.assertEqual(len(V["corrected_probe_modes"](self.root)), 3)
         mode = self.root / "debug-g"
         output = mode / "probe-stdout.tsv"
         original = output.read_text(encoding="utf-8")
@@ -227,6 +254,12 @@ class CorrectedControlTest(unittest.TestCase):
         command.write_text(original_command.replace("NearestSqrtPlatform.kt", "Other.kt", 1), encoding="utf-8")
         self.reject(lambda: V["corrected_probe_modes"](self.root))
         command.write_text(original_command, encoding="utf-8")
+        default_command = self.root / "default" / "compiler-command.json"
+        default_original = default_command.read_text(encoding="utf-8")
+        default_command.write_text(default_original.replace('"-target", "mingw_x64", "-o"',
+                                                            '"-target", "mingw_x64", "-g", "-o"'), encoding="utf-8")
+        self.reject(lambda: V["corrected_probe_modes"](self.root))
+        default_command.write_text(default_original, encoding="utf-8")
         receipt = mode / "run-receipt.json"
         receipt.write_text(json.dumps({"state": "TIMEOUT", "childExitCode": None}), encoding="utf-8")
         self.reject(lambda: V["corrected_probe_modes"](self.root))
@@ -235,11 +268,18 @@ class CorrectedControlTest(unittest.TestCase):
         probe_fixture(probe_fixture_rebuilt)
         (probe_fixture_rebuilt / "optimized-opt" / "sqrt-operation-probe.exe").write_bytes(b"changed")
         self.reject(lambda: V["corrected_probe_modes"](probe_fixture_rebuilt))
+        missing_default = self.root / "missing-default"
+        missing_default.mkdir()
+        probe_fixture(missing_default)
+        shutil.rmtree(missing_default / "default")
+        self.reject(lambda: V["corrected_probe_modes"](missing_default))
 
     def test_workflow_route_contract_and_adverse(self):
         workflow = (REPO / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
         required = ("default: historical-pc53", "- corrected-production", "if ($route -eq 'historical-pc53')",
-                    "validate-corrected", "--native-scalars", "--probe-directory", "'-g'", "'-opt'",
+                    "validate-corrected", "--native-scalars", "--probe-directory",
+                    "Name = 'default'; Flags = @()", "+ $probeMode.Flags +",
+                    "SqrtOperationJvmProbe.java", "$engineSources + $probeSources", "'-g'", "'-opt'",
                     "$correctedProbeExit -eq '0' -and $correctedValidationExit -eq 0")
         def check(text):
             if any(token not in text for token in required):
