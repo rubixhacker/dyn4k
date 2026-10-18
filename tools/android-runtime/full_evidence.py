@@ -52,6 +52,8 @@ def validate_full_keep_scope(configuration, allowed_test_classes):
                     selector in allowed_test_classes or
                     selector.startswith("io.github.rubixhacker.dyn4k.full.")):
                 raise ValueError(f"engine or facade class kept outside full test entries: {selector}")
+    if dexopt_member_count != 1:
+        raise ValueError("full optimized route has a missing Matrix22 member keep")
 
 
 def validate_full_r8(configuration, mapping, usage, debug_dex, release_dex,

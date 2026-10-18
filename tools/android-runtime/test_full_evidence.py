@@ -194,7 +194,9 @@ class FullInstalledEvidenceTest(unittest.TestCase):
             full_evidence.validate_full_installed(duplicate, {CASE, CONSUMER}, 0)
 
     def test_rejects_broad_keep_or_unchanged_engine_dex(self):
-        rules = "-keep class io.github.rubixhacker.dyn4k.full.FullActivity { *; }\n"
+        rules = ("-keep class io.github.rubixhacker.dyn4k.full.FullActivity { *; }\n"
+                 "-keepclassmembers class org.dyn4j.geometry.Matrix22 "
+                 "{ public double normMax(); }\n")
         mapping = "org.dyn4j.geometry.Vector2 -> a:\norg.dyn4j.dynamics.Body -> b:\n"
         usage = "org.dyn4j.geometry.Unused\n"
         debug = {"Lorg/dyn4j/geometry/Vector2;", "Lorg/dyn4j/dynamics/Body;", "Lc;"}
@@ -226,6 +228,13 @@ class FullInstalledEvidenceTest(unittest.TestCase):
         self.assertEqual(len(full_evidence.validate_full_r8(
             rules, mapping, usage, debug, release, {matrix}, minimum_transformed=2
         )["transformed_engine_classes"]), 2)
+        without_member_rule = rules.replace(
+            "-keepclassmembers class org.dyn4j.geometry.Matrix22 "
+            "{ public double normMax(); }\n", "")
+        with self.assertRaisesRegex(ValueError, "missing Matrix22 member keep"):
+            full_evidence.validate_full_r8(
+                without_member_rule, mapping, usage, debug, release, {matrix},
+                minimum_transformed=2)
         for bad_rules, bad_release in ((rules + "-keep class org.dyn4j.** { *; }\n", release),
                                        (rules.replace("normMax", "norm*"), release),
                                        (rules + "-keepclassmembers class org.dyn4j.geometry.Matrix22 "
