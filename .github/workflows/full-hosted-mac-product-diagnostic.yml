@@ -1,0 +1,77 @@
+name: Full hosted macOS product diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-product-diagnostic:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check clean checkout and exact source identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+
+      - name: Select pinned Xcode
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run focused macOS product diagnostic
+        id: macos_product_diagnostic
+        run: >-
+          python -B tools/qualification/full_hosted.py
+          --candidate-sha "$GITHUB_SHA"
+          --target macosArm64
+          --output "$RUNNER_TEMP/full-hosted-macosArm64"
+
+      - name: Package full hosted raw evidence
+        id: package_failed_evidence
+        if: always()
+        run: >-
+          python -B tools/qualification/full_hosted.py --package
+          --output "$RUNNER_TEMP/full-hosted-macosArm64"
+          --archive "$RUNNER_TEMP/full-hosted-macosArm64.tar"
+
+      - name: Write diagnostic job receipt
+        if: always()
+        env:
+          DIAGNOSTIC_OUTCOME: ${{ steps.macos_product_diagnostic.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package_failed_evidence.outcome }}
+        run: |
+          printf '{\n  "candidate_sha": "%s",\n  "run_id": "%s",\n  "run_attempt": "%s",\n  "target": "macosArm64",\n  "full_hosted_outcome": "%s",\n  "package_outcome": "%s"\n}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$DIAGNOSTIC_OUTCOME" "$PACKAGE_OUTCOME" \
+            > "$RUNNER_TEMP/full-hosted-macosArm64-job-receipt.json"
+
+      - name: Upload focused macOS diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-hosted-macosArm64-product-diagnostic-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/full-hosted-macosArm64.tar
+            ${{ runner.temp }}/full-hosted-macosArm64-job-receipt.json
+          if-no-files-found: warn
