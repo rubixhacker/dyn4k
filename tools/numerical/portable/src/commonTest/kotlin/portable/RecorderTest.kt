@@ -17,6 +17,126 @@ import kotlin.test.assertSame
 
 class RecorderTest {
     @Test
+    fun throwingOutputForBeforeRotationWaitsUntilWorldStepCompletes() {
+        fun scene(): Pair<World<Body>, Body> {
+            val world = World<Body>()
+            world.setGravity(0.0, 0.0)
+            val body = Body()
+            body.addFixture(Geometry.createCircle(0.5))
+            body.setMass(MassType.NORMAL)
+            body.setAngularVelocity(1.0)
+            world.addBody(body)
+            return world to body
+        }
+        val (controlWorld, controlBody) = scene()
+        controlBody.getTransform().rotate(0.25)
+        controlWorld.step(1, 1.0 / 60.0)
+
+        val (world, body) = scene()
+        var completed = 0
+        world.addStepListener(object : StepListener<Body> {
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) { completed++ }
+        })
+        assertFailsWith<IllegalStateException> {
+            RotationOperationTap.capture("before-rotation-output") {
+                NumericalRecorder { line ->
+                    if (line.contains("\"kind\":\"action\""))
+                        throw IllegalStateException("action output failed")
+                }.capture(CaseSpec("before-rotation-output", "free-motion", "default",
+                    60, 1, emptyMap()), world,
+                    before = { _, _ ->
+                        body.getTransform().rotate(0.25)
+                        "rotate-before-step"
+                    })
+            }
+        }
+        assertEquals(1, completed)
+        assertEquals(controlBody.getTransform().getValues().toList(),
+            body.getTransform().getValues().toList())
+        assertEquals(null, RotationOperationTap.currentCapture())
+        assertEquals(1, world.getStepListeners().size)
+    }
+
+    @Test
+    fun beforeRotationMarkerKeepsItsOrderAfterTheCompletedStep() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val body = Body()
+        body.addFixture(Geometry.createCircle(0.5))
+        body.setMass(MassType.NORMAL)
+        body.setAngularVelocity(1.0)
+        world.addBody(body)
+        val rows = mutableListOf<String>()
+        var completed = 0
+        world.addStepListener(object : StepListener<Body> {
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) { completed++ }
+        })
+        RotationOperationTap.capture("ordered-before-rotation") {
+            NumericalRecorder(
+                { rows.add("NUMERICAL_JSON $it") },
+                { assertEquals(1, completed); rows.add(it) },
+            ).capture(CaseSpec("ordered-before-rotation", "free-motion", "default",
+                60, 1, emptyMap()), world,
+                before = { _, _ ->
+                    body.getTransform().rotate(0.25)
+                    "rotate-before-step"
+                })
+        }
+        val action = rows.indexOfFirst { it.contains("\"kind\":\"action\"") }
+        val begin = rows.indexOfFirst { it.contains("\"name\":\"step.begin\"") }
+        val state = rows.indexOfFirst { it.contains("\"kind\":\"state\"") }
+        val rotations = rows.withIndex().filter { it.value.startsWith("PROSPECTIVE_ROTATION_JSON ") }
+        assertEquals(2, rotations.size)
+        assertTrue(action in 0 until rotations[0].index)
+        assertTrue(rotations[0].index < begin)
+        assertTrue(begin < rotations[1].index)
+        assertTrue(rotations[1].index < state)
+        assertTrue(rotations[0].value.contains("\"sequence\":0"))
+        assertTrue(rotations[1].value.contains("\"sequence\":1"))
+        assertEquals(1, completed)
+    }
+
+    @Test
+    fun throwingBeforeRotationMarkerStillCompletesTheWorldStep() {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val body = Body()
+        body.addFixture(Geometry.createCircle(0.5))
+        body.setMass(MassType.NORMAL)
+        body.setAngularVelocity(1.0)
+        world.addBody(body)
+        var completed = 0
+        world.addStepListener(object : StepListener<Body> {
+            override fun begin(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun updatePerformed(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun postSolve(step: TimeStep?, world: PhysicsWorld<Body, *>?) = Unit
+            override fun end(step: TimeStep?, world: PhysicsWorld<Body, *>?) { completed++ }
+        })
+        assertFailsWith<IllegalStateException> {
+            RotationOperationTap.capture("throwing-before-marker") {
+                NumericalRecorder(
+                    { },
+                    { throw IllegalStateException("marker output failed") },
+                ).capture(CaseSpec("throwing-before-marker", "free-motion", "default",
+                    60, 1, emptyMap()), world,
+                    before = { _, _ ->
+                        body.getTransform().rotate(0.25)
+                        "rotate-before-step"
+                    })
+            }
+        }
+        assertEquals(1, completed)
+        assertEquals(null, RotationOperationTap.currentCapture())
+        assertEquals(1, world.getStepListeners().size)
+    }
+
+    @Test
     fun throwingOutputDuringStepWaitsUntilEngineCompletes() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
