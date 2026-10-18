@@ -9,6 +9,7 @@ import tempfile
 import time
 
 import capture
+import host_image
 
 
 class AdverseStepError(ValueError):
@@ -24,7 +25,9 @@ def checked(stage, action):
         raise AdverseStepError(stage, error) from error
 
 
-def path_swap_control():
+def path_swap_control(receipt=None, retained_image=None):
+    if receipt is None:
+        receipt = {}
     if sys.platform == "win32":
         source = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
         arguments = ["-t", "127.0.0.1"]
@@ -38,11 +41,20 @@ def path_swap_control():
         if os.name == "posix":
             checked("make_executable", lambda: os.chmod(executable, 0o700))
         original_sha = checked("hash_image", lambda: capture.digest(executable))
+        receipt.update({"host": sys.platform, "control_image_source": str(source),
+                        "original_sha256": original_sha, "swap": "unattempted",
+                        "mapped_image_identity": "unobserved"})
+        if retained_image is not None:
+            def retain_selected():
+                with executable.open("rb") as source_stream, retained_image.open("xb") as output_stream:
+                    shutil.copyfileobj(source_stream, output_stream)
+                if capture.digest(retained_image) != original_sha:
+                    raise ValueError("retained selected executable differs from launched image")
+            checked("retain_selected_image", retain_selected)
+            receipt["selected_image_archive"] = str(retained_image)
         process = checked("launch_image", lambda: subprocess.Popen(
             [str(executable), *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-        receipt = {"host": sys.platform, "pid": process.pid,
-                   "original_sha256": original_sha, "swap": "unattempted",
-                   "mapped_image_identity": "unobserved"}
+        receipt["pid"] = process.pid
         try:
             time.sleep(0.1)
             if process.poll() is not None:
@@ -102,14 +114,19 @@ def main():
     args = parser.parse_args()
     if not args.output.is_absolute() or args.output.exists():
         parser.error("output must be a new absolute path")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    retained_image = args.output.with_name(args.output.stem + "-selected.exe") \
+        if sys.platform == "win32" else None
+    partial = {}
     try:
-        result = path_swap_control()
+        result = path_swap_control(partial, retained_image)
     except (OSError, ValueError) as error:
-        result = {"host": sys.platform, "swap": "unavailable", "error": str(error),
+        result = {**partial, "host": sys.platform, "swap": "unavailable", "error": str(error),
                   "mapped_image_identity": "unobserved"}
         if isinstance(error, AdverseStepError):
             result["error_stage"] = error.stage
-    args.output.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(error.__cause__, host_image.PECodeMismatch):
+                result["pe_mismatch"] = error.__cause__.detail
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
     if result["mapped_image_identity"] != "matched_original" or result.get("stale_pid") != "rejected" or \

@@ -295,6 +295,31 @@ class PortableCaptureTest(unittest.TestCase):
             host_image.compare_pe_code(image, layout,
                 lambda address, size: (b"z" * size if address == base else read(address, size)), base)
 
+    def test_windows_live_pe_code_mismatch_identifies_exact_bytes(self):
+        image = self.windows_pe_fixture()
+        layout = host_image.pe_executable_sections(image)
+        base = 0x140000000
+
+        def read(address, size):
+            if address == base:
+                return bytes(image[:size])
+            mapped = bytearray(image[0x200:0x200 + size])
+            mapped[37] ^= 1
+            return bytes(mapped)
+
+        with self.assertRaises(host_image.PECodeMismatch) as mismatch:
+            host_image.compare_pe_code(image, layout, read, base)
+        detail = mismatch.exception.detail
+        self.assertEqual((detail["section"], detail["rva"], detail["file_offset"]),
+                         (".text", 0x1025, 0x225))
+        self.assertEqual((detail["selected_byte"], detail["mapped_byte"]), (37, 36))
+        self.assertLessEqual(len(bytes.fromhex(detail["selected_window_hex"])), 17)
+        self.assertEqual(detail["selected_image_sha256"], hashlib.sha256(image).hexdigest())
+        self.assertEqual(detail["parsed_relocation_byte_count"], 0)
+        self.assertEqual(detail["window_relocation_rvas"], [])
+        self.assertNotEqual(detail["selected_section_sha256"],
+                            detail["mapped_section_sha256"])
+
     def test_windows_source_archive_entry_uses_jar_separators(self):
         relative = PureWindowsPath("commonMain", "kotlin", "org", "dyn4j", "Vector2.kt")
         self.assertEqual(capture.source_archive_name(relative),
@@ -835,6 +860,16 @@ class PortableCaptureTest(unittest.TestCase):
         self.assertEqual(result["stale_pid"], "rejected")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_retains_exact_selected_image(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "selected-image"
+            result = host_image_adverse.path_swap_control({}, selected)
+            self.assertEqual(capture.digest(selected), result["original_sha256"])
+            self.assertEqual(result["selected_image_archive"], str(selected))
+            self.assertEqual(result["mapped_image_identity"], "matched_original")
+            self.assertEqual(result["stale_pid"], "rejected")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
     def test_path_swap_does_not_copy_system_file_metadata(self):
         with mock.patch.object(host_image_adverse.shutil, "copy2",
                                side_effect=PermissionError(1, "copy metadata denied")):
@@ -862,6 +897,57 @@ class PortableCaptureTest(unittest.TestCase):
                 self.assertEqual(receipt["mapped_image_identity"], "unobserved")
                 self.assertEqual(receipt["error_stage"], stage)
                 self.assertIn(message, receipt["error"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
+    def test_path_swap_retains_selected_image_and_pe_mismatch_on_failure(self):
+        detail = {"section": ".text", "rva": 0x1042,
+                  "selected_byte": 1, "mapped_byte": 2}
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "path-swap.json"
+            with mock.patch.object(capture, "observed_process_image",
+                                   side_effect=host_image.PECodeMismatch(detail)), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    host_image_adverse.main()
+            receipt = json.loads(output.read_text())
+        self.assertEqual(receipt["error_stage"], "observe_before")
+        self.assertEqual(receipt["original_sha256"], capture.digest(Path("/bin/sleep")))
+        self.assertEqual(receipt["control_image_source"], "/bin/sleep")
+        self.assertEqual(receipt["pe_mismatch"], detail)
+        self.assertEqual(receipt["stale_pid"], "rejected")
+
+    def test_windows_path_swap_main_archives_selected_image_on_failure(self):
+        detail = {"section": ".text", "rva": 0x1042,
+                  "selected_byte": 1, "mapped_byte": 2}
+        process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
+                                  terminate=mock.Mock(), communicate=mock.Mock(return_value=(b"", b"")),
+                                  returncode=1)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "System32" / "ping.exe"
+            source.parent.mkdir()
+            source.write_bytes(b"MZ selected image fixture")
+            output = root / "path-swap.json"
+            retained = root / "path-swap-selected.exe"
+            with mock.patch.dict(os.environ, {"SystemRoot": str(root)}), \
+                    mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
+                    mock.patch.object(host_image_adverse.subprocess, "Popen", return_value=process), \
+                    mock.patch.object(host_image_adverse.time, "sleep"), \
+                    mock.patch.object(capture, "observed_process_image",
+                                      side_effect=host_image.PECodeMismatch(detail)), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    host_image_adverse.main()
+            receipt = json.loads(output.read_text())
+            self.assertEqual(retained.read_bytes(), source.read_bytes())
+            self.assertEqual(receipt["original_sha256"], capture.digest(retained))
+            self.assertEqual(receipt["selected_image_archive"], str(retained))
+            self.assertEqual(receipt["control_image_source"], str(source))
+            self.assertEqual(receipt["pe_mismatch"], detail)
+            self.assertEqual(receipt["error_stage"], "observe_before")
+            self.assertEqual(receipt["mapped_image_identity"], "unobserved")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
     def test_path_swap_writes_receipt_when_diagnostic_path_is_absent(self):

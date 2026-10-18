@@ -247,6 +247,15 @@ def pe_executable_sections(image):
             "relocations": relocations}
 
 
+class PECodeMismatch(ValueError):
+    def __init__(self, detail):
+        self.detail = detail
+        super().__init__("live mapped PE code differs from selected executable "
+                         f"in {detail['section']} at RVA 0x{detail['rva']:x}: "
+                         f"selected=0x{detail['selected_byte']:02x}, "
+                         f"mapped=0x{detail['mapped_byte']:02x}")
+
+
 def compare_pe_code(image, layout, read_memory, base):
     mapped_header = read_memory(base, layout["header_size"])
     selected_header = bytearray(image[:layout["header_size"]])
@@ -262,8 +271,10 @@ def compare_pe_code(image, layout, read_memory, base):
     matched = 0
     digest = hashlib.sha256()
     for section in layout["sections"]:
-        expected = bytearray(image[section["raw_offset"]:section["raw_offset"] + section["size"]])
-        observed = bytearray(read_memory(base + section["rva"], section["size"]))
+        selected_code = image[section["raw_offset"]:section["raw_offset"] + section["size"]]
+        mapped_code = read_memory(base + section["rva"], section["size"])
+        expected = bytearray(selected_code)
+        observed = bytearray(mapped_code)
         if len(observed) != len(expected):
             raise ValueError("live mapped PE code read was incomplete")
         for rva in layout["relocations"]:
@@ -271,7 +282,25 @@ def compare_pe_code(image, layout, read_memory, base):
             if 0 <= index < len(expected):
                 expected[index] = observed[index] = 0
         if observed != expected:
-            raise ValueError("live mapped PE code differs from selected executable")
+            index = next(index for index, pair in enumerate(zip(expected, observed))
+                         if pair[0] != pair[1])
+            window = slice(max(0, index - 8), min(len(expected), index + 9))
+            raise PECodeMismatch({
+                "section": section["name"], "section_rva": section["rva"],
+                "section_size": len(expected), "mapped_base": base,
+                "preferred_base": layout["preferred_base"],
+                "selected_image_sha256": hashlib.sha256(image).hexdigest(),
+                "parsed_relocation_byte_count": len(layout["relocations"]),
+                "rva": section["rva"] + index,
+                "file_offset": section["raw_offset"] + index,
+                "selected_byte": expected[index], "mapped_byte": observed[index],
+                "selected_window_hex": selected_code[window].hex(),
+                "mapped_window_hex": mapped_code[window].hex(),
+                "window_relocation_rvas": [section["rva"] + position
+                                           for position in range(window.start, window.stop)
+                                           if section["rva"] + position in layout["relocations"]],
+                "selected_section_sha256": hashlib.sha256(expected).hexdigest(),
+                "mapped_section_sha256": hashlib.sha256(observed).hexdigest()})
         matched += len(expected) - sum(section["rva"] <= rva < section["rva"] + len(expected)
                                        for rva in layout["relocations"])
         digest.update(expected)

@@ -157,6 +157,13 @@ OS sharing denial when Windows prevents rename and still requires a matching
 live code observation and a rejected stale PID. A failed module or memory
 read remains unpassed. Hosted Windows execution must establish whether this
 probe succeeds for the Kotlin/Native executable on the selected runner.
+The path-swap child is a copied `System32\ping.exe`; Python only runs the
+control script. It exercises a different PE from the staged dyn4k executable.
+The control archives the exact copied executable beside its JSON receipt.
+On a code mismatch, the JSON retains its selected hash and PID, plus the first
+unmatched section, RVA, file offset, byte windows, and section hashes.
+The mismatch still fails the control. A runner investigation must use those
+bytes to identify a supported mapping difference before changing acceptance.
 
 ## macOS ARM64 hosted runner
 
