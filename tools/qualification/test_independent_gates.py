@@ -772,7 +772,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                  independent_gates.P2_CANONICAL_ARCHIVE_OWNER_REVISION,
                  "actual_arithmetic.py",
                  independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"]),
-                (independent_gates.APPROVED_P2_EDBC_PRODUCERS, current, "run.py",
+                (independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS, current, "run.py",
                  independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["run.py"])):
             with self.subTest(candidate=candidate, stale=name), mock.patch.dict(
                     blobs, {name: stale}):
@@ -831,8 +831,10 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected = dict(independent_gates.APPROVED_P2_CURRENT_PRODUCERS)
         expected["run.py"] = run_sha256
         self.assertEqual(expected, independent_gates.APPROVED_P2_EDBC_PRODUCERS)
-        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
-        self.assertEqual(run_sha256,
+        local_expected = dict(expected)
+        local_expected["run.py"] = "750273c0417ff633db79243e2b4df929104f6012b54f667168c176b450dea8cd"
+        self.assertEqual(local_expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(local_expected["run.py"],
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
         self.assertEqual(run_git_blob, subprocess.check_output(
             ["git", "rev-parse", f"{edbc}:{run_path}"], cwd=ROOT, text=True).strip())
@@ -875,6 +877,61 @@ class IndependentGateSeamTests(unittest.TestCase):
                              {"run.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, previous)
+
+    def test_p2_native_02c_assembly_pins_only_reviewed_run_producer(self):
+        current = "02cbc0a989e4d4b02a5305e8bf6d737251336ec8"
+        pre_fence = "e7d11b4f"
+        edbc = independent_gates.P2_EDBC_ASSEMBLY_REVISION
+        older = independent_gates.P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION
+        run_path = "tools/numerical/portable/run.py"
+        run_sha256 = "750273c0417ff633db79243e2b4df929104f6012b54f667168c176b450dea8cd"
+        run_git_blob = "cb0455222f79d323f96eaac983772f813ea5601c"
+
+        self.assertEqual(current, independent_gates.P2_NATIVE_02C_ASSEMBLY_REVISION)
+        expected = dict(independent_gates.APPROVED_P2_EDBC_PRODUCERS)
+        expected["run.py"] = run_sha256
+        self.assertEqual(expected, independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(run_sha256, hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
+        self.assertEqual(run_git_blob, subprocess.check_output(
+            ["git", "rev-parse", f"{current}:{run_path}"], cwd=ROOT, text=True).strip())
+        self.assertEqual(run_sha256, hashlib.sha256(subprocess.check_output(
+            ["git", "show", f"{current}:{run_path}"], cwd=ROOT)).hexdigest())
+
+        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
+        self.assertEqual(independent_gates.APPROVED_P2_EDBC_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, edbc))
+        self.assertEqual(independent_gates.APPROVED_P2_CURRENT_PRODUCERS,
+                         independent_gates._p2_producer_binding(
+                             ROOT, "2b20aa96c5bc28f13258b86d517003ff74f8b5fd"))
+        self.assertEqual(independent_gates.APPROVED_P2_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, older))
+
+        with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+            independent_gates._p2_producer_binding(ROOT, pre_fence)
+
+        original_read_bytes = Path.read_bytes
+
+        def tampered_local(path_value):
+            content = original_read_bytes(path_value)
+            return (content + b"\n# changed local run producer\n"
+                    if path_value == ROOT / run_path else content)
+
+        with mock.patch.object(Path, "read_bytes", tampered_local):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
+
+        original_check_output = subprocess.check_output
+
+        def tampered_committed(command, *args, **kwargs):
+            content = original_check_output(command, *args, **kwargs)
+            if "show" in command and f"{current}:{run_path}" in command:
+                return content + b"\n# changed committed run producer\n"
+            return content
+
+        with mock.patch.object(subprocess, "check_output", tampered_committed):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
 
     def test_p2_canonical_archive_source_keeps_exact_revision_windows(self):
         source = "tools/numerical/portable/actual_arithmetic.py"
