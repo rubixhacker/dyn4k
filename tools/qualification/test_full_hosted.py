@@ -482,6 +482,12 @@ class FullHostedTests(unittest.TestCase):
                                  calls)
                 self.assertEqual("FAILED", receipt["status"])
                 for lane in receipt["configurations"]:
+                    if "consumer_process" in lane:
+                        self.assertEqual(
+                            ["-PqualificationProduction=true"]
+                            if lane["configuration"] == "production" else [],
+                            [argument for argument in lane["consumer_process"]["command"]
+                             if argument.startswith("-PqualificationProduction=")])
                     if configuration == "symlink":
                         self.assertTrue(lane["reason"].startswith(
                             "Safari generated Karma config is absent or unsafe:") or
@@ -1949,6 +1955,8 @@ class FullHostedTests(unittest.TestCase):
                     command += ["--init-script", str(original_output /
                                 folder.parent.name / "qualification.init.gradle"),
                                 "-PqualificationSafari=true"]
+                    if folder.parent.name == "production":
+                        command.append("-PqualificationProduction=true")
                 if folder.name == "graph":
                     command += ["--init-script", str(original_output /
                                                      folder.parent.name / "qualification-graph.init.gradle")]
@@ -2324,6 +2332,40 @@ class FullHostedTests(unittest.TestCase):
         self.assertEqual([2465, 58], [item["executed"]
                          for item in receipt["configurations"][0]["source"]])
         self.assertEqual(3, receipt["configurations"][0]["consumer"]["executed"])
+
+    def test_public_safari_directory_and_tar_bind_consumer_production_mode(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        self.assertEqual(72, len(self.safari_diagnostic_rows()))
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        archive = self.root.parent / (self.root.name + "-consumer-mode.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        for configuration, mutation in (("production", "missing"),
+                                        ("production", "false"),
+                                        ("production", "duplicate"),
+                                        ("development", "unexpected")):
+            with self.subTest(configuration=configuration, mutation=mutation):
+                changed = json.loads(json.dumps(receipt))
+                lane = next(item for item in changed["configurations"]
+                            if item["configuration"] == configuration)
+                command = lane["consumer_process"]["command"]
+                if mutation in ("missing", "false"):
+                    command.remove("-PqualificationProduction=true")
+                if mutation == "false":
+                    command.append("-PqualificationProduction=false")
+                elif mutation in ("duplicate", "unexpected"):
+                    command.append("-PqualificationProduction=true")
+                with self.assertRaisesRegex(ValueError, "Safari consumer production mode"):
+                    full_hosted.verify_raw_files(
+                        self.root, changed, manifest, consumer,
+                        candidate_repository=self.candidate_repository)
+                (self.root / "receipt.json").write_text(json.dumps(changed))
+                full_hosted.package_archive(self.root, archive)
+                with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                    with self.assertRaisesRegex(ValueError, "Safari consumer production mode"):
+                        full_hosted.verify_transport_archive(
+                            archive, changed["candidate_sha"], "jsSafari",
+                            candidate_repository=self.candidate_repository)
 
     def test_public_safari_directory_and_tar_bind_all_real_diagnostic_identities(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")

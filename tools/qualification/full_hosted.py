@@ -1994,6 +1994,14 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
             if target == "jsSafari" and process_name == "consumer" \
                     and "-PqualificationSafari=true" not in command:
                 raise ValueError("Safari consumer browser mode is absent")
+            if target == "jsSafari" and process_name == "consumer":
+                production_mode = [argument for argument in command
+                                   if isinstance(argument, str)
+                                   and argument.startswith("-PqualificationProduction")]
+                expected_mode = (["-PqualificationProduction=true"]
+                                 if config == "production" else [])
+                if production_mode != expected_mode:
+                    raise ValueError("Safari consumer production mode differs")
         source_process = lane["source_process"]
         consumer_process = lane["consumer_process"]
         graph_process = lane["graph_process"]
@@ -2241,6 +2249,8 @@ def run(target, candidate_sha, output):
                                     f"-PqualificationInvocationId={lane['invocation_id']}"]
                 if target == "jsSafari":
                     consumer_command.append("-PqualificationSafari=true")
+                    if config == "production":
+                        consumer_command.append("-PqualificationProduction=true")
                 if target == "jsSafari":
                     try:
                         with safari_reporter.stage(repository, candidate_sha,
