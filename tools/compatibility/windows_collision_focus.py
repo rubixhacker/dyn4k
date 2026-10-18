@@ -21,6 +21,20 @@ SUITES = {
     "org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest":
         "TEST-mingwX64Test.org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest.xml",
 }
+ORIGINAL_CASES = {
+    suite: {
+        f"{method}[mingwX64]"
+        for method in ("detectSat", "detectGjk", "gjkDistance", "getClipManifold")
+    }
+    for suite in (
+        "org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest",
+        "org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest",
+        "org.dyn4j.coverage.collision.shapes.a.CircleSegmentTest",
+        "org.dyn4j.coverage.collision.shapes.a.CircleSliceTest",
+        "org.dyn4j.coverage.collision.shapes.a.PolygonCapsuleTest",
+        "org.dyn4j.coverage.collision.shapes.a.PolygonPolygonTest",
+    )
+}
 DIAGNOSTIC_CASES = {
     "capsuleSlice[mingwX64]",
     "circlePolygon[mingwX64]",
@@ -79,13 +93,34 @@ def validate(native_directory, java_tsv, native_tsv):
                 f"wrong suite identity in {report_name}: {root.attrib.get('name')}"
             )
         if suite_name.endswith("WindowsCollisionIntermediateDiagnosticTest"):
-            cases = {case.attrib.get("name") for case in root.findall("testcase")}
-            if cases != DIAGNOSTIC_CASES or len(root.findall("testcase")) != 6:
+            test_cases = root.findall("testcase")
+            cases = {case.attrib.get("name") for case in test_cases}
+            if cases != DIAGNOSTIC_CASES or len(test_cases) != 6:
                 raise ValueError(f"diagnostic case set mismatch: {sorted(cases)}")
+            if any(case.find("skipped") is not None for case in test_cases):
+                raise ValueError("diagnostic suite contains skipped cases")
             system_output = root.find("system-out")
             if system_output is None or system_output.text is None:
                 raise ValueError("diagnostic suite has no system-out trace")
             diagnostic_records = system_output.text.splitlines()
+        else:
+            test_cases = root.findall("testcase")
+            case_ids = [case.attrib.get("name") for case in test_cases]
+            expected_cases = ORIGINAL_CASES[suite_name]
+            if set(case_ids) != expected_cases or len(case_ids) != len(expected_cases):
+                missing = sorted(expected_cases - set(case_ids))
+                unexpected = sorted(set(case_ids) - expected_cases)
+                raise ValueError(
+                    f"original suite case set mismatch in {suite_name}; "
+                    f"missing={missing}, unexpected={unexpected}"
+                )
+            skipped = sorted(
+                case.attrib.get("name")
+                for case in test_cases
+                if case.find("skipped") is not None
+            )
+            if skipped:
+                raise ValueError(f"original suite contains skipped cases in {suite_name}: {skipped}")
 
     if diagnostic_records is None:
         raise ValueError("diagnostic report was not processed")
@@ -109,11 +144,36 @@ def validate(native_directory, java_tsv, native_tsv):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Validate focused mingwX64 collision XML and TSV evidence.")
-    parser.add_argument("--native-directory", required=True)
-    parser.add_argument("--java-tsv", required=True)
-    parser.add_argument("--native-tsv", required=True)
+    parser = argparse.ArgumentParser(description="Validate focused mingwX64 collision evidence.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    validate_command = commands.add_parser("validate")
+    validate_command.add_argument("--native-directory", required=True)
+    validate_command.add_argument("--java-tsv", required=True)
+    validate_command.add_argument("--native-tsv", required=True)
+    status_command = commands.add_parser("status")
+    status_command.add_argument("--gradle-exit-code", required=True)
+    status_command.add_argument("--java-exit-code", required=True)
+    status_command.add_argument("--collection-status", type=int, required=True)
+    status_command.add_argument("--validation-status", type=int, required=True)
     args = parser.parse_args(argv)
+
+    if args.command == "status":
+        failed = (
+            args.gradle_exit_code != "0"
+            or args.java_exit_code != "0"
+            or args.collection_status != 0
+            or args.validation_status != 0
+        )
+        if failed:
+            print(
+                "WINDOWS_COLLISION_FOCUS_FAILED "
+                f"gradle={args.gradle_exit_code} java={args.java_exit_code} "
+                f"collection={args.collection_status} validation={args.validation_status}"
+            )
+            return 1
+        print("WINDOWS_COLLISION_FOCUS_PASSED gradle=0 java=0 collection=0 validation=0")
+        return 0
+
     try:
         suites, cases, native_rows, java_rows = validate(
             args.native_directory, args.java_tsv, args.native_tsv
