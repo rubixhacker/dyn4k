@@ -30,17 +30,34 @@ def run_expression_upper_bounds(source):
     lines = source.splitlines()
     index = 0
     while index < len(lines):
-        match = re.match(r"^( *)(- +)?run:[ \t]*(.*)$", lines[index])
+        line = lines[index]
+        if (re.match(r"^ *[\[{]", line)
+                or re.match(r"^ *- +(?:\{|\[)", line)
+                or re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[\[{]", line)):
+            raise ValueError(f"unsupported YAML flow syntax at line {index + 1}")
+        if (re.match(r"^ *(?:- +)?['\"]", line)
+                or re.match(r"^ *(?:- +)?\?[ \t]", line)):
+            raise ValueError(f"unsupported YAML key syntax at line {index + 1}")
+        if re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[&*!]", line):
+            raise ValueError(f"unsupported YAML alias or tag syntax at line {index + 1}")
+        match = re.match(r"^( *)(- +)?run:[ \t]*(.*)$", line)
         if match is None:
+            if (not line.lstrip().startswith("#")
+                    and re.search(r"(?<![\w-])['\"]?run['\"]?[ \t]*:", line)):
+                raise ValueError(f"unsupported run syntax at line {index + 1}")
             index += 1
             continue
         line_number = index + 1
         value = match.group(3)
+        key_indent = len(match.group(1)) + len(match.group(2) or "")
         if not value:
+            if match.group(2) or index == 0 or lines[index - 1].strip() != "defaults:":
+                raise ValueError(f"unsupported run syntax at line {line_number}")
             index += 1
             continue
         if value.startswith(("|", ">")):
-            key_indent = len(match.group(1)) + len(match.group(2) or "")
+            if re.fullmatch(r"[|>](?:[+-][1-9]?|[1-9][+-]?)?", value) is None:
+                raise ValueError(f"unsupported run syntax at line {line_number}")
             block = []
             index += 1
             while index < len(lines):
@@ -53,11 +70,47 @@ def run_expression_upper_bounds(source):
             yield line_number, sum(len(line[conservative_content_indent:]) + 1
                                    for line in block)
         else:
+            if value.startswith(("'", '"', "&", "*", "!", "{", "[", "#", "?")):
+                raise ValueError(f"unsupported run syntax at line {line_number}")
+            next_index = index + 1
+            while (next_index < len(lines)
+                   and (not lines[next_index].strip()
+                        or lines[next_index].lstrip().startswith("#"))):
+                next_index += 1
+            if (next_index < len(lines)
+                    and len(lines[next_index]) - len(lines[next_index].lstrip()) > key_indent):
+                raise ValueError(f"multiline plain run at line {line_number}")
             yield line_number, len(value)
             index += 1
 
 
 class WorkflowExpressionLimit(unittest.TestCase):
+    def test_flow_step_with_escaped_run_key_is_rejected(self):
+        source = ("name: adverse\non: workflow_dispatch\njobs:\n  control:\n"
+                  "    runs-on: ubuntu-latest\n"
+                  '    steps: [{"r\\u0075n": "' + "x" * (RUN_EXPRESSION_LIMIT + 1) + '"}]\n')
+        with self.assertRaisesRegex(ValueError, "unsupported YAML flow syntax"):
+            list(run_expression_upper_bounds(source))
+
+    def test_unsupported_valid_run_syntax_is_rejected(self):
+        job = ("name: adverse\non: workflow_dispatch\njobs:\n  control:\n"
+               "    runs-on: ubuntu-latest\n    steps:\n")
+        cases = (
+            ("      - run : |\n          " + "x" * RUN_EXPRESSION_LIMIT + "\n",
+             "unsupported run syntax"),
+            ("      - run: " + "x" * 11000 + "\n          " + "x" * 10000 + "\n",
+             "multiline plain run"),
+            ('      - "r\\u0075n": |\n          echo hi\n',
+             "unsupported YAML key syntax"),
+            ('      - run: "echo hi"\n', "unsupported run syntax"),
+            ("      - run: | # comment\n          echo hi\n",
+             "unsupported run syntax"),
+        )
+        for step, error in cases:
+            with self.subTest(step=step[:32]):
+                with self.assertRaisesRegex(ValueError, error):
+                    list(run_expression_upper_bounds(job + step))
+
     def test_inline_run_and_block_scalar_variants_are_bounded(self):
         cases = (
             ("- run: |", "          ", "x" * RUN_EXPRESSION_LIMIT),
