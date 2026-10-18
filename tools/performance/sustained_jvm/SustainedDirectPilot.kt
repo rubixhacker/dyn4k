@@ -63,12 +63,18 @@ private fun plateau(family: String, variant: String, count: Int, hz: Int, warmup
         val gcRequestedNs = System.nanoTime()
         System.gc()
         Thread.sleep(10)
-        val heap = retainedHeap()
-        val rss = rssBytes()
         val collected = collectionCount()
         val afterSampleNs = System.nanoTime()
+        SustainedSidecars.requirePlateauCollection(before, collected)
+        val heapSampleBeginNs = System.nanoTime()
+        val heap = retainedHeap()
+        val heapSampleEndNs = System.nanoTime()
+        val rssSampleBeginNs = System.nanoTime()
+        val rss = rssBytes()
+        val rssSampleEndNs = System.nanoTime()
         SustainedSidecars.plateau(cycle, heap, rss, before, collected,
-            cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs)
+            cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs,
+            heapSampleBeginNs, heapSampleEndNs, rssSampleBeginNs, rssSampleEndNs)
         System.out.println("$cycle,$heap,$rss,$collected,-1,-1,0,-1,-1")
     }
 }

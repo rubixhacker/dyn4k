@@ -187,9 +187,7 @@ public final class SustainedSidecars {
         memory.newLine();
     }
 
-    public static void plateau(int cycle, long heap, long rss, long beforeCollections,
-                               long afterCollections, long cycleDisposedNs,
-                               long beforeSampleNs, long gcRequestedNs, long afterSampleNs)
+    public static void requirePlateauCollection(long beforeCollections, long afterCollections)
             throws IOException {
         if (beforeCollections < 0 || afterCollections < 0) {
             closeResource();
@@ -199,10 +197,22 @@ public final class SustainedSidecars {
             closeResource();
             throw new IllegalStateException("post-collection plateau probe unsupported: no collection observed");
         }
+    }
+
+    public static void plateau(int cycle, long heap, long rss, long beforeCollections,
+                               long afterCollections, long cycleDisposedNs,
+                               long beforeSampleNs, long gcRequestedNs, long afterSampleNs,
+                               long heapSampleBeginNs, long heapSampleEndNs,
+                               long rssSampleBeginNs, long rssSampleEndNs)
+            throws IOException {
+        requirePlateauCollection(beforeCollections, afterCollections);
+        Long bufferPoolBytes = bufferMemory();
         long writtenNs = System.nanoTime();
         if (cycleDisposedNs <= 0 || cycleDisposedNs > beforeSampleNs ||
                 beforeSampleNs > gcRequestedNs || gcRequestedNs > afterSampleNs ||
-                afterSampleNs > writtenNs) {
+                afterSampleNs > heapSampleBeginNs || heapSampleBeginNs > heapSampleEndNs ||
+                heapSampleEndNs > rssSampleBeginNs || rssSampleBeginNs > rssSampleEndNs ||
+                rssSampleEndNs > writtenNs) {
             closeResource();
             throw new IllegalStateException("post-collection plateau probe unsupported: observation order invalid");
         }
@@ -213,6 +223,10 @@ public final class SustainedSidecars {
                 ",\"collection_before_sample_ns\":" + beforeSampleNs +
                 ",\"gc_requested_ns\":" + gcRequestedNs +
                 ",\"collection_after_sample_ns\":" + afterSampleNs +
+                ",\"heap_sample_begin_ns\":" + heapSampleBeginNs +
+                ",\"heap_sample_end_ns\":" + heapSampleEndNs +
+                ",\"rss_sample_begin_ns\":" + rssSampleBeginNs +
+                ",\"rss_sample_end_ns\":" + rssSampleEndNs +
                 ",\"heap_after_collection_bytes\":" + heap +
                 ",\"rss_after_collection_bytes\":" + rss +
                 ",\"collection_count\":" + afterCollections +
@@ -223,7 +237,7 @@ public final class SustainedSidecars {
                 ",\"collection_probe\":\"sum of GarbageCollectorMXBean.getCollectionCount\"" +
                 ",\"collection_count_status\":\"observed\"" +
                 ",\"managed_heap_delta_bytes\":" + (heap - emptyHeap) +
-                ",\"buffer_pool_used_bytes\":" + bufferMemory() +
+                ",\"buffer_pool_used_bytes\":" + bufferPoolBytes +
                 ",\"native_workload_bytes\":null,\"attributed_workload_bytes\":null," +
                 "\"reserved_runtime_bytes\":null,\"native_attribution\":\"unsupported\"," +
                 "\"qualification\":\"unpassed\"}");

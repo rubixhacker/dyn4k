@@ -70,7 +70,9 @@ def validate_plateau(records, raw):
         assert row["collection_probe"] == "sum of GarbageCollectorMXBean.getCollectionCount"
         assert row["collection_count_status"] == "observed"
         assert (0 < row["cycle_disposed_ns"] <= row["collection_before_sample_ns"] <=
-                row["gc_requested_ns"] <= row["collection_after_sample_ns"] <= row["clock_ns"])
+                row["gc_requested_ns"] <= row["collection_after_sample_ns"] <=
+                row["heap_sample_begin_ns"] <= row["heap_sample_end_ns"] <=
+                row["rss_sample_begin_ns"] <= row["rss_sample_end_ns"] <= row["clock_ns"])
     assert all(a["collection_after_sample_ns"] < b["cycle_disposed_ns"]
                for a, b in zip(records, records[1:]))
     assert all(row["native_workload_bytes"] is None and
@@ -216,6 +218,14 @@ class SustainedJvmMemoryTest(unittest.TestCase):
         wrong_order[75]["collection_before_sample_ns"] = wrong_order[75]["cycle_disposed_ns"] - 1
         with self.assertRaises(AssertionError):
             validate_plateau(wrong_order, files["steps.csv"])
+        premature_heap = copy.deepcopy(plateau)
+        premature_heap[75]["heap_sample_begin_ns"] = premature_heap[75]["collection_after_sample_ns"] - 1
+        with self.assertRaises(AssertionError):
+            validate_plateau(premature_heap, files["steps.csv"])
+        premature_rss = copy.deepcopy(plateau)
+        premature_rss[75]["rss_sample_begin_ns"] = premature_rss[75]["heap_sample_end_ns"] - 1
+        with self.assertRaises(AssertionError):
+            validate_plateau(premature_rss, files["steps.csv"])
 
     def test_disabled_collection_probe_fails_closed(self):
         result, files = self.execute("unsupported", ("-XX:+DisableExplicitGC",))

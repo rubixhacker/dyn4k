@@ -368,13 +368,19 @@ public final class SustainedPilot {
             long gcRequestedNs = System.nanoTime();
             System.gc();
             Thread.sleep(10);
-            long heap = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-            long rss = rssBytes();
             long collected = collections();
             long afterSampleNs = System.nanoTime();
+            SustainedSidecars.requirePlateauCollection(beforeCollections, collected);
+            long heapSampleBeginNs = System.nanoTime();
+            long heap = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+            long heapSampleEndNs = System.nanoTime();
+            long rssSampleBeginNs = System.nanoTime();
+            long rss = rssBytes();
+            long rssSampleEndNs = System.nanoTime();
             try {
                 SustainedSidecars.plateau(cycle, heap, rss, beforeCollections, collected,
-                        cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs);
+                        cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs,
+                        heapSampleBeginNs, heapSampleEndNs, rssSampleBeginNs, rssSampleEndNs);
             } catch (IOException error) {
                 throw new IllegalStateException("plateau sidecar failed", error);
             }
