@@ -791,8 +791,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                 expected_producer_scopes={"unchanged-java-corpus": scope})
             self.assertEqual("FAILED", result["gates"]["unchanged-java-corpus"]["status"])
 
-    @unittest.skipUnless(Path("/tmp/dyn4k-merge-complete-corpus-rotation-migration-journeys-0681a8cd/summary.json").is_file(),
-                         "reviewed local migration archive is absent")
+    @unittest.skipUnless(
+        Path("/tmp/dyn4k-merge-complete-corpus-rotation-migration-journeys-0681a8cd/summary.json").is_file()
+        and Path("/tmp/dyn4k-merge-complete-corpus-rotation-gate-wave/build/staging-repository/"
+                 "io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/"
+                 "dyn4k-core-jvm-0.1.0-alpha.1.jar").is_file(),
+        "reviewed local migration archive or same-commit staged JVM JAR is absent")
     def test_historical_migration_raw_scenes_replay_and_input_mutation_fails(self):
         source = Path("/tmp/dyn4k-merge-complete-corpus-rotation-migration-journeys-0681a8cd")
         samples = Path("/tmp/dyn4k-migration-preflight/samples")
@@ -802,6 +806,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             root = Path(temporary)
             evidence = root / "evidence"
             shutil.copytree(source, evidence)
+            report = json.loads((evidence / "summary.json").read_text())
             paths = subprocess.check_output(
                 ["git", "-C", str(samples), "ls-files", "--", "*.java"], text=True).splitlines()
             rows = []
@@ -812,7 +817,11 @@ class IndependentGateSeamTests(unittest.TestCase):
                 shutil.copy2(original, copied)
                 rows.append(f"{hashlib.sha256(original.read_bytes()).hexdigest()}  {relative}\n")
             (evidence / "sources.sha256").write_text("".join(rows))
-            candidate_jar = Path("/tmp/dyn4k-archive-relocation-copy-7032/archives/dyn4k-core-jvm-0.1.0-alpha.1.jar")
+            producer_worktree = Path("/tmp/dyn4k-merge-complete-corpus-rotation-gate-wave")
+            self.assertEqual(report["candidate_commit"], subprocess.check_output(
+                ["git", "-C", str(producer_worktree), "rev-parse", "HEAD"], text=True).strip())
+            candidate_jar = (producer_worktree / "build/staging-repository/io/github/rubixhacker/"
+                             "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
             pinned_lib = Path("/tmp/dyn4k-migration-preflight/lib")
             full_ci = Path("/tmp/dyn4k-archive-relocation-copy-7032")
             for provider in journeys.PROVIDERS:
@@ -829,7 +838,6 @@ class IndependentGateSeamTests(unittest.TestCase):
             (evidence / "instrumentation").mkdir()
             shutil.copy2(pinned_lib / "javassist-3.30.2-GA.jar",
                          evidence / "instrumentation/javassist-3.30.2-GA.jar")
-            report = json.loads((evidence / "summary.json").read_text())
             journeys.write_summary(evidence, report)
             hashes = {"dyn4k-core": hashlib.sha256(candidate_jar.read_bytes()).hexdigest()}
             self.assertIn("ten pinned migration journeys",
