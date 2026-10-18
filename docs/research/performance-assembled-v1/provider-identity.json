@@ -1,0 +1,31 @@
+{
+  "candidate_identity_sha256": "87141b553cfcdc2574eaa4c85e91666d9c5b58eecfda89c449e5e6dcfce293f5",
+  "probe_tool_sha256": "df78e75e3280402f099a954dec20e9eb049be5d37c69b1793d6f993a74bddeea",
+  "probe_tool_source_commit": "a34302586a3250d6e1e2b19f3cfe141942f0ed1c",
+  "qualification": "unpassed",
+  "routes": {
+    "compatibility": {
+      "api_sha256": null,
+      "core_sha256": "e503fc9304f29408d008ff73a9a32e11644f9d5c182aac281bcb876bf28e4d39",
+      "exit_code": 0,
+      "origin": {
+        "api": "unavailable",
+        "core": "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "java_version": "21.0.9",
+        "pid": "2215532"
+      }
+    },
+    "direct_kotlin": {
+      "api_sha256": "e7d0b1502bafeb28373d0e20aaf02152268717664b274ad25b3e77511c065274",
+      "core_sha256": "e503fc9304f29408d008ff73a9a32e11644f9d5c182aac281bcb876bf28e4d39",
+      "exit_code": 0,
+      "origin": {
+        "api": "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar",
+        "core": "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "java_version": "21.0.9",
+        "pid": "2215483"
+      }
+    }
+  },
+  "schema": 1
+}

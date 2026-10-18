@@ -1,0 +1,159 @@
+{
+  "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
+  "candidate_identity": {
+    "absent_classpath_paths": [
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/kotlin/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/resources/compatibility",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/resources/main"
+    ],
+    "entrypoints": {
+      "compatibility": "BaselinePilot",
+      "direct_kotlin": "performance.DirectPilotKt"
+    },
+    "java": "/var/home/stewart/.gradle/jdks/jetbrains_s_r_o_-21-amd64-linux.2/bin/java",
+    "java_flags": [
+      "-Xms256m",
+      "-Xmx2g",
+      "-XX:+UseG1GC"
+    ],
+    "java_version": "openjdk version \"21.0.9\" 2025-10-21\nOpenJDK Runtime Environment JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147)\nOpenJDK 64-Bit Server VM JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147, mixed mode, sharing)",
+    "paths": {
+      "compatibility": [
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/java/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/kotlin/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/resources/compatibility",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+      ],
+      "direct_kotlin": [
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/java/main",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/kotlin/main",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/resources/main",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar",
+        "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar"
+      ]
+    },
+    "qualification": "unpassed",
+    "schema": 1,
+    "sha256": {
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar": "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f",
+      "/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains/annotations/13.0/919f0dfe192fb4e063e7dacadee7f8bb9a2672a9/annotations-13.0.jar": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar": "e503fc9304f29408d008ff73a9a32e11644f9d5c182aac281bcb876bf28e4d39",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar": "e7d0b1502bafeb28373d0e20aaf02152268717664b274ad25b3e77511c065274",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build.gradle.kts": "bde3f84944a15518e047b4d558ddc6ee8ac9c147d4ef2084b6b2090775426e35",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/java/compatibility": "6af7ebc67b241d92686c3918e42d8d6379b4a6a8e4a7b33acc106197aa8d83c7",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/java/main": "0986ebfe5dd3a389132c5d224b86f311354c09b2a057c1db7596cbbc0ce099d0",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/build/classes/kotlin/main": "836c3df78ad127b7b731eb598d379d82172c56add009bf2b9a497db94bf95c70",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/src/main/java/performance/ProviderIdentity.java": "93e6721d07d1bad849aaf667b4a415c7fef55fc199578989728c1039f0360ab4",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/src/main/kotlin/performance/DirectFixture.kt": "6bcf520ebf6da871e9e24f094f33129898265d184c5c1c4f7be3ed76425147f5",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/consumers/performance/src/main/kotlin/performance/DirectPilot.kt": "329e6329f51baf8cd2f6e4a8dee7874ab2e368ba677a18508d6192aa14800429",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/docs/research/performance-manifest-v1.json": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/tools/performance/BaselinePilot.java": "fb7e40062e06c4169c23e72ae3259e360cd9459dc79f1c31297e2da46a169ba9",
+      "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/tools/performance/candidate_runner.py": "a015b8c4dd75539c370b5f634615d8fe953d3b4865f0ab51a74fe7c0829445f3"
+    },
+    "source_commit": "a34302586a3250d6e1e2b19f3cfe141942f0ed1c",
+    "source_trees": {
+      "dyn4k": "329700d7f730bb8ce8d06bf46bd6b44d5aea24e1",
+      "dyn4k-core": "4958e484cb8311fef63674821f9d4b62cd5bb383"
+    },
+    "staging_repository": "/var/home/stewart/Workspace/dyn4k-port-performance-assembled/build/staging-repository"
+  },
+  "candidate_identity_sha256": "87141b553cfcdc2574eaa4c85e91666d9c5b58eecfda89c449e5e6dcfce293f5",
+  "candidate_runner_sha256": "a015b8c4dd75539c370b5f634615d8fe953d3b4865f0ab51a74fe7c0829445f3",
+  "capture_tool_sha256": {
+    "tools/performance/candidate_pilot.py": "74caf034af9dbb6b52d2b37aa6fe3e837572949431bf3fd29ffd23ddd78bfba7",
+    "tools/performance/measure.py": "f0e61107f39db2c6ab49146aef913418d2c4dc46b02d4e236bc63d3f296dc782"
+  },
+  "capture_tool_source_commit": "a34302586a3250d6e1e2b19f3cfe141942f0ed1c",
+  "direct_fixture_sha256": "6bcf520ebf6da871e9e24f094f33129898265d184c5c1c4f7be3ed76425147f5",
+  "direct_pilot_sha256": "329e6329f51baf8cd2f6e4a8dee7874ab2e368ba677a18508d6192aa14800429",
+  "expected_runs": 3,
+  "failures": [],
+  "harness_sha256": "fb7e40062e06c4169c23e72ae3259e360cd9459dc79f1c31297e2da46a169ba9",
+  "host": {
+    "charging_state": null,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "hostname": "bazzite",
+    "java_version": "openjdk version \"21.0.9\" 2025-10-21\nOpenJDK Runtime Environment JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147)\nOpenJDK 64-Bit Server VM JBR-21.0.9+10-895.147-jcef (build 21.0.9+10-b895.147, mixed mode, sharing)",
+    "machine": "x86_64",
+    "os_version": "NAME=\"Bazzite\"\nVERSION=\"44.20261012.0 (Silverblue)\"\nRELEASE_TYPE=stable\nID=bazzite\nID_LIKE=\"fedora\"\nVERSION_ID=44\nVERSION_CODENAME=\"Silverblue\"\nPRETTY_NAME=\"Bazzite\"\nANSI_COLOR=\"0;38;2;138;43;226\"\nLOGO=bazzite-logo\nCPE_NAME=\"cpe:/o:universal-blue:bazzite:44\"\nDEFAULT_HOSTNAME=\"bazzite\"\nHOME_URL=\"https://bazzite.gg\"\nDOCUMENTATION_URL=\"https://docs.bazzite.gg\"\nSUPPORT_URL=\"https://discord.bazzite.gg\"\nBUG_REPORT_URL=\"https://github.com/ublue-os/bazzite/issues/\"\nSUPPORT_END=2027-05-19\nVARIANT=\"Silverblue\"\nVARIANT_ID=bazzite-gnome\nOSTREE_VERSION='44.20261012.0'\nBUILD_ID=\"Stable (F44.20261012)\"\nBOOTLOADER_NAME=\"Bazzite Stable (F44.20261012)\"\nIMAGE_ID=\"bazzite-gnome-44.20261012\"",
+    "power_mode": null,
+    "product_name": "Desktop (AMD Ryzen AI Max 300 Series)",
+    "product_version": "A6",
+    "ram_kib": 131147088,
+    "release": "7.2.9-ogc3.1.fc44.x86_64",
+    "system": "Linux",
+    "temperature_c": null,
+    "throttling": null
+  },
+  "manifest_sha256": "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a",
+  "probe": {
+    "allocation_supported": true,
+    "collection_count_delta": 1,
+    "controlled_allocated_bytes": 1164520,
+    "controlled_payload_bytes": 1048576,
+    "heap_after_collection_bytes": 1475848,
+    "heap_live_bytes": 4278632,
+    "rss_after_collection_bytes": 56672256,
+    "rss_live_bytes": 49885184,
+    "timer_median_pair_ns": 30,
+    "timer_min_positive_ns": 20,
+    "timer_p99_pair_ns": 40
+  },
+  "qualification": "unpassed",
+  "results": [
+    {
+      "api": "baseline",
+      "cycles": 100,
+      "heap_drift_fraction": 0.0030596322322056224,
+      "plateau_status": "stable",
+      "process_pid": 2283386,
+      "raw": "lifecycle.replace.small.60hz.baseline.plateau.csv",
+      "raw_sha256": "e9bc70b5a4e8c593480274b8ffb40cce5e6fbb0a06d54f6128f6142fbc2391d1",
+      "stderr_raw": "lifecycle.replace.small.60hz.baseline.plateau.stderr.raw",
+      "stderr_sha256": "12cac62c30ad9633bf228cd2a9487b6aa1af4460dde02d9c1dfd015923603c47",
+      "warmup_raw": "lifecycle.replace.small.60hz.baseline.plateau.warmup.csv",
+      "warmup_sha256": "12cac62c30ad9633bf228cd2a9487b6aa1af4460dde02d9c1dfd015923603c47",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.baseline"
+    },
+    {
+      "api": "direct_kotlin",
+      "cycles": 100,
+      "heap_drift_fraction": 0.0009403977701722965,
+      "plateau_status": "stable",
+      "process_pid": 2284877,
+      "raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.csv",
+      "raw_sha256": "782ea2648f027aa5e47254ad2f4682dbf29fabe9ef7c230c616880f220b721e0",
+      "stderr_raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.stderr.raw",
+      "stderr_sha256": "f310797d8979fb3ee03259672d429929861b415b95b65b40db6732d9c2dc972a",
+      "warmup_raw": "lifecycle.replace.small.60hz.direct_kotlin.plateau.warmup.csv",
+      "warmup_sha256": "15f90868d32dcc16efbe0459b390be2a01d3cd03addb7d7ae73f5de4b425b851",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.direct_kotlin"
+    },
+    {
+      "api": "compatibility",
+      "cycles": 100,
+      "heap_drift_fraction": 0.002864086296466395,
+      "plateau_status": "stable",
+      "process_pid": 2285983,
+      "raw": "lifecycle.replace.small.60hz.compatibility.plateau.csv",
+      "raw_sha256": "fbb71cd267ea1fa4543de118c48f1596dd18e111eadc036087348966fec79539",
+      "stderr_raw": "lifecycle.replace.small.60hz.compatibility.plateau.stderr.raw",
+      "stderr_sha256": "22cb8dacc6b7c18aefa1ea748e19cb86b4d3266aa54486368127214aaf94548d",
+      "warmup_raw": "lifecycle.replace.small.60hz.compatibility.plateau.warmup.csv",
+      "warmup_sha256": "07e8f0938d541e50d9a884fa4569e503ad2151a3dca8d46293026f8c7071dede",
+      "warmup_status": "unvalidated",
+      "warmup_steps": 60,
+      "workload_id": "lifecycle.replace.small.60hz.compatibility"
+    }
+  ],
+  "schema": 1,
+  "status": "bounded_pilot_only"
+}

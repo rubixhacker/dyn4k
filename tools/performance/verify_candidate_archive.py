@@ -22,6 +22,12 @@ from provider_probe import probe_routes
 
 REQUIRED_GROUPS = ("pilot", "noise", "memory", "plateau")
 OPTIONAL_GROUPS = ("discovery-plateau-v0",)
+V4_RAW_INDEX_SHA256 = {
+    "pilot": "b40f678f9a4efc37ca4c9bcb24c4fc809cdaa51ae3b8d62102b5b90d57d19c85",
+    "noise": "95a758dc13244f561ac6320e190c06516266f124ab9ded3a50a2557f3842c006",
+    "memory": "e2ba52e719496300680009bc79c9d119fa5c57caae7137461a49b26fd474efc8",
+    "plateau": "63b22d30bf7dd0b4570ba717938f8eb1190d48e3cf8813e28112d15894c04b65",
+}
 CONTROL_NAMES = frozenset(("missing_direct_route", "crossed_compatibility_route",
                            "upstream_provider", "stale_artifact", "empty_scene", "inactive_scene"))
 SUMMARY_FIELDS = (
@@ -449,13 +455,63 @@ def verify(root):
             "negative_controls": len(controls["controls"]), "qualification": "unpassed"}
 
 
+def audit_raw_archive(root):
+    root = Path(root)
+    identity_file = root / "candidate-identity-at-pilot.json"
+    identity = json.loads(identity_file.read_text())
+    identity_hash = sha256(identity_file)
+    require(identity.get("schema") == 1 and identity.get("qualification") == "unpassed",
+            "recorded candidate identity is not an unpassed v1 record")
+    commit = identity["source_commit"]
+    require(len(commit) == 40 and all(char in "0123456789abcdef" for char in commit),
+            "source commit is not an exact SHA")
+    trees = {name: git("rev-parse", f"{commit}:{name}").decode().strip()
+             for name in ("dyn4k", "dyn4k-core")}
+    require(identity["source_trees"] == trees, "recorded source trees differ from the exact commit")
+    counts = {}
+    raw_files = 0
+    seen = set()
+    for group, expected_count in (("pilot", 36), ("noise", 3), ("memory", 3), ("plateau", 3)):
+        directory = root / group
+        index = directory / "evidence.json"
+        require(sha256(index) == V4_RAW_INDEX_SHA256[group],
+                f"{group} evidence index hash differs")
+        evidence = json.loads(index.read_text())
+        results = evidence["results"]
+        require(evidence["qualification"] == "unpassed" and
+                evidence["candidate_identity_sha256"] == identity_hash and
+                evidence["candidate_identity"] == identity and
+                evidence["manifest_sha256"] == sha256(ROOT / "docs/research/performance-manifest-v1.json") and
+                evidence["baseline_jar_sha256"] == manifest()["baseline_jar_sha256"] and
+                evidence["expected_runs"] == len(results) == expected_count and
+                not evidence["failures"], f"{group} archive identity or run count differs")
+        for result in results:
+            for name_key, hash_key in (("raw", "raw_sha256"),
+                                       ("warmup_raw", "warmup_sha256"),
+                                       ("stderr_raw", "stderr_sha256")):
+                name = result[name_key]
+                path = directory / name
+                require(Path(name).name == name and path not in seen,
+                        f"{group} raw file ID is invalid or reused")
+                seen.add(path)
+                require(path.is_file() and sha256(path) == result[hash_key],
+                        f"{group} raw file hash differs: {name}")
+                raw_files += 1
+        counts[group] = len(results)
+    return {"archive_audit": "raw_hashes_verified", "source_artifact_audit": "not_attempted",
+            "identity_sha256": identity_hash, "runs": counts, "raw_files": raw_files,
+            "qualification": "unpassed"}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("archive")
+    parser.add_argument("--raw-only", action="store_true")
     args = parser.parse_args()
     try:
-        report = verify(args.archive)
-    except (OSError, ValueError, KeyError, TypeError, StopIteration, csv.Error) as exc:
+        report = audit_raw_archive(args.archive) if args.raw_only else verify(args.archive)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration, csv.Error,
+            subprocess.CalledProcessError) as exc:
         print(json.dumps({"archive_audit": "unavailable", "qualification": "unpassed",
                           "reason": str(exc)}, sort_keys=True))
         raise SystemExit(1) from None

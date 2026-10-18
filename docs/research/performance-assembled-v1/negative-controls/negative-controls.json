@@ -1,0 +1,38 @@
+{
+  "candidate_identity_sha256": "87141b553cfcdc2574eaa4c85e91666d9c5b58eecfda89c449e5e6dcfce293f5",
+  "control_tool_sha256": "19fa51b49b76233640b4feb9a3843fd993b5133f72f1d76cf2326711caf12bb1",
+  "control_tool_source_commit": "a34302586a3250d6e1e2b19f3cfe141942f0ed1c",
+  "controls": {
+    "crossed_compatibility_route": {
+      "reason": "Java compatibility route has a missing or crossed provider",
+      "status": "rejected_as_expected"
+    },
+    "empty_scene": {
+      "reason": "body count changed unexpectedly",
+      "status": "rejected_as_expected"
+    },
+    "inactive_scene": {
+      "reason": "activity invalid",
+      "status": "rejected_as_expected"
+    },
+    "missing_direct_route": {
+      "reason": "direct Kotlin route lacks its staged API and core artifacts",
+      "status": "rejected_as_expected"
+    },
+    "stale_artifact": {
+      "reason": "stale candidate path",
+      "status": "rejected_as_expected"
+    },
+    "upstream_provider": {
+      "reason": "upstream dyn4j artifact is on a candidate route",
+      "status": "rejected_as_expected"
+    }
+  },
+  "core_artifact_sha256": "e503fc9304f29408d008ff73a9a32e11644f9d5c182aac281bcb876bf28e4d39",
+  "qualification": "unpassed",
+  "schema": 1,
+  "source_raw": "separated.default.small.60hz.direct_kotlin.timing.r1.csv",
+  "source_sha256": "af77cd80b13d774125bf58fc8199c51d64b0a6e2b53f3e3aa157ea2952389421",
+  "synthetic_empty_sha256": "acc99bb17877cd1a704aa6d385b0f0d5060a4224183bdc5e5989bb9b0997cc07",
+  "synthetic_inactive_sha256": "6e2ac3b98c4e7e09382480e40c847e0d45f64c4693ccc2df59872e0eb909a7da"
+}
