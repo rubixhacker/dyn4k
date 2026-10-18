@@ -405,7 +405,7 @@ class FullHostedTests(unittest.TestCase):
             return ET.tostring(root)
 
         def synthetic_command(command, _cwd, destination, invocation_id=None):
-            started = time.time_ns() - 10**9
+            started = time.time_ns()
             kind = destination.name
             configuration = destination.parent.name
             if kind == "stage":
@@ -450,7 +450,7 @@ class FullHostedTests(unittest.TestCase):
                 stdout = "DYN4K_RESOLVED_GRAPH=" + json.dumps(graph) + "\n"
             write(destination / "stdout.txt", stdout + "BUILD SUCCESSFUL\n")
             write(destination / "stderr.txt", "")
-            finished = time.time_ns() + 10**9
+            finished = time.time_ns()
             return {"command": command, "pid": 42, "exit_code": 0,
                     "invocation_id": invocation_id, "started_ns": started,
                     "finished_ns": finished,
@@ -542,6 +542,39 @@ class FullHostedTests(unittest.TestCase):
                          "complete_suite_status", "release_gate_status"):
                 self.assertEqual("NOT_RUN", scoped[gate])
             self.assertEqual({"NOT_RUN"}, {lane["status"] for lane in qualification["lanes"]})
+            adverse_order = evidence / "adverse-process-order"
+            shutil.copytree(output, adverse_order)
+            order_receipt = qualify.load_json_strict(adverse_order / "receipt.json")
+            self.assertGreater(order_receipt["stage"]["finished_ns"], 1)
+            order_receipt["configurations"][0]["consumer_process"]["started_ns"] = 1
+            (adverse_order / "receipt.json").write_text(
+                json.dumps(order_receipt, sort_keys=True) + "\n")
+            order_archive = evidence / "adverse-process-order.tar"
+            full_hosted.package_archive(adverse_order, order_archive)
+            with self.assertRaisesRegex(ValueError, "process order"):
+                full_hosted.verify_raw_files(adverse_order, order_receipt)
+            with self.assertRaisesRegex(ValueError, "process order"):
+                full_hosted.verify_transport_archive(order_archive, candidate, target)
+            for command_prefix, bundle in ((directory_command[:-1], adverse_order),
+                                           (command[:-1], order_archive)):
+                result = subprocess.run([*command_prefix, str(bundle)], cwd=clean,
+                                        capture_output=True, text=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("process order", result.stderr)
+            for bundle in (adverse_order, order_archive):
+                result = subprocess.run([*artifact_command, str(bundle)], cwd=clean,
+                                        capture_output=True, text=True)
+                self.assertEqual(1, result.returncode)
+                self.assertIn("process order", result.stderr)
+            adverse_order_report = evidence / "adverse-process-order-qualification.json"
+            order_record = subprocess.run([
+                sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                "--candidate-sha", candidate, "--full-hosted-bundle", str(order_archive),
+                "--output", str(adverse_order_report)], cwd=clean,
+                capture_output=True, text=True)
+            self.assertEqual(2, order_record.returncode)
+            self.assertIn("process order", order_record.stderr)
+            self.assertFalse(adverse_order_report.exists())
             rogue = clean / "dyn4k-core/build/dokka/html/index.html"
             rogue.parent.mkdir(parents=True)
             rogue.write_text("<html>untracked local replacement</html>")
@@ -649,6 +682,9 @@ class FullHostedTests(unittest.TestCase):
                                                    for module in qualify.MODULES},
                 "consumer_cases_per_configuration": len(consumer_cases),
                 "positive_archive_sha256": full_hosted.sha256(archive),
+                "process_order_archive_sha256": full_hosted.sha256(order_archive),
+                "process_order_rejection": order_record.stderr.strip().splitlines()[-1],
+                "process_order_qualification_report_written": adverse_order_report.exists(),
                 "adverse_archive_sha256": full_hosted.sha256(adverse_archive),
                 "adverse_directory_rejection": str(directory_error.exception),
                 "adverse_tar_rejection": str(tar_error.exception),
@@ -673,6 +709,13 @@ class FullHostedTests(unittest.TestCase):
         consumer_manifest = json.loads((repository / "tools/qualification/foundation-probes.json").read_text())
         target = "mingwX64"
         now = time.time_ns()
+        stage_window = (now - 60 * 10**9, now + 60 * 10**9)
+        windows = {}
+        boundary = stage_window[1]
+        for configuration in full_hosted.CONFIGS[target]:
+            for phase in ("source", "consumer", "graph"):
+                windows[(configuration, phase)] = (boundary, boundary + 10 * 10**9)
+                boundary += 10 * 10**9
         receipt = {"schema": 2, "kind": "hosted-full-common-corpus", "target": target,
                    "status": "FULL_COMMON_PASSED",
                    "manifest_sha256": full_hosted.canonical_hash(manifest),
@@ -693,6 +736,19 @@ class FullHostedTests(unittest.TestCase):
         def write(path, data):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data if isinstance(data, bytes) else data.encode())
+            parts = path.relative_to(self.root).parts
+            if parts[0] == "stage":
+                window = stage_window
+            elif parts[0] in full_hosted.CONFIGS[target] and len(parts) > 2:
+                phase = parts[1]
+                if phase in ("xml", "executables"):
+                    phase = "consumer" if parts[2] == "consumer" else "source"
+                window = windows.get((parts[0], phase))
+            else:
+                window = None
+            if window:
+                modified = (window[0] + window[1]) // 2
+                os.utime(path, ns=(modified, modified))
             return path
 
         def process(folder, invocation, task, output):
@@ -717,9 +773,11 @@ class FullHostedTests(unittest.TestCase):
                 if folder.name == "graph":
                     command += ["--init-script", str(PureWindowsPath(receipt["archive_root"]) /
                                                      folder.parent.name / "qualification-graph.init.gradle")]
+            window = (stage_window if invocation is None
+                      else windows[(folder.parent.name, folder.name)])
             return {"command": command, "pid": 42, "exit_code": 0,
-                    "invocation_id": invocation, "started_ns": 1,
-                    "finished_ns": now + 10**12,
+                    "invocation_id": invocation, "started_ns": window[0],
+                    "finished_ns": window[1],
                     "stdout_sha256": full_hosted.sha256(folder / "stdout.txt"),
                     "stderr_sha256": full_hosted.sha256(folder / "stderr.txt")}
 
@@ -787,8 +845,9 @@ class FullHostedTests(unittest.TestCase):
                 for classname, method in cases:
                     ET.SubElement(suite, "testcase", classname=classname, name=method, time="0.1")
                 report = write(folder / "xml" / module / "TEST-all.xml", ET.tostring(suite))
-                checked = full_hosted.read_reports([report], full_hosted.expected_cases(manifest, module),
-                                                   target, 1, now + 10**12)
+                checked = full_hosted.read_reports(
+                    [report], full_hosted.expected_cases(manifest, module), target,
+                    *windows[(config, "source")])
                 checked["module"] = module
                 checked["reports"][0]["path"] = f"xml/{module}/TEST-all.xml"
                 lane["source"].append(checked)
@@ -1017,7 +1076,9 @@ class FullHostedTests(unittest.TestCase):
     def test_complete_archive_rejects_missing_consumer_graph_and_executable_tamper(self):
         receipt, manifest, consumer = self.full_archive()
         graph = self.root / "optimized-opt/graph/stdout.txt"
+        graph_mtime = graph.stat().st_mtime_ns
         graph.write_text("BUILD SUCCESSFUL\n")
+        os.utime(graph, ns=(graph_mtime, graph_mtime))
         receipt["files"] = full_hosted.archive_inventory(self.root)
         receipt["configurations"][1]["graph_process"]["stdout_sha256"] = full_hosted.sha256(graph)
         with self.assertRaisesRegex(ValueError, "graph observation"):
@@ -1064,6 +1125,29 @@ class FullHostedTests(unittest.TestCase):
         extra.write_text("<testsuite tests='0'/>")
         receipt["files"] = full_hosted.archive_inventory(self.root)
         with self.assertRaisesRegex(ValueError, "extra or missing XML"):
+            full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+
+    def test_resealed_process_windows_reject_each_cross_phase_overlap(self):
+        receipt, manifest, consumer = self.full_archive()
+        lane = receipt["configurations"][0]
+        mutations = (
+            (lane["source_process"], "started_ns", receipt["stage"]["finished_ns"] - 1),
+            (lane["consumer_process"], "started_ns",
+             lane["source_process"]["finished_ns"] - 1),
+            (lane["graph_process"], "started_ns",
+             lane["consumer_process"]["finished_ns"] - 1),
+        )
+        for process, field, forged in mutations:
+            with self.subTest(process=process["command"]):
+                original = process[field]
+                process[field] = forged
+                try:
+                    with self.assertRaisesRegex(ValueError, "process order"):
+                        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
+                finally:
+                    process[field] = original
+        lane["source_process"]["started_ns"] = 0
+        with self.assertRaisesRegex(ValueError, "process exit, identity, or timestamps"):
             full_hosted.verify_raw_files(self.root, receipt, manifest, consumer)
 
     def test_complete_archive_rejects_resealed_resolved_dependency_bytes(self):

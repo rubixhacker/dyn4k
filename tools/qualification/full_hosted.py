@@ -939,6 +939,13 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
             if target == "jsSafari" and process_name == "consumer" \
                     and "-PqualificationSafari=true" not in command:
                 raise ValueError("Safari consumer browser mode is absent")
+        source_process = lane["source_process"]
+        consumer_process = lane["consumer_process"]
+        graph_process = lane["graph_process"]
+        if not (stage["finished_ns"] <= source_process["started_ns"]
+                <= source_process["finished_ns"] <= consumer_process["started_ns"]
+                <= consumer_process["finished_ns"] <= graph_process["started_ns"]):
+            raise ValueError("archived process order differs from staged test invocation")
         require_test_tasks(lane["source_process"], folder / "source", target, config, qualify.MODULES)
         require_test_tasks(lane["consumer_process"], folder / "consumer", target, config, ("",))
         source = lane.get("source")
