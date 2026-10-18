@@ -20,6 +20,7 @@ class ProspectiveArithmeticTest {
     private fun hexNullable(value: Double?): String = if (value == null) "null" else "\"${hex(value)}\""
     private fun bits(value: Long?): String = if (value == null) "null"
         else "\"${value.toULong().toString(16).padStart(16, '0')}\""
+    private fun name(value: String?): String = if (value == null) "null" else "\"$value\""
 
     private fun observe(method: String, run: () -> Unit) {
         check(RotationOperationTap.listener == null)
@@ -28,8 +29,10 @@ class ProspectiveArithmeticTest {
         RotationOperationTap.listener = { call ->
             val target = targets.getOrPut(call.target) { targets.size }
             println("PROSPECTIVE_ROTATION_JSON " +
-                "{\"schema\":\"portable-rotation-op/1\",\"method\":\"$method\"," +
+                "{\"schema\":\"portable-rotation-op/2\",\"method\":\"$method\"," +
                 "\"sequence\":${sequence++},\"target_token\":$target," +
+                "\"case_id\":${name(call.caseId)},\"step\":${call.step}," +
+                "\"body_id\":${name(call.bodyId)}," +
                 "\"kind\":\"${call.kind}\",\"source\":\"${call.source}\"," +
                 "\"pre\":[\"${hex(call.preCost)}\",\"${hex(call.preSint)}\"]," +
                 "\"trig\":[\"${hex(call.trigCost)}\",\"${hex(call.trigSint)}\"]," +

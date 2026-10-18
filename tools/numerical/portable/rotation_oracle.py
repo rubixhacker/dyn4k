@@ -535,17 +535,25 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
 _MARKER_FIELDS = {"schema", "method", "sequence", "target_token", "kind",
                   "source", "pre", "trig", "raw", "post", "angle_bits",
                   "alpha_bits", "start_angle_bits", "end_angle_bits",
-                  "diff_bits", "start", "end"}
+                  "diff_bits", "start", "end", "case_id", "step", "body_id"}
 
 
 def verify_operation_marker(marker, allowed_evaluations=("strict",)):
     try:
         if type(marker) is not dict or set(marker) != _MARKER_FIELDS or \
-                marker["schema"] != "portable-rotation-op/1" or \
+                marker["schema"] != "portable-rotation-op/2" or \
                 type(marker["method"]) is not str or not marker["method"] or \
                 type(marker["sequence"]) is not int or marker["sequence"] < 0 or \
                 type(marker["target_token"]) is not int or marker["target_token"] < 0:
             raise ValueError("operation marker identity or shape differs")
+        if marker["case_id"] is None:
+            if marker["step"] is not None or marker["body_id"] is not None:
+                raise ValueError("partial operation case binding")
+        elif type(marker["case_id"]) is not str or not marker["case_id"] or \
+                type(marker["step"]) is not int or marker["step"] < 1 or \
+                (marker["body_id"] is not None and
+                 (type(marker["body_id"]) is not str or not marker["body_id"])):
+            raise ValueError("operation case binding shape differs")
         if type(allowed_evaluations) not in (tuple, list) or \
                 not allowed_evaluations or any(mode not in _EVALUATIONS
                                                 for mode in allowed_evaluations):

@@ -21,7 +21,8 @@ def fixture():
     case_id = "geometry-boundary-s0-o0-d0"
     rows = [
         "NUMERICAL_JSON " + json.dumps({"kind": "inputs", "id": case_id,
-                                        "steps": 1}),
+                                        "steps": 1,
+                                        "setup": {"bodies": [{"id": "b0"}]}}),
         "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation),
         "NUMERICAL_JSON " + json.dumps({"kind": "state", "id": case_id,
                                         "step": 1, "state": {}}),
@@ -51,6 +52,22 @@ class ActualArithmeticTest(unittest.TestCase):
         rows[2] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(first)
         with self.assertRaises(CaptureRejected):
             verify_capture(xml_for(rows), "captureGeometry", expected)
+
+    def test_bound_case_step_and_body_must_match_trace(self):
+        rows = fixture()
+        operation = json.loads(rows[1].split(" ", 1)[1])
+        operation.update(case_id="geometry-boundary-s0-o0-d0", step=1, body_id="b0")
+        rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+        expected = ["geometry-boundary-s0-o0-d0"]
+        bound = verify_capture(xml_for(rows), "captureGeometry", expected)
+        self.assertEqual(bound["operations_verified"], 1)
+        self.assertEqual(bound["body_bound_operations"], 1)
+        for field, value in (("case_id", "other"), ("step", 2), ("body_id", "b9")):
+            changed = copy.deepcopy(operation)
+            changed[field] = value
+            rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(changed)
+            with self.subTest(field=field), self.assertRaises(CaptureRejected):
+                verify_capture(xml_for(rows), "captureGeometry", expected)
 
     def test_case_inventory_is_complete(self):
         mapping = expected_case_ids()

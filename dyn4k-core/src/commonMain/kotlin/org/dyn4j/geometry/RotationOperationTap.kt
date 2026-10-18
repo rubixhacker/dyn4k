@@ -22,6 +22,9 @@ object RotationOperationTap {
         val startSint: Double? = null,
         val endCost: Double? = null,
         val endSint: Double? = null,
+        val caseId: String? = null,
+        val step: Int? = null,
+        val bodyId: String? = null,
     )
 
     var listener: ((Call) -> Unit)? = null

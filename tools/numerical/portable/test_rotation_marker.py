@@ -12,13 +12,14 @@ def bits(value):
 
 def marker():
     return {
-        "schema": "portable-rotation-op/1", "method": "observedProbe",
+        "schema": "portable-rotation-op/2", "method": "observedProbe",
         "sequence": 0, "target_token": 0, "kind": "rotate", "source": "origin",
         "pre": [bits(1.0), bits(0.0)], "trig": [bits(1.0), bits(-0.0)],
         "raw": [bits(1.0), bits(0.0)], "post": [bits(1.0), bits(0.0)],
         "angle_bits": bits(-0.0), "alpha_bits": None,
         "start_angle_bits": None, "end_angle_bits": None,
         "diff_bits": None, "start": [None, None], "end": [None, None],
+        "case_id": None, "step": None, "body_id": None,
     }
 
 

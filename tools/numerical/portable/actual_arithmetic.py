@@ -88,13 +88,14 @@ def verify_capture(xml, method, expected_ids=None):
     state_count = 0
     total_steps = 0
     operations = 0
+    body_bound_operations = 0
     pair_inputs_unbound = 0
     sequence = 0
     last_main = {}
 
     def record(line):
         nonlocal active, state_count, total_steps, operations
-        nonlocal pair_inputs_unbound, sequence
+        nonlocal pair_inputs_unbound, sequence, body_bound_operations
         if not line:
             return
         if line.startswith("NUMERICAL_JSON "):
@@ -144,6 +145,18 @@ def verify_capture(xml, method, expected_ids=None):
         if active is None or marker.get("method") != expected_method or \
                 marker.get("sequence") != sequence:
             raise CaptureRejected("operation case, method, or sequence differs")
+        if marker.get("case_id") is not None:
+            if marker["case_id"] != active["id"] or \
+                    type(marker.get("step")) is not int or \
+                    not active.get("startStep", 0) + 1 <= marker["step"] <= \
+                    active.get("startStep", 0) + active["steps"]:
+                raise CaptureRejected("operation case or step binding differs")
+            if marker.get("body_id") is not None:
+                bodies = active.get("setup", {}).get("bodies", [])
+                if type(bodies) is not list or marker["body_id"] not in [
+                        body.get("id") for body in bodies if type(body) is dict]:
+                    raise CaptureRejected("operation body binding differs")
+                body_bound_operations += 1
         outcome = verify_operation_marker(marker)
         if outcome["status"] == "UNPASSED_INPUT_ORIGIN":
             pair_inputs_unbound += 1
@@ -211,6 +224,7 @@ def verify_capture(xml, method, expected_ids=None):
     return {"status": "UNPASSED_TARGET_BINDING", "qualification": "UNPASSED",
             "method": method, "cases": len(ids), "steps": total_steps,
             "operations_verified": operations,
+            "body_bound_operations": body_bound_operations,
             "pair_inputs_unbound": pair_inputs_unbound,
             "trace_sha256": trace_hash.hexdigest(),
             "operations_sha256": operation_hash.hexdigest()}
