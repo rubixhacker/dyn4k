@@ -137,11 +137,14 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             linked = root / "raw-linked.kexe"
             linked.write_bytes(b"raw linked executable")
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
+            nonce = "c" * 32
+            source = "a" * 40
             launch_raw = (bundle + ": 123\n").encode()
             app_raw = b"DYN4K\tCOMPLETE\tnonce\n"
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
+                         "source_sha": source,
                          "linked_sha256": mobile_capture.capture.digest(linked),
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
@@ -169,7 +172,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                     (archive / "setup").mkdir()
                     (archive / "setup/apple-launch.stdout.bin").write_bytes(launch_raw)
                     (archive / "setup/apple-launch.stderr.bin").write_bytes(b"")
-                    (data / "dyn4k-performance-nonce.ready").write_bytes(b"nonce")
+                    (data / f"dyn4k-performance-{nonce}.ready").write_bytes(nonce.encode())
                     output = launch_raw.decode()
                 else:
                     output = ""
@@ -178,27 +181,38 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             installed_image = installed / "Dyn4kPerformance"
             identity = mobile_capture.apple_file_identity(installed_image)
             def vnode(_pid, _executable, _archive):
-                self.assertFalse((data / "dyn4k-performance-nonce.release").exists())
+                self.assertFalse((data / f"dyn4k-performance-{nonce}.release").exists())
                 return {"pid": 123, "path": str(installed_image),
                         "device": identity["device"], "inode": identity["inode"],
                         "size": identity["size"]}
 
             def finish(_pid, _signal):
-                self.assertEqual((data / "dyn4k-performance-nonce.release").read_bytes(), b"nonce")
+                token = (data / f"dyn4k-performance-{nonce}.release").read_text()
+                self.assertEqual(launches[0][-1], mobile_capture.simulator_release_digest(
+                    "release", source, nonce, token))
                 Path(next(arg.split("=", 1)[1] for arg in launches[0]
                           if arg.startswith("--stdout="))).write_bytes(app_raw)
                 Path(next(arg.split("=", 1)[1] for arg in launches[0]
                           if arg.startswith("--stderr="))).write_bytes(b"app err\x00")
                 raise ProcessLookupError
 
+            real_wait_ack = mobile_capture.wait_simulator_ack
+            def app_ack(barrier, captured_source, captured_nonce, token, timeout, capture_archive):
+                self.assertEqual((captured_source, captured_nonce), (source, nonce))
+                barrier["ack"].write_bytes(mobile_capture.simulator_release_digest(
+                    "ack", source, nonce, token).encode())
+                return real_wait_ack(barrier, captured_source, captured_nonce, token,
+                                     timeout, capture_archive)
+
             with patch.object(mobile_capture, "setup_command", side_effect=setup), \
                  patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}), \
                  patch.object(mobile_capture, "apple_process_path",
                               side_effect=[installed_image, installed_image, installed_image, None]), \
                  patch.object(mobile_capture, "apple_process_vnode", side_effect=vnode), \
-                 patch.object(mobile_capture.os, "kill", side_effect=finish):
+                 patch.object(mobile_capture.os, "kill", side_effect=finish), \
+                 patch.object(mobile_capture, "wait_simulator_ack", side_effect=app_ack):
                 stdout, stderr, process = mobile_capture.run_simulator(
-                    args, inventory, selected / "Dyn4kPerformance", ["fixture"], "nonce")
+                    args, inventory, selected / "Dyn4kPerformance", ["fixture"], nonce)
             self.assertEqual(stdout, app_raw)
             self.assertEqual(stderr, b"app err\x00")
             self.assertEqual((archive / "stdout.bin").read_bytes(), app_raw)
@@ -216,11 +230,15 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertNotIn("--console", launches[0])
             self.assertTrue(any(arg.startswith("--stdout=") for arg in launches[0]))
             self.assertTrue(any(arg.startswith("--stderr=") for arg in launches[0]))
-            self.assertEqual(launches[0][-2:], ["--simulator-attestation-barrier", str(data)])
+            self.assertEqual(launches[0][-3:-1], ["--simulator-attestation-barrier", str(data)])
+            self.assertNotIn((archive / "attestation.release.bin").read_text(),
+                             json.dumps(launches[0]))
             self.assertEqual(process["attestation"]["ready_sha256"],
                              mobile_capture.capture.digest(archive / "attestation.ready.bin"))
             self.assertLess(process["attestation"]["ready_ns"],
-                            process["attestation"]["released_ns"])
+                            process["attestation"]["image_proven_ns"])
+            self.assertLess(process["attestation"]["released_ns"],
+                            process["attestation"]["ack_ns"])
             for path in data.iterdir():
                 path.unlink()
             archive = root / "failed-archive"
@@ -233,8 +251,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                               side_effect=ValueError("simulator process executable vnode is missing or ambiguous")):
                 with self.assertRaisesRegex(ValueError, "vnode"):
                     mobile_capture.run_simulator(
-                        args, inventory, selected / "Dyn4kPerformance", ["fixture"], "nonce")
-            self.assertFalse((data / "dyn4k-performance-nonce.release").exists())
+                        args, inventory, selected / "Dyn4kPerformance", ["fixture"], nonce)
+            self.assertFalse((data / f"dyn4k-performance-{nonce}.release").exists())
             self.assertEqual((archive / "stdout.bin").read_bytes(), b"")
             self.assertEqual((archive / "stderr.bin").read_bytes(), b"")
 
@@ -264,6 +282,40 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "before live image proof"):
                 mobile_capture.wait_simulator_ready(data, "nonce", 0.01)
 
+    def test_committed_release_ack_requires_exact_nofollow_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "data"
+            archive = root / "archive"
+            data.mkdir()
+            archive.mkdir()
+            source, nonce, token = "a" * 40, "b" * 32, "c" * 64
+            ready = data / f"dyn4k-performance-{nonce}.ready"
+            ready.write_bytes(nonce.encode())
+            barrier = mobile_capture.wait_simulator_ready(data, nonce, 0.01)
+            attestation = mobile_capture.release_simulator_barrier(
+                barrier, source, nonce, token, archive, 1)
+            self.assertEqual(barrier["release"].read_bytes(), token.encode())
+            self.assertEqual(attestation["commitment_sha256"],
+                             mobile_capture.simulator_release_digest("release", source, nonce, token))
+            self.assertNotIn(token, json.dumps(attestation))
+            expected = mobile_capture.simulator_release_digest(
+                "ack", source, nonce, token).encode()
+            target = data / "target"
+            target.write_bytes(expected)
+            barrier["ack"].symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "without following"):
+                mobile_capture.wait_simulator_ack(barrier, source, nonce, token, 0.01, archive)
+            barrier["ack"].unlink()
+            barrier["ack"].write_bytes(b"wrong")
+            with self.assertRaisesRegex(ValueError, "exact regular file"):
+                mobile_capture.wait_simulator_ack(barrier, source, nonce, token, 0.01, archive)
+            barrier["ack"].write_bytes(expected)
+            observed = mobile_capture.wait_simulator_ack(
+                barrier, source, nonce, token, 0.01, archive)
+            self.assertEqual((archive / "attestation.ack.bin").read_bytes(), expected)
+            self.assertGreater(observed["ack_ns"], attestation["released_ns"])
+
     def test_simulator_rejects_executable_replaced_during_launch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -277,8 +329,10 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             linked = root / "raw-linked.kexe"
             linked.write_bytes(b"raw linked image")
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
+            nonce = "c" * 32
             selected_sha = mobile_capture.capture.digest(selected / "Dyn4kPerformance")
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
+                         "source_sha": "a" * 40,
                          "linked_sha256": mobile_capture.capture.digest(linked),
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
@@ -301,7 +355,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                     output = str(data) + "\n"
                 elif label == "apple-launch":
                     (installed / "Dyn4kPerformance").write_bytes(b"replaced image")
-                    (data / "dyn4k-performance-nonce.ready").write_bytes(b"nonce")
+                    (data / f"dyn4k-performance-{nonce}.ready").write_bytes(nonce.encode())
                     (archive / "setup").mkdir()
                     (archive / "setup/apple-launch.stdout.bin").write_bytes((bundle + ": 123\n").encode())
                     (archive / "setup/apple-launch.stderr.bin").write_bytes(b"")
@@ -324,7 +378,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                                             "size": len(b"selected image")}):
                 with self.assertRaisesRegex(ValueError, "selected|package|image"):
                     mobile_capture.run_simulator(
-                        args, inventory, selected / "Dyn4kPerformance", ["fixture"], "nonce")
+                        args, inventory, selected / "Dyn4kPerformance", ["fixture"], nonce)
             self.assertEqual((archive / "stdout.bin").read_bytes(), b"DYN4K\tCOMPLETE\tnonce\n")
             self.assertEqual((archive / "stderr.bin").read_bytes(), b"app err")
             self.assertNotEqual(mobile_capture.capture.digest(installed / "Dyn4kPerformance"), selected_sha)
@@ -484,10 +538,17 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
             data_container = root / "data"
+            release_token = "d" * 64
+            commitment = mobile_capture.simulator_release_digest(
+                "release", fixture.source, fixture.nonce, release_token)
+            ack_bytes = mobile_capture.simulator_release_digest(
+                "ack", fixture.source, fixture.nonce, release_token).encode()
             launch_command = ["xcrun", "simctl", "launch", "selected-udid", bundle,
-                              "--simulator-attestation-barrier", str(data_container)]
-            token_sha = mobile_capture.hashlib.sha256(fixture.nonce.encode()).hexdigest()
-            process = {"started_ns": 1, "ended_ns": 4, "bundle_id": bundle,
+                              "--simulator-attestation-barrier", str(data_container), commitment]
+            ready_sha = mobile_capture.hashlib.sha256(fixture.nonce.encode()).hexdigest()
+            release_sha = mobile_capture.hashlib.sha256(release_token.encode()).hexdigest()
+            ack_sha = mobile_capture.hashlib.sha256(ack_bytes).hexdigest()
+            process = {"started_ns": 1, "ended_ns": 10, "bundle_id": bundle,
                        "command": launch_command,
                        "image": {"pid": 123, "path": str(installed),
                                  "sha256": mobile_capture.capture.digest(executable),
@@ -495,9 +556,14 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                                  "method": "simctl-launch-pid/proc_pidpath/lsof-text-vnode"},
                        "launch": {"pid": 123, "method": "simctl-redirected-files",
                                   "stdout_sha256": mobile_capture.hashlib.sha256(launch_raw).hexdigest()},
-                       "attestation": {"method": "simulator-data-container-nonce-file-v1",
-                                       "ready_sha256": token_sha, "release_sha256": token_sha,
-                                       "ready_ns": 2, "released_ns": 3},
+                       "attestation": {"method": "simulator-data-container-committed-release-v2",
+                                       "source_sha": fixture.source,
+                                       "commitment_sha256": commitment,
+                                       "ready_sha256": ready_sha, "release_sha256": release_sha,
+                                       "ack_sha256": ack_sha, "pre_release_stdout_bytes": 0,
+                                       "pre_release_stderr_bytes": 0,
+                                       "ready_ns": 4, "image_proven_ns": 7,
+                                       "released_ns": 8, "ack_ns": 9},
                        "output": {"stdout_path": str(data_container / "producer.stdout"),
                                   "stderr_path": str(data_container / "producer.stderr"),
                                   "stdout_sha256": mobile_capture.hashlib.sha256(raw).hexdigest(),
@@ -512,9 +578,17 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                 (args.archive / "setup").mkdir()
                 (args.archive / "setup/apple-launch.stdout.bin").write_bytes(launch_raw)
                 (args.archive / "setup/apple-launch.json").write_text(
-                    json.dumps({"argv": launch_command, "exit_code": 0}))
+                    json.dumps({"argv": launch_command, "exit_code": 0,
+                                "started_ns": 2, "ended_ns": 3}))
+                (args.archive / "setup/apple-process-vnode.stdout.bin").write_bytes(
+                    b"p123\0ftxt\0D1\0i2\0s" + str(executable.stat().st_size).encode() +
+                    b"\0n" + str(installed).encode() + b"\0")
+                (args.archive / "setup/apple-process-vnode.json").write_text(json.dumps({
+                    "argv": ["/usr/sbin/lsof", "-a", "-p", "123", "-d", "txt", "-F0pfiDns"],
+                    "exit_code": 0, "started_ns": 5, "ended_ns": 6}))
                 (args.archive / "attestation.ready.bin").write_bytes(fixture.nonce.encode())
-                (args.archive / "attestation.release.bin").write_bytes(fixture.nonce.encode())
+                (args.archive / "attestation.release.bin").write_bytes(release_token.encode())
+                (args.archive / "attestation.ack.bin").write_bytes(ack_bytes)
                 return raw, b"", process
 
             with patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
@@ -531,6 +605,28 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                                 result["process"]["image"]["sha256"])
             self.assertEqual(result["linked_executable_sha256"], inventory["linked_sha256"])
             self.assertEqual(result["executable_sha256"], package["Dyn4kPerformance"])
+            self.assertEqual(mobile_capture.validate_simulator_attestation(
+                archive, result["process"], fixture.source, fixture.nonce), commitment)
+            (archive / "attestation.ack.bin").write_bytes(b"forged ack")
+            with self.assertRaisesRegex(ValueError, "attestation barrier"):
+                mobile_capture.validate_simulator_attestation(
+                    archive, result["process"], fixture.source, fixture.nonce)
+            (archive / "attestation.ack.bin").write_bytes(ack_bytes)
+            (archive / "attestation.release.bin").write_bytes(fixture.nonce.encode())
+            with self.assertRaisesRegex(ValueError, "attestation barrier"):
+                mobile_capture.validate_simulator_attestation(
+                    archive, result["process"], fixture.source, fixture.nonce)
+            (archive / "attestation.release.bin").write_bytes(release_token.encode())
+            with self.assertRaisesRegex(ValueError, "attestation barrier"):
+                mobile_capture.validate_simulator_attestation(
+                    archive, result["process"], "0" * 40, fixture.nonce)
+            vnode = archive / "setup/apple-process-vnode.stdout.bin"
+            original_vnode = vnode.read_bytes()
+            vnode.write_bytes(original_vnode.replace(b"i2\0", b"i3\0"))
+            with self.assertRaisesRegex(ValueError, "vnode differs"):
+                mobile_capture.validate_simulator_attestation(
+                    archive, result["process"], fixture.source, fixture.nonce)
+            vnode.write_bytes(original_vnode)
             valid_process = copy.deepcopy(process)
             args.archive = root / "barrier-missing-launch-arg"
             process = {**valid_process, "command": launch_command[:-2]}
@@ -540,7 +636,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                  patch.object(mobile_capture.secrets, "token_hex", return_value=fixture.nonce), \
                  patch.object(mobile_capture, "run_simulator", side_effect=simulator):
                 self.assertEqual(mobile_capture.run(args), 1)
-            self.assertIn("did not request the attestation barrier",
+            self.assertIn("attestation barrier",
                           json.loads((args.archive / "result.json").read_text())["error"])
             args.archive = root / "barrier-wrong-container"
             process = {**valid_process, "output": {**valid_process["output"],
@@ -576,7 +672,11 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             for label, attestation in (
                     ("early-release", {**process["attestation"], "released_ns": 2}),
                     ("forged-method", {**process["attestation"], "method": "app-stdout"}),
-                    ("forged-hash", {**process["attestation"], "ready_sha256": "0" * 64})):
+                    ("forged-hash", {**process["attestation"], "ready_sha256": "0" * 64}),
+                    ("early-ack", {**process["attestation"], "ack_ns": 3}),
+                    ("pre-output", {**process["attestation"], "pre_release_stdout_bytes": 1}),
+                    ("missing-image-time", {key: value for key, value in process["attestation"].items()
+                                            if key != "image_proven_ns"})):
                 args.archive = root / f"barrier-{label}"
                 process = {**valid_process, "attestation": attestation}
                 with self.subTest(label=label), \
@@ -806,6 +906,91 @@ class MobileCaptureAdverseTest(unittest.TestCase):
 
 
 class NativeSimulatorBarrierExecutionTest(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_BARRIER_EXECUTABLE"),
+                         "set the linked Native producer")
+    def test_release_sha256_matches_independent_known_answers(self):
+        executable = Path(os.environ["DYN4K_NATIVE_BARRIER_EXECUTABLE"]).resolve(strict=True)
+        for value in ("", "abc", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+                      "dyn4k-performance-release-v1|" + "a" * 40 + "|" + "b" * 32 + "|" + "c" * 64):
+            with self.subTest(length=len(value)):
+                output = subprocess.check_output([str(executable), "--sha256-control", value],
+                                                 text=True).strip()
+                self.assertEqual(output, mobile_capture.hashlib.sha256(value.encode()).hexdigest())
+
+    @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_BARRIER_EXECUTABLE") and
+                         os.environ.get("DYN4K_NATIVE_BARRIER_SOURCE"),
+                         "set the linked Native producer and its exact source SHA")
+    def test_early_public_nonce_cannot_start_either_api(self):
+        executable = Path(os.environ["DYN4K_NATIVE_BARRIER_EXECUTABLE"]).resolve(strict=True)
+        source = os.environ["DYN4K_NATIVE_BARRIER_SOURCE"]
+        root = Path(__file__).resolve().parents[3]
+        tree = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", f"{source}:consumers/performance/portable"],
+            text=True).strip()
+        manifest = json.loads(mobile_capture.capture.MANIFEST.read_text())
+        for api in ("direct_kotlin", "compatibility"):
+            with self.subTest(api=api), tempfile.TemporaryDirectory() as directory:
+                nonce = "c" * 32
+                token = "d" * 64
+                commitment = mobile_capture.simulator_release_digest("release", source, nonce, token)
+                data = Path(directory)
+                ready = data / f"dyn4k-performance-{nonce}.ready"
+                release = data / f"dyn4k-performance-{nonce}.release"
+                ack = data / f"dyn4k-performance-{nonce}.ack"
+                arguments = [str(executable), f"separated.default.small.30hz.{api}",
+                             "separated", "default", "small", "30", "30", "3", "timing",
+                             api, source, "a" * 64, "b" * 64, "development", nonce,
+                             "--simulator-attestation-barrier", directory, commitment]
+                process = subprocess.Popen(arguments, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+                try:
+                    deadline = time.monotonic() + 10
+                    while not ready.is_file() and time.monotonic() < deadline:
+                        time.sleep(0.005)
+                    self.assertEqual(ready.read_bytes(), nonce.encode())
+                    self.assertEqual(select.select([process.stdout], [], [], 0.05)[0], [])
+                    release.write_bytes(nonce.encode())
+                    self.assertEqual(select.select([process.stdout], [], [], 0.25)[0], [],
+                                     "Native producer ran before host attestation")
+                    release.unlink()
+                    self.assertIsNone(process.poll())
+                    release.write_bytes(("e" * 64).encode())
+                    self.assertEqual(select.select([process.stdout], [], [], 0.25)[0], [],
+                                     "Native producer accepted wrong secret")
+                    release.unlink()
+                    target = data / "target"
+                    target.write_bytes(token.encode())
+                    release.symlink_to(target)
+                    self.assertEqual(select.select([process.stdout], [], [], 0.25)[0], [],
+                                     "Native producer followed secret symlink")
+                    release.unlink()
+                    self.assertFalse(ack.exists())
+                    release.write_bytes(token.encode())
+                    stdout, stderr = process.communicate(timeout=10)
+                    self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
+                    self.assertEqual(stderr, b"")
+                    self.assertEqual(ack.read_bytes(), mobile_capture.simulator_release_digest(
+                        "ack", source, nonce, token).encode())
+                    scenario = mobile_capture.capture.scenario_from_manifest(
+                        manifest, f"separated.default.small.30hz.{api}")
+                    clocks, rows, provider, summary = mobile_capture.capture.validate_protocol(
+                        stdout, scenario, source, tree, {"core": "a" * 64, "kotlin": "b" * 64},
+                        "development", nonce, 30, 3, "timing")
+                    self.assertEqual((len(clocks["warmup"]), len(clocks["measure"]), len(rows)),
+                                     (3, 30, 30))
+                    self.assertLessEqual(clocks["warmup"][-1][2], clocks["measure"][0][1])
+                    self.assertEqual(provider[2], source)
+                    self.assertEqual(summary[-1], "unpassed")
+                    with self.assertRaisesRegex(ValueError, "provider"):
+                        mobile_capture.capture.validate_protocol(
+                            stdout, scenario, "0" * 40, tree,
+                            {"core": "a" * 64, "kotlin": "b" * 64}, "development", nonce,
+                            30, 3, "timing")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate()
+
     @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_BARRIER_EXECUTABLE") and
                          os.environ.get("DYN4K_NATIVE_BARRIER_SOURCE"),
                          "set the linked Native producer and its exact source SHA")
@@ -825,13 +1010,16 @@ class NativeSimulatorBarrierExecutionTest(unittest.TestCase):
                 with self.subTest(api=api, release_kind=release_kind), \
                      tempfile.TemporaryDirectory() as directory:
                     nonce = "c" * 32
+                    token = "d" * 64
+                    commitment = mobile_capture.simulator_release_digest("release", source, nonce, token)
                     data = Path(directory)
                     ready = data / f"dyn4k-performance-{nonce}.ready"
                     release = data / f"dyn4k-performance-{nonce}.release"
+                    ack = data / f"dyn4k-performance-{nonce}.ack"
                     arguments = [str(executable), scenario["id"], "separated", "default", "small",
                                  "30", "30", "3", "timing", api, source, hashes["core"],
                                  hashes["kotlin"], "development", nonce,
-                                 "--simulator-attestation-barrier", directory]
+                                 "--simulator-attestation-barrier", directory, commitment]
                     process = subprocess.Popen(arguments, stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE)
                     try:
@@ -845,16 +1033,18 @@ class NativeSimulatorBarrierExecutionTest(unittest.TestCase):
                             release.write_bytes(b"wrong")
                         else:
                             target = data / "target"
-                            target.write_bytes(nonce.encode())
+                            target.write_bytes(token.encode())
                             release.symlink_to(target)
                         self.assertEqual(select.select([process.stdout], [], [], 0.25)[0], [],
                                          "Native producer left barrier before valid release")
                         self.assertIsNone(process.poll())
                         release.unlink()
-                        release.write_bytes(nonce.encode())
+                        release.write_bytes(token.encode())
                         stdout, stderr = process.communicate(timeout=10)
                         self.assertEqual(process.returncode, 0, stderr.decode(errors="replace"))
                         self.assertEqual(stderr, b"")
+                        self.assertEqual(ack.read_bytes(), mobile_capture.simulator_release_digest(
+                            "ack", source, nonce, token).encode())
                         clocks, rows, provider, run = mobile_capture.capture.validate_protocol(
                             stdout, scenario, source, tree, hashes, "development", nonce,
                             30, 3, "timing")

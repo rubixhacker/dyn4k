@@ -292,6 +292,32 @@ def producer_arguments(scenario, inventory, artifacts, steps, warmup, nonce):
             artifacts["dyn4k"]["sha256"], inventory["build"], nonce]
 
 
+def simulator_release_digest(label, source, nonce, token):
+    if not re.fullmatch(r"[0-9a-f]{40}", source) or not re.fullmatch(r"[0-9a-f]{32}", nonce) \
+            or not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise ValueError("simulator release identity is malformed")
+    return hashlib.sha256(
+        f"dyn4k-performance-{label}-v1|{source}|{nonce}|{token}".encode("ascii")
+    ).hexdigest()
+
+
+def read_simulator_marker(path, length):
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ValueError("simulator attestation marker cannot open without following") from error
+    try:
+        details = os.fstat(descriptor)
+        if not stat.S_ISREG(details.st_mode) or details.st_size != length:
+            raise ValueError("simulator attestation marker is not an exact regular file")
+        data = os.read(descriptor, length + 1)
+        if len(data) != length:
+            raise ValueError("simulator attestation marker size changed during read")
+        return data
+    finally:
+        os.close(descriptor)
+
+
 def apple_process_path(pid):
     library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
     library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
@@ -386,37 +412,60 @@ def apple_process_image(executable, pid, expected_sha, expected_size, before, ar
 def wait_simulator_ready(data_container, nonce, timeout):
     ready = data_container / f"dyn4k-performance-{nonce}.ready"
     release = data_container / f"dyn4k-performance-{nonce}.release"
+    ack = data_container / f"dyn4k-performance-{nonce}.ack"
     deadline = time.monotonic() + min(timeout, 15)
     while time.monotonic() < deadline:
-        if os.path.lexists(release):
+        if os.path.lexists(release) or os.path.lexists(ack):
             raise ValueError("simulator attestation release appeared before live image proof")
         if os.path.lexists(ready):
-            if ready.is_symlink() or not ready.is_file() or ready.read_bytes() != nonce.encode():
+            if read_simulator_marker(ready, len(nonce)) != nonce.encode():
                 raise ValueError("simulator attestation ready marker is malformed")
-            return {"ready": ready, "release": release, "ready_ns": time.monotonic_ns()}
+            return {"ready": ready, "release": release, "ack": ack,
+                    "ready_ns": time.monotonic_ns()}
         time.sleep(0.005)
     raise ValueError("simulator attestation ready marker is missing")
 
 
-def release_simulator_barrier(barrier, nonce, archive):
+def release_simulator_barrier(barrier, source, nonce, token, archive, image_proven_ns):
     ready = barrier["ready"]
     release = barrier["release"]
-    if (ready.is_symlink() or not ready.is_file() or ready.read_bytes() != nonce.encode()
-            or os.path.lexists(release)):
+    if (read_simulator_marker(ready, len(nonce)) != nonce.encode()
+            or os.path.lexists(release) or os.path.lexists(barrier["ack"])):
         raise ValueError("simulator attestation marker changed before release")
     pending = release.with_name(release.name + ".tmp")
     with pending.open("xb") as output:
-        output.write(nonce.encode())
+        output.write(token.encode())
     try:
         os.link(pending, release)
+        released_ns = time.monotonic_ns()
     finally:
         pending.unlink(missing_ok=True)
-    (archive / "attestation.ready.bin").write_bytes(ready.read_bytes())
-    (archive / "attestation.release.bin").write_bytes(release.read_bytes())
-    return {"method": "simulator-data-container-nonce-file-v1",
+    (archive / "attestation.ready.bin").write_bytes(read_simulator_marker(ready, len(nonce)))
+    (archive / "attestation.release.bin").write_bytes(read_simulator_marker(release, len(token)))
+    return {"method": "simulator-data-container-committed-release-v2",
+            "source_sha": source,
+            "commitment_sha256": simulator_release_digest("release", source, nonce, token),
             "ready_sha256": capture.digest(archive / "attestation.ready.bin"),
             "release_sha256": capture.digest(archive / "attestation.release.bin"),
-            "ready_ns": barrier["ready_ns"], "released_ns": time.monotonic_ns()}
+            "ready_ns": barrier["ready_ns"], "image_proven_ns": image_proven_ns,
+            "released_ns": released_ns}
+
+
+def wait_simulator_ack(barrier, source, nonce, token, timeout, archive):
+    expected = simulator_release_digest("ack", source, nonce, token).encode()
+    ack = barrier["ack"]
+    deadline = time.monotonic() + min(timeout, 15)
+    while time.monotonic() < deadline:
+        if os.path.lexists(ack):
+            observed = read_simulator_marker(ack, len(expected))
+            if observed != expected:
+                raise ValueError("simulator app acknowledgement is malformed")
+            observed_ns = time.monotonic_ns()
+            (archive / "attestation.ack.bin").write_bytes(observed)
+            return {"ack_sha256": hashlib.sha256(observed).hexdigest(),
+                    "ack_ns": observed_ns}
+        time.sleep(0.005)
+    raise ValueError("simulator app acknowledgement is missing")
 
 
 def run_simulator(args, inventory, harness, producer, nonce):
@@ -467,13 +516,19 @@ def run_simulator(args, inventory, harness, producer, nonce):
     stderr_path = data_container / f"dyn4k-performance-{nonce}.stderr"
     ready_path = data_container / f"dyn4k-performance-{nonce}.ready"
     release_path = data_container / f"dyn4k-performance-{nonce}.release"
+    ack_path = data_container / f"dyn4k-performance-{nonce}.ack"
     if any(os.path.lexists(path) for path in (stdout_path, stderr_path, ready_path,
-                                             release_path, ready_path.with_name(ready_path.name + ".tmp"),
-                                             release_path.with_name(release_path.name + ".tmp"))):
+                                             release_path, ack_path,
+                                             ready_path.with_name(ready_path.name + ".tmp"),
+                                             release_path.with_name(release_path.name + ".tmp"),
+                                             ack_path.with_name(ack_path.name + ".tmp"))):
         raise ValueError("simulator output or attestation paths already exist")
+    token = secrets.token_hex(32)
+    commitment = simulator_release_digest("release", inventory["source_sha"], nonce, token)
     launch = ["xcrun", "simctl", "launch", f"--stdout={stdout_path}",
               f"--stderr={stderr_path}", "--terminate-running-process",
-              args.udid, bundle, *producer, "--simulator-attestation-barrier", str(data_container)]
+              args.udid, bundle, *producer, "--simulator-attestation-barrier", str(data_container),
+              commitment]
     started = time.monotonic_ns()
     image = None
     attestation = None
@@ -496,7 +551,17 @@ def run_simulator(args, inventory, harness, producer, nonce):
             raise ValueError("simulator launch PID process image was not observable")
         if validate_installed_bundle(Path(app), installed_app) != inventory["bundle_sha256"]:
             raise ValueError("post-launch simulator package differs from selected inventory")
-        attestation = release_simulator_barrier(barrier, nonce, args.archive)
+        if (stdout_path.is_symlink() or stderr_path.is_symlink()
+                or (stdout_path.is_file() and stdout_path.stat().st_size != 0)
+                or (stderr_path.is_file() and stderr_path.stat().st_size != 0)):
+            raise ValueError("simulator producer output appeared before live image release")
+        image_proven_ns = time.monotonic_ns()
+        attestation = release_simulator_barrier(
+            barrier, inventory["source_sha"], nonce, token, args.archive, image_proven_ns)
+        attestation["pre_release_stdout_bytes"] = 0
+        attestation["pre_release_stderr_bytes"] = 0
+        attestation.update(wait_simulator_ack(
+            barrier, inventory["source_sha"], nonce, token, args.timeout, args.archive))
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             path = apple_process_path(pid)
@@ -630,6 +695,78 @@ def run_android(args, inventory, harness, producer, nonce):
                             "started_ns": started, "ended_ns": ended}
 
 
+def validate_simulator_attestation(archive, process, source, nonce):
+    launch_file = archive / "setup/apple-launch.stdout.bin"
+    launch_record_file = archive / "setup/apple-launch.json"
+    vnode_file = archive / "setup/apple-process-vnode.stdout.bin"
+    vnode_record_file = archive / "setup/apple-process-vnode.json"
+    ready_file = archive / "attestation.ready.bin"
+    release_file = archive / "attestation.release.bin"
+    ack_file = archive / "attestation.ack.bin"
+    if not all(path.is_file() for path in (launch_file, launch_record_file, vnode_file,
+                                           vnode_record_file, ready_file, release_file, ack_file)):
+        raise ValueError("simulator live-image attestation barrier raw receipt is missing")
+    launch_record = json.loads(launch_record_file.read_text())
+    vnode_record = json.loads(vnode_record_file.read_text())
+    command = process.get("command")
+    attestation = process.get("attestation")
+    if not isinstance(command, list) or len(command) < 3 or not isinstance(attestation, dict):
+        raise ValueError("simulator live-image attestation barrier is malformed")
+    try:
+        ready_bytes = read_simulator_marker(ready_file, len(nonce))
+        release_bytes = read_simulator_marker(release_file, 64)
+        ack_bytes = read_simulator_marker(ack_file, 64)
+        token = release_bytes.decode("ascii")
+        commitment = simulator_release_digest("release", source, nonce, token)
+        expected_ack = simulator_release_digest("ack", source, nonce, token).encode("ascii")
+    except (UnicodeError, ValueError) as error:
+        raise ValueError("simulator live-image attestation barrier token is malformed") from error
+    image = process.get("image")
+    if not isinstance(image, dict):
+        raise ValueError("simulator live-image attestation barrier image is missing")
+    pid = image.get("pid")
+    image_path = Path(image.get("path", ""))
+    if (not isinstance(pid, int) or pid <= 0 or not image_path.is_absolute()
+            or vnode_record.get("argv") != ["/usr/sbin/lsof", "-a", "-p", str(pid),
+                                            "-d", "txt", "-F0pfiDns"]
+            or vnode_record.get("exit_code") != 0):
+        raise ValueError("simulator live-image attestation barrier vnode receipt is malformed")
+    observed = parse_apple_process_vnode(vnode_file.read_bytes(), pid, image_path)
+    if any(image.get(field) != observed[field] for field in
+           ("pid", "path", "device", "inode", "size")):
+        raise ValueError("simulator live-image attestation barrier vnode differs from process image")
+    if (command[-3:] != ["--simulator-attestation-barrier", command[-2], commitment]
+            or launch_record.get("argv") != command or launch_record.get("exit_code") != 0
+            or attestation.get("method") != "simulator-data-container-committed-release-v2"
+            or attestation.get("source_sha") != source
+            or attestation.get("commitment_sha256") != commitment
+            or ready_bytes != nonce.encode("ascii")
+            or ack_bytes != expected_ack
+            or attestation.get("ready_sha256") != hashlib.sha256(ready_bytes).hexdigest()
+            or attestation.get("release_sha256") != hashlib.sha256(release_bytes).hexdigest()
+            or attestation.get("ack_sha256") != hashlib.sha256(ack_bytes).hexdigest()
+            or attestation.get("pre_release_stdout_bytes") != 0
+            or attestation.get("pre_release_stderr_bytes") != 0
+            or any(type(attestation.get(field)) is not int for field in
+                   ("ready_ns", "image_proven_ns", "released_ns", "ack_ns"))
+            or any(type(vnode_record.get(field)) is not int for field in
+                   ("started_ns", "ended_ns"))
+            or any(type(launch_record.get(field)) is not int for field in
+                   ("started_ns", "ended_ns"))
+            or not process["started_ns"] < launch_record["started_ns"] < \
+                   launch_record["ended_ns"] < attestation["ready_ns"] < \
+                   vnode_record["started_ns"] < vnode_record["ended_ns"] <= \
+                   attestation["image_proven_ns"] < attestation["released_ns"] < \
+                   attestation["ack_ns"] < process["ended_ns"]):
+        raise ValueError("simulator live-image attestation barrier is missing or malformed")
+    output = process.get("output")
+    if (not isinstance(output, dict)
+            or command[-2] != str(Path(output.get("stdout_path", "")).parent)
+            or command[-2] != str(Path(output.get("stderr_path", "")).parent)):
+        raise ValueError("simulator attestation container differs from producer output")
+    return commitment
+
+
 def run(args):
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
@@ -665,35 +802,9 @@ def run(args):
             launch_file = args.archive / "setup/apple-launch.stdout.bin"
             if not launch_file.is_file():
                 raise ValueError("simulator OS launch receipt is missing")
-            launch_record = json.loads((args.archive / "setup/apple-launch.json").read_text())
-            launch_command = process.get("command")
-            if (not isinstance(launch_command, list) or len(launch_command) < 2
-                    or launch_command[-2] != "--simulator-attestation-barrier"
-                    or launch_record.get("argv") != launch_command
-                    or launch_record.get("exit_code") != 0):
-                raise ValueError("simulator OS launch did not request the attestation barrier")
-            attestation = process.get("attestation")
-            ready_file = args.archive / "attestation.ready.bin"
-            release_file = args.archive / "attestation.release.bin"
-            token_sha = hashlib.sha256(nonce.encode()).hexdigest()
-            if (not isinstance(attestation, dict)
-                    or attestation.get("method") != "simulator-data-container-nonce-file-v1"
-                    or not ready_file.is_file() or not release_file.is_file()
-                    or ready_file.read_bytes() != nonce.encode()
-                    or release_file.read_bytes() != nonce.encode()
-                    or attestation.get("ready_sha256") != token_sha
-                    or attestation.get("release_sha256") != token_sha
-                    or not isinstance(attestation.get("ready_ns"), int)
-                    or not isinstance(attestation.get("released_ns"), int)
-                    or not process["started_ns"] < attestation["ready_ns"]
-                    < attestation["released_ns"] < process["ended_ns"]):
-                raise ValueError("simulator live-image attestation barrier is missing or malformed")
+            validate_simulator_attestation(args.archive, process, inventory["source_sha"], nonce)
             launch = process.get("launch")
             output = process.get("output")
-            if (not isinstance(output, dict)
-                    or launch_command[-1] != str(Path(output.get("stdout_path", "")).parent)
-                    or launch_command[-1] != str(Path(output.get("stderr_path", "")).parent)):
-                raise ValueError("simulator attestation container differs from producer output")
             if not isinstance(launch, dict) or launch.get("method") != "simctl-redirected-files":
                 raise ValueError("simulator OS launch receipt origin is missing")
             if launch.get("stdout_sha256") != capture.digest(launch_file):
