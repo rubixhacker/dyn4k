@@ -1,6 +1,8 @@
 import hashlib
 import json
 import re
+import struct
+import subprocess
 from pathlib import Path
 from xml.parsers import expat
 
@@ -78,6 +80,7 @@ def verify_capture(xml, method, expected_ids=None):
     expected_method = _WRAPPERS[method]
     trace_hash = hashlib.sha256()
     operation_hash = hashlib.sha256()
+    binding_hash = hashlib.sha256()
     parser = expat.ParserCreate()
     suite = None
     testcases = []
@@ -92,10 +95,37 @@ def verify_capture(xml, method, expected_ids=None):
     pair_inputs_unbound = 0
     sequence = 0
     last_main = {}
+    target_bodies = {}
+    step_operations = []
+    step_receipted = False
+    last_receipt_step = 0
+    prior_pairs = []
+    state_pairs = []
+    toi_events = []
+    used_toi_events = set()
+    pending_resets = []
+    body_step_receipts = 0
+    temporary_operations = 0
+    selected_resets = 0
+
+    def pair_from_trace(body):
+        transform = body["transform"]
+        return [struct.pack(">d", transform[key]).hex()
+                for key in ("getCost", "getSint")]
+
+    def body_ids():
+        bodies = active.get("setup", {}).get("bodies", [])
+        if type(bodies) is not list or not bodies or \
+                [body.get("id") for body in bodies] != [
+                    f"b{index}" for index in range(len(bodies))]:
+            raise CaptureRejected("body inventory differs")
+        return [body["id"] for body in bodies]
 
     def record(line):
         nonlocal active, state_count, total_steps, operations
         nonlocal pair_inputs_unbound, sequence, body_bound_operations
+        nonlocal step_receipted, last_receipt_step, prior_pairs, state_pairs, body_step_receipts
+        nonlocal temporary_operations, selected_resets
         if not line:
             return
         if line.startswith("NUMERICAL_JSON "):
@@ -117,21 +147,116 @@ def verify_capture(xml, method, expected_ids=None):
                 active = row
                 state_count = 0
                 last_main.clear()
+                target_bodies.clear()
+                step_operations.clear()
+                toi_events.clear()
+                used_toi_events.clear()
+                pending_resets.clear()
+                step_receipted = False
+                last_receipt_step = 0
+                body_ids()
+                prior_pairs = [pair_from_trace(body) for body in
+                               row["initial"]["bodies"]]
                 ids.append(row["id"])
             elif active is None or row["id"] != active["id"]:
                 raise CaptureRejected("trace row outside declared case")
             elif row.get("kind") == "state":
+                if state_count and last_receipt_step != state_count:
+                    raise CaptureRejected("missing prior body-step receipt")
                 state_count += 1
                 if type(row.get("step")) is not int or \
                         row["step"] != active.get("startStep", 0) + state_count:
                     raise CaptureRejected("state step order differs")
+                state_pairs = [pair_from_trace(body) for body in row["state"]["bodies"]]
+                if len(state_pairs) != len(body_ids()):
+                    raise CaptureRejected("state body inventory differs")
+                step_receipted = False
+            elif row.get("kind") == "event" and row.get("name") == "toi.payload.bodies":
+                toi_events.append(row)
             elif row.get("kind") == "case-end":
                 if type(row.get("steps")) is not int or \
                         row["steps"] != active["steps"] or \
-                        state_count != active["steps"]:
+                        state_count != active["steps"] or \
+                        last_receipt_step != state_count or \
+                        pending_resets:
                     raise CaptureRejected("case step coverage differs")
                 total_steps += state_count
                 active = None
+            return
+        if line.startswith("PROSPECTIVE_BINDING_JSON "):
+            raw = line.removeprefix("PROSPECTIVE_BINDING_JSON ")
+            binding_hash.update((raw + "\n").encode())
+            try:
+                binding = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(
+                    CaptureRejected(f"nonfinite binding token: {value}")))
+            except (TypeError, ValueError) as error:
+                raise CaptureRejected("invalid binding JSON") from error
+            if active is None or type(binding) is not dict or \
+                    binding.get("case_id") != active["id"]:
+                raise CaptureRejected("binding case differs")
+            if binding.get("kind") == "toi-accepted":
+                if set(binding) != {"kind", "case_id", "step", "body_ids",
+                                    "reset_body_ids", "time_bits"} or \
+                        binding["step"] != active.get("startStep", 0) + state_count + 1 or \
+                        pending_resets or type(binding["time_bits"]) is not str:
+                    raise CaptureRejected("accepted TOI selection differs")
+                names = body_ids()
+                pair = binding["body_ids"]
+                resets = binding["reset_body_ids"]
+                if type(pair) is not list or len(pair) != 2 or \
+                        any(name not in names for name in pair) or \
+                        resets not in ([pair[0]], pair):
+                    raise CaptureRejected("accepted TOI body pair differs")
+                matching = [index for index, event in enumerate(toi_events)
+                            if index not in used_toi_events and
+                            event.get("step") == binding["step"] and
+                            event.get("payload", {}).get("bodies") ==
+                            [names.index(name) for name in pair] and
+                            type(event.get("payload", {}).get("time")) is float and
+                            struct.pack(">d", event["payload"]["time"]).hex() ==
+                            binding["time_bits"]]
+                if not matching:
+                    raise CaptureRejected("accepted TOI callback differs")
+                used_toi_events.add(matching[-1])
+                pending_resets.extend((name, binding["time_bits"]) for name in resets)
+                selected_resets += len(resets)
+            elif binding.get("kind") == "body-step":
+                if set(binding) != {"kind", "case_id", "step", "bodies",
+                                    "temporary_calls"} or step_receipted or \
+                        binding["step"] != active.get("startStep", 0) + state_count or \
+                        state_count < 1 or pending_resets:
+                    raise CaptureRejected("body-step receipt order differs")
+                receipts = binding["bodies"]
+                names = body_ids()
+                if type(receipts) is not list or len(receipts) != len(names):
+                    raise CaptureRejected("body-step inventory differs")
+                for index, receipt in enumerate(receipts):
+                    calls = [call for call in step_operations
+                             if call["body_id"] == names[index]]
+                    if type(receipt) is not dict or set(receipt) != \
+                            {"body_id", "calls", "pre", "post"} or \
+                            receipt["body_id"] != names[index] or \
+                            type(receipt["calls"]) is not int or \
+                            receipt["calls"] != len(calls) or \
+                            receipt["pre"] != prior_pairs[index] or \
+                            receipt["post"] != state_pairs[index] or \
+                            (calls and (calls[0]["pre"] != receipt["pre"] or
+                                        calls[-1]["post"] != receipt["post"])) or \
+                            (not calls and receipt["pre"] != receipt["post"]):
+                        raise CaptureRejected("body-step operation chain differs")
+                temporary = [call for call in step_operations
+                             if call["body_id"] is None]
+                if type(binding["temporary_calls"]) is not int or \
+                        binding["temporary_calls"] != len(temporary):
+                    raise CaptureRejected("temporary operation count differs")
+                temporary_operations += len(temporary)
+                body_step_receipts += len(receipts)
+                step_operations.clear()
+                prior_pairs = state_pairs
+                step_receipted = True
+                last_receipt_step = state_count
+            else:
+                raise CaptureRejected("unknown binding kind")
             return
         if not line.startswith("PROSPECTIVE_ROTATION_JSON "):
             raise CaptureRejected("unexpected producer output")
@@ -145,28 +270,42 @@ def verify_capture(xml, method, expected_ids=None):
         if active is None or marker.get("method") != expected_method or \
                 marker.get("sequence") != sequence:
             raise CaptureRejected("operation case, method, or sequence differs")
-        if marker.get("case_id") is not None:
-            if marker["case_id"] != active["id"] or \
-                    type(marker.get("step")) is not int or \
-                    not active.get("startStep", 0) + 1 <= marker["step"] <= \
-                    active.get("startStep", 0) + active["steps"]:
-                raise CaptureRejected("operation case or step binding differs")
-            if marker.get("body_id") is not None:
-                bodies = active.get("setup", {}).get("bodies", [])
-                if type(bodies) is not list or marker["body_id"] not in [
-                        body.get("id") for body in bodies if type(body) is dict]:
-                    raise CaptureRejected("operation body binding differs")
-                body_bound_operations += 1
+        if marker.get("case_id") != active["id"] or \
+                marker.get("step") != active.get("startStep", 0) + state_count + 1 or \
+                marker.get("body_id") not in (None, *body_ids()):
+            raise CaptureRejected("operation case, step, or body binding differs")
+        if step_receipted:
+            step_receipted = False
+        if marker["body_id"] is not None:
+            body_bound_operations += 1
+            token = marker["target_token"]
+            if token in target_bodies and target_bodies[token] != marker["body_id"]:
+                raise CaptureRejected("target changed body identity")
+            if any(body == marker["body_id"] and target != token
+                   for target, body in target_bodies.items()):
+                raise CaptureRejected("body changed target identity")
+            target_bodies[token] = marker["body_id"]
+        elif marker["target_token"] in target_bodies:
+            raise CaptureRejected("body target reported as temporary")
+        if pending_resets:
+            expected_body, expected_time = pending_resets.pop(0)
+            if marker["kind"] != "lerp-reset" or \
+                    marker["body_id"] != expected_body or \
+                    marker["alpha_bits"] != expected_time:
+                raise CaptureRejected("accepted TOI reset call differs")
+        elif marker["kind"] == "lerp-reset":
+            raise CaptureRejected("reset has no accepted TOI selection")
         outcome = verify_operation_marker(marker)
         if outcome["status"] == "UNPASSED_INPUT_ORIGIN":
             pair_inputs_unbound += 1
         elif outcome["status"] != "PASSED_ARITHMETIC":
             raise CaptureRejected(f"operation arithmetic differs: {outcome}")
-        if marker["source"] != "vector-lerp":
+        if marker["body_id"] is not None:
             token = marker["target_token"]
             if token in last_main and marker["pre"] != last_main[token]:
                 raise CaptureRejected("same-target operation chain differs")
             last_main[token] = marker["post"]
+        step_operations.append(marker)
         sequence += 1
         operations += 1
 
@@ -221,21 +360,37 @@ def verify_capture(xml, method, expected_ids=None):
             testcases[0].get("name") not in (method, f"{method}[jvm]") or \
             active is not None or ids != expected_ids:
         raise CaptureRejected("target method or case inventory differs")
-    return {"status": "UNPASSED_TARGET_BINDING", "qualification": "UNPASSED",
+    if body_step_receipts == 0:
+        raise CaptureRejected("empty body-step inventory")
+    return {"status": "VERIFIED_ARITHMETIC_BINDING" if not pair_inputs_unbound
+            else "UNPASSED_INPUT_ORIGIN", "qualification": "UNPASSED",
             "method": method, "cases": len(ids), "steps": total_steps,
             "operations_verified": operations,
             "body_bound_operations": body_bound_operations,
+            "body_step_receipts": body_step_receipts,
+            "temporary_operations": temporary_operations,
+            "selected_resets": selected_resets,
             "pair_inputs_unbound": pair_inputs_unbound,
             "trace_sha256": trace_hash.hexdigest(),
-            "operations_sha256": operation_hash.hexdigest()}
+            "operations_sha256": operation_hash.hexdigest(),
+            "binding_sha256": binding_hash.hexdigest()}
 
 
 _RECEIPT_FILES = {"xml", "stage_log", "gradle_log", "execve_log", "artifact", "runtime",
-                  "source"}
+                  "source", "worker_classpath"}
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _sha(value):
     return hashlib.sha256(value).hexdigest()
+
+
+def _source_archive(commit):
+    result = subprocess.run(("git", "archive", "--format=tar", commit),
+                            cwd=_ROOT, capture_output=True, check=False)
+    if result.returncode:
+        raise CaptureRejected("candidate commit archive unavailable")
+    return result.stdout
 
 
 def _check_process(files, runtime_executable):
@@ -245,6 +400,7 @@ def _check_process(files, runtime_executable):
         log = files["gradle_log"].decode()
         executions = files["execve_log"].decode()
         stage = files["stage_log"].decode()
+        worker_classpath = files["worker_classpath"].decode()
     except UnicodeError as error:
         raise CaptureRejected("process log encoding differs") from error
     process_lines = [line for line in log.splitlines()
@@ -258,6 +414,12 @@ def _check_process(files, runtime_executable):
                          r'",.*GradleWorkerMain.*\)\s+=\s+0$')
     if sum(bool(pattern.search(line)) for line in executions.splitlines()) != 1:
         raise CaptureRejected("executed JVM worker identity differs")
+    if not re.search(r"-cp\s+\S*dyn4k-core-jvm[^\s]*\.jar", worker_classpath) and \
+            "dyn4k-core-jvm" not in worker_classpath:
+        raise CaptureRejected("executed worker classpath omits staged engine")
+    if "-cp " not in worker_classpath or \
+            not re.search(r"@/[^\s]+gradle-worker-classpath[^\s]+txt", log):
+        raise CaptureRejected("executed worker classpath evidence differs")
 
 
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
@@ -265,6 +427,8 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             any(type(value) is not bytes or not value for value in files.values()) or \
             type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("receipt input identity differs")
+    if files["source"] != _source_archive(commit):
+        raise CaptureRejected("source archive differs from candidate commit")
     _check_process(files, runtime_executable)
     summary = verify_capture(files["xml"], method, expected_ids)
     return {"schema": "portable-arithmetic-capture-receipt/1",
@@ -277,6 +441,7 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             "stage_log_sha256": _sha(files["stage_log"]),
             "gradle_log_sha256": _sha(files["gradle_log"]),
             "execve_log_sha256": _sha(files["execve_log"]),
+            "worker_classpath_sha256": _sha(files["worker_classpath"]),
             "summary": summary}
 
 

@@ -1,36 +1,45 @@
 import copy
 import unittest
+from unittest.mock import patch
 
 from actual_arithmetic import CaptureRejected, make_capture_receipt, verify_capture_receipt
 from test_actual_arithmetic import fixture, xml_for
 
 
 class CaptureReceiptTest(unittest.TestCase):
+    def setUp(self):
+        source = patch("actual_arithmetic._source_archive", return_value=b"source")
+        source.start()
+        self.addCleanup(source.stop)
+
     def fixture(self):
         xml = xml_for(fixture())
         runtime = "/tmp/dyn4k-tools/jdk21/bin/java"
         log = (f"Starting process 'Gradle Test Executor 1'. Command: {runtime} "
+               "@/tmp/gradle-worker-classpath1txt "
                "worker.org.gradle.process.internal.worker.GradleWorkerMain\n"
                "BUILD SUCCESSFUL\n").encode()
         execve = (f'123 execve("{runtime}", ["{runtime}", '
                   '"worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n').encode()
         files = {"xml": xml, "stage_log": b"BUILD SUCCESSFUL\n",
                  "gradle_log": log, "execve_log": execve,
-                 "artifact": b"artifact", "runtime": b"runtime", "source": b"source"}
+                 "artifact": b"artifact", "runtime": b"runtime", "source": b"source",
+                 "worker_classpath": b"-cp /tmp/dyn4k-core-jvm-0.1.jar\n"}
         receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
                                        ["geometry-boundary-s0-o0-d0"], runtime)
         return receipt, files, runtime
 
-    def test_sealed_capture_still_unpassed_without_body_bridge(self):
+    def test_sealed_capture_keeps_case_policy_unpassed(self):
         receipt, files, runtime = self.fixture()
         result = verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
                                         ["geometry-boundary-s0-o0-d0"], runtime)
-        self.assertEqual(result["status"], "UNPASSED_TARGET_BINDING")
+        self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1)
 
     def test_stale_bytes_source_artifact_trace_and_runtime_fail(self):
         for key in ("xml", "stage_log", "gradle_log", "execve_log",
-                    "artifact", "runtime", "source"):
+                    "artifact", "runtime", "source", "worker_classpath"):
             receipt, files, runtime = self.fixture()
             files[key] += b"tamper"
             with self.subTest(key=key), self.assertRaises(CaptureRejected):
@@ -41,6 +50,11 @@ class CaptureReceiptTest(unittest.TestCase):
         with self.assertRaises(CaptureRejected):
             verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
                                    ["geometry-boundary-s0-o0-d0"], runtime)
+        receipt, files, runtime = self.fixture()
+        with patch("actual_arithmetic._source_archive", return_value=b"other"):
+            with self.assertRaises(CaptureRejected):
+                verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
 
     def test_wrong_method_process_and_receipt_fields_fail(self):
         receipt, files, runtime = self.fixture()

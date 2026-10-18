@@ -634,6 +634,7 @@ abstract class AbstractPhysicsWorld<T : PhysicsBody, V : ContactCollisionData<T>
         for (listener in listeners) if (!listener!!.collision(body1, other, impact)) allow = false
         if (!allow) return false
         val impactTime = impact.getTime()
+        ToiAcceptedResetTap.listener?.invoke(body1, other, impactTime, other.isDynamic())
         body1.getPreviousTransform().lerp(body1.getTransform(), impactTime, body1.getTransform())
         if (other.isDynamic()) other.getPreviousTransform().lerp(other.getTransform(), impactTime, other.getTransform())
         if (impact.getSeparation().getDistance() <= 0.0) return true

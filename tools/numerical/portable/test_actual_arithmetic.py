@@ -19,13 +19,22 @@ def fixture():
     operation = marker()
     operation["method"] = "geometryCollisionBoundaryAndScale"
     case_id = "geometry-boundary-s0-o0-d0"
+    operation.update(case_id=case_id, step=1, body_id="b0")
+    identity = ["3ff0000000000000", "0000000000000000"]
+    state_body = {"id": "b0", "transform": {"getCost": 1.0, "getSint": 0.0}}
     rows = [
         "NUMERICAL_JSON " + json.dumps({"kind": "inputs", "id": case_id,
                                         "steps": 1,
-                                        "setup": {"bodies": [{"id": "b0"}]}}),
+                                        "setup": {"bodies": [{"id": "b0"}]},
+                                        "initial": {"bodies": [state_body]}}),
         "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation),
         "NUMERICAL_JSON " + json.dumps({"kind": "state", "id": case_id,
-                                        "step": 1, "state": {}}),
+                                        "step": 1, "state": {"bodies": [state_body]}}),
+        "PROSPECTIVE_BINDING_JSON " + json.dumps({
+            "kind": "body-step", "case_id": case_id, "step": 1,
+            "bodies": [{"body_id": "b0", "calls": 1,
+                        "pre": identity, "post": identity}],
+            "temporary_calls": 0}),
         "NUMERICAL_JSON " + json.dumps({"kind": "case-end", "id": case_id,
                                         "steps": 1}),
     ]
@@ -33,6 +42,59 @@ def fixture():
 
 
 class ActualArithmeticTest(unittest.TestCase):
+    def test_zero_call_body_step_is_required_and_matches_state(self):
+        rows = fixture()
+        rows.pop(1)
+        receipt = json.loads(rows[2].split(" ", 1)[1])
+        receipt["bodies"][0]["calls"] = 0
+        rows[2] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        expected = ["geometry-boundary-s0-o0-d0"]
+        result = verify_capture(xml_for(rows), "captureGeometry", expected)
+        self.assertEqual(result["operations_verified"], 0)
+        self.assertEqual(result["body_step_receipts"], 1)
+        for changed in (rows[:2] + rows[3:],
+                        [*rows[:2], rows[2].replace('"calls": 0', '"calls": 1'),
+                         rows[3]]):
+            with self.assertRaises(CaptureRejected):
+                verify_capture(xml_for(changed), "captureGeometry", expected)
+
+    def test_temporary_operation_is_counted_without_body_identity(self):
+        rows = fixture()
+        operation = json.loads(rows[1].split(" ", 1)[1])
+        operation["body_id"] = None
+        rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+        receipt = json.loads(rows[3].split(" ", 1)[1])
+        receipt["bodies"][0]["calls"] = 0
+        receipt["temporary_calls"] = 1
+        rows[3] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        result = verify_capture(xml_for(rows), "captureGeometry",
+                                ["geometry-boundary-s0-o0-d0"])
+        self.assertEqual(result["temporary_operations"], 1)
+        receipt["temporary_calls"] = 0
+        rows[3] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(rows), "captureGeometry",
+                           ["geometry-boundary-s0-o0-d0"])
+
+    def test_listener_callback_alone_cannot_select_reset(self):
+        rows = fixture()
+        callback = {"kind": "event", "id": "geometry-boundary-s0-o0-d0",
+                    "step": 1, "name": "toi.payload.bodies",
+                    "payload": {"bodies": [0, 0], "time": 0.5}}
+        selection = {"kind": "toi-accepted", "case_id": "geometry-boundary-s0-o0-d0",
+                     "step": 1, "body_ids": ["b0", "b0"],
+                     "reset_body_ids": ["b0"], "time_bits": "3fe0000000000000"}
+        rows.insert(1, "NUMERICAL_JSON " + json.dumps(callback))
+        rows.insert(2, "PROSPECTIVE_BINDING_JSON " + json.dumps(selection))
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(rows), "captureGeometry",
+                           ["geometry-boundary-s0-o0-d0"])
+        selection["time_bits"] = "3fd0000000000000"
+        rows[2] = "PROSPECTIVE_BINDING_JSON " + json.dumps(selection)
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(rows), "captureGeometry",
+                           ["geometry-boundary-s0-o0-d0"])
+
     def test_same_target_chain_rejects_reordered_operations(self):
         rows = fixture()
         first = json.loads(rows[1].split(" ", 1)[1])
@@ -42,7 +104,17 @@ class ActualArithmeticTest(unittest.TestCase):
         second["trig"] = [struct.pack(">d", 1.0).hex(), second["angle_bits"]]
         second["raw"] = second["trig"][:]
         second["post"] = second["trig"][:]
+        second["case_id"] = first["case_id"]
+        second["step"] = first["step"]
+        second["body_id"] = first["body_id"]
         rows.insert(2, "PROSPECTIVE_ROTATION_JSON " + json.dumps(second))
+        receipt = json.loads(rows[4].split(" ", 1)[1])
+        receipt["bodies"][0]["calls"] = 2
+        receipt["bodies"][0]["post"] = second["post"]
+        rows[4] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        state = json.loads(rows[3].split(" ", 1)[1])
+        state["state"]["bodies"][0]["transform"]["getSint"] = 1e-16
+        rows[3] = "NUMERICAL_JSON " + json.dumps(state)
         expected = ["geometry-boundary-s0-o0-d0"]
         self.assertEqual(verify_capture(xml_for(rows), "captureGeometry", expected)
                          ["operations_verified"], 2)
@@ -56,7 +128,6 @@ class ActualArithmeticTest(unittest.TestCase):
     def test_bound_case_step_and_body_must_match_trace(self):
         rows = fixture()
         operation = json.loads(rows[1].split(" ", 1)[1])
-        operation.update(case_id="geometry-boundary-s0-o0-d0", step=1, body_id="b0")
         rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
         expected = ["geometry-boundary-s0-o0-d0"]
         bound = verify_capture(xml_for(rows), "captureGeometry", expected)
@@ -81,10 +152,11 @@ class ActualArithmeticTest(unittest.TestCase):
                               if case.startswith("contacts-") or case == "long-free-60" or
                               case.startswith("P-JINT-")}), 318)
 
-    def test_public_capture_seam_verifies_arithmetic_but_not_target_binding(self):
+    def test_public_capture_seam_verifies_binding_without_case_qualification(self):
         result = verify_capture(xml_for(fixture()), "captureGeometry",
                                 ["geometry-boundary-s0-o0-d0"])
-        self.assertEqual(result["status"], "UNPASSED_TARGET_BINDING")
+        self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["cases"], 1)
         self.assertEqual(result["operations_verified"], 1)
         self.assertEqual(result["steps"], 1)

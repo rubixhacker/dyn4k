@@ -21,6 +21,7 @@ import org.dyn4j.dynamics.joint.WheelJoint
 import org.dyn4j.dynamics.contact.Contact
 import org.dyn4j.dynamics.contact.SolvedContact
 import org.dyn4j.geometry.Transform
+import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Convex
@@ -32,6 +33,7 @@ import org.dyn4j.world.NarrowphaseCollisionData
 import org.dyn4j.world.ManifoldCollisionData
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
+import org.dyn4j.world.ToiAcceptedResetTap
 import org.dyn4j.world.listener.CollisionListener
 import org.dyn4j.world.listener.ContactListener
 import org.dyn4j.world.listener.StepListener
@@ -69,6 +71,33 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         val rotations = bodies.map { it.getTransform().getRotationAngle() }.toMutableList()
         val sums = MutableList(bodies.size) { 0.0 }
         var step = spec.startStep
+        val previousRotationListener = RotationOperationTap.listener
+        val previousResetListener = ToiAcceptedResetTap.listener
+        val bodyTransforms = bodies.map { it.getTransform() }
+        val bodyCalls = IntArray(bodies.size)
+        var temporaryCalls = 0
+        fun bits(value: Double) = value.toBits().toULong().toString(16).padStart(16, '0')
+        fun pair(value: Transform) = listOf(bits(value.getCost()), bits(value.getSint()))
+        if (previousRotationListener != null) {
+            RotationOperationTap.listener = { call ->
+                val index = bodyTransforms.indexOfFirst { it === call.target }
+                if (index < 0) temporaryCalls++ else bodyCalls[index]++
+                previousRotationListener(call.copy(caseId = spec.id, step = step,
+                    bodyId = if (index < 0) null else "b$index"))
+            }
+            ToiAcceptedResetTap.listener = { first, second, time, secondDynamic ->
+                val firstIndex = bodies.indexOfFirst { it === first }
+                val secondIndex = bodies.indexOfFirst { it === second }
+                check(firstIndex >= 0 && secondIndex >= 0)
+                val resets = if (secondDynamic) listOf("b$firstIndex", "b$secondIndex")
+                    else listOf("b$firstIndex")
+                println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
+                    "kind" to "toi-accepted", "case_id" to spec.id, "step" to step,
+                    "body_ids" to listOf("b$firstIndex", "b$secondIndex"),
+                    "reset_body_ids" to resets, "time_bits" to bits(time))))
+                previousResetListener?.invoke(first, second, time, secondDynamic)
+            }
+        }
         var order = 0
         var frozenOrder = 0
         var precedingSecondAsleep = true
@@ -213,6 +242,9 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         try {
             for (number in 1..spec.steps) {
                 step = spec.startStep + number
+                bodyCalls.fill(0)
+                temporaryCalls = 0
+                val preRotations = bodyTransforms.map(::pair)
                 order = 0
                 frozenOrder = 0
                 val wakeCase = frozen && (spec.id.startsWith("contacts-default-") ||
@@ -271,10 +303,20 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                         "order" to order++, "state" to state) + frozenState)
                     endpoints++
                 }
+                if (previousRotationListener != null) {
+                    println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
+                        "kind" to "body-step", "case_id" to spec.id, "step" to step,
+                        "bodies" to bodyTransforms.mapIndexed { index, transform -> mapOf(
+                            "body_id" to "b$index", "calls" to bodyCalls[index],
+                            "pre" to preRotations[index], "post" to pair(transform)) },
+                        "temporary_calls" to temporaryCalls)))
+                }
             }
             line(mapOf("kind" to "case-end", "id" to spec.id, "steps" to spec.steps,
                 "events" to events, "endpoints" to endpoints))
         } finally {
+            RotationOperationTap.listener = previousRotationListener
+            ToiAcceptedResetTap.listener = previousResetListener
             world.removeContactListener(contacts)
             world.removeTimeOfImpactListener(timeOfImpact)
             if (frozen) world.removeCollisionListener(collisions)

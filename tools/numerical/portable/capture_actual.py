@@ -2,8 +2,10 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from actual_arithmetic import (CaptureRejected, expected_case_ids,
@@ -62,10 +64,19 @@ def run_capture(method, output):
                "jvmTest", "--tests", f"portable.ProspectiveArithmeticTest.{method}",
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info"]
+    worker_arguments = output / "worker-classpath.txt"
     with (output / "gradle.log").open("xb") as log:
-        target = subprocess.run(command, cwd=PORTABLE, env=environment,
-                                stdout=log, stderr=subprocess.STDOUT, check=False)
-    if target.returncode or not XML.is_file():
+        target = subprocess.Popen(command, cwd=PORTABLE, env=environment,
+                                  stdout=log, stderr=subprocess.STDOUT)
+        while target.poll() is None:
+            if not worker_arguments.exists():
+                output_text = (output / "gradle.log").read_text(errors="replace")
+                matches = re.findall(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
+                                     output_text)
+                if matches and Path(matches[-1]).is_file():
+                    shutil.copyfile(matches[-1], worker_arguments)
+            time.sleep(0.02)
+    if target.returncode or not XML.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
     shutil.copyfile(XML, output / "capture.xml")
     if clean_source() != commit:
@@ -75,7 +86,8 @@ def run_capture(method, output):
     files = {key: (output / name).read_bytes() for key, name in {
         "xml": "capture.xml", "stage_log": "stage.log", "gradle_log": "gradle.log",
         "execve_log": "execve.log", "artifact": "artifact.jar",
-        "runtime": "runtime-java", "source": "source.tar"}.items()}
+        "runtime": "runtime-java", "source": "source.tar",
+        "worker_classpath": "worker-classpath.txt"}.items()}
     if hashlib.sha256(files["artifact"]).hexdigest() != hashlib.sha256(
             STAGED_JAR.read_bytes()).hexdigest() or \
             hashlib.sha256(files["runtime"]).hexdigest() != hashlib.sha256(
