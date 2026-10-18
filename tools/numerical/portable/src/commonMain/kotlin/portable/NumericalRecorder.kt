@@ -53,7 +53,9 @@ data class CaseSpec(
     val startStep: Int = 0,
 )
 
-class NumericalRecorder(private val emit: (String) -> Unit) {
+class NumericalRecorder internal constructor(private val emit: (String) -> Unit,
+                                             private val diagnosticEmit: (String) -> Unit) {
+    constructor(emit: (String) -> Unit) : this(emit, { println(it) })
     private data class EndState(val world: World<Body>, val caseId: String,
         val bodies: List<Body>, val joints: List<Joint<Body>>, val rotations: List<Double>,
         val dt: Double, val origin: List<Double>, val state: Map<String, Any?>)
@@ -100,9 +102,9 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         var temporaryCalls = 0
         fun bits(value: Double) = value.toBits().toULong().toString(16).padStart(16, '0')
         fun pair(value: Transform) = listOf(bits(value.getCost()), bits(value.getSint()))
-        fun flushObservations() {
+        fun flushObservations(observations: List<RotationOperationTap.Observation>) {
             val capture = diagnostic ?: return
-            for (observation in capture.drain()) {
+            for (observation in observations) {
                 when (observation) {
                     is RotationOperationTap.Observation.Rotation -> {
                         val call = observation.call
@@ -110,7 +112,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                         if (index < 0) temporaryCalls++ else bodyCalls[index]++
                         val bound = call.copy(caseId = spec.id, step = step,
                             bodyId = if (index < 0) null else "b$index")
-                        println("PROSPECTIVE_ROTATION_JSON " +
+                        diagnosticEmit("PROSPECTIVE_ROTATION_JSON " +
                             ProspectiveOperationMarker.encode(capture, bound))
                     }
                     is RotationOperationTap.Observation.ToiAccepted -> {
@@ -121,7 +123,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                         }
                         val resets = if (observation.secondDynamic)
                             listOf("b$firstIndex", "b$secondIndex") else listOf("b$firstIndex")
-                        println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
+                        diagnosticEmit("PROSPECTIVE_BINDING_JSON " + json(mapOf(
                             "kind" to "toi-accepted", "case_id" to spec.id, "step" to step,
                             "body_ids" to listOf("b$firstIndex", "b$secondIndex"),
                             "reset_body_ids" to resets, "time_bits" to bits(observation.time))))
@@ -134,7 +136,9 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
         var precedingSecondAsleep = true
         var events = 0
         var endpoints = 0
+        val deferredBeforeStepRows = mutableListOf<Map<String, Any?>>()
         val deferredStepEvents = mutableListOf<Map<String, Any?>>()
+        var beforeStepRunning = false
         var worldStepRunning = false
         var diagnosticFailure: Throwable? = null
         fun event(name: String, payload: () -> Any?, time: TimeStep? = null,
@@ -152,7 +156,9 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 } else emptyMap()
                 val row = mapOf("kind" to "event", "id" to spec.id, "step" to step,
                     "order" to order++, "name" to name, "payload" to observedPayload) + frozenEvent
-                if (worldStepRunning) deferredStepEvents.add(row) else line(row)
+                if (beforeStepRunning) deferredBeforeStepRows.add(row)
+                else if (worldStepRunning) deferredStepEvents.add(row)
+                else line(row)
                 events++
             } catch (failure: Throwable) {
                 diagnosticFailure = failure
@@ -308,6 +314,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
             world.addStepListener(steps)
             for (number in 1..spec.steps) {
                 step = spec.startStep + number
+                beforeStepRunning = true
                 bodyCalls.fill(0)
                 temporaryCalls = 0
                 val preRotations = bodyTransforms.map(::pair)
@@ -322,7 +329,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     val state = FrozenState.capture(world, bodies, joints, sums, dt, origin,
                         initial = true)
                     val projection = FrozenEvent.wakeState(spec, name, step, frozenOrder++, state)
-                    line(mapOf("kind" to "instrumented-callback", "id" to spec.id,
+                    deferredBeforeStepRows.add(mapOf("kind" to "instrumented-callback", "id" to spec.id,
                         "step" to step, "order" to order++, "event" to name,
                         "values" to listOf(state), "frozenRecord" to projection))
                     events++
@@ -330,7 +337,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                 if (number == 1 && spec.id in setOf("P-JINT-Weld-enabled-equal",
                         "P-JINT-Pulley-slack-transition-main")) {
                     val binding = FrozenEvent.experimentalBinding(spec, step, frozenOrder++)
-                    line(mapOf("kind" to "instrumented-callback", "id" to spec.id,
+                    deferredBeforeStepRows.add(mapOf("kind" to "instrumented-callback", "id" to spec.id,
                         "step" to step, "order" to order++,
                         "event" to "experimental-input-binding",
                         "values" to binding["values"], "frozenRecord" to binding))
@@ -343,7 +350,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     val frozenActions = if (frozen) FrozenEvent.actions(spec, step,
                         frozenOrder, sleepingBefore, precedingSecondAsleep) else emptyList()
                     frozenOrder += frozenActions.size
-                    line(mapOf("kind" to "action", "id" to spec.id, "step" to step,
+                    deferredBeforeStepRows.add(mapOf("kind" to "action", "id" to spec.id, "step" to step,
                         "order" to order++, "name" to action) +
                         if (frozen) mapOf("frozenRecords" to frozenActions) else emptyMap())
                     events++
@@ -367,18 +374,31 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                             "overLength" to (current > target || !slack)))
                     } else emptyMap()
                 } else emptyMap()
-                flushObservations()
+                beforeStepRunning = false
+                var beforeStepFailure: Throwable? = null
+                val beforeStepObservations = try {
+                    diagnostic?.drain().orEmpty()
+                } catch (failure: Throwable) {
+                    beforeStepFailure = failure
+                    emptyList()
+                }
                 worldStepRunning = true
                 try {
-                    if (diagnostic == null) world.step(1, dt)
+                    if (diagnostic == null || beforeStepFailure != null) world.step(1, dt)
                     else diagnostic.captureStep(world) { world.step(1, dt) }
                 } finally {
                     worldStepRunning = false
                 }
+                beforeStepFailure?.let {
+                    throw IllegalStateException("diagnostic observation failed before step", it)
+                }
                 diagnosticFailure?.let { throw IllegalStateException("diagnostic event failed", it) }
+                for (row in deferredBeforeStepRows) line(row)
+                deferredBeforeStepRows.clear()
+                flushObservations(beforeStepObservations)
                 for (row in deferredStepEvents) line(row)
                 deferredStepEvents.clear()
-                flushObservations()
+                flushObservations(diagnostic?.drain().orEmpty())
                 for (index in bodies.indices) {
                     val angle = bodies[index].getTransform().getRotationAngle()
                     val difference = atan2(sin(angle - rotations[index]), cos(angle - rotations[index]))
@@ -399,7 +419,7 @@ class NumericalRecorder(private val emit: (String) -> Unit) {
                     endpoints++
                 }
                 if (diagnostic != null) {
-                    println("PROSPECTIVE_BINDING_JSON " + json(mapOf(
+                    diagnosticEmit("PROSPECTIVE_BINDING_JSON " + json(mapOf(
                         "kind" to "body-step", "case_id" to spec.id, "step" to step,
                         "bodies" to bodyTransforms.mapIndexed { index, transform -> mapOf(
                             "body_id" to "b$index", "calls" to bodyCalls[index],
