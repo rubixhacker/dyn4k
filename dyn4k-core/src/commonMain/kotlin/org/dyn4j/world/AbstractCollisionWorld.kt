@@ -78,10 +78,11 @@ internal fun <Q> worldLiveUnmodifiableList(backing: MutableList<Q>): List<Q> {
     return worldPlatformUnmodifiableBackingList(backing, worldReadOnlyView(backing))
 }
 
-private fun <Q> worldReadOnlyView(backing: MutableList<Q>): MutableList<Q> = object : AbstractMutableList<Q>(), RandomAccess {
+private fun <Q> worldReadOnlyView(backing: MutableList<Q>, rangeSize: Int? = null): MutableList<Q> = object : AbstractMutableList<Q>(), RandomAccess {
     override val size: Int get() = backing.size
     override fun get(index: Int): Q = backing[index]
     override fun set(index: Int, element: Q): Q = throw UnsupportedOperationException()
+    override fun add(element: Q): Boolean = throw UnsupportedOperationException()
     override fun add(index: Int, element: Q): Unit = throw UnsupportedOperationException()
     override fun removeAt(index: Int): Q = throw UnsupportedOperationException()
     override fun remove(element: Q): Boolean = throw UnsupportedOperationException()
@@ -107,8 +108,15 @@ private fun <Q> worldReadOnlyView(backing: MutableList<Q>): MutableList<Q> = obj
             override fun add(element: Q): Unit = throw UnsupportedOperationException()
         }
     }
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Q> =
-        worldReadOnlyView(backing.subList(fromIndex, toIndex))
+    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Q> {
+        if (rangeSize != null) {
+            if (fromIndex < 0 || toIndex > rangeSize) throw IndexOutOfBoundsException()
+            if (fromIndex > toIndex) throw IllegalArgumentException()
+        }
+        val child = backing.subList(fromIndex, toIndex)
+        backing.size // Check the parent before a child can adopt the root's current version.
+        return worldReadOnlyView(child, toIndex - fromIndex)
+    }
 }
 
 abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : CollisionData<T, E>> :
@@ -143,8 +151,8 @@ abstract class AbstractCollisionWorld<T : CollisionBody<E>, E : Fixture, V : Col
         )
         broadphaseDetector = CollisionItemBroadphaseDetectorAdapter(broadphase)
         broadphaseDetector.setUpdateTrackingEnabled(true)
-        bodies = ArrayList(capacity)
-        bodiesUnmodifiable = worldLiveUnmodifiableList(bodies)
+        bodies = WorldTrackedArrayList(capacity)
+        bodiesUnmodifiable = worldPlatformUnmodifiableList(worldReadOnlyView(bodies))
         collisionData = LinkedHashMap(Collisions.getEstimatedCollisionPairs(capacity))
         collisionListenersUnmodifiable = worldLiveUnmodifiableList(collisionListeners)
         boundsListenersUnmodifiable = worldLiveUnmodifiableList(boundsListeners)

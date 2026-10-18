@@ -70,4 +70,70 @@ class CollisionWorldLiveViewErrorsTest {
         assertEquals(1, view.size)
         assertSame(second, view[0])
     }
+
+    @Test
+    fun staleBodySubListsRejectAddBeforeReadingTheirSize() {
+        val world = World<Body>()
+        val first = Body()
+        world.addBody(first)
+        val view = world.getBodies() as MutableList<Body>
+        val subList = view.subList(0, 1)
+        val nestedSubList = subList.subList(0, 1)
+        val iterator = view.listIterator()
+
+        world.addBody(Body())
+
+        assertFailsWith<UnsupportedOperationException> { subList.add(Body()) }
+        assertFailsWith<UnsupportedOperationException> { nestedSubList.add(Body()) }
+        assertFailsWith<UnsupportedOperationException> { subList.add(-1, Body()) }
+        assertFailsWith<UnsupportedOperationException> { subList.addAll(-1, emptyList()) }
+        assertFailsWith<UnsupportedOperationException> { iterator.remove() }
+        assertEquals(2, view.size)
+        assertSame(first, view[0])
+    }
+
+    @Test
+    fun staleBodySubListsCannotCreateReadableNestedViews() {
+        val world = World<Body>()
+        val first = Body()
+        world.addBody(first)
+        val view = world.getBodies() as MutableList<Body>
+        val subList = view.subList(0, 1)
+        val nestedSubList = subList.subList(0, 1)
+        assertSame(first, nestedSubList[0])
+
+        world.addBody(Body())
+
+        assertFailsWith<ConcurrentModificationException> { subList.subList(0, 1)[0] }
+        assertFailsWith<ConcurrentModificationException> { nestedSubList.subList(0, 1)[0] }
+        assertSame(first, view.subList(0, 1).subList(0, 1)[0])
+    }
+
+    @Test
+    fun staleBodySubListChecksInvalidRangesBeforeFailFastRead() {
+        val world = World<Body>()
+        world.addBody(Body())
+        val subList = (world.getBodies() as MutableList<Body>).subList(0, 1)
+
+        world.addBody(Body())
+
+        assertFailsWith<IndexOutOfBoundsException> { subList.subList(-1, 1) }
+        assertFailsWith<IndexOutOfBoundsException> { subList.subList(0, 2) }
+        assertFailsWith<IllegalArgumentException> { subList.subList(1, 0) }
+    }
+
+    @Test
+    fun sameSizeBodyChangesStillInvalidateSavedSubLists() {
+        val world = World<Body>()
+        val first = Body()
+        world.addBody(first)
+        val view = world.getBodies() as MutableList<Body>
+        val subList = view.subList(0, 1)
+
+        world.removeBody(first)
+        world.addBody(Body())
+
+        assertEquals(1, view.size)
+        assertFailsWith<ConcurrentModificationException> { subList.subList(0, 1)[0] }
+    }
 }
