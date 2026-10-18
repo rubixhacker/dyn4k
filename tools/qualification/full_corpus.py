@@ -12,7 +12,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ORIGINAL_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
@@ -194,7 +194,8 @@ def capture_artifacts(repository, started_ns, finished_ns):
     return artifacts
 
 
-def artifact_binding_problems(repository, binding, started, finished, strict_paths):
+def artifact_binding_problems(repository, binding, started, finished, strict_paths,
+                              check_mtime=True):
     artifacts = binding.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         return ["candidate artifact binding is absent"]
@@ -215,7 +216,7 @@ def artifact_binding_problems(repository, binding, started, finished, strict_pat
             source = repository / path
             if digest(source.read_bytes()) != bound:
                 raise ValueError("candidate artifact SHA-256 differs")
-            if (type(started) is int and type(finished) is int and
+            if (check_mtime and type(started) is int and type(finished) is int and
                     not started <= source.stat().st_mtime_ns <= finished):
                 raise ValueError("candidate artifact is outside invocation window")
             modules.add(module)
@@ -223,6 +224,31 @@ def artifact_binding_problems(repository, binding, started, finished, strict_pat
             problems.append(f"candidate artifact binding differs: {error}")
     if modules != {"dyn4k-core", "dyn4k"}:
         problems.append("candidate artifacts are required for both modules")
+    return problems
+
+
+def archived_environment_problems(repository, environment, require_checkout):
+    if not isinstance(environment, dict):
+        return ["candidate environment receipt is absent"]
+    if not require_checkout:
+        return []
+    problems = []
+    wrappers = environment.get("gradle_wrapper")
+    wrappers = wrappers if isinstance(wrappers, dict) else {}
+    for relative in ("gradlew", "gradle/wrapper/gradle-wrapper.jar",
+                     "gradle/wrapper/gradle-wrapper.properties"):
+        path = repository / relative
+        if not path.is_file() or wrappers.get(relative) != digest(path.read_bytes()):
+            problems.append(f"candidate Gradle wrapper hash differs: {relative}")
+    for name in ("java", "node"):
+        executables = environment.get("executables")
+        identity = executables.get(name) if isinstance(executables, dict) else None
+        if (not isinstance(identity, dict)
+                or not isinstance(identity.get("sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+                or identity.get("exit_code") != 0
+                or not identity.get("version")):
+            problems.append(f"candidate {name} identity receipt is invalid")
     return problems
 
 
@@ -603,8 +629,9 @@ def reconcile_originals(repository, upstream, audit):
 
 def verify_reports(repository, manifest, candidate_sha, binding, reports,
                    mapping=None, upstream=None, require_checkout=False,
-                   manifest_path=None, mapping_path=None):
+                   manifest_path=None, mapping_path=None, evidence_root=None):
     repository = Path(repository)
+    evidence_root = Path(evidence_root) if evidence_root is not None else repository
     problems = []
     if manifest.get("kind") != "full-common-corpus" or manifest.get("schema") != 1:
         problems.append("full corpus manifest is invalid")
@@ -626,7 +653,7 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
     try:
         if not isinstance(log_path, str) or not log_path:
             raise ValueError("log path is absent")
-        log_file = Path(log_path)
+        log_file = evidence_root / "gradle.log" if evidence_root != repository else Path(log_path)
         if not log_file.is_absolute():
             log_file = repository / log_file
         raw_log = log_file.read_bytes()
@@ -639,17 +666,21 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
     except (OSError, ValueError) as error:
         problems.append(f"Gradle log binding differs: {error}")
     try:
-        environment = capture_environment(repository)
-        if binding.get("environment") != environment:
-            problems.append("candidate environment or tool identity differs")
-        if require_checkout and (any(value is None for value in environment["gradle_wrapper"].values())
-                                 or any(value is None or value["exit_code"] != 0
-                                        for value in environment["executables"].values())):
-            problems.append("candidate environment lacks required Gradle, Java, or Node tool identity")
+        if evidence_root != repository:
+            problems.extend(archived_environment_problems(
+                repository, binding.get("environment"), require_checkout))
+        else:
+            environment = capture_environment(repository)
+            if binding.get("environment") != environment:
+                problems.append("candidate environment or tool identity differs")
+            if require_checkout and (any(value is None for value in environment["gradle_wrapper"].values())
+                                     or any(value is None or value["exit_code"] != 0
+                                            for value in environment["executables"].values())):
+                problems.append("candidate environment lacks required Gradle, Java, or Node tool identity")
     except (OSError, UnicodeError, ValueError) as error:
         problems.append(f"candidate environment or tool identity unavailable: {error}")
-    problems.extend(artifact_binding_problems(repository, binding, started, finished,
-                                               require_checkout))
+    problems.extend(artifact_binding_problems(evidence_root, binding, started, finished,
+                                               require_checkout, evidence_root == repository))
     if mapping is not None and mapping != manifest.get("original_mappings"):
         problems.append("reviewed original map differs from manifest")
     if manifest.get("policy") == "production":
@@ -729,7 +760,7 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
         expected = expected_cases(manifest, group)
         paths = reports.get(group_id, [])
         bound = binding.get("reports", {}).get(group_id, {})
-        names = {str(Path(path).relative_to(repository)) for path in paths}
+        names = {str(Path(path).relative_to(evidence_root)) for path in paths}
         if not paths or len(names) != len(paths) or set(bound) != names:
             problems.append(f"missing or extra report files: {group_id}")
         seen = Counter()
@@ -737,14 +768,14 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
         hashes = {}
         for path in paths:
             path = Path(path)
-            name = str(path.relative_to(repository))
+            name = str(path.relative_to(evidence_root))
             try:
                 raw = path.read_bytes()
                 file_hash = digest(raw)
                 hashes[name] = file_hash
                 if bound.get(name) != file_hash:
                     problems.append(f"report hash differs from source binding: {name}")
-                if (type(started) is int and type(finished) is int
+                if (evidence_root == repository and type(started) is int and type(finished) is int
                         and not started <= path.stat().st_mtime_ns <= finished):
                     problems.append(f"report predates or postdates invocation: {name}")
                 suite = ET.fromstring(raw)
@@ -811,6 +842,180 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
     return result
 
 
+def archive_relative(name):
+    if (not isinstance(name, str) or not name or "\\" in name or ":" in name
+            or name.startswith("/")):
+        raise ValueError(f"invalid archive path: {name}")
+    relative = PurePosixPath(name)
+    if relative.as_posix() != name or ".." in relative.parts or "." in relative.parts:
+        raise ValueError(f"invalid archive path: {name}")
+    return Path(*relative.parts)
+
+
+def archive_status(candidate_sha, problems, corpus=None):
+    return {"schema": 1, "kind": "full-common-archive-verification",
+            "candidate_sha": candidate_sha, "status": "UNPASSED" if problems else "PASSED",
+            "problems": problems, "corpus": corpus}
+
+
+def package_archive(repository, archive, manifest, mapping, candidate_sha, binding,
+                    reports, upstream=None, require_checkout=False,
+                    manifest_path=None, mapping_path=None):
+    repository, archive = Path(repository), Path(archive)
+    result = verify_reports(repository, manifest, candidate_sha, binding, reports,
+                            mapping=mapping, upstream=upstream,
+                            require_checkout=require_checkout,
+                            manifest_path=manifest_path, mapping_path=mapping_path)
+    if result["status"] != "PASSED":
+        raise ValueError("complete common corpus did not verify: " + "; ".join(result["problems"]))
+    archive.mkdir(parents=True, exist_ok=True)
+    evidence = archive / "evidence"
+    if evidence.exists():
+        raise ValueError("archive evidence directory already exists")
+    evidence.mkdir()
+
+    def write(name, data):
+        target = evidence / archive_relative(name)
+        if target.exists():
+            raise ValueError(f"duplicate archive path: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    def copy(name, source):
+        target = evidence / archive_relative(name)
+        if target.exists() or source.is_symlink() or not source.is_file():
+            raise ValueError(f"missing, linked, or duplicate archive input: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    manifest_bytes = (Path(manifest_path).read_bytes() if manifest_path else
+                      (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode())
+    if mapping_path:
+        mapping_bytes = Path(mapping_path).read_bytes()
+    else:
+        stream = io.StringIO()
+        writer = csv.DictWriter(stream, fieldnames=list(mapping[0]), delimiter="\t",
+                                lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(mapping)
+        mapping_bytes = stream.getvalue().encode()
+    write("binding.json", (json.dumps(binding, indent=2, sort_keys=True) + "\n").encode())
+    write("manifest.json", manifest_bytes)
+    write("mapping.tsv", mapping_bytes)
+    write("mapping.json", (json.dumps(mapping, indent=2, sort_keys=True) + "\n").encode())
+    write("verified.json", (json.dumps(result, indent=2, sort_keys=True) + "\n").encode())
+    if manifest.get("policy") == "production":
+        copy("reviewed-pairs.tsv", repository / PAIR_PATH)
+    log = Path(binding["log"])
+    copy("gradle.log", log if log.is_absolute() else repository / log)
+    for item in binding["artifacts"]:
+        name = item["path"]
+        copy(name, repository / archive_relative(name))
+    for bound in binding["reports"].values():
+        for name in bound:
+            copy(name, repository / archive_relative(name))
+
+    files = {}
+    for path in sorted(archive.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"linked archive input: {path}")
+        if path.is_file() and path != archive / "archive-index.json":
+            name = path.relative_to(archive).as_posix()
+            files[name] = {"sha256": digest(path.read_bytes()),
+                           "mtime_ns": path.stat().st_mtime_ns}
+    index = {"schema": 1, "kind": "full-common-archive", "candidate_sha": candidate_sha,
+             "original_revision": ORIGINAL_REVISION if upstream is not None else None,
+             "bound_artifacts": sorted(item["path"] for item in binding["artifacts"]),
+             "bound_reports": {group: sorted(bound) for group, bound in binding["reports"].items()},
+             "files": files}
+    (archive / "archive-index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+    return index
+
+
+def verify_archive(archive, repository, candidate_sha, upstream=None, require_checkout=True):
+    archive, repository = Path(archive), Path(repository)
+    problems = []
+    try:
+        index = json.loads((archive / "archive-index.json").read_text())
+        if (index.get("schema") != 1 or index.get("kind") != "full-common-archive"
+                or index.get("candidate_sha") != candidate_sha):
+            problems.append("archive candidate SHA or schema differs")
+        if require_checkout and index.get("original_revision") != ORIGINAL_REVISION:
+            problems.append("archive original revision differs")
+        actual = {}
+        for path in archive.rglob("*"):
+            name = path.relative_to(archive).as_posix()
+            archive_relative(name)
+            if path.is_symlink():
+                problems.append(f"linked archive member: {name}")
+            elif path.is_file() and name != "archive-index.json":
+                actual[name] = path
+        recorded = index.get("files", {})
+        if not isinstance(recorded, dict) or set(recorded) != set(actual):
+            problems.append("archive file inventory differs")
+        else:
+            for name, path in actual.items():
+                item = recorded[name]
+                if (not isinstance(item, dict) or item.get("sha256") != digest(path.read_bytes())
+                        or type(item.get("mtime_ns")) is not int or item["mtime_ns"] <= 0):
+                    problems.append(f"archive byte or timestamp receipt differs: {name}")
+        if problems:
+            return archive_status(candidate_sha, problems)
+        evidence = archive / "evidence"
+        binding = json.loads((evidence / "binding.json").read_text())
+        manifest = json.loads((evidence / "manifest.json").read_text())
+        mapping = json.loads((evidence / "mapping.json").read_text())
+        expected = {"binding.json", "manifest.json", "mapping.tsv", "mapping.json", "verified.json",
+                    "gradle.log"}
+        if manifest.get("policy") == "production":
+            expected.add("reviewed-pairs.tsv")
+            with (evidence / "mapping.tsv").open(newline="") as stream:
+                if list(csv.DictReader(stream, delimiter="\t")) != mapping:
+                    problems.append("archive mapping content differs")
+            for archive_name, repo_name in (("manifest.json", MANIFEST_PATH),
+                                            ("mapping.tsv", MAP_PATH),
+                                            ("reviewed-pairs.tsv", PAIR_PATH)):
+                if (evidence / archive_name).read_bytes() != committed_bytes(
+                        repository, candidate_sha, repo_name):
+                    problems.append(f"archive candidate source differs: {repo_name}")
+        artifacts = [item["path"] for item in binding["artifacts"]]
+        bound_reports = {group: sorted(bound) for group, bound in binding["reports"].items()}
+        if index.get("bound_artifacts") != sorted(artifacts) or index.get("bound_reports") != bound_reports:
+            problems.append("archive binding inventory differs")
+        expected.update(artifacts)
+        expected.update(name for bound in bound_reports.values() for name in bound)
+        started, finished = binding.get("started_ns"), binding.get("finished_ns")
+        for name in [*artifacts, *(name for bound in bound_reports.values() for name in bound)]:
+            mtime = recorded.get("evidence/" + name, {}).get("mtime_ns")
+            if (type(started) is not int or type(finished) is not int
+                    or type(mtime) is not int or not started <= mtime <= finished):
+                problems.append(f"archive invocation timestamp differs: {name}")
+        actual_evidence = {path.relative_to(evidence).as_posix()
+                           for path in evidence.rglob("*") if path.is_file()}
+        if actual_evidence != expected:
+            problems.append("archive evidence file set differs")
+        for name in expected:
+            archive_relative(name)
+        if problems:
+            return archive_status(candidate_sha, problems)
+        reports = {group["id"]: [evidence / archive_relative(name)
+                                  for name in binding["reports"].get(group["id"], {})]
+                   for group in GROUPS}
+        corpus = verify_reports(repository, manifest, candidate_sha, binding, reports,
+                                mapping=mapping, upstream=upstream,
+                                require_checkout=require_checkout,
+                                manifest_path=repository / MANIFEST_PATH if require_checkout else None,
+                                mapping_path=repository / MAP_PATH if require_checkout else None,
+                                evidence_root=evidence)
+        if corpus["status"] != "PASSED":
+            problems.extend(corpus["problems"])
+        if json.loads((evidence / "verified.json").read_text()) != corpus:
+            problems.append("archive verification receipt differs")
+        return archive_status(candidate_sha, problems, corpus)
+    except (KeyError, OSError, TypeError, ValueError, subprocess.CalledProcessError) as error:
+        return archive_status(candidate_sha, [f"archive unavailable or invalid: {error}"])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Source-derived full common corpus gate")
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -835,6 +1040,20 @@ def main():
     verify.add_argument("--upstream", type=Path, required=True)
     verify.add_argument("--binding", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
+    package = sub.add_parser("package-archive")
+    package.add_argument("--repository", type=Path, default=Path("."))
+    package.add_argument("--candidate-sha", required=True)
+    package.add_argument("--manifest", type=Path, required=True)
+    package.add_argument("--mapping", type=Path, required=True)
+    package.add_argument("--upstream", type=Path, required=True)
+    package.add_argument("--binding", type=Path, required=True)
+    package.add_argument("--archive", type=Path, required=True)
+    archived = sub.add_parser("verify-archive")
+    archived.add_argument("--repository", type=Path, default=Path("."))
+    archived.add_argument("--candidate-sha", required=True)
+    archived.add_argument("--upstream", type=Path, required=True)
+    archived.add_argument("--archive", type=Path, required=True)
+    archived.add_argument("--output", type=Path, required=True)
     run = sub.add_parser("run")
     run.add_argument("--repository", type=Path, default=Path("."))
     run.add_argument("--candidate-sha", required=True)
@@ -846,6 +1065,12 @@ def main():
     run.add_argument("--log", type=Path, required=True)
     run.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.operation == "verify-archive":
+        result = verify_archive(args.archive, args.repository, args.candidate_sha,
+                                upstream=args.upstream)
+        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        print(json.dumps({"status": result["status"], "problems": result["problems"]}))
+        return 0 if result["status"] == "PASSED" else 1
     if args.operation == "seal-pairs":
         raw_map = args.mapping.read_bytes()
         if digest(raw_map) != REVIEWED_MAP_SHA256:
@@ -899,6 +1124,17 @@ def main():
         mapping = list(csv.DictReader(stream, delimiter="\t"))
     if manifest.get("policy") != "production":
         raise ValueError("production full corpus manifest is required")
+    if args.operation == "package-archive":
+        binding = json.loads(args.binding.read_text())
+        reports = {group["id"]: sorted(args.repository.glob(group["pattern"]))
+                   for group in GROUPS}
+        index = package_archive(args.repository, args.archive, manifest, mapping,
+                                args.candidate_sha, binding, reports,
+                                upstream=args.upstream, require_checkout=True,
+                                manifest_path=args.manifest, mapping_path=args.mapping)
+        print(json.dumps({"status": "PASSED", "files": len(index["files"]),
+                          "candidate_sha": args.candidate_sha}))
+        return 0
     if args.operation == "run":
         command = args.command[1:] if args.command and args.command[0] == "--" else args.command
         if command != GRADLE_COMMAND:
