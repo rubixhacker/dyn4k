@@ -157,6 +157,10 @@ def verify_case_slices(lane, expected_ids):
 def verify_archive(output):
     result = json.loads((output / "result.json").read_text())
     lane = output / "baseline-jvm"
+    if result["status"] not in ("CAPTURED_WITH_FAILED_ANGLE_PHYSICAL", "FAILED") or \
+            (result["status"] == "FAILED" and result.get("reason") !=
+             "baseline Angle first nonfinite step changed: 87"):
+        raise Rejected("baseline capture failed for an unrelated reason")
     verify_baseline_jar(output / "dyn4j-6.0.0.jar")
     if result["baseline_jar_sha256"] != PINNED_JAR_SHA256 or \
             result["baseline_source_revision"] != PINNED_SOURCE_REVISION:

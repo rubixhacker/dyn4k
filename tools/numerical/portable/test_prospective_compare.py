@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from prospective_compare import (compare_case, verify_baseline_manifest,
-                                 verify_reference_case)
+                                 verify_baseline_bytes, verify_reference_case)
 from receipt import digest
 
 
@@ -62,7 +62,9 @@ class ProspectiveComparisonTest(unittest.TestCase):
     def test_nonfinite_and_empty_case_cannot_pass(self):
         changed = json.loads(json.dumps(self.rows))
         changed[3]["state"]["bodies"][0]["position"][0] = {"nonfinite": "Infinity"}
-        self.assertEqual(self.compare(changed)["status"], "FAILED_NONFINITE")
+        result = self.compare(changed)
+        self.assertEqual(result["status"], "FAILED_NONFINITE")
+        self.assertEqual(result["failed_step"], 1)
         self.assertEqual(self.compare([], [])["status"], "FAILED_COVERAGE")
 
     def test_manifest_rejects_stale_reference_bytes_and_missing_case(self):
@@ -80,6 +82,18 @@ class ProspectiveComparisonTest(unittest.TestCase):
             verify_baseline_manifest(manifest, {"one", "two"}, "fixed", "fixture")
         with self.assertRaisesRegex(Exception, "JAR"):
             verify_baseline_manifest(manifest, {"one"}, "changed", "fixture")
+
+    def test_archive_bytes_must_match_verified_jar_and_trace(self):
+        jar = self.root / "dyn4j-6.0.0.jar"
+        trace = self.root / "baseline-jvm/trace.jsonl"
+        trace.parent.mkdir()
+        jar.write_bytes(b"jar")
+        trace.write_text("trace\n")
+        manifest = {"baseline_jar_sha256": digest(jar), "trace_sha256": digest(trace)}
+        verify_baseline_bytes(self.root, manifest)
+        trace.write_text("stale\n")
+        with self.assertRaisesRegex(Exception, "trace hash"):
+            verify_baseline_bytes(self.root, manifest)
 
 
 if __name__ == "__main__":

@@ -32,16 +32,17 @@ def verify_reference_case(path, expected_sha256):
         raise Rejected(f"baseline reference case hash differs: {Path(path).stem}")
 
 
-def _nonfinite(value):
-    if isinstance(value, dict):
-        return "nonfinite" in value or any(_nonfinite(child) for child in value.values())
-    if isinstance(value, list):
-        return any(_nonfinite(child) for child in value)
-    return False
+def verify_baseline_bytes(baseline, manifest):
+    baseline = Path(baseline)
+    if digest(baseline / "dyn4j-6.0.0.jar") != manifest["baseline_jar_sha256"]:
+        raise Rejected("baseline JAR hash differs")
+    if digest(baseline / "baseline-jvm/trace.jsonl") != manifest["trace_sha256"]:
+        raise Rejected("baseline trace hash differs")
 
 
 def _compare_value(left, right, path, result):
-    if _nonfinite(left) or _nonfinite(right):
+    if (isinstance(left, dict) and "nonfinite" in left) or \
+            (isinstance(right, dict) and "nonfinite" in right):
         raise Difference("FAILED_NONFINITE", f"nonfinite value at {path}")
     if isinstance(left, dict) and isinstance(right, dict):
         if left.keys() != right.keys():
@@ -80,6 +81,7 @@ def compare_case(reference, candidate, case):
     sentinel = object()
     first = None
     last = None
+    current_step = None
     try:
         for left, right in zip_longest(records(reference, allow_tagged_nonfinite=True),
                                        records(candidate, allow_tagged_nonfinite=True),
@@ -87,6 +89,7 @@ def compare_case(reference, candidate, case):
             if left is sentinel or right is sentinel:
                 raise Difference("FAILED_COVERAGE", "case record count differs")
             result["records"] += 1
+            current_step = left.get("step")
             if first is None:
                 first = (left.get("kind"), right.get("kind"))
             last = (left.get("kind"), right.get("kind"))
@@ -114,6 +117,8 @@ def compare_case(reference, candidate, case):
     except Difference as error:
         result["status"] = error.status
         result["reason"] = str(error)
+        if current_step is not None:
+            result["failed_step"] = current_step
     except (Rejected, OSError, EOFError, KeyError, TypeError, ValueError) as error:
         result["status"] = "FAILED_COVERAGE"
         result["reason"] = str(error)
@@ -127,6 +132,7 @@ def compare_host(baseline, lane, frozen_ids):
     cases = declared_cases()
     expected = {case["id"] for case in cases}
     verify_baseline_manifest(manifest, expected, PINNED_JAR_SHA256, fixture_source_sha256())
+    verify_baseline_bytes(baseline, manifest)
     receipt = json.loads((Path(lane) / "receipt.json").read_text())
     if receipt.get("schema") != "portable-numerical-receipt/1" or \
             receipt.get("counts", {}).get("executed_cases") != len(cases) or \
