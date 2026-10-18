@@ -14,6 +14,25 @@ def workflow_jobs(workflow):
 
 
 class QualificationWorkflowContractTest(unittest.TestCase):
+    def test_native_monitor_probe_runs_on_both_hosted_publication_runners(self):
+        publications = workflow_jobs(WORKFLOW.read_text())["hosted-publications"]
+        matrix = next(line for line in publications.splitlines()
+                      if line.strip().startswith("matrix: ${{ fromJSON("))
+        choices = [json.loads(value)["include"] for value in re.findall(r"'(\{.*?\})'", matrix)]
+        self.assertEqual(["macos", "windows"], [entry["host"] for entry in choices[1]])
+        step_name = "      - name: Probe native performance monitor\n"
+        self.assertEqual(1, publications.count(step_name))
+        setup = publications.index("      - uses: actions/setup-python@v5")
+        probe = publications.index(step_name)
+        harness = publications.index("      - name: Harness regression tests")
+        self.assertLess(setup, probe)
+        self.assertLess(probe, harness)
+        step = publications[probe:publications.index("      - uses:", probe)]
+        self.assertEqual(
+            step_name + "        run: PYTHONPATH=tools/performance python -B -m unittest "
+            "tools.performance.test_stress_monitor.StressMonitorTest."
+            "test_native_hosted_probe_when_available -v\n", step)
+
     def test_windows_dispatch_selects_only_windows_without_changing_regular_matrices(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("      windows_diagnostics:\n", workflow)

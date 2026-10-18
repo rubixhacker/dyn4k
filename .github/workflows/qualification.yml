@@ -334,6 +334,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Probe native performance monitor
+        run: PYTHONPATH=tools/performance python -B -m unittest tools.performance.test_stress_monitor.StressMonitorTest.test_native_hosted_probe_when_available -v
       - uses: android-actions/setup-android@v3
         with:
           packages: >-

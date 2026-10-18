@@ -10,4 +10,6 @@ The `full-common-<sha>` upload contains its binding, result, Gradle log, built a
 
 Set `windows_diagnostics=true` on a manual dispatch to run only the Windows native and publication jobs. Regular dispatches, pushes, and pull requests keep the full hosted matrices. Each Windows job uploads raw failure logs with the candidate SHA and run identity. Missing logs fail the collection step. A failed harness or runtime step remains failed after the upload.
 
+The normal macOS and Windows publication jobs run the native performance monitor probe before the qualification harness. This probe requires the reviewed performance sources in the assembled checkout. Its result tests host memory APIs; sustained performance qualification still needs separate reference and candidate evidence.
+
 These Ubuntu checks do not mark any complete-port support lane passed. The 112-lane matrix remains `NOT_RUN` until its independent gate archives verify at the same source and artifact identities. Hosted runners and physical devices need their own current evidence.
