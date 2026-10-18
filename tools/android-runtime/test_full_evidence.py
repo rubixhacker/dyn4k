@@ -210,6 +210,32 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "wrong installed runtime"):
                     run_full.validate_runtime(identity, api, abi, boot)
 
+    def test_api21_runtime_requires_exact_google_image_and_primary_abi(self):
+        expected = {
+            "x86_64": "generic_x86_64/sdk_google_phone_x86_64/generic_x86_64:5.0.2/LSY66K/6695550:eng/test-keys",
+            "x86": "generic_x86/sdk_google_phone_x86/generic_x86:5.0.2/LSY66K/6695550:eng/test-keys",
+        }
+        for abi, fingerprint in expected.items():
+            identity = {"ro.build.fingerprint": fingerprint, "ro.build.version.sdk": "21",
+                        "ro.product.cpu.abi": abi}
+            with self.subTest(abi=abi):
+                run_full.validate_runtime(identity, "21", abi, "1")
+                for wrong, wrong_abi, boot in (({**identity, "ro.build.fingerprint": "forged"}, abi, "1"),
+                                               (identity, "arm64-v8a", "1"),
+                                               (identity, abi, "0")):
+                    with self.assertRaisesRegex(ValueError, "wrong installed runtime"):
+                        run_full.validate_runtime(wrong, "21", wrong_abi, boot)
+
+    def test_cli_accepts_api21_for_full_installed_route(self):
+        with patch("sys.argv", ["run_full.py", "--prepared", "prepared.json",
+                                "--provider-artifacts", "providers.txt",
+                                "--build-receipt", "receipt.json", "--build-type", "debug",
+                                "--expected-api", "21", "--expected-abi", "x86",
+                                "--output", "out"]), \
+                patch.object(run_full, "run", return_value={"status": "PASSED", "cases": {}}) as execute:
+            run_full.main()
+            self.assertEqual(execute.call_args.args[0].expected_api, "21")
+
 
 if __name__ == "__main__":
     unittest.main()

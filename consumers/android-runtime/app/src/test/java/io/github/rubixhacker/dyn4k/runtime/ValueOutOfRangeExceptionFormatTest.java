@@ -8,11 +8,17 @@ import static org.junit.Assert.assertEquals;
 
 public final class ValueOutOfRangeExceptionFormatTest {
     @Test public void followsJvmFormatterAtHalfMicro() {
-        double boundary = 5.0e-7;
-        assertEquals(0x3ea0c6f7a0b5ed8dL, Double.doubleToRawLongBits(boundary));
-        String baselineMessage = String.format("radius cannot be %f", boundary);
-        assertEquals("radius cannot be 0.000001", baselineMessage);
-        assertEquals(baselineMessage, new ValueOutOfRangeException("radius", boundary).getMessage());
+        Locale original = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.US);
+            double boundary = 5.0e-7;
+            assertEquals(0x3ea0c6f7a0b5ed8dL, Double.doubleToRawLongBits(boundary));
+            String baselineMessage = String.format("radius cannot be %f", boundary);
+            assertEquals("radius cannot be 0.000001", baselineMessage);
+            assertEquals(baselineMessage, new ValueOutOfRangeException("radius", boundary).getMessage());
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 
     @Test public void followsJvmFormatterAtMaximumDouble() {

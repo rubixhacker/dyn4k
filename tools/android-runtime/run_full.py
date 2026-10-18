@@ -50,6 +50,10 @@ GRAPH_EDGES = {
 }
 GRAPH_ARTIFACTS = GRAPH_COMPONENTS - {
     "project:full", f"{PROVIDER_GROUP}:dyn4k-core:{PROVIDER_VERSION}"}
+API21_FINGERPRINTS = {
+    "x86_64": "generic_x86_64/sdk_google_phone_x86_64/generic_x86_64:5.0.2/LSY66K/6695550:eng/test-keys",
+    "x86": "generic_x86/sdk_google_phone_x86/generic_x86:5.0.2/LSY66K/6695550:eng/test-keys",
+}
 
 
 def validate_provider_artifacts(graph, prepared):
@@ -118,9 +122,11 @@ def apk_path(app, build_type, test=False):
 
 
 def validate_runtime(identity, expected_api, expected_abi, boot_completed):
+    fingerprint = (API21_FINGERPRINTS.get(expected_abi) if expected_api == "21"
+                   else FINGERPRINTS.get(expected_api))
     if identity.get("ro.build.version.sdk") != expected_api or \
             identity.get("ro.product.cpu.abi") != expected_abi or \
-            identity.get("ro.build.fingerprint") != FINGERPRINTS[expected_api] or \
+            not fingerprint or identity.get("ro.build.fingerprint") != fingerprint or \
             boot_completed != "1":
         raise ValueError(f"wrong installed runtime: {identity}")
 
@@ -317,7 +323,7 @@ def main():
     parser.add_argument("--seal-build", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--build-type", choices=("debug", "release"))
-    parser.add_argument("--expected-api", choices=("36", "37"))
+    parser.add_argument("--expected-api", choices=("21", "36", "37"))
     parser.add_argument("--expected-abi", choices=("x86_64", "x86", "arm64-v8a", "armeabi-v7a"),
                         default="x86_64")
     args = parser.parse_args()
