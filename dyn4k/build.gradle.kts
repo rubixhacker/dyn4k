@@ -1,6 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
 plugins {
     kotlin("multiplatform")
@@ -56,7 +57,9 @@ kotlin {
     androidNativeArm32()
     androidNativeArm64()
     androidNativeX86()
-    androidNativeX64()
+    androidNativeX64 {
+        binaries { test(setOf(NativeBuildType.RELEASE)) }
+    }
 
     sourceSets {
         commonMain.dependencies { api(project(":dyn4k-core")) }

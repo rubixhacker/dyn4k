@@ -1,6 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.security.MessageDigest
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -1053,7 +1054,9 @@ kotlin {
     androidNativeArm32()
     androidNativeArm64()
     androidNativeX86()
-    androidNativeX64()
+    androidNativeX64 {
+        binaries { test(setOf(NativeBuildType.RELEASE)) }
+    }
 
     sourceSets {
         commonTest.dependencies { implementation(kotlin("test")) }
