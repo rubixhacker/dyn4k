@@ -75,6 +75,21 @@ def original_path(target, value):
     return path
 
 
+def expected_gradle_home(target, receipt):
+    runner_home = receipt.get("runner_home")
+    if not isinstance(runner_home, str) or not runner_home:
+        raise ValueError("Gradle user home runner anchor is absent")
+    home = original_path(target, runner_home)
+    if "gradle_user_home_override" not in receipt:
+        raise ValueError("Gradle user home environment anchor is absent")
+    override = receipt["gradle_user_home_override"]
+    if override is None:
+        return home / ".gradle"
+    if not isinstance(override, str) or not override:
+        raise ValueError("Gradle user home override is invalid")
+    return original_path(target, override)
+
+
 def archived_file(output, name):
     path = output / relative_path(name)
     if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(output.resolve()):
@@ -476,13 +491,14 @@ def graph_script(target):
         "         sha256: MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString()]",
         "      }.sort { a, b -> a.component <=> b.component ?: a.name <=> b.name }",
         f"      println('DYN4K_RESOLVED_GRAPH=' + JsonOutput.toJson([configuration: '{configuration}',",
+        "        gradle_user_home: gradle.gradleUserHomeDir.absolutePath,",
         "        components: components, artifacts: artifacts]))",
         "    }",
         "  }",
         "}", ""))
 
 
-def parse_graph(folder, process, target, hashes, staging):
+def parse_graph(folder, process, target, hashes, staging, expected_home, staged_root=None):
     if process["exit_code"]:
         raise ValueError("external consumer graph resolution failed")
     lines = [line.removeprefix("DYN4K_RESOLVED_GRAPH=")
@@ -494,6 +510,12 @@ def parse_graph(folder, process, target, hashes, staging):
     expected_config = "jsCompileClasspath" if target == "jsSafari" else f"{target}CompileKlibraries"
     if graph.get("configuration") != expected_config:
         raise ValueError("external consumer graph configuration differs")
+    reported_home = graph.get("gradle_user_home")
+    if not isinstance(reported_home, str) or not reported_home:
+        raise ValueError("Gradle user home observation is absent")
+    gradle_home = original_path(target, reported_home)
+    if gradle_home != original_path(target, expected_home):
+        raise ValueError("Gradle user home differs from receipt")
     artifact_target = "js" if target == "jsSafari" else target
     required = {f"{qualify.GROUP}:{qualify.target_publication_name(module, artifact_target)}:{qualify.VERSION}"
                 for module in qualify.MODULES}
@@ -528,12 +550,26 @@ def parse_graph(folder, process, target, hashes, staging):
         expected_file = original_path(target, staging) / qualify.target_binary_path(
             module, artifact_target)
         resolved_file = original_path(target, matches[0]["file"])
-        cache_parts = resolved_file.parts
-        cached = (len(cache_parts) >= 8 and cache_parts[-8:-2] ==
-                  ("caches", "modules-2", "files-2.1", qualify.GROUP, name, qualify.VERSION)
-                  and re.fullmatch(r"[0-9a-f]{40}", cache_parts[-2]))
+        staged_binary = ((Path(staged_root) if staged_root is not None else Path(staging)) /
+                         qualify.target_binary_path(module, artifact_target))
+        if (not staged_binary.is_file() or staged_binary.is_symlink()
+                or sha256(staged_binary) != hashes[module]):
+            raise ValueError("staged target bytes differ from graph input")
+        cache_digest = hashlib.sha1(staged_binary.read_bytes()).hexdigest()
+        cached_file = (gradle_home / "caches/modules-2/files-2.1" / qualify.GROUP /
+                       name / qualify.VERSION / cache_digest / resolved_file.name)
+        if resolved_file != expected_file:
+            cache_parts = resolved_file.parts
+            if (len(cache_parts) < 8 or cache_parts[-8:-2] !=
+                    ("caches", "modules-2", "files-2.1", qualify.GROUP,
+                     name, qualify.VERSION)):
+                raise ValueError("external consumer resolved artifact differs from staging")
+            if not resolved_file.is_relative_to(gradle_home):
+                raise ValueError("Gradle user home differs from resolved cache root")
+            if cache_parts[-2] != cache_digest:
+                raise ValueError("Gradle cache digest differs from staged bytes")
         if (len(matches) != 1 or matches[0].get("sha256") != hashes[module]
-                or (resolved_file != expected_file and not cached)):
+                or (resolved_file != expected_file and resolved_file != cached_file)):
             raise ValueError("external consumer resolved artifact differs from staging")
     return graph
 
@@ -830,6 +866,10 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
     lanes = receipt.get("configurations")
     if not isinstance(lanes, list) or [lane.get("configuration") for lane in lanes] != list(CONFIGS[target]):
         raise ValueError("both required configurations are absent, duplicated, or unordered")
+    if not isinstance(receipt.get("gradle_user_home"), str) or not receipt["gradle_user_home"]:
+        raise ValueError("Gradle user home receipt is absent")
+    if original_path(target, receipt["gradle_user_home"]) != expected_gradle_home(target, receipt):
+        raise ValueError("Gradle user home differs from runner environment")
     if manifest is None:
         manifest = load_corpus(repository, receipt["candidate_sha"])
     if consumer_manifest is None:
@@ -1016,7 +1056,9 @@ def verify_raw_files(output, receipt, manifest=None, consumer_manifest=None,
             if not process["started_ns"] <= product["modified_ns"] <= process["finished_ns"]:
                 raise ValueError("test executable predates invocation")
         graph = parse_graph(folder / "graph", lane["graph_process"], target,
-                            receipt["artifact_hashes"], receipt["staging_repository"])
+                            receipt["artifact_hashes"], receipt["staging_repository"],
+                            staged_root=output / "staged",
+                            expected_home=receipt["gradle_user_home"])
         if graph != lane.get("consumer_graph"):
             raise ValueError("external consumer graph differs from archived observation")
         archived_graph = lane.get("resolved_artifacts")
@@ -1050,6 +1092,8 @@ def run(target, candidate_sha, output):
                "target": target, "status": "NOT_RUN", "configurations": [],
                "archive_root": str(output),
                "repository_root": str(repository),
+               "runner_home": str(Path.home()),
+               "gradle_user_home_override": os.environ.get("GRADLE_USER_HOME"),
                "github_run_id": os.environ.get("GITHUB_RUN_ID"),
                "github_job": os.environ.get("GITHUB_JOB"),
                "runner_name": os.environ.get("RUNNER_NAME"),
@@ -1174,7 +1218,9 @@ def run(target, candidate_sha, output):
                 lane["graph_process"] = run_command(graph_command, repository,
                                                      folder / "graph", lane["invocation_id"])
                 lane["consumer_graph"] = parse_graph(folder / "graph", lane["graph_process"],
-                                                       target, receipt["artifact_hashes"], staging)
+                                                       target, receipt["artifact_hashes"], staging,
+                                                       expected_home=expected_gradle_home(target, receipt))
+                receipt.setdefault("gradle_user_home", lane["consumer_graph"]["gradle_user_home"])
                 lane["resolved_artifacts"] = []
                 for index, item in enumerate(lane["consumer_graph"]["artifacts"]):
                     name = f"{config}/resolved-artifacts/{index:03d}-{item['name']}"

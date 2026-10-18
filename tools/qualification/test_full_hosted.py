@@ -305,6 +305,7 @@ class FullHostedTests(unittest.TestCase):
                               "file": str(cache), "name": cache.name,
                               "size": cache.stat().st_size, "sha256": full_hosted.sha256(cache)})
         graph = {"configuration": f"{target}CompileKlibraries",
+                 "gradle_user_home": str(self.root / "gradle-home"),
                  "components": [item["component"] for item in artifacts] +
                  [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES] +
                  ["org.jetbrains.kotlin:kotlin-stdlib:2.4.20", "root project :"],
@@ -314,7 +315,7 @@ class FullHostedTests(unittest.TestCase):
             (graph_folder / "stdout.txt").write_text(
                 "DYN4K_RESOLVED_GRAPH=" + json.dumps(value) + "\n")
             return full_hosted.parse_graph(graph_folder, {"exit_code": 0}, target,
-                                           hashes, staging)
+                                           hashes, staging, self.root / "gradle-home")
 
         self.assertEqual(graph, observe(graph))
         mutations = (
@@ -333,6 +334,12 @@ class FullHostedTests(unittest.TestCase):
              "artifact differs"),
             (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
                 "dyn4k-core-macosarm64", "dyn4k-core-mingwx64")), "artifact differs"),
+            (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
+                Path(value["artifacts"][0]["file"]).parts[-2], "f" * 40)), "cache digest"),
+            (lambda value: value["artifacts"][0].update(file=value["artifacts"][0]["file"].replace(
+                str(self.root / "gradle-home"), str(self.root / "other-gradle-home"))),
+             "Gradle user home"),
+            (lambda value: value.pop("gradle_user_home"), "Gradle user home"),
             (lambda value: value["artifacts"][0].update(name="wrong.klib"),
              "artifact identity"),
             (lambda value: value["components"].remove(
@@ -575,6 +582,7 @@ class FullHostedTests(unittest.TestCase):
                                       "size": cached.stat().st_size,
                                       "sha256": full_hosted.sha256(cached)})
                 graph = {"configuration": f"{target}CompileKlibraries",
+                         "gradle_user_home": str(evidence / "gradle-home"),
                          "components": [item["component"] for item in artifacts] +
                          [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
                          "artifacts": artifacts}
@@ -593,6 +601,7 @@ class FullHostedTests(unittest.TestCase):
                    "simulators": {"tvOS": [{"udid": simulator,
                                             "runtime": "com.apple.CoreSimulator.SimRuntime.tvOS-26-0"}]}}
         runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
+                  "GRADLE_USER_HOME": str(evidence / "gradle-home"),
                   "RUNNER_NAME": "synthetic-runner", "RUNNER_OS": "macOS",
                   "RUNNER_ARCH": "ARM64"}
         with mock.patch.object(full_hosted, "__file__", str(repository /
@@ -625,6 +634,9 @@ class FullHostedTests(unittest.TestCase):
             self.assertEqual(2, load.call_count)
             receipt = qualify.load_json_strict(output / "receipt.json")
             self.assertEqual(emitted, receipt)
+            self.assertEqual(str(evidence / "gradle-home"), receipt["gradle_user_home"])
+            self.assertEqual(str(evidence / "gradle-home"),
+                             receipt["gradle_user_home_override"])
             full_hosted.verify_raw_files(output, receipt)
             archive = evidence / "full.tar"
             full_hosted.package_archive(output, archive)
@@ -733,6 +745,80 @@ class FullHostedTests(unittest.TestCase):
                          "complete_suite_status", "release_gate_status"):
                 self.assertEqual("NOT_RUN", scoped[gate])
             self.assertEqual({"NOT_RUN"}, {lane["status"] for lane in qualification["lanes"]})
+
+            def reseal_cache_path(label, change, home=None):
+                adverse = evidence / f"adverse-{label}"
+                shutil.copytree(output, adverse)
+                changed = qualify.load_json_strict(adverse / "receipt.json")
+                if home is not None:
+                    changed["gradle_user_home"] = home
+                for lane in (changed["configurations"] if home is not None
+                             else changed["configurations"][:1]):
+                    stdout = adverse / lane["configuration"] / "graph/stdout.txt"
+                    modified_ns = stdout.stat().st_mtime_ns
+                    lines = stdout.read_text().splitlines(keepends=True)
+                    for index, line in enumerate(lines):
+                        if line.startswith("DYN4K_RESOLVED_GRAPH="):
+                            graph = json.loads(line.removeprefix("DYN4K_RESOLVED_GRAPH="))
+                            artifacts = graph["artifacts"] if home is not None else graph["artifacts"][:1]
+                            for artifact in artifacts:
+                                artifact["file"] = change(artifact["file"])
+                            if home is not None:
+                                graph["gradle_user_home"] = home
+                            lines[index] = "DYN4K_RESOLVED_GRAPH=" + json.dumps(graph) + "\n"
+                            break
+                    else:
+                        self.fail("synthetic graph observation is absent")
+                    stdout.write_text("".join(lines))
+                    os.utime(stdout, ns=(modified_ns, modified_ns))
+                    lane["consumer_graph"] = graph
+                    for archived, artifact in zip(lane["resolved_artifacts"], graph["artifacts"]):
+                        archived["file"] = artifact["file"]
+                    lane["graph_process"]["stdout_sha256"] = full_hosted.sha256(stdout)
+                changed["files"] = full_hosted.archive_inventory(adverse)
+                (adverse / "receipt.json").write_text(json.dumps(changed, sort_keys=True))
+                packed = evidence / f"adverse-{label}.tar"
+                full_hosted.package_archive(adverse, packed)
+                return adverse, packed, changed
+
+            wrong_digest = reseal_cache_path(
+                "cache-digest", lambda path: path.replace(Path(path).parts[-2], "f" * 40))
+            wrong_home = reseal_cache_path(
+                "cache-home", lambda path: path.replace(
+                    str(evidence / "gradle-home"), str(evidence / "unrecorded-gradle-home")))
+            resealed_home = reseal_cache_path(
+                "cache-home-resealed", lambda path: path.replace(
+                    str(evidence / "gradle-home"), str(evidence / "unrecorded-gradle-home")),
+                str(evidence / "unrecorded-gradle-home"))
+            for label, (bad_directory, bad_tar, bad_receipt), error in (
+                    ("cache-digest", wrong_digest, "cache digest"),
+                    ("cache-home", wrong_home, "Gradle user home"),
+                    ("cache-home-resealed", resealed_home, "Gradle user home"),
+                    ("cache-bytes", (adverse_cache, adverse_cache_archive, cache_receipt),
+                     "resolved dependency artifact bytes")):
+                with self.subTest(cache_provenance=label):
+                    with self.assertRaisesRegex(ValueError, error):
+                        full_hosted.verify_raw_files(bad_directory, bad_receipt)
+                    with self.assertRaisesRegex(ValueError, error):
+                        full_hosted.verify_transport_archive(bad_tar, candidate, target)
+                    for prefix, bundle in ((directory_command[:-1], bad_directory),
+                                           (command[:-1], bad_tar)):
+                        result = subprocess.run([*prefix, str(bundle)], cwd=clean,
+                                                capture_output=True, text=True)
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn(error, result.stderr)
+                    for bundle in (bad_directory, bad_tar):
+                        result = subprocess.run([*artifact_command, str(bundle)], cwd=clean,
+                                                capture_output=True, text=True)
+                        self.assertEqual(1, result.returncode)
+                        self.assertIn("full hosted archive failed", result.stderr)
+                    rejected = subprocess.run([
+                        sys.executable, str(clean / "tools/qualification/qualify.py"), "record",
+                        "--candidate-sha", candidate, "--full-hosted-bundle", str(bad_tar),
+                        "--output", str(evidence / f"qualification-{label}.json")],
+                        cwd=clean, capture_output=True, text=True)
+                    self.assertEqual(2, rejected.returncode)
+                    self.assertIn("full hosted receipt failed", rejected.stderr)
             adverse_order = evidence / "adverse-process-order"
             shutil.copytree(output, adverse_order)
             order_receipt = qualify.load_json_strict(adverse_order / "receipt.json")
@@ -928,7 +1014,10 @@ class FullHostedTests(unittest.TestCase):
                    "runner_os": "Windows", "runner_arch": "X64",
                    "archive_root": r"C:\runner\temp\full",
                    "repository_root": r"C:\runner\work\dyn4k",
+                   "runner_home": r"C:\runner",
+                   "gradle_user_home_override": None,
                    "staging_repository": r"C:\runner\work\dyn4k\build\staging-repository",
+                   "gradle_user_home": r"C:\runner\.gradle",
                    "configurations": [], "artifact_hashes": {}}
 
         def write(path, data):
@@ -1082,6 +1171,7 @@ class FullHostedTests(unittest.TestCase):
                                   "name": binary.name, "size": binary.stat().st_size,
                                   "sha256": full_hosted.sha256(binary)})
             graph = {"configuration": "mingwX64CompileKlibraries",
+                     "gradle_user_home": receipt["gradle_user_home"],
                      "components": [item["component"] for item in artifacts] +
                      [f"{qualify.GROUP}:{module}:{qualify.VERSION}" for module in qualify.MODULES],
                      "artifacts": artifacts}
