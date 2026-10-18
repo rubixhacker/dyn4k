@@ -154,3 +154,14 @@ class CandidateJvmP2Control(unittest.TestCase):
                 validate_warmup_clock(files["warmup-clock.csv"], files["stderr.raw"],
                                       files["clock-origin.json"])
                 self.assertEqual(100, len(rows(files["allocation-v2.jsonl"])))
+
+    def test_candidate_plateau_disabled_gc_fails_closed(self):
+        for route in ("direct_kotlin", "compatibility"):
+            with self.subTest(route=route):
+                result, files, nonce = self.execute(route, "plateau", True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("post-collection plateau probe unsupported: no collection observed",
+                              result.stderr)
+                self.assertEqual([], rows(files["plateau-v2.jsonl"]))
+                validate_warmup_clock(files["warmup-clock.csv"], files["stderr.raw"],
+                                      files["clock-origin.json"])

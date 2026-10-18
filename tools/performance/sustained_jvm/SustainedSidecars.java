@@ -187,16 +187,41 @@ public final class SustainedSidecars {
         memory.newLine();
     }
 
-    public static void plateau(int cycle, long heap, long rss, long collections,
-                               long beforeCollections) throws IOException {
-        if (collections <= beforeCollections)
+    public static void plateau(int cycle, long heap, long rss, long beforeCollections,
+                               long afterCollections, long cycleDisposedNs,
+                               long beforeSampleNs, long gcRequestedNs, long afterSampleNs)
+            throws IOException {
+        if (beforeCollections < 0 || afterCollections < 0) {
+            closeResource();
+            throw new IllegalStateException("post-collection plateau probe unsupported: collection count unknown");
+        }
+        if (afterCollections <= beforeCollections) {
+            closeResource();
             throw new IllegalStateException("post-collection plateau probe unsupported: no collection observed");
+        }
+        long writtenNs = System.nanoTime();
+        if (cycleDisposedNs <= 0 || cycleDisposedNs > beforeSampleNs ||
+                beforeSampleNs > gcRequestedNs || gcRequestedNs > afterSampleNs ||
+                afterSampleNs > writtenNs) {
+            closeResource();
+            throw new IllegalStateException("post-collection plateau probe unsupported: observation order invalid");
+        }
         if (plateau == null) return;
         plateau.write("{" + binding + ",\"kind\":\"create_use_dispose\",\"cycle\":" + cycle +
-                ",\"clock_ns\":" + System.nanoTime() +
+                ",\"clock_ns\":" + writtenNs +
+                ",\"cycle_disposed_ns\":" + cycleDisposedNs +
+                ",\"collection_before_sample_ns\":" + beforeSampleNs +
+                ",\"gc_requested_ns\":" + gcRequestedNs +
+                ",\"collection_after_sample_ns\":" + afterSampleNs +
                 ",\"heap_after_collection_bytes\":" + heap +
                 ",\"rss_after_collection_bytes\":" + rss +
-                ",\"collection_count\":" + collections +
+                ",\"collection_count\":" + afterCollections +
+                ",\"collection_count_before\":" + beforeCollections +
+                ",\"collection_count_after\":" + afterCollections +
+                ",\"collection_count_delta\":" + (afterCollections - beforeCollections) +
+                ",\"collection_count_unit\":\"collections\"" +
+                ",\"collection_probe\":\"sum of GarbageCollectorMXBean.getCollectionCount\"" +
+                ",\"collection_count_status\":\"observed\"" +
                 ",\"managed_heap_delta_bytes\":" + (heap - emptyHeap) +
                 ",\"buffer_pool_used_bytes\":" + bufferMemory() +
                 ",\"native_workload_bytes\":null,\"attributed_workload_bytes\":null," +

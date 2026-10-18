@@ -60,6 +60,19 @@ def validate_plateau(records, raw):
     assert all(row["collection_count"] > 0 for row in records)
     assert all(b["collection_count"] > a["collection_count"]
                for a, b in zip(records, records[1:]))
+    for row in records:
+        assert row["collection_count_before"] >= 0
+        assert row["collection_count_after"] == row["collection_count"]
+        assert row["collection_count_after"] > row["collection_count_before"]
+        assert row["collection_count_delta"] == (row["collection_count_after"] -
+                                                  row["collection_count_before"])
+        assert row["collection_count_unit"] == "collections"
+        assert row["collection_probe"] == "sum of GarbageCollectorMXBean.getCollectionCount"
+        assert row["collection_count_status"] == "observed"
+        assert (0 < row["cycle_disposed_ns"] <= row["collection_before_sample_ns"] <=
+                row["gc_requested_ns"] <= row["collection_after_sample_ns"] <= row["clock_ns"])
+    assert all(a["collection_after_sample_ns"] < b["cycle_disposed_ns"]
+               for a, b in zip(records, records[1:]))
     assert all(row["native_workload_bytes"] is None and
                row["attributed_workload_bytes"] is None and
                row["qualification"] == "unpassed" for row in records)
@@ -110,6 +123,7 @@ class SustainedJvmMemoryTest(unittest.TestCase):
                     "allocation-v2.jsonl", "plateau-v2.jsonl", "steps.csv", "stderr.raw",
                     "process-result.json")}
         env = {**os.environ,
+               "JAVA_HOME": str(JDK),
                "TMPDIR": str(Path.home() / "dyn4k-performance-tmp"),
                "DYN4K_PROVIDER_JSON": str(outputs["provider.json"]),
                "DYN4K_CLOCK_ORIGIN_JSON": str(outputs["clock-origin.json"]),
@@ -187,6 +201,21 @@ class SustainedJvmMemoryTest(unittest.TestCase):
         implausible[75]["cycle"] = 20
         with self.assertRaises(AssertionError):
             validate_plateau(implausible, files["steps.csv"])
+        no_new_collection = copy.deepcopy(plateau)
+        no_new_collection[75]["collection_count_before"] = no_new_collection[75]["collection_count_after"]
+        no_new_collection[75]["collection_count_delta"] = 0
+        self.assertGreater(no_new_collection[76]["collection_count"],
+                           no_new_collection[75]["collection_count"])
+        with self.assertRaises(AssertionError):
+            validate_plateau(no_new_collection, files["steps.csv"])
+        unknown_collection = copy.deepcopy(plateau)
+        unknown_collection[75]["collection_count_before"] = -1
+        with self.assertRaises(AssertionError):
+            validate_plateau(unknown_collection, files["steps.csv"])
+        wrong_order = copy.deepcopy(plateau)
+        wrong_order[75]["collection_before_sample_ns"] = wrong_order[75]["cycle_disposed_ns"] - 1
+        with self.assertRaises(AssertionError):
+            validate_plateau(wrong_order, files["steps.csv"])
 
     def test_disabled_collection_probe_fails_closed(self):
         result, files = self.execute("unsupported", ("-XX:+DisableExplicitGC",))

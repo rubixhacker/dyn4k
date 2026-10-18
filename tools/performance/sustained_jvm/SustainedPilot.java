@@ -321,10 +321,14 @@ public final class SustainedPilot {
 
     private static long collections() {
         long result = 0L;
+        boolean observed = false;
         for (GarbageCollectorMXBean bean : ManagementFactory.getGarbageCollectorMXBeans()) {
-            if (bean.getCollectionCount() >= 0) result += bean.getCollectionCount();
+            long count = bean.getCollectionCount();
+            if (count < 0) return -1;
+            result = Math.addExact(result, count);
+            observed = true;
         }
-        return result;
+        return observed ? result : -1;
     }
 
     private static void plateau(String family, String variant, int count, int hz, int warmup)
@@ -352,6 +356,7 @@ public final class SustainedPilot {
         for (int cycle = 0; cycle < 100; cycle++) {
             long allocatedBefore = probe.read();
             plateauCycle(family, variant, count, hz);
+            long cycleDisposedNs = System.nanoTime();
             long allocatedAfter = probe.read();
             try {
                 SustainedSidecars.allocation("plateau", cycle, probe, allocatedBefore, allocatedAfter);
@@ -359,13 +364,17 @@ public final class SustainedPilot {
                 throw new IllegalStateException("plateau allocation sidecar failed", error);
             }
             long beforeCollections = collections();
+            long beforeSampleNs = System.nanoTime();
+            long gcRequestedNs = System.nanoTime();
             System.gc();
             Thread.sleep(10);
             long heap = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
             long rss = rssBytes();
             long collected = collections();
+            long afterSampleNs = System.nanoTime();
             try {
-                SustainedSidecars.plateau(cycle, heap, rss, collected, beforeCollections);
+                SustainedSidecars.plateau(cycle, heap, rss, beforeCollections, collected,
+                        cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs);
             } catch (IOException error) {
                 throw new IllegalStateException("plateau sidecar failed", error);
             }
@@ -417,7 +426,9 @@ public final class SustainedPilot {
             long beforeCollections = collections();
             System.gc();
             try { Thread.sleep(100); } catch (InterruptedException exc) { Thread.currentThread().interrupt(); throw new IllegalStateException(exc); }
-            long collectionDelta = collections() - beforeCollections;
+            long afterCollections = collections();
+            long collectionDelta = beforeCollections < 0 || afterCollections < 0
+                    ? -1 : afterCollections - beforeCollections;
             System.err.println("#retained_collection_count_delta=" + collectionDelta);
             if (collectionDelta > 0)
                 System.err.println("#retained_heap_world_alive_bytes=" +

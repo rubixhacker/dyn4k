@@ -18,8 +18,13 @@ private fun rssBytes(): Long = try {
     -1
 }
 
-private fun collectionCount(): Long = ManagementFactory.getGarbageCollectorMXBeans()
-    .sumOf { max(0L, it.collectionCount) }
+private fun collectionCount(): Long {
+    val collectors = ManagementFactory.getGarbageCollectorMXBeans()
+    if (collectors.isEmpty()) return -1
+    val counts = collectors.map { it.collectionCount }
+    if (counts.any { it < 0 }) return -1
+    return counts.fold(0L, Math::addExact)
+}
 
 private fun retainedHeap(): Long = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
@@ -51,14 +56,19 @@ private fun plateau(family: String, variant: String, count: Int, hz: Int, warmup
     repeat(100) { cycle ->
         val allocatedBefore = probe.read()
         plateauCycle(family, variant, count, hz)
+        val cycleDisposedNs = System.nanoTime()
         SustainedSidecars.allocation("plateau", cycle, probe, allocatedBefore, probe.read())
         val before = collectionCount()
+        val beforeSampleNs = System.nanoTime()
+        val gcRequestedNs = System.nanoTime()
         System.gc()
         Thread.sleep(10)
         val heap = retainedHeap()
         val rss = rssBytes()
         val collected = collectionCount()
-        SustainedSidecars.plateau(cycle, heap, rss, collected, before)
+        val afterSampleNs = System.nanoTime()
+        SustainedSidecars.plateau(cycle, heap, rss, before, collected,
+            cycleDisposedNs, beforeSampleNs, gcRequestedNs, afterSampleNs)
         System.out.println("$cycle,$heap,$rss,$collected,-1,-1,0,-1,-1")
     }
 }
@@ -101,7 +111,8 @@ private fun run(family: String, variant: String, count: Int, hz: Int, steps: Int
         val before = collectionCount()
         System.gc()
         Thread.sleep(100)
-        val collectionDelta = collectionCount() - before
+        val after = collectionCount()
+        val collectionDelta = if (before < 0 || after < 0) -1 else after - before
         System.err.println("#retained_collection_count_delta=$collectionDelta")
         if (collectionDelta > 0) System.err.println("#retained_heap_world_alive_bytes=${retainedHeap()}")
         SustainedSidecars.memory("retained", 0, retainedHeap(), rssBytes(), collectionDelta)
