@@ -625,7 +625,7 @@ class QualificationTests(unittest.TestCase):
                     "reviewed_pairs_sha256": "e" * 64,
                     "configurations": [{"configuration": config,
                                         "source": [{"module": "dyn4k-core",
-                                                    "case_ids": [str(n) for n in range(2454)]},
+                                                    "case_ids": [str(n) for n in range(2460)]},
                                                    {"module": "dyn4k",
                                                     "case_ids": [str(n) for n in range(58)]}],
                                         "consumer": {"case_ids": ["one", "two", "three"]}}
@@ -712,13 +712,13 @@ class QualificationTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         suite = json.loads((repository / full_suite_manifest.MANIFEST_PATH).read_text())
         corpus = json.loads((repository / full_suite_manifest.CORPUS_PATH).read_text())
-        self.assertEqual(2515, len(suite["cases"]))
-        self.assertEqual(2515, len({case["id"] for case in suite["cases"]}))
-        self.assertEqual(2515, len(corpus["cases"]))
+        self.assertEqual(2521, len(suite["cases"]))
+        self.assertEqual(2521, len({case["id"] for case in suite["cases"]}))
+        self.assertEqual(2521, len(corpus["cases"]))
         self.assertEqual(2385, len(corpus["original_mappings"]))
         self.assertEqual(2385, len({row["original"] for row in corpus["original_mappings"]}))
-        self.assertEqual(199, len(corpus["source_files"]))
-        self.assertEqual("bf94699fb2b7bc5f68070b2baa67a24747a7891c6c6d6e864ed7a17aa9a51240",
+        self.assertEqual(201, len(corpus["source_files"]))
+        self.assertEqual("7e828a381e6409592b157467c651610cd90c39b25183de8e8f2c601ccd0f3095",
                          qualify.manifest_digest(suite))
         full_suite_manifest.validate_manifest(suite, repository)
         qualify.validate_complete_suite_bindings(suite, repository)

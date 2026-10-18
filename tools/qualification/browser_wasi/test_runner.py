@@ -176,7 +176,7 @@ class SourceCasesTest(unittest.TestCase):
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
         core = common_corpus_cases(root, candidate, "dyn4k-core")
         facade = common_corpus_cases(root, candidate, "dyn4k")
-        self.assertEqual(2454, len(core))
+        self.assertEqual(2460, len(core))
         self.assertEqual(58, len(facade))
         self.assertIn(("org.dyn4j.coverage.world.core.PhysicsWorldCoreCoverageTest",
                        "addBody"), core)
@@ -368,9 +368,9 @@ class SourceCasesTest(unittest.TestCase):
             for name in ("dyn4k-core", "dyn4k", "consumer"):
                 folder = lane_dir / name
                 folder.mkdir()
-                evidence = {"status": "PASSED", "expected": 2454 if name == "dyn4k-core"
+                evidence = {"status": "PASSED", "expected": 2460 if name == "dyn4k-core"
                             else 58 if name == "dyn4k" else 1,
-                            "executed": 2454 if name == "dyn4k-core"
+                            "executed": 2460 if name == "dyn4k-core"
                             else 58 if name == "dyn4k" else 1,
                             "failures": 0, "skipped": 0}
                 for field, filename in (("gradle_console", "gradle-console.log"),

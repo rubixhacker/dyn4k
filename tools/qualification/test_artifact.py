@@ -281,7 +281,7 @@ class RawArtifactTests(unittest.TestCase):
             self.assertTrue(all(":current:" in lane for lane in scoped["configuration_lanes"]))
             self.assertTrue(all(item["complete_lane_status"] == "NOT_RUN"
                                 for item in scoped["observed_cases"]))
-            self.assertEqual(2454, len(scoped["observed_cases"][0]
+            self.assertEqual(2460, len(scoped["observed_cases"][0]
                                        ["common_case_ids"]["dyn4k-core"]))
             self.assertEqual(58, len(scoped["observed_cases"][0]
                                      ["common_case_ids"]["dyn4k"]))
