@@ -23,7 +23,9 @@ Linux ARM64, Windows x64, and macOS ARM64 Native processes. See the
 harness entry, including Wasm binaries, before launch. On Linux it reads
 `/proc/<pid>/exe`; on Windows it compares mapped PE headers and code through
 `ReadProcessMemory`; on macOS it compares the mapped executable vnode with a
-selected file handle through `proc_pidinfo`. Path APIs provide diagnostics.
+selected file handle through `proc_pidinfo`. Path APIs provide diagnostics;
+a failed lookup records `path: null` and `path_error` without replacing the
+mapped identity check.
 Each OS probe fails closed when its identity check is unavailable. The archive contains the
 raw streams, exit code, PID, monotonic host times, input hashes, linked identity,
 positive clock calibration, fixture reset, and activity. Invalid or incomplete output

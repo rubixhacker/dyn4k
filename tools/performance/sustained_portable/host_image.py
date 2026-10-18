@@ -71,9 +71,15 @@ def observe_macos(pid, selected):
                                      ctypes.c_void_p, ctypes.c_int]
     library.proc_pidinfo.restype = ctypes.c_int
     path_buffer = ctypes.create_string_buffer(4096)
-    if library.proc_pidpath(pid, path_buffer, len(path_buffer)) <= 0:
-        raise OSError(ctypes.get_errno(), "proc_pidpath failed")
-    reported_path = os.fsdecode(path_buffer.value)
+    reported_path = None
+    path_error = None
+    try:
+        if library.proc_pidpath(pid, path_buffer, len(path_buffer)) > 0 and path_buffer.value:
+            reported_path = os.fsdecode(path_buffer.value)
+        else:
+            path_error = f"proc_pidpath returned no path (errno={ctypes.get_errno()})"
+    except OSError as error:
+        path_error = f"proc_pidpath failed: {error}"
     with Path(selected).open("rb") as stream:
         selected_stat = os.fstat(stream.fileno())
         selected_sha = file_sha256(stream)
@@ -105,7 +111,7 @@ def observe_macos(pid, selected):
                 file_sha256(stream) != selected_sha:
             raise ValueError("selected executable changed during image observation")
     return {"method": "proc_pidinfo_region_vnode", "identity_kind": "mapped_executable_vnode",
-            "path": reported_path, "mapped_path": match["path"],
+            "path": reported_path, "path_error": path_error, "mapped_path": match["path"],
             "mapped_address": match["address"], "mapped_size": match["size"],
             "mapped_dev": match["dev"], "mapped_ino": match["ino"],
             "selected_dev": selected_stat.st_dev & 0xffffffff,
@@ -257,10 +263,19 @@ def observe_windows(pid, selected):
         comparison = compare_pe_code(image, layout, read_memory, info.base)
         path_buffer = ctypes.create_unicode_buffer(32768)
         length = wintypes.DWORD(len(path_buffer))
-        if not kernel.QueryFullProcessImageNameW(handle, 0, path_buffer, ctypes.byref(length)):
-            raise ctypes.WinError(ctypes.get_last_error())
+        reported_path = None
+        path_error = None
+        try:
+            if kernel.QueryFullProcessImageNameW(handle, 0, path_buffer, ctypes.byref(length)) and \
+                    length.value and path_buffer.value:
+                reported_path = path_buffer.value
+            else:
+                path_error = f"QueryFullProcessImageNameW returned no path (winerror={ctypes.get_last_error()})"
+        except OSError as error:
+            path_error = f"QueryFullProcessImageNameW failed: {error}"
         return {"method": "ReadProcessMemory_main_PE_code", "identity_kind": "mapped_executable_code",
-                "path": path_buffer.value, "mapped_base": info.base, "mapped_size": info.size,
+                "path": reported_path, "path_error": path_error,
+                "mapped_base": info.base, "mapped_size": info.size,
                 "sha256": selected_sha, "hash_scope": "selected_file_with_matching_live_PE_header_and_code",
                 **comparison}
     finally:

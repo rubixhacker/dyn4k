@@ -141,7 +141,8 @@ The Windows observer uses `EnumProcessModulesEx` to select the main module,
 then `ReadProcessMemory` to compare its mapped PE header and every readable,
 nonwritable executable section with the selected file. The comparison masks
 only documented base-relocation bytes and requires at least 4 KiB of matched
-code. `QueryFullProcessImageNameW` supplies diagnostic path metadata only.
+code. `QueryFullProcessImageNameW` supplies diagnostic path metadata only;
+failure records `path: null` and `path_error` after the live code comparison.
 The receipt records both the selected file SHA-256 and mapped code hash; it
 does not call the path digest mapped bytes. The path-swap control records an
 OS sharing denial when Windows prevents rename and still requires a matching
@@ -183,7 +184,9 @@ The macOS observer scans live executable regions with
 `proc_pidinfo(PROC_PIDREGIONPATHINFO)`. It compares the mapped vnode's device
 and inode with `fstat` on the selected executable file handle, then hashes
 that handle's bytes. `proc_pidpath` is retained as diagnostic path metadata;
-its path bytes are never called mapped image bytes. The path-swap control
+its path bytes are never called mapped image bytes. Lookup failure records
+`path: null` and `path_error` while the vnode comparison remains required.
+The path-swap control
 must still match the original mapped vnode after the wrapper pathname is
 replaced, and must reject a stale PID. A missing or inaccessible region
 remains unpassed. Hosted macOS ARM64 execution must establish whether the

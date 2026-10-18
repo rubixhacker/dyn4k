@@ -1,5 +1,7 @@
 import copy
+import ctypes
 from contextlib import ExitStack
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -143,7 +145,41 @@ class PortableCaptureTest(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "vnode mapping"):
                 host_image.select_macos_region([changed], selected)
 
-    def test_windows_live_pe_code_comparison_rejects_substitution(self):
+    def test_macos_diagnostic_path_failure_preserves_vnode_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "selected"
+            selected.write_bytes(b"selected executable")
+            stat = selected.stat()
+
+            def observe_region(ino, path_lookup=None):
+                def pidinfo(pid, flavor, address, pointer, size):
+                    if address:
+                        return 0
+                    record = ctypes.cast(pointer, ctypes.POINTER(host_image._RegionWithPath)).contents
+                    record.region.address = 0x1000
+                    record.region.size = 4096
+                    record.region.protection = 5
+                    record.vnode.stat.dev = stat.st_dev & 0xffffffff
+                    record.vnode.stat.ino = ino
+                    return size
+                library = SimpleNamespace(proc_pidpath=path_lookup or mock.Mock(return_value=0),
+                                          proc_pidinfo=mock.Mock(side_effect=pidinfo))
+                with mock.patch.object(host_image.ctypes, "CDLL", return_value=library):
+                    return host_image.observe_macos(17, selected)
+
+            for path_lookup, error in ((mock.Mock(return_value=0), "returned no path"),
+                                       (mock.Mock(side_effect=OSError(3, "denied")), "denied")):
+                with self.subTest(error=error):
+                    receipt = observe_region(stat.st_ino, path_lookup)
+                    self.assertIsNone(receipt["path"])
+                    self.assertIn(error, receipt["path_error"])
+                    capture.require_process_image(
+                        receipt, hashlib.sha256(selected.read_bytes()).hexdigest())
+            with self.assertRaisesRegex(ValueError, "vnode mapping"):
+                observe_region(stat.st_ino + 1)
+
+    @staticmethod
+    def windows_pe_fixture():
         image = bytearray(0x2200)
         image[:2] = b"MZ"
         struct.pack_into("<I", image, 0x3c, 0x80)
@@ -159,6 +195,10 @@ class PortableCaptureTest(unittest.TestCase):
         struct.pack_into("<IIII", image, 0x190, 8192, 0x1000, 8192, 0x200)
         struct.pack_into("<I", image, 0x188 + 36, 0x60000020)
         image[0x200:] = bytes(range(256)) * 32
+        return image
+
+    def test_windows_live_pe_code_comparison_rejects_substitution(self):
+        image = self.windows_pe_fixture()
         layout = host_image.pe_executable_sections(image)
         base = 0x140000000
         def read(address, size):
@@ -180,6 +220,61 @@ class PortableCaptureTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mapped PE header differs"):
             host_image.compare_pe_code(image, layout,
                 lambda address, size: (b"z" * size if address == base else read(address, size)), base)
+
+    def test_windows_diagnostic_path_failure_preserves_live_code_gate(self):
+        image = self.windows_pe_fixture()
+        base = 0x140000000
+        with tempfile.TemporaryDirectory() as temporary:
+            selected = Path(temporary) / "selected.exe"
+            selected.write_bytes(image)
+
+            def observe(mutated, path_lookup=None):
+                def enum_modules(handle, modules, length, needed, flags):
+                    modules[0] = base
+                    ctypes.cast(needed, ctypes.POINTER(host_image.wintypes.DWORD))[0] = \
+                        ctypes.sizeof(ctypes.c_void_p)
+                    return 1
+                def module_info(handle, module, pointer, length):
+                    info = ctypes.cast(pointer, ctypes.POINTER(host_image._ModuleInfo)).contents
+                    info.base = base
+                    info.size = 0x3000
+                    return 1
+                def read_memory(handle, address, buffer, size, count):
+                    data = bytearray(image[:size] if address.value == base else image[0x200:0x200 + size])
+                    if mutated == "header" and address.value == base:
+                        data[0] ^= 1
+                    if mutated == "code" and address.value != base:
+                        data[0] ^= 1
+                    ctypes.memmove(buffer, bytes(data), size)
+                    ctypes.cast(count, ctypes.POINTER(ctypes.c_size_t))[0] = size
+                    return 1
+                kernel = SimpleNamespace(OpenProcess=mock.Mock(return_value=123),
+                                         CloseHandle=mock.Mock(),
+                                         ReadProcessMemory=mock.Mock(side_effect=read_memory),
+                                         QueryFullProcessImageNameW=path_lookup or mock.Mock(return_value=0))
+                psapi = SimpleNamespace(EnumProcessModulesEx=mock.Mock(side_effect=enum_modules),
+                                        GetModuleInformation=mock.Mock(side_effect=module_info))
+                with mock.patch.object(host_image.ctypes, "get_last_error", return_value=5,
+                                       create=True), mock.patch.object(
+                                           host_image.ctypes, "WinDLL", create=True,
+                                           side_effect=lambda name, **kwargs:
+                                               kernel if name == "kernel32" else psapi):
+                    try:
+                        return host_image.observe_windows(17, selected)
+                    finally:
+                        kernel.CloseHandle.assert_called_once_with(123)
+
+            for path_lookup, error in ((mock.Mock(return_value=0), "returned no path"),
+                                       (mock.Mock(side_effect=OSError(5, "denied")), "denied")):
+                with self.subTest(error=error):
+                    receipt = observe(None, path_lookup)
+                    self.assertIsNone(receipt["path"])
+                    self.assertIn(error, receipt["path_error"])
+                    capture.require_process_image(receipt, hashlib.sha256(image).hexdigest())
+            for mutated in ("header", "code"):
+                with self.subTest(mutated=mutated), self.assertRaisesRegex(
+                        ValueError, f"mapped PE {mutated} differs"):
+                    observe(mutated)
 
     def test_native_host_selects_only_resolved_target_artifacts(self):
         inventory = {"resolved_artifacts": [
