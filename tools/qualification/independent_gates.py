@@ -70,12 +70,24 @@ PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
 PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
 PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
+PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
+PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_PROSPECTIVE_CHECKERS = {
     "prospective_compare.py": "5ab8be61c17565d1feb4a23ceb588981f12d9e69213e0af97425a5f2a50f0ed9",
     "cases.py": "273c8246850d6995f0b3db1dac2d6f52d1c3154af1deaa48fbde25dc41f184c1",
     "orthogonality.py": "946bea6b9662a8f6e763ee9ce19374fa2b0b822a16a8e74ec355603576a5a15e",
     "reference_diagnostic.py": "f3e40a4671c8e07d5d0071f11818f9235d7a0f4a8ddfd784cb01604b0bb4b967",
     "receipt.py": "36c6c18255274195f58e4361e91d5fd7a5fc77eb9d5df01acc4abc0d36c75b0c",
+}
+APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
+    **APPROVED_PROSPECTIVE_CHECKERS,
+    "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
+}
+APPROVED_PROSPECTIVE_POLICY_CHECKERS = {
+    **APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS,
+    "cases.py": "d1613dfbd5f40adffabb960466010c22006261d8cf60f4711b49d8755c80e02c",
+    "orthogonality.py": "a7fce390f154a9c044f20fb27803d104798cd6800bf8d757cc5ba9b862390644",
+    "reference_diagnostic.py": "5d87eb26d11dabacc7caa0842a129d62d6e8f661a4b079c3383af309e7c6ef22",
 }
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "e51e768c7d2c9075b9e1900b2bf3ad0fdacbda42bb3eb0d6f52f49492b546675",
@@ -278,25 +290,33 @@ def approved_prospective_cases(repository):
 
 def _prospective_checker_binding(repository, candidate_sha):
     source_dir = "tools/numerical/portable"
-    changed = subprocess.run(
-        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
-         "--is-ancestor", PROSPECTIVE_CHECKER_REVISION, candidate_sha],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
-    if changed.returncode not in (0, 1):
-        raise ValueError("prospective checker revision ancestry is unavailable")
+    def descends_from(revision):
+        checked = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+             "--is-ancestor", revision, candidate_sha],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        if checked.returncode not in (0, 1):
+            raise ValueError("prospective checker revision ancestry is unavailable")
+        return checked.returncode == 0
+
+    if descends_from(PROSPECTIVE_CHECKER_REVISION):
+        approved = APPROVED_PROSPECTIVE_CHECKERS
+    elif descends_from(PROSPECTIVE_BRIDGE_CHECKER_REVISION):
+        approved = APPROVED_PROSPECTIVE_CHECKERS
+    elif descends_from(PROSPECTIVE_ASSEMBLED_CHECKER_REVISION):
+        approved = APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS
+    elif descends_from(PROSPECTIVE_POLICY_REVISION):
+        approved = APPROVED_PROSPECTIVE_POLICY_CHECKERS
+    else:
+        raise ValueError("prospective checker candidate predates approved revisions")
     for filename, current in APPROVED_PROSPECTIVE_CHECKERS.items():
         relative = f"{source_dir}/{filename}"
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "-C", str(repository), "show",
              f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
-        approved = (current if changed.returncode == 0 else hashlib.sha256(
-            subprocess.check_output(
-                ["git", "--no-replace-objects", "-C", str(repository), "show",
-                 f"{PROSPECTIVE_POLICY_REVISION}:{relative}"], stderr=subprocess.PIPE)
-        ).hexdigest())
         if (hashlib.sha256(local.read_bytes()).hexdigest() != current
-                or hashlib.sha256(committed).hexdigest() != approved):
+                or hashlib.sha256(committed).hexdigest() != approved[filename]):
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
     catalog = f"{source_dir}/prospective_policy_catalog.json"
     committed = subprocess.check_output(
@@ -686,8 +706,7 @@ def _p2_scope(scope, candidate_sha, source_sha256, artifact_sha256, root):
                                  + ", ".join(sorted(missing)))
     if (set(scope) != required or scope["candidate_sha"] != candidate_sha
             or scope["target"] != "jvm" or scope["runtime"] != "Java"
-            or not isinstance(scope["runtime_identity"], str)
-            or not scope["runtime_identity"]
+            or not SHA64.fullmatch(str(scope["runtime_identity"]))
             or scope["source_sha256"] != source_sha256
             or not isinstance(scope["artifact_hashes"], dict)
             or set(scope["artifact_hashes"]) != set(qualify.MODULES)
@@ -703,6 +722,24 @@ def _p2_scope(scope, candidate_sha, source_sha256, artifact_sha256, root):
     if hashlib.sha256(sidecar.read_bytes()).hexdigest() != scope["baseline_attestation_sha256"]:
         raise ValueError("external numerical baseline attestation differs from independent audit")
     return sidecar
+
+
+def _p2_runtime_identity(proof):
+    required = {"host", "os", "machine", "device", "executable",
+                "executable_sha256", "version", "method_executions",
+                "dependency_sha256", "method_process_sha256"}
+    if (not isinstance(proof, dict) or set(proof) != required
+            or proof["host"] != "jvm" or proof["device"] is not False
+            or proof["method_executions"] != 15
+            or any(not isinstance(proof[key], str) or not proof[key]
+                   for key in ("os", "machine", "executable", "version"))
+            or not Path(proof["executable"]).is_absolute()
+            or 'version "21.' not in proof["version"]
+            or any(not SHA64.fullmatch(str(proof[key])) for key in
+                   ("executable_sha256", "dependency_sha256",
+                    "method_process_sha256"))):
+        raise ValueError("reviewed P2 candidate runtime/process proof is incomplete")
+    return digest({"schema": "reviewed-p2-runtime/1", "runtime": proof})
 
 
 def _p2_directory(root, relative):
@@ -788,6 +825,7 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
             summary = compare_host(baseline, copied / "candidate/jvm", frozen,
                                    baseline_attestation=sidecar,
                                    arithmetic_captures=copied / "arithmetic")
+            verified_runtime = _json(copied / "candidate/jvm/receipt.json").get("runtime")
     finally:
         sys.path.pop(0)
         sys.dont_write_bytecode = previous
@@ -800,7 +838,7 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
             or summary.get("baseline_attestation_sha256") !=
             hashlib.sha256(sidecar.read_bytes()).hexdigest()):
         raise ValueError("reviewed P2 comparison source, artifact, or baseline differs")
-    return summary, case_order, case_methods
+    return summary, case_order, case_methods, _p2_runtime_identity(verified_runtime)
 
 
 def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
@@ -857,14 +895,18 @@ def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
     sidecar = _p2_scope(scope, candidate_sha, source_sha256, artifact_sha256, root)
     if inventory["baseline_attestation_sha256"] != scope["baseline_attestation_sha256"]:
         raise ValueError("prospective bridge baseline attestation differs from independent audit")
-    summary, case_order, case_methods = _verify_p2_host(
+    summary, case_order, case_methods, runtime_identity = _verify_p2_host(
         root, bridge, sidecar, repository, candidate_sha, source_sha256, artifact_sha256)
+    if runtime_identity != scope["runtime_identity"]:
+        raise ValueError("reviewed P2 runtime identity differs from independent audit")
     if summary.get("candidate_artifact_sha256", {}).get("metadata") != \
             scope["artifact_hashes"]["dyn4k"]:
         raise ValueError("reviewed P2 metadata JAR differs from independent JVM audit")
     if set(case_order) != set(inventory["case_ids"]):
         raise ValueError("reviewed P2 source method/case inventory differs from bridge")
-    return _p2_summary(summary, case_order, PROSPECTIVE_BRIDGE_METHODS, case_methods)
+    result = _p2_summary(summary, case_order, PROSPECTIVE_BRIDGE_METHODS, case_methods)
+    result["runtime_identity"] = runtime_identity
+    return result
 
 
 def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,

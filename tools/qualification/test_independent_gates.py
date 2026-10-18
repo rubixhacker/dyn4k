@@ -482,9 +482,47 @@ class IndependentGateSeamTests(unittest.TestCase):
     def test_prospective_checker_pins_historical_and_assembled_source(self):
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                           cwd=ROOT, text=True).strip()
-        independent_gates._prospective_checker_binding(ROOT, current)
-        independent_gates._prospective_checker_binding(
-            ROOT, independent_gates.PROSPECTIVE_POLICY_REVISION)
+        windows = (
+            (independent_gates.PROSPECTIVE_POLICY_REVISION,
+             independent_gates.APPROVED_PROSPECTIVE_POLICY_CHECKERS),
+            (independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION,
+             independent_gates.APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS),
+            ("0533142a1358b2eebb3c3f36ae3dc1a8b01d9667",
+             independent_gates.APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS),
+            (independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION,
+             independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+            (independent_gates.PROSPECTIVE_CHECKER_REVISION,
+             independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+            (current, independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+        )
+        for revision, blobs in windows:
+            with self.subTest(revision=revision):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+                for filename, approved in blobs.items():
+                    path = f"tools/numerical/portable/{filename}"
+                    self.assertEqual(approved, hashlib.sha256(subprocess.check_output(
+                        ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
+        with self.assertRaisesRegex(ValueError, "predates approved revisions"):
+            independent_gates._prospective_checker_binding(ROOT, BASE)
+        with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+            independent_gates._source_binding(
+                ROOT, independent_gates.PROSPECTIVE_BRIDGE_CHECKER_REVISION,
+                {f"tools/numerical/portable/{name}": value
+                 for name, value in independent_gates.APPROVED_P2_PRODUCERS.items()},
+                "reviewed P2 raw producer")
+        with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS,
+                             {"cases.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(
+                    ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
+            independent_gates._prospective_checker_binding(ROOT, current)
+        with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_POLICY_CHECKERS,
+                             {"cases.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(
+                    ROOT, independent_gates.PROSPECTIVE_POLICY_REVISION)
+            independent_gates._prospective_checker_binding(
+                ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
         with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_CHECKERS,
                              {"prospective_compare.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
@@ -590,8 +628,19 @@ class IndependentGateSeamTests(unittest.TestCase):
                       "baseline": "baseline", "candidate": "candidate",
                       "arithmetic": "arithmetic"}
             receipt = {"prospective_bridge": bridge}
+            verified_runtime = {"host": "jvm", "os": "test-host", "machine": "x86_64",
+                                "device": False, "executable": "/tmp/dyn4k-tools/jdk21/bin/java",
+                                "executable_sha256": "e" * 64,
+                                "version": 'openjdk version "21.0.1"',
+                                "method_executions": 15,
+                                "dependency_sha256": artifact_sha,
+                                "method_process_sha256": "f" * 64}
+            verified_identity = independent_gates._p2_runtime_identity(verified_runtime)
+            self.assertEqual(independent_gates.digest(
+                {"schema": "reviewed-p2-runtime/1", "runtime": verified_runtime}),
+                verified_identity)
             scope = {"candidate_sha": candidate, "target": "jvm", "runtime": "Java",
-                     "runtime_identity": "pinned-jdk21", "artifact_hashes": {
+                     "runtime_identity": verified_identity, "artifact_hashes": {
                          "dyn4k-core": artifact_sha, "dyn4k": "c" * 64},
                      "source_sha256": source_sha,
                      "baseline_attestation_path": str(sidecar),
@@ -622,14 +671,30 @@ class IndependentGateSeamTests(unittest.TestCase):
                                                        "operation_method": methods[0],
                                                        "operation_receipt_sha256": "d" * 64}
                                                       for case_id in ids]}, list(ids),
-                                                 {case_id: methods[0] for case_id in ids})):
+                                                 {case_id: methods[0] for case_id in ids},
+                                                 verified_identity)):
                 self.assertEqual("PASSED", independent_gates.verify_pending_prospective_bridge(
                     root, receipt, ROOT, candidate, artifact_sha, source_sha, scope)["status"])
+                self.assertEqual(verified_identity, independent_gates.verify_pending_prospective_bridge(
+                    root, receipt, ROOT, candidate, artifact_sha, source_sha, scope)["runtime_identity"])
+                for forged in ({**verified_runtime, "executable_sha256": "0" * 64},
+                               {**verified_runtime, "method_process_sha256": "0" * 64}):
+                    forged_identity = independent_gates._p2_runtime_identity(forged)
+                    self.assertNotEqual(verified_identity, forged_identity)
+                    with self.assertRaisesRegex(ValueError, "runtime identity differs"):
+                        independent_gates.verify_pending_prospective_bridge(
+                            root, receipt, ROOT, candidate, artifact_sha, source_sha,
+                            {**scope, "runtime_identity": forged_identity})
                 with self.assertRaisesRegex(ValueError, "metadata JAR differs"):
                     independent_gates.verify_pending_prospective_bridge(
                         root, receipt, ROOT, candidate, artifact_sha, source_sha,
                         {**scope, "artifact_hashes": {**scope["artifact_hashes"],
                                                      "dyn4k": "0" * 64}})
+            for malformed in ({**verified_runtime, "method_executions": 14},
+                              {**verified_runtime, "method_process_sha256": "missing"},
+                              {**verified_runtime, "host": "node-js"}):
+                with self.assertRaisesRegex(ValueError, "runtime/process proof is incomplete"):
+                    independent_gates._p2_runtime_identity(malformed)
             for bad in ({**scope, "source_sha256": "0" * 64},
                         {**scope, "artifact_hashes": {**scope["artifact_hashes"],
                                                      "dyn4k-core": "0" * 64}},
