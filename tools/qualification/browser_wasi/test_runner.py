@@ -16,6 +16,34 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_finite_decimal_range_preserves_binary_edges(self):
+        from runner import verify_collision_value
+
+        accepted = (
+            "0@0", "0@-9223372036854775808",
+            "-0.0@-9223372036854775808", "0e999@0",
+            "-0e-999@-9223372036854775808",
+            "4.9E-324@1", "-4.9E-324@-9223372036854775807",
+            "Infinity@9218868437227405312", "-Infinity@-4503599627370496",
+            "NaN@9221120237041090561", "NaN@-2251799813685247",
+        )
+        for value in accepted:
+            with self.subTest(accepted=value):
+                verify_collision_value("penetration.depth", value)
+        rejected = (
+            ("1e-999@0", "underflows"),
+            ("-1e-999@-9223372036854775808", "underflows"),
+            ("1e999@9218868437227405312", "overflows"),
+            ("-1e999@-4503599627370496", "overflows"),
+            ("1@0", "raw bits"), ("-0.0@0", "raw bits"),
+            ("inf@9218868437227405312", "numeric syntax"),
+            ("NaN@9218868437227405312", "NaN bits"),
+        )
+        for value, error in rejected:
+            with self.subTest(rejected=value):
+                with self.assertRaisesRegex(ValueError, error):
+                    verify_collision_value("penetration.depth", value)
+
     def test_real_wasm_negative_zero_requires_negative_raw_bits(self):
         from runner import verify_collision_diagnostics
         import xml.etree.ElementTree as ET
@@ -622,6 +650,63 @@ class SourceCasesTest(unittest.TestCase):
                     copied / "lane.json", Path(directory) / "mutant-auditor")
             self.assertEqual(1, rejected.returncode, rejected.stderr)
             self.assertIn("raw bits", rejected.stderr)
+
+    def test_public_finite_decimal_range_rejects_resealed_real_wasm(self):
+        from runner import sha256
+        import xml.etree.ElementTree as ET
+
+        receipt = os.environ.get("DYN4K_BROWSER_WASI_RANGE_WASM_RECEIPT")
+        replay = os.environ.get("DYN4K_BROWSER_WASI_RANGE_WASM_REPLAY_ROOT")
+        artifacts = os.environ.get("DYN4K_BROWSER_WASI_RANGE_ARTIFACTS")
+        if any(value is None for value in (receipt, replay, artifacts)):
+            self.skipTest("set real Wasm receipt, exact replay root, and range artifacts")
+        source = Path(receipt).parent
+        evidence = Path(artifacts)
+        evidence.mkdir(parents=True, exist_ok=False)
+        with mock.patch.dict(os.environ, {"DYN4K_BROWSER_WASI_REPLAY_ROOT": replay}):
+            baseline = self.public_historical_audit(
+                Path(receipt), evidence / "baseline-auditor")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+            for name, value in (
+                ("positive-underflow", "1e-999@0"),
+                ("negative-underflow", "-1e-999@-9223372036854775808"),
+                ("positive-overflow", "1e999@9218868437227405312"),
+                ("negative-overflow", "-1e999@-4503599627370496"),
+            ):
+                case = evidence / name
+                case.mkdir()
+                lane, copied = self.copy_lane(source, str(case))
+                module = lane["modules"]["dyn4k-core"]
+                report_item = next(item for item in module["raw_xml"]
+                                   if "WindowsCollisionIntermediateDiagnosticTest" in item["path"])
+                report = Path(report_item["path"])
+                timestamp = report.stat()
+                suite = ET.parse(report).getroot()
+                output = suite.find("system-out")
+                rows = output.text.splitlines()
+                self.assertEqual(72, len(rows))
+                fields = rows[0].split("\t")
+                depth = next(i for i, field in enumerate(fields)
+                             if field.startswith("penetration.depth="))
+                fields[depth] = f"penetration.depth={value}"
+                rows[0] = "\t".join(fields)
+                output.text = "\n".join(rows) + "\n"
+                ET.ElementTree(suite).write(report, encoding="unicode")
+                os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
+                report_item["sha256"] = sha256(report)
+                module["diagnostic_sha256"] = hashlib.sha256(
+                    "\n".join(rows).encode()).hexdigest()
+                self.save_copied_lane(lane, copied)
+                audited = self.public_historical_audit(
+                    copied / "lane.json", case / "auditor")
+                (case / "audit-result.json").write_text(json.dumps({
+                    "returncode": audited.returncode,
+                    "stdout": audited.stdout,
+                    "stderr": audited.stderr,
+                }, indent=2) + "\n")
+                with self.subTest(value=value):
+                    self.assertEqual(1, audited.returncode, audited.stderr)
+                    self.assertIn("finite decimal", audited.stderr)
 
     def test_public_wasmtime_receipt_rejects_events_moved_to_stderr(self):
         from runner import sha256
