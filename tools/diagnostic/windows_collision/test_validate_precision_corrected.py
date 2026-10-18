@@ -17,6 +17,23 @@ V = runpy.run_path(str(Path(__file__).with_name("validate-precision-control.py")
 FOCUS = V["focus"]
 SCALAR = V["SCALAR"]
 REPO = V["REPO"]
+FOCUSED_SCRIPT = "tools/diagnostic/windows_collision/run-focused-controls.ps1"
+
+
+def workflow_run_expressions(workflow):
+    lines = workflow.splitlines(keepends=True)
+    expressions = []
+    for index, line in enumerate(lines):
+        if line.strip() != "run: |":
+            continue
+        indentation = len(line) - len(line.lstrip(" "))
+        body = []
+        for continuation in lines[index + 1:]:
+            if continuation.strip() and len(continuation) - len(continuation.lstrip(" ")) <= indentation:
+                break
+            body.append(continuation)
+        expressions.append("".join(body))
+    return expressions
 
 
 def bits(value):
@@ -276,6 +293,7 @@ class CorrectedControlTest(unittest.TestCase):
 
     def test_workflow_route_contract_and_adverse(self):
         workflow = (REPO / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
+        script = (REPO / FOCUSED_SCRIPT).read_text(encoding="utf-8")
         required = ("default: historical-pc53", "- corrected-production", "if ($route -eq 'historical-pc53')",
                     "validate-corrected", "--native-scalars", "--probe-directory",
                     "Name = 'default'; Flags = @()", "+ $probeMode.Flags +",
@@ -283,10 +301,35 @@ class CorrectedControlTest(unittest.TestCase):
                     "$correctedProbeExit -eq '0' -and $correctedValidationExit -eq 0")
         def check(text):
             if any(token not in text for token in required):
-                raise ValueError("corrected workflow route is incomplete")
-        check(workflow)
+                raise ValueError("corrected script route is incomplete")
+        check(workflow + script)
         for token in required:
-            self.reject(lambda token=token: check(workflow.replace(token, "BROKEN")))
+            self.reject(lambda token=token: check((workflow + script).replace(token, "BROKEN")))
+
+    def test_workflow_run_expression_limit_and_script_binding(self):
+        workflow = (REPO / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
+        invocation = f"& (Join-Path $PWD '{FOCUSED_SCRIPT}') -Route $env:DYN4K_COLLISION_ROUTE"
+        script = (REPO / FOCUSED_SCRIPT).read_text(encoding="utf-8")
+        route_binding = "DYN4K_COLLISION_ROUTE: ${{ inputs.route }}"
+
+        def check(workflow_text, script_text):
+            expressions = workflow_run_expressions(workflow_text)
+            if len(expressions) != 2 or max(len(expression.encode("utf-8")) for expression in expressions) >= 21000:
+                raise ValueError("workflow run expression exceeds the GitHub limit")
+            if invocation not in workflow_text or route_binding not in workflow_text or \
+                    workflow_text.count("${{ inputs.route }}") != 1 or "${{" in script_text:
+                raise ValueError("workflow route is not bound to the script")
+            sources = script_text.split("$controlSources = @(", 1)[1].split("\n)", 1)[0]
+            if sources.count(f"'{FOCUSED_SCRIPT}'") != 1:
+                raise ValueError("the committed script is missing from the source hash receipt")
+
+        check(workflow, script)
+        self.reject(lambda: check(workflow.replace(invocation, invocation + "x" * 21000), script))
+        self.reject(lambda: check(workflow.replace(invocation, "Write-Output 'BROKEN'"), script))
+        self.reject(lambda: check(workflow.replace(route_binding, "DYN4K_COLLISION_ROUTE: wrong"), script))
+        self.reject(lambda: check(workflow, script.replace(f"'{FOCUSED_SCRIPT}'", "'missing.ps1'")))
+        subprocess.check_call(["git", "-C", str(REPO), "ls-files", "--error-unmatch", FOCUSED_SCRIPT],
+                              stdout=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":
