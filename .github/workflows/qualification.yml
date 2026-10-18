@@ -2,6 +2,12 @@ name: Staged qualification evidence
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_diagnostics:
+        description: Run only Windows native and publication diagnostics
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - codex/port-qualification-harness
@@ -11,6 +17,7 @@ on:
 
 jobs:
   staged-jvm-and-linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,18 +184,7 @@ jobs:
   hosted-publications:
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - host: macos
-            runner: macos-26
-            targets: >-
-              --target macosArm64 --target iosArm64 --target iosSimulatorArm64
-              --target iosX64 --target tvosArm64 --target tvosSimulatorArm64
-              --target watchosArm64 --target watchosDeviceArm64
-              --target watchosSimulatorArm64
-          - host: windows
-            runner: windows-2025
-            targets: --target mingwX64
+      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}' || '{"include":[{"host":"macos","runner":"macos-26","targets":"--target macosArm64 --target iosArm64 --target iosSimulatorArm64 --target iosX64 --target tvosArm64 --target tvosSimulatorArm64 --target watchosArm64 --target watchosDeviceArm64 --target watchosSimulatorArm64"},{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     defaults:
@@ -249,18 +245,31 @@ jobs:
             ${{ runner.temp }}/artifact-audit.json
             build/staging-repository/.qualification/${{ matrix.host }}/
           if-no-files-found: error
+      - name: Collect Windows publication logs
+        if: always() && matrix.host == 'windows'
+        shell: bash
+        run: |
+          diagnostics="$RUNNER_TEMP/windows-publication-diagnostics"
+          mkdir -p "$diagnostics/logs"
+          if [[ -f build/staging-repository/.qualification/windows/stage.log ]]; then
+            cp build/staging-repository/.qualification/windows/stage.log "$diagnostics/logs/stage.log"
+          fi
+          gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+          if [[ -d "$gradle_home/daemon" ]]; then
+            find "$gradle_home/daemon" -type f -name '*.out.log' -exec cp --parents {} "$diagnostics/logs" \;
+          fi
+      - name: Upload Windows publication logs
+        if: always() && matrix.host == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.host }}
+          path: ${{ runner.temp }}/windows-publication-diagnostics/
+          if-no-files-found: warn
 
   hosted-native:
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {target: macosArm64, runner: macos-26}
-          - {target: iosSimulatorArm64, runner: macos-26}
-          - {target: tvosSimulatorArm64, runner: macos-26}
-          - {target: watchosSimulatorArm64, runner: macos-26}
-          - {target: iosX64, runner: macos-26-intel}
-          - {target: mingwX64, runner: windows-2025}
+      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"target":"mingwX64","runner":"windows-2025"}]}' || '{"include":[{"target":"macosArm64","runner":"macos-26"},{"target":"iosSimulatorArm64","runner":"macos-26"},{"target":"tvosSimulatorArm64","runner":"macos-26"},{"target":"watchosSimulatorArm64","runner":"macos-26"},{"target":"iosX64","runner":"macos-26-intel"},{"target":"mingwX64","runner":"windows-2025"}]}') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
@@ -346,8 +355,37 @@ jobs:
           name: qualification-full-${{ github.sha }}-${{ matrix.target }}
           path: ${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar
           if-no-files-found: error
+      - name: Collect Windows native failure evidence
+        if: always() && matrix.target == 'mingwX64'
+        shell: bash
+        run: |
+          diagnostics="$RUNNER_TEMP/windows-native-diagnostics"
+          mkdir -p "$diagnostics/xml" "$diagnostics/logs"
+          find dyn4k-core dyn4k consumers/qualification/portable \
+            -path '*/build/test-results/*/TEST-*.xml' -type f \
+            -exec cp --parents {} "$diagnostics/xml" \; 2>/dev/null || true
+          if [[ -f build/staging-repository/.qualification/mingwX64/stage.log ]]; then
+            cp build/staging-repository/.qualification/mingwX64/stage.log "$diagnostics/logs/stage.log"
+          fi
+          if [[ -d "$RUNNER_TEMP/full-hosted-mingwX64" ]]; then
+            find "$RUNNER_TEMP/full-hosted-mingwX64" -type f \
+              \( -name stdout.txt -o -name stderr.txt \) \
+              -exec cp --parents {} "$diagnostics/logs" \;
+          fi
+          gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+          if [[ -d "$gradle_home/daemon" ]]; then
+            find "$gradle_home/daemon" -type f -name '*.out.log' -exec cp --parents {} "$diagnostics/logs" \;
+          fi
+      - name: Upload Windows native failure evidence
+        if: always() && matrix.target == 'mingwX64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/windows-native-diagnostics/
+          if-no-files-found: warn
 
   safari-browser:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     runs-on: macos-26
     timeout-minutes: 120
     env:
