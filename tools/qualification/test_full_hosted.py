@@ -523,6 +523,95 @@ class FullHostedTests(unittest.TestCase):
                 for root in (repository / "dyn4k-core", repository / "dyn4k", consumer):
                     self.assertFalse((root / "karma.config.d").exists())
 
+    def test_generated_safari_init_script_configures_real_portable_input(self):
+        gradle = os.environ.get("DYN4K_GRADLE_BIN")
+        if not gradle or not os.environ.get("JAVA_HOME") or not os.environ.get("ANDROID_HOME"):
+            self.skipTest("offline Gradle, JDK, and Android SDK are required for real configuration")
+        source_root = Path(os.environ.get("DYN4K_PORTABLE_CONSUMER_ROOT") or
+                           Path(__file__).resolve().parents[2])
+        source = source_root / "consumers/qualification/portable"
+        portable = self.root / "portable"
+        portable.mkdir()
+        for name in ("settings.gradle.kts", "build.gradle.kts"):
+            shutil.copy2(source / name, portable / name)
+        repository = self.root / "staging"
+        repository.mkdir()
+        probe = self.root / "safari-input.init.gradle"
+        probe.write_text(
+            "gradle.projectsEvaluated {\n"
+            "  def task = gradle.rootProject.tasks.named('jsBrowserTest').get()\n"
+            "  println('DYN4K_SAFARI_INPUT=' + task.inputFileProperty.get().asFile.absolutePath)\n"
+            "}\n")
+        environment = os.environ.copy()
+        environment["TMPDIR"] = str(self.root)
+        environment["JAVA_TOOL_OPTIONS"] = (
+            environment.get("JAVA_TOOL_OPTIONS", "") +
+            f" -Djava.io.tmpdir={self.root}").strip()
+        for mode in full_hosted.CONFIGS["jsSafari"]:
+            with self.subTest(mode=mode):
+                init = self.root / f"{mode}.init.gradle"
+                init.write_text(full_hosted.init_script("jsSafari", mode))
+                command = [gradle, "--offline", "--no-daemon", "--console=plain",
+                           "-p", str(portable), "--init-script", str(init),
+                           "--init-script", str(probe),
+                           f"-PqualificationRepository={repository}",
+                           "-PqualificationSafari=true"]
+                if mode == "production":
+                    command.append("-PqualificationProduction=true")
+                result = subprocess.run([*command, "help", "--dry-run"],
+                                        cwd=portable, env=environment, capture_output=True,
+                                        text=True, timeout=180)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                inputs = [line.removeprefix("DYN4K_SAFARI_INPUT=")
+                          for line in result.stdout.splitlines()
+                          if line.startswith("DYN4K_SAFARI_INPUT=")]
+                self.assertEqual([str(full_hosted.safari_product_paths(
+                    portable, mode, "consumer")[1])], inputs)
+
+    def test_generated_safari_init_script_configures_real_source_inputs(self):
+        gradle = os.environ.get("DYN4K_GRADLE_BIN")
+        root = os.environ.get("DYN4K_SOURCE_PROJECT_ROOT")
+        if (not gradle or not root or not os.environ.get("JAVA_HOME")
+                or not os.environ.get("ANDROID_HOME")):
+            self.skipTest("task-owned source copy and offline Gradle toolchain are required")
+        source = self.root / "source"
+        shutil.copytree(Path(root), source,
+                        ignore=shutil.ignore_patterns("build", ".gradle"))
+        probe = self.root / "source-input.init.gradle"
+        probe.write_text(
+            "gradle.projectsEvaluated {\n"
+            "  ['dyn4k-core', 'dyn4k'].each { name ->\n"
+            "    def project = gradle.rootProject.project(':' + name)\n"
+            "    def task = project.tasks.named('jsBrowserTest').get()\n"
+            "    println('DYN4K_SOURCE_INPUT=' + name + '=' +\n"
+            "      task.inputFileProperty.get().asFile.absolutePath)\n"
+            "  }\n"
+            "}\n")
+        environment = os.environ.copy()
+        environment["TMPDIR"] = str(self.root)
+        environment["JAVA_TOOL_OPTIONS"] = (
+            environment.get("JAVA_TOOL_OPTIONS", "") +
+            f" -Djava.io.tmpdir={self.root}").strip()
+        for mode in full_hosted.CONFIGS["jsSafari"]:
+            with self.subTest(mode=mode):
+                init = self.root / f"source-{mode}.init.gradle"
+                init.write_text(full_hosted.init_script("jsSafari", mode))
+                command = [gradle, "--offline", "--no-daemon", "--console=plain",
+                           "-p", str(source), "--init-script", str(init),
+                           "--init-script", str(probe)]
+                if mode == "production":
+                    command.append("-PqualificationProduction=true")
+                result = subprocess.run([*command, "help", "--dry-run"],
+                                        cwd=source, env=environment, capture_output=True,
+                                        text=True, timeout=180)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                inputs = [line.removeprefix("DYN4K_SOURCE_INPUT=")
+                          for line in result.stdout.splitlines()
+                          if line.startswith("DYN4K_SOURCE_INPUT=")]
+                self.assertEqual([
+                    f"{module}={full_hosted.safari_product_paths(source / module, mode, module)[1]}"
+                    for module in qualify.MODULES], inputs)
+
     def test_committed_manifest_bytes_reject_source_drift(self):
         file = self.root / "tools/qualification/full-common-corpus.json"
         file.parent.mkdir(parents=True)
@@ -2426,6 +2515,50 @@ class FullHostedTests(unittest.TestCase):
                         full_hosted.verify_transport_archive(
                             archive, changed["candidate_sha"], "jsSafari",
                             candidate_repository=self.candidate_repository)
+
+    def test_public_safari_directory_and_tar_reject_old_doubled_consumer_init(self):
+        receipt, manifest, consumer = self.full_archive("jsSafari")
+        self.assertEqual(72, len(self.safari_diagnostic_rows()))
+        full_hosted.verify_raw_files(self.root, receipt, manifest, consumer,
+                                     candidate_repository=self.candidate_repository)
+        archive = self.root.parent / (self.root.name + "-doubled-consumer-init.tar")
+        self.addCleanup(archive.unlink, missing_ok=True)
+        (self.root / "receipt.json").write_text(json.dumps(receipt))
+        full_hosted.package_archive(self.root, archive)
+        with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+            full_hosted.verify_transport_archive(
+                archive, receipt["candidate_sha"], "jsSafari",
+                candidate_repository=self.candidate_repository)
+        for mode in full_hosted.CONFIGS["jsSafari"]:
+            with self.subTest(mode=mode):
+                script = self.root / mode / "qualification.init.gradle"
+                original = script.read_text()
+                timestamp = script.stat().st_mtime_ns
+                wrong = original.replace(
+                    "          if (project != project.rootProject) {\n"
+                    "            testFileName = project.rootProject.name + '-' + testFileName\n"
+                    "          }\n",
+                    "          testFileName = project.rootProject.name + '-' + testFileName\n")
+                self.assertNotEqual(original, wrong)
+                try:
+                    script.write_text(wrong)
+                    os.utime(script, ns=(timestamp, timestamp))
+                    changed = json.loads(json.dumps(receipt))
+                    changed["files"] = full_hosted.archive_inventory(self.root)
+                    with self.assertRaisesRegex(ValueError, "source test task script differs"):
+                        full_hosted.verify_raw_files(
+                            self.root, changed, manifest, consumer,
+                            candidate_repository=self.candidate_repository)
+                    (self.root / "receipt.json").write_text(json.dumps(changed))
+                    full_hosted.package_archive(self.root, archive)
+                    with mock.patch.object(full_hosted, "load_corpus", return_value=manifest):
+                        with self.assertRaisesRegex(ValueError, "source test task script differs"):
+                            full_hosted.verify_transport_archive(
+                                archive, changed["candidate_sha"], "jsSafari",
+                                candidate_repository=self.candidate_repository)
+                finally:
+                    script.write_text(original)
+                    os.utime(script, ns=(timestamp, timestamp))
 
     def test_public_safari_pass_rejects_failed_source_xml_diagnostics(self):
         receipt, manifest, consumer = self.full_archive("jsSafari")
