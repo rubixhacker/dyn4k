@@ -12,6 +12,7 @@ import compare
 
 
 ROOT = Path(__file__).resolve().parents[3]
+CURRENT_SOURCE = object()
 STAGED = ROOT / "build/staging-repository/io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1"
 ARTIFACT = STAGED / "dyn4k-core-jvm-0.1.0-alpha.1.jar"
 RECEIPT_FIELDS = {
@@ -30,8 +31,35 @@ def run(*args):
     return subprocess.run(args, cwd=ROOT, check=True, capture_output=True).stdout
 
 
-def source_hash():
-    return sha256(run("git", "archive", "--format=tar", "HEAD"))
+def validate_source_commit(commit):
+    if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise compare.Rejected("source revision")
+    try:
+        kind = run("git", "cat-file", "-t", commit).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise compare.Rejected("source revision unavailable") from error
+    if kind != b"commit":
+        raise compare.Rejected("source revision is not a commit")
+    return commit
+
+
+def source_hash(commit=CURRENT_SOURCE):
+    try:
+        head = run("git", "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise compare.Rejected("source revision unavailable") from error
+    validate_source_commit(head)
+    if commit is CURRENT_SOURCE:
+        commit = head
+    else:
+        validate_source_commit(commit)
+        if commit != head:
+            raise compare.Rejected("source revision is not HEAD")
+    try:
+        archive = run("git", "-c", "core.autocrlf=false", "archive", "--format=tar", commit)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise compare.Rejected("source archive unavailable") from error
+    return sha256(archive)
 
 
 def build_config_hash():
@@ -109,7 +137,7 @@ def seal(args, fixture, counts):
     commit = clean_commit()
     receipt = {
         "fixture_key": args.fixture,
-        "source_sha256": source_hash(),
+        "source_sha256": source_hash(commit),
         "source_hash_method": "SHA-256 of git archive --format=tar HEAD",
         "artifact_sha256": sha256(ARTIFACT.read_bytes()),
         "artifact_path": str(ARTIFACT.relative_to(ROOT)),
@@ -141,7 +169,7 @@ def verify(args, fixture, counts):
         raise compare.Rejected("source hash method differs")
     if receipt["candidate_commit"] != clean_commit():
         raise compare.Rejected("receipt commit is stale")
-    if receipt["source_sha256"] != source_hash():
+    if receipt["source_sha256"] != source_hash(receipt["candidate_commit"]):
         raise compare.Rejected("receipt source hash is stale")
     if receipt["artifact_path"] != str(ARTIFACT.relative_to(ROOT)) or not ARTIFACT.is_file():
         raise compare.Rejected("receipt artifact path differs")

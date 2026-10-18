@@ -372,12 +372,17 @@ def recorder_sources(fixture):
 
 
 def source_archive(commit):
-    require(re.fullmatch(r"[0-9a-f]{40}", commit) is not None, "source revision")
-    process = subprocess.Popen(["git", "archive", "--format=tar", commit], stdout=subprocess.PIPE)
+    receipt.validate_source_commit(commit)
     digest = hashlib.sha256()
-    for block in iter(lambda: process.stdout.read(1024 * 1024), b""):
-        digest.update(block)
-    require(process.wait() == 0, "source archive unavailable")
+    try:
+        with subprocess.Popen(["git", "-c", "core.autocrlf=false", "archive",
+                               "--format=tar", commit], cwd=receipt.ROOT,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+            for block in iter(lambda: process.stdout.read(1024 * 1024), b""):
+                digest.update(block)
+            require(process.wait() == 0, "source archive unavailable")
+    except OSError as error:
+        raise compare.Rejected("source archive unavailable") from error
     return digest.hexdigest()
 
 

@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,42 @@ import receipt
 TRACE = Path("/tmp/dyn4k-root-world-configured-f9920e9/baseline-trace/"
              "Q-sleep-wake-outer30-repeat1-0.jsonl.gz")
 ZERO_PROBE = Path("/tmp/dyn4k-root-exact-zero-probe")
+HISTORICAL_SOURCE = "f5053629d68dc134092434310c3d130ee1c0d9b5"
+HISTORICAL_CANONICAL_SHA256 = "ad492f782d450e425baf0ce5b41222577443bfa400ca59a2880e44f3a22b6509"
+
+
+class CanonicalHistoricalSourceTest(unittest.TestCase):
+    def test_historical_source_archive_is_canonical_across_git_configs(self):
+        raw = {}
+        for autocrlf in ("false", "true"):
+            environment = dict(os.environ, GIT_CONFIG_COUNT="1",
+                               GIT_CONFIG_KEY_0="core.autocrlf",
+                               GIT_CONFIG_VALUE_0=autocrlf)
+            archive = subprocess.run(["git", "archive", "--format=tar", HISTORICAL_SOURCE],
+                                     cwd=receipt.ROOT, env=environment,
+                                     capture_output=True, check=True).stdout
+            raw[autocrlf] = hashlib.sha256(archive).hexdigest()
+            with self.subTest(autocrlf=autocrlf), patch.dict(os.environ, environment):
+                self.assertEqual(exact.source_archive(HISTORICAL_SOURCE),
+                                 HISTORICAL_CANONICAL_SHA256)
+        self.assertEqual(raw["false"], HISTORICAL_CANONICAL_SHA256)
+        self.assertNotEqual(raw["true"], HISTORICAL_CANONICAL_SHA256)
+        with self.assertRaisesRegex(compare.Rejected, "identity"):
+            exact.verify_binding({"source_archive_sha256": raw["true"]},
+                                 {"source_archive_sha256": HISTORICAL_CANONICAL_SHA256})
+
+    def test_historical_source_rejects_invalid_missing_or_noncommit_revision(self):
+        tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=receipt.ROOT,
+                              capture_output=True, check=True, text=True).stdout.strip()
+        for revision in ("HEAD", None, "f" * 40, tree):
+            with self.subTest(revision=revision), self.assertRaises(compare.Rejected):
+                exact.source_archive(revision)
+
+    def test_historical_archive_command_failure_is_rejected(self):
+        with patch.object(receipt, "validate_source_commit", return_value=HISTORICAL_SOURCE), \
+             patch.object(exact.subprocess, "Popen", side_effect=OSError("git unavailable")), \
+             self.assertRaisesRegex(compare.Rejected, "source archive unavailable"):
+            exact.source_archive(HISTORICAL_SOURCE)
 
 
 @unittest.skipUnless(TRACE.is_file(), "approved configured baseline trace unavailable")

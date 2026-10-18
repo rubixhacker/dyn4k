@@ -1,8 +1,10 @@
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -17,6 +19,70 @@ import sleep_physical
 
 
 TOOL = Path(__file__).with_name("receipt.py")
+
+
+class CanonicalCurrentSourceTest(unittest.TestCase):
+    @staticmethod
+    def archive_hash(commit, autocrlf):
+        environment = dict(os.environ, GIT_CONFIG_COUNT="1",
+                           GIT_CONFIG_KEY_0="core.autocrlf",
+                           GIT_CONFIG_VALUE_0=autocrlf)
+        archive = subprocess.run(["git", "archive", "--format=tar", commit],
+                                 cwd=receipt.ROOT, env=environment,
+                                 capture_output=True, check=True).stdout
+        return receipt.sha256(archive)
+
+    def test_current_source_hash_is_canonical_across_git_configs(self):
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=receipt.ROOT,
+                                capture_output=True, check=True, text=True).stdout.strip()
+        canonical = self.archive_hash(commit, "false")
+        raw_windows = self.archive_hash(commit, "true")
+        self.assertNotEqual(canonical, raw_windows)
+        for autocrlf in ("false", "true"):
+            environment = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                           "GIT_CONFIG_VALUE_0": autocrlf}
+            with self.subTest(autocrlf=autocrlf), patch.dict(os.environ, environment):
+                self.assertEqual(receipt.source_hash(), canonical)
+                self.assertEqual(receipt.source_hash(commit), canonical)
+                self.assertNotEqual(receipt.source_hash(commit), raw_windows)
+
+    def test_current_source_rejects_invalid_or_noncommit_revision(self):
+        tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=receipt.ROOT,
+                              capture_output=True, check=True, text=True).stdout.strip()
+        for revision in ("HEAD", None, "f" * 40, tree,
+                         "f5053629d68dc134092434310c3d130ee1c0d9b5"):
+            with self.subTest(revision=revision), self.assertRaises(compare.Rejected):
+                receipt.source_hash(revision)
+
+    def test_receipt_rejects_raw_windows_source_hash(self):
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=receipt.ROOT,
+                                capture_output=True, check=True, text=True).stdout.strip()
+        stale = dict.fromkeys(receipt.RECEIPT_FIELDS, "unused")
+        stale.update(fixture_key="tiny", candidate_commit=commit,
+                     source_hash_method="SHA-256 of git archive --format=tar HEAD",
+                     source_sha256=self.archive_hash(commit, "true"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(json.dumps(stale))
+            args = types.SimpleNamespace(receipt=path, fixture="tiny")
+            environment = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                           "GIT_CONFIG_VALUE_0": "true"}
+            with patch.dict(os.environ, environment), \
+                 patch.object(receipt, "clean_commit", return_value=commit), \
+                 self.assertRaisesRegex(compare.Rejected, "source hash is stale"):
+                receipt.verify(args, {"counts": {}}, {})
+
+    def test_current_source_archive_command_failure_is_rejected(self):
+        original = receipt.run
+
+        def failed_archive(*args):
+            if "archive" in args:
+                raise subprocess.CalledProcessError(1, args)
+            return original(*args)
+
+        with patch.object(receipt, "run", side_effect=failed_archive), \
+             self.assertRaisesRegex(compare.Rejected, "source archive unavailable"):
+            receipt.source_hash()
 
 
 class ReceiptConsumerTest(unittest.TestCase):
