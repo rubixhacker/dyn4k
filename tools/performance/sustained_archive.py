@@ -136,6 +136,7 @@ def approved_gate(policy):
                 all(any("{" + name + "}" in part for part in prefix)
                     for name in ("harness", "adapter")) and
                 (row_id != "jvm.java" or
+                 harness.get("sidecar_protocol") in ("jvm-v2", "legacy-v1") and
                  "-cp" in prefix and all(any("{" + name + "}" in part for part in prefix)
                     for name in ("baseline", "core", "kotlin"))),
                 f"unpassed policy: approved harness or fixture differs: {row_id}")
@@ -827,8 +828,12 @@ def validate_v2_sidecars(root, item, scenario, source_commit, fixture_sha256,
                      row["buffer_pool_used_bytes"] >= 0),
                     "version 2 memory attribution or collection proof differs")
             if row["phase"] == "warmup":
-                require(row["clock_ns"] >= int(warm_clock[row["step"]]["end_ns"]) and
-                        row["clock_ns"] >= allocation[1 + row["step"]]["clock_ns"],
+                step = row["step"]
+                next_begin = (warm_clock[step + 1]["begin_ns"] if step + 1 < len(warm_clock)
+                              else measured_clock[0]["begin_ns"])
+                require(row["clock_ns"] >= int(warm_clock[step]["end_ns"]) and
+                        row["clock_ns"] >= allocation[1 + step]["clock_ns"] and
+                        row["clock_ns"] < int(next_begin),
                         "version 2 warm-up memory clock differs")
             if row["phase"] == "measure":
                 step = row["step"]
@@ -890,6 +895,7 @@ def capture_key(item):
 
 def verify_capture(root, item, scenarios, references, artifact_hashes, policy, index):
     row_id = item["row_id"]
+    jvm_v2 = approved_gate(policy)["harnesses"][row_id].get("sidecar_protocol") == "jvm-v2"
     scenario = scenarios[item["scenario_id"]]
     reference = references[row_id]
     require(item["status"] == "complete" and type(item.get("exit_code")) is int and
@@ -983,10 +989,14 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
         validate_process_clock(root, item, warm_clock_rows, None,
                                image_receipt["observed_ns"])
         rows = csv_rows(raw, PLATEAU_FIELDS)
-        validate_v2_sidecars(root, item, scenario, item["source_commit"],
-                             approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
-                             checked_file(root, item, "provider_path", "provider_sha256"),
-                             warm_clock_rows, None, rows, markers)
+        audit = validate_v2_sidecars(root, item, scenario, item["source_commit"],
+                                     approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+                                     checked_file(root, item, "provider_path", "provider_sha256"),
+                                     warm_clock_rows, None, rows, markers)
+        if jvm_v2:
+            require(audit is not None, "version 2 process sidecars are required by approved JVM harness")
+            require(audit["qualification"] == "passed",
+                    "version 2 plateau attribution is unqualified")
         validate_plateau(rows, policy["sustained"]["create_use_dispose_cycles"])
         return rows, markers
     if item["kind"] == "report":
@@ -999,10 +1009,15 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     validate_clock(clock_rows, rows, hz, duration)
     validate_process_clock(root, item, warm_clock_rows, clock_rows,
                            image_receipt["observed_ns"])
-    validate_v2_sidecars(root, item, scenario, item["source_commit"],
-                         approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
-                         checked_file(root, item, "provider_path", "provider_sha256"),
-                         warm_clock_rows, clock_rows, rows, markers)
+    audit = validate_v2_sidecars(root, item, scenario, item["source_commit"],
+                                 approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+                                 checked_file(root, item, "provider_path", "provider_sha256"),
+                                 warm_clock_rows, clock_rows, rows, markers)
+    if jvm_v2 and mode in ("allocation", "memory"):
+        require(audit is not None, "version 2 process sidecars are required by approved JVM harness")
+        if mode == "memory":
+            require(audit["qualification"] == "passed",
+                    "version 2 memory attribution is unqualified")
     if "resource_path" in item or "run_path" in item:
         require("resource_path" in item and "run_path" in item,
                 "versioned resource or run sidecar is partial")

@@ -112,6 +112,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
             "harnesses": {row_id: {"sha256": sha256(harness),
                                    "adapter_sha256": sha256(adapter),
                                    "fixture_sha256": fixture_sha,
+                                   "sidecar_protocol": "legacy-v1",
                                    "environment": {},
                                    "command_prefix": ["{runtime}", "-Xmx256m", "-cp",
                                                       "{harness}:{adapter}:{baseline}:{core}:{kotlin}",
@@ -414,7 +415,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         item["clock_sha256"] = sha256(clock)
         item["summary"] = step_summary(rows, "timing", 30)
 
-    def test_complete_synthetic_raw_archive_passes_protocol(self):
+    def test_complete_synthetic_legacy_v1_archive_passes_explicit_test_policy(self):
         result = self.verify()
         self.assertEqual("passed", result["qualification"])
         self.assertEqual(27, result["measurements"])
@@ -427,11 +428,22 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertEqual(18, sum(item["kind"] == "noise_interval" for item in records))
         self.assertTrue(any(item["kind"] == "budget_interval" for item in records))
 
-    def test_public_verify_accepts_complete_signed_archive_with_full_intervals(self):
+    def test_public_verify_accepts_synthetic_legacy_v1_with_full_intervals(self):
         status, result = self.cli_verify(fast=False)
         self.assertEqual(0, status)
         self.assertEqual("passed", result["qualification"])
         self.assertEqual(18, result["noise_intervals"])
+
+    def test_public_signed_legacy_v1_archive_cannot_pass_approved_v2_harness(self):
+        root, index_path, index = self.changed_archive("v2-approved-v1-only")
+        policy = copy.deepcopy(self.policy)
+        policy["sustained_gate"]["harnesses"]["jvm.java"]["sidecar_protocol"] = "jvm-v2"
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertNotEqual(0, status, result)
+        self.assertEqual("unpassed", result["qualification"])
+        self.assertIn("version 2 process sidecars", result["reason"])
 
     def test_public_verify_checks_optional_versioned_host_resource_and_run_sidecars(self):
         root, index_path, index = self.changed_archive("versioned-sidecars")

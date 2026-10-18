@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import shutil
@@ -136,6 +137,22 @@ class SignedV2ArchivePublicTest(unittest.TestCase):
             status, result = self.verify(archive)
             self.assertNotEqual(0, status)
             self.assertIn("duplicate", result["reason"])
+
+    def test_resigned_warmup_memory_observation_after_next_step_begins_fails(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as folder:
+            archive, index = self.copy("memory", folder)
+            record = index["captures"][0]
+            with (archive / record["warmup_clock_path"]).open() as stream:
+                clocks = list(csv.DictReader(stream))
+            path = archive / record["memory_v2_path"]
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            rows[2 + 3]["clock_ns"] = int(clocks[4]["begin_ns"])
+            self.assertLess(rows[2 + 3]["clock_ns"], rows[2 + 4]["clock_ns"])
+            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            self.reseal(archive, index, "memory_v2")
+            status, result = self.verify(archive)
+            self.assertNotEqual(0, status, result)
+            self.assertIn("version 2 warm-up memory clock", result["reason"])
 
 
 if __name__ == "__main__":
