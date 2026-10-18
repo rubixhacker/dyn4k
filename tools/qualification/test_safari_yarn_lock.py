@@ -143,6 +143,104 @@ class SafariYarnLockTests(unittest.TestCase):
             return safari_yarn_lock.capture(self.repository, self.candidate,
                                             self.output, "development")
 
+    def commit_real_lock_wrapper(self, detached_child):
+        names = ("dyn4k-dyn4k-core", "dyn4k-dyn4k-core-test",
+                 "dyn4k-dyn4k", "dyn4k-dyn4k-test")
+        child = ("child=subprocess.Popen([sys.executable,'-c',"
+                 "'import time; time.sleep(30)'],stdout=subprocess.DEVNULL,"
+                 "stderr=subprocess.DEVNULL)\n"
+                 "print('detached_child_pid',child.pid,flush=True)\n") if detached_child else ""
+        wrapper = (
+            "#!/usr/bin/env python3\n"
+            "import json,subprocess,sys\n"
+            "from pathlib import Path\n"
+            "build=Path.cwd()/'build/js'\n"
+            "build.mkdir(parents=True,exist_ok=True)\n"
+            "(build/'yarn.lock').write_bytes(b'host generated lock\\n')\n"
+            f"names={names!r}\n"
+            "(build/'package.json').write_text(json.dumps({'name':'dyn4k',"
+            "'workspaces':['packages/'+n for n in names]})+'\\n')\n"
+            "for name in names:\n"
+            "  path=build/'packages'/name/'package.json'\n"
+            "  path.parent.mkdir(parents=True,exist_ok=True)\n"
+            "  value={'name':name}\n"
+            "  if name.endswith('-test'): value['devDependencies']="
+            "{'karma-safari-launcher':'1.0.0'}\n"
+            "  path.write_text(json.dumps(value)+'\\n')\n"
+            + child +
+            "print('> Task :dyn4k-core:jsTestPackageJson',flush=True)\n"
+            "print('> Task :dyn4k:jsTestPackageJson',flush=True)\n"
+            "print('> Task :kotlinNpmInstall',flush=True)\n"
+            "print('> Task :kotlinStoreYarnLock FAILED',flush=True)\n"
+            f"sys.stderr.write({LOCK_FAILURE!r});sys.stderr.flush()\n"
+            "sys.exit(1)\n"
+        )
+        (self.repository / "gradlew").write_text(wrapper)
+        (self.repository / "gradlew").chmod(0o755)
+        subprocess.run(["git", "-C", str(self.repository), "add", "gradlew"], check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "real lock wrapper fixture"], check=True)
+        self.candidate = git_oid(self.repository, "HEAD")
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group required")
+    def test_public_real_hosted_lock_mismatch_rejects_detached_closed_pipe_child(self):
+        self.commit_real_lock_wrapper(detached_child=True)
+
+        def stop_child():
+            stdout = self.output / "stdout.txt"
+            if stdout.is_file():
+                match = re.search(r"(?m)^detached_child_pid (\d+)$", stdout.read_text())
+                if match:
+                    try:
+                        os.kill(int(match.group(1)), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+        self.addCleanup(stop_child)
+        receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                           self.output, "development")
+        self.assertEqual(safari_yarn_lock.full_hosted_command(
+            self.repository, self.output / "development/qualification.init.gradle",
+            "development", receipt["invocation_id"]), receipt["process"]["command"])
+        self.assertEqual(1, receipt["process"]["exit_code"])
+        self.assertTrue(receipt["process"]["stream_incomplete"])
+        self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+        with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group required")
+    def test_public_real_hosted_lock_mismatch_accepts_child_free_process(self):
+        self.commit_real_lock_wrapper(detached_child=False)
+        receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                           self.output, "development")
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
+        self.assertFalse(receipt["process"]["stream_incomplete"])
+        self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", safari_yarn_lock.audit_capture(
+            self.repository, self.candidate, self.output)["status"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group required")
+    def test_public_group_probe_error_records_failed_capture(self):
+        self.commit_real_lock_wrapper(detached_child=False)
+        real_killpg = os.killpg
+
+        def fail_probe(pid, sent_signal):
+            if sent_signal == 0:
+                raise PermissionError("injected group probe failure")
+            return real_killpg(pid, sent_signal)
+
+        with mock.patch.object(safari_yarn_lock.os, "killpg", side_effect=fail_probe):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("PROCESS_CAPTURE_FAILED", receipt["status"])
+        self.assertFalse(receipt["qualified"])
+        self.assertEqual("CLEAN", receipt["reporter_stage"]["status"])
+        with self.assertRaisesRegex(ValueError, "hosted diagnostic identity differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
     def test_failed_lock_task_captures_exact_different_bytes_and_inputs(self):
         def failure(*args):
             self.generated()

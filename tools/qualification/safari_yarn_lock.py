@@ -606,6 +606,12 @@ def _run_lock_task_posix(repository, command, stdout, stderr):
                                stderr=subprocess.PIPE, start_new_session=True)
     try:
         result = _drain_lock_task_posix(process, command, stdout, stderr, started)
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            result["stream_incomplete"] = True
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
