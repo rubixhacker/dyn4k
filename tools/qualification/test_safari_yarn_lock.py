@@ -1,8 +1,12 @@
 import json
+import hashlib
+import io
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -31,11 +35,17 @@ class SafariYarnLockTests(unittest.TestCase):
         (self.repository / "kotlin-js-store").mkdir()
         (self.repository / "kotlin-js-store/yarn.lock").write_bytes(b"tracked lock\n")
         (self.repository / "gradlew").write_text("#!/bin/sh\n")
+        (self.repository / ".gitignore").write_text("build/\n")
         (self.repository / "build.gradle.kts").write_text("plugins {}\n")
         (self.repository / "settings.gradle.kts").write_text('rootProject.name = "dyn4k"\n')
         (self.repository / "gradle/wrapper").mkdir(parents=True)
         (self.repository / "gradle/wrapper/gradle-wrapper.properties").write_text(
             "distributionUrl=gradle-9.5-bin.zip\n")
+        (self.repository / "tools/qualification").mkdir(parents=True)
+        (self.repository / "tools/qualification/full_hosted.py").write_text("# hosted source\n")
+        for module in ("dyn4k-core", "dyn4k"):
+            (self.repository / module).mkdir()
+            (self.repository / module / "build.gradle.kts").write_text("plugins {}\n")
         subprocess.run(["git", "init", "-q", str(self.repository)], check=True)
         subprocess.run(["git", "-C", str(self.repository), "add", "."], check=True)
         subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
@@ -45,7 +55,7 @@ class SafariYarnLockTests(unittest.TestCase):
             ["git", "-C", str(self.repository), "rev-parse", "HEAD"], text=True).strip()
         self.output = self.root / "capture"
 
-    def generated(self, data=b"host generated lock\n"):
+    def generated(self, data=b"host generated lock\n", safari=False):
         path = self.repository / "build/js/yarn.lock"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -57,13 +67,35 @@ class SafariYarnLockTests(unittest.TestCase):
         for name in names:
             module = path.parent / "packages" / name / "package.json"
             module.parent.mkdir(parents=True)
-            module.write_text(json.dumps({"name": name}) + "\n")
+            value = {"name": name}
+            if safari and name.endswith("-test"):
+                value["devDependencies"] = {"karma-safari-launcher": "1.0.0"}
+            module.write_text(json.dumps(value) + "\n")
 
     def write_logs(self, output=None, stderr=LOCK_FAILURE):
         folder = output or self.output
         folder.mkdir(exist_ok=True)
-        (folder / "stdout.txt").write_text("> Task :kotlinStoreYarnLock FAILED\n")
+        (folder / "stdout.txt").write_text(
+            "> Task :dyn4k-core:jsTestPackageJson\n"
+            "> Task :dyn4k:jsTestPackageJson\n"
+            "> Task :kotlinNpmInstall\n"
+            "> Task :kotlinStoreYarnLock FAILED\n")
         (folder / "stderr.txt").write_text(stderr)
+
+    def hosted_capture(self):
+        def failure(repository, output, command):
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2,
+                    "stdout_bytes_seen": (output / "stdout.txt").stat().st_size,
+                    "stderr_bytes_seen": (output / "stderr.txt").stat().st_size,
+                    "stdout_truncated": False, "stderr_truncated": False,
+                    "timed_out": False, "stream_incomplete": False}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            return safari_yarn_lock.capture(self.repository, self.candidate,
+                                            self.output, "development")
 
     def test_failed_lock_task_captures_exact_different_bytes_and_inputs(self):
         def failure(*args):
@@ -377,6 +409,140 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("INCOMPLETE_LOG_CAPTURE", receipt["status"])
         self.assertFalse(receipt["qualified"])
 
+    def test_full_hosted_development_uses_exact_safari_source_command(self):
+        def failure(repository, output, command):
+            self.assertEqual([str(repository / "gradlew"), "--no-daemon", "--console=plain",
+                              "--rerun-tasks", "--init-script",
+                              str(output / "development/qualification.init.gradle"),
+                              ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest",
+                              f"-PqualificationInvocationId={command[-1].split('=')[1]}"], command)
+            script = (output / "development/qualification.init.gradle").read_bytes()
+            self.assertEqual("6a0057de491e563866306c0eae7d2baf9c6f1e70ec52497120e6d563b04b3eec",
+                             hashlib.sha256(script).hexdigest())
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
+        self.assertEqual("development", receipt["configuration"])
+        self.assertFalse(receipt["qualified"])
+        self.assertIn("development/qualification.init.gradle",
+                      [item["path"] for item in receipt["files"]])
+
+    def test_full_hosted_production_uses_exact_flag_and_script(self):
+        def failure(repository, output, command):
+            self.assertEqual("-PqualificationProduction=true", command[-1])
+            self.assertEqual("eeaa1019f7b65efcfe2435f92425b2453bec947794a1db7090fcd8fa09479794",
+                             hashlib.sha256((output / "production/qualification.init.gradle").read_bytes()).hexdigest())
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=failure):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "production")
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
+
+    def test_full_hosted_wrong_command_or_process_is_rejected(self):
+        def wrong(repository, output, command):
+            self.generated(safari=True)
+            self.write_logs()
+            return {"command": [str(repository / "gradlew"), ":kotlinStoreYarnLock"],
+                    "pid": 123, "exit_code": 1, "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=wrong):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("PROCESS_BINDING_REJECTED", receipt["status"])
+
+    def test_full_hosted_chrome_only_graph_cannot_match_safari(self):
+        def chrome(repository, output, command):
+            self.generated()
+            self.write_logs()
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=chrome):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("INCOMPLETE_PACKAGE_GRAPH", receipt["status"])
+
+    def test_full_hosted_changed_init_script_is_rejected(self):
+        def changed(repository, output, command):
+            self.generated(safari=True)
+            self.write_logs()
+            (output / "development/qualification.init.gradle").write_text("// changed\n")
+            return {"command": command, "pid": 123, "exit_code": 1,
+                    "started_ns": 1, "finished_ns": 2}
+
+        with mock.patch.object(safari_yarn_lock, "run_lock_task", side_effect=changed):
+            receipt = safari_yarn_lock.capture(self.repository, self.candidate,
+                                               self.output, "development")
+        self.assertEqual("CAPTURE_REJECTED", receipt["status"])
+
+    def test_full_hosted_wrong_candidate_never_starts_process(self):
+        with mock.patch.object(safari_yarn_lock, "run_lock_task") as runner:
+            with self.assertRaisesRegex(ValueError, "candidate SHA"):
+                safari_yarn_lock.capture(self.repository, "a" * 40,
+                                         self.output, "development")
+            runner.assert_not_called()
+
+    def test_full_hosted_public_audit_binds_command_candidate_process_and_raw_bytes(self):
+        receipt = self.hosted_capture()
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", receipt["status"])
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", safari_yarn_lock.audit_capture(
+            self.repository, self.candidate, self.output)["status"])
+        for mutation in ("candidate", "command", "process", "raw"):
+            with self.subTest(mutation=mutation):
+                saved = (self.output / "receipt.json").read_bytes()
+                raw = self.output / "generated/build/js/yarn.lock"
+                raw_saved = raw.read_bytes()
+                record = json.loads(saved)
+                if mutation == "candidate":
+                    record["candidate_sha"] = "a" * 40
+                elif mutation == "command":
+                    record["process"]["command"].remove("--init-script")
+                elif mutation == "process":
+                    record["process"]["pid"] = 0
+                else:
+                    raw.write_bytes(b"tampered lock\n")
+                (self.output / "receipt.json").write_text(json.dumps(record) + "\n")
+                with self.assertRaises(ValueError):
+                    safari_yarn_lock.audit_capture(self.repository, self.candidate,
+                                                   self.output)
+                (self.output / "receipt.json").write_bytes(saved)
+                raw.write_bytes(raw_saved)
+
+    def test_full_hosted_public_audit_rejects_resealed_chrome_only_package(self):
+        self.hosted_capture()
+        path = self.output / "generated/build/js/packages/dyn4k-dyn4k-core-test/package.json"
+        package = json.loads(path.read_text())
+        del package["devDependencies"]["karma-safari-launcher"]
+        path.write_text(json.dumps(package) + "\n")
+        receipt_path = self.output / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        member = next(item for item in receipt["files"] if item["path"] ==
+                      "generated/build/js/packages/dyn4k-dyn4k-core-test/package.json")
+        member["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        member["size"] = path.stat().st_size
+        receipt_path.write_text(json.dumps(receipt) + "\n")
+        with self.assertRaisesRegex(ValueError, "Safari package"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_full_hosted_public_cli_audits_capture(self):
+        self.hosted_capture()
+        arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
+                     "--output", str(self.output), "--audit"]
+        with mock.patch.object(safari_yarn_lock, "ROOT", self.repository), \
+                mock.patch.object(sys, "argv", arguments), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(0, safari_yarn_lock.main())
+        self.assertEqual("LOCK_MISMATCH_CAPTURED", json.loads(output.getvalue())["status"])
+
     def test_manual_workflow_has_separate_mac_route_and_uploads_failed_capture(self):
         workflow = (Path(__file__).resolve().parents[2] /
                     ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
@@ -384,6 +550,9 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertIn("runs-on: macos-26", workflow)
         self.assertIn("java-version: '21'", workflow)
         self.assertIn("ref: ${{ inputs.candidate_sha }}", workflow)
+        self.assertIn('--configuration "${{ inputs.configuration }}"', workflow)
+        self.assertIn("--audit", workflow)
+        self.assertIn("${{ github.run_id }}-${{ github.run_attempt }}", workflow)
         self.assertIn("if: always()", workflow)
         self.assertIn("tools/qualification/safari_yarn_lock.py", workflow)
         self.assertNotIn("kotlinUpgradeYarnLock", workflow)
