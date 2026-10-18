@@ -96,6 +96,7 @@ P2_CANONICAL_ARCHIVE_OWNER_REVISION = "606e6734613fc90677d3c30cabbf01c6a2e17ae4"
 P2_CANONICAL_ARCHIVE_ASSEMBLY_REVISION = "48638f5acca9bf97532ce575809cf5e8472c93f7"
 P2_ORIGINAL_OBJECT_OWNER_REVISION = "081b7c0be3bf92ffee28668538e61e2fade24081"
 P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION = "8163c24141e49fea7570ffd139fc9a3ad6aca077"
+P2_CURRENT_ASSEMBLY_REVISION = "24726f1f9e5c6c5cdad8dff3ea4e932265edd1c4"
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
     "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
@@ -103,6 +104,11 @@ APPROVED_P2_PRODUCERS = {
     "rotation_oracle.py": "a95e4fba5883728dfe936c752daacd5a1fe0bb484dff4b14ddc9935b4a322ac6",
     "run.py": "fd584dee2d88f60d5e3c8abd4b8d040c70365a9024d690d0ba307e039addd233",
 }
+APPROVED_P2_CURRENT_PRODUCERS = {
+    **APPROVED_P2_PRODUCERS,
+    "baseline_capture.py": "0d61d0f942b6f0f977b028f47df183bcbd2f2d25add9300a787a30535f917847",
+}
+APPROVED_P2_LOCAL_PRODUCERS = dict(APPROVED_P2_CURRENT_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -416,7 +422,9 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
-    if descends_from(P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION):
+    if descends_from(P2_CURRENT_ASSEMBLY_REVISION):
+        approved = APPROVED_P2_CURRENT_PRODUCERS
+    elif descends_from(P2_ORIGINAL_OBJECT_ASSEMBLY_REVISION):
         approved = APPROVED_P2_PRODUCERS
     elif descends_from(P2_ORIGINAL_OBJECT_OWNER_REVISION):
         approved = APPROVED_P2_ORIGINAL_OBJECT_OWNER_PRODUCERS
@@ -432,7 +440,7 @@ def _p2_producer_binding(repository, candidate_sha):
     else:
         approved = APPROVED_P2_HISTORICAL_PRODUCERS
     source_dir = "tools/numerical/portable"
-    for name, local_approved in APPROVED_P2_PRODUCERS.items():
+    for name, local_approved in APPROVED_P2_LOCAL_PRODUCERS.items():
         relative = f"{source_dir}/{name}"
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(
