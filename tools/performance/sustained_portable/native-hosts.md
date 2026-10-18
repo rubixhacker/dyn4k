@@ -65,7 +65,8 @@ selected commit under home storage. Its four build output directories must
 not exist. Run the traced builder from that checkout with the pinned offline
 toolchain. Keep the trace archive and checkout together. The builder records
 each exact Gradle command, JDK and tracer hash, raw syscall trace, Gradle log,
-engine and producer Kotlin source digests, generated producer identity, fresh
+engine and producer Kotlin source digests, the pinned compiler JAR hash and
+observed reads, generated producer identity, fresh
 and staged KLIB hashes, resolved link inputs, writable temporary executable
 mappings, rename installs, and both executable hashes.
 

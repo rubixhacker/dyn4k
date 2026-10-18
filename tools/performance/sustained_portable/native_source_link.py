@@ -44,6 +44,11 @@ def identity_source(root=ROOT):
     return root / "consumers/performance/portable/build/generated/portableIdentity/commonMain/kotlin/performance/portable/BuildIdentity.kt"
 
 
+def native_compiler_jar():
+    path = Path.home() / ".konan/kotlin-native-prebuilt-linux-x86_64-2.4.20/konan/lib/kotlin-native-compiler-embeddable.jar"
+    return capture.required_file(str(path), "pinned Kotlin Native compiler")
+
+
 def git_value(*arguments):
     return subprocess.check_output(["git", "-C", str(ROOT), *arguments], text=True).strip()
 
@@ -157,6 +162,7 @@ def build(args):
         raise ValueError("select pinned Gradle 9.5.0 and JDK 21")
     sources = source_files()
     producer_sources = consumer_source_files()
+    compiler_jar = native_compiler_jar()
     args.archive.mkdir(parents=True)
     temporary = args.archive / "tmp"
     temporary.mkdir()
@@ -183,7 +189,7 @@ def build(args):
             raise ValueError("fresh compiler KLIB differs from staged KLIB")
         publication[label] = {"compiler_klib": str(output), "staged_klib": str(staged),
                               "sha256": capture.digest(output)}
-    publication_watched = list(sources)
+    publication_watched = list(sources) + [str(compiler_jar)]
     for item in publication.values():
         publication_watched.extend((item["compiler_klib"], item["staged_klib"]))
     publication_events = trace_events(Path(actions["publication"]["trace"]), publication_watched)
@@ -211,7 +217,7 @@ def build(args):
                                    "resolved_klibs": {label: selected[label] for label in LABELS}}
         link_events[build_name] = trace_events(Path(actions[build_name]["trace"]),
             [selected[label]["path"] for label in LABELS] + [str(executable), str(identity)] +
-            list(producer_sources))
+            list(producer_sources) + [str(compiler_jar)])
         link_events[build_name]["executable_install"] = executable_install(
             Path(actions[build_name]["trace"]), str(executable))
     if (source_files() != sources or consumer_source_files() != producer_sources or
@@ -221,6 +227,8 @@ def build(args):
                "source_to_link": "unpassed", "source_sha": git_value("rev-parse", "HEAD"),
                "checkout": str(ROOT), "source_files": sources, "actions": actions,
                "producer_source_files": producer_sources,
+               "compiler_jar": str(compiler_jar),
+               "compiler_jar_sha256": capture.digest(compiler_jar),
                "publication": publication, "inventories": inventories,
                "observed_syscalls": {"publication": publication_events,
                                      "development": link_events["development"],
@@ -240,7 +248,9 @@ def verify_receipt(path, inventory=None, build_name=None):
             receipt.get("checkout") != str(ROOT) or
             receipt.get("source_sha") != git_value("rev-parse", "HEAD") or
             receipt.get("source_files") != source_files() or
-            receipt.get("producer_source_files") != consumer_source_files()):
+            receipt.get("producer_source_files") != consumer_source_files() or
+            receipt.get("compiler_jar") != str(native_compiler_jar()) or
+            receipt.get("compiler_jar_sha256") != capture.digest(native_compiler_jar())):
         raise ValueError("source-link receipt differs from selected checkout source")
     if set(receipt.get("actions", {})) != {"publication", *BUILDS}:
         raise ValueError("source-link receipt lacks exact traced build actions")
@@ -277,7 +287,7 @@ def verify_receipt(path, inventory=None, build_name=None):
               str(ROOT / "consumers/performance/portable")):
             raise ValueError(f"{name} command differs from exact consumer link")
     publication_trace = Path(receipt["actions"]["publication"]["trace"])
-    publication_watched = list(receipt["source_files"])
+    publication_watched = list(receipt["source_files"]) + [receipt["compiler_jar"]]
     for item in receipt["publication"].values():
         publication_watched.extend((item["compiler_klib"], item["staged_klib"]))
     publication_events = trace_events(publication_trace, publication_watched)
@@ -286,6 +296,8 @@ def verify_receipt(path, inventory=None, build_name=None):
     source_reads = set(publication_events["read"]).intersection(receipt["source_files"])
     if set(source_reads) != set(receipt["source_files"]):
         raise ValueError(f"compiler source reads unobserved: {len(receipt['source_files']) - len(source_reads)}")
+    if receipt["compiler_jar"] not in publication_events["read"]:
+        raise ValueError("pinned compiler JAR read unobserved during publication")
     for label in LABELS:
         item = receipt["publication"][label]
         expected_output, expected_stage = artifact_paths(ROOT, label)
@@ -315,13 +327,16 @@ def verify_receipt(path, inventory=None, build_name=None):
         trace = Path(receipt["actions"][mode]["trace"])
         paths = [selected[label]["path"] for label in LABELS]
         expected_sources = set(receipt["producer_source_files"]) | {item["generated_identity"]}
-        events = trace_events(trace, paths + [item["executable"]] + list(expected_sources))
+        events = trace_events(trace, paths + [item["executable"], receipt["compiler_jar"]] +
+                              list(expected_sources))
         events["executable_install"] = executable_install(trace, item["executable"])
         if events != receipt["observed_syscalls"][mode]:
             raise ValueError(f"{mode} syscall observations differ from raw trace")
         reads = events["read"]
         if not expected_sources <= set(reads):
             raise ValueError(f"{mode} producer compiler source reads unobserved")
+        if receipt["compiler_jar"] not in reads:
+            raise ValueError(f"{mode} pinned compiler JAR read unobserved")
         for label in LABELS:
             if (selected[label] != item["resolved_klibs"][label] or
                     selected[label]["sha256"] != receipt["publication"][label]["sha256"] or
