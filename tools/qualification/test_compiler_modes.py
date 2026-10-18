@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -134,7 +135,7 @@ class CompilerModesTest(unittest.TestCase):
                                  output / artifacts["dyn4k"]["path"],
                                  output / "helper-classes"]
                     command = [str(compiler_modes.JDK[runtime] / "bin/java"), "-cp",
-                               ":".join(map(str, classpath)), "PinnedCorpusReport", str(xml),
+                               os.pathsep.join(map(str, classpath)), "PinnedCorpusReport", str(xml),
                                f"example.{module}"]
                     reports.append({"kind": "full-common", "module": module,
                                     "runtime": runtime, "count": 1,
@@ -143,7 +144,7 @@ class CompilerModesTest(unittest.TestCase):
                 xml = output / "xml" / f"original-{runtime}.xml"
                 xml.write_text("one original case\n")
                 command = [str(compiler_modes.JDK[runtime] / "bin/java"), "-cp",
-                           ":".join(map(str, [output / "original-classes",
+                           os.pathsep.join(map(str, [output / "original-classes",
                                                output / artifacts["dyn4k-core"]["path"],
                                                output / "helper-classes"])),
                            "PinnedCorpusReport", str(xml), "example.Original"]
@@ -371,7 +372,7 @@ class CompilerModesTest(unittest.TestCase):
             sources, _ = compiler_modes.original_classes()
             self.assertEqual(199, len(sources))
             argfile = output / "original-sources.args"
-            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources))
+            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources), newline="\n")
             log = output / "logs/compile-originals.log"
             log.parent.mkdir()
             stdout = log.with_suffix(".stdout")
@@ -380,7 +381,7 @@ class CompilerModesTest(unittest.TestCase):
                 path.write_bytes(b"")
             command = [str(compiler_modes.JDK["java8"] / "bin/javac"),
                        "-source", "8", "-target", "8", "-encoding", "UTF-8",
-                       "-cp", str(archive) + ":" + str(dependency), "-d",
+                       "-cp", str(archive) + os.pathsep + str(dependency), "-d",
                        str(output / "original-classes"), "@" + str(argfile)]
             process = {"command": command, "exit_code": 0, "log": str(log),
                        "log_sha256": compiler_modes.digest(log),
@@ -390,11 +391,11 @@ class CompilerModesTest(unittest.TestCase):
                       "source_count": 199}
             self.assertEqual([], compiler_modes.original_compile_evidence_problems(
                 output, record, archive, [dependency]))
-            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources[:-1]))
+            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources[:-1]), newline="\n")
             record["argfile"] = compiler_modes.record_file(output, argfile)
             self.assertTrue(compiler_modes.original_compile_evidence_problems(
                 output, record, archive, [dependency]))
-            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources))
+            argfile.write_text("\n".join('"' + str(path) + '"' for path in sources), newline="\n")
             record["argfile"] = compiler_modes.record_file(output, argfile)
             process["command"][8] = str(output / "wrong.jar")
             self.assertTrue(compiler_modes.original_compile_evidence_problems(
@@ -421,8 +422,8 @@ class CompilerModesTest(unittest.TestCase):
                 [compiler_modes.sys.executable, "-c",
                  "import sys;print('out');print('err', file=sys.stderr)"],
                 log, cwd=output, split_streams=True)
-            self.assertEqual(b"out\n", log.with_suffix(".stdout").read_bytes())
-            self.assertEqual(b"err\n", log.with_suffix(".stderr").read_bytes())
+            self.assertEqual(("out" + os.linesep).encode(), log.with_suffix(".stdout").read_bytes())
+            self.assertEqual(("err" + os.linesep).encode(), log.with_suffix(".stderr").read_bytes())
             self.assertEqual([], compiler_modes.compile_process_problems(
                 process, process["command"], log, split_streams=True))
 
@@ -445,7 +446,7 @@ class CompilerModesTest(unittest.TestCase):
                                "--offline", "--no-daemon", "--max-workers=1",
                                "--rerun-tasks", "--console=plain", "classes"]
             execution_command = [str(compiler_modes.JDK["java8"] / "bin/java"), "-cp",
-                                 ":".join([str(project / "build/classes/kotlin/main"),
+                                 os.pathsep.join([str(project / "build/classes/kotlin/main"),
                                            str(project / "build/classes/java/main"),
                                            str(core), str(facade), str(dependency)]),
                                  "qualification.ConsumerKt"]
@@ -458,6 +459,14 @@ class CompilerModesTest(unittest.TestCase):
                                     "log_sha256": compiler_modes.digest(execution_log)}}
             self.assertEqual([], compiler_modes.jvm_consumer_evidence_problems(
                 output, consumer, artifacts, [dependency]))
+            with patch.object(compiler_modes.os, "pathsep", ";"):
+                consumer["process"]["command"][2] = ";".join(
+                    [str(project / "build/classes/kotlin/main"),
+                     str(project / "build/classes/java/main"),
+                     str(core), str(facade), str(dependency)])
+                self.assertEqual([], compiler_modes.jvm_consumer_evidence_problems(
+                    output, consumer, artifacts, [dependency]))
+            consumer["process"]["command"][2] = execution_command[2]
             consumer["compile"]["command"][-1] = "help"
             self.assertTrue(compiler_modes.jvm_consumer_evidence_problems(
                 output, consumer, artifacts, [dependency]))
@@ -494,12 +503,17 @@ class CompilerModesTest(unittest.TestCase):
             report = {"kind": "full-common", "module": "dyn4k-core", "runtime": "java8",
                       "file": {"path": "xml/dyn4k-core-java8.xml"},
                       "process": {"command": [str(compiler_modes.JDK["java8"] / "bin/java"),
-                                              "-cp", ":".join(map(str, classpath)),
+                                              "-cp", os.pathsep.join(map(str, classpath)),
                                               "PinnedCorpusReport",
                                               str(output / "xml/dyn4k-core-java8.xml"),
                                               "example.Core"]}}
             self.assertEqual([], compiler_modes.jvm_report_command_problems(
                 output, report, manifest, artifacts, [dependency], compiled_tests))
+            with patch.object(compiler_modes.os, "pathsep", ";"):
+                report["process"]["command"][2] = ";".join(map(str, classpath))
+                self.assertEqual([], compiler_modes.jvm_report_command_problems(
+                    output, report, manifest, artifacts, [dependency], compiled_tests))
+            report["process"]["command"][2] = os.pathsep.join(map(str, classpath))
             report["process"]["command"][0] = str(compiler_modes.JDK["current"] / "bin/java")
             self.assertTrue(compiler_modes.jvm_report_command_problems(
                 output, report, manifest, artifacts, [dependency], compiled_tests))

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -53,12 +54,13 @@ class QualificationTests(unittest.TestCase):
                         ET.SubElement(case, "error")
                     if identity in skipped:
                         ET.SubElement(case, "skipped")
-                xml = ET.tostring(suite, encoding="unicode")
-                command = ["python3", "-c", "from pathlib import Path; "
-                           "Path('probe.xml').write_text(" + repr(xml) + ")"]
+                (root / "fixture.xml").write_bytes(ET.tostring(suite))
+                command = [sys.executable, "-c", "from pathlib import Path; "
+                           "Path('probe.xml').write_bytes(Path('fixture.xml').read_bytes())"]
                 group = {"id": "synthetic", "report_pattern": "probe.xml",
                          "cases": [{"classname": classname, "name": name}
                                    for classname, name in selected]}
+                self.assertLess(sum(len(part) + 1 for part in command), 8191)
                 return qualify.run_probe(command, ["probe.xml"], "a" * 40,
                                          root / "result.json",
                                          manifest={"kind": "foundation-probe",
@@ -148,12 +150,13 @@ class QualificationTests(unittest.TestCase):
                         if change == "skipped" and index == 0:
                             ET.SubElement(case, "skipped")
                     report = Path("core.xml")
-                    xml = ET.tostring(suite, encoding="unicode")
+                    Path("fixture.xml").write_bytes(ET.tostring(suite))
                     command = [
-                        "python3",
+                        sys.executable,
                         "-c",
-                        "from pathlib import Path; Path('core.xml').write_text(" + repr(xml) + ")",
+                        "from pathlib import Path; Path('core.xml').write_bytes(Path('fixture.xml').read_bytes())",
                     ]
+                    self.assertLess(sum(len(part) + 1 for part in command), 8191)
                     result = qualify.run_probe(
                         command,
                         [str(report)],
@@ -240,14 +243,15 @@ class QualificationTests(unittest.TestCase):
         suite = ET.Element("testsuite", tests="48", failures="0", errors="0", skipped="0")
         for classname, name in cases + [("io.github.rubixhacker.dyn4k.GeometryShapeTest", "unexpected[jvm]")]:
             ET.SubElement(suite, "testcase", classname=classname, name=name, time="0")
-        xml = ET.tostring(suite, encoding="unicode")
         with tempfile.TemporaryDirectory() as root:
             previous = Path.cwd()
             os.chdir(root)
             try:
                 report = Path("probe.xml")
                 report_group = dict(group, report_pattern=str(report))
-                command = ["python3", "-c", "from pathlib import Path; Path('probe.xml').write_text(" + repr(xml) + ")"]
+                Path("fixture.xml").write_bytes(ET.tostring(suite))
+                command = [sys.executable, "-c", "from pathlib import Path; "
+                           "Path('probe.xml').write_bytes(Path('fixture.xml').read_bytes())"]
                 result = qualify.run_probe(command, [str(report)], "a" * 40,
                                            Path(root) / "result.json",
                                            manifest={**manifest, "groups": [report_group]})
@@ -407,13 +411,13 @@ class QualificationTests(unittest.TestCase):
                 ]}
                 writer = "from pathlib import Path; Path('one.xml').write_text('<testsuite tests=\"1\" skipped=\"0\" failures=\"0\" errors=\"0\"><testcase classname=\"C\" name=\"one\" time=\"0\"/></testsuite>')"
                 result = qualify.run_probe(
-                    ["python3", "-c", writer], ["one.xml", "missing.xml"],
+                    [sys.executable, "-c", writer], ["one.xml", "missing.xml"],
                     "a" * 40, Path(root) / "probe.json", manifest=manifest)
                 self.assertEqual("PROBE_FAILED", result["status"])
                 self.assertIn("missing", result["reason"])
                 duplicate = "from pathlib import Path; Path('one.xml').write_text('<testsuite tests=\"2\" skipped=\"0\" failures=\"0\" errors=\"0\"><testcase classname=\"C\" name=\"one\" time=\"0\"/><testcase classname=\"C\" name=\"one\" time=\"0\"/></testsuite>')"
                 result = qualify.run_probe(
-                    ["python3", "-c", duplicate], ["one.xml"],
+                    [sys.executable, "-c", duplicate], ["one.xml"],
                     "a" * 40, Path(root) / "duplicate.json",
                     manifest={"kind": "foundation-probe", "groups": [manifest["groups"][0]]})
                 self.assertEqual("PROBE_FAILED", result["status"])
@@ -556,7 +560,7 @@ class QualificationTests(unittest.TestCase):
                 ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
             output = repository / "audit.json"
             result = subprocess.run(
-                ["python3", str(Path(__file__).with_name("qualify.py")), "audit-staging",
+                [sys.executable, str(Path(__file__).with_name("qualify.py")), "audit-staging",
                  "--candidate-sha", sha, "--repository", str(repository / "empty-staging"),
                  *(item for target in sorted(qualify.matrix_targets()) for item in ("--target", target)),
                  "--stage-receipt", str(repository / "empty-staging/.qualification/receipt.json"),
@@ -582,7 +586,7 @@ class QualificationTests(unittest.TestCase):
     def test_report_refuses_sha_other_than_checkout(self):
         with tempfile.TemporaryDirectory() as root:
             result = subprocess.run(
-                ["python3", str(Path(__file__).with_name("qualify.py")), "record",
+                [sys.executable, str(Path(__file__).with_name("qualify.py")), "record",
                  "--candidate-sha", "f" * 40, "--output", str(Path(root) / "report.json")],
                 text=True, capture_output=True, check=False)
             self.assertNotEqual(0, result.returncode)
@@ -606,7 +610,7 @@ class QualificationTests(unittest.TestCase):
                 "status": "FULL_COMMON_PASSED", "configurations": [],
             }))
             result = subprocess.run([
-                "python3", str(Path(__file__).with_name("qualify.py")), "record",
+                sys.executable, str(Path(__file__).with_name("qualify.py")), "record",
                 "--candidate-sha", sha, "--full-hosted-bundle", str(bundle),
                 "--output", str(repository / "build/matrix.json"),
             ], cwd=repository, text=True, capture_output=True, check=False)
