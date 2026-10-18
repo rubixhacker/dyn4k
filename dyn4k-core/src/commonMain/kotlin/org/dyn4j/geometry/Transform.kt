@@ -51,27 +51,43 @@ open class Transform : Transformable, Copyable<Transform> {
         "[" + cost + " " + -sint + " | " + x + "][" + sint + " " + cost + " | " + y + "]"
 
     @kotlin.jvm.JvmName("rotate")
-    internal fun rotate(c: Double, s: Double) {
-        val nc = clamp(c * cost - s * sint)
-        val ns = clamp(s * cost + c * sint)
+    internal fun rotate(c: Double, s: Double) = rotateObserved(c, s, null, "origin")
+    private fun rotateObserved(c: Double, s: Double, angle: Double?, source: String) {
+        val oc = cost; val os = sint
+        val rawCost = c * oc - s * os
+        val rawSint = s * oc + c * os
+        val nc = clamp(rawCost)
+        val ns = clamp(rawSint)
         val nx = c * x - s * y
         val ny = s * x + c * y
         cost = nc; sint = ns; x = nx; y = ny
+        RotationOperationTap.listener?.invoke(RotationOperationTap.Call(
+            this, "rotate", source, oc, os, c, s, rawCost, rawSint, nc, ns,
+            angle?.toBits()))
     }
-    override fun rotate(theta: Double) = rotate(cos(theta), sin(theta))
+    override fun rotate(theta: Double) = rotateObserved(cos(theta), sin(theta), theta, "origin")
     override fun rotate(rotation: Rotation) =
         rotate(rotation.costValue(), rotation.sintValue())
     @kotlin.jvm.JvmName("rotate")
-    internal fun rotate(c: Double, s: Double, x: Double, y: Double) {
-        val nc = clamp(c * cost - s * sint)
-        val ns = clamp(s * cost + c * sint)
+    internal fun rotate(c: Double, s: Double, x: Double, y: Double) =
+        rotatePivotObserved(c, s, x, y, null)
+    private fun rotatePivotObserved(c: Double, s: Double, x: Double, y: Double,
+                                    angle: Double?) {
+        val oc = cost; val os = sint
+        val rawCost = c * oc - s * os
+        val rawSint = s * oc + c * os
+        val nc = clamp(rawCost)
+        val ns = clamp(rawSint)
         cost = nc; sint = ns
         val cx = this.x - x; val cy = this.y - y
         this.x = c * cx - s * cy + x
         this.y = s * cx + c * cy + y
+        RotationOperationTap.listener?.invoke(RotationOperationTap.Call(
+            this, "rotate", "pivot", oc, os, c, s, rawCost, rawSint, nc, ns,
+            angle?.toBits()))
     }
     override fun rotate(theta: Double, x: Double, y: Double) =
-        rotate(cos(theta), sin(theta), x, y)
+        rotatePivotObserved(cos(theta), sin(theta), x, y, theta)
     override fun rotate(rotation: Rotation, x: Double, y: Double) =
         rotate(rotation.costValue(), rotation.sintValue(), x, y)
     override fun rotate(theta: Double, point: Vector2) = rotate(theta, point.x, point.y)
@@ -168,6 +184,7 @@ open class Transform : Transformable, Copyable<Transform> {
 
     open fun lerp(end: Transform, alpha: Double) = lerp(end, alpha, this)
     open fun lerp(end: Transform, alpha: Double, result: Transform) {
+        val startCost = cost; val startSint = sint
         val nx = (1.0 - alpha) * x + alpha * end.x
         val ny = (1.0 - alpha) * y + alpha * end.y
         val startAngle = getRotationAngle()
@@ -176,14 +193,27 @@ open class Transform : Transformable, Copyable<Transform> {
         if (difference < -PI) difference += 2.0 * PI
         if (difference > PI) difference -= 2.0 * PI
         val angle = difference * alpha + startAngle
-        result.cost = cos(angle); result.sint = sin(angle)
+        val preCost = result.cost; val preSint = result.sint
+        val endCost = end.cost; val endSint = end.sint
+        val trigCost = cos(angle); val trigSint = sin(angle)
+        result.cost = trigCost; result.sint = trigSint
         result.x = nx; result.y = ny
+        RotationOperationTap.listener?.invoke(RotationOperationTap.Call(
+            result, "lerp-reset", "direct", preCost, preSint, trigCost, trigSint,
+            null, null, trigCost, trigSint, angle.toBits(), alpha, startAngle,
+            endAngle, difference, startCost, startSint, endCost, endSint))
     }
     private fun rotateOnly(theta: Double) {
         val c = cos(theta); val s = sin(theta)
-        val nc = clamp(c * cost - s * sint)
-        val ns = clamp(s * cost + c * sint)
+        val oc = cost; val os = sint
+        val rawCost = c * oc - s * os
+        val rawSint = s * oc + c * os
+        val nc = clamp(rawCost)
+        val ns = clamp(rawSint)
         cost = nc; sint = ns
+        RotationOperationTap.listener?.invoke(RotationOperationTap.Call(
+            this, "rotate", "vector-lerp", oc, os, c, s, rawCost, rawSint,
+            nc, ns, theta.toBits()))
     }
     open fun lerp(dp: Vector2, da: Double, alpha: Double, result: Transform) {
         result.set(this)

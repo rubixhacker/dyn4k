@@ -1,0 +1,687 @@
+{
+  "approval": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244821154",
+  "separation_approval": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6245666498",
+  "separation_override": {
+    "case": "pulley-preparation-1",
+    "callbacks": "two populated step-2 TOI outputs",
+    "paths": [
+      "event.payload[].separation.getDistance",
+      "event.payload[].separation.getPoint1[]",
+      "event.payload[].separation.getPoint2[]"
+    ],
+    "rule": "same populated output and fixed-case epsilon, formula, scale, D/P/DIR checks"
+  },
+  "header_extra_paths": {
+    "inputs.state.bodies[].fixtures[].getDensity": {
+      "detail": "EX; fixed material literal",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].getFriction": {
+      "detail": "EX; fixed material literal",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].getRestitution": {
+      "detail": "EX; fixed material literal",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].getRestitutionVelocity": {
+      "detail": "EX; fixed material literal",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getArea": {
+      "detail": "EX; fixed shape formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getCenter[]": {
+      "detail": "EX; fixed shape geometry",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getHeight": {
+      "detail": "EX; fixed shape geometry",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getNormals[][]": {
+      "detail": "EX; fixed shape geometry and ordered normals",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getRadius": {
+      "detail": "EX; fixed shape formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getRotationAngle": {
+      "detail": "EX; fixed shape geometry",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getVertices[][]": {
+      "detail": "EX; fixed shape geometry and ordered vertices",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].fixtures[].shape.getWidth": {
+      "detail": "EX; fixed shape geometry",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].previousTransform.getValues[]": {
+      "detail": "MAT(previous)",
+      "rule": "MAT"
+    },
+    "inputs.state.bodies[].properties.getAccumulatedForce[]": {
+      "detail": "AL(Z) = `accumulatedForce[]`, exact numeric zero",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getAccumulatedTorque": {
+      "detail": "AL(Z) = `accumulatedTorque`, exact numeric zero",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getAngularDamping": {
+      "detail": "EX; fixed damping coefficient",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getAngularVelocity": {
+      "detail": "AL(W) = `angularVelocity`, `1e-3 rad/s`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getChangeInOrientation": {
+      "detail": "CA, `2.0000000002e-4 rad`, same-provider source wrap formula and branch",
+      "rule": "CA"
+    },
+    "inputs.state.bodies[].properties.getChangeInPosition[]": {
+      "detail": "CP, `2.0000000002e-4 m` per component, same-provider current-minus-previous translation",
+      "rule": "CP"
+    },
+    "inputs.state.bodies[].properties.getFixtureCount": {
+      "detail": "EX; integer count schema and fixture array length",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getForce[]": {
+      "detail": "AL(X) = `force[]`, exact scheduled value",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getGravityScale": {
+      "detail": "EX; fixed multiplier",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getLinearDamping": {
+      "detail": "EX; fixed damping coefficient",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getLinearVelocity[]": {
+      "detail": "AL(V) = `velocity[]`, `1e-3 m/s` per component",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getLocalCenter[]": {
+      "detail": "EX; fixed center of mass, match `getMass.getCenter[]`",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getMass.getCenter[]": {
+      "detail": "EX; fixed mass center and local-center alias",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getMass.getInertia": {
+      "detail": "EX; fixed mass formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getMass.getInverseInertia": {
+      "detail": "EX; fixed inverse formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getMass.getInverseMass": {
+      "detail": "EX; fixed inverse formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getMass.getMass": {
+      "detail": "EX; fixed mass formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getCost": {
+      "detail": "AL(TRIG) = `previousTransform.getCost`, `1.0000000002e-4`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getRotationAngle": {
+      "detail": "AL(A) = previous angle, `1e-4 rad`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getSint": {
+      "detail": "AL(TRIG) = previous sine, `1.0000000002e-4`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslationX": {
+      "detail": "AL(T) = previous X, `1e-4 m`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslationY": {
+      "detail": "AL(T) = previous Y, `1e-4 m`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslation[]": {
+      "detail": "AL(T) = previous vector, `1e-4 m` per component",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getPreviousTransform.getValues[]": {
+      "detail": "MAT(previous), including equality to `previousTransform.getValues[]`",
+      "rule": "MAT"
+    },
+    "inputs.state.bodies[].properties.getRotationDiscRadius": {
+      "detail": "EX; fixed shape/mass radius formula and setup identity",
+      "rule": "EX"
+    },
+    "inputs.state.bodies[].properties.getTorque": {
+      "detail": "AL(X) = `torque`, exact scheduled value",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getCost": {
+      "detail": "AL(TRIG) = `transform.getCost`, `1.0000000002e-4`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getRotationAngle": {
+      "detail": "AL(A) = current angle, `1e-4 rad`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getSint": {
+      "detail": "AL(TRIG) = current sine, `1.0000000002e-4`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getTranslationX": {
+      "detail": "AL(T) = current X, `1e-4 m`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getTranslationY": {
+      "detail": "AL(T) = current Y, `1e-4 m`",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getTranslation[]": {
+      "detail": "AL(T) = current vector, `1e-4 m` per component",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].properties.getTransform.getValues[]": {
+      "detail": "MAT(current), including equality to `transform.getValues[]`",
+      "rule": "MAT"
+    },
+    "inputs.state.bodies[].properties.getWorldCenter[]": {
+      "detail": "AL(T) = `worldCenter[]`, `1e-4 m` per component; recompute from transform and local center",
+      "rule": "AL"
+    },
+    "inputs.state.bodies[].transform.getValues[]": {
+      "detail": "MAT(current)",
+      "rule": "MAT"
+    }
+  },
+  "header_mapped_paths": {
+    "inputs.state.bodies[].accumulatedForce[]": "Z",
+    "inputs.state.bodies[].accumulatedTorque": "Z",
+    "inputs.state.bodies[].angularVelocity": "W",
+    "inputs.state.bodies[].fixedOriginPosition[]": "T",
+    "inputs.state.bodies[].force[]": "X",
+    "inputs.state.bodies[].previousTransform.getCost": "TRIG",
+    "inputs.state.bodies[].previousTransform.getRotationAngle": "A",
+    "inputs.state.bodies[].previousTransform.getSint": "TRIG",
+    "inputs.state.bodies[].previousTransform.getTranslationX": "T",
+    "inputs.state.bodies[].previousTransform.getTranslationY": "T",
+    "inputs.state.bodies[].previousTransform.getTranslation[]": "T",
+    "inputs.state.bodies[].rotationIncrementSum": "A",
+    "inputs.state.bodies[].torque": "X",
+    "inputs.state.bodies[].transform.getCost": "TRIG",
+    "inputs.state.bodies[].transform.getRotationAngle": "A",
+    "inputs.state.bodies[].transform.getSint": "TRIG",
+    "inputs.state.bodies[].transform.getTranslationX": "T",
+    "inputs.state.bodies[].transform.getTranslationY": "T",
+    "inputs.state.bodies[].transform.getTranslation[]": "T",
+    "inputs.state.bodies[].velocity[]": "V",
+    "inputs.state.bodies[].worldCenter[]": "T",
+    "inputs.state.joints[].getAnchor1[]": "ANCH1",
+    "inputs.state.joints[].getAnchor2[]": "ANCH2",
+    "inputs.state.joints[].getBodyCount": "X",
+    "inputs.state.joints[].getCurrentLength": "L2",
+    "inputs.state.joints[].getCurrentLength1": "L1",
+    "inputs.state.joints[].getCurrentLength2": "L1",
+    "inputs.state.joints[].getLength": "X",
+    "inputs.state.joints[].getPulleyAnchor1[]": "X",
+    "inputs.state.joints[].getPulleyAnchor2[]": "X",
+    "inputs.state.joints[].getRatio": "X",
+    "inputs.state.joints[].getReactionTorque": "RTAU",
+    "inputs.state.joints[].reactionForce[]": "F",
+    "inputs.state.joints[].reactionTorque": "RTAU"
+  },
+  "later_header_paths": {
+    "inputs.state.bodies[].accumulatedForce[]": "Z",
+    "inputs.state.bodies[].accumulatedTorque": "Z",
+    "inputs.state.bodies[].angularVelocity": "W",
+    "inputs.state.bodies[].fixedOriginPosition[]": "T",
+    "inputs.state.bodies[].fixtures[].getDensity": "EX",
+    "inputs.state.bodies[].fixtures[].getFriction": "EX",
+    "inputs.state.bodies[].fixtures[].getRestitution": "EX",
+    "inputs.state.bodies[].fixtures[].getRestitutionVelocity": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getArea": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getCenter[]": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getHeight": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getNormals[][]": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getRadius": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getRotationAngle": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getVertices[][]": "EX",
+    "inputs.state.bodies[].fixtures[].shape.getWidth": "EX",
+    "inputs.state.bodies[].force[]": "X",
+    "inputs.state.bodies[].previousTransform.getCost": "TRIG",
+    "inputs.state.bodies[].previousTransform.getRotationAngle": "A",
+    "inputs.state.bodies[].previousTransform.getSint": "TRIG",
+    "inputs.state.bodies[].previousTransform.getTranslationX": "T",
+    "inputs.state.bodies[].previousTransform.getTranslationY": "T",
+    "inputs.state.bodies[].previousTransform.getTranslation[]": "T",
+    "inputs.state.bodies[].previousTransform.getValues[]": "MAT",
+    "inputs.state.bodies[].properties.getAccumulatedForce[]": "AL",
+    "inputs.state.bodies[].properties.getAccumulatedTorque": "AL",
+    "inputs.state.bodies[].properties.getAngularDamping": "EX",
+    "inputs.state.bodies[].properties.getAngularVelocity": "AL",
+    "inputs.state.bodies[].properties.getChangeInOrientation": "CA",
+    "inputs.state.bodies[].properties.getChangeInPosition[]": "CP",
+    "inputs.state.bodies[].properties.getFixtureCount": "EX",
+    "inputs.state.bodies[].properties.getForce[]": "AL",
+    "inputs.state.bodies[].properties.getGravityScale": "EX",
+    "inputs.state.bodies[].properties.getLinearDamping": "EX",
+    "inputs.state.bodies[].properties.getLinearVelocity[]": "AL",
+    "inputs.state.bodies[].properties.getLocalCenter[]": "EX",
+    "inputs.state.bodies[].properties.getMass.getCenter[]": "EX",
+    "inputs.state.bodies[].properties.getMass.getInertia": "EX",
+    "inputs.state.bodies[].properties.getMass.getInverseInertia": "EX",
+    "inputs.state.bodies[].properties.getMass.getInverseMass": "EX",
+    "inputs.state.bodies[].properties.getMass.getMass": "EX",
+    "inputs.state.bodies[].properties.getPreviousTransform.getCost": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getRotationAngle": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getSint": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslationX": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslationY": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getTranslation[]": "AL",
+    "inputs.state.bodies[].properties.getPreviousTransform.getValues[]": "MAT",
+    "inputs.state.bodies[].properties.getRotationDiscRadius": "EX",
+    "inputs.state.bodies[].properties.getTorque": "AL",
+    "inputs.state.bodies[].properties.getTransform.getCost": "AL",
+    "inputs.state.bodies[].properties.getTransform.getRotationAngle": "AL",
+    "inputs.state.bodies[].properties.getTransform.getSint": "AL",
+    "inputs.state.bodies[].properties.getTransform.getTranslationX": "AL",
+    "inputs.state.bodies[].properties.getTransform.getTranslationY": "AL",
+    "inputs.state.bodies[].properties.getTransform.getTranslation[]": "AL",
+    "inputs.state.bodies[].properties.getTransform.getValues[]": "MAT",
+    "inputs.state.bodies[].properties.getWorldCenter[]": "AL",
+    "inputs.state.bodies[].rotationIncrementSum": "A",
+    "inputs.state.bodies[].torque": "X",
+    "inputs.state.bodies[].transform.getCost": "TRIG",
+    "inputs.state.bodies[].transform.getRotationAngle": "A",
+    "inputs.state.bodies[].transform.getSint": "TRIG",
+    "inputs.state.bodies[].transform.getTranslationX": "T",
+    "inputs.state.bodies[].transform.getTranslationY": "T",
+    "inputs.state.bodies[].transform.getTranslation[]": "T",
+    "inputs.state.bodies[].transform.getValues[]": "MAT",
+    "inputs.state.bodies[].velocity[]": "V",
+    "inputs.state.bodies[].worldCenter[]": "T",
+    "inputs.state.joints[].getAnchor1[]": "ANCH1",
+    "inputs.state.joints[].getAnchor2[]": "ANCH2",
+    "inputs.state.joints[].getBodyCount": "X",
+    "inputs.state.joints[].getCurrentLength": "L2",
+    "inputs.state.joints[].getCurrentLength1": "L1",
+    "inputs.state.joints[].getCurrentLength2": "L1",
+    "inputs.state.joints[].getLength": "X",
+    "inputs.state.joints[].getPulleyAnchor1[]": "X",
+    "inputs.state.joints[].getPulleyAnchor2[]": "X",
+    "inputs.state.joints[].getRatio": "X",
+    "inputs.state.joints[].getReactionTorque": "RTAU",
+    "inputs.state.joints[].reactionForce[]": "F",
+    "inputs.state.joints[].reactionTorque": "RTAU"
+  },
+  "proposal_sha256": "b6d92db641a1cd1793f7bbe1046461c734b542634a6339fe5c3d36b46f72b8ce",
+  "state_event_paths": {
+    "event.payload[].angularVelocity1": {
+      "mask": "·YYY",
+      "rule": "W"
+    },
+    "event.payload[].angularVelocity2": {
+      "mask": "·YYY",
+      "rule": "W"
+    },
+    "event.payload[].constraint.contacts[].getDepth": {
+      "mask": "··YY",
+      "rule": "D"
+    },
+    "event.payload[].constraint.contacts[].getNormalImpulse": {
+      "mask": "··YY",
+      "rule": "I"
+    },
+    "event.payload[].constraint.contacts[].getPoint[]": {
+      "mask": "··YY",
+      "rule": "P"
+    },
+    "event.payload[].constraint.contacts[].getTangentialImpulse": {
+      "mask": "··YY",
+      "rule": "Z"
+    },
+    "event.payload[].constraint.getFriction": {
+      "mask": "·YYY",
+      "rule": "MIX"
+    },
+    "event.payload[].constraint.getNormal[]": {
+      "mask": "·YYY",
+      "rule": "DIR"
+    },
+    "event.payload[].constraint.getRestitution": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].constraint.getRestitutionVelocity": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].constraint.getTangentSpeed": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].constraint.getTangent[]": {
+      "mask": "·YYY",
+      "rule": "DIR"
+    },
+    "event.payload[].getDeltaTime": {
+      "mask": "YYYY",
+      "rule": "TS"
+    },
+    "event.payload[].getDeltaTimeRatio": {
+      "mask": "YYYY",
+      "rule": "TS"
+    },
+    "event.payload[].getDensity": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].getDepth": {
+      "mask": "··YY",
+      "rule": "D"
+    },
+    "event.payload[].getFriction": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].getInverseDeltaTime": {
+      "mask": "YYYY",
+      "rule": "TS"
+    },
+    "event.payload[].getNormalImpulse": {
+      "mask": "··YY",
+      "rule": "I"
+    },
+    "event.payload[].getPoint[]": {
+      "mask": "··YY",
+      "rule": "P"
+    },
+    "event.payload[].getPreviousInverseDeltaTime": {
+      "mask": "YYYY",
+      "rule": "TS"
+    },
+    "event.payload[].getPrevousDeltaTime": {
+      "mask": "YYYY",
+      "rule": "TS"
+    },
+    "event.payload[].getRestitution": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].getRestitutionVelocity": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].getTangentialImpulse": {
+      "mask": "··YY",
+      "rule": "Z"
+    },
+    "event.payload[].getTime": {
+      "mask": "··YY",
+      "rule": "Q"
+    },
+    "event.payload[].manifold.getNormal[]": {
+      "mask": "·YYY",
+      "rule": "DIR"
+    },
+    "event.payload[].manifold.points[].getDepth": {
+      "mask": "··YY",
+      "rule": "D"
+    },
+    "event.payload[].manifold.points[].getPoint[]": {
+      "mask": "··YY",
+      "rule": "P"
+    },
+    "event.payload[].penetration.getDepth": {
+      "mask": "·YYY",
+      "rule": "D"
+    },
+    "event.payload[].penetration.getNormal[]": {
+      "mask": "·YYY",
+      "rule": "DIR"
+    },
+    "event.payload[].separation.getDistance": {
+      "mask": "··YY",
+      "rule": "Z"
+    },
+    "event.payload[].separation.getNormal[]": {
+      "mask": "··YY",
+      "rule": "DIR"
+    },
+    "event.payload[].separation.getPoint1[]": {
+      "mask": "··YY",
+      "rule": "Z"
+    },
+    "event.payload[].separation.getPoint2[]": {
+      "mask": "··YY",
+      "rule": "Z"
+    },
+    "event.payload[].shape.getArea": {
+      "mask": "·YYY",
+      "rule": "AREA"
+    },
+    "event.payload[].shape.getCenter[]": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].shape.getHeight": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].shape.getNormals[][]": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].shape.getRadius": {
+      "mask": "·YYY",
+      "rule": "RADIUS"
+    },
+    "event.payload[].shape.getRotationAngle": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].shape.getVertices[][]": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].shape.getWidth": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "event.payload[].velocity1[]": {
+      "mask": "·YYY",
+      "rule": "V"
+    },
+    "event.payload[].velocity2[]": {
+      "mask": "·YYY",
+      "rule": "V"
+    },
+    "state.state.bodies[].accumulatedForce[]": {
+      "mask": "YYYY",
+      "rule": "Z"
+    },
+    "state.state.bodies[].accumulatedTorque": {
+      "mask": "YYYY",
+      "rule": "Z"
+    },
+    "state.state.bodies[].angularVelocity": {
+      "mask": "YYYY",
+      "rule": "W"
+    },
+    "state.state.bodies[].fixedOriginPosition[]": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].force[]": {
+      "mask": "YYYY",
+      "rule": "X"
+    },
+    "state.state.bodies[].previousTransform.getCost": {
+      "mask": "YYYY",
+      "rule": "TRIG"
+    },
+    "state.state.bodies[].previousTransform.getRotationAngle": {
+      "mask": "YYYY",
+      "rule": "A"
+    },
+    "state.state.bodies[].previousTransform.getSint": {
+      "mask": "YYYY",
+      "rule": "TRIG"
+    },
+    "state.state.bodies[].previousTransform.getTranslationX": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].previousTransform.getTranslationY": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].previousTransform.getTranslation[]": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].rotationIncrementSum": {
+      "mask": "YYYY",
+      "rule": "A"
+    },
+    "state.state.bodies[].torque": {
+      "mask": "YYYY",
+      "rule": "X"
+    },
+    "state.state.bodies[].transform.getCost": {
+      "mask": "YYYY",
+      "rule": "TRIG"
+    },
+    "state.state.bodies[].transform.getRotationAngle": {
+      "mask": "YYYY",
+      "rule": "A"
+    },
+    "state.state.bodies[].transform.getSint": {
+      "mask": "YYYY",
+      "rule": "TRIG"
+    },
+    "state.state.bodies[].transform.getTranslationX": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].transform.getTranslationY": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].transform.getTranslation[]": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.bodies[].velocity[]": {
+      "mask": "YYYY",
+      "rule": "V"
+    },
+    "state.state.bodies[].worldCenter[]": {
+      "mask": "YYYY",
+      "rule": "T"
+    },
+    "state.state.joints[].getAnchor1[]": {
+      "mask": "YYYY",
+      "rule": "ANCH1"
+    },
+    "state.state.joints[].getAnchor2[]": {
+      "mask": "YYYY",
+      "rule": "ANCH2"
+    },
+    "state.state.joints[].getAngularTranslation": {
+      "mask": "Y···",
+      "rule": "A"
+    },
+    "state.state.joints[].getBodyCount": {
+      "mask": "YYYY",
+      "rule": "X"
+    },
+    "state.state.joints[].getCurrentLength": {
+      "mask": "·YYY",
+      "rule": "L2"
+    },
+    "state.state.joints[].getCurrentLength1": {
+      "mask": "·YYY",
+      "rule": "L1"
+    },
+    "state.state.joints[].getCurrentLength2": {
+      "mask": "·YYY",
+      "rule": "L1"
+    },
+    "state.state.joints[].getLength": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "state.state.joints[].getLimitsReferenceAngle": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getLowerLimit": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getMaximumSpringTorque": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getPulleyAnchor1[]": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "state.state.joints[].getPulleyAnchor2[]": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "state.state.joints[].getRatio": {
+      "mask": "·YYY",
+      "rule": "X"
+    },
+    "state.state.joints[].getReactionTorque": {
+      "mask": "YYYY",
+      "rule": "RTAU"
+    },
+    "state.state.joints[].getSpringDampingRatio": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getSpringFrequency": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getSpringMode": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].getSpringStiffness": {
+      "mask": "Y···",
+      "rule": "STIFF"
+    },
+    "state.state.joints[].getSpringTorque": {
+      "mask": "Y···",
+      "rule": "TAU"
+    },
+    "state.state.joints[].getUpperLimit": {
+      "mask": "Y···",
+      "rule": "X"
+    },
+    "state.state.joints[].reactionForce[]": {
+      "mask": "YYYY",
+      "rule": "F"
+    },
+    "state.state.joints[].reactionTorque": {
+      "mask": "YYYY",
+      "rule": "RTAU"
+    }
+  }
+}

@@ -147,6 +147,19 @@
       "reference_manifest_revision": "6e86e63683b2cbac8bda70da94d69d1266ac2563",
       "archive_sha256": {"repeat_a": "422a749d36060c95cb978c3e9f5fed0f9810494243dac8452ad9cfecb17fe348", "repeat_b": "c9dead5c0e7b96b103ba8f71d67a23923e0efb9bbc9df77e49ad21de2633cb4c"},
       "physical_status": "UNPASSED_NO_APPROVED_RESIDUAL_BOUND",
+      "numerical_policy": {
+        "status": "ADOPTED_NOT_EXECUTED",
+        "decision": "https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6244821154",
+        "proposal_sha256": "b6d92db641a1cd1793f7bbe1046461c734b542634a6339fe5c3d36b46f72b8ce",
+        "catalog": "portable/frozen_weld_pulley_policy.json",
+        "state_event_patterns": 89,
+        "later_header_numeric_templates": 82,
+        "later_header_existing_state_rules": 34,
+        "later_header_explicit_extra_rules": 48,
+        "requires_complete_provider_post_action_chain": true,
+        "requires_target_math_premises": true,
+        "physical_residual_allowance": null
+      },
       "rules": [],
       "exact_numeric": ["inputs.*", "event.step", "event.order", "state.step", "action.step", "action.order", "instrumented-callback.step", "instrumented-callback.order"]
     }

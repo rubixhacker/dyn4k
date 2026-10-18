@@ -1,0 +1,31 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+
+gradle.beforeProject { project ->
+    project.tasks.configureEach { task ->
+        if (task.name.toLowerCase().contains('compile') ||
+                task.name.toLowerCase().contains('link')) {
+            task.doFirst {
+                task.inputs.files.files.findAll { input ->
+                    input.isFile() && input.name.contains('dyn4k-core') &&
+                        (input.name.endsWith('.klib') || input.name.endsWith('.jar'))
+                }.each { input ->
+                    def sha = MessageDigest.getInstance('SHA-256')
+                    input.withInputStream { stream ->
+                        byte[] block = new byte[1024 * 1024]
+                        int size
+                        while ((size = stream.read(block)) != -1) {
+                            sha.update(block, 0, size)
+                        }
+                    }
+                    println('NUMERICAL_PROOF_INPUT ' + JsonOutput.toJson([
+                        task: task.path,
+                        path: input.canonicalPath,
+                        sha256: sha.digest().encodeHex().toString(),
+                        bytes: input.length(),
+                    ]))
+                }
+            }
+        }
+    }
+}
