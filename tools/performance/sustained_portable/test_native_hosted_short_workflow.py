@@ -33,12 +33,12 @@ def run_expression_upper_bounds(source):
         line = lines[index]
         if (re.match(r"^ *[\[{]", line)
                 or re.match(r"^ *- +(?:\{|\[)", line)
-                or re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[\[{]", line)):
+                or re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*[ \t]*:[ \t]*[\[{]", line)):
             raise ValueError(f"unsupported YAML flow syntax at line {index + 1}")
         if (re.match(r"^ *(?:- +)?['\"]", line)
                 or re.match(r"^ *(?:- +)?\?[ \t]", line)):
             raise ValueError(f"unsupported YAML key syntax at line {index + 1}")
-        if re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*:[ \t]*[&*!]", line):
+        if re.match(r"^ *(?:- +)?[A-Za-z_][A-Za-z0-9_-]*[ \t]*:[ \t]*[&*!]", line):
             raise ValueError(f"unsupported YAML alias or tag syntax at line {index + 1}")
         match = re.match(r"^( *)(- +)?run:[ \t]*(.*)$", line)
         if match is None:
@@ -86,11 +86,14 @@ def run_expression_upper_bounds(source):
 
 class WorkflowExpressionLimit(unittest.TestCase):
     def test_flow_step_with_escaped_run_key_is_rejected(self):
-        source = ("name: adverse\non: workflow_dispatch\njobs:\n  control:\n"
-                  "    runs-on: ubuntu-latest\n"
-                  '    steps: [{"r\\u0075n": "' + "x" * (RUN_EXPRESSION_LIMIT + 1) + '"}]\n')
-        with self.assertRaisesRegex(ValueError, "unsupported YAML flow syntax"):
-            list(run_expression_upper_bounds(source))
+        for key in ("steps:", "steps :", "steps  :"):
+            with self.subTest(key=key):
+                source = ("name: adverse\non: workflow_dispatch\njobs:\n  control:\n"
+                          "    runs-on: ubuntu-latest\n    " + key
+                          + ' [{"r\\u0075n": "' + "x" * (RUN_EXPRESSION_LIMIT + 1)
+                          + '"}]\n')
+                with self.assertRaisesRegex(ValueError, "unsupported YAML flow syntax"):
+                    list(run_expression_upper_bounds(source))
 
     def test_unsupported_valid_run_syntax_is_rejected(self):
         job = ("name: adverse\non: workflow_dispatch\njobs:\n  control:\n"
