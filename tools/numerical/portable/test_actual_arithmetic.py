@@ -1,9 +1,14 @@
 import copy
+import hashlib
 import json
+import os
 import struct
+import subprocess
 import unittest
+from unittest.mock import patch
 from xml.sax.saxutils import escape
 
+import actual_arithmetic
 from actual_arithmetic import CaptureRejected, expected_case_ids, verify_capture
 from test_rotation_marker import bits, marker
 
@@ -40,6 +45,66 @@ def fixture():
                                         "steps": 1}),
     ]
     return rows
+
+
+class SourceArchiveTest(unittest.TestCase):
+    COMMIT = "cd21a4bd7d6731a096597f97966db9e02b9de448"
+    CANONICAL_SHA256 = "7958113412c14be8e106706a77871eba4dc8c4e1335c38fd01c7b9e18d26e12d"
+
+    @staticmethod
+    def git_setting(value):
+        return patch.dict(os.environ, {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.autocrlf",
+            "GIT_CONFIG_VALUE_0": value,
+        })
+
+    def canonical_source(self):
+        result = subprocess.run(("git", "-c", "core.autocrlf=false",
+                                 "--no-replace-objects", "archive", "--format=tar",
+                                 self.COMMIT), cwd=actual_arithmetic._ROOT,
+                                capture_output=True, check=True)
+        self.assertEqual(hashlib.sha256(result.stdout).hexdigest(),
+                         self.CANONICAL_SHA256)
+        return result.stdout
+
+    def test_archive_is_canonical_under_both_checkout_settings(self):
+        for setting in ("false", "true"):
+            with self.subTest(core_autocrlf=setting), self.git_setting(setting):
+                archive = actual_arithmetic._source_archive(self.COMMIT)
+                self.assertEqual(hashlib.sha256(archive).hexdigest(),
+                                 self.CANONICAL_SHA256)
+
+    def test_receipt_source_check_rejects_changed_raw_archive(self):
+        source = self.canonical_source()
+        files = {name: b"fixture" for name in actual_arithmetic._RECEIPT_FILES}
+        files["source"] = source
+        class ReachedLocalBinaryCheck(Exception):
+            pass
+        with self.git_setting("true"), patch.object(
+                actual_arithmetic, "_check_local_binaries",
+                side_effect=ReachedLocalBinaryCheck):
+            with self.assertRaises(ReachedLocalBinaryCheck):
+                actual_arithmetic.make_capture_receipt(
+                    files, "captureGeometry", self.COMMIT, [],
+                    actual_arithmetic._PINNED_JAVA)
+            changed = bytearray(source)
+            changed[1024] ^= 1
+            files["source"] = bytes(changed)
+            with self.assertRaisesRegex(CaptureRejected,
+                                        "source archive differs from candidate commit"):
+                actual_arithmetic.make_capture_receipt(
+                    files, "captureGeometry", self.COMMIT, [],
+                    actual_arithmetic._PINNED_JAVA)
+
+    def test_archive_rejects_non_exact_commit_pins_before_git(self):
+        with patch.object(actual_arithmetic.subprocess, "run",
+                          side_effect=AssertionError("git was invoked")) as run:
+            for pin in ("HEAD", self.COMMIT[:12], self.COMMIT.upper(),
+                        self.COMMIT + "0", "-" + self.COMMIT):
+                with self.subTest(pin=pin), self.assertRaises(CaptureRejected):
+                    actual_arithmetic._source_archive(pin)
+            run.assert_not_called()
 
 
 class ActualArithmeticTest(unittest.TestCase):
