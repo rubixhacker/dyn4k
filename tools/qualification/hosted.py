@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import qualify
+import stage
 
 
 NATIVE_TARGETS = {
@@ -185,14 +186,23 @@ def run_hosted(target, candidate_sha, output):
         build = (repository / "build.gradle.kts").read_text()
         kgp = re.search(r'kotlin\("multiplatform"\) version "([^"]+)"', build)
         result["runtime"]["kgp_declared_version"] = kgp.group(1) if kgp else ""
-        stage = [wrapper, "--no-daemon", "--console=plain"]
-        for module in qualify.MODULES:
-            stage.extend((f":{module}:publishKotlinMultiplatformPublicationToStagingRepository",
-                          f":{module}:publish{artifact_target[0].upper()}{artifact_target[1:]}PublicationToStagingRepository"))
-        result["stage_command"] = stage
-        completed = run_capture(stage)
-        if completed.returncode:
-            result.update(status="PROBE_FAILED", reason=f"staging exited {completed.returncode}")
+        stage_dir = staging / ".qualification" / target
+        receipt_path = stage_dir / "receipt.json"
+        console_path = stage_dir / "stage.log"
+        receipt = stage.run_stage(repository, candidate_sha, (artifact_target,),
+                                  receipt_path, console_path)
+        result["stage_command"] = receipt["command"]
+        result["stage_receipt_sha256"] = qualify.digest(receipt_path)
+        if receipt["status"] != "PASSED":
+            result.update(status="PROBE_FAILED", reason=receipt.get("reason", "staging failed"))
+            return result
+        audit = qualify.audit_staging(staging, candidate_sha, (artifact_target,),
+                                      repository / "LICENSE.md", receipt_path, console_path)
+        audit_path = stage_dir / "audit.json"
+        audit_path.write_text(json.dumps(audit, indent=2) + "\n")
+        result["stage_audit_sha256"] = qualify.digest(audit_path)
+        if audit["status"] != "PASSED":
+            result.update(status="PROBE_FAILED", reason="staged publication audit failed: " + "; ".join(audit["errors"]))
             return result
         result["artifact_hashes"] = target_hashes(staging, artifact_target)
         manifest = qualify.load_json_strict(repository / "tools/qualification/foundation-probes.json")

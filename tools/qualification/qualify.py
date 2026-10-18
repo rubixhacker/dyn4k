@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import io
 import json
 import math
 import os
 import re
 import subprocess
 import sys
+import tarfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -20,6 +22,19 @@ SHA64 = re.compile(r"^[0-9a-f]{64}$")
 VERSION = "0.1.0-alpha.1"
 GROUP = "io.github.rubixhacker"
 MODULES = ("dyn4k-core", "dyn4k")
+KOTLIN_VERSION = "2.4.20"
+POM_PROJECT_URL = "https://github.com/rubixhacker/dyn4k"
+POM_LICENSE_NAME = "BSD 3-Clause License"
+POM_LICENSE_URL = "https://opensource.org/licenses/BSD-3-Clause"
+POM_DEVELOPER_ID = "rubixhacker"
+POM_DEVELOPER_NAME = "Stewart Boling"
+POM_MODULE_DESCRIPTIONS = {
+    "dyn4k-core": ("dyn4k core", "Kotlin Multiplatform dyn4j 6.0.0 compatible foundation"),
+    "dyn4k": ("dyn4k", "Kotlin conveniences for the dyn4k core"),
+}
+APPLE_TARGETS = {"iosArm64", "iosSimulatorArm64", "iosX64", "macosArm64",
+                 "tvosArm64", "tvosSimulatorArm64", "watchosArm64",
+                 "watchosDeviceArm64", "watchosSimulatorArm64"}
 APPROVED_COMPLETE_SUITE_SHA256 = "60e91e7cab9dcf1c1ccb41eb25fefd6c1579ad147996bb40d94f7fcba91017a3"
 
 
@@ -77,6 +92,10 @@ def target_publication_name(module, target):
     return f"{module}-{suffix}"
 
 
+def matrix_targets():
+    return {row["target"] for row in matrix()}
+
+
 def check_providers(graph):
     if re.search(r"(?:^|\W)org\.dyn4j:dyn4j(?::|\W)", graph) and re.search(
         r"(?:^|\W)io\.github\.rubixhacker:dyn4k-core(?:-jvm)?(?::|\W)", graph
@@ -88,6 +107,316 @@ def target_binary_path(module, target):
     publication = target_publication_name(module, target)
     extension = ".aar" if target == "android" else ".jar" if target == "jvm" else ".klib"
     return f'{GROUP.replace(".", "/")}/{publication}/{VERSION}/{publication}-{VERSION}{extension}'
+
+
+def publication_binary_path(module, target):
+    if target is not None:
+        return target_binary_path(module, target)
+    return f'{GROUP.replace(".", "/")}/{module}/{VERSION}/{module}-{VERSION}.jar'
+
+
+def publication_variant_contract(module, target):
+    name = module if target is None else target_publication_name(module, target)
+    base = f"{name}-{VERSION}"
+    prefix = "metadata" if target is None else target
+    published = "" if target is None else "-published"
+    def variant(kind, url=None, file_name=None, library=False):
+        entry = {"name": f"{prefix}{kind}Elements{published}", "kind": kind, "target": target}
+        if url is not None:
+            entry["url"] = url
+            entry["file_name"] = file_name or url
+        if library:
+            dependencies = {("org.jetbrains.kotlin", "kotlin-stdlib", KOTLIN_VERSION)}
+            if target == "js":
+                dependencies.add(("org.jetbrains.kotlin", "kotlin-dom-api-compat", KOTLIN_VERSION))
+            if module == "dyn4k":
+                dependencies.add((GROUP, "dyn4k-core", VERSION))
+            entry["dependencies"] = dependencies
+        else:
+            entry["dependencies"] = set()
+        return entry
+    binary = Path(publication_binary_path(module, target)).name
+    binary_name = binary
+    if target is None:
+        binary_name = f"{module}-metadata-{VERSION}.jar"
+    elif target == "android":
+        binary_name = f"{module}.aar"
+    elif target not in ("jvm", "js", "wasmJs", "wasmWasi"):
+        binary_name = f"{module}-{target}Main-{VERSION}.klib"
+    sources = f"{base}-sources.jar"
+    source_name = f"{module}-kotlin-{VERSION}-sources.jar" if target is None else sources
+    variants = [variant("Api", binary, binary_name, library=True),
+                variant("Sources", sources, source_name)]
+    if target in ("jvm", "android", "js", "wasmJs", "wasmWasi"):
+        variants.insert(1, variant("Runtime", binary, binary_name, library=True))
+    if target in APPLE_TARGETS:
+        metadata = f"{base}-metadata.jar"
+        variants.append(variant("Metadata", metadata, metadata, library=True))
+    if target is None:
+        for mapped in matrix_targets():
+            mapped_name = target_publication_name(module, mapped)
+            available = {"group": GROUP, "module": mapped_name, "version": VERSION,
+                         "url": f"../../{mapped_name}/{VERSION}/{mapped_name}-{VERSION}.module"}
+            kinds = ["Api", "Sources"]
+            if mapped in ("jvm", "android", "js", "wasmJs", "wasmWasi"):
+                kinds.append("Runtime")
+            if mapped in APPLE_TARGETS:
+                kinds.append("Metadata")
+            for kind in kinds:
+                variants.append({"name": f"{mapped}{kind}Elements-published",
+                                 "kind": kind, "target": mapped,
+                                 "available-at": available})
+    return {entry["name"]: entry for entry in variants}
+
+
+def pom_dependency_contract(module, target):
+    stdlib = ("kotlin-stdlib-js" if target == "js" else
+              "kotlin-stdlib-wasm-js" if target == "wasmJs" else
+              "kotlin-stdlib-wasm-wasi" if target == "wasmWasi" else "kotlin-stdlib")
+    scope = "runtime" if target is None else "compile"
+    dependencies = {("org.jetbrains.kotlin", stdlib, KOTLIN_VERSION, scope)}
+    if target == "js":
+        dependencies.add(("org.jetbrains.kotlin", "kotlin-dom-api-compat", KOTLIN_VERSION, scope))
+    if module == "dyn4k":
+        core = "dyn4k-core" if target is None else target_publication_name("dyn4k-core", target)
+        dependencies.add((GROUP, core, VERSION, scope))
+    return dependencies
+
+
+def pom_metadata_contract(module):
+    title, description = POM_MODULE_DESCRIPTIONS[module]
+    return {
+        "name": title,
+        "description": description,
+        "url": POM_PROJECT_URL,
+        "licenses": {"license": {"name": POM_LICENSE_NAME, "url": POM_LICENSE_URL}},
+        "developers": {"developer": {"id": POM_DEVELOPER_ID, "name": POM_DEVELOPER_NAME}},
+        "scm": {"url": POM_PROJECT_URL},
+    }
+
+
+def pom_element_matches(element, name, expected):
+    namespace = "{http://maven.apache.org/POM/4.0.0}"
+    if element is None or element.tag != namespace + name or element.attrib:
+        return False
+    if isinstance(expected, str):
+        return not len(element) and element.text == expected
+    return (not (element.text or "").strip() and len(element) == len(expected)
+            and all(pom_element_matches(child, key, value) and not (child.tail or "").strip()
+                    for child, (key, value) in zip(element, expected.items())))
+
+
+def source_sets_for_publication(module, target):
+    if module == "dyn4k":
+        return {"commonMain"}
+    platform = ("nativeMain" if target is None or target not in
+                {"jvm", "android", "js", "wasmJs", "wasmWasi"} else
+                {"jvm": "jvmMain", "android": "androidMain", "js": "jsMain",
+                 "wasmJs": "wasmJsMain", "wasmWasi": "wasmWasiMain"}[target])
+    return {"commonMain", platform}
+
+
+def candidate_source_contract(repository, candidate_sha):
+    source_files = {}
+    if (repository / ".git").exists():
+        archive = subprocess.check_output(
+            ["git", "-C", str(repository), "archive", "--format=tar", candidate_sha,
+             "dyn4k-core/src", "dyn4k/src"], stderr=subprocess.PIPE)
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
+            for entry in tree:
+                if entry.isfile() and entry.name.endswith((".kt", ".java")):
+                    source_files[entry.name] = tree.extractfile(entry).read()
+    else:
+        for module in MODULES:
+            for source in (repository / module / "src").glob("*Main/*/**/*"):
+                if source.is_file() and source.suffix in (".kt", ".java"):
+                    source_files[source.relative_to(repository).as_posix()] = source.read_bytes()
+        descriptor = repository / "dyn4k-core/src/jvmModule/java/module-info.java"
+        if descriptor.is_file():
+            source_files[descriptor.relative_to(repository).as_posix()] = descriptor.read_bytes()
+    result = {module: {} for module in MODULES}
+    for path, contents in source_files.items():
+        parts = Path(path).parts
+        if path == "dyn4k-core/src/jvmModule/java/module-info.java":
+            result["dyn4k-core"]["jvmModule/module-info.java"] = hashlib.sha256(contents).hexdigest()
+            continue
+        if (len(parts) < 6 or parts[0] not in MODULES or parts[1] != "src"
+                or not parts[2].endswith("Main") or parts[3] not in ("kotlin", "java")):
+            continue
+        module, source_set = parts[0], parts[2]
+        jar_path = "/".join((source_set, *parts[4:]))
+        if jar_path in result[module]:
+            raise ValueError(f"duplicate candidate source path: {jar_path}")
+        result[module][jar_path] = hashlib.sha256(contents).hexdigest()
+    if any(not sources for sources in result.values()):
+        raise ValueError("candidate source tree is missing required module sources")
+    return result
+
+
+def expected_source_entries(source_contract, module, target):
+    return {path: sha for path, sha in source_contract[module].items()
+            if path.split("/", 1)[0] in source_sets_for_publication(module, target)
+            or (module == "dyn4k-core" and target == "jvm"
+                and path == "jvmModule/module-info.java")}
+
+
+def archive_file_names(archive):
+    names = archive.namelist()
+    if len(names) != len(set(names)) or archive.testzip() is not None:
+        raise ValueError("archive has duplicate entries or a corrupt member")
+    return {name for name in names if not name.endswith("/")}
+
+
+def validate_source_archive(path, expected):
+    with zipfile.ZipFile(path) as archive:
+        names = archive_file_names(archive)
+        if names != set(expected) | {"META-INF/MANIFEST.MF"}:
+            raise ValueError("source entries differ from exact candidate source tree")
+        if archive.read("META-INF/MANIFEST.MF") != b"Manifest-Version: 1.0\r\n\r\n":
+            raise ValueError("source JAR manifest differs from publication contract")
+        if any(hashlib.sha256(archive.read(name)).hexdigest() != sha
+               for name, sha in expected.items()):
+            raise ValueError("source bytes differ from exact candidate source tree")
+
+
+def validate_generated_docs(jar_path, generated, license_bytes):
+    if not generated.is_dir():
+        raise ValueError("generated Dokka output is missing")
+    expected = {path.relative_to(generated).as_posix(): path
+                for path in generated.rglob("*") if path.is_file()}
+    if not expected or "index.html" not in expected:
+        raise ValueError("generated Dokka output is incomplete")
+    with zipfile.ZipFile(jar_path) as archive:
+        names = archive_file_names(archive)
+        if names != set(expected) | {"META-INF/MANIFEST.MF", "META-INF/LICENSE.md"}:
+            raise ValueError("API documentation entries differ from generated Dokka output")
+        if archive.read("META-INF/MANIFEST.MF") != b"Manifest-Version: 1.0\r\n\r\n":
+            raise ValueError("API documentation JAR manifest differs from publication contract")
+        if archive.read("META-INF/LICENSE.md") != license_bytes:
+            raise ValueError("API documentation license notice differs from repository license")
+        if any(archive.read(name) != path.read_bytes() for name, path in expected.items()):
+            raise ValueError("API documentation bytes differ from generated Dokka output")
+
+
+def validate_apple_metadata(metadata_jar, klib):
+    with zipfile.ZipFile(metadata_jar) as archive:
+        if archive_file_names(archive) != {"META-INF/MANIFEST.MF"}:
+            raise ValueError("Apple metadata JAR entries differ from publication contract")
+        if archive.read("META-INF/MANIFEST.MF") != b"Manifest-Version: 1.0\r\n\r\n":
+            raise ValueError("Apple metadata JAR manifest differs from publication contract")
+    with zipfile.ZipFile(klib) as archive:
+        names = archive_file_names(archive)
+        if (not {"default/manifest", "default/linkdata/module", "default/ir/bodies.knb"} <= names
+                or not any(name.startswith("default/linkdata/package_") and name.endswith(".knm")
+                           for name in names)
+                or any(not archive.read(name) for name in
+                       ("default/manifest", "default/linkdata/module", "default/ir/bodies.knb"))):
+            raise ValueError("Apple KLIB metadata structure is incomplete")
+
+
+def variant_attributes(target, kind):
+    platform = ("common" if target is None else "jvm" if target == "jvm" else
+                "androidJvm" if target == "android" else "js" if target == "js" else
+                "wasm" if target in ("wasmJs", "wasmWasi") else "native")
+    usage = ("kotlin-metadata" if (target is None and kind == "Api") or kind == "Metadata" else
+             "java-api" if kind == "Api" and target in ("jvm", "android") else
+             "java-runtime" if kind in ("Runtime", "Sources") and target in ("jvm", "android") else
+             "kotlin-api" if kind == "Api" else "kotlin-runtime")
+    attributes = {"org.gradle.category": "documentation" if kind == "Sources" else "library",
+                  "org.gradle.jvm.environment": "standard-jvm" if target == "jvm" else
+                  "android" if target == "android" else "non-jvm",
+                  "org.gradle.usage": usage,
+                  "org.jetbrains.kotlin.platform.type": platform}
+    if kind == "Sources":
+        attributes.update({"org.gradle.dependency.bundling": "external",
+                           "org.gradle.docstype": "sources"})
+    if target in ("jvm", "android"):
+        attributes["org.gradle.libraryelements"] = "jar" if kind == "Sources" or target == "jvm" else "aar"
+    if target == "js":
+        attributes["org.jetbrains.kotlin.js.compiler"] = "ir"
+    if target in ("wasmJs", "wasmWasi"):
+        attributes["org.jetbrains.kotlin.wasm.target"] = "js" if target == "wasmJs" else "wasi"
+    if platform == "native":
+        native = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", target).lower().replace("android_native_", "android_")
+        attributes["org.jetbrains.kotlin.native.target"] = native
+    return attributes
+
+
+def audit_publication_metadata(base, module, target, data):
+    name = module if target is None else target_publication_name(module, target)
+    errors = []
+    if not isinstance(data, dict) or data.get("formatVersion") != "1.1":
+        errors.append(f"{name}: Gradle metadata formatVersion differs from publication contract")
+    expected_component = {"group": GROUP, "module": module, "version": VERSION}
+    if target is not None:
+        expected_component["url"] = f"../../{module}/{VERSION}/{module}-{VERSION}.module"
+    component = data.get("component") if isinstance(data, dict) else None
+    if not isinstance(component, dict) or any(component.get(key) != value for key, value in expected_component.items()):
+        errors.append(f"{name}: Gradle component coordinate differs from publication contract")
+    if target is None and isinstance(component, dict) and "url" in component:
+        errors.append(f"{name}: root Gradle component has a parent URL")
+    variants = data.get("variants") if isinstance(data, dict) else None
+    if not isinstance(variants, list) or any(not isinstance(item, dict) for item in variants):
+        return errors + [f"{name}: Gradle variants are invalid"], set()
+    actual = {item.get("name"): item for item in variants}
+    contract = publication_variant_contract(module, target)
+    if len(actual) != len(variants) or set(actual) != set(contract):
+        errors.append(f"{name}: Gradle variants differ from publication contract: missing={sorted(set(contract) - set(actual))} extra={sorted(str(item) for item in set(actual) - set(contract))}")
+    referenced = set()
+    file_hashes = {}
+    for variant_name, specification in contract.items():
+        item = actual.get(variant_name)
+        if not isinstance(item, dict):
+            continue
+        if item.get("attributes") != variant_attributes(specification["target"], specification["kind"]):
+            errors.append(f"{name}: {variant_name} selection attributes differ from publication contract")
+        available = specification.get("available-at")
+        if available is not None:
+            if (item.get("available-at") != available or "files" in item
+                    or "dependencies" in item):
+                errors.append(f"{name}: {variant_name} target mapping differs")
+            continue
+        if item.get("available-at") is not None:
+            errors.append(f"{name}: {variant_name} unexpectedly redirects to another publication")
+        dependencies = item.get("dependencies", [])
+        if not isinstance(dependencies, list) or any(not isinstance(dep, dict) for dep in dependencies):
+            errors.append(f"{name}: {variant_name} dependencies are invalid")
+        else:
+            observed = {(dep.get("group"), dep.get("module"),
+                         dep.get("version", {}).get("requires") if isinstance(dep.get("version"), dict) else None)
+                        for dep in dependencies}
+            canonical = [{"group": group, "module": dependency_module,
+                          "version": {"requires": version}}
+                         for group, dependency_module, version in specification["dependencies"]]
+            if (len(observed) != len(dependencies) or observed != specification["dependencies"]
+                    or any(dep not in canonical for dep in dependencies)):
+                errors.append(f"{name}: {variant_name} dependency graph differs from publication contract")
+        files = item.get("files")
+        if not isinstance(files, list) or len(files) != 1 or not isinstance(files[0], dict):
+            errors.append(f"{name}: {variant_name} must reference one published file")
+            continue
+        file = files[0]
+        url = specification["url"]
+        if file.get("url") != url or file.get("name") != specification["file_name"]:
+            errors.append(f"{name}: {variant_name} file reference differs from publication contract")
+        if set(file) != {"url", "name", "size", "sha512", "sha256", "sha1", "md5"}:
+            errors.append(f"{name}: {variant_name} file descriptor fields differ from publication contract")
+        path = base / url
+        referenced.add(path)
+        if not path.is_file():
+            errors.append(f"{name}: {variant_name} referenced file missing: {url}")
+        else:
+            if path not in file_hashes:
+                hashes = {algorithm: hashlib.new(algorithm) for algorithm in ("sha512", "sha256", "sha1", "md5")}
+                with path.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        for value in hashes.values():
+                            value.update(block)
+                file_hashes[path] = {algorithm: value.hexdigest() for algorithm, value in hashes.items()}
+            if file.get("size") != path.stat().st_size or any(
+                    file.get(algorithm) != value for algorithm, value in file_hashes[path].items()):
+                errors.append(f"{name}: {variant_name} referenced file size or checksum differs from staged bytes")
+    return errors, referenced
 
 
 def full_suite_cases(suite_manifest, lane_id=None):
@@ -376,88 +705,214 @@ def require_clean_checkout(repository, candidate_sha):
         raise ValueError(f"untracked checkout inputs invalidate candidate evidence: {names}")
 
 
-def audit_staging(root, candidate_sha):
+def audit_staging(root, candidate_sha, targets=None, license_file=Path("LICENSE.md"),
+                  receipt_path=None, console_path=None, content_contract=None):
     errors, artifacts = [], []
     if not SHA40.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be a full commit hash")
+    selected = matrix_targets() if targets is None else set(targets)
+    if not selected or not selected <= matrix_targets():
+        raise ValueError("selected publication targets are invalid")
+    if not license_file.is_file():
+        errors.append("repository license is missing")
+        license_bytes = None
+    else:
+        license_bytes = license_file.read_bytes()
+    repository = license_file.parent
+    if content_contract is None:
+        try:
+            sources_contract = candidate_source_contract(repository, candidate_sha)
+        except (OSError, ValueError, subprocess.CalledProcessError, tarfile.TarError) as error:
+            errors.append(f"candidate source tree invalid: {error}")
+            sources_contract = {}
+        docs_contract = {}
+        for module in MODULES:
+            root_docs = root / GROUP.replace(".", "/") / module / VERSION / f"{module}-{VERSION}-javadoc.jar"
+            if root_docs.is_file():
+                try:
+                    validate_generated_docs(root_docs, repository / module / "build/dokka/html", license_bytes)
+                    docs_contract[module] = digest(root_docs)
+                except (OSError, ValueError, zipfile.BadZipFile) as error:
+                    errors.append(f"{module}: API documentation differs from Dokka: {error}")
+            else:
+                errors.append(f"{module}: root API documentation artifact missing")
+        content_contract = {"schema": 1, "sources": sources_contract, "api_docs_sha256": docs_contract}
+    else:
+        sources_contract = content_contract.get("sources") if isinstance(content_contract, dict) else None
+        docs_contract = content_contract.get("api_docs_sha256") if isinstance(content_contract, dict) else None
+        if (not isinstance(content_contract, dict) or content_contract.get("schema") != 1
+                or not isinstance(sources_contract, dict) or set(sources_contract) != set(MODULES)
+                or any(not isinstance(value, dict) or not value or
+                       any(not isinstance(path, str) or not SHA64.fullmatch(str(sha))
+                           for path, sha in value.items())
+                       for value in sources_contract.values())
+                or not isinstance(docs_contract, dict) or set(docs_contract) != set(MODULES)
+                or any(not SHA64.fullmatch(str(value)) for value in docs_contract.values())):
+            errors.append("recorded publication content contract is invalid")
+            sources_contract, docs_contract = {}, {}
     for module in MODULES:
-        expected = {target_publication_name(module, target)
-                    for target in {row["target"] for row in matrix()}}
         root_metadata = root / GROUP.replace(".", "/") / module / VERSION / f"{module}-{VERSION}.module"
-        if root_metadata.is_file():
-            root_data = json.loads(root_metadata.read_text())
-            published = {item.get("available-at", {}).get("module")
-                         for item in root_data.get("variants", [])}
-            published.discard(None)
-            if published != expected:
-                errors.append(f"{module}: root metadata target mapping differs: missing={sorted(expected - published)} extra={sorted(published - expected)}")
-        else:
+        if not root_metadata.is_file():
             errors.append(f"{module}: root Gradle metadata missing")
-            published = set()
-        for name in [module] + sorted(published | expected):
+        for target in [None] + sorted(selected):
+            name = module if target is None else target_publication_name(module, target)
             base = root / GROUP.replace(".", "/") / name / VERSION
             pom = base / f"{name}-{VERSION}.pom"
             metadata = base / f"{name}-{VERSION}.module"
             if not pom.is_file() or not metadata.is_file():
                 errors.append(f"{name}: staged POM or Gradle metadata missing")
                 continue
-            pom_root = ET.parse(pom).getroot()
+            try:
+                pom_root = ET.parse(pom).getroot()
+            except ET.ParseError as error:
+                errors.append(f"{name}: POM XML is invalid: {error}")
+                continue
             ns = "{http://maven.apache.org/POM/4.0.0}"
+            expected_sections = {ns + key for key in
+                                 ("modelVersion", "groupId", "artifactId", "version", "name",
+                                  "description", "url", "licenses", "developers", "scm", "dependencies")}
+            packaging = None if target in (None, "jvm") else "aar" if target == "android" else "klib"
+            if packaging is not None:
+                expected_sections.add(ns + "packaging")
+            observed_sections = [child.tag for child in pom_root]
+            if (pom_root.tag != ns + "project" or len(observed_sections) != len(expected_sections)
+                    or set(observed_sections) != expected_sections
+                    or pom_root.findtext(ns + "modelVersion") != "4.0.0"
+                    or pom_root.findtext(ns + "packaging") != packaging):
+                errors.append(f"{name}: POM effective model differs from publication contract")
             for key, expected in (("groupId", GROUP), ("artifactId", name), ("version", VERSION)):
                 if pom_root.findtext(ns + key) != expected:
                     errors.append(f"{name}: wrong POM {key}")
-            for key in ("name", "description", "url", "licenses", "scm", "developers"):
-                if pom_root.find(ns + key) is None:
-                    errors.append(f"{name}: missing POM {key}")
+            for key, expected in pom_metadata_contract(module).items():
+                if not pom_element_matches(pom_root.find(ns + key), key, expected):
+                    errors.append(f"{name}: POM {key} differs from publication contract")
+            pom_entries = pom_root.findall(ns + "dependencies/" + ns + "dependency")
+            dependency_container = pom_root.find(ns + "dependencies")
+            if (dependency_container is None or dependency_container.attrib
+                    or any(child.tag != ns + "dependency" for child in dependency_container)):
+                errors.append(f"{name}: POM dependency container differs from publication contract")
+            fields = {ns + key for key in ("groupId", "artifactId", "version", "scope")}
             dependencies = {(entry.findtext(ns + "groupId"), entry.findtext(ns + "artifactId"),
-                             entry.findtext(ns + "version"))
-                            for entry in pom_root.findall(ns + "dependencies/" + ns + "dependency")}
-            if any(group == "org.dyn4j" for group, _, _ in dependencies):
-                errors.append(f"{name}: upstream dyn4j leaks into production dependencies")
-            if module == "dyn4k" and (GROUP, name.replace("dyn4k", "dyn4k-core", 1), VERSION) not in dependencies:
-                errors.append(f"{name}: coordinated dyn4k-core dependency missing")
-            module_data = json.loads(metadata.read_text())
-            if module_data.get("component", {}).get("version") != VERSION:
-                errors.append(f"{name}: wrong Gradle metadata version")
-            files = [path for path in base.iterdir() if path.is_file() and path.suffix in (".jar", ".aar", ".klib", ".md")]
-            binaries = [path for path in files if "sources" not in path.name and "javadoc" not in path.name
-                        and "dokka" not in path.name and "license" not in path.name]
-            if not binaries:
-                errors.append(f"{name}: no staged binary")
-            if not any("sources" in path.name for path in files):
-                errors.append(f"{name}: sources artifact missing")
-            if not any("javadoc" in path.name or "dokka" in path.name for path in files):
-                errors.append(f"{name}: API documentation artifact missing")
-            if not any("license" in path.name for path in files):
-                errors.append(f"{name}: license artifact missing")
-            for license_file in (path for path in files if "license" in path.name):
-                source_license = Path("LICENSE.md")
-                if source_license.is_file() and license_file.read_bytes() != source_license.read_bytes():
-                    errors.append(f"{name}: license differs from repository license")
-            for path in [pom, metadata] + files:
+                             entry.findtext(ns + "version"), entry.findtext(ns + "scope"))
+                            for entry in pom_entries}
+            if (len(dependencies) != len(pom_entries) or dependencies != pom_dependency_contract(module, target)
+                    or any({child.tag for child in entry} != fields or len(entry) != len(fields)
+                           or entry.attrib or any(child.attrib or len(child) for child in entry)
+                           for entry in pom_entries)):
+                errors.append(f"{name}: POM dependency graph differs from publication contract")
+            try:
+                module_data = load_json_strict(metadata)
+                metadata_errors, referenced = audit_publication_metadata(base, module, target, module_data)
+                errors.extend(metadata_errors)
+            except (OSError, ValueError, TypeError) as error:
+                errors.append(f"{name}: Gradle metadata invalid: {error}")
+                referenced = set()
+            binary = root / publication_binary_path(module, target)
+            source = base / f"{name}-{VERSION}-sources.jar"
+            docs = base / f"{name}-{VERSION}-javadoc.jar"
+            license_artifact = base / f"{name}-{VERSION}-license.md"
+            for path, label in ((binary, "binary"), (source, "sources artifact"),
+                                (docs, "API documentation artifact"),
+                                (license_artifact, "license artifact")):
+                if not path.is_file():
+                    errors.append(f"{name}: {label} missing: {path.name}")
+            if license_artifact.is_file() and license_bytes is not None and license_artifact.read_bytes() != license_bytes:
+                errors.append(f"{name}: license differs from repository license")
+            if source.is_file() and module in sources_contract:
+                try:
+                    expected = expected_source_entries(sources_contract, module, target)
+                    if not expected:
+                        raise ValueError("candidate source set is empty")
+                    validate_source_archive(source, expected)
+                except (OSError, ValueError, zipfile.BadZipFile) as error:
+                    errors.append(f"{name}: sources archive invalid: {error}")
+            if docs.is_file() and module in docs_contract and digest(docs) != docs_contract[module]:
+                errors.append(f"{name}: API documentation differs from generated Dokka publication")
+            if target in APPLE_TARGETS:
+                apple_metadata = base / f"{name}-{VERSION}-metadata.jar"
+                if apple_metadata.is_file() and binary.is_file():
+                    try:
+                        validate_apple_metadata(apple_metadata, binary)
+                    except (OSError, ValueError, zipfile.BadZipFile) as error:
+                        errors.append(f"{name}: Apple metadata invalid: {error}")
+            for path in (binary, source, docs):
+                if not path.is_file():
+                    continue
+                try:
+                    with zipfile.ZipFile(path) as archive:
+                        entries = archive.namelist()
+                        if path == docs and "index.html" not in entries:
+                            errors.append(f"{name}: API documentation index missing")
+                        if path == docs and not any("/" in item and item.endswith(".html") for item in entries):
+                            errors.append(f"{name}: API documentation pages missing")
+                        if path == source and not any(item.endswith((".kt", ".java")) for item in entries):
+                            errors.append(f"{name}: sources archive has no source files")
+                        if path == binary and path.suffix == ".jar":
+                            names = archive_file_names(archive)
+                            if "META-INF/LICENSE.md" not in names:
+                                errors.append(f"{name}: embedded license missing")
+                            elif license_bytes is not None and archive.read("META-INF/LICENSE.md") != license_bytes:
+                                errors.append(f"{name}: embedded license differs from repository license")
+                except (ValueError, zipfile.BadZipFile):
+                    errors.append(f"{name}: {path.name} archive is invalid")
+            for path in [pom, metadata, binary, source, docs, license_artifact] + sorted(
+                    referenced - {binary, source}):
+                if not path.is_file():
+                    continue
                 sha = digest(path)
                 artifacts.append({"path": str(path.relative_to(root)), "sha256": sha})
                 checksum = path.with_name(path.name + ".sha256")
                 if not checksum.is_file() or checksum.read_text().strip().lower() != sha:
                     errors.append(f"{path.name}: SHA-256 sidecar missing or incorrect")
-                if path.suffix == ".jar" and "sources" not in path.name and "javadoc" not in path.name:
-                    with zipfile.ZipFile(path) as archive:
-                        if "META-INF/LICENSE.md" not in archive.namelist():
-                            errors.append(f"{path.name}: embedded license missing")
-    return {"candidate_sha": candidate_sha, "artifacts": artifacts,
-            "status": "PASSED" if not errors else "FAILED", "errors": errors}
+    stage_receipt = None
+    stage_console = None
+    if receipt_path is not None or console_path is not None:
+        try:
+            import stage
+            if receipt_path is None or console_path is None:
+                raise ValueError("staging receipt and console are both required")
+            stage_receipt = str(receipt_path.resolve().relative_to(root.resolve()))
+            stage_console = str(console_path.resolve().relative_to(root.resolve()))
+            receipt = load_json_strict(receipt_path)
+            stage.verify_receipt(receipt, console_path, candidate_sha, tuple(sorted(selected)))
+            artifacts.append({"path": stage_receipt, "sha256": digest(receipt_path)})
+            artifacts.append({"path": stage_console, "sha256": digest(console_path)})
+        except (OSError, ValueError) as error:
+            errors.append(f"staging task outcome invalid: {error}")
+    return {"candidate_sha": candidate_sha, "targets": sorted(selected),
+            "stage_receipt": stage_receipt, "stage_console": stage_console,
+            "content_contract": content_contract,
+            "artifacts": artifacts, "status": "PASSED" if not errors else "FAILED",
+            "errors": errors}
 
 
-def verify_audit_against_staging(audit_data, repository):
+def verify_audit_against_staging(audit_data, repository, allow_pinned_content_contract=False):
     if not isinstance(audit_data, dict) or not SHA40.fullmatch(str(audit_data.get("candidate_sha", ""))):
         raise ValueError("staged audit candidate identity is invalid")
-    staged = audit_staging(repository / "build/staging-repository", audit_data["candidate_sha"])
+    root = repository / "build/staging-repository"
+    targets = audit_data.get("targets")
+    if not isinstance(targets, list) or not targets or len(set(targets)) != len(targets):
+        raise ValueError("staged audit targets are invalid")
+    paths = []
+    for key in ("stage_receipt", "stage_console"):
+        relative = audit_data.get(key)
+        if not isinstance(relative, str) or not relative.startswith(".qualification/"):
+            raise ValueError("staged audit task outcome path is invalid")
+        path = (root / relative).resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise ValueError("staged audit task outcome path escapes repository")
+        paths.append(path)
+    staged = audit_staging(root, audit_data["candidate_sha"], targets,
+                           repository / "LICENSE.md", *paths,
+                           content_contract=audit_data.get("content_contract")
+                           if allow_pinned_content_contract else None)
     observed_files = {item["path"]: item["sha256"] for item in staged["artifacts"]}
     recorded = audit_data.get("artifacts")
     if not isinstance(recorded, list) or any(not isinstance(item, dict) for item in recorded):
         raise ValueError("staged audit artifact list is invalid")
     recorded_files = {item.get("path"): item.get("sha256") for item in recorded}
     if (len(recorded_files) != len(recorded) or recorded_files != observed_files
+            or audit_data.get("content_contract") != staged.get("content_contract")
             or audit_data.get("status") != staged["status"]
             or sorted(audit_data.get("errors", [])) != sorted(staged["errors"])):
         raise ValueError("staged audit differs from current staged files")
@@ -894,6 +1349,9 @@ def main():
     audit = sub.add_parser("audit-staging")
     audit.add_argument("--candidate-sha", required=True)
     audit.add_argument("--repository", type=Path, required=True)
+    audit.add_argument("--target", action="append", required=True)
+    audit.add_argument("--stage-receipt", type=Path, required=True)
+    audit.add_argument("--stage-console", type=Path, required=True)
     audit.add_argument("--output", type=Path, required=True)
     provider = sub.add_parser("check-providers")
     provider.add_argument("graph", type=Path)
@@ -940,7 +1398,9 @@ def main():
         print(json.dumps(result))
         return 0 if result["status"] == "PROBE_PASSED" else 1
     if args.action == "audit-staging":
-        result = audit_staging(args.repository, args.candidate_sha)
+        result = audit_staging(args.repository, args.candidate_sha, args.target,
+                               repository / "LICENSE.md", args.stage_receipt,
+                               args.stage_console)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps(result))
         return 0 if result["status"] == "PASSED" else 1

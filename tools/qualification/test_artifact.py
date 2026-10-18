@@ -13,6 +13,7 @@ from pathlib import Path
 
 import artifact
 import qualify
+import test_publication
 
 
 class RawArtifactTests(unittest.TestCase):
@@ -624,27 +625,10 @@ class RawArtifactTests(unittest.TestCase):
         groups = {group["id"]: group for group in manifest["groups"]}
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
-            staging = repository / "build/staging-repository"
-            hashes = {}
-            for module in qualify.MODULES:
-                for artifact_target in (target, "jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"):
-                    binary = staging / qualify.target_binary_path(module, artifact_target)
-                    binary.parent.mkdir(parents=True, exist_ok=True)
-                    binary.write_bytes(module.encode())
-                    digest = hashlib.sha256(module.encode()).hexdigest()
-                    binary.with_name(binary.name + ".sha256").write_text(digest + "\n")
-                    if artifact_target == target:
-                        hashes[module] = digest
-                for publication in (module, *(qualify.target_publication_name(module, item)
-                                             for item in (target, "jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))):
-                    base = staging / qualify.GROUP.replace(".", "/") / publication / qualify.VERSION
-                    base.mkdir(parents=True, exist_ok=True)
-                    (base / f"{publication}-{qualify.VERSION}.pom").write_text(
-                        f'<project xmlns="http://maven.apache.org/POM/4.0.0">'
-                        f'<groupId>{qualify.GROUP}</groupId><artifactId>{publication}</artifactId>'
-                        f'<version>{qualify.VERSION}</version></project>')
-                    (base / f"{publication}-{qualify.VERSION}.module").write_text(
-                        json.dumps({"component": {"version": qualify.VERSION}}))
+            staging = test_publication.PublicationAuditTests().stage(
+                repository, (target, "jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))
+            hashes = {module: qualify.digest(staging / qualify.target_binary_path(module, target))
+                      for module in qualify.MODULES}
             started = time.time_ns() - 5_000_000_000
             finished = time.time_ns() + 5_000_000_000
 
@@ -732,6 +716,12 @@ class RawArtifactTests(unittest.TestCase):
             artifact.verify_bundle(workflow_bundle, manifest, sha, require_matrix=False)
             (workflow_bundle / "json/matrix-macosArm64.json").write_bytes(matrix_path.read_bytes())
             artifact.verify_bundle(workflow_bundle, manifest, sha)
+            missing_docs = repository / "bundle-missing-docs"
+            shutil.copytree(workflow_bundle, missing_docs)
+            docs = next((missing_docs / "staged").rglob("dyn4k-macosarm64-*-javadoc.jar"))
+            docs.unlink()
+            with self.assertRaisesRegex(ValueError, "staged GAV|partial"):
+                artifact.verify_bundle(missing_docs, manifest, sha)
 
             def reject_matrix(label, edit, reason):
                 changed = repository / f"bundle-matrix-{label}"
@@ -797,7 +787,7 @@ class RawArtifactTests(unittest.TestCase):
             (fabricated / "json/matrix-macosArm64.json").write_text(json.dumps({
                 "candidate_sha": sha, "total": 112,
                 "bounded_hosted_probes": [top_result]}))
-            with self.assertRaisesRegex(ValueError, "binary.*missing|binary.*checksum"):
+            with self.assertRaisesRegex(ValueError, "binary.*missing|binary.*checksum|SHA-256 sidecar"):
                 artifact.verify_bundle(fabricated, manifest, sha)
             inventory_path = workflow_bundle / "verification.json"
             inventory_bytes = inventory_path.read_bytes()

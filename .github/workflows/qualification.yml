@@ -6,6 +6,7 @@ on:
     branches:
       - codex/port-qualification-harness
       - codex/dyn4k-port
+      - codex/port-publication-assembly
   pull_request:
 
 jobs:
@@ -26,23 +27,22 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Harness regression tests
         run: python3 -m unittest discover -s tools/qualification -p 'test_*.py' -v
-      - name: Stage root and JVM publications
+      - name: Stage all target publications
         run: >-
-          ./gradlew --no-daemon --console=plain
-          :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository
-          :dyn4k-core:publishJvmPublicationToStagingRepository
-          :dyn4k-core:publishAndroidPublicationToStagingRepository
-          :dyn4k-core:publishLinuxX64PublicationToStagingRepository
-          :dyn4k-core:publishJsPublicationToStagingRepository
-          :dyn4k-core:publishWasmJsPublicationToStagingRepository
-          :dyn4k-core:publishWasmWasiPublicationToStagingRepository
-          :dyn4k:publishKotlinMultiplatformPublicationToStagingRepository
-          :dyn4k:publishJvmPublicationToStagingRepository
-          :dyn4k:publishAndroidPublicationToStagingRepository
-          :dyn4k:publishLinuxX64PublicationToStagingRepository
-          :dyn4k:publishJsPublicationToStagingRepository
-          :dyn4k:publishWasmJsPublicationToStagingRepository
-          :dyn4k:publishWasmWasiPublicationToStagingRepository
+          python3 tools/qualification/stage.py
+          --candidate-sha "$GITHUB_SHA"
+          --target jvm --target android --target js
+          --target wasmJs --target wasmWasi
+          --target linuxX64 --target linuxArm64
+          --target androidNativeArm32 --target androidNativeArm64
+          --target androidNativeX86 --target androidNativeX64
+          --target mingwX64 --target macosArm64
+          --target iosArm64 --target iosSimulatorArm64 --target iosX64
+          --target tvosArm64 --target tvosSimulatorArm64
+          --target watchosArm64 --target watchosDeviceArm64
+          --target watchosSimulatorArm64
+          --output build/staging-repository/.qualification/ubuntu/receipt.json
+          --console build/staging-repository/.qualification/ubuntu/stage.log
       - name: Execute staged Kotlin and Java consumer
         run: >-
           ./gradlew -p consumers/qualification --no-daemon --console=plain run
@@ -122,7 +122,26 @@ jobs:
           python3 tools/qualification/qualify.py audit-staging
           --candidate-sha "$GITHUB_SHA"
           --repository build/staging-repository
+          --target jvm --target android --target js
+          --target wasmJs --target wasmWasi
+          --target linuxX64 --target linuxArm64
+          --target androidNativeArm32 --target androidNativeArm64
+          --target androidNativeX86 --target androidNativeX64
+          --target mingwX64 --target macosArm64
+          --target iosArm64 --target iosSimulatorArm64 --target iosX64
+          --target tvosArm64 --target tvosSimulatorArm64
+          --target watchosArm64 --target watchosDeviceArm64
+          --target watchosSimulatorArm64
+          --stage-receipt build/staging-repository/.qualification/ubuntu/receipt.json
+          --stage-console build/staging-repository/.qualification/ubuntu/stage.log
           --output "$RUNNER_TEMP/artifact-audit.json"
+      - name: Package Linux publication evidence
+        if: always()
+        run: >-
+          python3 tools/qualification/publication.py package
+          --candidate-sha "$GITHUB_SHA"
+          --audit "$RUNNER_TEMP/artifact-audit.json"
+          --output "$RUNNER_TEMP/ubuntu-publication"
       - name: Record every required runtime lane
         if: always()
         run: >-
@@ -143,6 +162,92 @@ jobs:
           name: qualification-${{ github.sha }}
           path: |
             ${{ runner.temp }}/ubuntu-raw-bundle/
+          if-no-files-found: error
+      - name: Upload Linux publication bytes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publication-${{ github.sha }}-ubuntu
+          path: |
+            ${{ runner.temp }}/ubuntu-publication/
+            ${{ runner.temp }}/artifact-audit.json
+            build/staging-repository/.qualification/ubuntu/
+          if-no-files-found: error
+
+  hosted-publications:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos
+            runner: macos-26
+            targets: >-
+              --target macosArm64 --target iosArm64 --target iosSimulatorArm64
+              --target iosX64 --target tvosArm64 --target tvosSimulatorArm64
+              --target watchosArm64 --target watchosDeviceArm64
+              --target watchosSimulatorArm64
+          - host: windows
+            runner: windows-2025
+            targets: --target mingwX64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - name: Select pinned Xcode
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Harness regression tests
+        run: python -m unittest discover -s tools/qualification -p 'test_*.py' -v
+      - name: Stage hosted publications
+        run: >-
+          python tools/qualification/stage.py
+          --candidate-sha "${{ github.sha }}"
+          ${{ matrix.targets }}
+          --output "build/staging-repository/.qualification/${{ matrix.host }}/receipt.json"
+          --console "build/staging-repository/.qualification/${{ matrix.host }}/stage.log"
+      - name: Audit hosted publications
+        if: always()
+        run: >-
+          python tools/qualification/qualify.py audit-staging
+          --candidate-sha "${{ github.sha }}"
+          --repository build/staging-repository
+          ${{ matrix.targets }}
+          --stage-receipt "build/staging-repository/.qualification/${{ matrix.host }}/receipt.json"
+          --stage-console "build/staging-repository/.qualification/${{ matrix.host }}/stage.log"
+          --output "${{ runner.temp }}/artifact-audit.json"
+      - name: Package hosted publication evidence
+        if: always()
+        run: >-
+          python tools/qualification/publication.py package
+          --candidate-sha "${{ github.sha }}"
+          --audit "${{ runner.temp }}/artifact-audit.json"
+          --output "${{ runner.temp }}/hosted-publication"
+      - name: Upload hosted publication bytes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publication-${{ github.sha }}-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/hosted-publication/
+            ${{ runner.temp }}/artifact-audit.json
+            build/staging-repository/.qualification/${{ matrix.host }}/
           if-no-files-found: error
 
   hosted-native:

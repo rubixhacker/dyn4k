@@ -703,17 +703,29 @@ def copy_json(path, destination):
     return data
 
 
-def capture_staging(repository, destination, targets):
+def capture_staging(repository, destination, targets, candidate_sha):
     staging = repository / "build/staging-repository"
+    source_license = repository / "LICENSE.md"
+    if not source_license.is_file():
+        raise ValueError("repository license is missing")
+    shutil.copy2(source_license, destination / "LICENSE.md")
     gav = []
     files = []
     hashes = {}
     names = {module for module in qualify.MODULES}
     names.update(qualify.target_publication_name(module, target)
                  for module in qualify.MODULES for target in targets)
+    metadata_names = {qualify.target_publication_name(module, target)
+                      for module in qualify.MODULES for target in targets
+                      if target in qualify.APPLE_TARGETS}
     for name in sorted(names):
         base = staging / qualify.GROUP.replace(".", "/") / name / qualify.VERSION
-        for suffix in (".pom", ".module"):
+        suffixes = (".pom", ".module", "-sources.jar", "-javadoc.jar", "-license.md")
+        if name in qualify.MODULES:
+            suffixes += (".jar",)
+        if name in metadata_names:
+            suffixes += ("-metadata.jar",)
+        for suffix in suffixes:
             source = base / f"{name}-{qualify.VERSION}{suffix}"
             if not source.is_file() or source.is_symlink():
                 raise ValueError(f"staged GAV descriptor missing: {name}{suffix}")
@@ -724,7 +736,7 @@ def capture_staging(repository, destination, targets):
                                       ("version", qualify.VERSION)):
                     if root.findtext(namespace + key) != expected:
                         raise ValueError(f"staged GAV differs in {name} {key}")
-            else:
+            elif suffix == ".module":
                 metadata = qualify.load_json_strict(source)
                 if (not isinstance(metadata, dict)
                         or not isinstance(metadata.get("component"), dict)
@@ -735,6 +747,13 @@ def capture_staging(repository, destination, targets):
             shutil.copy2(source, target_path)
             files.append({"path": portable_path(target_path.relative_to(destination).as_posix()),
                           "sha256": qualify.digest(target_path)})
+            sidecar = source.with_name(source.name + ".sha256")
+            if not sidecar.is_file() or sidecar.read_text().strip().lower() != qualify.digest(source):
+                raise ValueError(f"staged checksum differs: {source.name}")
+            sidecar_path = destination / "staged" / sidecar.relative_to(staging)
+            shutil.copy2(sidecar, sidecar_path)
+            files.append({"path": portable_path(sidecar_path.relative_to(destination).as_posix()),
+                          "sha256": qualify.digest(sidecar_path)})
         gav.append(f"{qualify.GROUP}:{name}:{qualify.VERSION}")
     for target in targets:
         hashes[target] = {}
@@ -757,7 +776,10 @@ def capture_staging(repository, destination, targets):
             files.append({"path": portable_path(target_path.relative_to(destination).as_posix()),
                           "sha256": qualify.digest(target_path)})
             hashes[target][module] = actual
-    return gav, files, hashes
+    audit = qualify.audit_staging(staging, candidate_sha, targets, source_license)
+    if audit["status"] != "PASSED":
+        raise ValueError("staged publication is partial or invalid: " + "; ".join(audit["errors"]))
+    return gav, files, hashes, audit["content_contract"]
 
 
 def stage_hosted(repository, manifest, candidate_sha, target, probe_path, matrix_path, destination):
@@ -786,8 +808,26 @@ def stage_hosted(repository, manifest, candidate_sha, target, probe_path, matrix
             return result
         qualify.validate_hosted_probe(probe, candidate_sha, repository)
         artifact_target = "js" if target == "jsSafari" else target
-        result["gav"], result["staged_files"], hashes = capture_staging(
-            repository, destination, (artifact_target,))
+        result["gav"], result["staged_files"], hashes, result["staged_content_contract"] = capture_staging(
+            repository, destination, (artifact_target,), candidate_sha)
+        if "stage_receipt_sha256" in probe or "stage_audit_sha256" in probe:
+            if not probe.get("stage_receipt_sha256") or not probe.get("stage_audit_sha256"):
+                raise ValueError("hosted staging receipt and audit must both be present")
+            stage_dir = repository / "build/staging-repository/.qualification" / target
+            for filename, expected in (("receipt.json", probe["stage_receipt_sha256"]),
+                                       ("audit.json", probe["stage_audit_sha256"]),
+                                       ("stage.log", None)):
+                source = stage_dir / filename
+                if not source.is_file() or source.is_symlink():
+                    raise ValueError(f"hosted staging {filename} is missing")
+                if expected and qualify.digest(source) != expected:
+                    raise ValueError(f"hosted staging {filename} bytes differ")
+                destination_path = destination / "staged/.qualification" / target / filename
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination_path)
+                result["staged_files"].append({
+                    "path": portable_path(destination_path.relative_to(destination).as_posix()),
+                    "sha256": qualify.digest(destination_path)})
         if hashes[artifact_target] != probe["artifact_hashes"]:
             raise ValueError("staged GAV binary hashes differ from hosted observation")
         groups = {group["id"]: group for group in manifest["groups"]}
@@ -894,8 +934,9 @@ def stage_ubuntu(repository, manifest, candidate_sha, evidence_dir, destination)
                 result["reported_groups"][group_id] = counts["reported"]
                 result["executed"] += counts["selected"]
                 result["reported"] += counts["reported"]
-        result["gav"], result["staged_files"], result["artifact_hashes"] = capture_staging(
-            repository, destination, ("jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))
+        (result["gav"], result["staged_files"], result["artifact_hashes"],
+         result["staged_content_contract"]) = capture_staging(
+            repository, destination, ("jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"), candidate_sha)
         for name in ("artifact-audit.json", "runtime-matrix.json"):
             data = copy_json(evidence_dir / name, destination)
             if data.get("candidate_sha") != candidate_sha:
@@ -1018,6 +1059,28 @@ def verify_bundle(bundle, manifest, candidate_sha, require_matrix=True):
         raise ValueError("bundled staged GAV set differs")
     targets = ("jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android") if route == "ubuntu-host" else (
         "js" if route == "jsSafari" else route,)
+    license_file = bundle / "LICENSE.md"
+    if not license_file.is_file() or license_file.is_symlink():
+        raise ValueError("bundle source license is missing")
+    staged_audit = qualify.audit_staging(bundle / "staged", candidate_sha, targets, license_file,
+                                         content_contract=summary.get("staged_content_contract"))
+    if staged_audit["status"] != "PASSED":
+        raise ValueError("bundled staged publication is partial or invalid: " + "; ".join(staged_audit["errors"]))
+    if route != "ubuntu-host" and ("stage_receipt_sha256" in top or "stage_audit_sha256" in top):
+        if not top.get("stage_receipt_sha256") or not top.get("stage_audit_sha256"):
+            raise ValueError("bundled hosted stage identity is incomplete")
+        stage_dir = bundle / "staged/.qualification" / route
+        receipt_path = stage_dir / "receipt.json"
+        audit_path = stage_dir / "audit.json"
+        console_path = stage_dir / "stage.log"
+        if (not receipt_path.is_file() or qualify.digest(receipt_path) != top["stage_receipt_sha256"]
+                or not audit_path.is_file() or qualify.digest(audit_path) != top["stage_audit_sha256"]):
+            raise ValueError("bundled hosted stage receipt or audit bytes differ")
+        verified = qualify.audit_staging(bundle / "staged", candidate_sha, targets,
+                                         license_file, receipt_path, console_path,
+                                         content_contract=summary.get("staged_content_contract"))
+        if verified != qualify.load_json_strict(audit_path) or verified["status"] != "PASSED":
+            raise ValueError("bundled hosted stage task outcome or artifact audit differs")
     observed_hashes = {}
     for target in targets:
         observed_hashes[target] = {}

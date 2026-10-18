@@ -557,6 +557,9 @@ class QualificationTests(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(Path(__file__).with_name("qualify.py")), "audit-staging",
                  "--candidate-sha", sha, "--repository", str(repository / "empty-staging"),
+                 *(item for target in sorted(qualify.matrix_targets()) for item in ("--target", target)),
+                 "--stage-receipt", str(repository / "empty-staging/.qualification/receipt.json"),
+                 "--stage-console", str(repository / "empty-staging/.qualification/stage.log"),
                  "--output", str(output)], cwd=repository, text=True,
                 capture_output=True, check=False)
             self.assertEqual(1, result.returncode, result.stderr)
@@ -570,7 +573,10 @@ class QualificationTests(unittest.TestCase):
                 for target in {row["target"] for row in qualify.matrix()}
             }
             self.assertTrue(expected_publications.issubset(set(audit["errors"])))
-            self.assertEqual(46, len(audit["errors"]))
+            self.assertEqual(51, len(audit["errors"]))
+            self.assertTrue(any("candidate source tree invalid" in error for error in audit["errors"]))
+            self.assertTrue(all(f"{module}: root API documentation artifact missing" in audit["errors"]
+                                for module in qualify.MODULES))
 
     def test_report_refuses_sha_other_than_checkout(self):
         with tempfile.TemporaryDirectory() as root:

@@ -7,6 +7,7 @@ plugins {
     kotlin("multiplatform")
     id("com.android.kotlin.multiplatform.library")
     `maven-publish`
+    id("org.jetbrains.dokka")
 }
 
 kotlin {
@@ -84,8 +85,14 @@ if (providers.gradleProperty("qualificationProduction").orNull == "true") {
     }
 }
 
+val dokkaApiJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    from(tasks.named("dokkaGeneratePublicationHtml"))
+}
+
 publishing {
     publications.withType<MavenPublication>().configureEach {
+        artifact(dokkaApiJar)
         artifact(rootProject.file("LICENSE.md")) {
             classifier = "license"
             extension = "md"
