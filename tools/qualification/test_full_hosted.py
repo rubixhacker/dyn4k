@@ -228,8 +228,60 @@ class FullHostedTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "not a completed target"):
                     full_hosted.verify_transport_archive(archive, "a" * 40, "jsSafari")
 
+    def test_failed_safari_identity_retains_full_source_xml_inventory(self):
+        repository = self.root / "full-source-xml"
+        expected, paths, process = self.failed_safari_source_reports(repository)
+        counts = {"dyn4k-core": 161, "dyn4k": 10}
+        raw = b'<testsuite tests="0" failures="0" errors="0" skipped="0" time="0"/>'
+        for module, count in counts.items():
+            for index in range(count - 1):
+                (paths[module].parent / f"TEST-extra-{index:03d}.xml").write_bytes(raw)
+        process["finished_ns"] = time.time_ns()
+        output = self.root / "full-source-output"
+        folder = output / "development"
+        folder.mkdir(parents=True)
+        lane = {"configuration": "development", "source_process": process}
+        with mock.patch.object(full_hosted, "expected_cases",
+                               side_effect=lambda unused, module: expected[module]):
+            with self.assertRaisesRegex(ValueError,
+                                        "Safari diagnostic case identities differ"):
+                full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
+                                         "26.6.2", diagnostic=lane)
+        diagnostic = lane["source_xml_diagnostic"]
+        self.assertEqual("UNVERIFIED", diagnostic["status"], diagnostic)
+        self.assertEqual(process["pid"], diagnostic["source_pid"])
+        self.assertEqual(process["invocation_id"], diagnostic["invocation_id"])
+        self.assertEqual(sum(counts.values()), len(diagnostic["reports"]))
+        for module, count in counts.items():
+            self.assertEqual(count, sum(item["module"] == module
+                                        for item in diagnostic["reports"]))
+        for item in diagnostic["reports"]:
+            retained = folder / item["path"]
+            self.assertEqual(item["sha256"], full_hosted.sha256(retained))
+            self.assertEqual(item["size"], retained.stat().st_size)
+        lane.update(status="FAILED", reason=diagnostic["validation_error"])
+        receipt = {"schema": 2, "kind": "hosted-full-common-corpus",
+                   "candidate_sha": "a" * 40, "target": "jsSafari", "status": "FAILED",
+                   "configurations": [lane]}
+        receipt["files"] = full_hosted.archive_inventory(output)
+        (output / "receipt.json").write_text(json.dumps(receipt))
+        archive = self.root / "full-source-failed.tar"
+        full_hosted.package_archive(output, archive)
+        with tarfile.open(archive, "r") as packed:
+            archived = json.load(packed.extractfile("receipt.json"))
+            self.assertEqual("FAILED", archived["status"])
+            self.assertEqual("UNVERIFIED", archived["configurations"][0]
+                             ["source_xml_diagnostic"]["status"])
+            for item in diagnostic["reports"]:
+                source = repository / item["module"] / "build/test-results/jsBrowserTest"
+                name = Path(item["path"]).name
+                self.assertEqual((source / name).read_bytes(),
+                                 packed.extractfile(f"development/{item['path']}").read())
+        with self.assertRaisesRegex(ValueError, "not a completed target"):
+            full_hosted.verify_transport_archive(archive, "a" * 40, "jsSafari")
+
     def test_failed_safari_identity_diagnostic_rejects_unsafe_source_xml(self):
-        for mutation in ("stale", "symlink", "oversized", "crowded",
+        for mutation in ("stale", "symlink", "oversized", "crowded", "over-count",
                          "failed-process", "missing-invocation"):
             with self.subTest(mutation=mutation):
                 repository = self.root / f"unsafe-{mutation}"
@@ -248,8 +300,11 @@ class FullHostedTests(unittest.TestCase):
                         stream.truncate(32 * 1024 * 1024 + 1)
                     process["finished_ns"] = time.time_ns()
                 elif mutation == "crowded":
-                    for index in range(129):
+                    for index in range(full_hosted.MAX_FAILED_SOURCE_XML_ENTRIES):
                         (report.parent / f"extra-{index:03d}.txt").write_bytes(b"x")
+                elif mutation == "over-count":
+                    for index in range(full_hosted.MAX_FAILED_SOURCE_XML_FILES):
+                        (report.parent / f"TEST-extra-{index:03d}.xml").write_bytes(b"x")
                 elif mutation == "failed-process":
                     process["exit_code"] = 1
                 else:
@@ -264,6 +319,11 @@ class FullHostedTests(unittest.TestCase):
                         full_hosted.copy_reports(repository, "jsSafari", folder, process, {},
                                                  "26.6.2", diagnostic=lane)
                 self.assertEqual("UNAVAILABLE", lane["source_xml_diagnostic"]["status"])
+                if mutation in ("crowded", "over-count"):
+                    reason = ("failed Safari source XML directory is crowded"
+                              if mutation == "crowded"
+                              else "failed Safari source XML count exceeds bound")
+                    self.assertEqual(reason, lane["source_xml_diagnostic"]["reason"])
                 self.assertFalse((folder / "diagnostic/source-xml").exists())
 
     def test_failed_safari_identity_rejects_linked_diagnostic_destination(self):

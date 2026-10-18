@@ -46,8 +46,8 @@ INPUTS = (MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json"
           "consumers/qualification/portable/settings.gradle.kts")
 SOURCE_TASK = {target: f"{target}Test" for target in NATIVE}
 SOURCE_TASK["jsSafari"] = "jsBrowserTest"
-MAX_FAILED_SOURCE_XML_FILES = 16
-MAX_FAILED_SOURCE_XML_ENTRIES = 128
+MAX_FAILED_SOURCE_XML_FILES = 512
+MAX_FAILED_SOURCE_XML_ENTRIES = 1024
 MAX_FAILED_SOURCE_XML_BYTES = 32 * 1024 * 1024
 MAX_FAILED_SOURCE_XML_TOTAL = 64 * 1024 * 1024
 REVIEWED_COMMON_COUNTS = {"dyn4k-core": 2465, "dyn4k": 58}
