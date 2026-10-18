@@ -61,18 +61,18 @@ kotlin {
     linuxArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
     mingwX64 { binaries.executable { entryPoint = "performance.portable.main" } }
     macosArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
-    iosArm64()
-    iosSimulatorArm64()
-    iosX64()
-    tvosArm64()
-    tvosSimulatorArm64()
-    watchosArm64()
-    watchosDeviceArm64()
-    watchosSimulatorArm64()
-    androidNativeArm32()
-    androidNativeArm64()
-    androidNativeX86()
-    androidNativeX64()
+    iosArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    iosSimulatorArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    iosX64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    tvosArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    tvosSimulatorArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    watchosArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    watchosDeviceArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    watchosSimulatorArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    androidNativeArm32 { binaries.executable { entryPoint = "performance.portable.main" } }
+    androidNativeArm64 { binaries.executable { entryPoint = "performance.portable.main" } }
+    androidNativeX86 { binaries.executable { entryPoint = "performance.portable.main" } }
+    androidNativeX64 { binaries.executable { entryPoint = "performance.portable.main" } }
 
     sourceSets {
         commonMain { kotlin.srcDir(generatePortableIdentity) }
@@ -180,6 +180,139 @@ tasks.register("portableNativeHostBuildInventory") {
             "compiler_mode" to mode.lowercase(), "link_task" to linkTask,
             "resolved_artifacts" to artifacts, "harness" to harness.canonicalPath,
             "bundle_sha256" to bundle,
+        )
+        val outputDirectory = layout.buildDirectory.dir("portable-inventory").get().asFile
+        outputDirectory.mkdirs()
+        outputDirectory.resolve("$target-$build.json")
+            .writeText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + "\n")
+    }
+}
+
+val mobileTarget = providers.gradleProperty("portableMobileTarget").orNull
+val mobileBuild = providers.gradleProperty("portableMobileBuild").orNull
+val appleMobileTargets = mapOf(
+    "iosArm64" to Pair("iPhoneOS", "1,2"),
+    "iosSimulatorArm64" to Pair("iPhoneSimulator", "1,2"),
+    "iosX64" to Pair("iPhoneSimulator", "1,2"),
+    "tvosArm64" to Pair("AppleTVOS", "3"),
+    "tvosSimulatorArm64" to Pair("AppleTVSimulator", "3"),
+    "watchosArm64" to Pair("WatchOS", "4"),
+    "watchosDeviceArm64" to Pair("WatchOS", "4"),
+    "watchosSimulatorArm64" to Pair("WatchSimulator", "4"),
+)
+val androidMobileTargets = mapOf(
+    "androidNativeArm32" to "armeabi-v7a",
+    "androidNativeArm64" to "arm64-v8a",
+    "androidNativeX86" to "x86",
+    "androidNativeX64" to "x86_64",
+)
+val selectedMobileTarget = mobileTarget?.takeIf { it in appleMobileTargets || it in androidMobileTargets }
+val selectedMobileMode = when (mobileBuild) {
+    "development" -> "Debug"
+    "optimized" -> "Release"
+    else -> null
+}
+val selectedMobileLink = if (selectedMobileTarget != null && selectedMobileMode != null)
+    "link${selectedMobileMode}Executable${selectedMobileTarget.replaceFirstChar { it.uppercase() }}" else null
+
+val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
+    if (selectedMobileLink != null && selectedMobileTarget in appleMobileTargets) dependsOn(selectedMobileLink)
+    doLast {
+        val target = requireNotNull(selectedMobileTarget) { "set a supported -PportableMobileTarget" }
+        val (platform, families) = requireNotNull(appleMobileTargets[target]) {
+            "app packaging applies only to Apple mobile targets"
+        }
+        val mode = requireNotNull(selectedMobileMode) { "set -PportableMobileBuild=development or optimized" }
+        val linkState = tasks.named(requireNotNull(selectedMobileLink)).get().state
+        check(linkState.executed && !linkState.skipped && linkState.failure == null) {
+            "selected Apple mobile link did not complete"
+        }
+        val executable = project.file("build/bin/$target/${mode.lowercase()}Executable/dyn4k-performance-portable.kexe")
+        check(executable.isFile) { "selected Apple mobile executable is missing: $executable" }
+        val app = project.file("build/mobile-app/$target/${mode.lowercase()}/Dyn4kPerformance.app")
+        app.mkdirs()
+        val image = app.resolve("Dyn4kPerformance")
+        executable.copyTo(image, overwrite = true)
+        image.setExecutable(true)
+        val bundleId = "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}"
+        val minimum = if (target == "watchosDeviceArm64") "26.0" else if (target.startsWith("watchos")) "8.0" else "15.0"
+        val watchApplication = if (target.startsWith("watchos")) "<key>WKApplication</key><true/>" else ""
+        app.resolve("Info.plist").writeText("""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$bundleId</string>
+<key>CFBundleName</key><string>Dyn4kPerformance</string>
+<key>CFBundleDisplayName</key><string>Dyn4k Performance</string>
+<key>CFBundleExecutable</key><string>Dyn4kPerformance</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleSupportedPlatforms</key><array><string>$platform</string></array>
+<key>UIDeviceFamily</key><array>${families.split(',').joinToString("") { "<integer>$it</integer>" }}</array>
+<key>MinimumOSVersion</key><string>$minimum</string>
+$watchApplication
+</dict></plist>
+""")
+        if ("Simulator" in target || target == "iosX64") {
+            val signing = ProcessBuilder("codesign", "--force", "--sign", "-", "--timestamp=none", app.absolutePath)
+                .redirectErrorStream(true).start()
+            val output = signing.inputStream.bufferedReader().readText()
+            check(signing.waitFor() == 0) { "simulator app signing failed: $output" }
+        }
+    }
+}
+
+tasks.register("portableMobileBuildInventory") {
+    if (selectedMobileLink != null) {
+        dependsOn(if (selectedMobileTarget in appleMobileTargets) packagePortableMobileApp else selectedMobileLink)
+    }
+    doLast {
+        val target = requireNotNull(selectedMobileTarget) { "set a supported -PportableMobileTarget" }
+        val build = requireNotNull(mobileBuild) { "set -PportableMobileBuild" }
+        val mode = requireNotNull(selectedMobileMode) { "unsupported mobile build: $build" }
+        val linkTask = requireNotNull(selectedMobileLink)
+        val linkState = tasks.named(linkTask).get().state
+        check(linkState.executed && !linkState.skipped && linkState.failure == null) {
+            "selected mobile Native link did not complete"
+        }
+        check(gitValue("status", "--porcelain", "--untracked-files=all").isEmpty()) {
+            "commit the producer before writing an immutable build inventory"
+        }
+        val repository = rootProject.projectDir.parentFile.parentFile.parentFile
+        val sourceSha = gitValue("rev-parse", "HEAD")
+        val tree = gitValue("rev-parse", "HEAD:consumers/performance/portable")
+        val sourceFiles = gitValue("ls-tree", "-r", "--name-only", "HEAD",
+            "consumers/performance/portable", "tools/performance/sustained_portable")
+            .lines().filter { it.isNotBlank() }.associateWith { sha256(repository.resolve(it)) }
+        val binaryDirectory = project.file("build/bin/$target/${mode.lowercase()}Executable")
+        val linked = binaryDirectory.resolve("dyn4k-performance-portable.kexe")
+        check(linked.isFile) { "selected mobile executable is missing: $linked" }
+        val apple = target in appleMobileTargets
+        val bundleDirectory = if (apple)
+            project.file("build/mobile-app/$target/${mode.lowercase()}/Dyn4kPerformance.app") else binaryDirectory
+        val harness = if (apple) bundleDirectory.resolve("Dyn4kPerformance") else linked
+        check(harness.isFile) { "selected mobile process image is missing: $harness" }
+        val artifacts = configurations.getByName("${target}CompileKlibraries")
+            .resolvedConfiguration.resolvedArtifacts.map {
+                mapOf("module" to it.moduleVersion.id.toString(), "path" to it.file.canonicalPath,
+                      "sha256" to sha256(it.file))
+            }.sortedBy { it["module"] }
+        check(artifacts.isNotEmpty()) { "selected mobile compilation has no resolved artifacts" }
+        val bundle = bundleDirectory.walkTopDown().filter { it.isFile }.associate {
+            it.relativeTo(bundleDirectory).invariantSeparatorsPath to sha256(it)
+        }.toSortedMap()
+        val receipt = mapOf(
+            "format" to "portable-mobile-build-inventory-v1", "source_sha" to sourceSha,
+            "producer_tree" to tree, "source_files" to sourceFiles,
+            "manifest_sha256" to sha256(repository.resolve("docs/research/performance-manifest-v1.json")),
+            "target" to target, "build" to build, "gradle" to gradle.gradleVersion,
+            "kgp" to "2.4.20", "compiler_mode" to mode.lowercase(),
+            "compile_configuration" to "${target}CompileKlibraries", "link_task" to linkTask,
+            "resolved_artifacts" to artifacts, "linked_executable" to linked.canonicalPath,
+            "linked_sha256" to sha256(linked), "harness" to harness.canonicalPath,
+            "app_bundle" to if (apple) bundleDirectory.canonicalPath else null,
+            "bundle_id" to if (apple) "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}" else null,
+            "abi" to androidMobileTargets[target], "bundle_sha256" to bundle,
         )
         val outputDirectory = layout.buildDirectory.dir("portable-inventory").get().asFile
         outputDirectory.mkdirs()

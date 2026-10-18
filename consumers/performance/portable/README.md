@@ -51,7 +51,7 @@ The project declares the common producer for JVM, Android JVM, JS, Wasm JS, Wasm
 WASI, Linux, Windows, Apple, and Android Native Kotlin targets. This does not claim
 execution on unavailable targets or provide an Android JVM application shell.
 The Native host routes have separate [runner instructions](../../../tools/performance/sustained_portable/native-hosts.md).
-The iOS, tvOS, watchOS, and Android Native targets still need application
-shells for devices or simulators, deployment, and process observations.
-Each target still needs its staged artifacts, runtime host, and full
-qualification evidence.
+The Apple mobile targets now define executable app packages. The four Android Native
+ABIs have executable shells. Use the [mobile Native capture route](../../../tools/performance/sustained_portable/mobile-native.md)
+to build one target, deploy it, and retain a short process receipt. Each target
+still needs its staged artifacts, runtime host, and full qualification evidence.
