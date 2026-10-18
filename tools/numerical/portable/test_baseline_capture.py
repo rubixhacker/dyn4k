@@ -5,12 +5,20 @@ import unittest
 from pathlib import Path
 
 from baseline_capture import (angle_failure, baseline_inventory, verify_baseline_jar,
-                              verify_case_slices, verify_method_files)
+                              verify_archive, verify_case_slices, verify_method_files)
 from cases import declared_cases
 from receipt import digest
 
 
 class BaselineCaptureSeamTest(unittest.TestCase):
+    def test_unrelated_failed_capture_cannot_be_reclassified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "result.json").write_text(json.dumps(
+                {"status": "FAILED", "reason": "baseline method failed"}))
+            with self.assertRaisesRegex(Exception, "unrelated reason"):
+                verify_archive(output)
+
     def test_archive_rejects_changed_case_slice_and_method_report(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
