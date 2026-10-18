@@ -18,7 +18,7 @@ EXPECTED = (
 PREFIX = "DYN4K_COLLISION_SCALAR"
 FIELDS = ("id", "x", "y", "xSquared", "ySquared", "sum", "sqrt", "reciprocal", "normalized")
 RAW_NUMBER = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?@(-?\d+)")
-VERSION_TOKEN = re.compile(r"(?<![\w.+-])2\.4\.20(?![\w.+-])")
+VERSION_TOKEN = re.compile(r"(?<![-A-Za-z0-9_~+/])2\.4\.20(?![-A-Za-z0-9_~+/]|\.[A-Za-z0-9])")
 KOTLIN_VECTOR = re.compile(r'ScalarInput\("([^\"]+)", (-?\d+)L, (-?\d+)L\)')
 JAVA_VECTOR = re.compile(r'\{"([^\"]+)", (-?\d+)L, (-?\d+)L\}')
 
@@ -31,10 +31,14 @@ def validate_source_vectors() -> None:
     source_dir = Path(__file__).parent
     kotlin_text = (source_dir / "WindowsCollisionScalarControl.kt").read_text(encoding="utf-8")
     java_text = (source_dir / "WindowsCollisionScalarJavaControl.java").read_text(encoding="utf-8")
+    runner_text = (source_dir / "run-scalar-control.ps1").read_text(encoding="utf-8")
+    workflow_text = (source_dir.parents[2] / ".github/workflows/windows-collision-focus.yml").read_text(encoding="utf-8")
     kotlin_vectors = tuple((case_id, int(x), int(y)) for case_id, x, y in KOTLIN_VECTOR.findall(kotlin_text))
     java_vectors = tuple((case_id, int(x), int(y)) for case_id, x, y in JAVA_VECTOR.findall(java_text))
     if kotlin_vectors != EXPECTED or java_vectors != EXPECTED:
         raise ScalarValidationError("validator vectors differ from the committed Kotlin or Java control vectors")
+    if runner_text.count(VERSION_TOKEN.pattern) != 1 or workflow_text.count(VERSION_TOKEN.pattern) != 1:
+        raise ScalarValidationError("compiler version token checks differ across the runner and workflow")
 
 
 def _parse(text: str, provider: str, label: str) -> list[tuple[str, str, str]]:
@@ -122,12 +126,22 @@ def self_test() -> int:
     for name, adverse_native, adverse_java in cases:
         rejected(name, adverse_native, adverse_java)
 
-    if not VERSION_TOKEN.search("Kotlin/Native: 2.4.20") or not VERSION_TOKEN.search("2.4.20"):
+    valid_versions = ("Kotlin/Native 2.4.20", "Kotlin/Native: 2.4.20", "Version=2.4.20;", "2.4.20)", "2.4.20.")
+    if not all(VERSION_TOKEN.search(value) for value in valid_versions):
         raise AssertionError("valid Kotlin/Native version token was rejected")
-    for value in ("2.4.201", "2.4.20-dev", "2.4.20foo", "2.4.20+build", "2.4.20.1"):
+    for value in (
+        "2.4.201",
+        "2.4.20~dev",
+        "2.4.20/modified",
+        "2.4.20.1",
+        "2.4.20-dev",
+        "2.4.20+build",
+        "2.4.20foo",
+        "v2.4.20",
+    ):
         if VERSION_TOKEN.search(value):
             raise AssertionError(f"adverse version token was accepted: {value}")
-    print(f"SCALAR_VALIDATOR_SELF_TEST_OK positive=1 adverse={len(cases) + 5} arithmetic=observations")
+    print(f"SCALAR_VALIDATOR_SELF_TEST_OK positive={len(valid_versions)} adverse={len(cases) + 8} arithmetic=observations")
     return 0
 
 
