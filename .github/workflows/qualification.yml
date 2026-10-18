@@ -306,6 +306,20 @@ jobs:
           python3 tools/compatibility/full_ci.py verify \
             --candidate-sha "$GITHUB_SHA" \
             --output "$RUNNER_TEMP/full-ci-transport-check/full-ci"
+      - name: Replay independent Java gates from relocated full CI archive
+        if: always()
+        env:
+          DYN4K_FULL_CI_REPLAY_REQUIRED: '1'
+          DYN4K_FULL_CI_REPLAY_ARCHIVE: ${{ runner.temp }}/full-ci-transport-check/full-ci
+          DYN4K_FULL_CI_REPLAY_CANDIDATE: ${{ github.sha }}
+          DYN4K_FULL_CI_STAGE_AUDIT: ${{ runner.temp }}/artifact-audit.json
+          PYTHONPATH: tools/qualification
+        run: |
+          set -euo pipefail
+          export DYN4K_FULL_CI_REPLAY_MANIFEST_SHA256
+          DYN4K_FULL_CI_REPLAY_MANIFEST_SHA256="$(sha256sum "$DYN4K_FULL_CI_REPLAY_ARCHIVE/lane-manifest.json" | cut -d ' ' -f1)"
+          python3 -B -m unittest \
+            test_independent_gates.IndependentGateSeamTests.test_reviewed_full_ci_archive_replays_unchanged_and_strict_java_gates -v
       - name: Upload full Java compatibility raw archive
         if: always()
         uses: actions/upload-artifact@v4

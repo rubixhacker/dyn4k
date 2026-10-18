@@ -1482,27 +1482,67 @@ class IndependentGateSeamTests(unittest.TestCase):
                     "java-source-compatibility", BASE, ROOT,
                     {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64})
 
-    @unittest.skipUnless(
-        Path("/tmp/dyn4k-archive-relocation-copy-7032-partial-provenance/lane-manifest.json").is_file(),
-        "reviewed local full_ci archive is absent")
+    def test_required_full_ci_replay_rejects_missing_positive_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.dict(os.environ, {
+                    "DYN4K_FULL_CI_REPLAY_REQUIRED": "1",
+                    "DYN4K_FULL_CI_REPLAY_ARCHIVE": str(Path(temporary) / "absent-archive")}):
+                with self.assertRaisesRegex(AssertionError,
+                                            "required full_ci positive archive is missing"):
+                    self.test_reviewed_full_ci_archive_replays_unchanged_and_strict_java_gates()
+
     def test_reviewed_full_ci_archive_replays_unchanged_and_strict_java_gates(self):
-        source = Path("/tmp/dyn4k-archive-relocation-copy-7032-partial-provenance")
-        altered_source = Path("/tmp/dyn4k-archive-relocation-copy-7032")
-        manifest_sha256 = "e2b2cffdb961213b73a706842af1446586c03f23ed5566c186d0bc8c77ca6269"
+        required = "DYN4K_FULL_CI_REPLAY_REQUIRED" in os.environ
+        if required:
+            self.assertEqual("1", os.environ["DYN4K_FULL_CI_REPLAY_REQUIRED"])
+            source = Path(os.environ.get("DYN4K_FULL_CI_REPLAY_ARCHIVE", ""))
+            self.assertTrue(source.is_dir() and (source / "lane-manifest.json").is_file(),
+                            "required full_ci positive archive is missing")
+            candidate = os.environ.get("DYN4K_FULL_CI_REPLAY_CANDIDATE", "")
+            current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                              cwd=ROOT, text=True).strip()
+            self.assertEqual(current, candidate, "required full_ci candidate differs from checkout")
+            manifest_sha256 = os.environ.get("DYN4K_FULL_CI_REPLAY_MANIFEST_SHA256", "")
+            audit_path = Path(os.environ.get("DYN4K_FULL_CI_STAGE_AUDIT", ""))
+            self.assertTrue(audit_path.is_file(), "required independent staging audit is missing")
+            audit = qualify.load_json_strict(audit_path)
+            self.assertEqual("PASSED", audit.get("status"), "staging audit did not pass")
+            self.assertEqual(candidate, audit.get("candidate_sha"),
+                             "staging audit candidate differs")
+            qualify.verify_audit_against_staging(audit, ROOT)
+            hashes = qualify.target_binary_hashes(audit["artifacts"])["jvm"]
+            facade_source = (ROOT / "build/staging-repository" /
+                             qualify.publication_binary_path("dyn4k", "jvm"))
+            self.assertEqual(hashes["dyn4k"], hashlib.sha256(facade_source.read_bytes()).hexdigest())
+            altered_source = None
+        else:
+            source = Path("/tmp/dyn4k-archive-relocation-copy-7032-partial-provenance")
+            if not (source / "lane-manifest.json").is_file():
+                self.skipTest("reviewed historical full_ci archive is absent; CI requires a produced replay")
+            altered_source = Path("/tmp/dyn4k-archive-relocation-copy-7032")
+            candidate = "7032b41c780a08c850226eb2c984fb15af444a23"
+            manifest_sha256 = "e2b2cffdb961213b73a706842af1446586c03f23ed5566c186d0bc8c77ca6269"
         manifest = source / "lane-manifest.json"
         self.assertEqual(manifest_sha256, hashlib.sha256(manifest.read_bytes()).hexdigest())
         archive_files = json.loads(manifest.read_text())["archive_files"]
-        self.assertEqual(3593, len(archive_files))
+        if not required:
+            self.assertEqual(3593, len(archive_files))
         index = "baseline-cache/dyn4j-source/.git/index"
         self.assertEqual(archive_files[index], hashlib.sha256((source / index).read_bytes()).hexdigest())
-        candidate = "7032b41c780a08c850226eb2c984fb15af444a23"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             shutil.copytree(source, root / "full-ci")
-            (root / "facade.bin").write_bytes(b"separate facade fixture")
+            if required:
+                shutil.copy2(facade_source, root / "facade.bin")
+            else:
+                (root / "facade.bin").write_bytes(b"separate facade fixture")
             evidence = json.loads((root / "full-ci/result.json").read_text())
-            hashes = {"dyn4k-core": evidence["archives"]["staged_jvm_jar"],
-                      "dyn4k": hashlib.sha256((root / "facade.bin").read_bytes()).hexdigest()}
+            if required:
+                self.assertEqual(hashes["dyn4k-core"], evidence["archives"]["staged_jvm_jar"])
+            else:
+                hashes = {"dyn4k-core": "005b6a8a5926dfffa7b3dfd932db7662b6cacc4bfdbad1a0742d9dfcfaef651f",
+                          "dyn4k": hashlib.sha256((root / "facade.bin").read_bytes()).hexdigest()}
+                self.assertEqual(hashes["dyn4k-core"], evidence["archives"]["staged_jvm_jar"])
             scope = {"candidate_sha": candidate, "target": "jvm", "runtime": "Java",
                      "runtime_identity": "reviewed local archive", "artifact_hashes": hashes,
                      "producer_manifest_hashes": {"full-ci/lane-manifest.json": manifest_sha256}}
@@ -1570,7 +1610,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 hashes, "reviewed local archive", {"unchanged-java-corpus": pin},
                 expected_producer_scopes={"unchanged-java-corpus": scope})
             self.assertEqual("FAILED", result["gates"]["unchanged-java-corpus"]["status"])
-            if altered_source.is_dir():
+            if altered_source is not None and altered_source.is_dir():
                 with tempfile.TemporaryDirectory() as adverse_temporary:
                     adverse = Path(adverse_temporary)
                     shutil.copytree(altered_source, adverse / "full-ci")
