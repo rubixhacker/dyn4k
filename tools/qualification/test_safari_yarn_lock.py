@@ -2341,9 +2341,15 @@ class SafariYarnLockTests(unittest.TestCase):
             "sample_temp": "sample-state-*.tmp",
             "outcome": "launch-outcome-*.txt", "outcome_temp": "launch-outcome-*.tmp",
         }
+        launch_filename = re.compile(r"launch-([0-9]{1,10})\.txt")
         context_exists = context.is_dir() and not context.is_symlink()
-        matches = {key: list(islice(context.glob(pattern), 101)) if context_exists else []
-                   for key, pattern in patterns.items()}
+        matches = {}
+        for key, pattern in patterns.items():
+            candidates = context.glob(pattern) if context_exists else ()
+            if key == "launch":
+                candidates = (path for path in candidates
+                              if launch_filename.fullmatch(path.name))
+            matches[key] = list(islice(candidates, 101))
 
         def first_bytes(key):
             if not matches[key]:
@@ -2361,8 +2367,7 @@ class SafariYarnLockTests(unittest.TestCase):
         launch = first_bytes("launch")
         outcome = first_bytes("outcome")
         launch_pid = re.search(rb"(?:^|\n)pid=([0-9]{1,10})(?: |\n|$)", launch)
-        launch_name = (re.fullmatch(r"launch-([0-9]{1,10})\.txt",
-                                    matches["launch"][0].name)
+        launch_name = (launch_filename.fullmatch(matches["launch"][0].name)
                        if matches["launch"] else None)
         pid_matches = (launch_pid.group(1).decode() == launch_name.group(1)
                        if launch_pid and launch_name else None)
@@ -2526,6 +2531,25 @@ class SafariYarnLockTests(unittest.TestCase):
             self.assertNotIn(canary, str(failure.exception))
         missing = json.loads(self.wrapper_failure_context(result, self.root / "absent"))
         self.assertFalse(missing["context_exists"])
+
+    def test_wrapper_failure_context_distinguishes_launch_from_outcome(self):
+        context = self.root / "outcome-first"
+        context.mkdir()
+        (context / "launch-outcome-123.txt").write_text("open_state=pending\n")
+        result = subprocess.CompletedProcess(["bash"], 1, stdout="", stderr="")
+        outcome_only = json.loads(self.wrapper_failure_context(result, context))
+        with self.subTest(fixture="outcome_only"):
+            self.assertEqual(0, outcome_only["files"]["launch"])
+            self.assertEqual(1, outcome_only["files"]["outcome"])
+            self.assertIsNone(outcome_only["launch_pid_matches_name"])
+
+        (context / "launch-123.txt").write_text("pid=123 ppid=22 input=hidden\n")
+        (context / "launch-other.txt").write_text("pid=999\n")
+        outcome_first = json.loads(self.wrapper_failure_context(result, context))
+        with self.subTest(fixture="outcome_first"):
+            self.assertEqual(1, outcome_first["files"]["launch"])
+            self.assertEqual(1, outcome_first["files"]["outcome"])
+            self.assertTrue(outcome_first["launch_pid_matches_name"])
 
     @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_records_pending_open_and_completed_samples(self):
