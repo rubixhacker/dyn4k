@@ -111,6 +111,10 @@ def _source_angle(pair):
 def _source_angle_agrees(recorded_bits, pair):
     recorded = _binary64(recorded_bits)
     expected = _source_angle(pair)
+    if pair[1] >= 0.0 and not 0.0 <= recorded <= math.pi:
+        return False
+    if pair[1] < 0.0 and not -math.pi <= recorded <= 0.0:
+        return False
     if expected == 0.0:
         return recorded_bits == _bits(expected)
     return abs(recorded - expected) <= 8 * math.ulp(max(abs(recorded),
@@ -120,8 +124,24 @@ def _source_angle_agrees(recorded_bits, pair):
 def _trig_agrees(angle, trig):
     if angle == 0.0:
         return _bits(trig[0]) == _bits(1.0) and _bits(trig[1]) == _bits(angle)
-    return all(abs(observed - expected) <= 16 * math.ulp(1.0)
-               for observed, expected in zip(trig, (math.cos(angle), math.sin(angle))))
+    if abs(angle) > 32.0:
+        raise ValueError("rotation audit trig enclosure domain is unavailable")
+    x = Fraction.from_float(angle)
+    square = x * x
+    cosine = sine = Fraction(0)
+    cos_term = Fraction(1)
+    sin_term = x
+    for index in range(101):
+        cosine += cos_term
+        sine += sin_term
+        cos_term *= -square / ((2 * index + 1) * (2 * index + 2))
+        sin_term *= -square / ((2 * index + 2) * (2 * index + 3))
+    cos_remainder = abs(x) ** 201 / math.factorial(201)
+    sin_remainder = abs(x) ** 202 / math.factorial(202)
+    return (cosine - cos_remainder - _Q <= Fraction.from_float(trig[0]) <=
+            cosine + cos_remainder + _Q and
+            sine - sin_remainder - _Q <= Fraction.from_float(trig[1]) <=
+            sine + sin_remainder + _Q)
 
 
 def _validate_rotate(call, pre, trig, post):
@@ -181,8 +201,12 @@ def _validate_reset(call, trig, post):
     angle = _binary64(call["angle_bits"])
     if not 0.0 <= alpha <= 1.0:
         raise ValueError("rotation audit lerp alpha differs")
+    end_rotation = _pair(call["end_rotation"])
+    if abs(end_rotation[0] * end_rotation[0] +
+           end_rotation[1] * end_rotation[1] - 1.0) > 32 * float(_Q):
+        raise ValueError("rotation audit lerp end orientation differs")
     if not _source_angle_agrees(call["start_angle_bits"], _pair(call["pre"])) or \
-            not _source_angle_agrees(call["end_angle_bits"], _pair(call["end_rotation"])):
+            not _source_angle_agrees(call["end_angle_bits"], end_rotation):
         raise ValueError("rotation audit lerp source angle differs")
     diff = end - start
     if diff < -math.pi:
@@ -229,11 +253,22 @@ def validate_rotation_audit(audit, case, header, states, rotation_cap):
     resets = []
     for step in range(1, case["steps"] + 1):
         counts = {body_id: 0 for body_id in body_ids}
+        if step not in states or {body["id"] for body in states[step]["bodies"]} != set(body_ids):
+            raise ValueError("rotation audit state inventory differs")
+        state_bodies = {body["id"]: body for body in states[step]["bodies"]}
         while position < len(calls) and calls[position].get("step") == step:
             call = calls[position]
             if type(call.get("sequence")) is not int or call["sequence"] != position or \
                     type(call.get("step")) is not int or \
-                    call.get("body_id") not in chain or call.get("pre") != list(chain[call["body_id"]]):
+                    call.get("body_id") not in chain:
+                raise ValueError("rotation audit call sequence or input differs")
+            body_id = call["body_id"]
+            if call.get("kind") == "lerp-reset":
+                previous = state_bodies[body_id].get("previousTransform")
+                if previous is None or call.get("pre") != list(_state_pair(previous)) or \
+                        call.get("end_rotation") != list(chain[body_id]):
+                    raise ValueError("rotation audit lerp end origin or start differs")
+            elif call.get("pre") != list(chain[body_id]):
                 raise ValueError("rotation audit call sequence or input differs")
             pre = _pair(call["pre"])
             trig = _pair(call["trig"])
@@ -250,8 +285,6 @@ def validate_rotation_audit(audit, case, header, states, rotation_cap):
                 raise ValueError("rotation audit operation differs")
             chain[call["body_id"]] = tuple(call["post"])
             position += 1
-        if step not in states or {body["id"] for body in states[step]["bodies"]} != set(body_ids):
-            raise ValueError("rotation audit state inventory differs")
         for body in states[step]["bodies"]:
             if _state_pair(body["transform"]) != chain[body["id"]]:
                 raise ValueError("rotation audit state chain differs")

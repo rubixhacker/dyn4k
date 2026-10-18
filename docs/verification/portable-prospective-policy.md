@@ -134,12 +134,28 @@ chains, rotation caps, clamp results, accepted TOI reset bodies, finite
 fields and normal arithmetic envelopes. A lerp reset must record the end
 orientation pair. The verifier checks its start/end source angles, wrapped
 difference, alpha in [0,1], interpolated angle, and the angle/trig relation.
-It checks exact signed-zero raw products and unclamped outputs. The local
-trig screen is a conservative host-libm consistency check, not a target
-trig error proof. It reports each producer, trig,
+It checks exact signed-zero raw products and unclamped outputs. For finite
+angles with magnitude at most 32 radians, the structural trig screen
+evaluates exact rational Taylor sums. The absolute remainders are bounded by
+`|angle|^201/201!` for cosine and `|angle|^202/202!` for sine. It expands each
+enclosure by the adopted absolute `2u`, rather than a host-libm tolerance.
+Larger arguments stay `UNPASSED_PREMISE` until an independent range-reducing
+oracle is available. A wrong sine sign alone does not fail a tiny angle if
+the absolute error remains within `2u`.
+
+Pinned [`getRotationAngle`](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/geometry/Transform.java#L530-L536)
+uses `Math.acos(cost)` and the sign test `sint >= 0`. The audit enforces
+the [Java `Math.acos` range](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Math.html#acos(double))
+of [0,π] or [-π,0] before its host-acos screen.
+It checks the lerp end pair against the operative 32-ulp orientation
+invariant. The end pair must equal the preceding audited transform; the
+start pair must equal that step's recorded `previousTransform`.
+This follows the pinned [TOI interpolation call](https://github.com/dyn4j/dyn4j/blob/058bf6d982a0fb89b54050f929f6ea9dae53b714/src/main/java/org/dyn4j/world/AbstractPhysicsWorld.java#L1698-L1710).
+These archive links do not prove that a target emitted the call stream.
+The audit reports each producer, trig,
 rounding, subnormal, zero-product and FMA premise as `UNPASSED`. Its
 supplied bytes are not yet sealed to a target process or checked by an
-independent trig interval oracle. A valid synthetic audit cannot grant a
+independent full-range trig interval oracle. A valid synthetic audit cannot grant a
 target pass.
 
 These formulas follow the [body's symplectic Euler velocity update and

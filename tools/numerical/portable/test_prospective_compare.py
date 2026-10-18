@@ -920,6 +920,10 @@ class ProspectiveComparisonTest(unittest.TestCase):
             valid = deepcopy(call)
             valid["alpha_bits"] = bits(alpha)
             _validate_reset(valid, (1.0, 0.0), (1.0, 0.0))
+        nonorthogonal_end = deepcopy(call)
+        nonorthogonal_end["end_rotation"] = [bits(1.0), bits(1.0)]
+        with self.assertRaisesRegex(ValueError, "end orientation"):
+            _validate_reset(nonorthogonal_end, (1.0, 0.0), (1.0, 0.0))
         for key, value in (("alpha_bits", bits(math.nextafter(0.0, -math.inf))),
                            ("alpha_bits", bits(math.nextafter(1.0, math.inf))),
                            ("alpha_bits", bits(-1.0)),
@@ -1001,6 +1005,49 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "angle arithmetic"):
                     _validate_reset(call, trig, trig)
 
+    def test_rotation_audit_public_lerp_start_angle_cannot_exceed_pi(self):
+        rows, case, _ = self.policy_rows()
+
+        def bits(value):
+            return struct.pack(">d", value).hex()
+
+        def transform(c, s):
+            return {"getCost": c, "getSint": s,
+                    "getRotationAngle": math.copysign(math.acos(c), s),
+                    "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+                    "getTranslationY": 0.0,
+                    "getValues": [c, -s, 0.0, s, c, 0.0]}
+
+        start_pair = [-1.0, 0.0]
+        start = math.pi + 8 * math.ulp(math.pi)
+        end = math.pi
+        diff = end - start
+        trig = [math.cos(start), math.sin(start)]
+        rows[0]["initial"]["bodies"] = [rows[0]["initial"]["bodies"][0]]
+        rows[0]["initial"]["bodies"][0]["transform"] = transform(*start_pair)
+        rows[0]["setup"]["bodies"][0]["transform"] = transform(*start_pair)
+        rows[2]["state"]["bodies"][0].update(
+            transform=transform(*trig), previousTransform=transform(*start_pair),
+            velocity=[0.0, 0.0], angularVelocity=0.0,
+            linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+            kineticEnergy=0.0)
+        catalog = self.small_policy(rows, {"event.step.begin.payload": "exact_step"})
+        call = {"sequence": 0, "step": 1, "body_id": "b0", "kind": "lerp-reset",
+                "branch": "toi", "pre": [bits(value) for value in start_pair],
+                "end_rotation": [bits(value) for value in start_pair],
+                "trig": [bits(value) for value in trig],
+                "post": [bits(value) for value in trig],
+                "alpha_bits": bits(0.0), "start_angle_bits": bits(start),
+                "end_angle_bits": bits(end), "diff_bits": bits(diff),
+                "angle_bits": bits(start)}
+        audit = {"schema": "portable-rotation-audit/2", "case_id": "one",
+                 "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+                 "declared_calls": 1, "accepted_toi_resets": [[1, "b0"]],
+                 "calls": [call]}
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=audit)["status"],
+                         "UNPASSED_PREMISE")
+
     def test_rotation_audit_structure_clamp_reset_and_count_controls(self):
         rows, case, _ = self.policy_rows()
 
@@ -1032,6 +1079,42 @@ class ProspectiveComparisonTest(unittest.TestCase):
         result = self.policy_result(rows, rows, case, catalog, rotation_audit=audit)
         self.assertEqual(result["status"], "PASSED_NUMERICAL_POLICY", result)
         self.assertEqual(result["target_arithmetic"], "UNPASSED_UNBOUND_AUDIT")
+        tiny_cos = deepcopy(audit)
+        excess_cos = 1.0 + 2 * math.ulp(1.0)
+        tiny_cos["calls"][0].update(angle_bits=bits(1e-16),
+                                      trig=[bits(excess_cos), bits(0.0)],
+                                      raw=[bits(excess_cos), bits(0.0)],
+                                      clamp=[True, False])
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=tiny_cos)["status"],
+                         "UNPASSED_PREMISE")
+        wrong_sign_rows = deepcopy(rows)
+        wrong_sign_rows[2]["state"]["bodies"][0]["transform"] = transform(
+            s=-math.ulp(1.0))
+        wrong_sign = deepcopy(audit)
+        wrong_sign["calls"][0].update(
+            angle_bits=bits(1e-16),
+            trig=[bits(1.0), bits(-math.ulp(1.0))],
+            raw=[bits(1.0), bits(-math.ulp(1.0))],
+            post=[bits(1.0), bits(-math.ulp(1.0))])
+        self.assertEqual(self.policy_result(wrong_sign_rows, wrong_sign_rows, case,
+                                            catalog, rotation_audit=wrong_sign)["status"],
+                         "UNPASSED_PREMISE")
+        near_limit = 1e-16 - math.ulp(1.0)
+        for sine, status in ((-1e-16, "PASSED_NUMERICAL_POLICY"),
+                             (near_limit, "PASSED_NUMERICAL_POLICY"),
+                             (math.nextafter(near_limit, -math.inf),
+                              "UNPASSED_PREMISE")):
+            with self.subTest(tiny_angle_sine=sine):
+                near_rows = deepcopy(rows)
+                near_rows[2]["state"]["bodies"][0]["transform"] = transform(s=sine)
+                near_audit = deepcopy(audit)
+                near_audit["calls"][0].update(
+                    angle_bits=bits(1e-16), trig=[bits(1.0), bits(sine)],
+                    raw=[bits(1.0), bits(sine)], post=[bits(1.0), bits(sine)])
+                self.assertEqual(self.policy_result(near_rows, near_rows, case,
+                                                    catalog, rotation_audit=near_audit)["status"],
+                                 status)
         self.assertEqual(result["target_premises"], {
             name: "UNPASSED" for name in
             ("producer", "trig", "rounding", "subnormal", "zero_product", "fma")})
@@ -1108,6 +1191,38 @@ class ProspectiveComparisonTest(unittest.TestCase):
         self.assertEqual(self.policy_result(rows, rows, case, catalog,
                                             rotation_audit=reset)["status"],
                          "PASSED_NUMERICAL_POLICY")
+        nonorthogonal_end = deepcopy(reset)
+        nonorthogonal_end["calls"][0]["end_rotation"] = [bits(1.0), bits(1.0)]
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=nonorthogonal_end)["status"],
+                         "UNPASSED_PREMISE")
+        unbound_end = deepcopy(reset)
+        unbound_end["calls"][0].update(
+            end_rotation=[bits(0.0), bits(1.0)],
+            end_angle_bits=bits(math.pi / 2), diff_bits=bits(math.pi / 2))
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=unbound_end)["status"],
+                         "UNPASSED_PREMISE")
+        rotation = [bits(math.cos(math.pi / 2)), bits(math.sin(math.pi / 2))]
+        rotate_then_reset = deepcopy(reset)
+        rotate_then_reset["declared_calls"] = 2
+        rotate_call = deepcopy(call)
+        rotate_call.update(angle_bits=bits(math.pi / 2), trig=rotation,
+                           raw=rotation, post=rotation)
+        rotate_then_reset["calls"].insert(0, rotate_call)
+        end_angle = math.acos(math.cos(math.pi / 2))
+        rotate_then_reset["calls"][1].update(
+            sequence=1, end_rotation=rotation,
+            end_angle_bits=bits(end_angle), diff_bits=bits(end_angle))
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=rotate_then_reset)["status"],
+                         "PASSED_NUMERICAL_POLICY")
+        wrong_end_origin = deepcopy(rotate_then_reset)
+        wrong_end_origin["calls"][1].update(
+            end_rotation=one, end_angle_bits=bits(0.0), diff_bits=bits(0.0))
+        self.assertEqual(self.policy_result(rows, rows, case, catalog,
+                                            rotation_audit=wrong_end_origin)["status"],
+                         "UNPASSED_PREMISE")
         old_schema = deepcopy(reset)
         old_schema["schema"] = "portable-rotation-audit/1"
         self.assertEqual(self.policy_result(rows, rows, case, catalog,
