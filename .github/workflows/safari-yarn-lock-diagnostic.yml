@@ -1,0 +1,51 @@
+name: Safari Yarn lock diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full reviewed candidate commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - name: Select pinned Xcode
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Capture source Kotlin/JS lock generation
+        run: >-
+          python tools/qualification/safari_yarn_lock.py
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --output "${{ runner.temp }}/safari-yarn-lock-diagnostic"
+      - name: Retain raw lock diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-yarn-lock-${{ inputs.candidate_sha }}
+          path: ${{ runner.temp }}/safari-yarn-lock-diagnostic/
+          include-hidden-files: true
+          if-no-files-found: error
