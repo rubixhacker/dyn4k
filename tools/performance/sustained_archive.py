@@ -43,9 +43,12 @@ PLATEAU_FIELDS = ("cycle", "heap_after_collection_bytes", "rss_after_collection_
 STRESS_MONITOR_FIELDS = ("elapsed_ns", "rss_bytes", "action")
 PROCESS_IMAGE_METHODS = {"Linux": "os_procfs", "Darwin": "macos_libproc",
                          "Windows": "windows_query_image"}
+FROZEN_MANIFEST_SHA256 = "18cca97bbf1fc939eda669efe2344bbfe06c416a735ca8cc5184d5ba2519176a"
 
 
 def frozen_policy():
+    require(sha256(MANIFEST_FILE) == FROZEN_MANIFEST_SHA256,
+            "independently frozen manifest digest differs")
     generated = manifest()
     checked_in = json.loads(MANIFEST_FILE.read_text())
     validate(generated)
@@ -80,13 +83,58 @@ def required_reports(policy):
 
 def required_noise(policy):
     return {
-        (row["id"], item["id"], repeat, side)
+        (row["id"], item["id"].rsplit(".", 1)[0] +
+         (".baseline" if row["id"] == "jvm.java" else ".direct_kotlin"),
+         mode, repeat, side)
         for row in policy["runtime_rows"]
         for item in policy["scenarios"]
         if item["size"] != "stress" and item["api"] == "baseline"
+        for mode in MODES
         for repeat in (1, 2, 3)
         for side in ("a", "b")
     }
+
+
+def comparison_control_keys(policy):
+    keys = set()
+    for row in policy["runtime_rows"]:
+        row_id = row["id"]
+        for scenario in policy["scenarios"]:
+            if scenario["size"] == "stress" or scenario["api"] == "baseline":
+                continue
+            comparisons = []
+            if row_id == "jvm.java":
+                comparisons.append("jvm_vs_dyn4j")
+            if scenario["api"] == "compatibility":
+                comparisons.append("shim_vs_direct")
+            if row["size_assignment"][scenario["size"]] != "report_only":
+                for window in ("full", "final_minute"):
+                    keys.add("|".join(("absolute_timing", row_id, scenario["id"],
+                                       "timing", "p99", window)))
+                    keys.add("|".join(("absolute_memory", row_id, scenario["id"],
+                                       "memory", "attributed_workload_peak_bytes", window)))
+            for comparison in comparisons:
+                for mode, metrics in (("timing", ("median", "p99", "total")),
+                                      ("allocation", ("total",)),
+                                      ("memory", ("retained_heap_world_alive_bytes",))):
+                    windows = ("full",) if mode == "memory" else ("full", "final_minute")
+                    for metric in metrics:
+                        for window in windows:
+                            keys.add("|".join((comparison, row_id, scenario["id"],
+                                               mode, metric, window)))
+                keys.add("|".join((comparison, row_id, scenario["id"],
+                                   "allocation", "construction_allocated_bytes", "full")))
+    return keys
+
+
+def noise_limit_lookup(policy):
+    result = {}
+    for assignment, limit in policy["sustained_gate"]["noise_upper_ratio_max"].items():
+        _, row_id, scenario_id, mode, metric, window = assignment.split("|")
+        stem = scenario_id.rsplit(".", 1)[0]
+        key = (row_id, stem, mode, metric, window)
+        result[key] = min(result.get(key, limit), limit)
+    return result
 
 
 def required_plateaus(policy):
@@ -109,14 +157,24 @@ def approved_gate(policy):
     require(isinstance(gate, dict),
             "unpassed policy: approved sustained harness, noise, and stress decisions are absent")
     rows = {row["id"] for row in policy["runtime_rows"]}
+    control_keys = comparison_control_keys(policy)
+    controls = gate.get("noise_controls")
+    assignments = gate.get("comparison_controls")
+    limits = gate.get("noise_upper_ratio_max")
+    require(isinstance(controls, dict) and set(controls) == rows and
+            isinstance(assignments, dict) and set(assignments) == control_keys and
+            isinstance(limits, dict) and set(limits) == control_keys and
+            all(assignments[key] == key.split("|")[1] for key in control_keys) and
+            all(type(limits[key]) in (int, float) and math.isfinite(limits[key]) and
+                limits[key] >= 1 for key in control_keys),
+            "unpassed policy: frozen comparison control map or noise limits are absent")
     require(isinstance(gate.get("harnesses"), dict) and
             set(gate["harnesses"]) == rows and
-            isinstance(gate.get("noise_upper_ratio_max"), (int, float)) and
-            not isinstance(gate["noise_upper_ratio_max"], bool) and
-            math.isfinite(gate["noise_upper_ratio_max"]) and
-            gate["noise_upper_ratio_max"] >= 1 and
             all(type(gate.get(name)) is int and gate[name] > 0 for name in
-                ("stress_wall_ns_max", "stress_rss_bytes_max")),
+                ("stress_wall_stop_ns", "stress_wall_ns_max",
+                 "stress_rss_stop_bytes", "stress_rss_bytes_max")) and
+            gate["stress_wall_stop_ns"] < gate["stress_wall_ns_max"] and
+            gate["stress_rss_stop_bytes"] < gate["stress_rss_bytes_max"],
             "unpassed policy: approved noise or stress ceiling is absent or invalid")
     fixture_hash = hashlib.sha256(canonical({"fixture": policy["fixture"],
                     "joint_parameters": policy["joint_parameters"]})).hexdigest()
@@ -140,6 +198,32 @@ def approved_gate(policy):
                  "-cp" in prefix and all(any("{" + name + "}" in part for part in prefix)
                     for name in ("baseline", "core", "kotlin"))),
                 f"unpassed policy: approved harness or fixture differs: {row_id}")
+        control = controls[row_id]
+        expected_kind = "dyn4j_6_0_0" if row_id == "jvm.java" else "same_target_port"
+        require(control.get("kind") == expected_kind and
+                control.get("optimized_build") == next(row for row in policy["runtime_rows"]
+                    if row["id"] == row_id)["optimized_build"] and
+                isinstance(control.get("source_commit"), str) and
+                len(control["source_commit"]) == 40 and
+                isinstance(control.get("artifact_sha256"), dict) and
+                set(control["artifact_sha256"]) == {"core", "kotlin"} and
+                isinstance(control["artifact_sha256"]["core"], str) and
+                len(control["artifact_sha256"]["core"]) == 64 and
+                ((control["artifact_sha256"]["kotlin"] == policy["baseline_jar_sha256"] and
+                  control["artifact_sha256"]["core"] == policy["baseline_jar_sha256"])
+                 if row_id == "jvm.java" else
+                 isinstance(control["artifact_sha256"]["kotlin"], str) and
+                 len(control["artifact_sha256"]["kotlin"]) == 64) and
+                control.get("harness_sha256") == harness["sha256"] and
+                control.get("adapter_sha256") == harness["adapter_sha256"] and
+                isinstance(control.get("runtime_sha256"), str) and
+                len(control["runtime_sha256"]) == 64 and
+                isinstance(control.get("probe_sha256"), str) and
+                len(control["probe_sha256"]) == 64 and
+                (row_id == "jvm.java" or
+                 isinstance(control.get("build_receipt_sha256"), str) and
+                 len(control["build_receipt_sha256"]) == 64),
+                f"unpassed policy: independently frozen noise control differs: {row_id}")
     return gate
 
 
@@ -152,7 +236,7 @@ def command_prefix(reference, policy, row_id, artifacts, baseline):
               "kotlin": artifacts[row_id]["kotlin"]["staged_path"]}
     try:
         return [part.format_map(tokens) for part in
-                approved_gate(policy)["harnesses"][row_id]["command_prefix"]]
+                policy["sustained_gate"]["harnesses"][row_id]["command_prefix"]]
     except (KeyError, ValueError) as exc:
         raise ValueError("approved complete command template is invalid") from exc
 
@@ -298,6 +382,48 @@ def verify_source_and_artifacts(root, index, expected_source_commit, policy):
     return hashes
 
 
+def control_artifacts(root, index, policy):
+    controls = policy["sustained_gate"]["noise_controls"]
+    records = index.get("control_artifacts")
+    require(isinstance(records, dict) and
+            set(records) == {row_id for row_id in index["references"] if row_id != "jvm.java"},
+            "independent noise control artifact inventory differs")
+    receipts = index.get("control_build_receipts")
+    require(isinstance(receipts, dict) and set(receipts) == set(records),
+            "independent noise control build receipt inventory differs")
+    result = {}
+    for row_id in index["references"]:
+        if row_id == "jvm.java":
+            result[row_id] = {name: index["baseline"] for name in ("core", "kotlin")}
+            continue
+        modules = records[row_id]
+        require(set(modules) == {"core", "kotlin"},
+                f"independent noise control modules differ: {row_id}")
+        for name, record in modules.items():
+            checked_file(root, record, "archive_path", "sha256")
+            staged = Path(record["staged_path"])
+            local_host = index["references"][row_id]["host"] == observed_host()
+            require(record["sha256"] == controls[row_id]["artifact_sha256"][name] and
+                    record["sha256"] != index["artifacts"][row_id][name]["sha256"] and
+                    staged.is_absolute() and
+                    (not local_host or staged.is_file() and sha256(staged) == record["sha256"]),
+                    f"independent optimized noise control bytes differ: {row_id}:{name}")
+        receipt_record = receipts[row_id]
+        require(receipt_record["sha256"] == controls[row_id]["build_receipt_sha256"],
+                f"independent noise control build receipt digest differs: {row_id}")
+        receipt = json.loads(checked_file(root, receipt_record, "archive_path",
+                                          "sha256").read_text())
+        require(receipt == {"source_commit": controls[row_id]["source_commit"],
+                            "artifact_sha256": controls[row_id]["artifact_sha256"],
+                            "build_configuration": controls[row_id]["optimized_build"],
+                            "target": next(row["target"] for row in policy["runtime_rows"]
+                                           if row["id"] == row_id),
+                            "status": "built_from_frozen_control_source"},
+                f"independent optimized noise control build receipt differs: {row_id}")
+        result[row_id] = modules
+    return result
+
+
 def verify_references(root, index, policy, complete=True):
     gate = approved_gate(policy)
     rows = {item["id"]: item for item in policy["runtime_rows"]}
@@ -307,6 +433,7 @@ def verify_references(root, index, policy, complete=True):
             "reference environment rows differ")
     for row_id, reference in references.items():
         row = rows[row_id]
+        control = gate["noise_controls"][row_id]
         require(reference["target"] == row["target"] and
                 reference["runtime_family"] == row["runtime_family"] and
                 reference["minimum_policy"] == row["minimum_policy"] and
@@ -375,6 +502,14 @@ def verify_references(root, index, policy, complete=True):
                 set(probe["memory_components"]) == {"managed", "native", "wasm_linear"} and
                 len(set(probe["memory_components"])) == 3,
                 f"allocation or memory probe invalid: {row_id}")
+        require(control["runtime_sha256"] == runtime["sha256"] and
+                control["harness_sha256"] == harness["sha256"] and
+                control["adapter_sha256"] == adapter["sha256"] and
+                control["probe_sha256"] == probe["timer_sha256"] and
+                control["source_commit"] != index["source_commit"] and
+                (row_id != "jvm.java" or
+                 control["source_commit"] == policy["source_commit"]),
+                f"independent optimized noise control identity differs: {row_id}")
         allocation = csv_rows(checked_file(root, probe, "allocation_raw", "allocation_sha256"),
                               ("payload_bytes", "allocated_bytes", "collection_count_delta"))
         require(len(allocation) == 1 and
@@ -432,12 +567,13 @@ def warmup_rows(path, hz, plateau=False):
     return rows, markers
 
 
-def validate_steps(rows, scenario, mode, policy):
+def validate_steps(rows, scenario, mode, policy, partial=False):
     hz = scenario["rate_hz"]
     count = policy["families"][scenario["family"]][scenario["size"]]
     steps = (60 if scenario["size"] == "stress" else
              policy["sustained"]["measured_wall_seconds"]) * hz
-    require(len(rows) == steps and [int(row["step"]) for row in rows] == list(range(steps)),
+    require((0 < len(rows) < steps if partial else len(rows) == steps) and
+            [int(row["step"]) for row in rows] == list(range(len(rows))),
             "raw step duration, count, or order differs")
     static = (1 if scenario["family"] in ("pile", "lifecycle") else
               2 if scenario["family"] == "ccd" else count if scenario["family"] == "joint" else 0)
@@ -459,7 +595,7 @@ def validate_steps(rows, scenario, mode, policy):
             require(int(row[field]) >= 0 and
                     (position == 0 or int(row[field]) >= int(rows[position - 1][field])),
                     f"nonmonotonic {field} at step {position}")
-        sampled = position % hz == 0 or position == steps - 1
+        sampled = position % hz == 0 or (not partial and position == steps - 1)
         for field in ("broadphase_candidates", "active_contact_pairs", "active_contact_points"):
             value = int(row[field])
             require(value >= 0 if sampled else value == -1,
@@ -467,8 +603,9 @@ def validate_steps(rows, scenario, mode, policy):
         for field in ("linear_speed_sum_m_per_s", "angular_speed_sum_rad_per_s"):
             value = float(row[field])
             require(math.isfinite(value) and value >= 0, f"invalid {field} at step {position}")
-    require(activity_status(rows, scenario["family"], scenario["variant"], count, hz) == "valid",
-            "scenario activity invalid")
+    if not partial:
+        require(activity_status(rows, scenario["family"], scenario["variant"], count, hz) == "valid",
+                "scenario activity invalid")
     return rows
 
 
@@ -520,21 +657,27 @@ def validate_plateau(rows, cycles):
 
 
 def validate_stress(root, item, policy, image_receipt):
-    gate = approved_gate(policy)
+    gate = policy["sustained_gate"]
+    reason = item.get("termination_reason")
+    limited = reason in ("wall_limit", "rss_limit")
     require(item.get("stress_monitor_method") ==
             stress_monitor_method(item["host"]["system"]) and
             not item["stress_monitor_method"].startswith("unsupported_"),
             "unpassed row: external peak RSS monitor is unvalidated")
     require(item["wall_ns"] <= gate["stress_wall_ns_max"] and
-            item.get("termination_reason") == "completed" and
             type(item.get("stress_peak_rss_bytes")) is int and
             item["stress_peak_rss_bytes"] <= gate["stress_rss_bytes_max"],
             "stress wall, memory, or termination ceiling invalid")
+    require((item["status"] == "capacity_limited" and type(item["exit_code"]) is int and
+             item["exit_code"] != 0) if limited else
+            (reason == "completed" and item["status"] == "complete" and
+             item["exit_code"] == 0),
+            "stress capacity stop or completed termination differs")
     rows = csv_rows(checked_file(root, item, "stress_monitor_path",
                                  "stress_monitor_sha256"), STRESS_MONITOR_FIELDS)
     elapsed = [int(row["elapsed_ns"]) for row in rows]
     rss = [int(row["rss_bytes"]) for row in rows]
-    require(len(rows) >= 2 and elapsed[0] >= 0 and
+    require(len(rows) >= (1 if limited else 2) and elapsed[0] >= 0 and
             item["started_ns"] + elapsed[0] >= image_receipt["observed_ns"] and
             elapsed == sorted(set(elapsed)) and
             elapsed[-1] <= item["wall_ns"] and
@@ -542,17 +685,23 @@ def validate_stress(root, item, policy, image_receipt):
             (item["host"]["system"] == "Darwin" or rss == sorted(rss)) and
             max(rss) == item["stress_peak_rss_bytes"] and
             all(row["action"] == "running" for row in rows[:-1]) and
-            rows[-1]["action"] == item["termination_reason"],
+            rows[-1]["action"] == reason and
+            ((elapsed[-1] >= gate["stress_wall_stop_ns"] if reason == "wall_limit" else
+              item["stress_peak_rss_bytes"] >= gate["stress_rss_stop_bytes"])
+             if limited else
+             elapsed[-1] < gate["stress_wall_stop_ns"] and
+             item["stress_peak_rss_bytes"] < gate["stress_rss_stop_bytes"]),
             "stress monitor stream or termination receipt invalid")
     receipt = json.loads(checked_file(root, item, "stress_monitor_receipt_path",
                                       "stress_monitor_receipt_sha256").read_text())
     terminal_fields = ({"metric_kind", "terminal_pid", "terminal_wait_status",
                         "terminal_ru_maxrss_bytes"} if item["host"]["system"] == "Darwin"
                        else set())
+    stop_fields = {"stop_action", "stop_requested_ns"} if limited else set()
     require(set(receipt) == {"pid", "method", "process_image_sha256",
                              "process_image_observed_ns", "started_ns", "ended_ns",
                              "sample_count", "peak_rss_bytes", "termination_reason",
-                             "exit_code"} | terminal_fields and
+                             "exit_code"} | terminal_fields | stop_fields and
             all(type(receipt[field]) is int for field in
                 ("pid", "process_image_observed_ns", "started_ns", "ended_ns",
                  "sample_count", "peak_rss_bytes", "exit_code")) and
@@ -566,14 +715,24 @@ def validate_stress(root, item, policy, image_receipt):
                         "peak_rss_bytes": item["stress_peak_rss_bytes"],
                         "termination_reason": item["termination_reason"],
                         "exit_code": item["exit_code"],
+                        **({"stop_action": receipt["stop_action"],
+                            "stop_requested_ns": receipt["stop_requested_ns"]}
+                           if limited else {}),
                         **({"metric_kind": "peak_rss_bytes",
-                            "terminal_pid": item["pid"], "terminal_wait_status": 0,
+                            "terminal_pid": item["pid"],
+                            "terminal_wait_status": receipt["terminal_wait_status"],
                             "terminal_ru_maxrss_bytes": item["stress_peak_rss_bytes"]}
                            if terminal_fields else {})} and
+            (not limited or
+             receipt["stop_action"] in ("terminate", "kill") and
+             type(receipt["stop_requested_ns"]) is int and
+             item["started_ns"] + elapsed[-1] <= receipt["stop_requested_ns"] <= item["ended_ns"]) and
             (not terminal_fields or
+             (os.waitstatus_to_exitcode(receipt["terminal_wait_status"]) == item["exit_code"]) and
              rss[-1] == receipt["terminal_ru_maxrss_bytes"] and
              all(value <= rss[-1] for value in rss[:-1])),
             "stress monitor receipt differs from process image or termination")
+    return "capacity_limited" if limited else "completed"
 
 
 def validate_clock(clock, measured, hz, duration_seconds):
@@ -923,7 +1082,8 @@ def capture_key(item):
     if kind in ("measure", "report"):
         return (item["row_id"], item["scenario_id"], item["mode"], item["repeat"])
     if kind == "noise":
-        return (item["row_id"], item["scenario_id"], item["repeat"], item["side"])
+        return (item["row_id"], item["scenario_id"], item["mode"],
+                item["repeat"], item["side"])
     if kind == "plateau":
         return (item["row_id"], item["scenario_id"])
     raise ValueError("unknown capture kind")
@@ -931,12 +1091,28 @@ def capture_key(item):
 
 def verify_capture(root, item, scenarios, references, artifact_hashes, policy, index):
     row_id = item["row_id"]
-    jvm_v2 = approved_gate(policy)["harnesses"][row_id].get("sidecar_protocol") == "jvm-v2"
+    gate = policy["sustained_gate"]
+    jvm_v2 = gate["harnesses"][row_id].get("sidecar_protocol") == "jvm-v2"
     scenario = scenarios[item["scenario_id"]]
     reference = references[row_id]
-    require(item["status"] == "complete" and type(item.get("exit_code")) is int and
-            item["exit_code"] == 0 and
-            item["artifacts"] == artifact_hashes[row_id],
+    noise = item["kind"] == "noise"
+    capacity = item["kind"] == "report" and item.get("status") == "capacity_limited"
+    selected_artifacts = ({row_id: ({name: index["baseline"] for name in ("core", "kotlin")}
+                         if row_id == "jvm.java" else index["control_artifacts"][row_id])}
+                          if noise else index["artifacts"])
+    expected_artifacts = (gate["noise_controls"][row_id]["artifact_sha256"] if noise else
+                          artifact_hashes[row_id])
+    executed_source = (gate["noise_controls"][row_id]["source_commit"] if noise else
+                       item["source_commit"])
+    require((item.get("noise_control_id") == row_id and
+             item.get("executed_source_commit") == executed_source) if noise else
+            "noise_control_id" not in item and "executed_source_commit" not in item,
+            "executed independent noise control assignment differs")
+    require(((item["status"] == "capacity_limited" and type(item.get("exit_code")) is int and
+              item["exit_code"] != 0) if capacity else
+             (item["status"] == "complete" and type(item.get("exit_code")) is int and
+              item["exit_code"] == 0)) and
+            item["artifacts"] == expected_artifacts,
             "capture source, artifact, or completion differs")
     require(item["host"] == reference["host"] and
             item["runtime_sha256"] == reference["runtime"]["sha256"] and
@@ -945,7 +1121,7 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
                 reference["host"]["system"]) and
             item["probe_sha256"] == reference["probe"]["timer_sha256"] and
             item["ambient_environment"] ==
-                approved_gate(policy)["harnesses"][row_id]["environment"] and
+                gate["harnesses"][row_id]["environment"] and
             item["build_configuration"] == reference["build_configuration"] and
             item["build_configuration"] == next(row for row in policy["runtime_rows"]
                 if row["id"] == row_id)["optimized_build"],
@@ -983,18 +1159,18 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     provider = json.loads(checked_file(root, item, "provider_path", "provider_sha256").read_text())
     require(provider["pid"] == item["pid"] and
             provider["runtime_sha256"] == item["runtime_sha256"] and
-            provider["source_commit"] == item["source_commit"] and
+            provider["source_commit"] == executed_source and
             provider["api"] == scenario["api"] and
-            provider["artifact_sha256"] == artifact_hashes[row_id] and
+            provider["artifact_sha256"] == expected_artifacts and
             provider["baseline_sha256"] == policy["baseline_jar_sha256"] and
             provider["loaded_core_sha256"] == (policy["baseline_jar_sha256"] if
-                scenario["api"] == "baseline" else artifact_hashes[row_id]["core"]) and
-            provider["loaded_kotlin_sha256"] == (artifact_hashes[row_id]["kotlin"] if
+                scenario["api"] == "baseline" else expected_artifacts["core"]) and
+            provider["loaded_kotlin_sha256"] == (expected_artifacts["kotlin"] if
                 scenario["api"] == "direct_kotlin" else None) and
             provider["loaded_harness_sha256"] == reference["harness"]["sha256"] and
             provider["loaded_adapter_sha256"] == reference["adapter"]["sha256"] and
             provider["loaded_fixture_sha256"] ==
-                approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+                gate["harnesses"][row_id]["fixture_sha256"],
             "loaded provider or process identity differs")
     raw = checked_file(root, item, "raw_path", "raw_sha256")
     stderr = checked_file(root, item, "stderr_path", "stderr_sha256")
@@ -1002,7 +1178,8 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     warm_clock = checked_file(root, item, "warmup_clock_path", "warmup_clock_sha256")
     warm_clock_rows = csv_rows(warm_clock, WARMUP_CLOCK_FIELDS)
     validate_warmup_clock(warm_clock_rows, warm, scenario["rate_hz"])
-    require(item["wall_ns"] >= (len(warm) / scenario["rate_hz"] + duration) * 1_000_000_000,
+    require(item["wall_ns"] >= (len(warm) / scenario["rate_hz"] +
+                                (0 if capacity else duration)) * 1_000_000_000,
             "executed process shorter than warm-up plus required duration")
     require(int(markers.get("process_pid", item["pid"])) == item["pid"] and
             int(markers.get("route_marker", {"baseline": 0, "direct_kotlin": 1,
@@ -1019,14 +1196,14 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     if scenario["api"] != "baseline":
         expected_tail.append(scenario["api"])
     require(command == command_prefix(reference, policy, row_id,
-                                      index["artifacts"], index["baseline"]) + expected_tail,
+                                      selected_artifacts, index["baseline"]) + expected_tail,
             "executed command, classpath, JVM settings, or fixture differs")
     if item["kind"] == "plateau":
         validate_process_clock(root, item, warm_clock_rows, None,
                                image_receipt["observed_ns"])
         rows = csv_rows(raw, PLATEAU_FIELDS)
-        audit = validate_v2_sidecars(root, item, scenario, item["source_commit"],
-                                     approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+        audit = validate_v2_sidecars(root, item, scenario, executed_source,
+                                     gate["harnesses"][row_id]["fixture_sha256"],
                                      checked_file(root, item, "provider_path", "provider_sha256"),
                                      warm_clock_rows, None, rows, markers)
         if jvm_v2:
@@ -1036,17 +1213,28 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
         validate_plateau(rows, policy["sustained"]["create_use_dispose_cycles"])
         return rows, markers
     if item["kind"] == "report":
-        validate_stress(root, item, policy, image_receipt)
-    mode = "timing" if item["kind"] == "noise" else item["mode"]
+        require(validate_stress(root, item, policy, image_receipt) ==
+                ("capacity_limited" if capacity else "completed"),
+                "stress termination state differs")
+    mode = item["mode"]
     require(item["mode"] == mode, "capture mode differs")
-    rows = validate_steps(csv_rows(raw, STEP_FIELDS), scenario, mode, policy)
+    rows = validate_steps(csv_rows(raw, STEP_FIELDS), scenario, mode, policy,
+                          partial=capacity)
     clock = checked_file(root, item, "clock_path", "clock_sha256")
     clock_rows = csv_rows(clock, CLOCK_FIELDS)
-    validate_clock(clock_rows, rows, hz, duration)
+    validate_clock(clock_rows, rows, hz, len(rows) / hz if capacity else duration)
     validate_process_clock(root, item, warm_clock_rows, clock_rows,
                            image_receipt["observed_ns"])
-    audit = validate_v2_sidecars(root, item, scenario, item["source_commit"],
-                                 approved_gate(policy)["harnesses"][row_id]["fixture_sha256"],
+    if capacity:
+        require(item["wall_ns"] >= (len(warm) + len(rows)) * 1_000_000_000 / hz and
+                item["summary"] == step_summary(rows, mode, hz),
+                "bounded capacity raw sample count or summary differs")
+        for field, value in item.items():
+            if field.endswith("_path") and field not in ("runner_path",):
+                checked_file(root, item, field, field[:-5] + "_sha256")
+        return rows, markers
+    audit = validate_v2_sidecars(root, item, scenario, executed_source,
+                                 gate["harnesses"][row_id]["fixture_sha256"],
                                  checked_file(root, item, "provider_path", "provider_sha256"),
                                  warm_clock_rows, clock_rows, rows, markers)
     if jvm_v2 and mode in ("allocation", "memory"):
@@ -1087,7 +1275,7 @@ def verify_capture(root, item, scenarios, references, artifact_hashes, policy, i
     if mode == "memory":
         memory = checked_file(root, item, "memory_path", "memory_sha256")
         assignment = next(row for row in policy["runtime_rows"] if row["id"] == row_id)
-        cap = (None if scenario["size"] == "stress" or scenario["api"] == "baseline" or
+        cap = (None if noise or scenario["size"] == "stress" or scenario["api"] == "baseline" or
                assignment["size_assignment"][scenario["size"]] == "report_only" else
                policy["budgets"]["incremental_peak_mib"][scenario["size"]] *
                policy["budgets"]["mib_bytes"])
@@ -1237,6 +1425,8 @@ def check_budgets(captures, scenarios, policy, draws, report=None):
                                       "construction_or_replacement_allocation_ratio_max"),
                                      ("memory", "retained_heap_world_alive_bytes",
                                       "retained_heap_ratio_max")):
+        if "jvm.java" not in assignments:
+            break
         for scenario in scenarios.values():
             if (scenario["api"] == "baseline" or scenario["size"] == "stress" or
                     assignments["jvm.java"][scenario["size"]] == "report_only"):
@@ -1278,6 +1468,7 @@ def _verify_archive(root, key, expected_source_commit, policy):
             len(index["scenario_ids"]) == len(set(index["scenario_ids"])),
             "frozen manifest or scenario inventory differs")
     artifacts = verify_source_and_artifacts(root, index, expected_source_commit, policy)
+    control_artifacts(root, index, policy)
     references = verify_references(root, index, policy)
     scenarios = {item["id"]: item for item in policy["scenarios"]}
     captures = index["captures"]
@@ -1301,6 +1492,8 @@ def _verify_archive(root, key, expected_source_commit, policy):
             "required sustained measurement matrix is partial or extra")
     require(set(groups["report"]) == required_reports(policy),
             "stress report matrix is partial or extra")
+    require(all(item["status"] == "complete" for item in groups["report"].values()),
+            "capacity-limited stress reports cannot qualify sustained performance")
     require(set(groups["noise"]) == required_noise(policy),
             "unchanged baseline noise calibration matrix is partial or extra")
     require(set(groups["plateau"]) == required_plateaus(policy),
@@ -1336,8 +1529,11 @@ def _verify_archive(root, key, expected_source_commit, policy):
                                 for first, second in zip(items, items[1:])),
                             "fresh measurement process order differs from balanced policy")
                     previous_end = items[-1]["ended_ns"]
-            latest_noise = max(groups["noise"][(row_id, scenario["id"], repeat, side)]["ended_ns"]
-                               for repeat in (1, 2, 3) for side in ("a", "b"))
+            control_id = (scenario["id"] if row_id == "jvm.java" else
+                          stem + ".direct_kotlin")
+            latest_noise = max(groups["noise"][(row_id, control_id, mode, repeat, side)]["ended_ns"]
+                               for mode in MODES for repeat in (1, 2, 3)
+                               for side in ("a", "b"))
             earliest_candidate = min(groups["measure"][(row_id, f"{stem}.{api}", mode, repeat)]["started_ns"]
                                      for api in ROUTES[1:] for mode in MODES
                                      for repeat in (1, 2, 3))
@@ -1345,7 +1541,9 @@ def _verify_archive(root, key, expected_source_commit, policy):
                     "noise calibration was not completed before candidate runs")
     analysis_partial = root / "analysis.partial.jsonl"
     with analysis_partial.open("w") as analysis:
-        calibration_intervals, maximum_noise_upper, inconclusive_event_tails = analyze_groups(
+        calibration_intervals, maximum_noise_upper = analyze_noise_groups(
+            root, groups, scenarios, references, artifacts, policy, index, analysis)
+        inconclusive_event_tails = analyze_candidate_groups(
             root, groups, scenarios, references, artifacts, policy, index, analysis)
     analysis_path = root / "analysis.jsonl"
     analysis_partial.replace(analysis_path)
@@ -1359,9 +1557,131 @@ def _verify_archive(root, key, expected_source_commit, policy):
             "plateaus": len(groups["plateau"])}
 
 
-def analyze_groups(root, groups, scenarios, references, artifacts, policy, index, analysis):
+def analyze_noise_groups(root, groups, scenarios, references, artifacts, policy, index, analysis):
     calibration_intervals = 0
     maximum_noise_upper = 0.0
+    limits = noise_limit_lookup(policy)
+    for row in policy["runtime_rows"]:
+        row_id = row["id"]
+        for scenario in policy["scenarios"]:
+            if scenario["api"] != "baseline":
+                continue
+            stem = scenario["id"].rsplit(".", 1)[0]
+            if scenario["size"] == "stress":
+                continue
+            control_id = (scenario["id"] if row_id == "jvm.java" else
+                          stem + ".direct_kotlin")
+            for mode in MODES:
+                retained_first = []
+                retained_second = []
+                construction_first = []
+                construction_second = []
+                workload_first = {"full": [], "final_minute": []}
+                workload_second = {"full": [], "final_minute": []}
+                for repeat in (1, 2, 3):
+                    a = groups["noise"][(row_id, control_id, mode, repeat, "a")]
+                    b = groups["noise"][(row_id, control_id, mode, repeat, "b")]
+                    require(a["sequence"] != b["sequence"] and
+                            (a["sequence"] < b["sequence"]) == (repeat != 2) and
+                            (a["started_ns"] < b["started_ns"]) == (repeat != 2),
+                            "noise calibration order is not balanced")
+                    first, first_markers = verify_capture(root, a, scenarios, references,
+                                                          artifacts, policy, index)
+                    second, second_markers = verify_capture(root, b, scenarios, references,
+                                                            artifacts, policy, index)
+                    if mode == "memory":
+                        retained_first.append(int(first_markers["retained_heap_world_alive_bytes"]))
+                        retained_second.append(int(second_markers["retained_heap_world_alive_bytes"]))
+                        for item, destination in ((a, workload_first), (b, workload_second)):
+                            memory = csv_rows(checked_file(root, item, "memory_path",
+                                                           "memory_sha256"), MEMORY_FIELDS)
+                            measured = [row for row in memory if row["phase"] == "measure"]
+                            destination["full"].append(max(int(row["attributed_workload_bytes"])
+                                                           for row in memory[1:]))
+                            destination["final_minute"].append(max(
+                                int(row["attributed_workload_bytes"])
+                                for row in measured[-60 * scenario["rate_hz"]:]))
+                        continue
+                    if mode == "allocation":
+                        construction_first.append(int(first_markers["construction_allocated_bytes"]))
+                        construction_second.append(int(second_markers["construction_allocated_bytes"]))
+                    metrics = ("median", "p99", "total") if mode == "timing" else ("total",)
+                    for window, window_a, window_b in (("full", first, second),
+                        ("final_minute", first[-60 * scenario["rate_hz"]:],
+                         second[-60 * scenario["rate_hz"]:])):
+                        for metric in metrics:
+                            left = allocation_rows(window_a) if mode == "allocation" else window_a
+                            right = allocation_rows(window_b) if mode == "allocation" else window_b
+                            if mode == "allocation" and all(int(row["elapsed_ns"]) == 0 for row in left):
+                                require(all(int(row["elapsed_ns"]) == 0 for row in right),
+                                        "positive A/A allocation against zero control")
+                                value = {"lower_95": 1.0, "upper_95": 1.0,
+                                         "draws": 2000, "zero_baseline": True}
+                            else:
+                                value = interval(left, right, scenario["rate_hz"], metric, 2000)
+                            limit = limits.get((row_id, stem, mode, metric, window))
+                            require(limit is not None,
+                                    "noise comparison control assignment is missing")
+                            analysis.write(json.dumps({"kind": "noise_interval", "row_id": row_id,
+                                "scenario_id": control_id, "mode": mode, "repeat": repeat,
+                                "window": window, "metric": metric, "limit": limit,
+                                **value}, sort_keys=True) + "\n")
+                            maximum_noise_upper = max(maximum_noise_upper, value["upper_95"])
+                            calibration_intervals += 1
+                            require(value["lower_95"] >= 1 / limit and
+                                    value["upper_95"] <= limit,
+                                    "unchanged-control noise calibration is inconclusive")
+                if mode == "memory":
+                    value = scalar_interval(retained_first, retained_second, 2000)
+                    limit = limits.get((row_id, stem, mode,
+                                        "retained_heap_world_alive_bytes", "full"))
+                    require(limit is not None,
+                            "memory noise comparison control assignment is missing")
+                    analysis.write(json.dumps({"kind": "noise_interval", "row_id": row_id,
+                        "scenario_id": control_id, "mode": mode, "repeat": 0,
+                        "window": "full", "metric": "retained_heap_world_alive_bytes",
+                        "limit": limit, **value}, sort_keys=True) + "\n")
+                    maximum_noise_upper = max(maximum_noise_upper, value["upper_95"])
+                    calibration_intervals += 1
+                    require(value["lower_95"] >= 1 / limit and
+                            value["upper_95"] <= limit,
+                            "unchanged-control memory noise calibration is inconclusive")
+                    for window in ("full", "final_minute"):
+                        limit = limits.get((row_id, stem, mode,
+                                            "attributed_workload_peak_bytes", window))
+                        if limit is None:
+                            continue
+                        value = scalar_interval(workload_first[window],
+                                                workload_second[window], 2000)
+                        analysis.write(json.dumps({"kind": "noise_interval", "row_id": row_id,
+                            "scenario_id": control_id, "mode": mode, "repeat": 0,
+                            "window": window, "metric": "attributed_workload_peak_bytes",
+                            "limit": limit, **value}, sort_keys=True) + "\n")
+                        maximum_noise_upper = max(maximum_noise_upper, value["upper_95"])
+                        calibration_intervals += 1
+                        require(value["lower_95"] >= 1 / limit and
+                                value["upper_95"] <= limit,
+                                "unchanged-control workload memory noise is inconclusive")
+                if mode == "allocation":
+                    value = scalar_interval(construction_first, construction_second, 2000)
+                    limit = limits.get((row_id, stem, mode,
+                                        "construction_allocated_bytes", "full"))
+                    require(limit is not None,
+                            "construction noise comparison control assignment is missing")
+                    analysis.write(json.dumps({"kind": "noise_interval", "row_id": row_id,
+                        "scenario_id": control_id, "mode": mode, "repeat": 0,
+                        "window": "full", "metric": "construction_allocated_bytes",
+                        "limit": limit, **value}, sort_keys=True) + "\n")
+                    maximum_noise_upper = max(maximum_noise_upper, value["upper_95"])
+                    calibration_intervals += 1
+                    require(value["lower_95"] >= 1 / limit and
+                            value["upper_95"] <= limit,
+                            "unchanged-control construction noise calibration is inconclusive")
+    return calibration_intervals, maximum_noise_upper
+
+
+def analyze_candidate_groups(root, groups, scenarios, references, artifacts, policy, index,
+                             analysis):
     inconclusive_event_tails = 0
     for row in policy["runtime_rows"]:
         row_id = row["id"]
@@ -1378,31 +1698,6 @@ def analyze_groups(root, groups, scenarios, references, artifacts, policy, index
                 continue
             local_scenarios = {f"{stem}.{api}": scenarios[f"{stem}.{api}"]
                                for api in selected_apis}
-            for repeat in (1, 2, 3):
-                a = groups["noise"][(row_id, scenario["id"], repeat, "a")]
-                b = groups["noise"][(row_id, scenario["id"], repeat, "b")]
-                require(a["sequence"] != b["sequence"] and
-                        (a["sequence"] < b["sequence"]) == (repeat != 2) and
-                        (a["started_ns"] < b["started_ns"]) == (repeat != 2),
-                        "noise calibration order is not balanced")
-                first, _ = verify_capture(root, a, scenarios, references, artifacts, policy, index)
-                second, _ = verify_capture(root, b, scenarios, references, artifacts, policy, index)
-                for window_a, window_b in ((first, second),
-                                           (first[-60 * scenario["rate_hz"]:],
-                                            second[-60 * scenario["rate_hz"]:])):
-                    for metric in ("median", "p99", "total"):
-                        value = interval(window_a, window_b, scenario["rate_hz"], metric, 2000)
-                        analysis.write(json.dumps({"kind": "noise_interval", "row_id": row_id,
-                                                   "scenario_id": scenario["id"],
-                                                   "repeat": repeat,
-                                                   "window": "full" if window_a is first else "final_minute",
-                                                   "metric": metric, **value}, sort_keys=True) + "\n")
-                        maximum_noise_upper = max(maximum_noise_upper, value["upper_95"])
-                        calibration_intervals += 1
-                        limit = approved_gate(policy)["noise_upper_ratio_max"]
-                        require(value["lower_95"] >= 1 / limit and
-                                value["upper_95"] <= limit,
-                                "unchanged-baseline noise calibration is inconclusive")
             for mode in MODES:
                 local = []
                 for repeat in (1, 2, 3):
@@ -1417,11 +1712,55 @@ def analyze_groups(root, groups, scenarios, references, artifacts, policy, index
             for api in selected_apis:
                 item = groups["plateau"][(row_id, f"{stem}.{api}")]
                 verify_capture(root, item, scenarios, references, artifacts, policy, index)
-    return calibration_intervals, maximum_noise_upper, inconclusive_event_tails
+    return inconclusive_event_tails
 
 
 def verify_archive(root, key, expected_source_commit):
     return _verify_archive(root, key, expected_source_commit, frozen_policy())
+
+
+def verify_capacity_report(root, key, expected_source_commit, capture_index, policy=None):
+    policy = frozen_policy() if policy is None else policy
+    approved_gate(policy)
+    root = Path(root).resolve()
+    require(len(key) >= 32, "trusted key is too short")
+    index = json.loads((root / "archive.json").read_text())
+    require(index.get("schema") == 1 and index.get("route") == "sustained-raw-v1" and
+            index.get("capture_tool_sha256") == sha256(Path(__file__)) and
+            hmac.compare_digest(index.get("signature", ""), signature(index, key)),
+            "capacity archive schema, tool, or signature differs")
+    expected_hash = (sha256(MANIFEST_FILE) if policy == manifest() else
+                     hashlib.sha256(canonical(policy)).hexdigest())
+    require(index.get("manifest_sha256") == expected_hash and
+            index.get("scenario_ids") == [item["id"] for item in policy["scenarios"]],
+            "capacity archive frozen manifest differs")
+    artifacts = verify_source_and_artifacts(root, index, expected_source_commit, policy)
+    control_artifacts(root, index, policy)
+    references = verify_references(root, index, policy, complete=False)
+    require(type(capture_index) is int and 0 <= capture_index < len(index["captures"]),
+            "capacity report index is absent")
+    item = index["captures"][capture_index]
+    require(item.get("kind") == "report" and item.get("status") == "capacity_limited" and
+            item.get("source_commit") == index["source_commit"] and
+            item.get("row_id") in references and
+            capture_key(item) in required_reports(policy),
+            "capacity report row, scenario, or state differs")
+    scenarios = {scenario["id"]: scenario for scenario in policy["scenarios"]}
+    rows, _ = verify_capture(root, item, scenarios, references, artifacts, policy, index)
+    return {"qualification": "unpassed", "stress_completed": False,
+            "small_medium_pass": False, "release_qualified": False,
+            "source_commit": index["source_commit"],
+            "capacity_report": {"status": "capacity_limited", "complete": True,
+                                "row_id": item["row_id"],
+                                "scenario_id": item["scenario_id"],
+                                "mode": item["mode"],
+                                "termination_reason": item["termination_reason"],
+                                "sample_count": len(rows),
+                                "wall_ns": item["wall_ns"],
+                                "peak_rss_bytes": item["stress_peak_rss_bytes"],
+                                "raw_sha256": item["raw_sha256"],
+                                "monitor_sha256": item["stress_monitor_sha256"],
+                                "receipt_sha256": item["stress_monitor_receipt_sha256"]}}
 
 
 def initialize_archive(root, config, key):
@@ -1451,6 +1790,31 @@ def initialize_archive(root, config, key):
             artifacts[row_id][name] = {"staged_path": str(path),
                                         "archive_path": str(target.relative_to(root)),
                                         "sha256": sha256(target)}
+    control_records = {}
+    control_receipts = {}
+    non_jvm = set(config["references"]) - {"jvm.java"}
+    require(set(config.get("control_artifact_paths", {})) == non_jvm,
+            "independent noise control artifact paths differ")
+    require(set(config.get("control_build_receipt_paths", {})) == non_jvm,
+            "independent noise control build receipt paths differ")
+    for row_id in non_jvm:
+        control_records[row_id] = {}
+        paths = config["control_artifact_paths"][row_id]
+        require(set(paths) == {"core", "kotlin"},
+                "independent noise control modules differ")
+        for name, path_text in paths.items():
+            path = Path(path_text).resolve(strict=True)
+            target = root / "controls" / row_id / f"{name}{path.suffix}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+            control_records[row_id][name] = {"staged_path": str(path),
+                                             "archive_path": str(target.relative_to(root)),
+                                             "sha256": sha256(target)}
+        receipt_path = Path(config["control_build_receipt_paths"][row_id]).resolve(strict=True)
+        receipt_target = root / "controls" / row_id / "build-receipt.json"
+        shutil.copyfile(receipt_path, receipt_target)
+        control_receipts[row_id] = {"archive_path": str(receipt_target.relative_to(root)),
+                                    "sha256": sha256(receipt_target)}
     baseline_path = Path(config["baseline_path"]).resolve(strict=True)
     baseline_target = root / "artifacts" / baseline_path.name
     shutil.copyfile(baseline_path, baseline_target)
@@ -1506,9 +1870,12 @@ def initialize_archive(root, config, key):
              "baseline": {"staged_path": str(baseline_path),
                           "archive_path": str(baseline_target.relative_to(root)),
                           "sha256": sha256(baseline_target)},
-             "artifacts": artifacts, "references": references, "captures": []}
+             "artifacts": artifacts, "control_artifacts": control_records,
+             "control_build_receipts": control_receipts,
+             "references": references, "captures": []}
     write_index(root, index, key)
     verify_source_and_artifacts(root, index, commit, policy)
+    control_artifacts(root, index, policy)
     verify_references(root, index, policy, complete=False)
     return index
 
@@ -1531,6 +1898,7 @@ def capture_one(root, job, key):
     scenarios = {item["id"]: item for item in policy["scenarios"]}
     references = verify_references(root, index, policy, complete=False)
     hashes = verify_source_and_artifacts(root, index, index["source_commit"], policy)
+    controls = control_artifacts(root, index, policy)
     require(job["row_id"] in references and job["scenario_id"] in scenarios,
             "job row or scenario absent from manifest")
     identity = capture_key(job)
@@ -1557,9 +1925,10 @@ def capture_one(root, job, key):
             str(warmup_steps)]
     if scenario["api"] != "baseline":
         tail.append(scenario["api"])
+    selected_artifacts = controls if job["kind"] == "noise" else index["artifacts"]
     require(120 * hz <= warmup_steps <= 600 * hz and
             command == command_prefix(reference, policy, job["row_id"],
-                                      index["artifacts"], index["baseline"]) + tail,
+                                      selected_artifacts, index["baseline"]) + tail,
             "capture command, JVM settings, or fixture differs from approved policy")
     require(job["kind"] != "report" or
             not stress_monitor_method(platform.system()).startswith("unsupported_"),
@@ -1586,6 +1955,10 @@ def capture_one(root, job, key):
     stress_monitor = folder / "stress-monitor.csv"
     stress_monitor_receipt = folder / "stress-receipt.json"
     environment = dict(gate["harnesses"][job["row_id"]]["environment"])
+    executed_hashes = (gate["noise_controls"][job["row_id"]]["artifact_sha256"]
+                       if job["kind"] == "noise" else hashes[job["row_id"]])
+    executed_source = (gate["noise_controls"][job["row_id"]]["source_commit"]
+                       if job["kind"] == "noise" else index["source_commit"])
     environment.update({"DYN4K_PROVIDER_JSON": str(provider),
                         "DYN4K_MEMORY_CSV": str(memory),
                         "DYN4K_RESOURCE_CSV": str(resource),
@@ -1594,8 +1967,8 @@ def capture_one(root, job, key):
                         "DYN4K_WARMUP_CLOCK_CSV": str(warmup_clock),
                         "DYN4K_CLOCK_ORIGIN_JSON": str(clock_origin),
                         "DYN4K_CLOCK_NONCE": clock_nonce,
-                        "DYN4K_SOURCE_COMMIT": index["source_commit"],
-                        "DYN4K_ARTIFACT_HASHES_JSON": json.dumps(hashes[job["row_id"]]),
+                        "DYN4K_SOURCE_COMMIT": executed_source,
+                        "DYN4K_ARTIFACT_HASHES_JSON": json.dumps(executed_hashes),
                         "DYN4K_BASELINE_SHA256": policy["baseline_jar_sha256"]})
     if job["mode"] in ("allocation", "memory", "plateau"):
         environment.update({"DYN4K_" + stem.upper() + "_JSONL": str(path)
@@ -1622,6 +1995,8 @@ def capture_one(root, job, key):
         termination_reason = None
         stress_peak_rss = None
         terminal_usage = None
+        stop_requested_ns = None
+        stop_action = None
         if image_observation is None and process.poll() is None:
             termination_reason = "image_probe_unavailable"
             process.terminate()
@@ -1699,20 +2074,38 @@ def capture_one(root, job, key):
                             writer.writerow((elapsed, terminal_peak, termination_reason))
                             break
                         peak = max(peak, rss)
-                        if elapsed > gate["stress_wall_ns_max"]:
+                        if elapsed >= gate["stress_wall_stop_ns"]:
                             termination_reason = "wall_limit"
-                        elif peak > gate["stress_rss_bytes_max"]:
+                        elif peak >= gate["stress_rss_stop_bytes"]:
                             termination_reason = "rss_limit"
-                        writer.writerow((elapsed, rss,
-                                         termination_reason or "running"))
                         if termination_reason:
+                            stop_requested_ns = time.monotonic_ns()
+                            stop_action = "terminate"
                             process.terminate()
-                            try:
-                                process.wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait()
+                            if platform.system() == "Darwin":
+                                deadline = time.monotonic() + 5
+                                while time.monotonic() < deadline and terminal_usage is None:
+                                    terminal_usage = darwin_wait4_peak_rss(pid, os.WNOHANG)
+                                    if terminal_usage is None:
+                                        time.sleep(0.05)
+                                if terminal_usage is None:
+                                    stop_action = "kill"
+                                    process.kill()
+                                    terminal_usage = darwin_wait4_peak_rss(pid, 0)
+                                status, terminal_peak = terminal_usage
+                                process.returncode = os.waitstatus_to_exitcode(status)
+                                peak = max(peak, terminal_peak)
+                                rss = terminal_peak
+                            else:
+                                try:
+                                    process.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    stop_action = "kill"
+                                    process.kill()
+                                    process.wait()
+                            writer.writerow((elapsed, rss, termination_reason))
                             break
+                        writer.writerow((elapsed, rss, "running"))
                         time.sleep(0.1)
                     else:
                         if platform.system() == "Darwin":
@@ -1734,10 +2127,16 @@ def capture_one(root, job, key):
                     process.wait()
         returncode = process.wait()
     ended = time.monotonic_ns()
-    item = {**job, "status": "complete" if returncode == 0 and
-            image_observation is not None and
-            termination_reason in (None, "completed") else "failed",
-            "source_commit": index["source_commit"], "artifacts": hashes[job["row_id"]],
+    capacity_limited = (job["kind"] == "report" and
+                        termination_reason in ("wall_limit", "rss_limit") and
+                        returncode != 0 and stop_requested_ns is not None and
+                        ended - started <= gate["stress_wall_ns_max"] and
+                        stress_peak_rss is not None and
+                        stress_peak_rss <= gate["stress_rss_bytes_max"])
+    item = {**job, "status": ("capacity_limited" if capacity_limited else
+            "complete" if returncode == 0 and image_observation is not None and
+            termination_reason in (None, "completed") else "failed"),
+            "source_commit": index["source_commit"], "artifacts": executed_hashes,
             "host": observed_host(), "runtime_sha256": reference["runtime"]["sha256"],
             "process_image_sha256": image_observation["sha256"] if image_observation else None,
             "process_image_method": PROCESS_IMAGE_METHODS.get(platform.system()),
@@ -1749,6 +2148,9 @@ def capture_one(root, job, key):
             "runner_sha256": sha256(runner), "raw_path": str(raw.relative_to(root)),
             "raw_sha256": sha256(raw), "stderr_path": str(stderr.relative_to(root)),
             "stderr_sha256": sha256(stderr), "exit_code": returncode}
+    if job["kind"] == "noise":
+        item.update(noise_control_id=job["row_id"],
+                    executed_source_commit=executed_source)
     if image_observation is not None:
         item.update(process_image_receipt_path=str(image_receipt_path.relative_to(root)),
                     process_image_receipt_sha256=sha256(image_receipt_path))
@@ -1776,6 +2178,9 @@ def capture_one(root, job, key):
                     "sample_count": sample_count, "peak_rss_bytes": stress_peak_rss,
                     "termination_reason": termination_reason,
                     "exit_code": returncode,
+                    **({"stop_action": stop_action,
+                        "stop_requested_ns": stop_requested_ns}
+                       if capacity_limited else {}),
                     **({"metric_kind": "peak_rss_bytes", "terminal_pid": pid,
                         "terminal_wait_status": terminal_usage[0],
                         "terminal_ru_maxrss_bytes": terminal_usage[1]}
@@ -1805,7 +2210,7 @@ def capture_one(root, job, key):
     if warmup_clock.is_file():
         item.update(warmup_clock_path=str(warmup_clock.relative_to(root)),
                     warmup_clock_sha256=sha256(warmup_clock))
-    if returncode == 0:
+    if returncode == 0 or capacity_limited:
         try:
             if job["kind"] not in ("noise", "plateau"):
                 scenario = next(value for value in policy["scenarios"]
@@ -1849,7 +2254,8 @@ def merge_parts(output, parts, key, policy=None):
             merged = {name: copy.deepcopy(index[name]) for name in
                       ("schema", "route", "capture_tool_sha256", "manifest_sha256", "scenario_ids",
                        "source_commit", "source_trees", "baseline")}
-            merged.update(artifacts={}, references={}, captures=[])
+            merged.update(artifacts={}, control_artifacts={}, control_build_receipts={},
+                          references={}, captures=[])
             copy_record(part, merged["baseline"], "archive_path", "sha256", "")
         else:
             for field in ("schema", "route", "capture_tool_sha256", "manifest_sha256", "scenario_ids",
@@ -1858,6 +2264,7 @@ def merge_parts(output, parts, key, policy=None):
             require(index["baseline"]["sha256"] == merged["baseline"]["sha256"],
                     "part baseline artifact differs")
         verify_source_and_artifacts(part, index, merged["source_commit"], policy)
+        control_artifacts(part, index, policy)
         references = verify_references(part, index, policy, complete=False)
         require(len(references) == 1, "each capture part must own one reference row")
         row_id = next(iter(references))
@@ -1875,6 +2282,14 @@ def merge_parts(output, parts, key, policy=None):
         for record in modules.values():
             copy_record(part, record, "archive_path", "sha256", prefix)
         merged["artifacts"][row_id] = modules
+        if row_id != "jvm.java":
+            controls = copy.deepcopy(index["control_artifacts"][row_id])
+            for record in controls.values():
+                copy_record(part, record, "archive_path", "sha256", prefix)
+            merged["control_artifacts"][row_id] = controls
+            receipt_record = copy.deepcopy(index["control_build_receipts"][row_id])
+            copy_record(part, receipt_record, "archive_path", "sha256", prefix)
+            merged["control_build_receipts"][row_id] = receipt_record
         for source_item in index["captures"]:
             require(source_item["row_id"] == row_id, "capture part crosses reference rows")
             item = copy.deepcopy(source_item)
@@ -1907,13 +2322,15 @@ def merge_parts(output, parts, key, policy=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("init", "capture", "merge", "verify", "plan"))
+    parser.add_argument("command", choices=("init", "capture", "merge", "verify",
+                                            "verify-capacity", "plan"))
     parser.add_argument("--archive")
     parser.add_argument("--config")
     parser.add_argument("--job")
     parser.add_argument("--part", action="append")
     parser.add_argument("--trusted-key")
     parser.add_argument("--expected-source-commit")
+    parser.add_argument("--capture-index", type=int)
     args = parser.parse_args()
     try:
         if args.command == "plan":
@@ -1938,6 +2355,11 @@ def main():
                 result = capture_one(args.archive, json.loads(Path(args.job).read_text()), key)
             elif args.command == "merge":
                 result = merge_parts(args.archive, args.part or [], key)
+            elif args.command == "verify-capacity":
+                require(args.expected_source_commit and args.capture_index is not None,
+                        "verify-capacity needs source commit and capture index")
+                result = verify_capacity_report(args.archive, key, args.expected_source_commit,
+                                                args.capture_index)
             else:
                 require(args.expected_source_commit, "verify needs expected source commit")
                 result = verify_archive(args.archive, key, args.expected_source_commit)

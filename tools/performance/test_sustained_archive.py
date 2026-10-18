@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from manifest import manifest
 from sustained_archive import (CLOCK_FIELDS, MEMORY_FIELDS, PLATEAU_FIELDS, STEP_FIELDS,
-                               WARMUP_CLOCK_FIELDS, canonical,
+                               WARMUP_CLOCK_FIELDS, canonical, comparison_control_keys,
                                capture_one, merge_parts,
                                initialize_archive,
                                observed_host, required_measurements, required_noise,
@@ -42,6 +42,20 @@ class SustainedArchiveContractTest(unittest.TestCase):
         self.assertFalse(any(".stress." in key[1] for key in plan))
         self.assertFalse(any(key[1].endswith(".baseline") and
                              key[0] != "jvm.java" for key in plan))
+
+    def test_public_plan_rejects_rehashed_candidate_fitted_manifest_text(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as folder:
+            altered = Path(folder) / "performance-manifest-v1.json"
+            source = ROOT / "docs/research/performance-manifest-v1.json"
+            altered.write_text(source.read_text() + "\n")
+            output = io.StringIO()
+            with patch("sustained_archive.MANIFEST_FILE", altered), \
+                 patch.object(sys, "argv", ["sustained_archive.py", "plan"]), \
+                 contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit) as caught:
+                    main()
+            self.assertNotEqual(0, caught.exception.code)
+            self.assertIn("frozen manifest digest", output.getvalue())
 
 
 def write_csv(path, fields, rows):
@@ -117,8 +131,20 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                                    "command_prefix": ["{runtime}", "-Xmx256m", "-cp",
                                                       "{harness}:{adapter}:{baseline}:{core}:{kotlin}",
                                                       "SyntheticHarness"]}},
-            "noise_upper_ratio_max": 1.05,
+            "noise_controls": {row_id: {"kind": "dyn4j_6_0_0",
+                                        "source_commit": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+                                        "artifact_sha256": {"core": sha256(baseline),
+                                                            "kotlin": sha256(baseline)},
+                                        "optimized_build": row["optimized_build"],
+                                        "runtime_sha256": sha256(runtime),
+                                        "harness_sha256": sha256(harness),
+                                        "adapter_sha256": sha256(adapter),
+                                        "probe_sha256": sha256(timer)}},
+            "comparison_controls": {key: row_id for key in comparison_control_keys(cls.policy)},
+            "noise_upper_ratio_max": {key: 1.05 for key in comparison_control_keys(cls.policy)},
+            "stress_wall_stop_ns": 190_000_000_000,
             "stress_wall_ns_max": 200_000_000_000,
+            "stress_rss_stop_bytes": 5000,
             "stress_rss_bytes_max": 3 * 1024 ** 3}
         receipt = cls.root / "build-receipt.json"
         receipt.write_text(json.dumps({"source_commit": cls.commit,
@@ -167,7 +193,9 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                  "baseline": {"staged_path": str(baseline),
                               "archive_path": baseline_copy.name,
                               "sha256": sha256(baseline_copy)},
-                 "artifacts": {row_id: artifacts}, "references": {row_id: reference},
+                 "artifacts": {row_id: artifacts}, "control_artifacts": {},
+                 "control_build_receipts": {},
+                 "references": {row_id: reference},
                  "captures": []}
         scenarios = {item["id"]: item for item in cls.policy["scenarios"]}
         jobs = []
@@ -176,8 +204,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                                                key[3], balanced_orders()[key[3] - 1].index(
                                                    key[1].rsplit(".", 1)[1])))
         noise_keys = sorted(required_noise(cls.policy),
-                            key=lambda key: (key[0], key[1], key[2],
-                                             0 if (key[3] == "a") == (key[2] != 2) else 1))
+                            key=lambda key: (key[0], key[1], key[2], key[3],
+                                             0 if (key[4] == "a") == (key[3] != 2) else 1))
         jobs.extend(("noise", key) for key in noise_keys)
         jobs.extend(("measure", key) for key in measure_keys)
         jobs.extend(("report", key) for key in sorted(required_reports(cls.policy)))
@@ -185,9 +213,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         for serial, (kind, key) in enumerate(jobs, 1):
             scenario_id = key[1]
             scenario = scenarios[scenario_id]
-            mode = (key[2] if kind in ("measure", "report") else
-                    "timing" if kind == "noise" else "plateau")
-            repeat = key[2] if kind == "noise" else key[3] if kind in ("measure", "report") else 1
+            mode = (key[2] if kind in ("measure", "report", "noise") else "plateau")
+            repeat = key[3] if kind == "noise" else key[3] if kind in ("measure", "report") else 1
             folder = cls.root / "runs" / f"run-{serial:03d}"
             folder.mkdir(parents=True)
             raw = folder / "raw.csv"
@@ -259,13 +286,16 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                                                         "runtime_ns": 0, "nonce": nonce,
                                                         "host_before_ns": host_start,
                                                         "host_after_ns": host_start + 1_000_000}))
+            noise_hashes = {"core": sha256(baseline), "kotlin": sha256(baseline)}
+            executed_hashes = noise_hashes if kind == "noise" else hashes
             provider.write_text(json.dumps({"pid": pid, "runtime_sha256": sha256(runtime),
-                                            "source_commit": cls.commit, "api": api,
-                                            "artifact_sha256": hashes,
+                                            "source_commit": cls.policy["source_commit"] if
+                                            kind == "noise" else cls.commit, "api": api,
+                                            "artifact_sha256": executed_hashes,
                                             "baseline_sha256": sha256(baseline),
                                             "loaded_core_sha256": sha256(baseline) if api == "baseline"
-                                            else hashes["core"],
-                                            "loaded_kotlin_sha256": hashes["kotlin"] if
+                                            else executed_hashes["core"],
+                                            "loaded_kotlin_sha256": executed_hashes["kotlin"] if
                                             api == "direct_kotlin" else None,
                                             "loaded_harness_sha256": sha256(harness),
                                             "loaded_adapter_sha256": sha256(adapter),
@@ -282,12 +312,12 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                 tail.append(api)
             item = {"kind": kind, "row_id": row_id, "scenario_id": scenario_id,
                     "mode": mode, "repeat": repeat,
-                    "sequence": (1 if repeat != 2 else 2) if kind == "noise" and key[3] == "a"
+                    "sequence": (1 if repeat != 2 else 2) if kind == "noise" and key[4] == "a"
                     else (2 if repeat != 2 else 1) if kind == "noise" else
                     balanced_orders()[repeat - 1].index(api) + 1 if kind == "measure"
                     else serial,
                     "status": "complete", "source_commit": cls.commit,
-                    "artifacts": hashes, "host": observed_host(),
+                    "artifacts": executed_hashes, "host": observed_host(),
                     "runtime_sha256": sha256(runtime),
                     "process_image_sha256": sha256(runtime),
                     "process_image_method": "os_procfs" if sys.platform.startswith("linux")
@@ -300,7 +330,9 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                     "wall_ns": 180000000000,
                     "command": [str(runtime), "-Xmx256m", "-cp",
                                 ":".join((str(harness), str(adapter), str(baseline),
+                                          str(baseline) if kind == "noise" else
                                           str(cls.root / "staged-core.jar"),
+                                          str(baseline) if kind == "noise" else
                                           str(cls.root / "staged-kotlin.jar"))),
                                 "SyntheticHarness", *tail], "runner_path": str(runtime),
                     "runner_sha256": sha256(runtime),
@@ -346,7 +378,9 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
             if kind in ("measure", "report"):
                 item["summary"] = step_summary(rows, mode, hz)
             if kind == "noise":
-                item["side"] = key[3]
+                item["side"] = key[4]
+                item["noise_control_id"] = row_id
+                item["executed_source_commit"] = cls.policy["source_commit"]
             index["captures"].append(item)
         index["signature"] = signature(index, cls.key)
         (cls.root / "archive.json").write_text(json.dumps(index))
@@ -380,6 +414,159 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                 except SystemExit as exc:
                     status = exc.code
         return status, json.loads(output.getvalue())
+
+    def cli_capacity(self, root, policy, capture_index):
+        key_path = Path(self.folder.name) / "operator.key"
+        key_path.write_bytes(self.key)
+        args = ["sustained_archive.py", "verify-capacity", "--archive", str(root),
+                "--trusted-key", str(key_path), "--capture-index", str(capture_index),
+                "--expected-source-commit", self.commit]
+        output = io.StringIO()
+        with patch.object(sys, "argv", args), patch("sustained_archive.frozen_policy",
+                                                   return_value=policy), \
+             contextlib.redirect_stdout(output):
+            try:
+                main()
+                status = 0
+            except SystemExit as exc:
+                status = exc.code
+        return status, json.loads(output.getvalue()) if output.getvalue() else {}
+
+    def stopped_capacity_archive(self, name):
+        root, index_path, index = self.changed_archive(name)
+        policy = copy.deepcopy(self.policy)
+        policy["sustained_gate"]["stress_rss_stop_bytes"] = 1500
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        capture_index = next(position for position, item in enumerate(index["captures"])
+                             if item["kind"] == "report" and item["mode"] == "timing")
+        item = index["captures"][capture_index]
+        raw_path = root / item["raw_path"]
+        rows = list(csv.DictReader(raw_path.read_text().splitlines()))[:30 * 30]
+        write_csv(raw_path, STEP_FIELDS,
+                  ([row[field] for field in STEP_FIELDS] for row in rows))
+        item["raw_sha256"] = sha256(raw_path)
+        clock_path = root / item["clock_path"]
+        stamps = list(csv.DictReader(clock_path.read_text().splitlines()))[:30 * 30]
+        write_csv(clock_path, CLOCK_FIELDS,
+                  ([row[field] for field in CLOCK_FIELDS] for row in stamps))
+        item["clock_sha256"] = sha256(clock_path)
+        item["status"] = "capacity_limited"
+        item["exit_code"] = -15
+        item["termination_reason"] = "rss_limit"
+        item["wall_ns"] = 151_000_000_000
+        item["ended_ns"] = item["started_ns"] + item["wall_ns"]
+        item["summary"] = step_summary(rows, "timing", 30)
+        monitor_path = root / item["stress_monitor_path"]
+        write_csv(monitor_path, ("elapsed_ns", "rss_bytes", "action"),
+                  ((1_000_000, 2000, "running"),
+                   (150_500_000_000, 2000, "rss_limit")))
+        item["stress_monitor_sha256"] = sha256(monitor_path)
+        receipt_path = root / item["stress_monitor_receipt_path"]
+        receipt = json.loads(receipt_path.read_text())
+        receipt.update(ended_ns=item["ended_ns"], termination_reason="rss_limit",
+                       exit_code=-15, stop_action="terminate",
+                       stop_requested_ns=item["started_ns"] + 150_500_000_000)
+        receipt_path.write_text(json.dumps(receipt))
+        item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+        self.reseal(index_path, index)
+        return root, index_path, index, policy, capture_index
+
+    def test_public_capacity_report_accepts_signed_bounded_limit_stop_only(self):
+        root, _, _, policy, capture_index = self.stopped_capacity_archive("bounded-capacity")
+        status, result = self.cli_capacity(root, policy, capture_index)
+        self.assertEqual(0, status, result)
+        self.assertEqual("capacity_limited", result["capacity_report"]["status"])
+        self.assertTrue(result["capacity_report"]["complete"])
+        self.assertEqual("unpassed", result["qualification"])
+        self.assertFalse(result["stress_completed"])
+        self.assertFalse(result["small_medium_pass"])
+        self.assertFalse(result["release_qualified"])
+
+    def test_public_capacity_report_accepts_signed_wall_limit_stop(self):
+        root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+            "bounded-wall-capacity")
+        item = index["captures"][capture_index]
+        policy["sustained_gate"].update(stress_wall_stop_ns=140_000_000_000,
+                                         stress_rss_stop_bytes=5000)
+        monitor_path = root / item["stress_monitor_path"]
+        monitor = list(csv.DictReader(monitor_path.read_text().splitlines()))
+        monitor[-1]["action"] = "wall_limit"
+        write_csv(monitor_path, ("elapsed_ns", "rss_bytes", "action"),
+                  ([row[field] for field in ("elapsed_ns", "rss_bytes", "action")]
+                   for row in monitor))
+        item["stress_monitor_sha256"] = sha256(monitor_path)
+        item["termination_reason"] = "wall_limit"
+        receipt_path = root / item["stress_monitor_receipt_path"]
+        receipt = json.loads(receipt_path.read_text())
+        receipt["termination_reason"] = "wall_limit"
+        receipt_path.write_text(json.dumps(receipt))
+        item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        status, result = self.cli_capacity(root, policy, capture_index)
+        self.assertEqual(0, status, result)
+        self.assertEqual("wall_limit", result["capacity_report"]["termination_reason"])
+
+    def test_public_capacity_report_accepts_first_external_peak_sample_stop(self):
+        root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+            "first-peak-capacity")
+        item = index["captures"][capture_index]
+        monitor_path = root / item["stress_monitor_path"]
+        monitor = list(csv.DictReader(monitor_path.read_text().splitlines()))
+        write_csv(monitor_path, ("elapsed_ns", "rss_bytes", "action"),
+                  ([monitor[-1][field] for field in ("elapsed_ns", "rss_bytes", "action")],))
+        item["stress_monitor_sha256"] = sha256(monitor_path)
+        receipt_path = root / item["stress_monitor_receipt_path"]
+        receipt = json.loads(receipt_path.read_text())
+        receipt["sample_count"] = 1
+        receipt_path.write_text(json.dumps(receipt))
+        item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+        self.reseal(index_path, index)
+        status, result = self.cli_capacity(root, policy, capture_index)
+        self.assertEqual(0, status, result)
+        self.assertEqual("capacity_limited", result["capacity_report"]["status"])
+
+    def test_public_capacity_report_rejects_signed_crash_and_receipt_attacks(self):
+        for attack in ("crash", "wrong_exit", "wrong_pid", "missing_stop",
+                       "missing_monitor", "partial_clock", "below_stop"):
+            with self.subTest(attack=attack):
+                root, index_path, index, policy, capture_index = self.stopped_capacity_archive(
+                    "capacity-" + attack)
+                item = index["captures"][capture_index]
+                receipt_path = root / item["stress_monitor_receipt_path"]
+                receipt = json.loads(receipt_path.read_text())
+                if attack == "crash":
+                    item["termination_reason"] = "crash"
+                elif attack == "wrong_exit":
+                    item["exit_code"] = 1
+                elif attack == "wrong_pid":
+                    receipt["pid"] += 1
+                elif attack == "missing_stop":
+                    receipt.pop("stop_requested_ns")
+                elif attack == "missing_monitor":
+                    (root / item["stress_monitor_path"]).unlink()
+                elif attack == "partial_clock":
+                    clock_path = root / item["clock_path"]
+                    stamps = list(csv.DictReader(clock_path.read_text().splitlines()))[:-1]
+                    write_csv(clock_path, CLOCK_FIELDS,
+                              ([row[field] for field in CLOCK_FIELDS] for row in stamps))
+                    item["clock_sha256"] = sha256(clock_path)
+                else:
+                    policy["sustained_gate"]["stress_rss_stop_bytes"] = 2500
+                    index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+                if attack in ("wrong_pid", "missing_stop"):
+                    receipt_path.write_text(json.dumps(receipt))
+                    item["stress_monitor_receipt_sha256"] = sha256(receipt_path)
+                self.reseal(index_path, index)
+                status, result = self.cli_capacity(root, policy, capture_index)
+                self.assertNotEqual(0, status, result)
+                self.assertEqual("unpassed", result["qualification"])
+
+    def test_public_full_verify_cannot_turn_capacity_stop_into_qualification(self):
+        root, _, _, policy, _ = self.stopped_capacity_archive("capacity-not-full-gate")
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertNotEqual(0, status, result)
+        self.assertIn("capacity-limited", result["reason"])
 
     def changed_archive(self, mutation):
         if hasattr(type(self), "_mutation_root"):
@@ -420,19 +607,206 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertEqual("passed", result["qualification"])
         self.assertEqual(27, result["measurements"])
         self.assertEqual(9, result["stress_reports"])
-        self.assertEqual(6, result["noise_runs"])
+        self.assertEqual(18, result["noise_runs"])
         self.assertEqual(3, result["plateaus"])
         analysis = Path(result["analysis_path"])
         self.assertEqual(sha256(analysis), result["analysis_sha256"])
         records = [json.loads(line) for line in analysis.read_text().splitlines()]
-        self.assertEqual(18, sum(item["kind"] == "noise_interval" for item in records))
+        self.assertEqual(28, sum(item["kind"] == "noise_interval" for item in records))
         self.assertTrue(any(item["kind"] == "budget_interval" for item in records))
 
     def test_public_verify_accepts_synthetic_legacy_v1_with_full_intervals(self):
         status, result = self.cli_verify(fast=False)
         self.assertEqual(0, status)
         self.assertEqual("passed", result["qualification"])
-        self.assertEqual(18, result["noise_intervals"])
+        self.assertEqual(28, result["noise_intervals"])
+
+    def test_public_verify_rejects_missing_frozen_comparison_control(self):
+        root, index_path, index = self.changed_archive("missing-control-map")
+        policy = copy.deepcopy(self.policy)
+        policy["sustained_gate"].pop("comparison_controls", None)
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertNotEqual(0, status, result)
+        self.assertIn("control", result["reason"])
+
+    def test_public_verify_rejects_resealed_wrong_control_assignment(self):
+        root, index_path, index = self.changed_archive("wrong-control-map")
+        policy = copy.deepcopy(self.policy)
+        policy["sustained_gate"]["comparison_controls"] = {
+            "jvm_vs_dyn4j|jvm.java|separated.default.small.30hz.direct_kotlin|median|full":
+            "candidate_control"}
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertNotEqual(0, status, result)
+        self.assertIn("control", result["reason"])
+
+    def test_public_verify_requires_absolute_timing_and_memory_control_assignments(self):
+        for key in (
+            "absolute_timing|jvm.java|separated.default.small.30hz.direct_kotlin|timing|p99|final_minute",
+            "absolute_memory|jvm.java|separated.default.small.30hz.direct_kotlin|memory|attributed_workload_peak_bytes|full"):
+            with self.subTest(key=key):
+                root, index_path, index = self.changed_archive("missing-absolute-" + key.split("|")[0])
+                policy = copy.deepcopy(self.policy)
+                policy["sustained_gate"]["comparison_controls"].pop(key, None)
+                policy["sustained_gate"]["noise_upper_ratio_max"].pop(key, None)
+                index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+                self.reseal(index_path, index)
+                status, result = self.cli_verify(root, policy=policy)
+                self.assertNotEqual(0, status, result)
+                self.assertIn("control", result["reason"])
+
+    def non_jvm_control_archive(self, name):
+        root, index_path, index = self.changed_archive(name)
+        policy = copy.deepcopy(self.policy)
+        row = next(row for row in manifest()["runtime_rows"]
+                   if row["id"] == "linuxX64.linux_x64")
+        old_id = "jvm.java"
+        row_id = row["id"]
+        policy["runtime_rows"] = [row]
+        policy["targets"] = [row["target"]]
+        gate = policy["sustained_gate"]
+        gate["harnesses"][row_id] = gate["harnesses"].pop(old_id)
+        control_source = "c" * 40
+        control_records = {}
+        control_hashes = {}
+        for name_part in ("core", "kotlin"):
+            staged = root / ("frozen-control-" + name_part + ".jar")
+            staged.write_bytes(("independently frozen port " + name_part).encode())
+            archived = root / ("control-" + name_part + ".jar")
+            shutil.copyfile(staged, archived)
+            control_hashes[name_part] = sha256(archived)
+            control_records[name_part] = {"staged_path": str(staged),
+                                          "archive_path": archived.name,
+                                          "sha256": sha256(archived)}
+        control = gate["noise_controls"].pop(old_id)
+        control_receipt_path = root / "control-build-receipt.json"
+        control_receipt_path.write_text(json.dumps({
+            "source_commit": control_source,
+            "artifact_sha256": control_hashes,
+            "build_configuration": row["optimized_build"],
+            "target": row["target"],
+            "status": "built_from_frozen_control_source"}))
+        control.update(kind="same_target_port", source_commit=control_source,
+                       artifact_sha256=control_hashes,
+                       optimized_build=row["optimized_build"],
+                       build_receipt_sha256=sha256(control_receipt_path))
+        gate["noise_controls"][row_id] = control
+        keys = comparison_control_keys(policy)
+        gate["comparison_controls"] = {key: row_id for key in keys}
+        gate["noise_upper_ratio_max"] = {key: 1.05 for key in keys}
+        index["control_artifacts"] = {row_id: control_records}
+        index["control_build_receipts"] = {row_id: {
+            "archive_path": control_receipt_path.name,
+            "sha256": sha256(control_receipt_path)}}
+        index["artifacts"][row_id] = index["artifacts"].pop(old_id)
+        reference = index["references"].pop(old_id)
+        for field in ("target", "runtime_family", "minimum_policy", "size_assignment",
+                      "optimized_build", "development_build"):
+            reference[field] = row[field]
+        reference["build_configuration"] = row["optimized_build"]
+        index["references"][row_id] = reference
+        receipt_path = root / reference["build_receipt"]["archive_path"]
+        build_receipt = json.loads(receipt_path.read_text())
+        build_receipt.update(target=row["target"],
+                             build_configuration=row["optimized_build"])
+        receipt_path.write_text(json.dumps(build_receipt))
+        reference["build_receipt"]["sha256"] = sha256(receipt_path)
+        new_captures = []
+        for item in index["captures"]:
+            api = item["scenario_id"].rsplit(".", 1)[1]
+            if item["kind"] != "noise" and api == "baseline":
+                shutil.rmtree(root / Path(item["raw_path"]).parent)
+                continue
+            item["row_id"] = row_id
+            item["build_configuration"] = row["optimized_build"]
+            provider_path = root / item["provider_path"]
+            provider = json.loads(provider_path.read_text())
+            if item["kind"] == "noise":
+                item["scenario_id"] = item["scenario_id"].rsplit(".", 1)[0] + ".direct_kotlin"
+                item["artifacts"] = control_hashes
+                item["noise_control_id"] = row_id
+                item["executed_source_commit"] = control_source
+                item["command"][3] = ":".join((reference["harness"]["path"],
+                    reference["adapter"]["path"], index["baseline"]["staged_path"],
+                    str(root / "frozen-control-core.jar"),
+                    str(root / "frozen-control-kotlin.jar")))
+                item["command"].append("direct_kotlin")
+                provider.update(source_commit=control_source, api="direct_kotlin",
+                                artifact_sha256=control_hashes,
+                                loaded_core_sha256=control_hashes["core"],
+                                loaded_kotlin_sha256=control_hashes["kotlin"])
+            else:
+                repeat = item["repeat"]
+                if item["kind"] == "measure":
+                    selected = [route for route in balanced_orders()[repeat - 1]
+                                if route != "baseline"]
+                    item["sequence"] = selected.index(api) + 1
+            provider_path.write_text(json.dumps(provider))
+            item["provider_sha256"] = sha256(provider_path)
+            new_captures.append(item)
+        index["captures"] = new_captures
+        index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.reseal(index_path, index)
+        return root, index_path, index, policy
+
+    def test_public_non_jvm_noise_uses_separate_optimized_port_control(self):
+        root, _, _, policy = self.non_jvm_control_archive("non-jvm-control")
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertEqual(0, status, result)
+        self.assertEqual("passed", result["qualification"])
+
+    def test_public_non_jvm_noise_rejects_candidate_or_wrong_control_bytes(self):
+        root, index_path, index, policy = self.non_jvm_control_archive("wrong-port-control")
+        row_id = "linuxX64.linux_x64"
+        index["control_artifacts"][row_id]["core"]["sha256"] = \
+            index["artifacts"][row_id]["core"]["sha256"]
+        self.reseal(index_path, index)
+        status, result = self.cli_verify(root, policy=policy)
+        self.assertNotEqual(0, status, result)
+        self.assertIn("control", result["reason"])
+
+    def test_public_non_jvm_noise_rejects_signed_wrong_receipt_probe_and_process(self):
+        for attack in ("receipt", "probe", "provider", "control_source"):
+            with self.subTest(attack=attack):
+                root, index_path, index, policy = self.non_jvm_control_archive(
+                    "non-jvm-" + attack)
+                row_id = "linuxX64.linux_x64"
+                item = next(item for item in index["captures"] if item["kind"] == "noise")
+                if attack == "receipt":
+                    receipt_record = index["control_build_receipts"][row_id]
+                    receipt_path = root / receipt_record["archive_path"]
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt["build_configuration"] = "development"
+                    receipt_path.write_text(json.dumps(receipt))
+                    receipt_record["sha256"] = sha256(receipt_path)
+                    policy["sustained_gate"]["noise_controls"][row_id][
+                        "build_receipt_sha256"] = receipt_record["sha256"]
+                    index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+                elif attack == "probe":
+                    item["probe_sha256"] = "0" * 64
+                elif attack == "provider":
+                    provider_path = root / item["provider_path"]
+                    provider = json.loads(provider_path.read_text())
+                    provider["loaded_core_sha256"] = \
+                        index["artifacts"][row_id]["core"]["sha256"]
+                    provider_path.write_text(json.dumps(provider))
+                    item["provider_sha256"] = sha256(provider_path)
+                else:
+                    item["executed_source_commit"] = self.commit
+                self.reseal(index_path, index)
+                status, result = self.cli_verify(root, policy=policy)
+                self.assertNotEqual(0, status, result)
+                self.assertEqual("unpassed", result["qualification"])
+
+    def test_signed_non_jvm_part_retains_frozen_control_in_merge(self):
+        root, _, _, policy = self.non_jvm_control_archive("non-jvm-merge")
+        destination = Path(self.folder.name) / "non-jvm-merged"
+        result = merge_parts(destination, [root], self.key, policy=policy)
+        self.assertEqual("passed", result["qualification"])
+        self.assertTrue((destination / "parts/linuxX64.linux_x64/control-core.jar").is_file())
 
     def test_public_signed_legacy_v1_archive_cannot_pass_approved_v2_harness(self):
         root, index_path, index = self.changed_archive("v2-approved-v1-only")
@@ -519,7 +893,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         self.assertIn("external peak RSS monitor is unvalidated", result["reason"])
 
     def test_public_verify_reports_missing_approved_noise_and_stress_policy(self):
-        for field in ("noise_upper_ratio_max", "stress_wall_ns_max",
+        for field in ("noise_upper_ratio_max", "stress_wall_stop_ns",
+                      "stress_wall_ns_max", "stress_rss_stop_bytes",
                       "stress_rss_bytes_max"):
             with self.subTest(field=field):
                 policy = copy.deepcopy(self.policy)
@@ -849,7 +1224,7 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                     item["raw_sha256"] = sha256(raw)
                 elif name == "noise":
                     item = next(item for item in index["captures"] if item["kind"] == "noise"
-                                and item["side"] == "b")
+                                and item["side"] == "b" and item["mode"] == "timing")
                     raw = root / item["raw_path"]
                     clock = root / item["clock_path"]
                     rows = list(csv.DictReader(raw.read_text().splitlines()))
@@ -889,6 +1264,8 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
                 self.assertEqual("unpassed", result["qualification"])
                 if name == "noise":
                     self.assertIn("noise calibration is inconclusive", result["reason"])
+                    partial = (root / "analysis.partial.jsonl").read_text()
+                    self.assertNotIn('"kind": "budget_interval"', partial)
                 if name == "cycle-native":
                     self.assertIn("attributable native_bytes", result["reason"])
                 if name == "cycle-rss":
@@ -1136,6 +1513,9 @@ class SyntheticSustainedArchiveTest(unittest.TestCase):
         root, path, index = self.changed_archive("report-only")
         policy = copy.deepcopy(self.policy)
         policy["runtime_rows"][0]["size_assignment"]["small"] = "report_only"
+        keys = comparison_control_keys(policy)
+        policy["sustained_gate"]["comparison_controls"] = {key: "jvm.java" for key in keys}
+        policy["sustained_gate"]["noise_upper_ratio_max"] = {key: 1.05 for key in keys}
         index["references"]["jvm.java"]["size_assignment"]["small"] = "report_only"
         index["manifest_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
         self.increase_compatibility_timing(root, index)
