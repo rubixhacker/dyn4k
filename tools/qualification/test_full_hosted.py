@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -36,6 +37,38 @@ class FullHostedTests(unittest.TestCase):
             target_jar.write_bytes(root.read_bytes())
             target_jar.with_name(target_jar.name + ".sha256").write_text(
                 full_hosted.sha256(target_jar) + "\n")
+
+    def make_staged_binary_sha1_leading_zero(self, repository, target):
+        binary = (repository / "build/staging-repository" /
+                  qualify.target_binary_path("dyn4k-core", target))
+        with zipfile.ZipFile(binary) as original:
+            members = {name: original.read(name) for name in original.namelist()}
+        for nonce in range(256):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                for name, contents in members.items():
+                    archive.writestr(name, contents + str(nonce).encode()
+                                     if name == "default/ir/bodies.knb" else contents)
+            contents = buffer.getvalue()
+            if hashlib.sha1(contents).hexdigest().startswith("0"):
+                break
+        else:
+            self.fail("could not create a synthetic leading-zero KLIB")
+        binary.write_bytes(contents)
+        binary.with_name(binary.name + ".sha256").write_text(
+            hashlib.sha256(contents).hexdigest() + "\n")
+        metadata_path = binary.with_suffix(".module")
+        metadata = json.loads(metadata_path.read_text())
+        for variant in metadata["variants"]:
+            for reference in variant.get("files", []):
+                if reference["url"] == binary.name:
+                    reference["size"] = len(contents)
+                    for algorithm in ("sha512", "sha256", "sha1", "md5"):
+                        reference[algorithm] = hashlib.new(algorithm, contents).hexdigest()
+        metadata_path.write_text(json.dumps(metadata))
+        metadata_path.with_name(metadata_path.name + ".sha256").write_text(
+            full_hosted.sha256(metadata_path) + "\n")
+        return hashlib.sha1(contents).hexdigest()
 
     def write_suite(self, cases, skipped=False, ignored=False):
         suite = ET.Element("testsuite", tests=str(len(cases)), failures="0", errors="0",
@@ -467,7 +500,17 @@ class FullHostedTests(unittest.TestCase):
             name = qualify.target_publication_name(module, target)
             binary = staging / qualify.target_binary_path(module, target)
             binary.parent.mkdir(parents=True, exist_ok=True)
-            binary.write_bytes((module + " staged bytes").encode())
+            contents = (module + " staged bytes").encode()
+            if module == "dyn4k-core":
+                for nonce in range(256):
+                    candidate = contents + str(nonce).encode()
+                    if hashlib.sha1(candidate).hexdigest().startswith("0"):
+                        contents = candidate
+                        break
+                else:
+                    self.fail("could not create leading-zero staged bytes")
+                self.assertTrue(hashlib.sha1(contents).hexdigest().startswith("0"))
+            binary.write_bytes(contents)
             hashes[module] = full_hosted.sha256(binary)
             cache = (self.root / "gradle-home/caches/modules-2/files-2.1" /
                      qualify.GROUP / name / qualify.VERSION /
@@ -718,6 +761,9 @@ class FullHostedTests(unittest.TestCase):
             configuration = destination.parent.name
             if kind == "stage":
                 test_publication.PublicationAuditTests().stage(repository, (target,))
+                leading_digest = self.make_staged_binary_sha1_leading_zero(repository, target)
+                self.assertEqual(40, len(leading_digest))
+                self.assertTrue(leading_digest.startswith("0"))
                 self.align_synthetic_docs(repository, target)
                 stdout = "> Task :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository\n"
             elif kind == "source":
@@ -749,7 +795,9 @@ class FullHostedTests(unittest.TestCase):
                     binary = repository / "build/staging-repository" / qualify.target_binary_path(module, target)
                     cached = (cache_home / "caches/modules-2/files-2.1" /
                               qualify.GROUP / name / qualify.VERSION /
-                              hashlib.sha1(binary.read_bytes()).hexdigest() /
+                              (hashlib.sha1(binary.read_bytes()).hexdigest().lstrip("0")
+                               if module == "dyn4k-core" else
+                               hashlib.sha1(binary.read_bytes()).hexdigest()) /
                               f"{module}-{target}Main-{qualify.VERSION}.klib")
                     cached.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(binary, cached)
@@ -960,6 +1008,9 @@ class FullHostedTests(unittest.TestCase):
 
             wrong_digest = reseal_cache_path(
                 "cache-digest", lambda path: path.replace(Path(path).parts[-2], "f" * 40))
+            extra_zero = reseal_cache_path(
+                "cache-extra-zero", lambda path: path.replace(
+                    Path(path).parts[-2], "00" + Path(path).parts[-2]))
             wrong_home = reseal_cache_path(
                 "cache-home", lambda path: path.replace(
                     str(evidence / "gradle-home"), str(evidence / "unrecorded-gradle-home")))
@@ -969,6 +1020,7 @@ class FullHostedTests(unittest.TestCase):
                 str(evidence / "unrecorded-gradle-home"))
             for label, (bad_directory, bad_tar, bad_receipt), error in (
                     ("cache-digest", wrong_digest, "cache digest"),
+                    ("cache-extra-zero", extra_zero, "cache digest"),
                     ("cache-home", wrong_home, "Gradle user home"),
                     ("cache-home-resealed", resealed_home, "Gradle user home"),
                     ("cache-bytes", (adverse_cache, adverse_cache_archive, cache_receipt),

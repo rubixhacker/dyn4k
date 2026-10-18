@@ -644,8 +644,10 @@ def parse_graph(folder, process, target, hashes, staging, expected_home, staged_
                 or sha256(staged_binary) != hashes[module]):
             raise ValueError("staged target bytes differ from graph input")
         cache_digest = hashlib.sha1(staged_binary.read_bytes()).hexdigest()
-        cached_file = (gradle_home / "caches/modules-2/files-2.1" / qualify.GROUP /
-                       name / qualify.VERSION / cache_digest / resolved_file.name)
+        cache_digests = {cache_digest, cache_digest.lstrip("0") or "0"}
+        cached_files = {(gradle_home / "caches/modules-2/files-2.1" / qualify.GROUP /
+                         name / qualify.VERSION / digest / resolved_file.name)
+                        for digest in cache_digests}
         if resolved_file != expected_file:
             cache_parts = resolved_file.parts
             if (len(cache_parts) < 8 or cache_parts[-8:-2] !=
@@ -654,10 +656,10 @@ def parse_graph(folder, process, target, hashes, staging, expected_home, staged_
                 raise ValueError("external consumer resolved artifact differs from staging")
             if not resolved_file.is_relative_to(gradle_home):
                 raise ValueError("Gradle user home differs from resolved cache root")
-            if cache_parts[-2] != cache_digest:
+            if cache_parts[-2] not in cache_digests:
                 raise ValueError("Gradle cache digest differs from staged bytes")
         if (len(matches) != 1 or matches[0].get("sha256") != hashes[module]
-                or (resolved_file != expected_file and resolved_file != cached_file)):
+                or (resolved_file != expected_file and resolved_file not in cached_files)):
             raise ValueError("external consumer resolved artifact differs from staging")
     return graph
 
