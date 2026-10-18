@@ -8,12 +8,179 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from runner import (gradle_test_task, runtime_version, source_cases, staged_files,
                     verify_reports, verify_wasmtime_output)
 
 
 class SourceCasesTest(unittest.TestCase):
+    @staticmethod
+    def copy_lane(source: Path, directory: str) -> tuple[dict, Path]:
+        copied = Path(directory) / source.name
+        shutil.copytree(source, copied)
+
+        def replace_paths(value):
+            if isinstance(value, str):
+                return value.replace(str(source), str(copied))
+            if isinstance(value, list):
+                return [replace_paths(item) for item in value]
+            if isinstance(value, dict):
+                return {key: replace_paths(item) for key, item in value.items()}
+            return value
+
+        return replace_paths(json.loads((copied / "lane.json").read_text())), copied
+
+    @staticmethod
+    def save_copied_lane(lane: dict, copied: Path) -> None:
+        from runner import sealed_lane, sha256, write_json
+
+        for module in lane["modules"].values():
+            result = Path(module["result_json"])
+            write_json(result, {key: value for key, value in module.items()
+                                if key not in ("result_json", "result_json_sha256")})
+            module["result_json_sha256"] = sha256(result)
+        write_json(copied / "lane.json", sealed_lane(lane))
+
+    @staticmethod
+    def public_historical_audit(
+        receipt: Path, audit_view: Path, extra_mounts: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess[str]:
+        root = Path(json.loads(receipt.read_text())["candidate_root"])
+        auditor_root = Path(__file__).resolve().parents[3]
+        replay = Path(os.environ["DYN4K_BROWSER_WASI_REPLAY_ROOT"])
+        audit_view.mkdir()
+        mounts = ["--ro-bind", "/", "/", "--bind", "/tmp", "/tmp",
+                  "--dev-bind", "/dev", "/dev", "--proc", "/proc",
+                  "--ro-bind", str(auditor_root), str(audit_view),
+                  "--bind", str(replay), str(root)]
+        for suffix in ("build", "dyn4k-core/build", "dyn4k/build",
+                       "consumers/qualification/browser-wasi/build"):
+            mounts.extend(("--bind", str(root / suffix), str(root / suffix)))
+        mounts.extend(extra_mounts)
+        return subprocess.run(
+            ["bwrap", *mounts, "--", "env", "PYTHONDONTWRITEBYTECODE=1", "python3",
+             str(audit_view / "tools/qualification/browser_wasi/runner.py"),
+             "audit", "--receipt", str(receipt)],
+            capture_output=True, text=True, check=False,
+        )
+
+    def assert_resealed_public_config_mutation_rejected(
+        self, mutation: str, lane_name: str = "js-chromium-minimum-production"
+    ) -> None:
+        from runner import sha256
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        replay_root = os.environ.get("DYN4K_BROWSER_WASI_REPLAY_ROOT")
+        if not evidence_root or not replay_root:
+            self.skipTest("set review evidence and replay root for public historical audit")
+        source = Path(evidence_root) / lane_name
+        self.assertTrue((source / "lane.json").is_file(), source)
+        with tempfile.TemporaryDirectory() as directory:
+            lane, copied = self.copy_lane(source, directory)
+            receipt = copied / "lane.json"
+            self.save_copied_lane(lane, copied)
+            baseline = self.public_historical_audit(receipt, Path(directory) / "baseline-auditor")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+
+            module = lane["modules"]["dyn4k-core"]
+            config = Path(module["karma_config"])
+            content = config.read_text()
+            if mutation in ("json_exclude_input", "json_custom_launcher", "json_disable_set"):
+                before, separator, after = content.partition("});")
+                self.assertEqual("});", separator)
+                start = before.index("config.set({") + len("config.set(")
+                settings = json.loads(before[start:] + "}")
+                if mutation == "json_exclude_input":
+                    settings["exclude"] = [settings["files"][1]]
+                elif mutation == "json_custom_launcher":
+                    settings["customLaunchers"] = {
+                        "ChromeHeadless": {"base": "FirefoxHeadless"}}
+                else:
+                    settings["set"] = None
+                config.write_text(before[:start] + json.dumps(settings, indent=2) + ");" + after)
+            else:
+                port_setter = f"config.set({{port: {module['karma_port']}}});"
+                self.assertEqual(1, content.count(port_setter))
+                if mutation == "unreachable_port_setter":
+                    replacement = "return;\n" + port_setter
+                elif mutation == "later_browser_override":
+                    replacement = 'config.set({browsers: ["FirefoxHeadless"]});\n' + port_setter
+                elif mutation == "later_js_input_override":
+                    wrong = module["linked_source"].replace(
+                        "testProductionExecutable", "testDevelopmentExecutable")
+                    self.assertNotEqual(wrong, module["linked_source"])
+                    replacement = ('config.set({files: ["/tmp/runner.js", ' + json.dumps(wrong) +
+                                   '], preprocessors: {' + json.dumps(wrong) +
+                                   ': ["webpack", "sourcemap"]}});\n' + port_setter)
+                else:
+                    self.fail(f"unknown Karma mutation: {mutation}")
+                config.write_text(content.replace(port_setter, replacement))
+            module["karma_config_sha256"] = sha256(config)
+            self.save_copied_lane(lane, copied)
+            rejected = self.public_historical_audit(receipt, Path(directory) / "mutant-auditor")
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("Karma", rejected.stderr)
+
+    def test_public_audit_rejects_unreachable_port_setter(self):
+        self.assert_resealed_public_config_mutation_rejected("unreachable_port_setter")
+
+    def test_public_audit_rejects_later_browser_override(self):
+        self.assert_resealed_public_config_mutation_rejected("later_browser_override")
+
+    def test_public_audit_rejects_later_js_input_override(self):
+        self.assert_resealed_public_config_mutation_rejected("later_js_input_override")
+
+    def test_public_audit_rejects_json_excluded_js_input(self):
+        self.assert_resealed_public_config_mutation_rejected("json_exclude_input")
+
+    def test_public_audit_rejects_json_excluded_wasm_input(self):
+        self.assert_resealed_public_config_mutation_rejected(
+            "json_exclude_input", "wasmJs-firefox-minimum-production")
+
+    def test_public_audit_rejects_json_custom_launcher(self):
+        self.assert_resealed_public_config_mutation_rejected("json_custom_launcher")
+
+    def test_public_audit_rejects_json_disabled_port_setter(self):
+        self.assert_resealed_public_config_mutation_rejected("json_disable_set")
+
+    def test_public_audit_rejects_changed_karma_helper_bytes(self):
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        replay_root = os.environ.get("DYN4K_BROWSER_WASI_REPLAY_ROOT")
+        if not evidence_root or not replay_root:
+            self.skipTest("set review evidence and replay root for public historical audit")
+        source = Path(evidence_root) / "wasmJs-firefox-minimum-production"
+        with tempfile.TemporaryDirectory() as directory:
+            lane, copied = self.copy_lane(source, directory)
+            receipt = copied / "lane.json"
+            self.save_copied_lane(lane, copied)
+            baseline = self.public_historical_audit(receipt, Path(directory) / "baseline-auditor")
+            self.assertEqual(0, baseline.returncode, baseline.stderr)
+            config = Path(lane["modules"]["dyn4k-core"]["karma_config"]).read_text()
+            before = config.partition("});")[0]
+            settings = json.loads(before[before.index("config.set({") + len("config.set("):] + "}")
+            runner_input = Path(settings["files"][0])
+            changed = Path(directory) / "changed-karma-runner.js"
+            changed.write_bytes(runner_input.read_bytes() + b"\n")
+            rejected = self.public_historical_audit(
+                receipt, Path(directory) / "mutant-auditor",
+                ("--bind", str(changed), str(runner_input)))
+            self.assertEqual(1, rejected.returncode, rejected.stderr)
+            self.assertIn("Karma", rejected.stderr)
+
+    def test_committed_common_corpus_has_all_browser_and_wasi_cases(self):
+        from runner import common_corpus_cases
+
+        root = Path(__file__).resolve().parents[3]
+        candidate = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+        core = common_corpus_cases(root, candidate, "dyn4k-core")
+        facade = common_corpus_cases(root, candidate, "dyn4k")
+        self.assertEqual(2454, len(core))
+        self.assertEqual(58, len(facade))
+        self.assertIn(("org.dyn4j.coverage.world.core.PhysicsWorldCoreCoverageTest",
+                       "addBody"), core)
+
     def test_collects_each_public_test_identity_across_classes(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "Suite.kt"
@@ -191,6 +358,246 @@ class SourceCasesTest(unittest.TestCase):
                                            "modules": {"dyn4k-core": module}}))
             with self.assertRaisesRegex(ValueError, "digest"):
                 audit_lane_receipt(receipt)
+
+    def test_audit_rejects_forged_passing_wasmtime_receipt(self):
+        from runner import audit_lane_receipt
+
+        with tempfile.TemporaryDirectory() as directory:
+            lane_dir = Path(directory)
+            modules = {}
+            for name in ("dyn4k-core", "dyn4k", "consumer"):
+                folder = lane_dir / name
+                folder.mkdir()
+                evidence = {"status": "PASSED", "expected": 2454 if name == "dyn4k-core"
+                            else 58 if name == "dyn4k" else 1,
+                            "executed": 2454 if name == "dyn4k-core"
+                            else 58 if name == "dyn4k" else 1,
+                            "failures": 0, "skipped": 0}
+                for field, filename in (("gradle_console", "gradle-console.log"),
+                                        ("raw_console", "wasmtime-console.log"),
+                                        ("linked_executable", "linked-executable.wasm")):
+                    path = folder / filename
+                    path.write_text("BUILD SUCCESSFUL\n" if field == "gradle_console"
+                                    else "fake PASS\n")
+                    evidence[field] = str(path)
+                    digest_field = "linked_sha256" if field == "linked_executable" else field + "_sha256"
+                    evidence[digest_field] = hashlib.sha256(path.read_bytes()).hexdigest()
+                result = folder / "result.json"
+                result.write_text(json.dumps(evidence))
+                evidence["result_json"] = str(result)
+                evidence["result_json_sha256"] = hashlib.sha256(result.read_bytes()).hexdigest()
+                modules[name] = evidence
+            receipt = lane_dir / "lane.json"
+            receipt.write_text(json.dumps({"status": "PASSED", "target": "wasmWasi",
+                                           "modules": modules}))
+            with self.assertRaises(ValueError):
+                audit_lane_receipt(receipt)
+
+    def test_audit_rejects_tampered_receipt_seal(self):
+        from runner import audit_lane_receipt, sealed_lane
+
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "lane.json"
+            lane = sealed_lane({"status": "FAILED", "target": "wasmWasi", "modules": {},
+                                "reason": "runtime failed"})
+            receipt.write_text(json.dumps(lane))
+            audit_lane_receipt(receipt)
+            lane["reason"] = "claimed success"
+            receipt.write_text(json.dumps(lane))
+            with self.assertRaisesRegex(ValueError, "seal"):
+                audit_lane_receipt(receipt)
+
+    def test_resealed_browser_configuration_relabel_is_rejected(self):
+        from runner import audit_lane_receipt
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for target, runtime in (("js", "chromium"), ("wasmJs", "firefox")):
+            for original, claimed in (("development", "production"),
+                                      ("production", "development")):
+                source = Path(evidence_root) / f"{target}-{runtime}-minimum-{original}"
+                self.assertTrue((source / "lane.json").is_file(), source)
+                with tempfile.TemporaryDirectory() as directory:
+                    lane, copied = self.copy_lane(source, directory)
+                    lane["configuration"] = claimed
+                    for module in lane["modules"].values():
+                        module["configuration"] = claimed
+                    self.save_copied_lane(lane, copied)
+                    with self.subTest(target=target, original=original, claimed=claimed):
+                        with self.assertRaisesRegex(ValueError, "configuration|production|development"):
+                            with mock.patch("runner.candidate_identity"):
+                                audit_lane_receipt(copied / "lane.json")
+
+    def test_resealed_browser_output_binding_mutations_are_rejected(self):
+        from runner import audit_lane_receipt, sha256
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for original, mutation, expected_error in (
+            ("production", "missing_production_flag", "Gradle configuration"),
+            ("production", "missing_production_marker", "browser configuration input"),
+            ("production", "development_linked_source", "linked source configuration"),
+            ("production", "wrong_linked_digest", "linked source digest"),
+            ("production", "wrong_browser_task", "Gradle configuration"),
+            ("development", "added_production_flag", "Gradle configuration"),
+        ):
+            source = Path(evidence_root) / f"js-chromium-minimum-{original}"
+            self.assertTrue((source / "lane.json").is_file(), source)
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                module = lane["modules"]["dyn4k-core"]
+                if mutation == "missing_production_flag":
+                    module["gradle_command"].remove("-PqualificationProduction=true")
+                elif mutation == "missing_production_marker":
+                    stdout = Path(module["gradle_stdout"])
+                    stdout.write_text("".join(line for line in stdout.read_text().splitlines(True)
+                                              if not line.startswith("qualification test input:")))
+                    console = Path(module["gradle_console"])
+                    console.write_text(stdout.read_text() + Path(module["gradle_stderr"]).read_text())
+                    module["gradle_stdout_sha256"] = sha256(stdout)
+                    module["gradle_console_sha256"] = sha256(console)
+                elif mutation == "development_linked_source":
+                    module["linked_source"] = module["linked_source"].replace(
+                        "testProductionExecutable", "testDevelopmentExecutable")
+                elif mutation == "wrong_linked_digest":
+                    module["linked_source_sha256"] = "0" * 64
+                elif mutation == "wrong_browser_task":
+                    module["gradle_command"][2] = ":dyn4k-core:wasmJsBrowserTest"
+                else:
+                    module["gradle_command"].append("-PqualificationProduction=true")
+                self.save_copied_lane(lane, copied)
+                with self.subTest(mutation=mutation):
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
+
+    def test_resealed_relabel_with_forged_command_and_output_is_rejected(self):
+        from runner import (audit_lane_receipt, gradle_command, linked_file, sha256,
+                            test_project)
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for original, claimed in (("development", "production"),
+                                  ("production", "development")):
+            source = Path(evidence_root) / f"js-chromium-minimum-{original}"
+            self.assertTrue((source / "lane.json").is_file(), source)
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                lane["configuration"] = claimed
+                root = Path(lane["candidate_root"])
+                for name, module in lane["modules"].items():
+                    module["configuration"] = claimed
+                    module["gradle_command"] = gradle_command(root, name, "js", claimed)
+                    linked = linked_file(test_project(root, name), "js", claimed, name)
+                    module["linked_source"] = str(linked)
+                    stdout = Path(module["gradle_stdout"])
+                    output = "".join(line for line in stdout.read_text().splitlines(True)
+                                     if not line.startswith("qualification test input:"))
+                    if claimed == "production":
+                        output += f"qualification test input: {linked}\n"
+                    stdout.write_text(output)
+                    console = Path(module["gradle_console"])
+                    console.write_text(output + Path(module["gradle_stderr"]).read_text())
+                    module["gradle_stdout_sha256"] = sha256(stdout)
+                    module["gradle_console_sha256"] = sha256(console)
+                self.save_copied_lane(lane, copied)
+                with self.subTest(original=original, claimed=claimed):
+                    with self.assertRaisesRegex(ValueError, "linked source digest"):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
+
+    def test_resealed_browser_omitted_karma_evidence_is_rejected(self):
+        from runner import audit_lane_receipt
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        source = Path(evidence_root) / "js-chromium-minimum-development"
+        self.assertTrue((source / "lane.json").is_file(), source)
+        for omitted in (("karma_port",), ("karma_config",),
+                        ("karma_config_sha256",),
+                        ("karma_port", "karma_config", "karma_config_sha256")):
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                for module in lane["modules"].values():
+                    for field in omitted:
+                        module.pop(field)
+                self.save_copied_lane(lane, copied)
+                with self.subTest(omitted=omitted):
+                    with self.assertRaises(ValueError):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
+
+    def test_resealed_browser_mismatched_karma_config_is_rejected(self):
+        from runner import audit_lane_receipt, sha256
+
+        evidence_root = os.environ.get("DYN4K_BROWSER_WASI_REVIEW_EVIDENCE")
+        if evidence_root is None:
+            self.skipTest("set DYN4K_BROWSER_WASI_REVIEW_EVIDENCE to a full 20-lane archive")
+        for lane_name, mutation in (
+            ("js-chromium-minimum-production", "wrong_receipt_port"),
+            ("js-chromium-minimum-production", "wrong_active_port"),
+            ("js-chromium-minimum-development", "wrong_browser"),
+            ("js-chromium-minimum-production", "wrong_js_input"),
+            ("wasmJs-firefox-minimum-production", "wrong_wasm_loader"),
+            ("js-chromium-minimum-production", "spoofed_config_comment"),
+        ):
+            source = Path(evidence_root) / lane_name
+            self.assertTrue((source / "lane.json").is_file(), source)
+            with tempfile.TemporaryDirectory() as directory:
+                lane, copied = self.copy_lane(source, directory)
+                module = lane["modules"]["dyn4k-core"]
+                config = Path(module["karma_config"])
+                content = config.read_text()
+                if mutation == "wrong_receipt_port":
+                    module["karma_port"] += 1
+                elif mutation == "wrong_active_port":
+                    port = module["karma_port"]
+                    original = f"config.set({{port: {port}}});"
+                    self.assertIn(original, content)
+                    content = content.replace(
+                        original,
+                        f"config.set({{port: {port + 1}}});\n// {original}",
+                    )
+                elif mutation == "wrong_browser":
+                    self.assertIn('"ChromeHeadless"', content)
+                    content = content.replace('"ChromeHeadless"', '"FirefoxHeadless"')
+                elif mutation == "wrong_js_input":
+                    production = module["linked_source"]
+                    self.assertIn(production, content)
+                    content = content.replace(
+                        production,
+                        production.replace("testProductionExecutable", "testDevelopmentExecutable"),
+                    )
+                elif mutation == "spoofed_config_comment":
+                    first_block = content.partition("config.set({")[2].partition("});")[0]
+                    content = ("/* config.set({" + first_block + "}); */\n" +
+                               content.replace('"ChromeHeadless"', '"FirefoxHeadless"'))
+                else:
+                    self.assertIn("static/load.mjs", content)
+                    content = content.replace("static/load.mjs", "static/other.mjs")
+                if mutation != "wrong_receipt_port":
+                    config.write_text(content)
+                    module["karma_config_sha256"] = sha256(config)
+                self.save_copied_lane(lane, copied)
+                with self.subTest(lane=lane_name, mutation=mutation):
+                    with self.assertRaisesRegex(ValueError, "Karma"):
+                        with mock.patch("runner.candidate_identity"):
+                            audit_lane_receipt(copied / "lane.json")
+
+    def test_browser_port_configuration_is_isolated_and_removed(self):
+        from runner import isolated_karma_port
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_karma_port(root) as port:
+                source = root / "karma.config.d/qualification-port.js"
+                self.assertIn(f"port: {port}", source.read_text())
+                self.assertGreater(port, 0)
+            self.assertFalse((root / "karma.config.d").exists())
 
     def test_existing_failed_lane_is_not_overwritten(self):
         from runner import run_lane
