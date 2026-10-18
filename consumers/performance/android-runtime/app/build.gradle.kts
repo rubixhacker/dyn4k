@@ -1,3 +1,6 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+
 plugins {
     id("com.android.application")
 }
@@ -23,7 +26,6 @@ android {
         }
     }
     testBuildType = providers.gradleProperty("performanceTestBuildType").getOrElse("debug")
-    lint { checkReleaseBuilds = false }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -39,12 +41,29 @@ dependencies {
 tasks.register("providerArtifacts") {
     doLast {
         val buildType = providers.gradleProperty("performanceTestBuildType").getOrElse("debug")
-        val artifacts = configurations.getByName("${buildType}RuntimeClasspath")
-            .resolvedConfiguration.resolvedArtifacts
-        for (artifact in artifacts) {
-            val id = artifact.moduleVersion.id
-            if (id.group == "io.github.rubixhacker") {
-                println("DYN4K_PROVIDER ${id.name} ${artifact.file.canonicalPath}")
+        fun coordinate(id: org.gradle.api.artifacts.component.ComponentIdentifier): String =
+            when (id) {
+                is ModuleComponentIdentifier -> "${id.group}:${id.module}:${id.version}"
+                else -> "project:app"
+            }
+        for ((scope, configurationName) in listOf(
+            "app" to "${buildType}RuntimeClasspath",
+            "test" to "${buildType}AndroidTestRuntimeClasspath",
+        )) {
+            val configuration = configurations.getByName(configurationName)
+            val resolution = configuration.incoming.resolutionResult
+            for (component in resolution.allComponents) {
+                val from = coordinate(component.id)
+                println("DYN4K_GRAPH_COMPONENT $scope $from")
+                for (dependency in component.dependencies) {
+                    val selected = dependency as? ResolvedDependencyResult
+                        ?: error("unresolved $configurationName dependency: $dependency")
+                    println("DYN4K_GRAPH_EDGE $scope $from ${coordinate(selected.selected.id)}")
+                }
+            }
+            for (artifact in configuration.resolvedConfiguration.resolvedArtifacts) {
+                val id = artifact.moduleVersion.id
+                println("DYN4K_GRAPH_ARTIFACT $scope ${id.group}:${id.name}:${id.version} ${artifact.file.canonicalPath}")
             }
         }
     }

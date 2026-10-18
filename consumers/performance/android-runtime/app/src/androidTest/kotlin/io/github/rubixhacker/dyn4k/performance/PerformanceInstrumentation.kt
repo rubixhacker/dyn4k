@@ -53,7 +53,9 @@ class PerformanceInstrumentation : Instrumentation() {
             require(targetContext.packageName == "io.github.rubixhacker.dyn4k.performance")
             require(context.packageName == "io.github.rubixhacker.dyn4k.performance.test")
             val provider = org.dyn4j.world.World::class.java
-            require(provider.name == "org.dyn4j.world.World")
+            val providerLoaderMatchesTarget = targetContext.classLoader.loadClass(provider.name) === provider
+            require(providerLoaderMatchesTarget)
+            require(provider.isInstance(org.dyn4j.world.World<org.dyn4j.dynamics.Body>()))
             emit("identity", "nonce" to nonce, "scenario" to scenario,
                  "build_type" to required("build_type"),
                  "source_commit" to required("source_commit"),
@@ -63,7 +65,9 @@ class PerformanceInstrumentation : Instrumentation() {
                  "kotlin_aar_sha256" to required("kotlin_aar_sha256"),
                  "app_package" to targetContext.packageName, "test_package" to context.packageName,
                  "evidence_authority" to "io.github.rubixhacker.dyn4k.performance.evidence",
-                 "provider_class" to provider.name, "pid" to Process.myPid(),
+                 "provider_class" to provider.name,
+                 "provider_loader_matches_target" to providerLoaderMatchesTarget,
+                 "pid" to Process.myPid(),
                  "api_level" to Build.VERSION.SDK_INT, "abi" to Build.SUPPORTED_ABIS[0],
                  "fingerprint" to Build.FINGERPRINT)
             val warm = Fixture(family, variant, count, hz, api)

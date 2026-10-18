@@ -2,8 +2,11 @@
 
 Build a committed source revision with local staged Android artifacts. The
 build command uses JDK 21 and Gradle 9.5.0 from `/tmp/dyn4k-tools`, AGP 9.3.1,
-KGP 2.4.20, and the installed Android SDK. It runs offline and checks the
-resolved AAR bytes against the staged AAR bytes.
+KGP 2.4.20, and the installed Android SDK. It runs offline with a task-local
+temporary directory and a 2 GiB Metaspace cap. The receipt retains its Gradle
+log, both resolved runtime graphs, every artifact's version and SHA-256, the
+staged AAR hashes, both APK hashes, and the release R8 mapping hash. The build
+rejects a second `World` provider or any resolved AAR byte substitution.
 
 ```bash
 python3 tools/performance/sustained_android/capture.py build \
@@ -33,7 +36,11 @@ python3 tools/performance/sustained_android/capture.py capture \
 
 The archive stores raw ADB output, installed APK bytes, the instrumentation
 JSONL, and a receipt. It keeps failure output if a guest, install, process, or
-record check fails. A captured short process still has qualification
+record check fails. On instrumentation timeout, the receipt still indexes the
+raw instrumentation bytes, their hash, the process exit code, and the host
+monotonic interval. Separated cases require every dynamic body to stay awake
+and retain the source fixture's initial aggregate linear speed. A captured
+short process still has qualification
 `unpassed`. The receipt carries the Android absolute and direct/shim budgets as
 metadata. The Java baseline comparison is JVM-only. No 600-second, memory,
 plateau, noise, stress, or reference result is inferred from this command.

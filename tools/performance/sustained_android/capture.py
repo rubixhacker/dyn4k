@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 
@@ -59,7 +61,8 @@ def require(condition, reason):
 
 
 def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
-                     steps, warmup, fixture, manifest, core, kotlin, build_type="debug"):
+                     steps, warmup, fixture, manifest, core, kotlin, build_type="debug",
+                     provider_class="org.dyn4j.world.World"):
     case = select_case(json.loads(MANIFEST.read_text()), scenario)
     dynamic = case["dynamic_bodies"]
     family = case["family"]
@@ -73,7 +76,8 @@ def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
                 "core_aar_sha256": core, "kotlin_aar_sha256": kotlin,
                 "app_package": APP_ID, "test_package": TEST_ID,
                 "evidence_authority": EVIDENCE_AUTHORITY,
-                "provider_class": "org.dyn4j.world.World", "api_level": api,
+                "provider_class": provider_class, "provider_loader_matches_target": True,
+                "api_level": api,
                 "abi": abi, "fingerprint": fingerprint}
     require(rows and all(isinstance(row, dict) and row.get("schema") == 1 for row in rows),
             "missing or invalid records")
@@ -112,6 +116,7 @@ def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
     measured = take("construction", "measure")
     require(measured.get("bodies") == warm["bodies"] and
             measured.get("joints") == warm.get("joints"), "fixture reset changed construction")
+    observed_active = 0
     for step in range(steps):
         tick = take("clock", "measure", step)
         previous = clock(tick, previous)
@@ -129,6 +134,12 @@ def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
             value = sample.get(key)
             require(type(value) in (int, float) and value >= 0 and value < float("inf"),
                     "invalid activity")
+        if sample["awake"] > 0:
+            observed_active += 1
+        if family == "separated":
+            require(sample["awake"] == dynamic and
+                    sample["linear_speed"] >= dynamic * 0.75 * 0.99,
+                    "separated activity below source-defined velocity")
         for key in ("contact_begins", "contact_ends", "toi_events"):
             require(type(sample.get(key)) is int and sample[key] >= 0, "invalid event count")
         for key in ("broad_pairs", "contact_pairs", "contact_points"):
@@ -139,7 +150,7 @@ def validate_records(rows, scenario, source, nonce, api, abi, fingerprint,
     require(cursor == len(rows) and run.get("steps") == steps and
             run.get("warmup_steps") == warmup and
             type(run.get("wall_ns")) is int and run["wall_ns"] > 0 and
-            type(run.get("active_steps")) is int and 0 <= run["active_steps"] <= steps and
+            type(run.get("active_steps")) is int and run["active_steps"] == observed_active and
             run.get("qualification") == "unpassed", "invalid run summary")
     return identity["pid"]
 
@@ -171,49 +182,167 @@ def staged_paths(repository):
     return paths
 
 
+def provider_name(mapping, build_type):
+    if build_type == "debug":
+        return "org.dyn4j.world.World"
+    require(build_type == "release", "unknown build type")
+    matches = re.findall(r"^org\.dyn4j\.world\.World -> ([^:]+):$",
+                         Path(mapping).read_text(), re.MULTILINE)
+    require(len(matches) == 1 and matches[0], "missing or ambiguous R8 World mapping")
+    return matches[0]
+
+
+def apk_has_class(apk, name):
+    descriptor = ("L" + name.replace(".", "/") + ";").encode("ascii")
+    with zipfile.ZipFile(apk) as archive:
+        return any(descriptor in archive.read(entry) for entry in archive.namelist()
+                   if re.fullmatch(r"classes[0-9]*\.dex", entry))
+
+
+def contains_world_class(path):
+    path = Path(path)
+    if path.suffix not in (".jar", ".aar"):
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            if path.suffix == ".jar":
+                return "org/dyn4j/world/World.class" in archive.namelist()
+            for name in archive.namelist():
+                if name == "classes.jar" or name.startswith("libs/") and name.endswith(".jar"):
+                    with zipfile.ZipFile(BytesIO(archive.read(name))) as classes:
+                        if "org/dyn4j/world/World.class" in classes.namelist():
+                            return True
+    except zipfile.BadZipFile as failure:
+        raise ValueError(f"invalid resolved runtime artifact: {path}") from failure
+    return False
+
+
+def parse_dependency_graph(log, staged_hashes):
+    graph = {scope: {"components": set(), "edges": [], "artifacts": []}
+             for scope in ("app", "test")}
+    for line in log.splitlines():
+        match = re.fullmatch(r"DYN4K_GRAPH_(COMPONENT|EDGE|ARTIFACT) (app|test) (.+)", line)
+        if not match:
+            continue
+        kind, scope, value = match.groups()
+        group = graph[scope]
+        if kind == "COMPONENT":
+            group["components"].add(value)
+        elif kind == "EDGE":
+            parts = value.split(" ")
+            require(len(parts) == 2, "invalid runtime dependency edge")
+            group["edges"].append(tuple(parts))
+        else:
+            coordinate, path = value.split(" ", 1)
+            path = str(Path(path).resolve(strict=True))
+            group["artifacts"].append({"coordinate": coordinate, "path": path,
+                                       "sha256": sha(path), "bytes": Path(path).stat().st_size,
+                                       "contains_world": contains_world_class(path)})
+    core = f"io.github.rubixhacker:dyn4k-core-android:{VERSION}"
+    facade = f"io.github.rubixhacker:dyn4k-android:{VERSION}"
+    providers = set()
+    for scope, group in graph.items():
+        components = group["components"]
+        require("project:app" in components and group["edges"] and group["artifacts"],
+                f"incomplete {scope} runtime graph")
+        require(all(start in components and end in components for start, end in group["edges"]),
+                f"unresolved {scope} runtime graph edge")
+        require(all(item["coordinate"] in components for item in group["artifacts"]),
+                f"unlisted {scope} runtime artifact")
+        require(not any(item.startswith("org.dyn4j:dyn4j:") for item in components),
+                "baseline provider in Android runtime graph")
+        for item in group["artifacts"]:
+            if item["contains_world"]:
+                providers.add((item["coordinate"], item["sha256"]))
+        group["components"] = sorted(components)
+        group["edges"] = [list(edge) for edge in sorted(group["edges"])]
+        group["artifacts"] = sorted(group["artifacts"], key=lambda item: (item["coordinate"], item["path"]))
+    for name, coordinate in ((STAGED[0], core), (STAGED[1], facade)):
+        matches = [item for item in graph["app"]["artifacts"] if item["coordinate"] == coordinate]
+        require(len(matches) == 1 and matches[0]["sha256"] == staged_hashes[name],
+                "resolved provider bytes do not match staged AAR inputs")
+    require(providers == {(core, staged_hashes[STAGED[0]])},
+            "missing or second World provider in runtime graph")
+    return graph
+
+
+def collect_instrumentation(instrument, archive, report, timeout, host_begin_ns):
+    timed_out = False
+    try:
+        stdout, _ = instrument.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        instrument.kill()
+        stdout, _ = instrument.communicate()
+    host_end_ns = time.monotonic_ns()
+    raw = archive / "instrumentation.raw"
+    raw.write_bytes(stdout)
+    report["raw"]["instrumentation"] = {"sha256": sha(raw), "bytes": len(stdout),
+                                            "exit_code": instrument.returncode,
+                                            "timed_out": timed_out}
+    report["host_monotonic"] = {"begin_ns": host_begin_ns, "end_ns": host_end_ns}
+    if timed_out:
+        raise RuntimeError("instrumentation timeout")
+    return stdout.decode("utf-8", "replace")
+
+
 def build(args):
     source_commit(args.source_commit)
+    output = Path(args.receipt).resolve()
+    build_log = output.with_suffix(output.suffix + ".gradle.log")
+    if output.exists() or build_log.exists():
+        raise FileExistsError(output if output.exists() else build_log)
+    output.parent.mkdir(parents=True, exist_ok=True)
     require(sha(FIXTURE) == sha(ANDROID_FIXTURE), "Android fixture differs from frozen portable fixture")
     repository = Path(args.staging_repository).resolve(strict=True)
     staged = staged_paths(repository)
     hashes = {name: sha(path) for name, path in staged.items()}
-    env = dict(os.environ, JAVA_HOME=str(JDK), ANDROID_HOME=str(args.android_home))
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    temporary.mkdir(exist_ok=False)
+    env = dict(os.environ, JAVA_HOME=str(JDK), ANDROID_HOME=str(args.android_home),
+               TMPDIR=str(temporary))
     require((JDK / "bin/java").is_file() and GRADLE.is_file(), "pinned JDK or Gradle missing")
     require(args.build_type in ("debug", "release"), "build type must be debug or release")
     java = command([str(JDK / "bin/java"), "-version"], env=env)
     require('version "21.' in java, "wrong JDK")
     gradle = command([str(GRADLE), "--version", "--offline"], env=env)
     require("Gradle 9.5" in gradle, "wrong Gradle")
-    build_log = PROJECT / "build" / f"producer-build-{args.build_type}.log"
-    build_log.parent.mkdir(parents=True, exist_ok=True)
+    gradle_jvm_args = f"-Xmx2g -XX:MaxMetaspaceSize=2g -Djava.io.tmpdir={temporary}"
     variant = args.build_type.capitalize()
     log = command([str(GRADLE), "-p", str(PROJECT), ":app:providerArtifacts",
                    f":app:assemble{variant}", f":app:assemble{variant}AndroidTest",
-                   "--offline", "--console=plain", f"-PstagingRepository={repository}",
+                   "--offline", "--no-daemon", "--max-workers=2", "--console=plain",
+                   f"-Dorg.gradle.jvmargs={gradle_jvm_args}",
+                   f"-PstagingRepository={repository}",
                    f"-PperformanceTestBuildType={args.build_type}"], build_log, env=env)
-    providers = dict(match.groups() for line in log.splitlines()
-                     if (match := re.fullmatch(r"DYN4K_PROVIDER ([^ ]+) (.+)", line)))
-    require(set(providers) == set(STAGED) and
-            all(sha(providers[name]) == hashes[name] for name in STAGED),
-            "resolved provider bytes do not match staged AAR inputs")
+    graph = parse_dependency_graph(log, hashes)
+    providers = {name: next(item for item in graph["app"]["artifacts"]
+                            if item["coordinate"] == f"io.github.rubixhacker:{name}:{VERSION}")
+                 for name in STAGED}
     require({name: sha(path) for name, path in staged.items()} == hashes, "staged AAR changed during build")
     app = PROJECT / f"app/build/outputs/apk/{args.build_type}/app-{args.build_type}.apk"
     test = PROJECT / f"app/build/outputs/apk/androidTest/{args.build_type}/app-{args.build_type}-androidTest.apk"
     require(app.is_file() and test.is_file(), "missing built APK pair")
+    mapping = PROJECT / "app/build/outputs/mapping/release/mapping.txt"
+    runtime_name = provider_name(mapping, args.build_type)
+    require(apk_has_class(app, runtime_name) and apk_has_class(test, runtime_name),
+            "built APK pair lacks mapped World provider")
     receipt = {"schema": 1, "source_commit": args.source_commit, "build_type": args.build_type,
                "manifest_sha256": sha(MANIFEST), "fixture_sha256": sha(FIXTURE),
                "staging_repository": str(repository),
                "staged_aars": {name: {"path": str(path), "sha256": hashes[name]} for name, path in staged.items()},
-               "resolved_aars": {name: {"path": providers[name], "sha256": sha(providers[name])}
+               "resolved_aars": {name: {"path": providers[name]["path"], "sha256": providers[name]["sha256"]}
                                  for name in STAGED},
+               "runtime_graph": graph,
+               "provider_runtime_name": runtime_name,
+               "r8_mapping": ({"path": str(mapping), "sha256": sha(mapping)}
+                              if args.build_type == "release" else None),
                "app_apk": {"path": str(app), "sha256": sha(app)},
                "test_apk": {"path": str(test), "sha256": sha(test)},
-               "build_log_sha256": sha(build_log), "jdk": java, "gradle": "9.5.0",
+               "build_log": {"path": str(build_log), "sha256": sha(build_log)},
+               "gradle_jvm_args": gradle_jvm_args, "temporary_directory": str(temporary),
+               "jdk": java, "gradle": "9.5.0",
                "qualification": "unpassed"}
-    output = Path(args.receipt)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if output.exists():
-        raise FileExistsError(output)
     output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     print(output)
 
@@ -233,12 +362,25 @@ def capture(args):
     for name, item in receipt["staged_aars"].items():
         require(name in STAGED and sha(item["path"]) == item["sha256"], "staged AAR substituted")
     require(set(receipt["staged_aars"]) == set(STAGED), "missing staged AAR")
+    hashes = {name: receipt["staged_aars"][name]["sha256"] for name in STAGED}
+    require(sha(receipt["build_log"]["path"]) == receipt["build_log"]["sha256"],
+            "build log substituted")
+    require(parse_dependency_graph(Path(receipt["build_log"]["path"]).read_text(), hashes) ==
+            receipt["runtime_graph"], "runtime graph substituted")
     require(set(receipt["resolved_aars"]) == set(STAGED) and
             all(sha(receipt["resolved_aars"][name]["path"]) ==
                 receipt["staged_aars"][name]["sha256"] for name in STAGED),
             "resolved AAR substituted")
     for key in ("app_apk", "test_apk"):
         require(sha(receipt[key]["path"]) == receipt[key]["sha256"], "built APK substituted")
+    mapping = receipt["r8_mapping"]
+    require((mapping is None if receipt["build_type"] == "debug" else
+             mapping is not None and sha(mapping["path"]) == mapping["sha256"]),
+            "R8 mapping substituted")
+    require(provider_name(mapping["path"] if mapping else None, receipt["build_type"]) ==
+            receipt["provider_runtime_name"], "mapped provider changed")
+    require(all(apk_has_class(receipt[key]["path"], receipt["provider_runtime_name"])
+                for key in ("app_apk", "test_apk")), "APK lacks mapped World provider")
     archive = create_archive(args.archive)
     nonce = uuid.uuid4().hex
     adb = [args.adb, "-P", str(args.adb_port), "-s", args.serial]
@@ -314,20 +456,7 @@ def capture(args):
                 break
             time.sleep(0.05)
         timeout = args.warmup_steps / case["rate_hz"] + args.steps / case["rate_hz"] + 60
-        try:
-            stdout, _ = instrument.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            instrument.kill()
-            stdout, _ = instrument.communicate()
-            (archive / "instrumentation.raw").write_bytes(stdout)
-            raise RuntimeError("instrumentation exceeded short process timeout")
-        host_end_ns = time.monotonic_ns()
-        raw_instrument = archive / "instrumentation.raw"
-        raw_instrument.write_bytes(stdout)
-        report["raw"]["instrumentation"] = {"sha256": sha(raw_instrument),
-                                                 "exit_code": instrument.returncode}
-        report["host_monotonic"] = {"begin_ns": host_begin_ns, "end_ns": host_end_ns}
-        result = stdout.decode("utf-8", "replace")
+        result = collect_instrumentation(instrument, archive, report, timeout, host_begin_ns)
         raw = run("records", "exec-out", "content", "read", "--uri",
                   f"content://{EVIDENCE_AUTHORITY}/performance-{nonce}.jsonl", check=False)
         rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
@@ -338,7 +467,7 @@ def capture(args):
                                receipt["fixture_sha256"], receipt["manifest_sha256"],
                                receipt["staged_aars"][STAGED[0]]["sha256"],
                                receipt["staged_aars"][STAGED[1]]["sha256"],
-                               receipt["build_type"])
+                               receipt["build_type"], receipt["provider_runtime_name"])
         require(instrument.returncode == 0 and observed_pids == {pid},
                 "instrumentation process ID differs from observed guest process")
         report["pid"] = pid

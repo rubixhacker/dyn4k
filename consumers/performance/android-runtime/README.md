@@ -18,7 +18,11 @@ warm-up clocks, fixture reset, measured clocks, and every step observation to
 JSONL in the app's private files. The host reads the nonce-named stream through
 the app's read-only evidence provider and
 checks case order, counts, clocks, and identity. It also hashes the built and
-installed APK bytes independently.
+installed APK bytes independently. The build receipt records both resolved
+runtime dependency graphs with artifact versions, paths, and hashes. For the
+release pair it binds the R8 mapping and mapped `World` class in both APKs.
+The instrumentation checks that the actual provider class is loaded from the
+target app and can construct a `World` before it starts the fixture.
 
 The R8 build uses a debug signing key for local installation. Its APK is not
 a release-signing or production-installability result.
