@@ -23,6 +23,7 @@ REFLECTIVE_FILTER_TYPES = (
     "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest$Sibling",
     "org.dyn4j.coverage.collision.model.FilterFixtureCoverageTest$Unrelated",
 )
+X86_DEXOPT_TEST = "org.dyn4j.coverage.UpstreamMatrix22CoverageTest"
 FINGERPRINTS = {
     "36": "google/sdk_gphone64_x86_64/emu64xa:16/BE4B.251210.005/14574095:user/release-keys",
     "37": "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys",
@@ -122,7 +123,8 @@ def full_app_inputs(suite):
         "-keep class io.github.rubixhacker.dyn4k.full.FullCorpusExecutor { public static java.util.List runAll(android.content.Context); }",
         "-keep class io.github.rubixhacker.dyn4k.full.FullActivity { public <init>(); public void onCreate(android.os.Bundle); }",
     ]
-    rules.extend(f"-keep,allowoptimization class {name} {{ *; }}" for name in
+    rules.extend(f"-keep{'' if name == X86_DEXOPT_TEST else ',allowoptimization'} "
+                 f"class {name} {{ *; }}" for name in
                  sorted({case["classname"] for case in portable}))
     rules.extend(f"-keep class {name} {{ public static void main(java.lang.String[]); }}"
                  for name in JAVA_JOURNEYS)

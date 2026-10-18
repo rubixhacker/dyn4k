@@ -88,6 +88,23 @@ class FullCorpusEvidenceTest(unittest.TestCase):
             self.assertIn(f"-keep,allowobfuscation class {name}\n", rules)
         self.assertNotIn("-keep class org.dyn4j.collision.TypeFilter", rules)
 
+    def test_x86_dexopt_exception_keeps_only_matrix_norm_test_from_optimization(self):
+        matrix = "org.dyn4j.coverage.UpstreamMatrix22CoverageTest"
+        suite = {"cases": [
+            {"id": f"dyn4k-core:{matrix}#norm", "module": "dyn4k-core",
+             "classname": matrix, "method": "norm", "scope": "portable"},
+            {"id": "dyn4k-core:org.dyn4j.coverage.OtherTest#norm", "module": "dyn4k-core",
+             "classname": "org.dyn4j.coverage.OtherTest", "method": "norm", "scope": "portable"},
+        ]}
+        inputs = android_corpus.full_app_inputs(suite)
+        rules = inputs["keep_rules"].decode().splitlines()
+        self.assertIn(f"-keep class {matrix} {{ *; }}", rules)
+        self.assertNotIn(f"-keep,allowoptimization class {matrix} {{ *; }}", rules)
+        self.assertIn("-keep,allowoptimization class org.dyn4j.coverage.OtherTest { *; }", rules)
+        self.assertEqual(sum(matrix in line for line in rules), 1)
+        self.assertIn(f"dyn4k-core:{matrix}#norm\t{matrix}\tnorm",
+                      inputs["case_asset"].decode().splitlines())
+
     def test_rejects_changed_manifest_or_raw_xml_after_preparation(self):
         binding = {"sha256": "frozen"}
         prepared = {"suite_manifest": binding,

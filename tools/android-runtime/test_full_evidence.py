@@ -196,6 +196,24 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                 full_evidence.validate_full_r8(bad_rules, bad_mapping, bad_usage, debug,
                                                bad_dex, minimum_transformed=2)
 
+    def test_targeted_x86_test_keep_still_requires_engine_transformation(self):
+        matrix = "org.dyn4j.coverage.UpstreamMatrix22CoverageTest"
+        rules = f"-keep class {matrix} {{ *; }}\n"
+        mapping = "org.dyn4j.geometry.Vector2 -> a:\norg.dyn4j.dynamics.Body -> b:\n"
+        usage = "org.dyn4j.geometry.Unused\n"
+        debug = {"Lorg/dyn4j/geometry/Vector2;", "Lorg/dyn4j/dynamics/Body;", "Lc;"}
+        release = {"La;", "Lb;"}
+        self.assertEqual(len(full_evidence.validate_full_r8(
+            rules, mapping, usage, debug, release, {matrix}, minimum_transformed=2
+        )["transformed_engine_classes"]), 2)
+        for bad_rules, bad_release in ((rules + "-keep class org.dyn4j.** { *; }\n", release),
+                                       (rules, debug)):
+            with self.subTest(bad_rules=bad_rules, bad_release=bad_release), \
+                    self.assertRaises(ValueError):
+                full_evidence.validate_full_r8(
+                    bad_rules, mapping, usage, debug, bad_release, {matrix},
+                    minimum_transformed=2)
+
     def test_rejects_wrong_resolved_aar_apk_and_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
