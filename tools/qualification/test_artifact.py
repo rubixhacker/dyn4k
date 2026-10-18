@@ -42,8 +42,8 @@ class RawArtifactTests(unittest.TestCase):
                 repository, (target, "jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))
             hashes = {module: qualify.digest(staging / qualify.target_binary_path(module, target))
                       for module in qualify.MODULES}
-            started = time.time_ns() - 5_000_000_000
-            finished = time.time_ns() + 5_000_000_000
+            started = time.time_ns()
+            finished = started
 
             def probe(ids, count, extra_reports=None):
                 selected = {**manifest, "groups": [groups[group_id] for group_id in ids]}
@@ -73,18 +73,22 @@ class RawArtifactTests(unittest.TestCase):
                       "source_probe": source, "consumer_probe": consumer,
                       "artifact_hashes": hashes}
             probe_path = repository / "hosted-macosArm64.json"
-            probe_path.write_text(json.dumps(hosted))
-            probe_path.with_name("hosted-macosArm64-source.json").write_text(json.dumps(source))
-            probe_path.with_name("hosted-macosArm64-consumer.json").write_text(json.dumps(consumer))
             matrix_path = repository / "matrix-macosArm64.json"
             lanes = [{"id": case["id"], "status": "NOT_RUN", "reason": "no evidence supplied"}
                      for case in qualify.expand(qualify.matrix())]
-            matrix_path.write_text(json.dumps({"candidate_sha": sha,
-                                               "total": 112,
-                                               "bounded_hosted_probes": [hosted],
-                                               "lanes": lanes,
-                                               "counts": {"PASSED": 0, "FAILED": 0,
-                                                          "UNAVAILABLE": 0, "NOT_RUN": 112}}))
+
+            def record_probe_window():
+                finished_at = time.time_ns()
+                source["finished_at_ns"] = finished_at
+                consumer["finished_at_ns"] = finished_at
+                probe_path.write_text(json.dumps(hosted))
+                probe_path.with_name("hosted-macosArm64-source.json").write_text(json.dumps(source))
+                probe_path.with_name("hosted-macosArm64-consumer.json").write_text(json.dumps(consumer))
+                matrix_path.write_text(json.dumps({"candidate_sha": sha, "total": 112,
+                                                   "bounded_hosted_probes": [hosted],
+                                                   "lanes": lanes,
+                                                   "counts": {"PASSED": 0, "FAILED": 0,
+                                                              "UNAVAILABLE": 0, "NOT_RUN": 112}}))
 
             def write_group(group_id, extras=()):
                 group = groups[group_id]
@@ -105,12 +109,14 @@ class RawArtifactTests(unittest.TestCase):
 
             write_group(target)
             write_group("consumer-macosArm64")
+            record_probe_window()
             missing = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
                                             matrix_path, repository / "bundle-missing")
             self.assertEqual("PROBE_FAILED", missing["status"])
             self.assertIn("core-macosArm64", missing["reason"])
 
             write_group("core-macosArm64", [("supplemental.FullReportTest", "extra-pass")])
+            record_probe_window()
             complete = artifact.stage_hosted(repository, manifest, sha, target, probe_path,
                                              matrix_path, repository / "bundle-complete")
             self.assertEqual("PROBE_PASSED", complete["status"])
@@ -303,10 +309,15 @@ class RawArtifactTests(unittest.TestCase):
                 for group_id in ids:
                     if group_id != "core-jvm":
                         write_group(group_id)
-            for name, ids in artifact.UBUNTU_PROBES.items():
-                count = sum(len(qualify.expected_probe_cases(manifest, groups[group_id]))
-                            for group_id in ids)
-                (repository / name).write_text(json.dumps(probe(ids, count)))
+            def record_ubuntu_probes():
+                nonlocal finished
+                finished = time.time_ns()
+                for name, ids in artifact.UBUNTU_PROBES.items():
+                    count = sum(len(qualify.expected_probe_cases(manifest, groups[group_id]))
+                                for group_id in ids)
+                    (repository / name).write_text(json.dumps(probe(ids, count)))
+
+            record_ubuntu_probes()
             (repository / "artifact-audit.json").write_text(json.dumps(
                 {"candidate_sha": sha, "status": "FAILED"}))
             (repository / "runtime-matrix.json").write_text(json.dumps(
@@ -327,9 +338,10 @@ class RawArtifactTests(unittest.TestCase):
                 self.assertEqual("PROBE_FAILED", missing_ubuntu["status"])
                 self.assertIn("core-jvm", missing_ubuntu["reason"])
                 write_group("core-jvm")
+                record_ubuntu_probes()
                 complete_ubuntu = artifact.stage_ubuntu(repository, manifest, sha, repository,
                                                          repository / "ubuntu-complete")
-            self.assertEqual("PROBE_PASSED", complete_ubuntu["status"])
+            self.assertEqual("PROBE_PASSED", complete_ubuntu["status"], complete_ubuntu["reason"])
             self.assertEqual("Linux", complete_ubuntu["runtime"]["system"])
             self.assertEqual(6686, complete_ubuntu["executed"])
             self.assertEqual(6686, artifact.verify_bundle(repository / "ubuntu-complete",
@@ -340,6 +352,21 @@ class RawArtifactTests(unittest.TestCase):
             summary_path.write_text(json.dumps(summary))
             with self.assertRaisesRegex(ValueError, "Ubuntu bundle runtime"):
                 artifact.verify_bundle(repository / "ubuntu-complete", manifest, sha)
+
+    def test_slow_ubuntu_fixture_generation_retains_bound_report_times(self):
+        original_stage_hosted = artifact.stage_hosted
+        calls = 0
+
+        def delayed_first_stage(*args, **kwargs):
+            nonlocal calls
+            result = original_stage_hosted(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                time.sleep(6)
+            return result
+
+        with patch.object(artifact, "stage_hosted", side_effect=delayed_first_stage):
+            self.test_missing_core_xml_rejects_bounded_pass_then_complete_bundle_passes()
 
 
 if __name__ == "__main__":
