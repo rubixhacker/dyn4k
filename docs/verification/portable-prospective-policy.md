@@ -138,11 +138,19 @@ execution of that method and contain exactly one target-emitted
 around 1, signed zero and its reciprocal, spacing at 1e6 m, and represented
 geometry gaps at zero and both signed 1e6 m origins. The record also checks
 finite classification for the largest finite value, infinity and NaN. The
-XML's existing `NUMERICAL_JSON` input record must carry an explicit negative
+three classifications must be JSON Booleans in both the raw marker and the
+receipt; JSON numbers are rejected even when Python would compare them equal.
+The XML's existing `NUMERICAL_JSON` input record must carry an explicit negative
 zero through the recorder. Missing probe evidence leaves every otherwise
 passing target case `UNPASSED`; a present but stale or contradictory receipt
-is rejected. The current matrix test and host runner do not emit this marker
-and receipt, so this repair does not establish a target pass.
+is rejected. A self-authored XML marker and receipt only establish archive
+consistency, not target execution. The current matrix test and host runner do
+not emit this marker and receipt, and no executed test payload or classpath is
+bound to it. Producer verification is therefore unavailable and the comparator
+keeps the case-pass gate closed: even a consistent synthetic archive leaves
+case qualification `UNPASSED` and records
+`UNPASSED_UNBOUND_PRODUCER`. Target qualification requires a reviewed producer,
+its executed payload, and independently checked raw process evidence.
 It checks the target's decoded boundary setup against the input expression
 `origin.x + scale*(1.5 + delta)` from the
 [portable fixture](../../tools/numerical/portable/src/commonTest/kotlin/portable/PortableMatrixTest.kt),

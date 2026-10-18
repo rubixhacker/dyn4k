@@ -839,6 +839,11 @@ def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
             Rejected(f"numeric probe nonfinite token: {value}")))
     except (ValueError, TypeError) as error:
         raise Rejected("numeric probe target payload is invalid") from error
+    boolean_fields = ("maximumFinite", "positiveInfinityFinite", "nanFinite")
+    if (not isinstance(payload, dict) or not isinstance(receipt["probe"], dict) or
+            any(type(row.get(field)) is not bool
+                for row in (payload, receipt["probe"]) for field in boolean_fields)):
+        raise Rejected("numeric probe Boolean field type differs")
     if payload != PROBE_VALUES or receipt["probe"] != PROBE_VALUES:
         raise Rejected("numeric probe target arithmetic differs")
     inputs = []
@@ -926,9 +931,10 @@ def compare_host(baseline, lane, frozen_ids):
     identity = Identity(commit, source_sha256, receipt["artifact_sha256"], runtime_proof)
     verify_receipt(receipt, Path(lane) / "trace.jsonl", cases, identity, target_artifacts)
     verify_case_slices(Path(lane), expected)
-    probe_verified = verify_numeric_probe(lane, commit, source_sha256,
-                                          receipt["trace_sha256"],
-                                          target_artifacts, runtime_proof)
+    probe_archive_consistent = verify_numeric_probe(lane, commit, source_sha256,
+                                                    receipt["trace_sha256"],
+                                                    target_artifacts, runtime_proof)
+    probe_verified = False
     prospective = [case for case in cases if case["id"] not in frozen_ids]
     results = []
     for case in prospective:
@@ -950,7 +956,9 @@ def compare_host(baseline, lane, frozen_ids):
                           "UNPASSED" if failed or unpassed or not probe_verified else
                           "PASSED_NUMERICAL_POLICY"),
                "qualification": "UNPASSED",
-               "numeric_probe": "PASSED" if probe_verified else "UNPASSED_NOT_EXECUTED",
+               "numeric_probe": ("PASSED" if probe_verified else
+                                 "UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
+                                 "UNPASSED_NOT_EXECUTED"),
                "baseline_jar_sha256": manifest["baseline_jar_sha256"],
                "baseline_trace_sha256": manifest["trace_sha256"],
                "baseline_fixture_source_sha256": manifest["fixture_source_sha256"],

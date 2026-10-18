@@ -325,7 +325,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
         self.assertFalse(verify_numeric_probe(lane, "commit", "source", "trace",
                                               artifacts, runtime))
 
-    def test_compare_host_never_marks_case_pass_without_verified_probe(self):
+    def test_compare_host_keeps_case_unpassed_without_target_probe_producer(self):
         lane, _, runtime, artifacts, _, _ = self.numeric_probe_fixture()
         baseline = self.root / "baseline"
         baseline.mkdir()
@@ -362,14 +362,15 @@ class ProspectiveComparisonTest(unittest.TestCase):
             stack.enter_context(patch("run.artifacts", return_value=artifacts))
             stack.enter_context(patch("run.clean_identity", return_value=("commit", "source")))
             stack.enter_context(patch("run.runtime", return_value=runtime))
-            for valid, expected in ((False, 0), (True, 1)):
-                with patch("prospective_compare.verify_numeric_probe", return_value=valid):
+            for archive_consistent in (False, True):
+                with patch("prospective_compare.verify_numeric_probe",
+                           return_value=archive_consistent):
                     result = compare_host(baseline, lane, set())
-                self.assertEqual(result["passed_case_policy"], expected)
-                self.assertEqual(result["results"][0]["qualification"],
-                                 "PASSED_CASE_POLICY" if valid else "UNPASSED")
+                self.assertEqual(result["passed_case_policy"], 0)
+                self.assertEqual(result["results"][0]["qualification"], "UNPASSED")
                 self.assertEqual(result["numeric_probe"],
-                                 "PASSED" if valid else "UNPASSED_NOT_EXECUTED")
+                                 "UNPASSED_UNBOUND_PRODUCER" if archive_consistent else
+                                 "UNPASSED_NOT_EXECUTED")
 
     def test_target_probe_rejects_stale_identity_output_and_nonfinite(self):
         lane, original, runtime, artifacts, xml, log = self.numeric_probe_fixture()
@@ -433,6 +434,30 @@ class ProspectiveComparisonTest(unittest.TestCase):
         runtime_file.write_bytes(b"different runtime")
         with self.assertRaisesRegex(Exception, "runtime"):
             verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
+
+    def test_target_probe_boolean_fields_require_json_booleans_in_output_and_receipt(self):
+        lane, original, runtime, artifacts, xml, _ = self.numeric_probe_fixture()
+        path = lane / "numeric-probe-receipt.json"
+        target_output = xml.read_text()
+        original_marker = json.dumps(original["probe"], separators=(",", ":"),
+                                     sort_keys=True)
+        for field in ("maximumFinite", "positiveInfinityFinite", "nanFinite"):
+            for number in (1, 0, 1.0, 0.0):
+                for location in ("marker", "receipt", "both"):
+                    with self.subTest(field=field, number=repr(number), location=location):
+                        altered = deepcopy(original)
+                        raw = deepcopy(original["probe"])
+                        if location in ("marker", "both"):
+                            raw[field] = number
+                        if location in ("receipt", "both"):
+                            altered["probe"][field] = number
+                        marker = json.dumps(raw, separators=(",", ":"), sort_keys=True)
+                        xml.write_text(target_output.replace(original_marker, marker))
+                        altered["xml_sha256"] = digest(xml)
+                        path.write_text(json.dumps(altered))
+                        with self.assertRaisesRegex(Exception, "Boolean"):
+                            verify_numeric_probe(lane, "commit", "source", "trace",
+                                                 artifacts, runtime)
 
     def test_policy_seam_requires_case_envelope_and_complete_paths(self):
         rows, case, catalog = self.policy_rows()
