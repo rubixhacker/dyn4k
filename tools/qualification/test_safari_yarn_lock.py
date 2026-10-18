@@ -14,6 +14,7 @@ import types
 import unittest
 import zlib
 from contextlib import redirect_stdout
+from itertools import islice
 from pathlib import Path, PureWindowsPath
 from unittest import mock
 
@@ -968,6 +969,24 @@ class SafariYarnLockTests(unittest.TestCase):
                 self.assertLess(len(message), 700)
 
     def test_public_hosted_capture_records_staging_handle_failure_residue(self):
+        source = self.repository / "build.gradle.kts"
+        source.write_bytes(b"plugins {}\r\n")
+        subprocess.run(["git", "-C", str(self.repository), "add", "build.gradle.kts"],
+                       check=True)
+        subprocess.run(["git", "-C", str(self.repository), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "-qm",
+                        "CRLF source fixture"], check=True)
+        self.candidate = git_oid(self.repository, "HEAD")
+        self.assertEqual(source.read_bytes(), safari_reporter.committed_bytes(
+            self.repository, self.candidate, Path("build.gradle.kts")))
+        binary_flag = getattr(os, "O_BINARY", 1 << 29)
+        read_modes = {}
+        real_read = os.read
+
+        def read_file(descriptor, count):
+            data = real_read(descriptor, count)
+            return data if read_modes.get(descriptor) else data.replace(b"\r\n", b"\n")
+
         class Directory:
             def __init__(self, source, relative):
                 self.path = source / relative
@@ -979,7 +998,11 @@ class SafariYarnLockTests(unittest.TestCase):
                 self.close()
 
             def open_file(self, name):
-                return os.open(self.path / name, os.O_RDONLY)
+                flags = os.O_RDONLY | getattr(safari_yarn_lock.os, "O_BINARY", 0)
+                native_flags = flags if os.name == "nt" else flags & ~binary_flag
+                descriptor = os.open(self.path / name, native_flags)
+                read_modes[descriptor] = bool(flags & binary_flag)
+                return descriptor
 
             def child(self, name, removable=False):
                 raise OSError("injected Win32 stage handle failure")
@@ -989,6 +1012,8 @@ class SafariYarnLockTests(unittest.TestCase):
 
         proxy = mock.Mock(wraps=os)
         proxy.name = "nt"
+        proxy.O_BINARY = binary_flag
+        proxy.read = read_file
         arguments = ["safari_yarn_lock.py", "--candidate-sha", self.candidate,
                      "--output", str(self.output), "--configuration", "development"]
         fake_module = types.SimpleNamespace(LockedDirectory=Directory)
@@ -999,6 +1024,19 @@ class SafariYarnLockTests(unittest.TestCase):
                 mock.patch.object(safari_yarn_lock, "run_lock_task") as runner, \
                 mock.patch.object(sys, "argv", arguments), \
                 redirect_stdout(io.StringIO()):
+            with mock.patch.object(proxy, "O_BINARY", 0):
+                with self.assertRaisesRegex(ValueError,
+                                            "incomplete diagnostic source: build.gradle.kts"):
+                    safari_yarn_lock.source_bytes(self.repository, Path("build.gradle.kts"))
+            self.assertEqual(source.read_bytes(), safari_yarn_lock.source_bytes(
+                self.repository, Path("build.gradle.kts")))
+            source.write_bytes(b"plugins {}\n")
+            with self.assertRaisesRegex(ValueError, "dirty tracked or untracked source"):
+                safari_yarn_lock.require_candidate(self.repository, self.candidate)
+            source.write_bytes(b"plugins changed\r\n")
+            with self.assertRaisesRegex(ValueError, "dirty tracked or untracked source"):
+                safari_yarn_lock.require_candidate(self.repository, self.candidate)
+            source.write_bytes(b"plugins {}\r\n")
             self.assertEqual(1, safari_yarn_lock.main())
         runner.assert_not_called()
         receipt = json.loads((self.output / "receipt.json").read_text())
@@ -2280,6 +2318,72 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual("CONTEXT_INCOMPLETE", json.loads(output.getvalue())["status"])
         self.assertFalse(json.loads((context / "inventory.json").read_text())["qualified"])
 
+    @staticmethod
+    def wrapper_failure_context(result, context):
+        stderr = result.stderr if isinstance(result.stderr, (str, bytes)) else ""
+        stdout = result.stdout if isinstance(result.stdout, (str, bytes)) else ""
+        lower_stderr = (stderr.decode("utf-8", "replace") if isinstance(stderr, bytes)
+                        else stderr).lower()
+        stderr_category = "other" if stderr else "empty"
+        for category, phrases in (
+                ("missing_path", ("no such file", "cannot find the path")),
+                ("command_missing", ("command not found", "is not recognized")),
+                ("permission", ("permission denied", "access is denied")),
+                ("syntax", ("syntax error", "unexpected token"))):
+            if any(phrase in lower_stderr for phrase in phrases):
+                stderr_category = category
+                break
+
+        patterns = {
+            "launch": "launch-*.txt", "redirect": "redirect-*.html",
+            "process": "process-*.txt", "open_stdout": "open-*.stdout",
+            "open_stderr": "open-*.stderr", "sample_final": "sample-state-*.txt",
+            "sample_temp": "sample-state-*.tmp",
+            "outcome": "launch-outcome-*.txt", "outcome_temp": "launch-outcome-*.tmp",
+        }
+        context_exists = context.is_dir() and not context.is_symlink()
+        matches = {key: list(islice(context.glob(pattern), 101)) if context_exists else []
+                   for key, pattern in patterns.items()}
+
+        def first_bytes(key):
+            if not matches[key]:
+                return b""
+            path = matches[key][0]
+            if path.is_symlink() or not path.is_file():
+                return b""
+            try:
+                with path.open("rb") as stream:
+                    return stream.read(4096)
+            except OSError:
+                return b""
+
+        process = first_bytes("process")
+        launch = first_bytes("launch")
+        outcome = first_bytes("outcome")
+        launch_pid = re.search(rb"(?:^|\n)pid=([0-9]{1,10})(?: |\n|$)", launch)
+        launch_name = (re.fullmatch(r"launch-([0-9]{1,10})\.txt",
+                                    matches["launch"][0].name)
+                       if matches["launch"] else None)
+        pid_matches = (launch_pid.group(1).decode() == launch_name.group(1)
+                       if launch_pid and launch_name else None)
+        detail = {
+            "returncode": result.returncode if type(result.returncode) is int
+            and -999 <= result.returncode <= 999 else None,
+            "stdout_length": min(len(stdout), 4097),
+            "stderr_length": min(len(stderr), 4097),
+            "stderr_category": stderr_category,
+            "context_exists": context_exists,
+            "files": {key: min(len(paths), 101) for key, paths in matches.items()},
+            "launch_pid_matches_name": pid_matches,
+            "process_sample_count": min(len(re.findall(rb"(?m)^sample=", process)), 101),
+            "process_markers": {marker: marker.encode() in process for marker in (
+                "sample_state_write_failed", "sample_state_verify_failed",
+                "sample_state_rename_failed", "sample_state_cleanup_failed")},
+            "outcome_finished": b"open_state=finished\n" in outcome,
+            "outcome_pending": b"open_state=pending\n" in outcome,
+        }
+        return json.dumps(detail, sort_keys=True, separators=(",", ":"))
+
     @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_joins_early_failed_launch_before_return(self):
         root = Path(__file__).resolve().parents[2]
@@ -2345,7 +2449,8 @@ class SafariYarnLockTests(unittest.TestCase):
                     ["bash", bash_path(controlled), bash_path(redirect)],
                     env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
                     capture_output=True, text=True, timeout=5)
-                self.assertEqual(23, result.returncode)
+                self.assertEqual(23, result.returncode,
+                                 self.wrapper_failure_context(result, context))
                 self.assertEqual([], list(context.glob("sample-state-*.txt")))
                 self.assertEqual([], list(context.glob("sample-state-*.tmp")))
                 process = list(context.glob("process-*.txt"))
@@ -2378,15 +2483,49 @@ class SafariYarnLockTests(unittest.TestCase):
             ["bash", bash_path(controlled), bash_path(redirect)],
             env={**os.environ, "DYN4K_SAFARI_LAUNCH_CONTEXT": bash_path(context)},
             capture_output=True, text=True, timeout=5)
-        self.assertEqual(1, result.returncode)
+        self.assertEqual(1, result.returncode,
+                         self.wrapper_failure_context(result, context))
         self.assertEqual([], list(context.glob("sample-state-*.txt")))
         self.assertEqual([], list(context.glob("sample-state-*.tmp")))
         outcome = list(context.glob("launch-outcome-*.txt"))
-        self.assertEqual(1, len(outcome))
+        self.assertEqual(1, len(outcome), self.wrapper_failure_context(result, context))
         self.assertEqual("open_state=finished\nopen_exit=0\n", outcome[0].read_text())
         process = list(context.glob("process-*.txt"))
         self.assertEqual(1, len(process))
         self.assertIn("sample_state_write_failed", process[0].read_text())
+
+    def test_wrapper_failure_context_bounds_diagnostic_and_redacts_fixture_text(self):
+        context = self.root / "diagnostic-context"
+        context.mkdir()
+        canaries = ("SECRET_ENV_CANARY", "SECRET_PATH_CANARY",
+                    "SECRET_STDOUT_CANARY", "SECRET_STDERR_CANARY")
+        (context / "launch-123.txt").write_text(
+            f"pid=123 ppid=22 input={canaries[1]}\n{canaries[0]}\n")
+        (context / "redirect-123.html").write_text(canaries[1])
+        (context / "process-123.txt").write_text(
+            "sample=1\nsample_state_write_failed\n" + canaries[0])
+        (context / "open-123.stdout").write_text(canaries[2])
+        (context / "open-123.stderr").write_text(canaries[3])
+        result = subprocess.CompletedProcess(
+            ["bash", canaries[1]], 1, stdout=canaries[2],
+            stderr="No such file or directory " + canaries[3])
+        detail = self.wrapper_failure_context(result, context)
+        parsed = json.loads(detail)
+        self.assertEqual(1, parsed["returncode"])
+        self.assertEqual(1, parsed["files"]["launch"])
+        self.assertEqual(1, parsed["files"]["process"])
+        self.assertEqual(0, parsed["files"]["outcome"])
+        self.assertTrue(parsed["process_markers"]["sample_state_write_failed"])
+        self.assertEqual("missing_path", parsed["stderr_category"])
+        self.assertLessEqual(len(detail), 1024)
+        for canary in canaries:
+            self.assertNotIn(canary, detail)
+        with self.assertRaises(AssertionError) as failure:
+            self.assertEqual(23, result.returncode, detail)
+        for canary in canaries:
+            self.assertNotIn(canary, str(failure.exception))
+        missing = json.loads(self.wrapper_failure_context(result, self.root / "absent"))
+        self.assertFalse(missing["context_exists"])
 
     @unittest.skipUnless(os.name == "posix", "Safari launch fixture uses POSIX process behavior")
     def test_wrapper_records_pending_open_and_completed_samples(self):
