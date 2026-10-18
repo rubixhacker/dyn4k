@@ -55,7 +55,7 @@ Complete implementation and release qualification are separate claims. A missing
 - Preserve the default-profile penetration failure separately from configured-profile qualification. The configured profile uses an internal step of 1/120 second and outer groups of 4, 2, or 1. Endpoint copies do not advance time or event history.
 - Keep baseline compatibility behavior unless a separately documented change is approved. Report known baseline defects and their physical consequences. Never substitute a corrected algorithm silently.
 - Select the first-party sample collection at revision `2c6b318e929baab77e9753ae78a4965eee74a30a` as the migration application. Retain its Java sources unchanged. Compile the collection and execute Tracking, Pyramid, Crank, Billiards, and Truck with recorded input and observation. Confirm actual CCD activity before claiming that journey covers CCD.
-- Stage delivery in independently verifiable consumer journeys. Use one integration branch. Implement tickets in separate worktrees, then merge and review their combined behavior.
+- Stage delivery in independently verifiable consumer journeys. Implement tickets in separate worktrees and assemble reviewed changes directly on `main` as they are ready. PR47 is merged; no single replacement integration branch or giant replacement PR is planned. Review each assembled change and its combined behavior.
 - Use Luna for bounded, routine work and Sol for coupled algorithms, compatibility, and review. Record the actual model. A separate agent reviews the integrated code and spec coverage.
 - Use ISO 24495-1:2023 and ISO 24495-3:2026 for human-readable text. Use ASD-STE100 Issue 9 for new code comments. Preserve required upstream legal notices. Review language as well as technical accuracy; do not claim formal certification.
 
@@ -71,7 +71,7 @@ Complete implementation and release qualification are separate claims. A missing
 - Bind test counts, raw observations, environment identity, and artifact checksums to the candidate commit. A later code or build change invalidates affected evidence.
 - Test staged external consumers and dependency conflicts. Keep baseline oracle dependencies out of production artifacts.
 - Run the approved sustained performance and memory checks. Unsupported probes and unavailable hardware are incomplete evidence, never zero readings.
-- Require independent standards and spec reviews. Resolve their actionable findings before marking the integration PR ready. Run a retrospective after implementation and review.
+- Require independent standards and spec reviews. Resolve their actionable findings before landing the reviewed assembled changes on `main`. Run a retrospective after implementation and review.
 
 ## Out of Scope
 
