@@ -198,10 +198,10 @@ class PhysicsWorldCoreCoverageTest {
         assertFailsWith<IllegalArgumentException> { World<Body>().addJoint(joint) }
     }
     @Test fun getJointsAndAdd() {
-        assertFailsWith<ClassCastException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).add(AngleJoint(Body(), Body())) }
+        assertFailsWith<UnsupportedOperationException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).add(AngleJoint(Body(), Body())) }
     }
     @Test fun getJointsAndRemove() {
-        assertFailsWith<ClassCastException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).removeAt(0) }
+        assertFailsWith<UnsupportedOperationException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).removeAt(0) }
     }
     @Test fun getJointAtIndex() {
         val (world, first, second) = pairedWorld()

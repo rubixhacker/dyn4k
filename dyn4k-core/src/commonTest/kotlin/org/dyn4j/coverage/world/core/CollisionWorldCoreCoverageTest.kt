@@ -245,11 +245,11 @@ class CollisionWorldCoreCoverageTest {
     }
     @Test fun getBodiesAndRemove() {
         val world = CoreCollisionWorld()
-        assertFailsWith<ClassCastException> { (world.getBodies() as MutableList<Body>).removeAt(0) }
+        assertFailsWith<UnsupportedOperationException> { (world.getBodies() as MutableList<Body>).removeAt(0) }
     }
     @Test fun getBodiesAndAdd() {
         val world = CoreCollisionWorld()
-        assertFailsWith<ClassCastException> { (world.getBodies() as MutableList<Body>).add(Body()) }
+        assertFailsWith<UnsupportedOperationException> { (world.getBodies() as MutableList<Body>).add(Body()) }
     }
     @Test fun getBodyAtIndex() {
         val world = CoreCollisionWorld()
