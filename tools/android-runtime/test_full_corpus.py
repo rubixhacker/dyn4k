@@ -88,7 +88,7 @@ class FullCorpusEvidenceTest(unittest.TestCase):
             self.assertIn(f"-keep,allowobfuscation class {name}\n", rules)
         self.assertNotIn("-keep class org.dyn4j.collision.TypeFilter", rules)
 
-    def test_x86_dexopt_exception_keeps_only_matrix_norm_test_from_optimization(self):
+    def test_x86_dexopt_exception_prevents_only_matrix_normmax_inlining(self):
         matrix = "org.dyn4j.coverage.UpstreamMatrix22CoverageTest"
         suite = {"cases": [
             {"id": f"dyn4k-core:{matrix}#norm", "module": "dyn4k-core",
@@ -98,8 +98,10 @@ class FullCorpusEvidenceTest(unittest.TestCase):
         ]}
         inputs = android_corpus.full_app_inputs(suite)
         rules = inputs["keep_rules"].decode().splitlines()
-        self.assertIn(f"-keep class {matrix} {{ *; }}", rules)
-        self.assertNotIn(f"-keep,allowoptimization class {matrix} {{ *; }}", rules)
+        self.assertIn(f"-keep,allowoptimization class {matrix} {{ *; }}", rules)
+        self.assertIn("-neverinline class org.dyn4j.geometry.Matrix22 "
+                      "{ public double normMax(); }", rules)
+        self.assertEqual(sum(line.startswith("-neverinline") for line in rules), 1)
         self.assertIn("-keep,allowoptimization class org.dyn4j.coverage.OtherTest { *; }", rules)
         self.assertEqual(sum(matrix in line for line in rules), 1)
         self.assertIn(f"dyn4k-core:{matrix}#norm\t{matrix}\tnorm",

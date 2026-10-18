@@ -7,6 +7,8 @@ from optimized_evidence import (_directives, _has_broad_namespace_keep,
 
 UMBRELLA = "io.github.rubixhacker.dyn4k.full.FullJourneyTest#allInstalledCases"
 PROTECTED = ("org.dyn4j.", "io.github.rubixhacker.dyn4k.")
+X86_DEXOPT_TOKENS = ["class", "org.dyn4j.geometry.Matrix22", "{", "public", "double",
+                     "normMax", "(", ")", ";", "}"]
 
 
 def validate_full_process_log(log, package):
@@ -35,7 +37,13 @@ def validate_full_installed(raw, expected_cases, process_exit_code):
 def validate_full_keep_scope(configuration, allowed_test_classes):
     if _has_broad_namespace_keep(configuration):
         raise ValueError("full optimized route has a broad keep rule")
+    neverinline_count = 0
     for name, tokens in _directives(configuration):
+        if name == "neverinline":
+            neverinline_count += 1
+            if tokens != X86_DEXOPT_TOKENS or neverinline_count != 1:
+                raise ValueError("full optimized route has an unexpected neverinline rule")
+            continue
         if name not in EFFECTIVE_KEEP_DIRECTIVES:
             continue
         selectors, _, _, _ = _parse_class_spec(name, tokens)

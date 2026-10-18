@@ -196,9 +196,11 @@ class FullInstalledEvidenceTest(unittest.TestCase):
                 full_evidence.validate_full_r8(bad_rules, bad_mapping, bad_usage, debug,
                                                bad_dex, minimum_transformed=2)
 
-    def test_targeted_x86_test_keep_still_requires_engine_transformation(self):
+    def test_targeted_x86_neverinline_still_requires_engine_transformation(self):
         matrix = "org.dyn4j.coverage.UpstreamMatrix22CoverageTest"
-        rules = f"-keep class {matrix} {{ *; }}\n"
+        rules = (f"-keep,allowoptimization class {matrix} {{ *; }}\n"
+                 "-neverinline class org.dyn4j.geometry.Matrix22 "
+                 "{ public double normMax(); }\n")
         mapping = "org.dyn4j.geometry.Vector2 -> a:\norg.dyn4j.dynamics.Body -> b:\n"
         usage = "org.dyn4j.geometry.Unused\n"
         debug = {"Lorg/dyn4j/geometry/Vector2;", "Lorg/dyn4j/dynamics/Body;", "Lc;"}
@@ -207,6 +209,11 @@ class FullInstalledEvidenceTest(unittest.TestCase):
             rules, mapping, usage, debug, release, {matrix}, minimum_transformed=2
         )["transformed_engine_classes"]), 2)
         for bad_rules, bad_release in ((rules + "-keep class org.dyn4j.** { *; }\n", release),
+                                       (rules.replace("normMax", "norm*"), release),
+                                       (rules + "-neverinline class org.dyn4j.geometry.Matrix22 "
+                                        "{ public double normMax(); }\n", release),
+                                       (rules + "-neverinline class org.dyn4j.geometry.Matrix22 "
+                                        "{ public double normInfinity(); }\n", release),
                                        (rules, debug)):
             with self.subTest(bad_rules=bad_rules, bad_release=bad_release), \
                     self.assertRaises(ValueError):
