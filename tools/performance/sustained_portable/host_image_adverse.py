@@ -117,7 +117,7 @@ def path_swap_control(receipt=None, control_image=None, control_sha256=None,
                         "mapped_image_identity": "unobserved"})
         process = checked("launch_image", lambda: subprocess.Popen(
             [str(executable), *arguments], stdin=subprocess.PIPE if task_owned else None,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0))
         receipt["pid"] = process.pid
         try:
             if task_owned:

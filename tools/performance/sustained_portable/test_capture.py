@@ -1096,6 +1096,46 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertFalse(any(p.read_bytes() == image for p in artifact.rglob("*") if p.is_file()))
             process.terminate.assert_called_once()
 
+    @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("cc"),
+                         "real Linux ELF control needs cc")
+    def test_task_owned_image_control_rejects_extra_stdout_from_real_child(self):
+        source_sha = "a" * 40
+        program = "\n".join((
+            "#include <string.h>",
+            "#include <unistd.h>",
+            "int main(int argc, char **argv) {",
+            '    if (argc != 3 || strcmp(argv[1], "--image-control-hold") ||',
+            f'        strcmp(argv[2], "{source_sha}")) return 2;',
+            f'    static const char output[] = "DYN4K_IMAGE_CONTROL_READY\\t{source_sha}\\nEXTRA\\n";',
+            "    if (write(1, output, sizeof(output) - 1) != sizeof(output) - 1) return 3;",
+            "    char input;",
+            "    while (read(0, &input, 1) > 0) {}",
+            "    return 0;",
+            "}",
+        ))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = root / "dyn4k-performance-portable.kexe"
+            subprocess.run(["cc", "-x", "c", "-", "-o", str(image)], input=program,
+                           text=True, capture_output=True, check=True)
+            output = root / "runner" / "performance-native-host-short" / "path-swap.json"
+            environment = {**os.environ, "RUNNER_TEMP": str(root / "runner"),
+                           "GITHUB_WORKSPACE": str(root / "workspace"),
+                           "PYTHONDONTWRITEBYTECODE": "1"}
+            completed = subprocess.run([
+                sys.executable, "-B", str(Path(host_image_adverse.__file__).resolve()),
+                "--output", str(output), "--control-image", str(image),
+                "--control-sha256", hashlib.sha256(image.read_bytes()).hexdigest(),
+                "--control-source-sha", source_sha,
+            ], env=environment, capture_output=True, text=True, timeout=10)
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["control_ready"], "unexpected_output")
+            self.assertEqual(receipt["control_stdout_tail"]["hex"], b"EXTRA\n".hex())
+            self.assertEqual(receipt["mapped_image_identity"], "matched_original")
+            self.assertEqual(receipt["swap"], "applied")
+            self.assertEqual(receipt["stale_pid"], "rejected")
+
     def test_task_owned_image_control_rejects_wrong_inventory_hash_before_launch(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
