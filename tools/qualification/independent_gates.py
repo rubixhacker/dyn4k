@@ -34,7 +34,7 @@ PRODUCER_SCOPED_GATES = frozenset(("unchanged-java-corpus", "java-source-compati
                                    "independent-review"))
 APPROVED_POLICY = {
     "tools/numerical/fixtures.json": "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c",
-    "tools/numerical/compare.py": "4310fe9ddad700bd591b7708cc1a61e9b307029ca97f5240b608a61fe0430fa3",
+    "tools/numerical/compare.py": "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f",
     "tools/numerical/physical.py": "98ff243a02eece8a47a4faeda06385696174b2b10836e4e1315d6a13e22ee5ba",
     "tools/numerical/weld-pulley-physical-declaration.json": "9794a4ef64c93f6ff76afb03d98784b27be68fe413256362abf1a3f84cf96368",
     "tools/numerical/weld-pulley-physical-manifest.json": "5531b263fbd5a7684db0ea9fbef167c8d8772104949ce01ba4de7606498aecab",
@@ -58,6 +58,16 @@ JOINT_PHYSICAL_STEPS = 36000
 PROSPECTIVE_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
 PROSPECTIVE_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
+ROTATION_ORACLE_REVISION = "8b2959fbffb96486f6dcb1aef90fdbacf1e8a1cb"
+ROTATION_ORACLE_SHA256 = "29de6401ef9253bee669714fdf31bade9291b4ee77d2aacaa34d62907f1bc238"
+ROTATION_ORACLE_PATH = "tools/numerical/portable/rotation_oracle.py"
+PRODUCER_MANIFEST_PATHS = {
+    "unchanged-java-corpus": ("full-ci/lane-manifest.json",),
+    "java-source-compatibility": ("full-ci/lane-manifest.json",),
+    "migration-journeys": ("evidence/summary.json",),
+    "performance-resource": ("evidence/candidate-identity-at-pilot.json",),
+    "independent-review": ("standards.json", "spec.json"),
+}
 
 
 def digest(value):
@@ -295,8 +305,9 @@ def _joint_quality_module(directory):
 
 
 def verify_joint_physical_cases(root, receipt, candidate_sha,
-                                expected_artifact_hashes, source_sha):
+                                expected_artifact_hashes, source_sha, repository=None):
     directory = Path(__file__).resolve().parents[1] / "numerical"
+    repository = Path(repository) if repository is not None else Path(__file__).resolve().parents[2]
     declaration = _json(directory / "weld-pulley-physical-declaration.json")
     manifest = _json(directory / "weld-pulley-physical-manifest.json")
     quality = _joint_quality_module(directory)
@@ -307,6 +318,21 @@ def verify_joint_physical_cases(root, receipt, candidate_sha,
             or {row.get("case") for row in rows if isinstance(row, dict)}
             != set(JOINT_PHYSICAL_CASES)):
         raise ValueError("candidate Weld/Pulley case identities or counts differ")
+    capture_source = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:tools/numerical/candidate/physical/WeldPulleyPhysicalCapture.java"],
+        stderr=subprocess.PIPE)
+    capture_sha = hashlib.sha256(capture_source).hexdigest()
+    build_config = hashlib.sha256()
+    for filename in ("settings.gradle.kts", "build.gradle.kts"):
+        content = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:tools/numerical/candidate/{filename}"],
+            stderr=subprocess.PIPE)
+        build_config.update(filename.encode() + b"\0" + str(len(content)).encode()
+                            + b"\0" + content)
+    expected_artifact_path = str(Path("build/staging-repository") /
+                                 qualify.target_binary_path("dyn4k-core", "jvm"))
     if (declaration.get("steps_per_case") != JOINT_PHYSICAL_STEPS
             or set(manifest.get("cases", {})) != set(JOINT_PHYSICAL_CASES)):
         raise ValueError("approved Weld/Pulley declaration or case set differs")
@@ -322,14 +348,25 @@ def verify_joint_physical_cases(root, receipt, candidate_sha,
         raw = trace.read_bytes()
         counts = manifest["cases"][case]["counts"]
         required_capture = {
-            "case": case, "candidate_commit": candidate_sha,
+            "candidate_commit": candidate_sha,
             "source_hash_method": NUMERICAL_SOURCE_HASH_METHOD,
             "source_sha256": source_sha,
             "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+            "artifact_path": expected_artifact_path,
+            "capture_sha256": capture_sha,
+            "build_config_sha256": build_config.hexdigest(),
             "trace_sha256": hashlib.sha256(raw).hexdigest(),
+            "reference_trace_sha256": manifest["cases"][case]["gzip_sha256"],
             "expected_counts": counts, "executed_counts": counts, "skipped": 0}
         if any(capture.get(key) != value for key, value in required_capture.items()):
             raise ValueError(f"{case} candidate physical capture identity or counts differ")
+        if (not isinstance(capture.get("runtime"), dict)
+                or not all(isinstance(value, str) and value
+                           for value in capture["runtime"].values())
+                or not isinstance(capture.get("physical"), dict)
+                or capture["physical"].get("case") != case
+                or capture["physical"].get("counts") != counts):
+            raise ValueError(f"{case} candidate physical producer manifest is incomplete")
         records = iter(_numerical_modules(directory)[0].records(trace))
         try:
             _, header = next(records)
@@ -337,8 +374,9 @@ def verify_joint_physical_cases(root, receipt, candidate_sha,
             raise ValueError(f"{case} candidate physical trace is empty") from error
         if header != {"kind": "inputs", "case": case,
                        "declaration_sha256": manifest["declaration_sha256"],
-                       "candidate_commit": candidate_sha, "source_sha256": source_sha,
-                       "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+                       "capture_sha256": capture_sha,
+                       "source_revision": candidate_sha,
+                       "jar_sha256": expected_artifact_hashes["dyn4k-core"],
                        "step_seconds": declaration["step_seconds"],
                        "steps": JOINT_PHYSICAL_STEPS}:
             raise ValueError(f"{case} candidate physical input or source identity differs")
@@ -373,6 +411,58 @@ def verify_joint_physical_cases(root, receipt, candidate_sha,
             "approved_reference_status": "PASSED_BASELINE_ONLY",
             "legacy_pulley_diagnostic": "39 old-reference samples exceeded the 0.005 m solver tolerance; observed maximum extension 0.1208278904872957 m",
             "failures": failures}
+
+
+@lru_cache(maxsize=4)
+def _approved_rotation_oracle(repository):
+    raw = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{ROTATION_ORACLE_REVISION}:{ROTATION_ORACLE_PATH}"], stderr=subprocess.PIPE)
+    if hashlib.sha256(raw).hexdigest() != ROTATION_ORACLE_SHA256:
+        raise ValueError("approved arithmetic oracle blob differs")
+    return ROTATION_ORACLE_SHA256
+
+
+def _target_arithmetic_evidence(root, audit, identity, repository):
+    required = (set(identity) | {"schema", "oracle_revision", "oracle_sha256",
+                                 "target_payload", "target_payload_sha256",
+                                 "process_receipt", "process_receipt_sha256"})
+    if (not isinstance(audit, dict) or set(audit) != required
+            or audit.get("schema") != "target-arithmetic-evidence/1"
+            or any(audit.get(key) != value for key, value in identity.items())):
+        raise ValueError("prospective arithmetic producer manifest is incomplete or misbound")
+    if (audit["oracle_revision"] != ROTATION_ORACLE_REVISION
+            or audit["oracle_sha256"] != _approved_rotation_oracle(str(repository))):
+        raise ValueError("approved arithmetic oracle identity differs")
+    for key in ("target_payload", "process_receipt"):
+        path = _file_path(root, audit[key])
+        if hashlib.sha256(path.read_bytes()).hexdigest() != audit[key + "_sha256"]:
+            raise ValueError(f"prospective arithmetic raw {key} differs")
+    payload = _json(_file_path(root, audit["target_payload"]))
+    process = _json(_file_path(root, audit["process_receipt"]))
+    if (not isinstance(payload, dict) or payload.get("case_id") != identity["case_id"]
+            or not isinstance(payload.get("runtime"), str) or not payload["runtime"]
+            or not isinstance(payload.get("operations"), list)
+            or not payload["operations"]):
+        raise ValueError("prospective arithmetic target payload is incomplete")
+    if (not isinstance(process, dict)
+            or set(process) != {"command", "exit_code", "started_ns", "finished_ns",
+                                "stdout", "stdout_sha256"}
+            or not isinstance(process["command"], list) or not process["command"]
+            or not all(isinstance(arg, str) and arg for arg in process["command"])
+            or Path(process["command"][0]).name.lower() not in {"java", "node", "wasmtime",
+                                                                  "adb", "xcrun", "gradlew", "gradle"}
+            or type(process["exit_code"]) is not int or process["exit_code"] != 0
+            or type(process["started_ns"]) is not int
+            or type(process["finished_ns"]) is not int
+            or process["started_ns"] <= 0
+            or process["finished_ns"] < process["started_ns"]):
+        raise ValueError("prospective arithmetic target process is incomplete")
+    stdout = _file_path(root, process["stdout"]).read_bytes()
+    if (hashlib.sha256(stdout).hexdigest() != process["stdout_sha256"]
+            or f"ARITHMETIC_CASE={identity['case_id']}" not in stdout.decode().splitlines()):
+        raise ValueError("prospective arithmetic target output differs")
+    return "NOT_RUN"
 
 
 def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
@@ -440,12 +530,18 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                         or arithmetic.get("candidate_commit") != candidate_sha
                         or arithmetic.get("trace_sha256") != required["trace_sha256"]):
                     raise ValueError(f"{case_id} target arithmetic raw audit identity differs")
+                arithmetic_status = _target_arithmetic_evidence(
+                    root, arithmetic,
+                    {"case_id": case_id, "candidate_commit": candidate_sha,
+                     "source_sha256": source_sha,
+                     "artifact_sha256": expected_artifact_hashes["dyn4k-core"],
+                     "trace_sha256": required["trace_sha256"]}, repository)
                 prospective_compare.verify_reference_inventory(reference, case_id, catalog)
                 compared = prospective_compare.compare_policy_case(
                     reference, candidate, declared[case_id], catalog)
                 rule = compared["status"]
                 cases[case_id] = {"rule": rule,
-                                  "arithmetic": "NOT_RUN",
+                                  "arithmetic": arithmetic_status,
                                   "status": "FAILED" if rule.startswith("FAILED") else "NOT_RUN"}
             return {"status": "FAILED" if any(item["status"] == "FAILED" for item in cases.values()) else "NOT_RUN",
                     "required_cases": PROSPECTIVE_CASE_COUNT,
@@ -465,9 +561,13 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
 
 def _producer_scope(gate, candidate_sha, scopes):
     scope = scopes.get(gate) if isinstance(scopes, dict) else None
-    if not isinstance(scope, dict) or set(scope) != {
-            "candidate_sha", "target", "runtime", "runtime_identity", "artifact_hashes"}:
+    required_fields = {"candidate_sha", "target", "runtime", "runtime_identity",
+                       "artifact_hashes"}
+    if (not isinstance(scope, dict) or not required_fields <= set(scope)
+            or set(scope) - required_fields - {"producer_manifest_hashes"}):
         raise ValueError(f"{gate} independent producing artifact/runtime scope is missing")
+    if "producer_manifest_hashes" not in scope:
+        raise ValueError(f"{gate} independently pinned producer manifest is missing")
     if scope["candidate_sha"] != candidate_sha:
         raise ValueError(f"{gate} producing source commit differs from exact candidate")
     expected_target = "source" if gate == "independent-review" else "jvm"
@@ -483,7 +583,37 @@ def _producer_scope(gate, candidate_sha, scopes):
     if (not isinstance(hashes, dict) or set(hashes) != required
             or any(not SHA64.fullmatch(str(value)) for value in hashes.values())):
         raise ValueError(f"{gate} producing artifact hashes are incomplete")
+    manifests = scope["producer_manifest_hashes"]
+    if (not isinstance(manifests, dict)
+            or set(manifests) != set(PRODUCER_MANIFEST_PATHS[gate])
+            or any(not SHA64.fullmatch(str(value)) for value in manifests.values())):
+        raise ValueError(f"{gate} independently pinned producer manifest is missing")
     return scope
+
+
+def _producer_manifest_contract(root, gate, scope, candidate_sha):
+    for relative, expected in scope["producer_manifest_hashes"].items():
+        manifest_file = _file_path(root, relative)
+        if hashlib.sha256(manifest_file.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"{gate} producer manifest differs from independent audit: {relative}")
+        manifest = _json(manifest_file)
+        if not isinstance(manifest, dict):
+            raise ValueError(f"{gate} producer manifest is not an object: {relative}")
+        source_field = ("candidate_commit" if gate == "migration-journeys" else
+                        "source_commit" if gate == "performance-resource" else "candidate_sha")
+        if manifest.get(source_field) != candidate_sha:
+            raise ValueError(f"{gate} producer manifest source differs from exact candidate")
+        if gate in ("unchanged-java-corpus", "java-source-compatibility"):
+            if manifest.get("status") != "PASSED" or len(manifest.get("files", {})) != 24:
+                raise ValueError("reviewed full_ci producer manifest is incomplete")
+        elif gate == "migration-journeys":
+            if (manifest.get("expected_cases") != 10 or manifest.get("passed_cases") != 10
+                    or manifest.get("failed_cases") != 0
+                    or manifest.get("unavailable_cases") != 0):
+                raise ValueError("migration producer manifest omits ten journeys")
+        elif gate == "independent-review":
+            if manifest.get("review_kind") != Path(relative).stem:
+                raise ValueError("independent review producer manifest kind differs")
 
 
 def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
@@ -511,6 +641,7 @@ def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
         if (receipt.get("producer_scope") != scope
                 or receipt.get("runtime_identity") != scope["runtime_identity"]):
             raise ValueError("raw producing artifact/runtime scope differs from independent selection")
+        _producer_manifest_contract(root, gate, scope, candidate_sha)
         selected_hashes = scope["artifact_hashes"]
     else:
         if (not isinstance(expected_artifact_hashes, dict)
@@ -1020,6 +1151,13 @@ def _java_full_ci(root, receipt, gate, candidate_sha, repository,
     evidence = _json(_file_path(root, f"{relative}/result.json"))
     if evidence.get("archives", {}).get("staged_jvm_jar") != expected_artifact_hashes["dyn4k-core"]:
         raise ValueError("reviewed Java corpus core JAR differs from independent staging audit")
+    corpus = evidence.get("corpus")
+    routes = ({name: row for name, row in corpus.items()
+               if re.fullmatch(r"(baseline|candidate|android)-javac(8|21)-java(8|21)", name)}
+              if isinstance(corpus, dict) else {})
+    if (len(routes) != 12 or any(not isinstance(row, dict)
+                                  or row.get("cases") != 2385 for row in routes.values())):
+        raise ValueError("reviewed Java producer manifest omits 2,385 expanded identities on 12 routes")
     resolved = receipt.get("resolved_artifacts")
     if (not isinstance(resolved, dict) or set(resolved) != set(qualify.MODULES)
             or any(hashlib.sha256(_file_path(root, path).read_bytes()).hexdigest()
@@ -1103,7 +1241,7 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, r
         physical_profiles["configured-sleep-wake"]["candidate_status"] = (
             "FAILED" if physical_profiles["configured-sleep-wake"]["failures"] else "PASSED")
         physical_profiles["weld-pulley"] = verify_joint_physical_cases(
-            root, receipt, candidate_sha, expected_artifact_hashes, source_sha)
+            root, receipt, candidate_sha, expected_artifact_hashes, source_sha, repository)
         physical_profiles["nominal"] = {"candidate_status": "NOT_RUN", "reason": "candidate nominal analytic physical evidence is absent"}
         return physical_profiles
     subgates = _missing_numerical_subgates(repository)
