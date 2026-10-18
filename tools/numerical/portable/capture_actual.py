@@ -6,11 +6,11 @@ import re
 import shutil
 import subprocess
 import time
-import zipfile
 from pathlib import Path
 
 from actual_arithmetic import (CaptureRejected, expected_case_ids,
-                               make_capture_receipt, verify_capture_receipt)
+                               make_capture_receipt, verify_capture_receipt,
+                               _portable_classes_archive)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -80,12 +80,8 @@ def run_capture(method, output):
     if target.returncode or not XML.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
     shutil.copyfile(XML, output / "capture.xml")
-    with zipfile.ZipFile(output / "portable-classes.zip", "x",
-                         compression=zipfile.ZIP_STORED) as classes:
-        for source_set in ("main", "test"):
-            directory = PORTABLE / "build/classes/kotlin/jvm" / source_set
-            for class_file in sorted(directory.rglob("*.class")):
-                classes.write(class_file, f"{source_set}/{class_file.relative_to(directory)}")
+    with (output / "portable-classes.zip").open("xb") as classes:
+        classes.write(_portable_classes_archive())
     if clean_source() != commit:
         raise CaptureRejected("target source changed during capture")
     runtime_path = JDK21 / "bin/java"

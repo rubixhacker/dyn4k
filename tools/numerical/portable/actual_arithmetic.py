@@ -397,11 +397,27 @@ def _source_archive(commit):
     return result.stdout
 
 
+def _portable_classes_archive():
+    archive = io.BytesIO()
+    class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as classes:
+        for source_set in ("main", "test"):
+            directory = class_root / source_set
+            for class_file in sorted(directory.rglob("*.class")):
+                name = f"{source_set}/{class_file.relative_to(directory)}"
+                entry = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                entry.compress_type = zipfile.ZIP_STORED
+                classes.writestr(entry, class_file.read_bytes())
+    return archive.getvalue()
+
+
 def _check_local_binaries(files, runtime_executable):
     try:
         if files["artifact"] != _STAGED_JAR.read_bytes() or \
                 files["runtime"] != Path(runtime_executable).read_bytes():
             raise CaptureRejected("local artifact or runtime differs")
+        if files["portable_classes"] != _portable_classes_archive():
+            raise CaptureRejected("local portable class archive differs")
         class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
         with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
             for name in classes.namelist():
@@ -438,7 +454,7 @@ def _check_process(files, runtime_executable):
     if sum(bool(pattern.search(line)) for line in executions.splitlines()) != 1:
         raise CaptureRejected("executed JVM worker identity differs")
     arguments = worker_classpath.splitlines()
-    if len(arguments) < 2 or arguments[0] != "-cp" or \
+    if len(arguments) != 2 or arguments[0] != "-cp" or \
             str(_STAGED_JAR) not in arguments[1].split(":"):
         raise CaptureRejected("executed worker classpath omits staged engine")
     classpath = arguments[1].split(":")
