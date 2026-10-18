@@ -1,12 +1,12 @@
 # Qualification harness
 
-This harness records what ran against one staged candidate. It does not turn a build, a host probe, or an empty suite into runtime qualification. [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43) remains open until every required case and the independent performance and compatibility gates pass.
+This harness records what ran against one staged candidate. A build or a host probe alone does not qualify a runtime. [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43) remains open while required cases and independent gates lack evidence.
 
 ## What the harness checks
 
 `tools/qualification/qualify.py matrix` emits the complete approved support matrix: 21 targets, 28 target/runtime families, and 112 cases after minimum/current and two build configurations. The configuration names correspond to the [approved support contract](https://github.com/rubixhacker/dyn4k/issues/6#issuecomment-5651793360): JVM no-optimize/default; Android debug/R8; web development/production; Native debug `-g`/optimized `-opt`. A matrix row is a requirement, not a result.
 
-`audit-staging` checks both module roots and all target publications referenced by their Gradle metadata. It checks POM identity and descriptive metadata, target mapping, sources, API documentation and license artifacts, an embedded JAR license, and SHA-256 sidecars. It writes every observed POM, module metadata file and distributable artifact with its computed SHA-256. Any missing publication fails the audit. The current build publishes some staged artifacts but does not attach API documentation artifacts; that remains a real failure.
+`audit-staging` checks both module roots and all target publications referenced by their Gradle metadata. It checks POM identity and descriptive metadata, target mapping, sources, API documentation and license artifacts, an embedded JAR license, and SHA-256 sidecars. It writes every observed POM, module metadata file and distributable artifact with its computed SHA-256. Any missing publication fails the audit. The audit result is separate from runtime execution.
 
 The external JVM consumer in `consumers/qualification/` resolves `io.github.rubixhacker:dyn4k:0.1.0-alpha.1` from the staged repository. It executes Kotlin and Java public geometry calls. Its `verifySingleProvider` task rejects a graph containing both `dyn4k-core` and upstream `org.dyn4j:dyn4j`. The portable KMP consumer in `consumers/qualification/portable/` declares every approved target and runs a common public geometry test wherever an actual staged target artifact and runtime are available. These are foundation probes. They do not claim the full geometry, collision, dynamics, joint or compatibility suite.
 
@@ -24,7 +24,9 @@ The Safari manifest pins both exact case names emitted by Safari 26.6.2. Their `
 
 `execute` accepts a JSON plan keyed by matrix case ID. Each entry supplies a command and result path, or an exact unavailability reason. Before a command, it moves any old result to a distinct `.previous-<id>` file. It gives the command `DYN4K_QUALIFICATION_INVOCATION`. The runner must write that value as `invocation_id` in a new JSON result. A no-op, failed command, stale file, wrong invocation, or invalid JSON fails execution. Missing plans remain `NOT_RUN`.
 
-`record` evaluates all 112 cases. It requires a clean checkout at the candidate SHA, including untracked files hidden by ignore rules. The input check excludes generated `build/`, `.gradle/`, and `.kotlin/` files only under the repository root and the four Gradle project roots. It also excludes `tools/qualification/__pycache__/` and the generated `kotlin-js-store/yarn.lock` files at the repository root and in `consumers/qualification/portable/`. An untracked source, build script, or ignored `local.properties` invalidates the candidate, even if a source path contains a directory named `build`. A full pass also requires a tracked `tools/qualification/full-suite-manifest.json` with every approved case and area. That file does not exist until [the complete compatibility corpus](https://github.com/rubixhacker/dyn4k/issues/42) can freeze it. A candidate manifest must select the exact runtime identity, version, configuration, suite ID, and both target binary hashes for each lane. The result must match those selections, include every distinct frozen case, and bind the suite, candidate, and staged audit digests. The audit is recomputed against staged files before it is accepted. There is no full-lane pass while the complete suite manifest is absent.
+`record` evaluates all 112 lanes. It requires a clean checkout at the candidate SHA, including untracked files hidden by ignore rules. The input check excludes generated `build/`, `.gradle/`, and `.kotlin/` files only under the repository root and the four Gradle project roots. It also excludes `tools/qualification/__pycache__/` and the generated `kotlin-js-store/yarn.lock` files at the repository root and in `consumers/qualification/portable/`. An untracked source, build script, or ignored `local.properties` invalidates the candidate, even if a source path contains a directory named `build`.
+
+The tracked [complete suite manifest](full-suite-manifest.md) contains 2,512 portable methods and three facade JVM-only methods. Each lane must bind its runtime identity, version, configuration, selected cases, suite ID, and both target binary hashes. The result must match those selections and bind the suite, candidate, and staged audit digests. The audit is recomputed against staged files before acceptance. The manifest defines required cases and gates; it is not execution evidence.
 
 `record --hosted-probe <json> --raw-bundle <directory>` checks the bounded result's candidate SHA, selected runtime identity, frozen source and consumer manifest digests, exact counts, staged target hashes, and complete raw XML bundle. It stores the result under `bounded_hosted_probes`. It does not promote a bounded probe to a `PASSED` full lane. The macOS 26 and Windows Server 2025 jobs do not establish the approved minimum OS versions. Windows Server 2025 is not a Windows 10 client runtime. Simulator tests do not establish physical Apple device support.
 
@@ -32,9 +34,17 @@ The Safari manifest pins both exact case names emitted by Safari 26.6.2. Their `
 
 Every inventoried file must match its recorded hash, size, and nanosecond modification time. A transport tar must contain only regular files with matching PAX timestamps. Raw XML and test executables must match their process windows. Process logs must be newer than their recorded process exits. The verifier rejects missing, extra, skipped, ignored, or failing cases. It rejects changed files, wrong runners, and incomplete configurations. Internal archive consistency does not authenticate a claimed GitHub run.
 
-`qualify.py record --full-hosted-bundle <directory>` verifies the archive. It stores exact common and bounded consumer case IDs under `full_hosted_receipts`. Each configuration maps to one `current` support lane. That mapping includes its observed runtime version and both target hashes. The complete-port manifest must match the full reviewed manifest from commit `6f983ad3a36bdc549c32f5d0883b0a47b28e1963`. This comparison covers every case area, lane gate, and independent gate definition. Native lanes select 2,512 portable methods. The three facade JVM-only methods apply only to JVM lanes.
+`qualify.py record --full-hosted-bundle <directory>` verifies the archive. It stores exact common and bounded consumer case IDs under `full_hosted_receipts`. Each configuration maps to one `current` support lane. That mapping includes its observed runtime version and both target hashes. The committed manifest binds case areas, lane gates, and independent gate definitions. Native lanes select 2,512 portable methods. The three facade JVM-only methods apply only to JVM lanes.
 
-A complete lane also needs separate, independently verified receipts for every applicable gate. This adapter cannot verify those gate archives. Self-reported gate JSON therefore cannot produce a production `PASSED`. The current checkout has no tracked complete-port manifest, staged audit, or gate receipts. Its 112 complete lanes remain `NOT_RUN`. Current macOS, Safari, Windows Server, and simulator receipts do not fill minimum-OS or physical-device lanes.
+A complete lane also needs separate, independently verified receipts for every applicable gate. Self-reported gate JSON cannot produce a production `PASSED`. At integration revision `23aa6bc4f086b929610d4260fd480cf77e8fafce`, `record` reported 112 `NOT_RUN` lanes. The report is `/tmp/dyn4k-qualification-status-docs-record-23aa.json`.
+
+The exact command was:
+
+```sh
+python3 tools/qualification/qualify.py record --candidate-sha 23aa6bc4f086b929610d4260fd480cf77e8fafce --output /tmp/dyn4k-qualification-status-docs-record-23aa.json
+```
+
+This status applies to that revision. Rerun the recorder for a later candidate.
 
 Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has attempted but invalid or failing evidence; `UNAVAILABLE` names an absent runner or probe; `NOT_RUN` has no attempt. `record --availability <json>` accepts target, `target:runtime`, `target:runtime:version`, or exact case IDs with concrete reasons. More specific selectors take priority. A missing device or suite never becomes a pass or a zero measurement.
 
@@ -66,4 +76,14 @@ The runtime runner must write `invocation_id` from its environment, actual case 
 
 ## Open qualification requirements
 
-The current engine has a bounded foundation suite only. Full portable correctness, exact runtime pins, both executed build configurations, physical Apple devices, Android ABI execution, minimum OS coverage, and complete browser/native compatibility remain unpassed until their own observations exist. Hosted Windows Server 2025 and Safari 26 executions establish only their stated bounded observations. [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42) and [Freeze and validate the performance fixture and reference-environment manifest](https://github.com/rubixhacker/dyn4k/issues/17) remain independent final blockers. A host JVM or Linux run cannot establish Apple, device, or release qualification.
+The complete common corpus passed on 12 host groups at revision `0681a8cd2e3f12327296a58da68bc8338224ea73`. The bound receipt is `/tmp/dyn4k-full-common-corpus-rotation-gate-result.json`. Its candidate SHA is `0681a8cd2e3f12327296a58da68bc8338224ea73`.
+
+The [corpus report](complete-common-corpus.md) and [implementation ledger](../planning/implementation-ledger.md) record this 15,075-case result. It does not qualify every target or the later integration revision.
+
+Android Native x64 ran its full common corpus on an API 37 x86_64 guest at source revision `93c5841e892e0926aaf1b01ee5032d1d3f2620c6`. It covered 2,454 core and 58 facade methods in debug and optimized modes. It also ran staged-consumer assertions.
+
+The receipt is `/tmp/dyn4k-android-native-full-evidence-final/result.json`. Its source SHA is `93c5841e892e0926aaf1b01ee5032d1d3f2620c6`. Replay at harness revision `21793f7b9c2195fa023102c4acf349b9350fe35f` returned `CONSISTENCY_ONLY`. This does not qualify integration revision `23aa6bc4f086b929610d4260fd480cf77e8fafce`. See the [Android Native report](android-native-runtime.md) and the revision-bound account in the [implementation ledger](../planning/implementation-ledger.md).
+
+Each lane needs staged-artifact, staged-consumer, numerical-parity, and physical-correctness receipts. JVM lanes also need unchanged Java corpus, Java source compatibility, and duplicate-provider evidence.
+
+Global gates cover migration journeys, sustained performance and resources, publication, and independent review. These gates need candidate-bound evidence. [Run the full compatibility corpus and unchanged migration applications](https://github.com/rubixhacker/dyn4k/issues/42) and [Freeze and validate the performance fixture and reference-environment manifest](https://github.com/rubixhacker/dyn4k/issues/17) remain open. Host JVM or Linux runs cannot establish Apple, device, or release qualification.
