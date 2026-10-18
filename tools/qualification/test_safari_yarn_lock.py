@@ -187,6 +187,10 @@ class SafariYarnLockTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "POSIX process group required")
     def test_public_real_hosted_lock_mismatch_rejects_detached_closed_pipe_child(self):
         self.commit_real_lock_wrapper(detached_child=True)
+        alias = self.root / "var-style-source"
+        alias.symlink_to(self.repository, target_is_directory=True)
+        self.repository = alias
+        self.assertNotEqual(self.repository, self.repository.resolve())
 
         def stop_child():
             stdout = self.output / "stdout.txt"
@@ -202,7 +206,8 @@ class SafariYarnLockTests(unittest.TestCase):
         receipt = safari_yarn_lock.capture(self.repository, self.candidate,
                                            self.output, "development")
         self.assertEqual(safari_yarn_lock.full_hosted_command(
-            self.repository, self.output / "development/qualification.init.gradle",
+            self.repository.resolve(),
+            self.output.resolve() / "development/qualification.init.gradle",
             "development", receipt["invocation_id"]), receipt["process"]["command"])
         self.assertEqual(1, receipt["process"]["exit_code"])
         self.assertTrue(receipt["process"]["stream_incomplete"])
@@ -893,10 +898,14 @@ class SafariYarnLockTests(unittest.TestCase):
         real_popen = subprocess.Popen
         outside = self.root / "outside.txt"
         outside.write_bytes(b"outside sentinel")
+        alias = self.root
+        if os.name != "nt":
+            alias = self.root / "var-style-alias"
+            alias.symlink_to(self.root, target_is_directory=True)
         for platform_name in ("posix", "nt"):
             for failed_name in ("stdout.txt", "stderr.txt"):
                 with self.subTest(platform=platform_name, failed_name=failed_name):
-                    output = self.root / f"capture-{platform_name}-{failed_name}"
+                    output = alias / f"capture-{platform_name}-{failed_name}"
                     launched = []
                     kernel = mock.Mock()
                     kernel.CreateJobObjectW.return_value = 789
@@ -904,7 +913,7 @@ class SafariYarnLockTests(unittest.TestCase):
                     kernel.AssignProcessToJobObject.return_value = 1
 
                     def fail_log(path, mode="r", *args, **kwargs):
-                        if path == output / failed_name and mode == "wb":
+                        if path.resolve() == (output / failed_name).resolve() and mode == "wb":
                             raise PermissionError(f"injected {failed_name} open failure")
                         return real_open(path, mode, *args, **kwargs)
 

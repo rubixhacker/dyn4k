@@ -22,6 +22,53 @@ class Function:
 
 
 class SafariWindowsFileTests(unittest.TestCase):
+    def test_source_bytes_accepts_root_alias_and_rejects_aliased_child_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "source"
+            source = repository / "build/js/yarn.lock"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"approved\n")
+            alias = root / "var-style-alias"
+            alias.symlink_to(repository, target_is_directory=True)
+            relative = Path("build/js/yarn.lock")
+            self.assertEqual(b"approved\n", safari_yarn_lock.source_bytes(alias, relative))
+            archived = safari_yarn_lock.copy_file(alias, relative, root / "capture", "generated")
+            self.assertEqual(b"approved\n", (root / "capture" / archived["path"]).read_bytes())
+
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "yarn.lock").write_bytes(b"hidden provider\n")
+            (repository / "build/js").rename(repository / "build/js.saved")
+            (repository / "build/js").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlink source path or ancestor"):
+                safari_yarn_lock.source_bytes(alias, relative)
+            self.assertEqual(b"hidden provider\n", (outside / "yarn.lock").read_bytes())
+
+    def test_source_bytes_rejects_root_alias_swap_before_open(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "source"
+            repository.mkdir()
+            (repository / "lock").write_bytes(b"approved\n")
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "lock").write_bytes(b"hidden provider\n")
+            alias = root / "var-style-alias"
+            alias.symlink_to(repository, target_is_directory=True)
+            real_source_path = safari_yarn_lock.source_path
+
+            def swap_after_validation(source_root, relative):
+                path = real_source_path(source_root, relative)
+                alias.unlink()
+                alias.symlink_to(outside, target_is_directory=True)
+                return path
+
+            with mock.patch.object(safari_yarn_lock, "source_path",
+                                   side_effect=swap_after_validation):
+                with self.assertRaisesRegex(ValueError, "source path identity changed"):
+                    safari_yarn_lock.source_bytes(alias, Path("lock"))
+
     def test_generated_input_rejects_stable_short_read_and_accepts_repeated_reads(self):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary) / "source"
@@ -178,8 +225,10 @@ class SafariWindowsFileTests(unittest.TestCase):
 
             def create(path, desired, share, security, disposition, flags, template):
                 directory = bool(flags & 0x02000000)
-                return os.open(path, (os.O_PATH if directory else os.O_RDONLY) |
-                               os.O_NOFOLLOW)
+                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW |
+                                     (os.O_DIRECTORY if directory else 0))
+                loaded.setdefault("paths", {})[descriptor] = path
+                return descriptor
 
             def information(handle, pointer):
                 observed = os.fstat(handle)
@@ -193,7 +242,7 @@ class SafariWindowsFileTests(unittest.TestCase):
                                               GetFileInformationByHandle=Function(information),
                                               SetFileInformationByHandle=Function(
                                                   lambda handle, kind, pointer, size:
-                                                  os.rmdir(os.readlink(f"/proc/self/fd/{handle}")) or 1),
+                                                  os.rmdir(loaded["paths"][handle]) or 1),
                                               CloseHandle=Function(lambda handle: os.close(handle) or 1))
             module_path = Path(__file__).with_name("safari_windows_file.py")
             spec = importlib.util.spec_from_file_location("safari_windows_file_control",

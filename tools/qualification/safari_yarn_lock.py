@@ -476,16 +476,17 @@ def source_path(repository, relative):
         path = path / part
         if path.is_symlink():
             raise ValueError(f"symlink source path or ancestor: {relative}")
-    if not path.resolve().is_relative_to(repository):
+    if path.resolve() != repository.resolve() / relative:
         raise ValueError(f"source path escapes checkout: {relative}")
     return path
 
 
 def source_bytes(repository, relative):
+    root = repository.resolve(strict=True)
     path = source_path(repository, relative)
     if os.name == "nt":
         from safari_windows_file import LockedDirectory
-        with LockedDirectory(repository, relative.parent) as directory:
+        with LockedDirectory(root, relative.parent) as directory:
             descriptor = directory.open_file(relative.name)
             try:
                 before = os.fstat(descriptor)
@@ -506,10 +507,12 @@ def source_bytes(repository, relative):
                 if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                         after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
                     raise ValueError(f"source path identity changed: {relative}")
+                if path.resolve(strict=True) != root / relative:
+                    raise ValueError(f"source path identity changed: {relative}")
                 return data
             finally:
                 os.close(descriptor)
-    directory = os.open(repository, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for part in relative.parts[:-1]:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -525,7 +528,12 @@ def source_bytes(repository, relative):
                 data = stream.read(MAX_FILE_BYTES + 1)
             if len(data) > MAX_FILE_BYTES:
                 raise ValueError(f"oversized diagnostic source: {relative}")
-            if path.resolve(strict=True) != path:
+            opened = os.fstat(descriptor)
+            current = os.lstat(path)
+            if (path.resolve(strict=True) != root / relative or
+                    (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) !=
+                    (current.st_dev, current.st_ino, current.st_size,
+                     current.st_mtime_ns)):
                 raise ValueError(f"source path identity changed: {relative}")
             return data
         finally:
