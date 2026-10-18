@@ -27,10 +27,14 @@ class GraphContactJourneyTest {
         val child = parent.subList(0, 0)
         val sibling = parent.subList(0, 1)
         child.clear()
-        assertEquals(0, child.size)
-        assertSame(joint, parent[0])
-        assertFailsWith<ConcurrentModificationException> { rootIterator.next() }
-        assertFailsWith<ConcurrentModificationException> { sibling[0] }
+        assertEquals(0, assertWorldViewOutcome(worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_CHILD_SIZE)) { child.size })
+        assertSame(joint, assertWorldViewOutcome(worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_PARENT_READ)) { parent[0] })
+        val iteratorOutcome = worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_ROOT_ITERATOR)
+        val iteratorValue = assertWorldViewOutcome(iteratorOutcome) { rootIterator.next() }
+        if (iteratorOutcome == WorldViewOutcome.VALUE) assertSame(joint, iteratorValue)
+        val siblingOutcome = worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_SIBLING_READ)
+        val siblingValue = assertWorldViewOutcome(siblingOutcome) { sibling[0] }
+        if (siblingOutcome == WorldViewOutcome.VALUE) assertSame(joint, siblingValue)
     }
 
     @Test

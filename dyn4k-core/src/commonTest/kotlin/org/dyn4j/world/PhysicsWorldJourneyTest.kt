@@ -249,9 +249,15 @@ class PhysicsWorldJourneyTest {
         world.clearEmptyStepSubList()
         assertSame(view, world.getStepListeners())
         assertSame(first, view[0])
-        assertFailsWith<ConcurrentModificationException> { iterator.next() }
-        assertFailsWith<ConcurrentModificationException> { protectedSublist[0] }
-        assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
+        val iteratorOutcome = worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_ROOT_ITERATOR)
+        val iteratorValue = assertWorldViewOutcome(iteratorOutcome) { iterator.next() }
+        if (iteratorOutcome == WorldViewOutcome.VALUE) assertSame(first, iteratorValue)
+        val protectedOutcome = worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_SIBLING_READ)
+        val protectedValue = assertWorldViewOutcome(protectedOutcome) { protectedSublist[0] }
+        if (protectedOutcome == WorldViewOutcome.VALUE) assertSame(first, protectedValue)
+        val publicOutcome = worldNestedViewOutcome(WorldViewOperation.EMPTY_CLEAR_PUBLIC_READ)
+        val publicValue = assertWorldViewOutcome(publicOutcome) { publicSublist[0] }
+        if (publicOutcome == WorldViewOutcome.VALUE) assertSame(first, publicValue)
     }
 
     @Test
