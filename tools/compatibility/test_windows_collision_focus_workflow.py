@@ -1,4 +1,5 @@
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -14,15 +15,146 @@ sys.path.insert(0, str(ROOT))
 from tools.compatibility import windows_collision_focus as focus
 
 
+FIXTURE_SHAPES = {
+    "CapsuleSlice": ("Capsule", "Slice"),
+    "CirclePolygon": ("Circle", "Polygon"),
+    "CircleSegment": ("Circle", "Segment"),
+    "CircleSlice": ("Circle", "Slice"),
+    "PolygonCapsule": ("Polygon", "Capsule"),
+    "PolygonPolygon": ("Polygon", "Polygon"),
+}
+EPA_SCHEMA = (
+    "index:edgeId:edgeA:edgeB:normalBefore:normalAfter:distance:support:"
+    "projection:delta:stop:equalDistanceEdgeIds:mirrorMatches"
+)
+
+
+def number(value):
+    value = float(value)
+    bits = struct.unpack(">Q", struct.pack(">d", value))[0]
+    if bits >= 1 << 63:
+        bits -= 1 << 64
+    return f"{value!r}@{bits}"
+
+
+def vector(x=0.0, y=0.0):
+    return f"{number(x)},{number(y)}"
+
+
+def shape(kind):
+    parts = [f"kind={kind}", f"center={vector()}", f"radius={number(1.0)}"]
+    if kind == "Circle":
+        parts.append(f"circle.radius={number(1.0)}")
+    elif kind == "Capsule":
+        parts.extend((f"capsule.length={number(1.0)}", f"capsule.capRadius={number(0.25)}",
+                      f"capsule.localFoci={vector(-0.25)};{vector(0.25)}",
+                      f"capsule.localAxis={number(1.0)},{number(0.0)}"))
+    elif kind == "Slice":
+        parts.extend((f"slice.radius={number(0.5)}", f"slice.theta={number(0.8)}",
+                      f"slice.circleCenter={vector()}",
+                      f"slice.rotation={number(1.0)},{number(0.0)}",
+                      f"slice.upperEdge=edge:0:0:{vector(0.0, 1.0)}:1:{vector(1.0, 0.0)}:0:{vector(0.0, 1.0)}:{vector(1.0, 0.0)}",
+                      f"slice.lowerEdge=edge:0:0:{vector(0.0, -1.0)}:1:{vector(1.0, 0.0)}:0:{vector(0.0, -1.0)}:{vector(1.0, 0.0)}"))
+    elif kind == "Segment":
+        parts.extend((f"segment.length={number(1.0)}",
+                      f"vertices={vector(-0.5)};{vector(0.5)}",
+                      f"normals={vector(1, 0)};{vector(0, 1)}"))
+    elif kind == "Polygon":
+        points = (vector(0, 0), vector(1, 0), vector(1, 1), vector(0, 1))
+        normals = (vector(0, -1), vector(1, 0), vector(0, 1), vector(-1, 0))
+        parts.extend((f"vertices={';'.join(points)}", f"normals={';'.join(normals)}"))
+    return "|".join(parts)
+
+
+def polygon_edges(kind):
+    if kind != "Polygon":
+        return "na"
+    return ";".join(":".join((str(index), number(1), number(0), number(0), number(1), number(1),
+                               number(1), number(1), f"{number(0)},{number(-1)}", number(1),
+                               vector(0, -1), vector(0, -1))) for index in range(4))
+
+
 def record(fixture, step, provider):
-    fields = (
-        "DYN4K_COLLISION_DIAGNOSTIC", "v2", f"provider={provider}",
-        f"fixture={fixture}", f"method=method{step % 3}",
-        f"phase=phase{step % 2}", f"order=order{step % 2}",
-        f"step={step}", f"algorithm=algorithm{step % 2}",
-        f"payload.raw={fixture}:{step}:0x1.fffffffffffffp-1",
-    )
-    return "\t".join(fields)
+    shape_a, shape_b = FIXTURE_SHAPES[fixture]
+    if step < 4:
+        algorithm = "gjk" if fixture not in ("PolygonCapsule", "PolygonPolygon") else "sat"
+        method = "detectGjk" if algorithm == "gjk" else "detectSat"
+        phase = "center" if step < 2 else "shifted"
+        order = "forward" if step % 2 == 0 else "reverse"
+    else:
+        slot = step - 4
+        phase = "center" if slot < 4 else "shifted"
+        algorithm = "gjk" if slot % 4 < 2 else "sat"
+        method = "getClipManifold"
+        order = "forward" if slot % 2 == 0 else "reverse"
+    if order == "reverse":
+        shape_a, shape_b = shape_b, shape_a
+    hit = step % 5 != 0
+    fields = {
+        "provider": provider, "fixture": fixture, "method": method, "phase": phase,
+        "order": order, "step": str(step), "algorithm": algorithm,
+        "a.transform": ",".join((number(1), number(-0.0), number(0), number(0), number(1), number(0))),
+        "b.transform": ",".join((number(1), number(-0.0), number(0), number(0), number(1), number(0))),
+        "a.center.local": vector(), "b.center.local": vector(),
+        "a.center.world": vector(), "b.center.world": vector(),
+        "hit": str(hit).lower(), "booleanHit": "na" if method == "getClipManifold" else str(hit).lower(),
+        "penetration.normal": vector(1, 0), "penetration.depth": number(0.5),
+        "selection": "satSourceReplay" if algorithm == "sat" else "epaSourceReplay" if hit else "unavailable",
+        "clipped": str(hit).lower() if method == "getClipManifold" else "na",
+        "manifold.normal": vector(1, 0) if method == "getClipManifold" else "na",
+        "manifold.count": "1" if method == "getClipManifold" and hit else "0" if method == "getClipManifold" else "na",
+        "a.shape.local": shape(shape_a), "b.shape.local": shape(shape_b),
+        "a.polygon.edgeArithmetic": polygon_edges(shape_a),
+        "b.polygon.edgeArithmetic": polygon_edges(shape_b),
+        "a.foci.world": "null", "b.foci.world": "null",
+        "a.axes.withB": "null", "b.axes.withA": "null",
+        "gjk.initial.centerDirection": vector(), "gjk.initial.effectiveDirection": vector(1, 0),
+        "clip.probe.feature.a": "na" if not hit else f"point:0:{vector(1, 0)}",
+        "clip.probe.feature.b": "na" if not hit else f"point:0:{vector(-1, 0)}",
+        "epa.replay.identity": "unobserved",
+        "epa.replay.simplex": ";".join((vector(1, 0), vector(-1, 0), vector(0, 1))) if algorithm == "gjk" and hit else "",
+        "epa.replay.iteration": "1" if algorithm == "gjk" and hit else "0",
+        "epa.replay.stop": "epsilon" if algorithm == "gjk" and hit else "notRun",
+        "epa.replay.epsilon": number(1e-8), "epa.replay.maxIterations": "100",
+        "epa.iteration.schema": EPA_SCHEMA,
+        "epa.iteration.records": "1:0:" + ":".join((
+            vector(1, 0), vector(-1, 0), vector(0, 1), vector(0, 1), number(1),
+            vector(1, 0), number(1), number(0), "epsilon", "0", "true"))
+            if algorithm == "gjk" and hit else "",
+        "epa.queue.reconstructedMatches": "true",
+        "epa.edge.a": vector(1, 0) if algorithm == "gjk" and hit else "na",
+        "epa.edge.b": vector(-1, 0) if algorithm == "gjk" and hit else "na",
+        "epa.edge.normal": vector(0, 1) if algorithm == "gjk" and hit else "na",
+        "epa.edge.distance": number(1) if algorithm == "gjk" and hit else "na",
+        "epa.terminal.support": vector(1, 0) if algorithm == "gjk" and hit else "na",
+        "epa.terminal.projection": number(1) if algorithm == "gjk" and hit else "na",
+        "epa.terminal.delta": number(0) if algorithm == "gjk" and hit else "na",
+        "epa.replay.normalMatchesResult": str(hit).lower() if algorithm == "gjk" and hit else "na",
+        "epa.replay.depthMatchesResult": str(hit).lower() if algorithm == "gjk" and hit else "na",
+    }
+    for index in range(6):
+        fields[f"support.{index}.direction"] = vector(1, 0)
+        fields[f"support.{index}.a"] = vector(1, 0)
+        fields[f"support.{index}.b.negated"] = vector(-1, 0)
+        fields[f"support.{index}.minkowski"] = vector(2, 0)
+    if algorithm == "sat":
+        fields.update({
+            "sat.replay.hit": str(hit).lower(), "sat.replay.matchesResult": "true",
+            "sat.candidates": f"0:0:{vector(1, 0)}:{number(0)},{number(1)}:{number(0)},{number(1)}:{number(1)}:false:false:na:na:{number(1)}:{vector(1, 0)}:true" if hit else
+                f"0:0:separated:{vector(1, 0)}:{number(0)},{number(1)}:{number(2)},{number(3)}",
+            "sat.winner.source": "a" if hit else "0", "sat.winner.index": "0",
+        })
+        if hit:
+            fields.update({
+                "sat.winner.preOrientation": vector(1, 0), "sat.winner.centerDot": number(1),
+                "sat.winner.orientationFlip": "false", "sat.winner.finalAxis": vector(1, 0),
+                "sat.winner.depth": number(1),
+            })
+    if method == "getClipManifold" and hit:
+        fields.update({"manifold.point.0.position": vector(), "manifold.point.0.depth": number(0.5),
+                       "manifold.point.0.id": "distance"})
+    return "\t".join(("DYN4K_COLLISION_DIAGNOSTIC", "v2") + tuple(
+        f"{key}={value}" for key, value in fields.items()))
 
 
 HISTORICAL_FAILURES = {
@@ -168,6 +300,11 @@ class WindowsCollisionFocusWorkflowContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             native_rows, java_rows = write_reports(directory)
+            java_fields = java_rows[0].split("\t")
+            depth_index = next(i for i, field in enumerate(java_fields)
+                               if field.startswith("penetration.depth="))
+            java_fields[depth_index] = f"penetration.depth={number(0.75)}"
+            java_rows[0] = "\t".join(java_fields)
             java_tsv = directory / "java.tsv"
             java_tsv.write_text("\n".join(java_rows) + "\n", encoding="utf-8")
             native_tsv = directory / "native.tsv"
@@ -186,6 +323,70 @@ class WindowsCollisionFocusWorkflowContractTest(unittest.TestCase):
                 if case.find("failure") is not None
             )
             self.assertEqual(9, failure_count, "keep the preserved original assertion failures visible")
+
+    def test_native_and_java_rows_require_complete_method_algorithm_schemas(self):
+        native_rows = [record(fixture, step, "dyn4k")
+                       for fixture in FIXTURE_SHAPES for step in range(12)]
+        java_rows = [record(fixture, step, "dyn4j-6.0.0")
+                     for fixture in FIXTURE_SHAPES for step in range(12)]
+        for rows, provider in ((native_rows, "dyn4k"), (java_rows, "dyn4j-6.0.0")):
+            with self.subTest(provider=provider):
+                self.assertEqual(72, len(focus._records(rows, provider, provider)[0]))
+                scenarios = (
+                    ("scalar", "a.shape.local", "fixture=CapsuleSlice"),
+                    ("sat", "sat.candidates", "algorithm=sat"),
+                    ("epa", "epa.iteration.records", "algorithm=gjk"),
+                )
+                for label, field, selector in scenarios:
+                    mutated = list(rows)
+                    index = next(i for i, row in enumerate(mutated) if selector in row)
+                    original_identity = tuple(
+                        part.split("=", 1)[1]
+                        for part in mutated[index].split("\t")[2:]
+                        if part.split("=", 1)[0] in focus.IDENTITY_FIELDS
+                    )
+                    mutated[index] = "\t".join(
+                        part for part in mutated[index].split("\t")
+                        if not part.startswith(field + "=")
+                    )
+                    mutated_identity = tuple(
+                        part.split("=", 1)[1]
+                        for part in mutated[index].split("\t")[2:]
+                        if part.split("=", 1)[0] in focus.IDENTITY_FIELDS
+                    )
+                    self.assertEqual(original_identity, mutated_identity)
+                    with self.subTest(missing=label), self.assertRaises(ValueError):
+                        focus._records(mutated, provider, provider)
+
+                mutated = list(rows)
+                first = mutated[0].split("\t")
+                original_identity = tuple(
+                    part.split("=", 1)[1]
+                    for part in first[2:]
+                    if part.split("=", 1)[0] in focus.IDENTITY_FIELDS
+                )
+                for index, part in enumerate(first):
+                    if part.startswith("a.transform="):
+                        key, values = part.split("=", 1)
+                        scalar, bits = values.split(",", 1)[0].split("@", 1)
+                        first[index] = f"{key}={scalar}@{int(bits) + 1}," + values.split(",", 1)[1]
+                        break
+                mutated[0] = "\t".join(first)
+                mutated_identity = tuple(
+                    part.split("=", 1)[1]
+                    for part in first[2:]
+                    if part.split("=", 1)[0] in focus.IDENTITY_FIELDS
+                )
+                self.assertEqual(original_identity, mutated_identity)
+                with self.subTest(malformed="numeric-bits"), self.assertRaises(ValueError):
+                    focus._records(mutated, provider, provider)
+
+                duplicate = list(rows)
+                duplicate[0] += "\t" + next(
+                    part for part in duplicate[0].split("\t") if part.startswith("a.shape.local=")
+                )
+                with self.subTest(malformed="duplicate-key"), self.assertRaises(ValueError):
+                    focus._records(duplicate, provider, provider)
 
     def test_actual_workflow_validator_exits_nonzero_when_a_report_is_missing(self):
         with tempfile.TemporaryDirectory() as temporary:
