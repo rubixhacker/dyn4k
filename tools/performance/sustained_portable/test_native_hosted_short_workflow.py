@@ -30,17 +30,17 @@ def run_expression_upper_bounds(source):
     lines = source.splitlines()
     index = 0
     while index < len(lines):
-        match = re.match(r"^(\s*)run:\s*(.*)$", lines[index])
+        match = re.match(r"^( *)(- +)?run:[ \t]*(.*)$", lines[index])
         if match is None:
             index += 1
             continue
         line_number = index + 1
-        value = match.group(2)
+        value = match.group(3)
         if not value:
             index += 1
             continue
         if value.startswith(("|", ">")):
-            key_indent = len(match.group(1))
+            key_indent = len(match.group(1)) + len(match.group(2) or "")
             block = []
             index += 1
             while index < len(lines):
@@ -49,15 +49,36 @@ def run_expression_upper_bounds(source):
                     break
                 block.append(line)
                 index += 1
-            content_indent = min((len(line) - len(line.lstrip())
-                                  for line in block if line.strip()), default=key_indent + 1)
-            yield line_number, sum(len(line[content_indent:]) + 1 for line in block)
+            conservative_content_indent = key_indent + 1
+            yield line_number, sum(len(line[conservative_content_indent:]) + 1
+                                   for line in block)
         else:
             yield line_number, len(value)
             index += 1
 
 
 class WorkflowExpressionLimit(unittest.TestCase):
+    def test_inline_run_and_block_scalar_variants_are_bounded(self):
+        cases = (
+            ("- run: |", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: |-", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: |+", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: >", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: >-", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: >+", "          ", "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: |2-", "            ", "x" * (RUN_EXPRESSION_LIMIT - 1)),
+            ("- name: named\n        run: |+", "          ",
+             "x" * RUN_EXPRESSION_LIMIT),
+            ("- run: " + "x" * RUN_EXPRESSION_LIMIT, "", ""),
+        )
+        for step, indent, payload in cases:
+            with self.subTest(step=step[:32]):
+                source = ("name: adverse\njobs:\n  control:\n    runs-on: ubuntu-latest\n"
+                          "    steps:\n      " + step + "\n" + indent + payload + "\n")
+                bounds = list(run_expression_upper_bounds(source))
+                self.assertEqual(len(bounds), 1)
+                self.assertGreaterEqual(bounds[0][1], RUN_EXPRESSION_LIMIT)
+
     def test_native_run_is_below_limit_and_all_workflows_are_audited(self):
         workflows = sorted(WORKFLOW.parent.glob("*.yml")) + sorted(WORKFLOW.parent.glob("*.yaml"))
         self.assertTrue(workflows)
@@ -70,7 +91,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((workflow.name, line, upper_bound))
-        self.assertGreater(checked, 0)
+        self.assertGreaterEqual(checked, 67)
         self.assertEqual(violations, [])
 
 
