@@ -2,10 +2,12 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import capture
@@ -40,12 +42,34 @@ def public_upload_roots():
     }
 
 
-def path_swap_control(receipt=None):
+def path_swap_control(receipt=None, control_image=None, control_sha256=None,
+                      control_source_sha=None):
     if receipt is None:
         receipt = {}
-    if sys.platform == "win32":
-        source = Path(os.environ["SystemRoot"]) / "System32" / "ping.exe"
-        arguments = ["-t", "127.0.0.1"]
+    task_owned = control_image is not None
+    if task_owned:
+        if not (isinstance(control_sha256, str) and
+                re.fullmatch(r"[0-9a-f]{64}", control_sha256) and
+                isinstance(control_source_sha, str) and
+                re.fullmatch(r"[0-9a-f]{40}", control_source_sha)):
+            raise AdverseStepError("select_control_image", ValueError(
+                "task-owned control requires an exact executable and source SHA"))
+        source = checked("select_control_image", lambda: Path(control_image).resolve(strict=True))
+        expected_name = ("dyn4k-performance-portable.exe" if sys.platform == "win32"
+                         else "dyn4k-performance-portable.kexe")
+        if source.name != expected_name or not source.is_file():
+            raise AdverseStepError("select_control_image", ValueError(
+                "task-owned control requires the selected Native executable"))
+        receipt.update({"control_image_source": str(source),
+                        "control_source_sha": control_source_sha,
+                        "selected_inventory_sha256": control_sha256})
+        if checked("validate_image_hash", lambda: capture.digest(source)) != control_sha256:
+            raise AdverseStepError("validate_image_hash", ValueError(
+                "selected Native executable differs from build inventory"))
+        arguments = ["--image-control-hold", control_source_sha]
+    elif sys.platform == "win32":
+        raise AdverseStepError("select_control_image", ValueError(
+            "Windows path swap requires the inventory-selected Native executable"))
     else:
         source = Path("/bin/sleep")
         arguments = ["10"]
@@ -62,35 +86,75 @@ def path_swap_control(receipt=None):
         if "overlap" in relations.values():
             raise AdverseStepError("validate_private_directory", ValueError(
                 "private executable directory overlaps a public upload root"))
-        executable = private / source.name
-        moved = private / ("original-" + source.name)
+        if task_owned:
+            selected_dir = private / "selected"
+            moved_dir = private / "original"
+            selected_dir.mkdir()
+            executable = selected_dir / source.name
+            moved = moved_dir / source.name
+            receipt["swap_method"] = "directory_rename"
+        else:
+            executable = private / source.name
+            moved = private / ("original-" + source.name)
+            receipt["swap_method"] = "file_rename"
         checked("copy_image", lambda: shutil.copyfile(source, executable))
         if os.name == "posix":
             checked("make_executable", lambda: os.chmod(executable, 0o700))
         original_sha = checked("hash_image", lambda: capture.digest(executable))
+        if task_owned and original_sha != control_sha256:
+            raise AdverseStepError("verify_private_copy", ValueError(
+                "private Native executable copy differs from build inventory"))
         receipt.update({"host": sys.platform, "control_image_source": str(source),
                         "original_sha256": original_sha,
                         "control_image_size": executable.stat().st_size,
                         "swap": "unattempted",
                         "mapped_image_identity": "unobserved"})
         process = checked("launch_image", lambda: subprocess.Popen(
-            [str(executable), *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            [str(executable), *arguments], stdin=subprocess.PIPE if task_owned else None,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE))
         receipt["pid"] = process.pid
         try:
-            time.sleep(0.1)
+            if task_owned:
+                ready = {}
+                def read_ready():
+                    ready["line"] = process.stdout.readline()
+                reader = threading.Thread(target=read_ready, daemon=True)
+                reader.start()
+                reader.join(timeout=3)
+                if reader.is_alive():
+                    raise AdverseStepError("wait_control_ready", ValueError(
+                        "Native control did not report readiness before deadline"))
+                expected_ready = f"DYN4K_IMAGE_CONTROL_READY\t{control_source_sha}\n".encode()
+                if ready.get("line") != expected_ready:
+                    raise AdverseStepError("wait_control_ready", ValueError(
+                        "Native control readiness differs from selected source"))
+                receipt["control_ready"] = "source_matched"
+            else:
+                time.sleep(0.1)
             if process.poll() is not None:
                 raise ValueError("adverse executable exited before path swap")
             receipt["before"] = checked("observe_before", lambda:
                                         capture.observed_process_image(process.pid, executable))
             checked("validate_before", lambda:
                     capture.require_process_image(receipt["before"], original_sha))
-            try:
-                os.replace(executable, moved)
-                executable.write_bytes(b"DYN4K_PATH_SWAP_DECOY")
-                receipt["swap"] = "applied"
-            except OSError as error:
-                receipt["swap"] = "blocked_by_os"
-                receipt["swap_error"] = str(error)
+            if task_owned:
+                try:
+                    os.replace(selected_dir, moved_dir)
+                except OSError as error:
+                    receipt["swap"] = "blocked_by_os"
+                    receipt["swap_error"] = str(error)
+                else:
+                    checked("create_decoy_directory", selected_dir.mkdir)
+                    checked("write_decoy", lambda: executable.write_bytes(b"DYN4K_PATH_SWAP_DECOY"))
+                    receipt["swap"] = "applied"
+            else:
+                try:
+                    os.replace(executable, moved)
+                    executable.write_bytes(b"DYN4K_PATH_SWAP_DECOY")
+                    receipt["swap"] = "applied"
+                except OSError as error:
+                    receipt["swap"] = "blocked_by_os"
+                    receipt["swap_error"] = str(error)
             selected = moved if receipt["swap"] == "applied" else executable
             receipt["after"] = checked("observe_after", lambda:
                                        capture.observed_process_image(process.pid, selected))
@@ -132,13 +196,17 @@ def path_swap_control(receipt=None):
 def main():
     parser = argparse.ArgumentParser(description="Probe a live host image path swap")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--control-image", type=Path)
+    parser.add_argument("--control-sha256")
+    parser.add_argument("--control-source-sha")
     args = parser.parse_args()
     if not args.output.is_absolute() or args.output.exists():
         parser.error("output must be a new absolute path")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     partial = {}
     try:
-        result = path_swap_control(partial)
+        result = path_swap_control(partial, args.control_image, args.control_sha256,
+                                   args.control_source_sha)
     except (OSError, ValueError) as error:
         result = {**partial, "host": sys.platform, "swap": "unavailable", "error": str(error),
                   "mapped_image_identity": "unobserved"}
@@ -149,7 +217,8 @@ def main():
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
     if result["mapped_image_identity"] != "matched_original" or result.get("stale_pid") != "rejected" or \
-            result["swap"] not in ("applied", "blocked_by_os"):
+            result["swap"] not in (("applied",) if args.control_image else
+                                   ("applied", "blocked_by_os")):
         raise SystemExit(1)
 
 

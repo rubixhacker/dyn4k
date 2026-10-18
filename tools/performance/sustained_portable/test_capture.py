@@ -11,6 +11,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -322,6 +323,38 @@ class PortableCaptureTest(unittest.TestCase):
                           detail["relocation_directory_size"]), (0, 0))
         self.assertEqual(detail["selected_image_sha256"], hashlib.sha256(image).hexdigest())
         self.assertEqual(detail["parsed_relocation_byte_count"], 0)
+        self.assertEqual(detail["window_relocation_rvas"], [])
+
+    def test_f666_fothk_jump_mismatch_is_not_accepted_as_base_relocation(self):
+        image = self.windows_pe_fixture()
+        image.extend(b"\x00" * (0x5000 - len(image)))
+        struct.pack_into("<H", image, 0x86, 2)
+        struct.pack_into("<I", image, 0x98 + 56, 0x6000)
+        image[0x1b0:0x1b5] = b"fothk"
+        struct.pack_into("<IIII", image, 0x1b8, 4096, 0x4000, 4096, 0x4000)
+        struct.pack_into("<I", image, 0x1b0 + 36, 0x60000020)
+        image[0x4000:0x5000] = b"\xcc" * 4096
+        image[0x4010:0x4015] = bytes.fromhex("e99bfbffff")
+        mapped_fothk = bytearray(image[0x4000:0x5000])
+        mapped_fothk[0x10:0x15] = bytes.fromhex("e9ab800000")
+        layout = host_image.pe_executable_sections(image)
+        base = 0x140000000
+        def read(address, size):
+            if address == base:
+                return bytes(image[:size])
+            if address == base + 0x4000:
+                return bytes(mapped_fothk[:size])
+            return bytes(image[0x200:0x200 + size])
+        with self.assertRaises(host_image.PECodeMismatch) as mismatch:
+            host_image.compare_pe_code(image, layout, read, base)
+        detail = mismatch.exception.detail
+        self.assertEqual((detail["section"], detail["rva"], detail["file_offset"]),
+                         ("fothk", 0x4011, 0x4011))
+        self.assertEqual((detail["selected_byte"], detail["mapped_byte"]), (0x9b, 0xab))
+        self.assertEqual(detail["selected_window_hex"],
+                         "cccccccccccccce99bfbffffcccccccccc")
+        self.assertEqual(detail["mapped_window_hex"],
+                         "cccccccccccccce9ab800000cccccccccc")
         self.assertEqual(detail["window_relocation_rvas"], [])
         self.assertNotEqual(detail["selected_section_sha256"],
                             detail["mapped_section_sha256"])
@@ -939,14 +972,18 @@ class PortableCaptureTest(unittest.TestCase):
 
         with self.assertRaises(host_image.PECodeMismatch) as mismatch:
             host_image.compare_pe_code(image, layout, read, base)
+        source_sha = "a" * 40
         process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
+                                  stdout=io.BytesIO(b"DYN4K_IMAGE_CONTROL_READY\t" +
+                                                    source_sha.encode() + b"\n"),
                                   terminate=mock.Mock(), communicate=mock.Mock(return_value=(b"", b"")),
                                   returncode=1)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "private" / "System32" / "ping.exe"
+            source = root / "build" / "dyn4k-performance-portable.exe"
             source.parent.mkdir(parents=True)
             source.write_bytes(image)
+            image_sha = hashlib.sha256(image).hexdigest()
             artifact = root / "runner" / "performance-native-host-short"
             output = artifact / "setup" / "path-swap.json"
             private_home = root / "private-home"
@@ -955,21 +992,24 @@ class PortableCaptureTest(unittest.TestCase):
 
             def launch(command, **kwargs):
                 selected = Path(command[0])
+                self.assertEqual(command[1:], ["--image-control-hold", source_sha])
                 self.assertFalse(selected.is_relative_to(artifact))
                 self.assertEqual(selected.read_bytes(), image)
                 launched.append(selected)
                 return process
 
-            with mock.patch.dict(os.environ, {"SystemRoot": str(root / "private")}), \
-                    mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
-                                                 "GITHUB_WORKSPACE": str(root / "workspace")}), \
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                              "GITHUB_WORKSPACE": str(root / "workspace")}), \
                     mock.patch.object(Path, "home", return_value=private_home), \
                     mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
                     mock.patch.object(host_image_adverse.subprocess, "Popen", side_effect=launch), \
                     mock.patch.object(host_image_adverse.time, "sleep"), \
                     mock.patch.object(capture, "observed_process_image",
                                       side_effect=mismatch.exception), \
-                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output)]), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output),
+                                                    "--control-image", str(source),
+                                                    "--control-sha256", image_sha,
+                                                    "--control-source-sha", source_sha]), \
                     redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     host_image_adverse.main()
@@ -997,6 +1037,190 @@ class PortableCaptureTest(unittest.TestCase):
             process.terminate.assert_called_once()
             process.communicate.assert_called_once_with(timeout=3)
 
+    def test_task_owned_image_control_applies_swap_and_rejects_stale_pid(self):
+        source_sha = "a" * 40
+        image = self.windows_pe_fixture()
+        image_sha = hashlib.sha256(image).hexdigest()
+        process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
+                                  stdout=io.BytesIO(b"DYN4K_IMAGE_CONTROL_READY\t" +
+                                                    source_sha.encode() + b"\n"),
+                                  terminate=mock.Mock(),
+                                  communicate=mock.Mock(return_value=(b"", b"")), returncode=1)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "build" / "dyn4k-performance-portable.exe"
+            source.parent.mkdir()
+            source.write_bytes(image)
+            artifact = root / "runner" / "performance-native-host-short"
+            output = artifact / "setup" / "path-swap.json"
+            private_home = root / "private-home"
+            private_home.mkdir()
+            observed = []
+            def observe(pid, selected):
+                observed.append((pid, selected))
+                if len(observed) == 3:
+                    raise OSError("stale PID")
+                return {"identity_kind": "mapped_executable_code",
+                        "method": "ReadProcessMemory_main_PE_code", "sha256": image_sha,
+                        "mapped_code_sha256": "b" * 64, "matched_code_bytes": 8192,
+                        "path": str(private_home / "diagnostic"), "path_error": None}
+            def launch(command, **kwargs):
+                self.assertEqual(command[1:], ["--image-control-hold", source_sha])
+                self.assertEqual(kwargs["stdin"], subprocess.PIPE)
+                self.assertEqual(Path(command[0]).read_bytes(), image)
+                self.assertFalse(Path(command[0]).is_relative_to(artifact))
+                return process
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                              "GITHUB_WORKSPACE": str(root / "workspace")}), \
+                    mock.patch.object(Path, "home", return_value=private_home), \
+                    mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
+                    mock.patch.object(host_image_adverse.subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(capture, "observed_process_image", side_effect=observe), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output),
+                                                    "--control-image", str(source),
+                                                    "--control-sha256", image_sha,
+                                                    "--control-source-sha", source_sha]), \
+                    redirect_stdout(io.StringIO()):
+                host_image_adverse.main()
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["swap"], "applied")
+            self.assertEqual(receipt["mapped_image_identity"], "matched_original")
+            self.assertEqual(receipt["stale_pid"], "rejected")
+            self.assertEqual(receipt["control_image_source"], str(source))
+            self.assertEqual(receipt["original_sha256"], image_sha)
+            self.assertEqual(len(observed), 3)
+            self.assertFalse(any(p.read_bytes() == image for p in artifact.rglob("*") if p.is_file()))
+            process.terminate.assert_called_once()
+
+    def test_task_owned_image_control_rejects_wrong_inventory_hash_before_launch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "build" / "dyn4k-performance-portable.exe"
+            source.parent.mkdir()
+            source.write_bytes(self.windows_pe_fixture())
+            output = root / "runner" / "performance-native-host-short" / "setup" / "path-swap.json"
+            with mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
+                    mock.patch.object(host_image_adverse.subprocess, "Popen",
+                                      side_effect=AssertionError("must not launch")), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output),
+                                                    "--control-image", str(source),
+                                                    "--control-sha256", "0" * 64,
+                                                    "--control-source-sha", "a" * 40]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    host_image_adverse.main()
+            self.assertEqual(failure.exception.code, 1)
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["error_stage"], "validate_image_hash")
+            self.assertEqual(receipt["mapped_image_identity"], "unobserved")
+            self.assertFalse(any(p.read_bytes() == source.read_bytes()
+                                 for p in output.parents[1].rglob("*") if p.is_file()))
+
+    def test_task_owned_image_control_rejects_wrong_live_image_and_stale_pid(self):
+        image = self.windows_pe_fixture()
+        image_sha = hashlib.sha256(image).hexdigest()
+        source_sha = "a" * 40
+        for failure_kind in ("wrong_live_image", "stale_pid", "blocked_swap", "wrong_ready_source"):
+            with self.subTest(failure_kind=failure_kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / "build" / "dyn4k-performance-portable.exe"
+                source.parent.mkdir()
+                source.write_bytes(image)
+                output = root / "runner" / "performance-native-host-short" / "setup" / "path-swap.json"
+                home = root / "private-home"
+                home.mkdir()
+                ready_source = "0" * 40 if failure_kind == "wrong_ready_source" else source_sha
+                process = SimpleNamespace(pid=17, poll=mock.Mock(return_value=None),
+                                          stdout=io.BytesIO(b"DYN4K_IMAGE_CONTROL_READY\t" +
+                                                            ready_source.encode() + b"\n"),
+                                          terminate=mock.Mock(),
+                                          communicate=mock.Mock(return_value=(b"", b"")),
+                                          returncode=1)
+                observations = 0
+                def observe(pid, selected):
+                    nonlocal observations
+                    observations += 1
+                    if observations == 3 and failure_kind != "stale_pid":
+                        raise OSError("stale PID")
+                    return {"identity_kind": "mapped_executable_code",
+                            "method": "ReadProcessMemory_main_PE_code",
+                            "sha256": ("0" * 64 if observations == 2 and
+                                       failure_kind == "wrong_live_image" else image_sha),
+                            "mapped_code_sha256": "b" * 64,
+                            "matched_code_bytes": 8192, "path": None,
+                            "path_error": "diagnostic path denied"}
+                replace = (mock.patch.object(host_image_adverse.os, "replace",
+                                             side_effect=PermissionError("sharing denied"))
+                           if failure_kind == "blocked_swap" else mock.patch.object(
+                               host_image_adverse.os, "replace", wraps=os.replace))
+                with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                                  "GITHUB_WORKSPACE": str(root / "workspace")}), \
+                        mock.patch.object(Path, "home", return_value=home), \
+                        mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
+                        mock.patch.object(host_image_adverse.subprocess, "Popen", return_value=process), \
+                        mock.patch.object(capture, "observed_process_image", side_effect=observe), \
+                        replace, \
+                        mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output),
+                                                        "--control-image", str(source),
+                                                        "--control-sha256", image_sha,
+                                                        "--control-source-sha", source_sha]), \
+                        redirect_stdout(io.StringIO()):
+                    with self.assertRaises(SystemExit) as failure:
+                        host_image_adverse.main()
+                self.assertEqual(failure.exception.code, 1)
+                receipt = json.loads(output.read_text())
+                if failure_kind == "wrong_live_image":
+                    self.assertEqual(receipt["mapped_image_identity"], "mismatched")
+                elif failure_kind == "stale_pid":
+                    self.assertEqual(receipt["stale_pid"], "incorrectly_observed")
+                elif failure_kind == "blocked_swap":
+                    self.assertEqual(receipt["swap"], "blocked_by_os")
+                else:
+                    self.assertEqual(receipt["error_stage"], "wait_control_ready")
+                process.terminate.assert_called_once()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bounded real child cleanup")
+    def test_task_owned_image_control_times_out_without_ready_child(self):
+        image = self.windows_pe_fixture()
+        source_sha = "a" * 40
+        launched = []
+        original_popen = host_image_adverse.subprocess.Popen
+        def launch(*_args, **_kwargs):
+            child = original_popen(["/bin/sleep", "10"], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            launched.append(child)
+            return child
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "build" / "dyn4k-performance-portable.exe"
+            source.parent.mkdir()
+            source.write_bytes(image)
+            output = root / "runner" / "performance-native-host-short" / "setup" / "path-swap.json"
+            home = root / "private-home"
+            home.mkdir()
+            started = time.monotonic()
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root / "runner"),
+                                              "GITHUB_WORKSPACE": str(root / "workspace")}), \
+                    mock.patch.object(Path, "home", return_value=home), \
+                    mock.patch.object(host_image_adverse.sys, "platform", "win32"), \
+                    mock.patch.object(host_image_adverse.subprocess, "Popen", side_effect=launch), \
+                    mock.patch.object(capture, "observed_process_image",
+                                      side_effect=OSError("stale PID")), \
+                    mock.patch.object(sys, "argv", ["host_image_adverse.py", "--output", str(output),
+                                                    "--control-image", str(source),
+                                                    "--control-sha256", hashlib.sha256(image).hexdigest(),
+                                                    "--control-source-sha", source_sha]), \
+                    redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    host_image_adverse.main()
+            self.assertEqual(failure.exception.code, 1)
+            self.assertLess(time.monotonic() - started, 5)
+            receipt = json.loads(output.read_text())
+            self.assertEqual(receipt["error_stage"], "wait_control_ready")
+            self.assertEqual(receipt["stale_pid"], "rejected")
+            self.assertEqual(len(launched), 1)
+            self.assertIsNotNone(launched[0].poll())
+
     def test_windows_path_swap_rejects_both_upload_roots_before_interrupted_copy(self):
         code = "\n".join((
             "import os, sys",
@@ -1007,7 +1231,9 @@ class PortableCaptureTest(unittest.TestCase):
             "host_image_adverse.sys.platform = 'win32'",
             "host_image_adverse.subprocess.Popen = lambda *a, **k: os._exit(77)",
             "with mock.patch.object(Path, 'home', return_value=Path(sys.argv[3])):",
-            "    sys.argv = ['host_image_adverse.py', '--output', sys.argv[2]]",
+            "    sys.argv = ['host_image_adverse.py', '--output', sys.argv[2],",
+            "                '--control-image', sys.argv[4], '--control-sha256', sys.argv[5],",
+            "                '--control-source-sha', 'a' * 40]",
             "    host_image_adverse.main()",
         ))
         cases = [("native_host_evidence", False), ("staging_repository", False)]
@@ -1017,10 +1243,11 @@ class PortableCaptureTest(unittest.TestCase):
             with self.subTest(selected_root=selected_root, via_symlink=via_symlink), \
                     tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
-                source = root / "system" / "System32" / "ping.exe"
+                source = root / "build" / "dyn4k-performance-portable.exe"
                 source.parent.mkdir(parents=True)
                 image = b"MZ" + b"synthetic-control" * 200
                 source.write_bytes(image)
+                image_sha = hashlib.sha256(image).hexdigest()
                 evidence = root / "runner" / "performance-native-host-short"
                 staging = root / "workspace" / "build" / "staging-repository"
                 evidence.mkdir(parents=True)
@@ -1032,12 +1259,12 @@ class PortableCaptureTest(unittest.TestCase):
                     home = root / "home-link"
                     home.symlink_to(roots[selected_root], target_is_directory=True)
                 environment = {**os.environ, "HOME": str(home),
-                               "SystemRoot": str(root / "system"),
                                "RUNNER_TEMP": str(root / "runner"),
                                "GITHUB_WORKSPACE": str(root / "workspace"),
                                "GITHUB_ACTIONS": "true"}
                 run = subprocess.run([sys.executable, "-B", "-c", code,
-                                      str(Path(__file__).parent), str(output), str(home)],
+                                      str(Path(__file__).parent), str(output), str(home),
+                                      str(source), image_sha],
                                      env=environment, capture_output=True, timeout=10)
                 self.assertEqual(run.returncode, 1, run.stderr.decode(errors="replace"))
                 self.assertTrue(output.exists(), run.stderr.decode(errors="replace"))

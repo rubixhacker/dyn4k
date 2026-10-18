@@ -23,6 +23,19 @@ route = {"source_sha": sha, "target": target, "build": build,
          "qualification": "unpassed", "commands": {}, "scenarios": {},
          "memory_scenarios": {}}
 
+def path_swap_command(root, output, target, selected, sha):
+    command = [sys.executable, "-B",
+               root / "tools/performance/sustained_portable/host_image_adverse.py",
+               "--output", output]
+    if target == "mingwX64":
+        harness = Path(selected["harness"])
+        expected = selected["bundle_sha256"].get(harness.name)
+        if not expected:
+            raise ValueError("inventory executable hash is missing")
+        command.extend(["--control-image", harness, "--control-sha256", expected,
+                        "--control-source-sha", sha])
+    return command
+
 def process_rows():
     listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,stat="],
                              capture_output=True, text=True, timeout=5, check=True)
@@ -260,9 +273,8 @@ try:
         "staging_repository": str(staging), "staging_uri": repository_uri,
     }, indent=2) + "\n")
 
-    image_control, _, _ = execute("setup/path-swap-command", [sys.executable, "-B",
-        root / "tools/performance/sustained_portable/host_image_adverse.py",
-        "--output", evidence / "setup/path-swap.json"], 45)
+    image_control, _, _ = execute("setup/path-swap-command", path_swap_command(
+        root, evidence / "setup/path-swap.json", target, selected, sha), 45)
     route["path_swap_control_passed"] = image_control
     for api in ("direct_kotlin", "compatibility"):
         for mode in ("timing", "memory"):

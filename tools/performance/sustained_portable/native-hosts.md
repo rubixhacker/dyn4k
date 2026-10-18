@@ -139,7 +139,11 @@ Repeat with the compatibility scenario and another new archive. Select
 host and retain its JSON receipt:
 
 ```powershell
+$selected = Get-Content -Raw $inventory | ConvertFrom-Json
 python -B tools/performance/sustained_portable/host_image_adverse.py `
+  --control-image $selected.harness `
+  --control-sha256 $selected.bundle_sha256.'dyn4k-performance-portable.exe' `
+  --control-source-sha $selected.source_sha `
   --output 'C:\absolute\new\archive\windows-path-swap.json'
 ```
 
@@ -152,15 +156,16 @@ base. Every other header byte must match the selected executable.
 `QueryFullProcessImageNameW` supplies diagnostic path metadata only;
 failure records `path: null` and `path_error` after the live code comparison.
 The receipt records both the selected file SHA-256 and mapped code hash; it
-does not call the path digest mapped bytes. The path-swap control records an
-OS sharing denial when Windows prevents rename and still requires a matching
-live code observation and a rejected stale PID. A failed module or memory
-read remains unpassed. Hosted Windows execution must establish whether this
-probe succeeds for the Kotlin/Native executable on the selected runner.
-The path-swap child is a copied `System32\ping.exe`; Python only runs the
-control script. It exercises a different PE from the staged dyn4k executable.
-The executable copy stays in a private temporary home directory until the
-child exits. On the hosted route, the control resolves this directory against
+does not call the path digest mapped bytes. The Windows path-swap child is the
+inventory-selected dyn4k Native executable. Its hold command checks the linked
+source SHA, reports readiness, and stays live while the helper compares mapped
+code. The helper verifies the inventory executable SHA before and after
+copying it to a private home directory. It renames the containing directory
+and writes a decoy executable at the old path. Only an applied swap, matching
+mapped image, and rejected stale PID pass. A sharing denial, failed module
+read, or changed code stays unpassed. Hosted Windows execution must establish
+whether this control succeeds on the selected runner.
+The hosted control resolves its private directory against
 both always-uploaded roots: the Native host evidence tree and the staged
 repository. It refuses overlap before copying and records the failed relation
 in JSON. Missing hosted roots or an unavailable home also leave a failed JSON
@@ -170,6 +175,10 @@ metadata; the first unmatched RVA and file offset; bounded selected and mapped
 byte windows; load bases; section hashes; and cleanup status. The mismatch
 still fails the control. A runner investigation must use this bounded evidence
 before changing acceptance.
+The prior `System32\ping.exe` control differed in executable `fothk` code at
+RVA `0x4011` in both retained f666 Windows runs. That byte is outside the
+parsed base relocations. Its cause has not been established from the bounded
+receipt, so the observer does not normalize it or accept that image.
 
 ## macOS ARM64 hosted runner
 

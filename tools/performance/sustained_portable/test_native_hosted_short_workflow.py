@@ -277,6 +277,27 @@ class HostedRawFileContract(unittest.TestCase):
         exec(compile(ast.Module(body=functions, type_ignores=[]),
                      str(RUNNER), "exec"), self.scope)
 
+    def test_windows_image_control_uses_exact_inventory_executable(self):
+        tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "path_swap_command")
+        scope = {"Path": Path, "sys": sys}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(RUNNER), "exec"), scope)
+        root = WORKFLOW.parents[2]
+        harness = Path("/selected/dyn4k-performance-portable.exe")
+        selected = {"harness": str(harness),
+                    "bundle_sha256": {harness.name: "a" * 64}}
+        output = Path("/evidence/setup/path-swap.json")
+        command = scope["path_swap_command"](root, output, "mingwX64", selected, "b" * 40)
+        self.assertEqual(command[-6:], ["--control-image", harness, "--control-sha256",
+                                        "a" * 64, "--control-source-sha", "b" * 40])
+        self.assertNotIn("ping.exe", " ".join(map(str, command)))
+        self.assertEqual(scope["path_swap_command"](root, output, "macosArm64", selected,
+                                                     "b" * 40)[-2:], ["--output", output])
+        with self.assertRaisesRegex(ValueError, "inventory executable hash"):
+            scope["path_swap_command"](root, output, "mingwX64",
+                                       {**selected, "bundle_sha256": {}}, "b" * 40)
+
     def test_growing_zero_size_file_has_bounded_incomplete_hash(self):
         growing = GrowingFile()
         result = self.scope["raw_file"](growing)
