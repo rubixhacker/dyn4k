@@ -1,5 +1,6 @@
 import copy
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                make_capture_receipt,
                                verify_capture_receipt)
 from test_actual_arithmetic import fixture, xml_for
+from test_rotation_marker import bits
 
 
 class CaptureReceiptTest(unittest.TestCase):
@@ -75,6 +77,84 @@ class CaptureReceiptTest(unittest.TestCase):
         self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1)
 
+    def test_geometry_without_accepted_toi_does_not_require_reset_hook_execution(self):
+        _, files, runtime = self.fixture()
+        files["worker_class_load"] = b"".join(
+            line for line in files["worker_class_load"].splitlines(keepends=True)
+            if b"org.dyn4j.world.ToiAcceptedResetTap " not in line
+        )
+        receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        result = verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                        ["geometry-boundary-s0-o0-d0"], runtime)
+        self.assertEqual(result["selected_resets"], 0)
+        self.assertEqual(len(receipt["worker_class_load_sources"]), 4)
+
+    def test_capture_slot_must_be_loaded_from_staged_engine(self):
+        _, files, runtime = self.fixture()
+        files["worker_class_load"] = b"".join(
+            line for line in files["worker_class_load"].splitlines(keepends=True)
+            if b"org.dyn4j.geometry.RotationCaptureSlot " not in line
+        )
+        with self.assertRaises(CaptureRejected):
+            make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                 ["geometry-boundary-s0-o0-d0"], runtime)
+
+    def test_accepted_reset_requires_executed_reset_hook_class(self):
+        _, files, runtime = self.fixture()
+        rows = fixture()
+        identity = [bits(1.0), bits(0.0)]
+        inputs = json.loads(rows[0].split(" ", 1)[1])
+        inputs["setup"]["bodies"].append({"id": "b1"})
+        inputs["initial"]["bodies"].append({
+            "id": "b1", "transform": {"getCost": 1.0, "getSint": 0.0}})
+        rows[0] = "NUMERICAL_JSON " + json.dumps(inputs)
+        state = json.loads(rows[2].split(" ", 1)[1])
+        state["state"]["bodies"].append({
+            "id": "b1", "transform": {"getCost": 1.0, "getSint": 0.0}})
+        state["order"] = 1
+        rows[2] = "NUMERICAL_JSON " + json.dumps(state)
+        body_step = json.loads(rows[3].split(" ", 1)[1])
+        body_step["bodies"].append({"body_id": "b1", "calls": 0,
+                                    "pre": identity, "post": identity})
+        rows[3] = "PROSPECTIVE_BINDING_JSON " + json.dumps(body_step)
+        operation = json.loads(rows[1].split(" ", 1)[1])
+        operation.update(kind="lerp-reset", source="direct", raw=[None, None],
+                         trig=identity, post=identity, angle_bits=bits(0.0),
+                         alpha_bits=bits(0.5), start_angle_bits=bits(0.0),
+                         end_angle_bits=bits(0.0), diff_bits=bits(0.0),
+                         start=identity, end=identity)
+        rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+        rows.insert(1, "NUMERICAL_JSON " + json.dumps({
+            "kind": "event", "id": "geometry-boundary-s0-o0-d0", "step": 1,
+            "order": 0, "name": "toi.payload.bodies",
+            "payload": {"bodies": [0, 1], "time": 0.5}}))
+        rows.insert(3, "PROSPECTIVE_BINDING_JSON " + json.dumps({
+            "kind": "toi-accepted", "case_id": "geometry-boundary-s0-o0-d0",
+            "step": 1, "body_ids": ["b0", "b1"], "reset_body_ids": ["b0"],
+            "time_bits": bits(0.5)}))
+        files["xml"] = xml_for(rows)
+        receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        self.assertEqual(receipt["summary"]["selected_resets"], 1)
+        files["worker_class_load"] = b"".join(
+            line for line in files["worker_class_load"].splitlines(keepends=True)
+            if b"org.dyn4j.world.ToiAcceptedResetTap " not in line
+        )
+        with self.assertRaises(CaptureRejected):
+            make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                 ["geometry-boundary-s0-o0-d0"], runtime)
+
+    def test_loaded_optional_reset_hook_still_requires_staged_source(self):
+        _, files, runtime = self.fixture()
+        files["worker_class_load"] = files["worker_class_load"].replace(
+            b"org.dyn4j.world.ToiAcceptedResetTap source: " +
+            _STAGED_JAR.as_uri().encode(),
+            b"org.dyn4j.world.ToiAcceptedResetTap source: file:/tmp/other.jar")
+        with self.assertRaises(CaptureRejected):
+            make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                 ["geometry-boundary-s0-o0-d0"], runtime)
+
     def test_stale_bytes_source_artifact_trace_and_runtime_fail(self):
         for key in ("xml", "stage_log", "gradle_log", "execve_log",
                     "artifact", "runtime", "source", "worker_classpath",
@@ -94,7 +174,7 @@ class CaptureReceiptTest(unittest.TestCase):
     def test_worker_load_log_rejects_substitution_and_recomputed_receipt(self):
         receipt, files, runtime = self.fixture()
         self.assertEqual(receipt["worker_pid"], "123")
-        self.assertEqual(len(receipt["worker_class_load_sources"]), 4)
+        self.assertEqual(len(receipt["worker_class_load_sources"]), 5)
         original = files["worker_class_load"]
         first = sorted(_AUDITED_ENGINE_CLASSES)[0].removesuffix(".class").replace("/", ".")
         changes = {
