@@ -105,7 +105,8 @@ class HostCapacityControlTest(unittest.TestCase):
         original = Path(control.__file__).read_bytes()
         substituted = original + b"\n# same-type replacement fixture\n"
         source.write_bytes(original)
-        git("add", control.SOURCE_PATH)
+        (source.parent / "noise.txt").write_text("unrelated tree entry\n")
+        git("add", control.SOURCE_PATH, "tools/performance/noise.txt")
         git("commit", "-qm", "original")
         original_commit = git("rev-parse", "HEAD")
         original_blob = git("rev-parse", f"{original_commit}:{control.SOURCE_PATH}")
@@ -117,6 +118,103 @@ class HostCapacityControlTest(unittest.TestCase):
         executed = self.root / "executed.py"
         executed.write_bytes(substituted)
         return repository, executed, original_commit, substituted_commit, original_blob, substituted_blob
+
+    def rehash_performance_tree(self, repository, original_commit, changed_tree):
+        def git(*args):
+            return subprocess.check_output(["git", "--no-replace-objects", "-C",
+                                            str(repository), *args])
+
+        def write_object(kind, raw):
+            oid = subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(repository),
+                 "hash-object", "-t", kind, "--literally", "-w", "--stdin"],
+                input=raw).strip()
+            expected = hashlib.sha1(kind.encode() + b" " + str(len(raw)).encode() +
+                                    b"\0" + raw).hexdigest().encode()
+            self.assertEqual(expected, oid)
+            return oid
+
+        def substitute(tree, name, old_oid, new_oid):
+            entry = b"40000 " + name + b"\0"
+            old = entry + bytes.fromhex(old_oid.decode())
+            self.assertEqual(1, tree.count(old))
+            return tree.replace(old, entry + bytes.fromhex(new_oid.decode()))
+
+        old_performance = git("rev-parse", f"{original_commit}:tools/performance").strip()
+        new_performance = write_object("tree", changed_tree)
+        old_tools = git("rev-parse", f"{original_commit}:tools").strip()
+        new_tools = write_object("tree", substitute(git("cat-file", "tree", old_tools.decode()),
+                                                    b"performance", old_performance,
+                                                    new_performance))
+        old_root = git("rev-parse", f"{original_commit}^{{tree}}").strip()
+        new_root = write_object("tree", substitute(git("cat-file", "tree", old_root.decode()),
+                                                   b"tools", old_tools, new_tools))
+        commit_body = git("cat-file", "commit", original_commit)
+        self.assertTrue(commit_body.startswith(b"tree " + old_root + b"\n"))
+        new_commit = write_object("commit", b"tree " + new_root + b"\n" +
+                                  commit_body.split(b"\n", 1)[1])
+        return new_commit.decode()
+
+    def test_public_replay_rejects_rehashed_duplicate_unrelated_tree_entry(self):
+        repository, _, original_commit, _, _, _ = self.replacement_fixture()
+        original_tree = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "cat-file", "tree",
+             f"{original_commit}:tools/performance"])
+        noise_oid = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "rev-parse",
+             f"{original_commit}:tools/performance/noise.txt"], text=True).strip()
+        duplicate = b"100644 noise.txt\0" + bytes.fromhex(noise_oid)
+        self.assertEqual(1, original_tree.count(duplicate))
+        forged_commit = self.rehash_performance_tree(repository, original_commit,
+                                                      original_tree + duplicate)
+        fsck = subprocess.run(["git", "-C", str(repository), "fsck", "--strict",
+                               "--no-reflogs"], capture_output=True, check=False)
+        self.assertNotEqual(0, fsck.returncode)
+        self.assertIn(b"duplicateEntries", fsck.stdout + fsck.stderr)
+        record = copy.deepcopy(self.record)
+        record.update(source_commit=forged_commit,
+                      tool_sha256=digest(Path(control.__file__).read_bytes()),
+                      tool_working_sha256=digest(Path(control.__file__).read_bytes()))
+        self.seal(record)
+        output = io.StringIO()
+        with patch.object(control, "ROOT", repository), \
+             patch.object(sys, "argv", ["host_capacity_control.py", "verify",
+                                       "--archive", str(self.archive),
+                                       "--trusted-key", str(self.key_path),
+                                       "--expected-source-commit", forged_commit]), \
+             contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as exit_status:
+                control.main()
+        self.assertEqual(1, exit_status.exception.code)
+        result = json.loads(output.getvalue())
+        self.assertEqual("unpassed", result["qualification"])
+        self.assertIn("duplicate", result["reason"])
+
+    def test_source_at_commit_rejects_malformed_traversed_tree_entries(self):
+        repository, _, original_commit, _, original_blob, _ = self.replacement_fixture()
+        original_tree = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "cat-file", "tree",
+             f"{original_commit}:tools/performance"])
+        source_entry = (b"100644 host_capacity_control.py\0" +
+                        bytes.fromhex(original_blob))
+        self.assertEqual(1, original_tree.count(source_entry))
+        with patch.object(control, "ROOT", repository):
+            self.assertEqual(Path(control.__file__).read_bytes(),
+                             control.source_at_commit(original_commit))
+            variants = (
+                ("duplicate selected", original_tree + source_entry, "duplicate"),
+                ("truncated", original_tree[:-1], "malformed"),
+                ("wrong selected mode",
+                 original_tree.replace(source_entry,
+                                       b"120000 host_capacity_control.py\0" +
+                                       bytes.fromhex(original_blob)), "path mode differs"),
+            )
+            for label, tree, message in variants:
+                with self.subTest(label=label):
+                    forged_commit = self.rehash_performance_tree(
+                        repository, original_commit, tree)
+                    with self.assertRaisesRegex(ValueError, message):
+                        control.source_at_commit(forged_commit)
 
     def corrupt_intermediate_tree(self, repository, original_commit,
                                   original_blob, substituted_blob):

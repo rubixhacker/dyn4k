@@ -79,6 +79,7 @@ def source_at_commit(commit):
     for index, part in enumerate(parts):
         tree = object_bytes("tree", oid)
         entries = []
+        names = set()
         offset = 0
         while offset < len(tree):
             space = tree.find(b" ", offset)
@@ -89,6 +90,8 @@ def source_at_commit(commit):
             name = tree[space + 1:nul]
             require(mode in (b"40000", b"100644", b"100755", b"120000", b"160000")
                     and b"/" not in name, "source tree entry mode or name is invalid")
+            require(name not in names, "source tree contains duplicate entry")
+            names.add(name)
             if name == part.encode():
                 entries.append((mode, tree[nul + 1:nul + 21].hex()))
             offset = nul + 21
