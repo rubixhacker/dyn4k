@@ -126,7 +126,8 @@ def verify_segments(manifest_path, output, replay_source=None):
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise Rejected("replay source must be an exact commit")
     if (manifest.get("candidate_commit") != source or
-            manifest.get("source_sha256") != hashlib.sha256(git("archive", "--format=tar", source)).hexdigest()):
+            manifest.get("source_sha256") != hashlib.sha256(git(
+                "-c", "core.autocrlf=false", "archive", "--format=tar", source)).hexdigest()):
         raise Rejected("segment source differs")
     for key in ("artifact", "linked_executable"):
         value = manifest[key]
@@ -260,7 +261,8 @@ def source_identity():
     if dirty or ignored:
         raise Rejected("source tree is dirty or contains ignored portable source")
     return (git("rev-parse", "HEAD").decode().strip(),
-            hashlib.sha256(git("archive", "--format=tar", "HEAD")).hexdigest())
+            hashlib.sha256(git("-c", "core.autocrlf=false", "archive", "--format=tar",
+                               "HEAD")).hexdigest())
 
 
 def artifact(target):

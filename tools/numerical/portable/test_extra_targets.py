@@ -74,7 +74,8 @@ class ExtraTargetSeamTest(unittest.TestCase):
             artifact.write_bytes(b"staged-core")
             source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=extra_targets.ROOT).decode().strip()
             archive = hashlib.sha256(subprocess.check_output(
-                ["git", "archive", "--format=tar", "HEAD"], cwd=extra_targets.ROOT)).hexdigest()
+                ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "HEAD"],
+                cwd=extra_targets.ROOT)).hexdigest()
             cases = extra_targets.declared_cases()
             groups = []
             for case in cases:
@@ -331,7 +332,8 @@ class ExtraTargetSeamTest(unittest.TestCase):
                 path.write_bytes(path.name.encode())
             source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=extra_targets.ROOT).decode().strip()
             archive = hashlib.sha256(subprocess.check_output(
-                ["git", "archive", "--format=tar", "HEAD"], cwd=extra_targets.ROOT)).hexdigest()
+                ["git", "-c", "core.autocrlf=false", "archive", "--format=tar", "HEAD"],
+                cwd=extra_targets.ROOT)).hexdigest()
             segments = []
             raw_rows = []
             active_method = None
@@ -373,18 +375,30 @@ class ExtraTargetSeamTest(unittest.TestCase):
             manifest_path = root / "manifest.json"
             assembled = root / "assembled.jsonl"
 
-            def check(value):
+            def check(value, env=None):
                 manifest_path.write_text(json.dumps(value))
                 assembled.unlink(missing_ok=True)
                 return subprocess.run([sys.executable, str(Path(extra_targets.__file__).resolve()),
                                        "--verify-segments", str(manifest_path), "--output", str(assembled)],
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, env=env)
 
             good = check(manifest)
             self.assertEqual(good.returncode, 0, good.stderr)
             self.assertEqual(len(assembled.read_text().splitlines()), 664)
             self.assertEqual(len(segments), 332)
-            assembled.unlink()
+            autocrlf_env = dict(os.environ, GIT_CONFIG_COUNT="1",
+                                GIT_CONFIG_KEY_0="core.autocrlf", GIT_CONFIG_VALUE_0="true")
+            with_autocrlf = check(manifest, autocrlf_env)
+            self.assertEqual(with_autocrlf.returncode, 0, with_autocrlf.stderr)
+            self.assertEqual(json.loads(with_autocrlf.stdout)["cases"], 332)
+            wrong_source = json.loads(json.dumps(manifest))
+            wrong_source["source_sha256"] = "0" * 64
+            self.assertNotEqual(check(wrong_source, autocrlf_env).returncode, 0)
+            wrong_segment = json.loads(json.dumps(manifest))
+            wrong_segment["segments"][0]["plain_sha256"] = "0" * 64
+            self.assertNotEqual(check(wrong_segment, autocrlf_env).returncode, 0)
+            manifest_path.write_text(json.dumps(manifest))
+            assembled.unlink(missing_ok=True)
             archival = subprocess.run([sys.executable, str(Path(extra_targets.__file__).resolve()),
                                        "--verify-segments", str(manifest_path), "--output", str(assembled),
                                        "--replay-source", source], capture_output=True, text=True)
@@ -854,6 +868,27 @@ class ExtraTargetSeamTest(unittest.TestCase):
             with patch.object(extra_targets, "ROOT", root):
                 with self.assertRaisesRegex(Rejected, "ignored portable source"):
                     extra_targets.source_identity()
+
+    def test_source_identity_uses_canonical_archive_with_autocrlf_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "source.txt").write_text("first\nsecond\n")
+            subprocess.run(["git", "-C", str(root), "add", "source.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c",
+                            "user.email=test@example.com", "commit", "-qm", "seed"], check=True)
+            commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"]).decode().strip()
+            canonical = hashlib.sha256(subprocess.check_output(
+                ["git", "-C", str(root), "-c", "core.autocrlf=false", "archive", "--format=tar",
+                 "HEAD"])).hexdigest()
+            converted = hashlib.sha256(subprocess.check_output(
+                ["git", "-C", str(root), "-c", "core.autocrlf=true", "archive", "--format=tar",
+                 "HEAD"])).hexdigest()
+            self.assertNotEqual(canonical, converted)
+            with patch.object(extra_targets, "ROOT", root), patch.dict(
+                    os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
+                                 "GIT_CONFIG_VALUE_0": "true"}):
+                self.assertEqual(extra_targets.source_identity(), (commit, canonical))
 
 
 if __name__ == "__main__":
