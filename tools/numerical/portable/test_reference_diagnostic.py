@@ -41,6 +41,12 @@ class FrozenComparatorSeamTest(unittest.TestCase):
         changed["state"]["bodies"][0]["transform"]["getTranslation"][0] = 0.0
         changed["state"]["bodies"][0]["force"][0] = 0.001
         self.assertEqual(compare_stream(fixture, [state], [changed])["status"], "FAILED")
+        snapshot = {"kind": "instrumented-callback", "values": [{"bodies": [{"id": "b1",
+            "properties": {"getForce": [0.0, 0.0]}}]}]}
+        changed_snapshot = json.loads(json.dumps(snapshot))
+        changed_snapshot["values"][0]["bodies"][0]["properties"]["getForce"][0] = -0.0
+        self.assertEqual(compare_stream(fixture, [snapshot], [changed_snapshot])["status"],
+                         "PASSED")
         exact_event = {"kind": "event", "payload": [{"shape": {"getArea": 1.0}}]}
         altered_event = {"kind": "event", "payload": [{"shape": {"getArea": math.nextafter(1.0, 2.0)}}]}
         self.assertEqual(compare_stream(fixture, [exact_event], [altered_event])["status"], "FAILED")
