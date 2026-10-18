@@ -1,4 +1,7 @@
+import copy
+from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -210,15 +213,141 @@ class PortableCaptureTest(unittest.TestCase):
             executable = str(Path(temporary) / "program.kexe")
             staged = executable + ".tmp123"
             trace = Path(temporary) / "link.strace"
-            trace.write_text(
-                f'1 openat(AT_FDCWD, "{staged}", O_RDWR|O_CREAT) = 3<{staged}>\n'
-                f'1 mmap(NULL, 100, PROT_READ|PROT_WRITE, MAP_SHARED, 3<{staged}>, 0) = 0x1234\n'
-                f'1 rename("{staged}", "{executable}") = 0\n')
+            created = f'1 1.0 openat(AT_FDCWD, "{staged}", O_RDWR|O_CREAT) = 3<{staged}>\n'
+            mapped = f'1 2.0 mmap(NULL, 100, PROT_READ|PROT_WRITE, MAP_SHARED, 3<{staged}>, 0) = 0x1234\n'
+            renamed = f'1 3.0 rename("{staged}", "{executable}") = 0\n'
+            trace.write_text(created + mapped + renamed)
             self.assertTrue(native_source_link.executable_install(trace, executable)
                             ["renamed_to_executable"])
-            trace.write_text(trace.read_text().replace("MAP_SHARED", "MAP_PRIVATE"))
-            with self.assertRaisesRegex(ValueError, "writable output mapping"):
-                native_source_link.executable_install(trace, executable)
+            for mutation in (created + mapped.replace("MAP_SHARED", "MAP_PRIVATE") + renamed,
+                             renamed + created + mapped,
+                             created + mapped.replace("1 2.0", "2 2.0") + renamed,
+                             created + mapped.replace("3<", "4<") + renamed,
+                             created + mapped + renamed.replace("1 3.0", "2 3.0")):
+                with self.subTest(mutation=mutation):
+                    trace.write_text(mutation)
+                    with self.assertRaisesRegex(ValueError, "ordered same-process"):
+                        native_source_link.executable_install(trace, executable)
+
+    def test_traced_command_requires_selected_gradle_and_java_chain(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            trace = Path(temporary) / "action.strace"
+            command = ["/pinned/gradle", "--offline", "task"]
+            gradle = f'1 1.0 execve("/pinned/gradle", {json.dumps(command)}, 0x1) = 0\n'
+            java = '1 2.0 execve("/pinned/jdk/bin/java", ' + \
+                json.dumps(["/pinned/jdk/bin/java", *command[1:]]) + ', 0x1) = 0\n'
+            trace.write_text(gradle + java)
+            native_source_link.require_traced_execve(trace, command, "/pinned/jdk/bin/java")
+            for mutation in (java, gradle, gradle + java.replace("1 2.0", "2 2.0"),
+                             java + gradle, gradle.replace("task", "other") + java):
+                with self.subTest(mutation=mutation):
+                    trace.write_text(mutation)
+                    with self.assertRaisesRegex(ValueError, "execve unobserved"):
+                        native_source_link.require_traced_execve(
+                            trace, command, "/pinned/jdk/bin/java")
+
+    @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_RETAINED_RECEIPT"),
+                         "set DYN4K_NATIVE_RETAINED_RECEIPT for raw trace replay")
+    def test_public_receipt_replay_rejects_resealed_trace_mutants(self):
+        selected = Path(os.environ["DYN4K_NATIVE_RETAINED_RECEIPT"])
+        original = json.loads(selected.read_text())
+        root = Path(original["checkout"])
+        source_files = native_source_link.source_files
+        producer_files = native_source_link.consumer_source_files
+        identity_source = native_source_link.identity_source
+        with ExitStack() as patches:
+            patches.enter_context(mock.patch.object(native_source_link, "ROOT", root))
+            patches.enter_context(mock.patch.object(capture, "ROOT", root))
+            patches.enter_context(mock.patch.object(native_source_link, "source_files",
+                                              side_effect=lambda: source_files(root)))
+            patches.enter_context(mock.patch.object(native_source_link, "consumer_source_files",
+                                              side_effect=lambda: producer_files(root)))
+            patches.enter_context(mock.patch.object(native_source_link, "identity_source",
+                                              side_effect=lambda: identity_source(root)))
+            self.assertEqual(native_source_link.verify_receipt(selected)["source_sha"],
+                             original["source_sha"])
+            with tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                action = original["actions"]["publication"]
+                gradle = f'1 1.0 execve({json.dumps(action["command"][0])}, ' + \
+                    f'{json.dumps(action["command"])}, 0x1) = 0\n'
+                java_path = action["environment"]["JAVA_HOME"] + "/bin/java"
+                java = f'1 2.0 execve({json.dumps(java_path)}, ' + \
+                    f'{json.dumps([java_path, *action["command"][1:]])}, 0x1) = 0\n'
+                reads = "".join(f'1 3.0 read(3<{path}>, "x", 1) = 1\n'
+                                for path in (*original["source_files"], original["compiler_jar"]))
+                output_paths = [item[field] for item in original["publication"].values()
+                                for field in ("compiler_klib", "staged_klib")]
+                for name, trace_text, expected in (
+                    ("no-writes", gradle + java + reads, "KLIB writes unobserved"),
+                    ("no-staged-writes", gradle + java + reads +
+                     "".join(f'1 4.0 write(4<{path}>, "x", 1) = 1\n'
+                             for path in output_paths[::2]), "KLIB writes unobserved"),
+                    ("no-java", gradle + reads, "Gradle/JDK execve unobserved")):
+                    with self.subTest(name=name):
+                        trace = directory / f"{name}.strace"
+                        trace.write_text(trace_text)
+                        candidate = copy.deepcopy(original)
+                        candidate["actions"]["publication"]["trace"] = str(trace)
+                        candidate["actions"]["publication"]["trace_sha256"] = capture.digest(trace)
+                        candidate["actions"]["publication"]["traced_command"][9] = str(trace)
+                        candidate["observed_syscalls"]["publication"] = \
+                            native_source_link.trace_events(trace,
+                                [*original["source_files"], original["compiler_jar"],
+                                 *output_paths])
+                        candidate_path = directory / f"{name}.json"
+                        candidate_path.write_text(json.dumps(candidate))
+                        with self.assertRaisesRegex(ValueError, expected):
+                            native_source_link.verify_receipt(candidate_path)
+                candidate = copy.deepcopy(original)
+                candidate["actions"]["publication"]["traced_command"][9] = \
+                    str(directory / "unrelated.strace")
+                candidate_path = directory / "wrong-output-argument.json"
+                candidate_path.write_text(json.dumps(candidate))
+                with self.assertRaisesRegex(ValueError, "traced toolchain differs"):
+                    native_source_link.verify_receipt(candidate_path)
+
+                link_action = original["actions"]["development"]
+                executable = original["inventories"]["development"]["executable"]
+                temporary_output = executable + ".tmp-replay"
+                link_gradle = f'1 1.0 execve({json.dumps(link_action["command"][0])}, ' + \
+                    f'{json.dumps(link_action["command"])}, 0x1) = 0\n'
+                link_java_path = link_action["environment"]["JAVA_HOME"] + "/bin/java"
+                link_java = f'1 2.0 execve({json.dumps(link_java_path)}, ' + \
+                    f'{json.dumps([link_java_path, *link_action["command"][1:]])}, 0x1) = 0\n'
+                link_reads = "".join(f'1 3.0 read(3<{path}>, "x", 1) = 1\n'
+                                     for path in original["observed_syscalls"]["development"]["read"])
+                link_writes = "".join(f'1 4.0 write(4<{path}>, "x", 1) = 1\n'
+                                      for path in original["observed_syscalls"]["development"]["write"])
+                created = f'1 5.0 openat(AT_FDCWD, "{temporary_output}", O_RDWR|O_CREAT) = 5<{temporary_output}>\n'
+                mapped = f'1 6.0 mmap(NULL, 100, PROT_READ|PROT_WRITE, MAP_SHARED, 5<{temporary_output}>, 0) = 0x1234\n'
+                renamed = f'1 7.0 rename("{temporary_output}", "{executable}") = 0\n'
+                for name, install, accepted in (
+                    ("ordered-install", created + mapped + renamed, True),
+                    ("reversed-install", renamed + created + mapped, False),
+                    ("cross-pid-install", created + mapped.replace("1 6.0", "2 6.0") + renamed, False),
+                    ("wrong-fd-install", created + mapped.replace("5<", "6<") + renamed, False)):
+                    with self.subTest(name=name):
+                        trace = directory / f"{name}.strace"
+                        trace.write_text(link_gradle + link_java + link_reads + link_writes + install)
+                        candidate = copy.deepcopy(original)
+                        candidate["actions"]["development"]["trace"] = str(trace)
+                        candidate["actions"]["development"]["trace_sha256"] = capture.digest(trace)
+                        candidate["actions"]["development"]["traced_command"][9] = str(trace)
+                        if accepted:
+                            candidate["observed_syscalls"]["development"] = \
+                                native_source_link.trace_events(trace,
+                                    [*original["observed_syscalls"]["development"]["read"],
+                                     *original["observed_syscalls"]["development"]["write"]])
+                            candidate["observed_syscalls"]["development"]["executable_install"] = \
+                                native_source_link.executable_install(trace, executable)
+                        candidate_path = directory / f"{name}.json"
+                        candidate_path.write_text(json.dumps(candidate))
+                        if accepted:
+                            native_source_link.verify_receipt(candidate_path)
+                        else:
+                            with self.assertRaisesRegex(ValueError, "ordered same-process"):
+                                native_source_link.verify_receipt(candidate_path)
 
     def test_host_deadline_retains_raw_and_process_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -283,6 +412,80 @@ class PortableCaptureTest(unittest.TestCase):
             self.assertIn(b"raw", (request.archive / "stdout.raw").read_bytes())
             self.assertIn(b"error", (request.archive / "stderr.raw").read_bytes())
             self.assertEqual((request.archive / "build-inventory.json").read_bytes(), b"{}\n")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux receipt archive control")
+    def test_capture_verifies_archived_receipt_and_rejects_postcheck_swap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "debugExecutable" / "probe.kexe"
+            executable.parent.mkdir()
+            shutil.copy2(sys.executable, executable)
+            core, kotlin, inventory = (root / name for name in ("core.klib", "kotlin.klib",
+                                                                 "inventory.json"))
+            core.write_bytes(b"core")
+            kotlin.write_bytes(b"kotlin")
+            inventory.write_text("{}\n")
+            external = root / "candidate.json"
+            original = b'{"selected":true}\n'
+            source = subprocess.check_output(["git", "-C", str(capture.ROOT), "rev-parse", "HEAD"],
+                                             text=True).strip()
+            actual_check = capture.subprocess.check_output
+            actual_run = capture.run_process
+            def check(command, **kwargs):
+                return "" if "status" in command else actual_check(command, **kwargs)
+            def hang(command, archive, receipt, stdin, deadline):
+                return actual_run([sys.executable, "-c", "import time;time.sleep(30)"],
+                                  archive, receipt, stdin, deadline)
+            evidence = {"source_files": {"engine": "hash"},
+                        "producer_source_files": {"producer": "hash"},
+                        "compiler_jar_sha256": "a" * 64,
+                        "observed_syscalls": {
+                            "publication": {"write": ["core", "kotlin"]},
+                            "development": {"write": [], "executable_install": {}}}}
+            for swap in ("external", "archived", "during-capture"):
+                with self.subTest(swap=swap):
+                    external.write_bytes(original)
+                    archive = root / (swap + "-swap")
+                    request = SimpleNamespace(target="linuxX64", mode="timing", steps=1, warmup=0,
+                        build="development", scenario=self.scenario["id"], source_sha=source,
+                        runtime=str(executable), harness=str(executable), core=str(core),
+                        kotlin=str(kotlin), inventory=str(inventory), archive=archive,
+                        host_timeout_seconds=0.2, publication_root=root,
+                        source_link_receipt=external)
+                    def verify(path, *_):
+                        self.assertEqual(Path(path).read_bytes(), original)
+                        self.assertEqual(Path(path), archive / "source-link.json")
+                        if swap != "during-capture":
+                            (Path(path) if swap == "archived" else external).write_bytes(
+                                b'{"tampered":true}\n')
+                        return evidence
+                    def run_with_swap(command, archive, receipt, stdin, deadline):
+                        result = hang(command, archive, receipt, stdin, deadline)
+                        if swap == "during-capture":
+                            (archive / "source-link.json").write_bytes(b'{"tampered":true}\n')
+                        return result
+                    with mock.patch.object(capture.subprocess, "check_output", side_effect=check), \
+                         mock.patch.object(capture, "validate_inventory", return_value={
+                             "gradle": "9.5.0", "kgp": "2.4.20",
+                             "compile_configuration": "linuxX64CompileKlibraries"}), \
+                         mock.patch.object(native_source_link, "verify_receipt", side_effect=verify), \
+                         mock.patch.object(native_source_link, "require_selected_inputs"), \
+                         mock.patch.object(capture, "run_process", side_effect=run_with_swap) as launched:
+                        if swap == "archived":
+                            with self.assertRaisesRegex(ValueError, "archived source-link receipt changed"):
+                                capture.capture(request)
+                            launched.assert_not_called()
+                        elif swap == "during-capture":
+                            with self.assertRaisesRegex(ValueError, "changed during process capture"):
+                                capture.capture(request)
+                        else:
+                            with self.assertRaisesRegex(ValueError, "host deadline"):
+                                capture.capture(request)
+                            self.assertEqual((archive / "source-link.json").read_bytes(), original)
+                            record = json.loads((archive / "capture.json").read_text())
+                            self.assertEqual(record["source_link_trace"]["receipt_sha256"],
+                                             capture.digest(archive / "source-link.json"))
+                            self.assertEqual(record["source_to_link"], "observed_build_provenance")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux mapped executable control")
     def test_path_swap_keeps_linux_proc_image_bytes(self):

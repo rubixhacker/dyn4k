@@ -93,10 +93,18 @@ Pass `--source-link-receipt /home/stewart/native-source-link-evidence/source-lin
 to `native_host_capture.py` for each short Linux x64 direct and compatibility
 capture in both builds. A capture verifies the raw trace hashes and exact
 selected KLIB and executable bytes before launch. It copies the receipt into
-the raw process archive; the large syscall traces remain in their retained
-shared archive. `source_to_link` and `qualification` remain `unpassed`:
-syscall tracing and fresh output equality show the observed build chain, but
-they do not cryptographically attest the compiler's internal byte transform.
+the raw process archive before verification and records the verified copy's
+hash. The large syscall traces remain in their retained shared archive.
+The verifier requires successful writes to both compiler KLIBs and staged
+copies, the exact `strace -o` path, and ordered Gradle/JDK execution. It
+requires one process to create, map, and rename each executable temporary
+file, using the same descriptor and path. A verified receipt and capture mark
+`source_to_link` as `observed_build_provenance`. Earlier receipts keep their
+original status, but the current verifier can replay them against retained
+raw traces. This status reports the observed build chain. Syscalls cannot
+prove that every input byte semantically influenced the compiler output.
+`qualification` stays `unpassed` until sustained measurements, validated
+reference rows, monitors, and approved budgets exist.
 
 ## Windows x64 hosted runner
 

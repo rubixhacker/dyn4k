@@ -69,35 +69,75 @@ def trace_events(path, watched):
     return {key: sorted(value) for key, value in observed.items()}
 
 
-def executable_install(path, executable):
-    predecessor = None
-    rename_pattern = re.compile(r'rename\("([^"\\]+)", "' +
-                                re.escape(executable) + r'"\) = 0(?:\s|$)')
+def require_traced_execve(path, command, java):
+    gradle_pid = None
+    gradle_time = None
+    java_seen = False
+    gradle_call = f'execve({json.dumps(command[0])}, {json.dumps(command)},'
+    java_call = f'execve({json.dumps(java)}, ['
+    header = re.compile(r'^(\d+)\s+(\d+(?:\.\d+)?)\s+')
     with path.open(errors="replace") as stream:
         for line in stream:
-            match = rename_pattern.search(line)
-            if match:
-                predecessor = match.group(1)
-                break
-    if predecessor is None or not predecessor.startswith(executable + ".tmp"):
-        raise ValueError("linked executable lacks traced temporary-file install")
-    created = False
-    mapped_write = False
-    with path.open(errors="replace") as stream:
-        for line in stream:
-            if predecessor not in line:
+            if "execve(" not in line or not line.rstrip().endswith("= 0"):
                 continue
-            if "openat(" in line and f'"{predecessor}"' in line and "O_CREAT" in line and \
-                    f"<{predecessor}>" in line:
-                created = True
-            if "mmap(" in line and f"<{predecessor}>" in line and \
-                    "PROT_WRITE" in line and "MAP_SHARED" in line and \
-                    re.search(r"= 0x[0-9a-f]+(?:\s|$)", line):
-                mapped_write = True
-    if not created or not mapped_write:
-        raise ValueError("linked executable lacks traced writable output mapping")
-    return {"temporary": predecessor, "created": True,
-            "shared_writable_mapping": True, "renamed_to_executable": True}
+            event = header.match(line)
+            if event is None:
+                continue
+            pid, timestamp = event.group(1), float(event.group(2))
+            call = line[event.end():]
+            if call.startswith(gradle_call):
+                gradle_pid, gradle_time = pid, timestamp
+            elif call.startswith(java_call) and pid == gradle_pid and timestamp > gradle_time:
+                position = event.end() + len(java_call)
+                for argument in command[1:]:
+                    position = line.find(json.dumps(argument), position)
+                    if position < 0:
+                        break
+                    position += len(json.dumps(argument))
+                else:
+                    java_seen = True
+            if java_seen:
+                return
+    raise ValueError("expected Gradle/JDK execve unobserved in raw trace")
+
+
+def executable_install(path, executable):
+    event = re.compile(r'^(\d+)\s+(\d+(?:\.\d+)?)\s+')
+    opened = re.compile(r'openat\(.*"([^"\\]+)", [^)]*O_CREAT[^)]*\) = (\d+)<([^<>]+)>')
+    descriptor = re.compile(r'= (\d+)<([^<>]+)>')
+    mapping = re.compile(r'mmap\(.*MAP_SHARED[^,]*, (\d+)<([^<>]+)>,.*\) = 0x[0-9a-f]+(?:\s|$)')
+    rename = re.compile(r'rename\("([^"\\]+)", "' +
+                        re.escape(executable) + r'"\) = 0(?:\s|$)')
+    states = {}
+    with path.open(errors="replace") as stream:
+        for line in stream:
+            header = event.match(line)
+            if header is None:
+                continue
+            pid, timestamp = header.group(1), float(header.group(2))
+            if "openat(" in line or "openat2(" in line:
+                fd = descriptor.search(line)
+                if fd:
+                    states.pop((pid, fd.group(1)), None)
+                created = opened.search(line)
+                if created and created.group(1) == created.group(3) and \
+                        created.group(1).startswith(executable + ".tmp"):
+                    states[(pid, created.group(2))] = (created.group(1), timestamp, None)
+            elif "mmap(" in line and "PROT_WRITE" in line:
+                mapped = mapping.search(line)
+                if mapped:
+                    key = (pid, mapped.group(1))
+                    state = states.get(key)
+                    if state and state[0] == mapped.group(2) and timestamp > state[1]:
+                        states[key] = (state[0], state[1], timestamp)
+            elif "rename(" in line:
+                renamed = rename.search(line)
+                if renamed and any(state[0] == renamed.group(1) and
+                                   state[2] is not None and timestamp > state[2]
+                                   for (owner, _), state in states.items() if owner == pid):
+                    return {"temporary": renamed.group(1), "created": True,
+                            "shared_writable_mapping": True, "renamed_to_executable": True}
+    raise ValueError("linked executable lacks ordered same-process writable output mapping and rename")
 
 
 def run_traced(command, archive, name, environment):
@@ -224,7 +264,8 @@ def build(args):
             git_value("status", "--porcelain", "--untracked-files=all")):
         raise ValueError("source checkout changed during traced build")
     receipt = {"format": "linux-x64-native-source-link-v1", "qualification": "unpassed",
-               "source_to_link": "unpassed", "source_sha": git_value("rev-parse", "HEAD"),
+               "source_to_link": "observed_build_provenance",
+               "source_sha": git_value("rev-parse", "HEAD"),
                "checkout": str(ROOT), "source_files": sources, "actions": actions,
                "producer_source_files": producer_sources,
                "compiler_jar": str(compiler_jar),
@@ -244,7 +285,7 @@ def verify_receipt(path, inventory=None, build_name=None):
     receipt = json.loads(path.read_text())
     if (receipt.get("format") != "linux-x64-native-source-link-v1" or
             receipt.get("qualification") != "unpassed" or
-            receipt.get("source_to_link") != "unpassed" or
+            receipt.get("source_to_link") not in ("unpassed", "observed_build_provenance") or
             receipt.get("checkout") != str(ROOT) or
             receipt.get("source_sha") != git_value("rev-parse", "HEAD") or
             receipt.get("source_files") != source_files() or
@@ -262,13 +303,17 @@ def verify_receipt(path, inventory=None, build_name=None):
         if action["exit_code"] != 0 or "--offline" not in action["command"] or \
                 "--no-build-cache" not in action["command"] or "--rerun-tasks" not in action["command"]:
             raise ValueError(f"{name} was not a successful fresh offline action")
-        if (action["traced_command"][-len(action["command"]):] != action["command"] or
-                action["traced_command"][0] != shutil.which("strace") or
+        expected_trace_command = [shutil.which("strace"), "-f", "-ttt", "-yy", "-s", "65535",
+            "-e", "trace=execve,openat,openat2,read,pread64,mmap,write,rename,renameat,renameat2",
+            "-o", action["trace"], *action["command"]]
+        if (action["traced_command"] != expected_trace_command or
                 capture.digest(Path(action["traced_command"][0])) != action["tracer_sha256"] or
                 capture.digest(Path(action["command"][0])) != action["gradle_sha256"] or
                 capture.digest(Path(action["environment"]["JAVA_HOME"]) / "bin/java") !=
                 action["java_sha256"]):
             raise ValueError(f"{name} traced toolchain differs")
+        require_traced_execve(Path(action["trace"]), action["command"],
+                              str(Path(action["environment"]["JAVA_HOME"]) / "bin/java"))
         expected_tasks = ({"publication": (
             ":dyn4k-core:publishLinuxX64PublicationToStagingRepository",
             ":dyn4k:publishLinuxX64PublicationToStagingRepository",
@@ -298,6 +343,7 @@ def verify_receipt(path, inventory=None, build_name=None):
         raise ValueError(f"compiler source reads unobserved: {len(receipt['source_files']) - len(source_reads)}")
     if receipt["compiler_jar"] not in publication_events["read"]:
         raise ValueError("pinned compiler JAR read unobserved during publication")
+    publication_writes = set(publication_events["write"])
     for label in LABELS:
         item = receipt["publication"][label]
         expected_output, expected_stage = artifact_paths(ROOT, label)
@@ -307,6 +353,8 @@ def verify_receipt(path, inventory=None, build_name=None):
         if any(capture.digest(capture.required_file(item[field], field)) != item["sha256"]
                for field in ("compiler_klib", "staged_klib")):
             raise ValueError("fresh KLIB output or staged bytes changed")
+        if not {item["compiler_klib"], item["staged_klib"]} <= publication_writes:
+            raise ValueError(f"{label} compiler and staged KLIB writes unobserved")
     for mode in BUILDS:
         item = receipt["inventories"][mode]
         selected_inventory = json.loads(Path(item["path"]).read_text())

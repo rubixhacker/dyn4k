@@ -501,22 +501,25 @@ def capture(args):
     inventory = validate_inventory(inventory_path, args.target, args.build, args.source_sha,
                                    producer_tree, manifest_path, harness, core, kotlin, bundle,
                                    getattr(args, "publication_root", None))
-    source_link = None
-    if getattr(args, "source_link_receipt", None) is not None:
-        if args.target != "linuxX64":
-            raise ValueError("source-link trace receipt is limited to Linux x64")
-        import native_source_link
-        source_link = native_source_link.verify_receipt(
-            args.source_link_receipt, str(inventory_path), args.build)
-        native_source_link.require_selected_inputs(
-            source_link, args.build, inventory_path, hashes["runtime"],
-            {"dyn4k-core": hashes["core"], "dyn4k": hashes["kotlin"]})
+    if getattr(args, "source_link_receipt", None) is not None and args.target != "linuxX64":
+        raise ValueError("source-link trace receipt is limited to Linux x64")
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
     args.archive.mkdir(parents=True)
-    if source_link is not None:
+    source_link = None
+    verified_receipt_sha = None
+    if getattr(args, "source_link_receipt", None) is not None:
+        import native_source_link
         receipt_path = args.archive / "source-link.json"
         receipt_path.write_bytes(Path(args.source_link_receipt).read_bytes())
+        verified_receipt_sha = digest(receipt_path)
+        source_link = native_source_link.verify_receipt(
+            receipt_path, str(inventory_path), args.build)
+        native_source_link.require_selected_inputs(
+            source_link, args.build, inventory_path, hashes["runtime"],
+            {"dyn4k-core": hashes["core"], "dyn4k": hashes["kotlin"]})
+        if digest(receipt_path) != verified_receipt_sha:
+            raise ValueError("archived source-link receipt changed during verification")
     publication_archive = []
     if inventory.get("publication_inputs"):
         directory = args.archive / "publication"
@@ -551,6 +554,8 @@ def capture(args):
         command += producer_args
     execution, stdout, stderr = run_process(
         command, args.archive, inventory_path, stdin_bytes, host_timeout)
+    if source_link is not None and digest(args.archive / "source-link.json") != verified_receipt_sha:
+        raise ValueError("archived source-link receipt changed during process capture")
     process_record = {
         "qualification": "unpassed", "protocol": "portable-development-v1",
         "target": args.target, "build": args.build, "mode": args.mode,
@@ -561,8 +566,8 @@ def capture(args):
                             "compile_configuration": inventory["compile_configuration"]},
         "publication_inputs": inventory.get("publication_inputs", []),
         "publication_archive": publication_archive,
-        "source_to_link": "unpassed",
-        "source_link_trace": ({"receipt_sha256": digest(args.archive / "source-link.json"),
+        "source_to_link": "observed_build_provenance" if source_link is not None else "unpassed",
+        "source_link_trace": ({"receipt_sha256": verified_receipt_sha,
                                "source_reads": len(source_link["source_files"]),
                                "producer_source_reads": len(source_link["producer_source_files"]) + 1,
                                "compiler_jar_sha256": source_link["compiler_jar_sha256"],
