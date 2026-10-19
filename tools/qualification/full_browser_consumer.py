@@ -32,6 +32,7 @@ BUILD_PATHS = tuple(f"{CONSUMER}/{name}" for name in
                      "facade/build.gradle.kts"))
 LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
 REPORTER = "tools/qualification/browser_wasi/browser-karma-reporter.js"
+YARN_LOCK = "tools/qualification/browser_wasi/fixtures/consumer-yarn.lock"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -101,6 +102,7 @@ def input_bytes(repository, candidate, lane):
                                   for item in by_module["dyn4k-core"]).encode(),
         "facade-cases.tsv": "".join(f"{item['id']}\t{item['classname']}\t{item['method']}\n"
                                     for item in by_module["dyn4k"]).encode(),
+        "consumer-yarn.lock": original(repository, candidate, YARN_LOCK),
     }
 
 
@@ -229,6 +231,13 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
     inputs.mkdir(parents=True, exist_ok=True)
     for name, data in inputs_content.items():
         (inputs / name).write_bytes(data)
+    project_lock = repository / CONSUMER / "kotlin-js-store/yarn.lock"
+    if project_lock.is_symlink() or project_lock.parent.is_symlink():
+        raise ValueError("external consumer lock path is symbolic")
+    if project_lock.exists() and project_lock.read_bytes() != inputs_content["consumer-yarn.lock"]:
+        raise ValueError("external consumer lock differs from pinned fixture")
+    project_lock.parent.mkdir(parents=True, exist_ok=True)
+    project_lock.write_bytes(inputs_content["consumer-yarn.lock"])
     output.mkdir(parents=True, exist_ok=True)
     work = output.parent / f"{output.name}-build"
     work.mkdir(parents=True, exist_ok=True)
@@ -317,6 +326,10 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
             reporter.unlink()
         if config_root.exists() and not any(config_root.iterdir()):
             config_root.rmdir()
+        if project_lock.exists() and project_lock.read_bytes() == inputs_content["consumer-yarn.lock"]:
+            project_lock.unlink()
+        if project_lock.parent.exists() and not any(project_lock.parent.iterdir()):
+            project_lock.parent.rmdir()
     all_rows = module_rows.get("core", []) + module_rows.get("facade", [])
     if len(all_rows) != 2523 or len(set(all_rows)) != 2523:
         raise ValueError("full 2,523 original browser assertions did not execute")
