@@ -47,6 +47,13 @@ RUNTIME_INPUT_SHA256 = {
     "mocha/mocha.js": "8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6",
     "karma-mocha/lib/adapter.js": "d2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933",
     "kotlin-web-helpers/dist/kotlin-test-karma-runner.js": "15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18",
+    "karma/lib/config.js": "fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42",
+    "karma/lib/helper.js": "db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f",
+    "karma/lib/file-list.js": "b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22",
+    "karma-mocha/lib/index.js": "4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b",
+    "karma-webpack/lib/karma-webpack/framework.js": "705fc7f4d211eee26beb549758d8ea39f502a7385c2a43756bc71e3003c99ca9",
+    "karma-webpack/lib/karma-webpack/preprocessor.js": "6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6",
+    "kotlin-web-helpers/dist/karma-webpack-output.js": "7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7",
 }
 
 
@@ -300,19 +307,27 @@ def effective_files(evidence, work, short, mode):
     inputs = evidence.get("input_sha256")
     tmpdir = evidence.get("tmpdir")
     if (not isinstance(files, list) or len(files) != 7
-            or not all(isinstance(value, str) for value in files)
+            or not all(isinstance(value, dict) and set(value) == {
+                "pattern", "served", "included", "watched", "nocache", "type"}
+                       and isinstance(value["pattern"], str) for value in files)
             or not isinstance(tmpdir, str) or not Path(tmpdir).is_absolute()):
         raise ValueError("Karma effective file list differs")
-    webpack = Path(files[0]).parent
+    webpack = Path(files[0]["pattern"]).parent
     if (webpack.parent != Path(tmpdir)
             or not re.fullmatch(r"_karma_webpack_[0-9]+", webpack.name)):
         raise ValueError("Karma generated webpack path differs")
     _, selected, runner = bundle_paths(work, short, mode)
     root = work / "root/js/node_modules"
-    expected = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
-                str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
-                str(runner), str(selected), str(webpack / "**/*")]
-    if (files != expected
+    paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+             str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+             str(runner), str(selected), str(webpack / "**/*")]
+    expected = [{"pattern": path, "served": True, "included": index != 6,
+                 "watched": False, "nocache": False,
+                 "type": None} for index, path in enumerate(paths)]
+    if (files != expected or any(
+            type(value[key]) is not type(reference[key])
+            for value, reference in zip(files, expected)
+            for key in ("served", "included", "watched", "nocache", "type"))
             or preprocessors != {str(runner): ["webpack", "sourcemap"],
                                  str(selected): ["webpack", "sourcemap"]}
             or inputs != {str(root / name): digest for name, digest in RUNTIME_INPUT_SHA256.items()}):

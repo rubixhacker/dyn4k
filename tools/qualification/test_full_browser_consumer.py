@@ -1,6 +1,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -157,23 +158,136 @@ class SelectedBundleTest(unittest.TestCase):
         _, selected, runner = browser.bundle_paths(work, "core", "development")
         root = work / "root/js/node_modules"
         evidence = {"tmpdir": tmpdir,
-                    "effective_files": [str(webpack / "runtime.js"),
-                                        str(webpack / "commons.js"),
-                                        str(root / "mocha/mocha.js"),
-                                        str(root / "karma-mocha/lib/adapter.js"),
-                                        str(runner), str(selected), str(webpack / "**/*")],
+                    "effective_files": [{"pattern": path, "served": True,
+                                         "included": index != 6, "watched": False,
+                                         "nocache": False,
+                                         "type": None}
+                                        for index, path in enumerate((
+                                            str(webpack / "runtime.js"),
+                                            str(webpack / "commons.js"),
+                                            str(root / "mocha/mocha.js"),
+                                            str(root / "karma-mocha/lib/adapter.js"),
+                                            str(runner), str(selected),
+                                            str(webpack / "**/*")))],
                     "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
                                                 for path in (runner, selected)},
                     "input_sha256": {str(root / name): digest for name, digest
                                      in browser.RUNTIME_INPUT_SHA256.items()}}
         browser.effective_files(evidence, work, "core", "development")
-        evidence["effective_files"].insert(5, "/tmp/untracked-injection.js")
+        evidence["effective_files"].insert(5, {**evidence["effective_files"][5],
+                                                 "pattern": "/tmp/untracked-injection.js"})
         with self.assertRaisesRegex(ValueError, "effective file list"):
             browser.effective_files(evidence, work, "core", "development")
         evidence["effective_files"].pop(5)
         evidence["effective_preprocessors"][str(selected)] = ["sourcemap"]
         with self.assertRaisesRegex(ValueError, "preprocessors"):
             browser.effective_files(evidence, work, "core", "development")
+
+    def test_effective_pattern_flags_reject_changed_selected_script(self):
+        work = Path("/evidence/build")
+        webpack = Path("/evidence/tmp/_karma_webpack_123")
+        _, selected, runner = browser.bundle_paths(work, "core", "development")
+        root = work / "root/js/node_modules"
+        paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+                 str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+                 str(runner), str(selected), str(webpack / "**/*")]
+        evidence = {"tmpdir": str(webpack.parent),
+                    "effective_files": [{"pattern": path, "served": True,
+                                         "included": index != 6, "watched": False,
+                                         "nocache": False,
+                                         "type": None}
+                                        for index, path in enumerate(paths)],
+                    "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
+                                                for path in (runner, selected)},
+                    "input_sha256": {str(root / name): digest for name, digest
+                                     in browser.RUNTIME_INPUT_SHA256.items()}}
+        browser.effective_files(evidence, work, "core", "development")
+        for field, changed in (("included", False), ("served", False),
+                               ("watched", True), ("nocache", None),
+                               ("type", "module"), ("included", 1)):
+            with self.subTest(field=field, changed=changed):
+                original = evidence["effective_files"][5][field]
+                evidence["effective_files"][5][field] = changed
+                with self.assertRaisesRegex(ValueError, "effective files"):
+                    browser.effective_files(evidence, work, "core", "development")
+                evidence["effective_files"][5][field] = original
+
+    def test_reporter_node_vm_rejects_unserved_or_excluded_selected_script(self):
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const vm = require('node:vm');",
+            "const source = fs.readFileSync(process.argv[1], 'utf8');",
+            "const work = '/evidence/build';",
+            "const root = path.join(work, 'root/js/node_modules');",
+            "const tmpdir = '/evidence/tmp';",
+            "const webpack = path.join(tmpdir, '_karma_webpack_123');",
+            "const selected = path.join(work, 'root/js/packages/test/kotlin/test.js');",
+            "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
+            "const paths = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),",
+            "    path.join(root, 'mocha/mocha.js'), path.join(root, 'karma-mocha/lib/adapter.js'),",
+            "    runner, selected, path.join(webpack, '**/*')];",
+            "const digests = new Map([",
+            "    ['karma-kotlin-reporter.js', '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347'],",
+            "    ['mocha.js', '8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6'],",
+            "    ['adapter.js', 'd2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933'],",
+            "    ['kotlin-test-karma-runner.js', '15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18'],",
+            "    ['config.js', 'fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42'],",
+            "    ['helper.js', 'db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f'],",
+            "    ['file-list.js', 'b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22'],",
+            "    ['index.js', '4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b'],",
+            "    ['framework.js', '705fc7f4d211eee26beb549758d8ea39f502a7385c2a43756bc71e3003c99ca9'],",
+            "    ['preprocessor.js', '6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6'],",
+            "    ['karma-webpack-output.js', '7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7']",
+            "]);",
+            "const fakeFs = {readFileSync: name => Buffer.from(name), realpathSync: name => name,",
+            "    writeFileSync: () => {}, openSync: () => 1};",
+            "const fakeCrypto = {createHash: () => ({update(data) {this.name = data.toString(); return this;},",
+            "    digest() {return digests.get(path.basename(this.name)) || '0'.repeat(64);}})};",
+            "function fakeRequire(name) {",
+            "    if (name === 'node:fs') return fakeFs;",
+            "    if (name === 'node:crypto') return fakeCrypto;",
+            "    if (name === 'node:path') return path;",
+            "    if (name === 'karma/lib/config') return {createPatternObject: file =>",
+            "        ({...file, nocache: file.nocache === undefined ? false : file.nocache})};",
+            "    throw Error(name);",
+            "}",
+            "fakeRequire.resolve = () => path.join(root,",
+            "    'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "function OriginalReporter() {",
+            "    this.write = () => {};",
+            "    this.onBrowserStart = () => {};",
+            "    this.onRunComplete = () => {};",
+            "}",
+            "OriginalReporter.$inject = [];",
+            "const key = 'reporter:karma-kotlin-reporter';",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}],",
+            "    files: paths.map((pattern, index) => ({pattern, served: true,",
+            "        included: index !== 6, watched: false,",
+            "        ...(index === 4 || index === 5 ? {nocache: false} : {})})),",
+            "    preprocessors: {[runner]: ['webpack', 'sourcemap'],",
+            "        [selected]: ['webpack', 'sourcemap']}};",
+            "const env = {DYN4K_BROWSER_REPORTER_SOURCE: '/evidence/reporter.js',",
+            "    DYN4K_BROWSER_REPORTER_ATTESTATION: '/evidence/reporter.json',",
+            "    DYN4K_BROWSER_RAW_KARMA: '/evidence/raw.jsonl',",
+            "    DYN4K_BROWSER_SELECTED_BUNDLE: selected,",
+            "    DYN4K_BROWSER_SELECTED_ARCHIVE: '/evidence/selected.js',",
+            "    DYN4K_BROWSER_SELECTED_ATTESTATION: '/evidence/selected.json',",
+            "    DYN4K_BROWSER_WORK_ROOT: work, DYN4K_BROWSER_TMPDIR: tmpdir};",
+            "vm.runInNewContext(source, {config, require: fakeRequire, process: {env, pid: 12}, Buffer});",
+            "const Reporter = config.plugins[0][key][1];",
+            "assert.doesNotThrow(() => new Reporter(null, config, null));",
+            "for (const field of ['included', 'served']) {",
+            "    config.files[5][field] = false;",
+            "    assert.throws(() => new Reporter(null, config, null), /effective files/);",
+            "    config.files[5][field] = true;",
+            "}",
+        ))
+        reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
+        completed = subprocess.run(["node", "-e", script, str(reporter)],
+                                   check=False, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:

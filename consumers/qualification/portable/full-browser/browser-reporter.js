@@ -38,18 +38,49 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             '8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6',
         [path.join(root, 'karma-mocha/lib/adapter.js')]:
             'd2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933',
-        [runner]: '15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18'
+        [runner]: '15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18',
+        [path.join(root, 'karma/lib/config.js')]:
+            'fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42',
+        [path.join(root, 'karma/lib/helper.js')]:
+            'db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f',
+        [path.join(root, 'karma/lib/file-list.js')]:
+            'b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22',
+        [path.join(root, 'karma-mocha/lib/index.js')]:
+            '4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b',
+        [path.join(root, 'karma-webpack/lib/karma-webpack/framework.js')]:
+            '705fc7f4d211eee26beb549758d8ea39f502a7385c2a43756bc71e3003c99ca9',
+        [path.join(root, 'karma-webpack/lib/karma-webpack/preprocessor.js')]:
+            '6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6',
+        [path.join(root, 'kotlin-web-helpers/dist/karma-webpack-output.js')]:
+            '7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7'
     };
     function runtimeSelection() {
-        const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
-        const webpack = path.dirname(files[0] || '');
+        for (const [name, digest] of Object.entries(inputHashes)) {
+            if (crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex') !== digest) {
+                throw new Error('Karma toolchain input differs');
+            }
+        }
+        const createPatternObject = require('karma/lib/config').createPatternObject;
+        const files = config.files.map(file => {
+            const pattern = createPatternObject(file);
+            if (pattern.type !== undefined) {
+                throw new Error('Karma effective pattern type differs');
+            }
+            return {pattern: pattern.pattern, served: pattern.served,
+                included: pattern.included, watched: pattern.watched,
+                nocache: pattern.nocache, type: null};
+        });
+        const webpack = path.dirname((files[0] || {}).pattern || '');
         if (!path.isAbsolute(tmpdir) || path.dirname(webpack) !== tmpdir ||
                 !/^_karma_webpack_[0-9]+$/.test(path.basename(webpack))) {
             throw new Error('Karma generated webpack path differs');
         }
-        const expected = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),
+        const expectedPaths = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),
             path.join(root, 'mocha/mocha.js'), path.join(root, 'karma-mocha/lib/adapter.js'),
             runner, selected, path.join(webpack, '**/*')];
+        const expected = expectedPaths.map((pattern, index) => ({pattern,
+            served: true, included: index !== 6, watched: false,
+            nocache: false, type: null}));
         const preprocessors = config.preprocessors;
         const expectedPreprocessors = {[runner]: ['webpack', 'sourcemap'],
             [selected]: ['webpack', 'sourcemap']};
@@ -58,11 +89,6 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
                 Object.keys(expectedPreprocessors).some(key =>
                     JSON.stringify(preprocessors[key]) !== JSON.stringify(expectedPreprocessors[key]))) {
             throw new Error('Karma effective files or preprocessors differ');
-        }
-        for (const [name, digest] of Object.entries(inputHashes)) {
-            if (crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex') !== digest) {
-                throw new Error('Karma toolchain input differs');
-            }
         }
         return {effective_files: files, effective_preprocessors: expectedPreprocessors,
             input_sha256: inputHashes, tmpdir};
