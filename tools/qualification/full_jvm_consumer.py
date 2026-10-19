@@ -129,6 +129,8 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                f"-PqualificationLaneScript={inputs / LANE}", LANE]
     started = time.time_ns()
     with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
+        for log in ("stdout.txt", "stderr.txt"):
+            os.utime(output / log, ns=(started, started))
         result = subprocess.run(command, cwd=inputs, stdout=stdout, stderr=stderr,
                                 check=False)
     finished = time.time_ns()
