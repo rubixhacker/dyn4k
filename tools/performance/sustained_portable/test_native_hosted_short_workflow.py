@@ -281,11 +281,16 @@ class HostedRawFileContract(unittest.TestCase):
         validator = next(node for node in tree.body
                          if isinstance(node, ast.FunctionDef)
                          and node.name == "validate_xcode_version")
-        scope = {}
+        scope = {"re": re}
         exec(compile(ast.Module(body=[validator], type_ignores=[]), str(RUNNER), "exec"), scope)
         scope["validate_xcode_version"]("Xcode 26.5\nBuild version 17F42\n")
         with self.assertRaisesRegex(RuntimeError, "not 26.5"):
             scope["validate_xcode_version"]("Xcode 26.4.1\nBuild version 17E303\n")
+        scope["validate_xcode_version"]("Xcode 26.5\nBuild version 18A1\n")
+        for build in ("Build version ", "Build version    ",
+                      "Build version 17 F42", "Build version 17F42!", "17F42"):
+            with self.subTest(build=build), self.assertRaisesRegex(RuntimeError, "not 26.5"):
+                scope["validate_xcode_version"](f"Xcode 26.5\n{build}\n")
 
     def setUp(self):
         (self.raw_node, self.sidecar_node, self.route_node, self.receipt_node,

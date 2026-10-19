@@ -114,9 +114,9 @@ current behavior in the [Xcode command-line reference](https://developer.apple.c
 
 The separate redirect behavior, `lsof` text mapping fields, and process
 lifetime still need an observed short capture on each matching local Mac
-simulator family. The Linux host cannot run `xcrun`. If a hosted `simctl` lacks
-the redirect flags, writes app
-bytes into the launch receipt, or ends the app before `proc_pidpath` and
+simulator family. The Linux host cannot run `xcrun`. If the selected Mac's
+`simctl` lacks the redirect flags, writes app bytes into the launch receipt,
+or ends the app before `proc_pidpath` and
 `lsof` can observe the PID, the adapter fails closed. Preserve the raw archive
 and report the exact unsupported behavior before changing the method.
 Physical `iosArm64`, `tvosArm64`, `watchosArm64`, and

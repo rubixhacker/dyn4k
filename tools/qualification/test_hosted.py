@@ -17,7 +17,9 @@ class HostedQualificationTests(unittest.TestCase):
              patch.object(hosted.platform, "machine", return_value="arm64"), \
              patch.object(hosted, "read_command", side_effect=lambda command: {
                  "sw_vers": "26.5.1", "xcodebuild": "Xcode 26.5\nBuild version 17F42"}.get(command[0], "")):
-            self.assertEqual("26.5", hosted.discover_runtime("macosArm64")["xcode_version"])
+            observed = hosted.discover_runtime("macosArm64")
+            self.assertEqual("26.5", observed["xcode_version"])
+            self.assertEqual("Build version 17F42", observed["xcode_build"])
         with patch.object(hosted.platform, "system", return_value="Darwin"), \
              patch.object(hosted.platform, "machine", return_value="arm64"), \
              patch.object(hosted, "read_command", side_effect=lambda command: {
@@ -113,8 +115,11 @@ class HostedQualificationTests(unittest.TestCase):
 
     def test_runtime_identity_rejects_wrong_host_and_xcode(self):
         mac = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
-               "xcode_version": "26.5", "simulators": {"iOS": ["iPhone 17"]}}
+               "xcode_version": "26.5", "xcode_build": "Build version 17F42",
+               "simulators": {"iOS": ["iPhone 17"]}}
         self.assertEqual("READY", hosted.runtime_status("iosSimulatorArm64", mac)[0])
+        self.assertEqual("READY", hosted.runtime_status(
+            "iosSimulatorArm64", {**mac, "xcode_build": "Build version 18A1"})[0])
         self.assertEqual("FAILED", hosted.runtime_status(
             "iosSimulatorArm64", {**mac, "xcode_version": "26.4.1"})[0])
         self.assertEqual("FAILED", hosted.runtime_status(
@@ -125,9 +130,23 @@ class HostedQualificationTests(unittest.TestCase):
             "mingwX64", {"system": "Windows", "machine": "AMD64",
                           "os_version": "10.0.19045"})[0])
 
+    def test_runtime_requires_retained_valid_xcode_build(self):
+        mac = {"system": "Darwin", "machine": "arm64", "os_version": "26.5.1",
+               "xcode_version": "26.5", "xcode_build": "Build version 17F42",
+               "simulators": {}}
+        self.assertEqual("READY", hosted.runtime_status("macosArm64", mac)[0])
+        for build in (None, "", "Build version ", "Build version    ",
+                      "Build version 17 F42", "Build version 17F42!", "17F42"):
+            with self.subTest(build=build):
+                self.assertEqual("FAILED", hosted.runtime_status(
+                    "macosArm64", {**mac, "xcode_build": build})[0])
+        without_build = {key: value for key, value in mac.items() if key != "xcode_build"}
+        self.assertEqual("FAILED", hosted.runtime_status("macosArm64", without_build)[0])
+
     def test_absent_simulator_or_safari_is_unavailable(self):
         mac = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
-               "xcode_version": "26.5", "simulators": {}}
+               "xcode_version": "26.5", "xcode_build": "Build version 17F42",
+               "simulators": {}}
         self.assertEqual("UNAVAILABLE", hosted.runtime_status("iosSimulatorArm64", mac)[0])
         self.assertEqual("UNAVAILABLE", hosted.runtime_status(
             "jsSafari", {**mac, "safari_version": "", "safaridriver_version": ""})[0])
@@ -153,7 +172,8 @@ class HostedQualificationTests(unittest.TestCase):
     def test_hosted_summary_rejects_stale_missing_and_partial_probes(self):
         sha = "a" * 40
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
-                   "xcode_version": "26.5", "simulators": {}}
+                   "xcode_version": "26.5", "xcode_build": "Build version 17F42",
+                   "simulators": {}}
         manifest = qualify.load_json_strict(Path(__file__).with_name("foundation-probes.json"))
         source_ids = ("core-macosArm64", "macosArm64")
         source_groups = [{"id": group_id, "expected": len(qualify.expected_probe_cases(
@@ -216,7 +236,8 @@ class HostedQualificationTests(unittest.TestCase):
                     "manifest_sha256": frozen_digest(("consumer-macosArm64",))}
         probe = {"candidate_sha": sha, "target": "macosArm64", "status": "PROBE_PASSED",
                  "runtime": {"system": "Darwin", "machine": "arm64", "os_version": "26.6.2",
-                             "xcode_version": "26.5", "simulators": {}},
+                             "xcode_version": "26.5", "xcode_build": "Build version 17F42",
+                             "simulators": {}},
                  "source_probe": source, "consumer_probe": consumer,
                  "artifact_hashes": {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}}
         self.assertEqual("PROBE_PASSED", qualify.validate_hosted_probe(probe, sha)["status"])

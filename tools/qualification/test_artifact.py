@@ -69,6 +69,7 @@ class RawArtifactTests(unittest.TestCase):
             hosted = {"candidate_sha": sha, "target": target, "status": "PROBE_PASSED",
                       "runtime": {"system": "Darwin", "machine": "arm64",
                                   "os_version": "26.6.2", "xcode_version": "26.5",
+                                  "xcode_build": "Build version 17F42",
                                   "simulators": {}},
                       "source_probe": source, "consumer_probe": consumer,
                       "artifact_hashes": hashes}

@@ -45,6 +45,13 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                              "Xcode 26.5\nBuild version 17F42\n"))
         with self.assertRaisesRegex(ValueError, "pinned 26.5"):
             mobile_capture.validate_xcode_version("Xcode 26.4.1\nBuild version 17E303\n")
+        self.assertEqual("Xcode 26.5\nBuild version 18A1\n",
+                         mobile_capture.validate_xcode_version(
+                             "Xcode 26.5\nBuild version 18A1\n"))
+        for build in ("Build version ", "Build version    ",
+                      "Build version 17 F42", "Build version 17F42!", "17F42"):
+            with self.subTest(build=build), self.assertRaisesRegex(ValueError, "pinned 26.5"):
+                mobile_capture.validate_xcode_version(f"Xcode 26.5\n{build}\n")
 
     def test_adb_route_rejects_shared_owner_lease(self):
         for port, serial in ((5038, "task-device"), (5049, "emulator-5558"),

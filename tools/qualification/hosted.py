@@ -36,6 +36,9 @@ def runtime_status(target, observed):
             return "FAILED", "macOS 26 runner identity is missing"
         if observed.get("xcode_version") != "26.5":
             return "FAILED", "selected Xcode differs from pinned 26.5"
+        build = observed.get("xcode_build")
+        if not isinstance(build, str) or re.fullmatch(r"Build version [0-9A-Za-z]+", build) is None:
+            return "FAILED", "selected Xcode build observation is missing or malformed"
     elif not version.startswith("10.0.26100"):
         return "FAILED", "Windows Server 2025 build 26100 identity is missing"
     if simulator and not observed.get("simulators", {}).get(simulator):
@@ -82,7 +85,7 @@ def discover_runtime(target):
                 "java_version": tool_version(["java", "-version"], r'version "([^"]+)"')}
     if observed["system"] == "Darwin":
         xcode = read_command(["xcodebuild", "-version"])
-        match = re.fullmatch(r"Xcode ([0-9]+(?:\.[0-9]+)*)\nBuild version [^\n]+", xcode)
+        match = re.fullmatch(r"Xcode ([0-9]+(?:\.[0-9]+)*)\nBuild version [0-9A-Za-z]+", xcode)
         observed["xcode_version"] = match.group(1) if match else ""
         observed["xcode_build"] = xcode.splitlines()[-1] if xcode else ""
         observed["simulators"] = {}
