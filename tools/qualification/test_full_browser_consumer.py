@@ -59,6 +59,66 @@ class SafariLauncherTest(unittest.TestCase):
             self.assertEqual(row["process_sha256"], browser.sha(b"selected Safari"))
 
 
+class SafariResponseWitnessTest(unittest.TestCase):
+    def test_replay_rejects_missing_or_changed_browser_bodies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            process = {"started_ns": 100, "finished_ns": 900, "karma_port": 12345}
+            launches = [{"pid": 42}]
+            names = ["runtime.js", "commons.js", "deadbeef0123456789ab.wasm"]
+            server = []
+            session = {"kind": "session", "protocol": 1, "candidate_sha": "a" * 40,
+                       "module": "core", "target": "wasmJs", "browser_pid": 42,
+                       "source_path": "/checkout/safari_response_witness.py",
+                       "source_sha256": "b" * 64, "started_ns": 150,
+                       "finished_ns": 800}
+            records = [session]
+            body_root = folder / "safari-browser-bodies"
+            body_root.mkdir()
+            for index, name in enumerate(names):
+                body = f"browser bytes {name}".encode()
+                relative = f"/absolute/{name}"
+                server.append({"url": relative, "size": len(body),
+                               "sha256": browser.sha(body)})
+                path = f"safari-browser-bodies/{index:04d}.body"
+                (folder / path).write_bytes(body)
+                records.append({"kind": "response", "ordinal": index,
+                                "request_id": f"r-{index}", "browser_pid": 42,
+                                "url": f"http://localhost:12345{relative}",
+                                "method": "GET", "status": 200,
+                                "source": "network", "request_ns": 200 + index * 100,
+                                "response_ns": 210 + index * 100,
+                                "finished_ns": 220 + index * 100,
+                                "body_path": path, "body_size": len(body),
+                                "body_sha256": browser.sha(body)})
+            witness = folder / "safari-browser-responses.jsonl"
+            replay = lambda: browser.verify_safari_response_witness(
+                folder, process, launches, server, "core", "wasmJs", "a" * 40,
+                session["source_path"], "b" * 64)
+            with self.assertRaisesRegex(ValueError, "absent"):
+                replay()
+            witness.write_text("\n".join(json.dumps(row) for row in records) + "\n")
+            self.assertEqual(len(replay()), 3)
+            server.reverse()
+            self.assertEqual(len(replay()), 3)
+            server.reverse()
+            original = (body_root / "0002.body").read_bytes()
+            (body_root / "0002.body").write_bytes(b"X" * len(original))
+            with self.assertRaisesRegex(ValueError, "body"):
+                replay()
+            (body_root / "0002.body").write_bytes(original)
+            for changed in ({**session, "browser_pid": 43},
+                            {**session, "source_sha256": "c" * 64},
+                            {**session, "candidate_sha": "d" * 40}):
+                witness.write_text("\n".join(json.dumps(row) for row in
+                                             [changed, *records[1:]]) + "\n")
+                with self.assertRaisesRegex(ValueError, "session or source"):
+                    replay()
+            witness.write_text("\n".join(json.dumps(row) for row in records[:-1]) + "\n")
+            with self.assertRaisesRegex(ValueError, "session or source"):
+                replay()
+
+
 class ToolchainPinTest(unittest.TestCase):
     def test_safari_uses_darwin_jdk_pin(self):
         self.assertEqual(browser.expected_java_sha256("Darwin", "Safari"),
