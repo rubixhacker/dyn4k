@@ -50,7 +50,6 @@ tasks.test {
         check(javaLauncher.get().metadata.installationPath.asFile.canonicalFile == runtimeHome.canonicalFile)
     }
     jvmArgs("-XshowSettings:properties")
-    if (configuration == "no-optimize") jvmArgs("-Xint")
     val selected = file(providers.gradleProperty("qualificationFacadeCases").get()).readLines()
     filter {
         selected.forEach { line ->

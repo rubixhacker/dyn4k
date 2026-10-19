@@ -300,7 +300,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                    for key in ("java_home", "runtime_java_home", "gradle_user_home"))):
         raise ValueError("producer paths or pinned toolchain are incomplete")
     if any(toolchain[key] != value for key, value in expected_executables.items()):
-        raise ValueError("independent Java or Gradle executable SHA-256 differs from receipt")
+        raise ValueError("independent executable SHA-256 differs from receipt")
     inputs = Path(paths["inputs"])
     expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
                         "--offline", "--no-daemon", "--console=plain", "--info", "--rerun-tasks",
@@ -346,7 +346,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                 or item.get("kotlin_jvm_target") != ("1.8" if version == "minimum" else "21")
                 or item.get("java_release") != (8 if version == "minimum" else 21)
                 or ("-Xno-optimize" in args) != (configuration == "no-optimize")
-                or ("-Xint" in jvm_args) != (configuration == "no-optimize")
+                or "-Xint" in jvm_args
                 or "-XshowSettings:properties" not in jvm_args):
             raise ValueError("external compile or test JVM configuration differs")
     if (receipt.get("raw_consumer_xml") is None or not isinstance(

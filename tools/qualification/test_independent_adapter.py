@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -375,19 +376,53 @@ class IndependentAdapterTests(unittest.TestCase):
                         root, candidate, suite, archive_map, audit_path, signature,
                         public, fingerprint)
 
+    def test_public_jvm_guard_routes_each_approved_lane(self):
+        import full_jvm_consumer
+
+        hashes = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
+        expected = {"expected_artifact_hashes": hashes,
+                    "expected_runtime_identity": "audited runtime",
+                    "expected_archive_digests": {"staged-consumer": "c" * 64},
+                    "expected_java_executable_sha256": "d" * 64,
+                    "expected_gradle_executable_sha256": "e" * 64,
+                    "expected_runtime_java_executable_sha256": "f" * 64}
+        cases = [{"id": "selected"}]
+        selected = {"case_ids": ["selected"]}
+        gate = {"status": "PASSED"}
+        for lane in full_jvm_consumer.LANES:
+            with self.subTest(lane=lane), mock.patch(
+                    "full_jvm_consumer.selected_contract",
+                    return_value=({}, {"cases": cases})) as contract, mock.patch(
+                    "full_jvm_consumer.verify", return_value=gate) as replay:
+                independent_adapter._verify_full_jvm_staged_consumer(
+                    ROOT, "0" * 40, lane, selected,
+                    {"staged-consumer": "/independent/archive"}, expected, gate)
+                contract.assert_called_once_with(ROOT, lane)
+                replay.assert_called_once_with(
+                    "/independent/archive", ROOT, "0" * 40, hashes, "audited runtime",
+                    "c" * 64, "d" * 64, "e" * 64, "f" * 64, lane)
+        with self.assertRaisesRegex(ValueError, "does not cover lane"):
+            independent_adapter._verify_full_jvm_staged_consumer(
+                ROOT, "0" * 40, "jvm:Java:minimum:equivalent", selected,
+                {"staged-consumer": "/independent/archive"}, expected, gate)
+
     def test_retained_full_jvm_archive_requires_signed_executable_hashes(self):
         import full_jvm_consumer
 
         tar_path = os.environ.get("DYN4K_RETAINED_FULL_JVM_ARCHIVE")
         if not tar_path:
             self.skipTest("retained full JVM archive path was not supplied")
-        candidate = "f3922e4d15338c42c788e7dbff3ac7bd71f1fca1"
-        lane = full_jvm_consumer.LANE
+        candidate = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                                            text=True).strip()
+        lane = os.environ.get("DYN4K_FULL_JVM_LANE", full_jvm_consumer.LANE)
         suite = independent_gates.load_approved_manifest(ROOT)
         hashes = {"dyn4k-core": "48928d2825cb84db80e1b6e6294d8f86dd722573850ad8c60399b7fdedc07d4e",
                   "dyn4k": "abf1619a63c24e41ebe8023c9686cc7173c2b3c6552412b0bfbdb94677242291"}
         java_hash = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
         gradle_hash = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
+        runtime_home = Path("/tmp/dyn4k-tools/jdk8" if ":minimum:" in lane
+                            else "/tmp/dyn4k-tools/jdk21")
+        runtime_hash = hashlib.sha256((runtime_home / "bin/java").read_bytes()).hexdigest()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             original = root / "original"
@@ -395,7 +430,9 @@ class IndependentAdapterTests(unittest.TestCase):
             subprocess.run(["tar", "-xf", tar_path, "-C", str(original)],
                            check=True, capture_output=True)
             receipt = json.loads((original / "receipt.json").read_text())
-            runtime = receipt["runtime_identity"]
+            runtime = subprocess.check_output([str(runtime_home / "bin/java"), "-version"],
+                                              stderr=subprocess.STDOUT, text=True).splitlines()[0]
+            runtime += f" | {platform.system()} {platform.release()} {platform.machine()}"
             forged = root / "forged"
             shutil.copytree(original, forged)
             forged_receipt = copy.deepcopy(receipt)
@@ -416,7 +453,8 @@ class IndependentAdapterTests(unittest.TestCase):
                               "expected_runtime_identity": runtime,
                               "expected_archive_digests": {"staged-consumer": digest},
                               "expected_java_executable_sha256": java_hash,
-                              "expected_gradle_executable_sha256": gradle_hash}}}
+                              "expected_gradle_executable_sha256": gradle_hash,
+                              "expected_runtime_java_executable_sha256": runtime_hash}}}
                 audit_path, signature, public, fingerprint = self.signed_inputs(root, signed)
                 generic = independent_gates.evaluate_gate(
                     "staged-consumer", path, candidate, lane, suite["lanes"][lane],

@@ -169,7 +169,6 @@ tasks.register("qualificationEvidence") {
             check(launcher.metadata.installationPath.asFile.canonicalFile == runtimeHome)
             val args = kotlinTask.compilerOptions.freeCompilerArgs.get()
             check(args.contains("-Xno-optimize") == (configuration == "no-optimize"))
-            check(testTask.jvmArgs.contains("-Xint") == (configuration == "no-optimize"))
             mapOf("module" to module, "compiler_args" to args,
                 "kotlin_jvm_target" to kotlinTask.compilerOptions.jvmTarget.get().target,
                 "java_release" to javaTask.options.release.get(),

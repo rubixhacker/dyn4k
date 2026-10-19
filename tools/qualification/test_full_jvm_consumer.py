@@ -47,6 +47,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         changes = (
             {"java_executable_sha256": "0" * 64},
             {"gradle_executable_sha256": "1" * 64},
+            {"runtime_java_executable_sha256": "3" * 64},
             {"java_executable_sha256": "0" * 64,
              "gradle_executable_sha256": "1" * 64},
         )
@@ -58,7 +59,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                 forged["toolchain"].update(changed)
                 (copied / "receipt.json").write_bytes(route.encoded(forged) + b"\n")
                 digest = independent_gates.archive_digest(copied)
-                with self.assertRaisesRegex(ValueError, "independent.*executable"):
+                with self.assertRaisesRegex(ValueError, "independent executable"):
                     verify_archive(copied, REPOSITORY, forged["candidate_sha"],
                                    forged["artifact_hashes"], forged["runtime_identity"], digest)
                 command = [
@@ -75,7 +76,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                 ]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("independent Java or Gradle executable SHA-256 differs",
+                self.assertIn("independent executable SHA-256 differs",
                               result.stderr)
 
     @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
@@ -104,9 +105,11 @@ class FullJvmConsumerTests(unittest.TestCase):
             (base + java + ["--expected-gradle-executable-sha256", "x" * 64] + runtime_java,
              "independent Java and Gradle executable SHA-256 values are required"),
             (base + ["--expected-java-executable-sha256", "0" * 64] + gradle + runtime_java,
-             "independent Java or Gradle executable SHA-256 differs from receipt"),
+             "independent executable SHA-256 differs from receipt"),
             (base + java + ["--expected-gradle-executable-sha256", "1" * 64] + runtime_java,
-             "independent Java or Gradle executable SHA-256 differs from receipt"),
+             "independent executable SHA-256 differs from receipt"),
+            (base + java + gradle + ["--expected-runtime-java-executable-sha256", "3" * 64],
+             "independent executable SHA-256 differs from receipt"),
         )
         for arguments, error in adverse:
             with self.subTest(arguments=arguments[-2:]):
@@ -137,6 +140,15 @@ class FullJvmConsumerTests(unittest.TestCase):
             inputs = Path(directory) / "inputs"
             self.assertEqual(len((inputs / "core-cases.tsv").read_text().splitlines()), 2465)
             self.assertEqual(len((inputs / "facade-cases.tsv").read_text().splitlines()), 61)
+
+    def test_all_four_lanes_select_original_jvm_contract(self):
+        selected = [route.selected_contract(REPOSITORY, lane)[1]
+                    for lane in route.LANES]
+        ids = [[item["id"] for item in contract["cases"]] for contract in selected]
+        self.assertTrue(all(item == ids[0] for item in ids))
+        self.assertEqual(2526, len(ids[0]))
+        with self.assertRaisesRegex(ValueError, "unsupported full JVM lane"):
+            route.selected_contract(REPOSITORY, "jvm:Java:minimum:equivalent")
 
     @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
     def test_public_replay_and_resealed_adverse_archive(self):
@@ -219,7 +231,8 @@ class FullJvmConsumerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify_archive(copied, REPOSITORY, candidate, hashes, identity, digest)
 
-        for mutation in ("source-inventory", "source-build", "binary-bytes"):
+        for mutation in ("source-inventory", "source-build", "binary-bytes",
+                         "build-configuration"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 copied, altered = copied_archive(directory)
                 if mutation == "source-inventory":
@@ -233,13 +246,20 @@ class FullJvmConsumerTests(unittest.TestCase):
                     graph["compile"][0]["artifacts"][0]["file"] = (
                         str(REPOSITORY / "dyn4k-core/build/libs/forged.jar"))
                     path.write_bytes(route.encoded(graph))
-                else:
+                elif mutation == "binary-bytes":
                     relative = altered["resolved_artifacts"]["dyn4k-core"]
                     marker = "RESOLVED_DYN4K_CORE"
                     path = copied / relative
                     data = bytearray(path.read_bytes())
                     data[100] ^= 1
                     path.write_bytes(data)
+                else:
+                    relative, marker = "build-configuration.json", "BUILD_CONFIGURATION"
+                    path = copied / relative
+                    proof = json.loads(path.read_bytes())
+                    proof["configuration"] = ("no-optimize" if
+                        proof["configuration"] == "default" else "default")
+                    path.write_bytes(route.encoded(proof))
                 digest = reseal(copied, altered, {relative: marker})
                 with self.assertRaises(ValueError):
                     verify_archive(copied, REPOSITORY, candidate, hashes, identity, digest)
@@ -262,6 +282,13 @@ class FullJvmConsumerTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             verify_archive(root, REPOSITORY, "0" * 40, hashes, identity, digest)
+        with self.assertRaisesRegex(ValueError, "candidate contract"):
+            route.verify(root, REPOSITORY, candidate, hashes, identity, digest,
+                         JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256,
+                         RUNTIME_EXECUTABLE_SHA256,
+                         next(lane for lane in route.LANES if lane != TEST_LANE))
+        with self.assertRaises(ValueError):
+            verify_archive(root, REPOSITORY, candidate, hashes, "wrong runtime", digest)
 
 
 if __name__ == "__main__":
