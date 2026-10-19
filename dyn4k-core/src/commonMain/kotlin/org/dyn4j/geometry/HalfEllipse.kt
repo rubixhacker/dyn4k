@@ -63,7 +63,7 @@ open class HalfEllipse : AbstractShape, Convex {
     }
 
     override fun copy() = HalfEllipse(this)
-    override fun toString() = "HalfEllipse[${super.toString()}|Width=${getWidth()}|Height=$height]"
+    override fun toString() = "HalfEllipse[${super.toString()}|Width=${getWidth()}|Height=${getHeight()}]"
     override fun getAxes(foci: Array<Vector2>?, transform: Transform): Array<Vector2> =
         throw UnsupportedOperationException("SAT does not support the HalfEllipse shape.")
     override fun getFoci(transform: Transform): Array<Vector2> =
@@ -150,7 +150,7 @@ open class HalfEllipse : AbstractShape, Convex {
     }
 
     override fun createMass(density: Double): Mass {
-        val mass = getArea() * density
+        val mass = (PI * halfWidth * height) * density * 0.5
         return Mass(center, mass, mass * (halfWidth * halfWidth + height * height) * INERTIA_CONSTANT)
     }
     override fun getArea(): Double = PI * halfWidth * height * 0.5

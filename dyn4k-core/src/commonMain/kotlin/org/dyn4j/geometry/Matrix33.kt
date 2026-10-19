@@ -128,16 +128,18 @@ open class Matrix33 : Copyable<Matrix33> {
     }
     open fun difference(matrix: Matrix33) = copy().subtract(matrix)
     open fun multiply(matrix: Matrix33): Matrix33 {
-        val a = copy()
-        m00 = a.m00 * matrix.m00 + a.m01 * matrix.m10 + a.m02 * matrix.m20
-        m01 = a.m00 * matrix.m01 + a.m01 * matrix.m11 + a.m02 * matrix.m21
-        m02 = a.m00 * matrix.m02 + a.m01 * matrix.m12 + a.m02 * matrix.m22
-        m10 = a.m10 * matrix.m00 + a.m11 * matrix.m10 + a.m12 * matrix.m20
-        m11 = a.m10 * matrix.m01 + a.m11 * matrix.m11 + a.m12 * matrix.m21
-        m12 = a.m10 * matrix.m02 + a.m11 * matrix.m12 + a.m12 * matrix.m22
-        m20 = a.m20 * matrix.m00 + a.m21 * matrix.m10 + a.m22 * matrix.m20
-        m21 = a.m20 * matrix.m01 + a.m21 * matrix.m11 + a.m22 * matrix.m21
-        m22 = a.m20 * matrix.m02 + a.m21 * matrix.m12 + a.m22 * matrix.m22
+        val a00 = m00; val a01 = m01; val a02 = m02
+        val a10 = m10; val a11 = m11; val a12 = m12
+        val a20 = m20; val a21 = m21; val a22 = m22
+        m00 = a00 * matrix.m00 + a01 * matrix.m10 + a02 * matrix.m20
+        m01 = a00 * matrix.m01 + a01 * matrix.m11 + a02 * matrix.m21
+        m02 = a00 * matrix.m02 + a01 * matrix.m12 + a02 * matrix.m22
+        m10 = a10 * matrix.m00 + a11 * matrix.m10 + a12 * matrix.m20
+        m11 = a10 * matrix.m01 + a11 * matrix.m11 + a12 * matrix.m21
+        m12 = a10 * matrix.m02 + a11 * matrix.m12 + a12 * matrix.m22
+        m20 = a20 * matrix.m00 + a21 * matrix.m10 + a22 * matrix.m20
+        m21 = a20 * matrix.m01 + a21 * matrix.m11 + a22 * matrix.m21
+        m22 = a20 * matrix.m02 + a21 * matrix.m12 + a22 * matrix.m22
         return this
     }
     open fun product(matrix: Matrix33) = copy().multiply(matrix)
@@ -188,7 +190,7 @@ open class Matrix33 : Copyable<Matrix33> {
         s = m12; m12 = m21; m21 = s
         return this
     }
-    open fun getTranspose() = copy().transpose()
+    open fun getTranspose() = Matrix33(m00, m10, m20, m01, m11, m21, m02, m12, m22)
     open fun determinant() =
         m00 * m11 * m22 + m01 * m12 * m20 + m02 * m10 * m21 -
         m20 * m11 * m02 - m21 * m12 * m00 - m22 * m10 * m01
@@ -196,16 +198,18 @@ open class Matrix33 : Copyable<Matrix33> {
     open fun invert(): Matrix33 {
         var det = determinant()
         det = if (abs(det) > Epsilon.E) 1.0 / det else 0.0
-        val a = copy()
-        m00 = det * (a.m11 * a.m22 - a.m12 * a.m21)
-        m01 = -det * (a.m01 * a.m22 - a.m21 * a.m02)
-        m02 = det * (a.m01 * a.m12 - a.m11 * a.m02)
-        m10 = -det * (a.m10 * a.m22 - a.m20 * a.m12)
-        m11 = det * (a.m00 * a.m22 - a.m20 * a.m02)
-        m12 = -det * (a.m00 * a.m12 - a.m10 * a.m02)
-        m20 = det * (a.m10 * a.m21 - a.m20 * a.m11)
-        m21 = -det * (a.m00 * a.m21 - a.m20 * a.m01)
-        m22 = det * (a.m00 * a.m11 - a.m10 * a.m01)
+        val n00 = det * (m11 * m22 - m12 * m21)
+        val n01 = -det * (m01 * m22 - m21 * m02)
+        val n02 = det * (m01 * m12 - m11 * m02)
+        val n10 = -det * (m10 * m22 - m20 * m12)
+        val n11 = det * (m00 * m22 - m20 * m02)
+        val n12 = -det * (m00 * m12 - m10 * m02)
+        val n20 = det * (m10 * m21 - m20 * m11)
+        val n21 = -det * (m00 * m21 - m20 * m01)
+        val n22 = det * (m00 * m11 - m10 * m01)
+        m00 = n00; m01 = n01; m02 = n02
+        m10 = n10; m11 = n11; m12 = n12
+        m20 = n20; m21 = n21; m22 = n22
         return this
     }
     open fun getInverse() = copy().invert()

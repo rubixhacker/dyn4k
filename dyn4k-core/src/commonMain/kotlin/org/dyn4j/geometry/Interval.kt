@@ -98,7 +98,17 @@ open class Interval : Copyable<Interval> {
             max = min
         }
     }
-    open fun getExpanded(value: Double) = copy().also { it.expand(value) }
+    open fun getExpanded(value: Double): Interval {
+        val e = value * 0.5
+        var newMin = min - e
+        var newMax = max + e
+        if (value < 0.0 && newMin > newMax) {
+            val midpoint = (newMin + newMax) * 0.5
+            newMin = midpoint
+            newMax = midpoint
+        }
+        return Interval(newMin, newMax)
+    }
     open fun getLength() = max - min
 
     companion object {
