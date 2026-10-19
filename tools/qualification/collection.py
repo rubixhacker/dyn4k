@@ -818,14 +818,25 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None, source_
         target_hashes = qualify.target_binary_hashes(staged_audit["artifacts"])
     else:
         target_hashes = {}
+    def candidate_lane_input(lane_id, lane):
+        selected = {"target": lane["target"],
+                    "artifact_hashes": target_hashes.get(lane["target"]),
+                    "runtime_identity": None}
+        if lane["target"] == "jvm":
+            selected["artifact_hashes"] = None
+            selected["jvm_mode_publication"] = {
+                "candidate_sha": candidate_sha, "lane": lane_id,
+                "mode": lane["configuration"], "source": "compiler_modes.replay",
+                "source_checkout": None, "publication_archive": None,
+                "archive_digest": None, "artifact_hashes": None}
+        return selected
+
     candidate_inputs = {"schema": 1, "candidate_sha": candidate_sha,
                         "suite_manifest_sha256": independent_gates.digest(manifest),
                         "audit_manifest_sha256": (qualify.manifest_digest(staged_audit)
                                                   if staged_audit is not None else None),
                         "status": "INCOMPLETE",
-                        "lanes": {lane_id: {"target": lane["target"],
-                                            "artifact_hashes": target_hashes.get(lane["target"]),
-                                            "runtime_identity": None}
+                        "lanes": {lane_id: candidate_lane_input(lane_id, lane)
                                   for lane_id, lane in manifest["lanes"].items()}}
     (output / "candidate-manifest-inputs.json").write_text(
         json.dumps(candidate_inputs, indent=2) + "\n")

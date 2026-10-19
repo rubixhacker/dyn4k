@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,9 +11,118 @@ from unittest import mock
 
 import qualify
 import independent_adapter
+import independent_gates
 
 
 class QualificationTests(unittest.TestCase):
+    MODE_ARCHIVES = Path("/var/home/stewart/dyn4k-evidence/session-control/full-jvm-d50-p1-p2-sol-work/archive")
+    MODE_SOURCE = Path("/var/home/stewart/dyn4k-evidence/session-control/full-jvm-d50-p1-p2-sol-work/final-candidate")
+
+    def mode_fixture(self, mode):
+        archive = self.MODE_ARCHIVES / f"jvm-{mode}-final"
+        if not archive.is_dir() or not self.MODE_SOURCE.is_dir():
+            self.skipTest("retained exact-candidate JVM mode publication is unavailable")
+        receipt = json.loads((archive / "receipt.json").read_text())
+        hashes = {module: receipt["artifacts"][module]["sha256"]
+                  for module in qualify.MODULES}
+        case = next(row for row in qualify.expand(qualify.matrix())
+                    if row["target"] == "jvm" and row["version"] == "minimum"
+                    and row["configuration"] == mode)
+        binding = {"candidate_sha": receipt["candidate_sha"], "lane": case["id"],
+                   "mode": mode, "source": "compiler_modes.replay",
+                   "source_checkout": str(self.MODE_SOURCE),
+                   "publication_archive": str(archive),
+                   "archive_digest": independent_gates.archive_digest(archive),
+                   "artifact_hashes": hashes}
+        return case, binding, hashes
+
+    def test_real_jvm_modes_bind_distinct_publications_to_complete_lane_inputs(self):
+        observed = {}
+        for mode in ("default", "no-optimize"):
+            case, binding, hashes = self.mode_fixture(mode)
+            sha = binding["candidate_sha"]
+            areas = ("geometry", "collision", "dynamics", "joints", "compatibility")
+            suite = {"schema": 1, "kind": "complete-port", "id": "fixture-suite",
+                     "areas": list(areas),
+                     "cases": [{"id": area, "area": area} for area in areas]}
+            audit = {"candidate_sha": sha, "status": "PASSED", "artifacts": [
+                {"path": qualify.target_binary_path(module, "jvm"),
+                 "sha256": "f" * 64} for module in qualify.MODULES]}
+            candidate = {"schema": 1, "candidate_sha": sha,
+                         "suite_manifest_sha256": qualify.manifest_digest(suite),
+                         "audit_manifest_sha256": qualify.manifest_digest(audit),
+                         "lanes": {case["id"]: {
+                             "runtime_identity": "fixture JDK", "runtime_version": "8",
+                             "configuration": mode, "suite_id": suite["id"],
+                             "artifact_hashes": hashes,
+                             "jvm_mode_publication": binding}}}
+            evidence = {**case, "candidate_sha": sha, "runtime_identity": "fixture JDK",
+                        "runtime_version": "8", "suite_id": suite["id"],
+                        "expected": 5, "executed": 5, "failures": 0, "skipped": 0,
+                        "consumer": "PASSED", "artifact_hashes": hashes,
+                        "jvm_mode_publication": binding, "invocation_id": "a" * 32,
+                        "exit_code": 0, "command": ["fixture"],
+                        "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                        "suite_manifest_sha256": qualify.manifest_digest(suite),
+                        "audit_manifest_sha256": qualify.manifest_digest(audit),
+                        "case_results": [{"id": area, "status": "PASSED"}
+                                         for area in areas]}
+            result = qualify.evaluate(case, evidence, sha, candidate, suite, audit)
+            self.assertEqual("PASSED", result["status"], result["reason"])
+            observed[mode] = hashes
+            for changed in ({key: value for key, value in binding.items() if key != "mode"},
+                            {**binding, "mode": "wrong"},
+                            {**binding, "lane": case["id"].replace("minimum", "current")},
+                            {**binding, "candidate_sha": "0" * 40},
+                            {**binding, "source": "self-reported"},
+                            {**binding, "source_checkout": str(Path(__file__).resolve().parents[2])},
+                            {**binding, "archive_digest": "0" * 64},
+                            {**binding, "artifact_hashes": {**hashes, "dyn4k": "0" * 64}}):
+                with self.assertRaises(ValueError):
+                    qualify.verify_jvm_mode_publication(
+                        changed, case, sha, changed["artifact_hashes"])
+                self.assertEqual("FAILED", qualify.evaluate(
+                    case, {**evidence, "jvm_mode_publication": changed}, sha,
+                    candidate, suite, audit)["status"])
+            wrong_archive = self.MODE_ARCHIVES / ("jvm-no-optimize-final" if mode == "default"
+                                                   else "jvm-default-final")
+            with self.assertRaises(ValueError):
+                qualify.verify_jvm_mode_publication(
+                    {**binding, "publication_archive": str(wrong_archive),
+                     "archive_digest": independent_gates.archive_digest(wrong_archive)},
+                    case, sha, hashes)
+            self.assertEqual("FAILED", qualify.evaluate(
+                case, {key: value for key, value in evidence.items()
+                       if key != "jvm_mode_publication"}, sha, candidate, suite, audit)["status"])
+            alternate = {**candidate, "lanes": {case["id"]: {
+                **candidate["lanes"][case["id"]], "jvm_mode_publication": None}}}
+            self.assertEqual("FAILED", qualify.evaluate(
+                case, {**evidence, "candidate_manifest_sha256": qualify.manifest_digest(alternate),
+                       "jvm_mode_publication": None}, sha, alternate, suite, audit)["status"])
+        self.assertNotEqual(observed["default"], observed["no-optimize"])
+
+    def test_resealed_forged_jvm_publication_is_rejected(self):
+        case, binding, hashes = self.mode_fixture("default")
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "forged"
+            shutil.copytree(binding["publication_archive"], archive, copy_function=shutil.copy2)
+            receipt_path = archive / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["artifacts"]["dyn4k-core"]["sha256"] = "0" * 64
+            receipt_path.write_text(json.dumps(receipt))
+            forged = {**binding, "publication_archive": str(archive),
+                      "archive_digest": independent_gates.archive_digest(archive),
+                      "artifact_hashes": {**hashes, "dyn4k-core": "0" * 64}}
+            with self.assertRaisesRegex(ValueError, "JVM mode publication"):
+                qualify.verify_jvm_mode_publication(
+                    forged, case, binding["candidate_sha"], forged["artifact_hashes"])
+            receipt_path.write_bytes(Path(binding["publication_archive"], "receipt.json").read_bytes())
+            copied = {**binding, "publication_archive": str(archive),
+                      "archive_digest": independent_gates.archive_digest(archive)}
+            with self.assertRaisesRegex(ValueError, "log escapes selected archive"):
+                qualify.verify_jvm_mode_publication(
+                    copied, case, binding["candidate_sha"], hashes)
+
     GEOMETRY_CASES = (
         "cleanseReturnsTheExactEmptyListAndASeparateEmptyArray",
         "cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult",

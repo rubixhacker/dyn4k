@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import collection
 import independent_gates
@@ -135,6 +136,43 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual("INCOMPLETE", candidate["status"])
             self.assertTrue(all(value["runtime_identity"] is None
                                 for value in candidate["lanes"].values()))
+            jvm_lanes = {lane_id: value for lane_id, value in candidate["lanes"].items()
+                         if value["target"] == "jvm"}
+            self.assertEqual(4, len(jvm_lanes))
+            self.assertEqual({"default", "no-optimize"},
+                             {value["jvm_mode_publication"]["mode"]
+                              for value in jvm_lanes.values()})
+            for lane_id, value in jvm_lanes.items():
+                self.assertIsNone(value["artifact_hashes"])
+                self.assertEqual(lane_id, value["jvm_mode_publication"]["lane"])
+                self.assertEqual(HEAD, value["jvm_mode_publication"]["candidate_sha"])
+                self.assertIsNone(value["jvm_mode_publication"]["publication_archive"])
+                self.assertIsNone(value["jvm_mode_publication"]["archive_digest"])
+
+    def test_staged_audit_does_not_assign_one_jvm_pair_to_both_modes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / f"publication-{HEAD}-ubuntu"
+            receipt = artifact / "fixture-publication"
+            receipt.mkdir(parents=True)
+            audit = {"candidate_sha": HEAD, "status": "PASSED", "artifacts": [
+                {"path": collection.qualify.target_binary_path(module, target),
+                 "sha256": value}
+                for target, value in (("jvm", "a" * 64), ("linuxX64", "b" * 64))
+                for module in collection.qualify.MODULES]}
+            (receipt / "artifact-audit.json").write_text(json.dumps(audit))
+            output = root / "collected"
+            with mock.patch.object(collection, "inspect_artifact",
+                                   return_value="PRODUCER_VERIFIED"):
+                collection.collect(ROOT, HEAD, [(artifact.name, artifact)], output)
+            candidate = json.loads((output / "candidate-manifest-inputs.json").read_text())
+            self.assertTrue(all(value["artifact_hashes"] is None
+                                for value in candidate["lanes"].values()
+                                if value["target"] == "jvm"))
+            self.assertTrue(all(value["artifact_hashes"] == {
+                                module: "b" * 64 for module in collection.qualify.MODULES}
+                                for value in candidate["lanes"].values()
+                                if value["target"] == "linuxX64"))
 
     def test_wrong_sha_and_duplicate_route_are_failed(self):
         with tempfile.TemporaryDirectory() as temporary:

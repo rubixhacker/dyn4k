@@ -598,6 +598,79 @@ def validate_complete_suite_bindings(suite_manifest, repository):
         raise ValueError("complete suite differs from independently reviewed manifest")
 
 
+def verify_jvm_mode_publication(binding, case, candidate_sha, expected_hashes):
+    import independent_gates
+
+    required = {"candidate_sha", "lane", "mode", "source", "source_checkout",
+                "publication_archive", "archive_digest", "artifact_hashes"}
+    if not isinstance(binding, dict) or set(binding) != required:
+        raise ValueError("JVM mode publication identity is incomplete")
+    if (binding["candidate_sha"] != candidate_sha or binding["lane"] != case["id"]
+            or binding["mode"] != case["configuration"]
+            or binding["source"] != "compiler_modes.replay"
+            or binding["artifact_hashes"] != expected_hashes):
+        raise ValueError("JVM mode publication candidate, lane, mode, source, or pair differs")
+    if (not SHA40.fullmatch(str(candidate_sha))
+            or not SHA64.fullmatch(str(binding["archive_digest"]))
+            or not isinstance(expected_hashes, dict)
+            or set(expected_hashes) != set(MODULES)
+            or any(not SHA64.fullmatch(str(value)) for value in expected_hashes.values())):
+        raise ValueError("JVM mode publication digest or pair is invalid")
+    source, archive = Path(binding["source_checkout"]), Path(binding["publication_archive"])
+    if (not source.is_absolute() or source.is_symlink() or not source.is_dir()
+            or not archive.is_absolute() or archive.is_symlink() or not archive.is_dir()):
+        raise ValueError("JVM mode publication source or archive is not a regular directory")
+    if independent_gates.archive_digest(archive) != binding["archive_digest"]:
+        raise ValueError("JVM mode publication archive digest differs")
+    receipt = load_json_strict(archive / "receipt.json")
+    if (receipt.get("candidate_sha") != candidate_sha or receipt.get("target") != "jvm"
+            or receipt.get("mode") != case["configuration"]):
+        raise ValueError("JVM mode publication receipt identity differs")
+    def check_logs(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "log":
+                    path = Path(item)
+                    if (not path.is_absolute() or not path.is_relative_to(archive)
+                            or path.is_symlink() or not path.is_file()):
+                        raise ValueError("JVM mode publication log escapes selected archive")
+                else:
+                    check_logs(item)
+        elif isinstance(value, list):
+            for item in value:
+                check_logs(item)
+    check_logs(receipt)
+    artifacts = receipt.get("artifacts")
+    if not isinstance(artifacts, dict) or set(artifacts) != set(MODULES):
+        raise ValueError("JVM mode publication pair is incomplete")
+    for module in MODULES:
+        item = artifacts[module]
+        relative = Path(item.get("path", "")) if isinstance(item, dict) else Path("")
+        expected_path = Path("staged") / target_binary_path(module, "jvm")
+        jar = archive / relative
+        if (relative != expected_path or item.get("sha256") != expected_hashes[module]
+                or jar.is_symlink() or not jar.is_file() or digest(jar) != expected_hashes[module]):
+            raise ValueError(f"JVM mode publication {module} JAR differs")
+    script = (
+        "import json,sys;from pathlib import Path;"
+        "sys.path.insert(0,sys.argv[1]);import compiler_modes,full_corpus;"
+        "compiler_modes.ROOT=Path(sys.argv[2]);"
+        "compiler_modes.MANIFEST=compiler_modes.ROOT/full_corpus.MANIFEST_PATH;"
+        "print(json.dumps(compiler_modes.replay(Path(sys.argv[3]),sys.argv[4],'jvm',sys.argv[5])))"
+    )
+    process = subprocess.run(
+        [sys.executable, "-c", script, str(Path(__file__).resolve().parent), str(source),
+         str(archive), candidate_sha, case["configuration"]],
+        cwd=source, capture_output=True, text=True, check=False, timeout=300)
+    if process.returncode or not process.stdout.strip():
+        raise ValueError("JVM mode publication public replay did not run")
+    replay = json.loads(process.stdout)
+    if (replay.get("status") != "PASSED" or replay.get("candidate_sha") != candidate_sha
+            or replay.get("target") != "jvm" or replay.get("mode") != case["configuration"]):
+        raise ValueError("JVM mode publication public replay is unpassed")
+    return True
+
+
 def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
              suite_manifest=None, artifact_audit=None):
     result = {"id": case["id"], "status": "NOT_RUN"}
@@ -671,9 +744,23 @@ def evaluate(case, evidence, candidate_sha=None, candidate_manifest=None,
         if not isinstance(bound_hashes, dict) or set(bound_hashes) != set(MODULES):
             problems.append("both target binary hashes are required")
         else:
+            mode_binding = lane.get("jvm_mode_publication")
+            verified_hashes = audited
+            if mode_binding is not None or "jvm_mode_publication" in lane:
+                if case["target"] != "jvm" or evidence.get("jvm_mode_publication") != mode_binding:
+                    problems.append("JVM mode publication differs from selected lane evidence")
+                else:
+                    try:
+                        verify_jvm_mode_publication(mode_binding, case, candidate_sha,
+                                                    bound_hashes)
+                        verified_hashes = bound_hashes
+                    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError,
+                            json.JSONDecodeError) as error:
+                        problems.append(f"JVM mode publication is unverified: {error}")
             for module in MODULES:
                 expected_hash = bound_hashes[module]
-                if (not SHA64.fullmatch(str(expected_hash)) or audited.get(module) != expected_hash
+                if (not SHA64.fullmatch(str(expected_hash))
+                        or verified_hashes.get(module) != expected_hash
                         or not isinstance(evidence.get("artifact_hashes"), dict)
                         or evidence["artifact_hashes"].get(module) != expected_hash):
                     problems.append(f"{module} binary hash differs from target audit")
