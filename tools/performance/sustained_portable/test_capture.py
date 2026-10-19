@@ -43,6 +43,8 @@ class LocalMacToolchainTest(unittest.TestCase):
                        "developer_dir": developer,
                        "xcodebuild_path": developer + "/usr/bin/xcodebuild",
                        "xcrun_find_output": developer + "/usr/bin/xcodebuild\n",
+                       "xcrun_find_argv": ["xcrun", "--find", "xcodebuild"],
+                       "xcode_version_argv": [developer + "/usr/bin/xcodebuild", "-version"],
                        "xcode_version": "Xcode 26.5\nBuild version 17F42\n"}
             argv = ["native_host_capture.py", "--archive", str(root / "archive"),
                     "--inventory", str(inventory_path), "--publication-root", str(root),
@@ -70,14 +72,22 @@ class LocalMacToolchainTest(unittest.TestCase):
             developer = Path(directory) / "Xcode.app/Contents/Developer"
             developer.mkdir(parents=True)
             found = str(developer / "usr/bin/xcodebuild") + "\n"
+            selected_executable = str(developer / "usr/bin/xcodebuild")
+            invoked = []
             def command(argv, **_kwargs):
-                output = "Xcode 26.5\nBuild version 17F42\n" if argv[0] == "xcodebuild" else found
+                invoked.append(argv)
+                output = (found if argv == ["xcrun", "--find", "xcodebuild"]
+                          else "Xcode 26.5\nBuild version 17F42\n" if argv == [selected_executable, "-version"]
+                          else "Xcode 26.4.1\nBuild version 17E303\n")
                 return subprocess.CompletedProcess(argv, 0, output, "")
             with mock.patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
                  mock.patch.object(native_host_capture.subprocess, "run", side_effect=command):
                 receipt = native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
             self.assertEqual(receipt["xcode_version"], "Xcode 26.5\nBuild version 17F42\n")
             self.assertEqual(receipt["xcrun_find_output"], found)
+            self.assertEqual(receipt["xcode_version_argv"], [selected_executable, "-version"])
+            self.assertEqual(invoked, [["xcrun", "--find", "xcodebuild"],
+                                       [selected_executable, "-version"]])
             native_host_capture.validate_apple_toolchain_receipt(receipt)
             for change in ({"xcode_version": "Xcode 26.4.1\nBuild version 17E303\n"},
                            {"xcode_version": "Xcode 26.5\nBuild version 17 F42\n"},
@@ -90,6 +100,45 @@ class LocalMacToolchainTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "DEVELOPER_DIR"):
                     native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
 
+    def test_selected_26_4_1_rejects_even_when_path_xcode_is_26_5(self):
+        with tempfile.TemporaryDirectory() as directory:
+            developer = Path(directory) / "Xcode.app/Contents/Developer"
+            developer.mkdir(parents=True)
+            selected = str(developer / "usr/bin/xcodebuild")
+            invoked = []
+            def command(argv, **_kwargs):
+                invoked.append(argv)
+                if argv == ["xcrun", "--find", "xcodebuild"]:
+                    output = selected + "\n"
+                elif argv == [selected, "-version"]:
+                    output = "Xcode 26.4.1\nBuild version 17E303\n"
+                elif argv == ["xcodebuild", "-version"]:
+                    output = "Xcode 26.5\nBuild version 17F42\n"
+                else:
+                    raise AssertionError(f"unexpected command: {argv}")
+                return subprocess.CompletedProcess(argv, 0, output, "")
+            with mock.patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 mock.patch.object(native_host_capture.subprocess, "run", side_effect=command):
+                with self.assertRaisesRegex(ValueError, "pinned 26.5"):
+                    native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
+            self.assertEqual(invoked, [["xcrun", "--find", "xcodebuild"],
+                                       [selected, "-version"]])
+
+    def test_mismatched_selected_path_fails_before_version_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            developer = Path(directory) / "Xcode.app/Contents/Developer"
+            developer.mkdir(parents=True)
+            invoked = []
+            def command(argv, **_kwargs):
+                invoked.append(argv)
+                return subprocess.CompletedProcess(
+                    argv, 0, "/Other/Xcode.app/Contents/Developer/usr/bin/xcodebuild\n", "")
+            with mock.patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 mock.patch.object(native_host_capture.subprocess, "run", side_effect=command):
+                with self.assertRaisesRegex(ValueError, "DEVELOPER_DIR binding"):
+                    native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
+            self.assertEqual(invoked, [["xcrun", "--find", "xcodebuild"]])
+
     def test_public_replay_requires_source_bound_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory)
@@ -99,6 +148,8 @@ class LocalMacToolchainTest(unittest.TestCase):
                        "developer_dir": developer,
                        "xcodebuild_path": developer + "/usr/bin/xcodebuild",
                        "xcrun_find_output": developer + "/usr/bin/xcodebuild\n",
+                       "xcrun_find_argv": ["xcrun", "--find", "xcodebuild"],
+                       "xcode_version_argv": [developer + "/usr/bin/xcodebuild", "-version"],
                        "xcode_version": "Xcode 26.5\nBuild version 18A1\n"}
             sidecar = archive / "apple-toolchain.json"
             sidecar.write_text(json.dumps(receipt) + "\n")
@@ -115,9 +166,13 @@ class LocalMacToolchainTest(unittest.TestCase):
                                     "developer_dir": developer,
                                     "xcode_version": receipt["xcode_version"]}}))
             native_host_capture.verify_apple_toolchain_archive(archive)
+            replay = [sys.executable, "-B", str(Path(native_host_capture.__file__).resolve()),
+                      "verify", "--archive", str(archive)]
+            self.assertEqual(subprocess.run(replay, capture_output=True).returncode, 0)
             original = json.loads(sidecar.read_text())
             for change in ({"xcode_version": "Xcode 26.4.1\nBuild version 17E303\n"},
                            {"xcode_version": "Xcode 26.5\nBuild version 17 F42\n"},
+                           {"xcode_version_argv": ["xcodebuild", "-version"]},
                            {"developer_dir": "/Other/Xcode.app/Contents/Developer"}):
                 with self.subTest(change=change):
                     sidecar.write_text(json.dumps(original | change) + "\n")
@@ -128,6 +183,7 @@ class LocalMacToolchainTest(unittest.TestCase):
                     (archive / "capture.json").write_text(json.dumps(record))
                     with self.assertRaises(ValueError):
                         native_host_capture.verify_apple_toolchain_archive(archive)
+                    self.assertEqual(subprocess.run(replay, capture_output=True).returncode, 1)
             sidecar.write_text(json.dumps(original) + "\n")
             sidecar.unlink()
             with self.assertRaisesRegex(ValueError, "toolchain"):

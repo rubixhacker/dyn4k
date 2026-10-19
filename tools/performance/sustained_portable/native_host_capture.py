@@ -14,22 +14,31 @@ def selected_artifact(inventory, module, target):
     return capture.native_artifacts(inventory, target)[module]["path"]
 
 
+def selected_xcodebuild_path(developer_dir, find_output):
+    developer = Path(developer_dir)
+    expected = str(developer / "usr/bin/xcodebuild")
+    if (not developer.is_absolute() or developer.parts[-2:] != ("Contents", "Developer")
+            or ".." in developer.parts
+            or find_output not in (expected + "\n", expected + "\r\n")):
+        raise ValueError("Apple toolchain selected DEVELOPER_DIR binding is invalid")
+    return expected
+
+
 def validate_apple_toolchain_receipt(receipt):
     if not isinstance(receipt, dict) or set(receipt) != {
             "format", "source_sha", "producer_tree", "inventory_sha256",
-            "developer_dir", "xcodebuild_path", "xcrun_find_output", "xcode_version"}:
+            "developer_dir", "xcodebuild_path", "xcrun_find_argv", "xcrun_find_output",
+            "xcode_version_argv", "xcode_version"}:
         raise ValueError("Apple toolchain receipt is missing or malformed")
     if receipt["format"] != "portable-apple-toolchain-v1" \
             or not re.fullmatch(r"[0-9a-f]{40}", receipt["source_sha"]) \
             or not re.fullmatch(r"[0-9a-f]{40}", receipt["producer_tree"]) \
             or not re.fullmatch(r"[0-9a-f]{64}", receipt["inventory_sha256"]):
         raise ValueError("Apple toolchain source binding is invalid")
-    developer = Path(receipt["developer_dir"])
-    if (not developer.is_absolute() or developer.parts[-2:] != ("Contents", "Developer")
-            or ".." in developer.parts
-            or receipt["xcodebuild_path"] != str(developer / "usr/bin/xcodebuild")
-            or receipt["xcrun_find_output"] not in (
-                receipt["xcodebuild_path"] + "\n", receipt["xcodebuild_path"] + "\r\n")):
+    selected_path = selected_xcodebuild_path(receipt["developer_dir"], receipt["xcrun_find_output"])
+    if (receipt["xcodebuild_path"] != selected_path
+            or receipt["xcrun_find_argv"] != ["xcrun", "--find", "xcodebuild"]
+            or receipt["xcode_version_argv"] != [selected_path, "-version"]):
         raise ValueError("Apple toolchain selected DEVELOPER_DIR binding is invalid")
     lines = receipt["xcode_version"].splitlines()
     if (len(lines) != 2 or lines[0] != "Xcode 26.5"
@@ -43,17 +52,21 @@ def observe_apple_toolchain(source_sha, producer_tree, inventory_sha256):
     if not selected or not Path(selected).is_absolute() or not Path(selected).is_dir():
         raise ValueError("set DEVELOPER_DIR to the installed Xcode Developer directory")
     developer = str(Path(selected).resolve())
-    observations = []
-    for argv in (["xcrun", "--find", "xcodebuild"], ["xcodebuild", "-version"]):
+    find_argv = ["xcrun", "--find", "xcodebuild"]
+    def observe(argv):
         result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
         if result.returncode:
             raise ValueError(f"Apple toolchain observation failed: {argv}: {result.stderr.strip()}")
-        observations.append(result.stdout)
+        return result.stdout
+    find_output = observe(find_argv)
+    selected_path = selected_xcodebuild_path(developer, find_output)
+    version_argv = [selected_path, "-version"]
+    version_output = observe(version_argv)
     receipt = {"format": "portable-apple-toolchain-v1", "source_sha": source_sha,
                "producer_tree": producer_tree, "inventory_sha256": inventory_sha256,
-               "developer_dir": developer, "xcodebuild_path": observations[0].strip(),
-               "xcrun_find_output": observations[0],
-               "xcode_version": observations[1]}
+               "developer_dir": developer, "xcodebuild_path": selected_path,
+               "xcrun_find_argv": find_argv, "xcrun_find_output": find_output,
+               "xcode_version_argv": version_argv, "xcode_version": version_output}
     return validate_apple_toolchain_receipt(receipt)
 
 

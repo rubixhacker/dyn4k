@@ -191,6 +191,8 @@ Use the installed ARM64 Mac over SSH with Xcode 26.5. Set
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for the task.
 The local capture checks the exact Xcode version, a valid build line, and
 that `xcrun --find xcodebuild` resolves under the selected developer directory.
+It invokes that exact executable for `-version` and retains both command lines
+and outputs for archive replay.
 It archives the observation in `apple-toolchain.json`, bound to the source and
 build inventory. Do not run the GitHub-hosted macOS route.
 
