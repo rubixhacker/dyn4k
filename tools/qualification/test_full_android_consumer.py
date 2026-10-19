@@ -133,5 +133,26 @@ class ReplayIntegrityTests(unittest.TestCase):
                                       current)
 
 
+class Api21DeviceTests(unittest.TestCase):
+    PACKAGE = "io.github.rubixhacker.dyn4k.qualification.fullandroid"
+
+    def test_task_serial_is_explicit_and_bounded(self):
+        self.assertEqual(subject.adb_for_serial("emulator-5560")[-4:],
+                         ["-P", "5038", "-s", "emulator-5560"])
+        for serial in ("emulator-5559", "device-5560", "emulator-5560 extra"):
+            with self.subTest(serial=serial), self.assertRaises(ValueError):
+                subject.adb_for_serial(serial)
+
+    def test_api21_ps_requires_exact_selected_process(self):
+        header = "USER     PID   PPID  VSIZE  RSS   WCHAN    PC         NAME\n"
+        selected = f"u0_a51   2867  123   1000   100  0        0          {self.PACKAGE}\n"
+        foreign = "u0_a52   3333  123   1000   100  0        0          other.app\n"
+        self.assertEqual(subject.api21_pid_from_ps(header + selected + foreign), "2867")
+        self.assertIsNone(subject.api21_pid_from_ps(header + foreign, required=False))
+        for raw in (header + foreign, header + selected + selected):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                subject.api21_pid_from_ps(raw)
+
+
 if __name__ == "__main__":
     unittest.main()

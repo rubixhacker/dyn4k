@@ -26,7 +26,7 @@ import independent_gates
 sys.path.insert(0, str(ROOT / "tools/android-runtime"))
 from evidence import parse_instrumentation, validate_lane
 from full_evidence import validate_full_process_log
-from run_full import validate_api21_process_log, api21_process_pid
+from run_full import API21_FINGERPRINTS, validate_api21_process_log, api21_process_pid
 from run_optimized import dex_evidence
 
 
@@ -177,7 +177,27 @@ def bounded_compile(checkout, staging, output):
 PACKAGE = "io.github.rubixhacker.dyn4k.qualification.fullandroid"
 UMBRELLA = PACKAGE + ".FullJourneyTest#allInstalledCases"
 SDK = Path("/var/home/stewart/Android/Sdk")
-ADB = [str(SDK / "platform-tools/adb"), "-P", "5038", "-s", "emulator-5558"]
+
+
+def adb_for_serial(serial):
+    if not re.fullmatch(r"emulator-[0-9]{4}", serial) or int(serial[-4:]) % 2:
+        raise ValueError(f"Android task serial is invalid: {serial}")
+    return [str(SDK / "platform-tools/adb"), "-P", "5038", "-s", serial]
+
+
+ADB = adb_for_serial(os.environ.get("DYN4K_ANDROID_SERIAL", "emulator-5558"))
+
+
+def api21_pid_from_ps(raw, required=True):
+    return api21_process_pid(raw, PACKAGE, required=required)
+
+
+def capture_api21_pid(archive, phase, required=True):
+    path = archive / f"ps-{phase}.txt"
+    adb_capture(["shell", "ps"], path)
+    pid = api21_pid_from_ps(path.read_text(), required=required)
+    write(archive / f"pid-{phase}.txt", (pid or "") + "\n")
+    return pid
 
 
 def validate_original_rows(raw, cases, exit_code):
@@ -489,6 +509,11 @@ def verify_archive(checkout, archive, expected_digest, expected_core_aar,
     if props["ro.build.version.sdk"] == "21":
         selected_pid = validate_api21_process_log(
             (archive / "logcat.txt").read_text(), PACKAGE, "x86_64", runtime["before_pid"])
+        if (api21_pid_from_ps((archive / "ps-before.txt").read_text()) != runtime["before_pid"]
+                or api21_pid_from_ps((archive / "ps-after.txt").read_text(),
+                                     required=False) is not None
+                or (archive / "pid-after.txt").read_text().strip()):
+            raise ValueError("API 21 process snapshots differ from selected process")
     else:
         selected_pid = validate_full_process_log((archive / "logcat.txt").read_text(), PACKAGE)
     if (runtime["before_pid"] != (archive / "pid-before.txt").read_text().strip()
@@ -567,11 +592,14 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
     if expected_api == 37 and identity["ro.build.fingerprint"] != (
             "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys"):
         raise ValueError("API 37 fingerprint differs from pinned guest")
-    adb_capture(["shell", "ps", "-A"], archive / "guest-processes-before.txt")
+    if expected_api == 21 and identity["ro.build.fingerprint"] != API21_FINGERPRINTS["x86_64"]:
+        raise ValueError("API 21 fingerprint differs from pinned guest")
+    adb_capture(["shell", "ps"] if expected_api == 21 else ["shell", "ps", "-A"],
+                archive / "guest-processes-before.txt")
     active = (archive / "guest-processes-before.txt").read_text()
     if any(PACKAGE in row or "io.github.rubixhacker.dyn4k.full" in row
            for row in active.splitlines()):
-        raise ValueError("another full corpus process is active on emulator 5558")
+        raise ValueError(f"another full corpus process is active on {ADB[-1]}")
     adb_capture(["install", "-r", str(archive / "app.apk")], archive / "install-app.txt")
     adb_capture(["install", "-r", str(archive / "test.apk")], archive / "install-test.txt")
     installed_app = installed_apk(PACKAGE, archive, "app")
@@ -582,8 +610,11 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
     adb_capture(["logcat", "-c"], archive / "logcat-clear.txt")
     adb_capture(["shell", "am", "start", "-W", "-n", PACKAGE + "/.FullActivity"],
                 archive / "launch.txt")
-    adb_capture(["shell", "pidof", PACKAGE], archive / "pid-before.txt")
-    before_pid = (archive / "pid-before.txt").read_text().strip()
+    if expected_api == 21:
+        before_pid = capture_api21_pid(archive, "before")
+    else:
+        adb_capture(["shell", "pidof", PACKAGE], archive / "pid-before.txt")
+        before_pid = (archive / "pid-before.txt").read_text().strip()
     if not before_pid.isdigit():
         raise ValueError("installed app process is absent before instrumentation")
     adb_capture(["shell", "pm", "list", "instrumentation"], archive / "instrumentations.txt")
@@ -602,15 +633,16 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
     raw = (archive / "instrumentation.txt").read_text()
     write(archive / "observed-method-rows.json", json.dumps(
         observed_method_rows(raw), sort_keys=True, indent=2) + "\n")
-    xml, observations = xml_from_original_rows(raw, cases, instrument["exit_code"])
-    write(archive / "consumer.xml", xml)
     adb_capture(["logcat", "-d"], archive / "logcat.txt")
     logcat = (archive / "logcat.txt").read_text()
     if expected_api == 21:
         selected_pid = validate_api21_process_log(logcat, PACKAGE, "x86_64", before_pid)
     else:
         selected_pid = validate_full_process_log(logcat, PACKAGE)
-    adb_capture(["shell", "pidof", PACKAGE], archive / "pid-after.txt", check=False)
+    if expected_api == 21:
+        capture_api21_pid(archive, "after", required=False)
+    else:
+        adb_capture(["shell", "pidof", PACKAGE], archive / "pid-after.txt", check=False)
     if (archive / "pid-after.txt").read_text().strip():
         raise ValueError("installed corpus process remains after instrumentation")
     runtime = {"properties": identity, "before_pid": before_pid,
@@ -619,6 +651,12 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
                "installed_app_sha256": installed_app["sha256"],
                "installed_test_sha256": installed_test["sha256"]}
     runtime_hash = independent_gates.digest(runtime)
+    source = source_and_toolchain(checkout, prepared)
+    write(archive / "source-toolchain.json", json.dumps(source, sort_keys=True, indent=2) + "\n")
+    write(archive / "runtime.json", json.dumps(runtime, sort_keys=True, indent=2) + "\n")
+    write(archive / "transformation.json", json.dumps(transformation, sort_keys=True, indent=2) + "\n")
+    xml, observations = xml_from_original_rows(raw, cases, instrument["exit_code"])
+    write(archive / "consumer.xml", xml)
     raw_graph = archive / "provider-graph.txt"
     stdout = (f"QUALIFICATION_LANE={lane}\n"
               f"QUALIFICATION_PROCESS_EXIT={instrument['exit_code']}\n"
@@ -628,10 +666,6 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
               f"QUALIFICATION_CONSUMER_XML_SHA256={sha256(archive / 'consumer.xml')}\n")
     write(archive / "process.txt", stdout)
     write(archive / "process-stderr.txt", "")
-    source = source_and_toolchain(checkout, prepared)
-    write(archive / "source-toolchain.json", json.dumps(source, sort_keys=True, indent=2) + "\n")
-    write(archive / "runtime.json", json.dumps(runtime, sort_keys=True, indent=2) + "\n")
-    write(archive / "transformation.json", json.dumps(transformation, sort_keys=True, indent=2) + "\n")
     source_sha = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"],
                                          text=True).strip()
     tree_sha = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD^{tree}"],
