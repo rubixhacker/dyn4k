@@ -2192,6 +2192,8 @@ def _browser_consumption_witness(root, receipt, signed_lane):
     modules = receipt.get("modules")
     if not isinstance(modules, dict) or set(modules) != {"core", "facade"}:
         raise ValueError("browser producer process inventory differs")
+    protocols = {"cdp"} if receipt.get("schema") == 4 else {
+        "cdp", "bidi", "web-inspector"}
     for short in ("core", "facade"):
         process = modules[short]
         browser = observed[short]
@@ -2202,7 +2204,7 @@ def _browser_consumption_witness(root, receipt, signed_lane):
         if (not isinstance(process, dict) or not isinstance(browser, dict)
                 or set(browser) != {"protocol", "clock", "browser_pid", "browser_sha256",
                                     "started_ns", "finished_ns", "responses"}
-                or browser["protocol"] not in {"cdp", "bidi", "web-inspector"}
+                or browser["protocol"] not in protocols
                 or browser["clock"] != "unix-epoch-ns"
                 or len(launches) != 1 or not isinstance(launches[0], dict)
                 or type(browser["browser_pid"]) is not int or browser["browser_pid"] <= 0

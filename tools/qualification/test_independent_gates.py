@@ -2718,6 +2718,13 @@ class FullBrowserSignedGateTests(unittest.TestCase):
             witness_path.write_text(json.dumps(witness))
             expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
                 witness_path.read_bytes()).hexdigest()
+        protocol_change = changes.pop("protocol_change", None)
+        if protocol_change is not None:
+            witness = json.loads(witness_path.read_text())
+            witness["browser_consumption"]["core"]["protocol"] = protocol_change
+            witness_path.write_text(json.dumps(witness))
+            expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                witness_path.read_bytes()).hexdigest()
         (self.archive / "receipt.json").write_text(json.dumps(receipt))
         digest = independent_gates.archive_digest(self.archive)
         expected["expected_archive_digests"]["staged-consumer"] = digest
@@ -2781,6 +2788,32 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                 replay.assert_called_once()
                 result, _ = self.evaluate(lane, receipt={"schema": 3})
                 self.assertEqual("FAILED", result["status"], result)
+
+    def test_schema4_re_signed_wrong_observer_protocol_fails(self):
+        lane = "js:Chromium:current:development"
+        public = lambda *args: {"status": "PASSED", "lane": args[2],
+                                "selected_cases": 2523, "archive_sha256": args[7],
+                                "candidate_sha": args[1]}
+        for protocol in ("bidi", "web-inspector"):
+            with self.subTest(protocol=protocol), mock.patch(
+                    "full_signed_routes.verify_browser", side_effect=public):
+                result, _ = self.evaluate(lane, receipt={"schema": 4},
+                                          protocol_change=protocol)
+                self.assertEqual("FAILED", result["status"], result)
+                self.assertIn("independent browser process observation differs",
+                              result["reason"])
+
+    def test_schema3_firefox_and_safari_keep_signed_protocols(self):
+        public = lambda *args: {"status": "PASSED", "lane": args[2],
+                                "selected_cases": 2523, "archive_sha256": args[7],
+                                "candidate_sha": args[1]}
+        for browser, protocol in (("Firefox", "bidi"),
+                                  ("Safari", "web-inspector")):
+            lane = f"js:{browser}:current:development"
+            with self.subTest(lane=lane), mock.patch(
+                    "full_signed_routes.verify_browser", side_effect=public):
+                result, _ = self.evaluate(lane, protocol_change=protocol)
+                self.assertEqual("PASSED", result["status"], result)
 
     def test_schema4_re_signed_external_witness_must_match_cdp_body_and_pid(self):
         lane = "js:Chromium:current:development"
