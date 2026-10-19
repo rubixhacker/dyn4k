@@ -97,13 +97,13 @@ async function moduleHandoff(root, repository, candidate, target, browser, archi
         const ready = await waitFor(readyPath, 12000, [consumer, observer],
             [stopPath, requestPath]);
         if (ready.pid !== offer.browser_pid ||
-                !Number.isSafeInteger(ready.started_ns) ||
+                !Number.isInteger(ready.started_ns) ||
                 ready.started_ns < offer.offered_ns) {
             throw new Error(`${module} observer readiness differs`);
         }
         unique(path.join(directory, 'allow.json'), {offer_sha256: offerHash,
             browser_pid: offer.browser_pid,
-            ready_ns: Math.max(Date.now() * 1000000, offer.offered_ns + 1)});
+            ready_ns: Math.max(Date.now() * 1000000, offer.offered_ns + 1000000)});
         const request = await waitFor(requestPath, 1200000, [consumer, observer],
             [stopPath]);
         if (request.offer_sha256 !== offerHash ||
@@ -127,7 +127,7 @@ async function moduleHandoff(root, repository, candidate, target, browser, archi
             throw new Error(`${module} independent observation differs`);
         }
         const releasedNs = Math.max(Date.now() * 1000000,
-            observation.finished_ns + 1, request.requested_ns + 1);
+            observation.finished_ns + 1000000, request.requested_ns + 1000000);
         unique(path.join(directory, 'release.json'), {offer_sha256: offerHash,
             browser_pid: offer.browser_pid, observer_sha256: hash(raw),
             released_ns: releasedNs});
