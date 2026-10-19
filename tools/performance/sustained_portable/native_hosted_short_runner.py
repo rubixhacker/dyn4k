@@ -390,6 +390,7 @@ try:
                             execution["termination"] != "natural" or execution["exit_code"] != 0 or
                             capture["managed_heap_observation"]["status"] !=
                                 "observed_kotlin_heap_after_collection" or
+                            type(capture["managed_heap_observation"].get("stages")) is not int or
                             capture["managed_heap_observation"]["stages"] != 3 or
                             run["qualification"] != "unpassed" or
                             any(not (archive / name).is_file() for name in

@@ -366,6 +366,95 @@ class HostedRawFileContract(unittest.TestCase):
                         self.assertTrue(eval(expression, scope))
                         record["pid"] = 1
 
+    def test_memory_heap_stage_count_in_true_outer_route(self):
+        cases = (("macosArm64", False), ("mingwX64", False),
+                 ("macosArm64", True))
+        for target, terminal in cases:
+            for stages in (3, 3.0, 3.5, True, "3", None, 0, -1):
+                with self.subTest(target=target, terminal=terminal, stages=stages), \
+                        tempfile.TemporaryDirectory() as directory:
+                    evidence = Path(directory)
+                    route = {"qualification": "unpassed", "commands": {}, "scenarios": {},
+                             "memory_scenarios": {}}
+
+                    def execute(label, argv, timeout):
+                        archive = argv[argv.index("--archive") + 1]
+                        archive.mkdir(parents=True)
+                        route["commands"][label] = {"exit_code": 0, "termination": "natural"}
+                        if argv[argv.index("--mode") + 1] != "memory":
+                            return True, None, None
+                        api = "direct_kotlin" if "direct_kotlin" in label else "compatibility"
+                        stdout = b"native output"
+                        (archive / "stdout.raw").write_bytes(stdout)
+                        (archive / "stderr.raw").write_bytes(b"")
+                        (archive / "heap.csv").write_text(
+                            "stage,retained_heap_bytes,gc_epoch\n"
+                            "startup,1024,1\nwarmup,1024,2\nmeasured,1024,3\n")
+                        (archive / "rss.csv").write_text(
+                            "monotonic_ns,resident_bytes\n10,4096\n20,8192\n")
+                        error = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
+                                 "exit_observed_monotonic_ns": 32, "exit_code": 0,
+                                 "returncode_at_error": 0,
+                                 "returncode_checked_monotonic_ns": 32,
+                                 "errno": errno.ESRCH,
+                                 "classification": "terminal_esrch_exit_confirmed",
+                                 "error": "[Errno 3] macOS process resident bytes unavailable"}
+                        resident = {"pid": 123,
+                                    "method": ("proc_pidinfo_task_resident" if
+                                               target == "macosArm64" else
+                                               "GetProcessMemoryInfo_working_set"),
+                                    "samples": [[10, 4096], [20, 8192]],
+                                    "errors": [error] if terminal else [],
+                                    "status": "observed_diagnostic"}
+                        (archive / "rss.json").write_text(json.dumps(resident))
+                        execution = {"pid": 123, "raw_collection": "selected_process_exited",
+                                     "termination": "natural", "exit_code": 0,
+                                     "started_monotonic_ns": 1,
+                                     "ended_monotonic_ns": 40,
+                                     "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+                                     "stderr_sha256": hashlib.sha256(b"").hexdigest()}
+                        (archive / "execution.json").write_text(json.dumps(execution))
+                        (archive / "run.json").write_text(json.dumps({
+                            "mode": "memory", "qualification": "unpassed"}))
+                        capture = {"mode": "memory", "source_sha": "local-control",
+                                   "target": target, "build": "development",
+                                   "scenario": {"api": api}, "pid": 123,
+                                   "process_image_identity": "observed",
+                                   "observed_image": {"identity_kind": "mapped_executable"},
+                                   "execution_sha256": hashlib.sha256(
+                                       (archive / "execution.json").read_bytes()).hexdigest(),
+                                   "rss_observation": {
+                                       "status": "observed_diagnostic", "samples": 2,
+                                       "errors": int(terminal),
+                                       "rss_json_sha256": hashlib.sha256(
+                                           (archive / "rss.json").read_bytes()).hexdigest()},
+                                   "managed_heap_observation": {
+                                       "status": "observed_kotlin_heap_after_collection",
+                                       "stages": stages,
+                                       "heap_csv_sha256": hashlib.sha256(
+                                           (archive / "heap.csv").read_bytes()).hexdigest()}}
+                        (archive / "capture.json").write_text(json.dumps(capture))
+                        return True, None, None
+
+                    self.scope.update(evidence=evidence, route=route, execute=execute,
+                                      root=WORKFLOW.parents[2],
+                                      inventory=evidence / "inventory.json",
+                                      staging=evidence / "stage", target=target,
+                                      build="development", sha="local-control",
+                                      image_control=True)
+                    exec(compile(ast.Module(body=[self.route_node], type_ignores=[]),
+                                 str(RUNNER), "exec"), self.scope)
+                    expected = "observed_diagnostic" if type(stages) is int and stages == 3 \
+                        else "failed"
+                    for api in ("direct_kotlin", "compatibility"):
+                        self.assertEqual(route["memory_scenarios"][api]["status"], expected)
+                        failure = evidence / f"captures/memory/{api}-failure.json"
+                        if expected == "failed":
+                            self.assertEqual(json.loads(failure.read_text())
+                                             ["qualification"], "unpassed")
+                        else:
+                            self.assertFalse(failure.exists())
+
     def test_ordered_live_sample_clocks_accept_in_both_routes(self):
         check = self.scope["resident_probe_errors_complete"]
         for no_error in (False, True):
