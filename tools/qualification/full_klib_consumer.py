@@ -251,13 +251,25 @@ def capture(repository, project, archive, work_root, lane, node, inputs):
             ids, normal = _tap(node_stdout, selected)
             (normal_root / "TEST-Node.xml").write_bytes(normal)
             observed.extend(ids)
+            bundle_root = archive / "runtime/bundle" / short
+            bundle = {}
+            for source_file in sorted(built.rglob("*")):
+                if source_file.is_symlink():
+                    raise ValueError("generated Node test bundle contains a symbolic path")
+                if source_file.is_file():
+                    relative = source_file.relative_to(built).as_posix()
+                    target_file = bundle_root / relative
+                    target_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source_file, target_file)
+                    bundle[relative] = sha(target_file.read_bytes())
             runtime = {"module": short, "command": command, "exit_code": process.returncode,
                        "pid": process.pid, "parent_pid": os.getpid(),
                        "started_ns": started, "finished_ns": finished,
                        "node_version": subprocess.check_output([str(node), "--version"], text=True).strip(),
                        "node_sha256": sha(Path(node).read_bytes()),
                        "program_sha256": sha(scripts[0].read_bytes()),
-                       "preload_sha256": sha(preload.read_bytes())}
+                       "preload_sha256": sha(preload.read_bytes()),
+                       "bundle_sha256": bundle}
             program = scripts[0]
         program_copy = archive / f"runtime/{short}.program"
         program_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -409,7 +421,7 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
 
 
 def verify(root, repository, candidate, lane, hashes, runtime_identity,
-           archive_digest, trusted_toolchain):
+           archive_digest, trusted_toolchain, replay_node=None):
     root, repository = Path(root), Path(repository).resolve()
     if lane not in LOCAL_LANES or not root.is_dir() or root.is_symlink():
         raise ValueError("full KLIB lane or archive is absent")
@@ -591,6 +603,10 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
             expected_program = (f"{paths['work_root']}/{short}/compileSync/js/test/"
                                 f"testDevelopmentExecutable/kotlin/"
                                 f"dyn4k-full-staged-klib-consumer-{short}-test.js")
+            bundle_root = root / "runtime/bundle" / short
+            bundle = {path.relative_to(bundle_root).as_posix(): sha(path.read_bytes())
+                      for path in bundle_root.rglob("*") if path.is_file() and not path.is_symlink()}
+            program_name = f"dyn4k-full-staged-klib-consumer-{short}-test.js"
             expected_node_command = [paths["node"], "--test", "--test-reporter=tap",
                                      "--require", f"{paths['checkout']}/{CONSUMER}/node-test-preload.cjs",
                                      expected_program]
@@ -599,6 +615,8 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                     or runtime.get("node_sha256") != trusted_toolchain["node_sha256"]
                     or runtime.get("node_version") != trusted_toolchain["node_version"]
                     or runtime.get("program_sha256") != sha(program.read_bytes())
+                    or runtime.get("bundle_sha256") != bundle
+                    or bundle.get(program_name) != runtime.get("program_sha256")
                     or runtime.get("preload_sha256") != receipt["consumer_build_sha256"][
                         f"{CONSUMER}/node-test-preload.cjs"]
                     or type(runtime.get("pid")) is not int or runtime["pid"] <= 0
@@ -606,6 +624,22 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                     or not process["started_ns"] <= runtime.get("started_ns", -1)
                     <= runtime.get("finished_ns", -1) <= process["finished_ns"]):
                 raise ValueError("Node runtime process differs from linked test program")
+            if replay_node is not None:
+                node_file = Path(replay_node).resolve()
+                if sha(node_file.read_bytes()) != trusted_toolchain["node_sha256"]:
+                    raise ValueError("replay Node binary differs from independent identity")
+                replay_command = [str(node_file), "--test", "--test-reporter=tap",
+                                  "--require", str(repository / CONSUMER / "node-test-preload.cjs"),
+                                  str(bundle_root / program_name)]
+                replay = subprocess.run(replay_command, cwd=bundle_root,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        check=False)
+                if replay.returncode:
+                    raise ValueError("transported Node test bundle failed public replay")
+                selected_map = _selected_cases(root / "inputs" / f"{short}-cases.tsv")
+                replay_ids, _ = _tap(replay.stdout, selected_map)
+                if set(replay_ids) != set(selected_map.values()):
+                    raise ValueError("transported Node test bundle changes original method outcomes")
     allowed = {item["path"] for item in receipt["files"]} | {"receipt.json"}
     actual = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
     if actual != allowed:
@@ -643,6 +677,7 @@ def main():
     for name in ("archive", "runtime-identity", "expected-archive-digest",
                  "trusted-toolchain"):
         replay.add_argument(f"--{name}", required=True)
+    replay.add_argument("--replay-node")
     args = parser.parse_args()
     if args.action == "prepare":
         result = prepare(args.repository, args.candidate_sha, args.lane, args.destination)
@@ -663,7 +698,8 @@ def main():
         else:
             trusted = json.loads(Path(args.trusted_toolchain).read_bytes())
             result = verify(args.archive, args.repository, args.candidate_sha, args.lane,
-                            hashes, args.runtime_identity, args.expected_archive_digest, trusted)
+                            hashes, args.runtime_identity, args.expected_archive_digest,
+                            trusted, args.replay_node)
     print(json.dumps(result, sort_keys=True))
 
 
