@@ -25,6 +25,16 @@ test('closed BiDi connection rejects pending body query', async () => {
     await assert.rejects(bidi.send('network.getData'), /closed/);
 });
 
+test('closed idle BiDi connection reports capture failure', async () => {
+    const bidi = new Bidi('ws://fake', FakeSocket, 1000);
+    bidi.socket.open();
+    let observed = null;
+    bidi.onFailure = error => { observed = error.message; };
+    bidi.socket.drop();
+    assert.match(observed, /closed/);
+    assert.equal(bidi.failure.message, observed);
+});
+
 test('silent BiDi command has a bounded deadline', async () => {
     const bidi = new Bidi('ws://fake', FakeSocket, 20);
     bidi.socket.open();

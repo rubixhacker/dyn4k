@@ -53,6 +53,7 @@ class Bidi {
         this.sequence = 0;
         this.pending = new Map();
         this.onEvent = () => {};
+        this.onFailure = () => {};
         this.failure = null;
         this.connected = false;
         this.ready = new Promise((resolve, reject) => {
@@ -93,6 +94,7 @@ class Bidi {
         this.failure = error;
         clearTimeout(this.openTimer);
         if (!this.connected) this.readyReject(error);
+        this.onFailure(error);
         for (const waiter of this.pending.values()) {
             clearTimeout(waiter.timer);
             waiter.reject(error);
@@ -177,6 +179,7 @@ async function main() {
     let session;
     let failure = null;
     let stopSignal = null;
+    let expectedShutdown = false;
     let stopTimer = null;
     const overall = setTimeout(() => {
         failure = failure || 'Firefox BiDi capture timed out';
@@ -186,6 +189,7 @@ async function main() {
         if (stopSignal && requests.size >= minimumResponses &&
                 responses.filter(Boolean).length === requests.size) {
             if (stopTimer) clearTimeout(stopTimer);
+            expectedShutdown = true;
             child.kill(stopSignal);
         }
     }
@@ -209,6 +213,11 @@ async function main() {
     }
     try {
         client = await connect(port);
+        client.onFailure = error => {
+            if (!expectedShutdown) {
+                failure = failure || `BiDi connection closed before capture ended: ${error}`;
+            }
+        };
         const created = await client.send('session.new', {capabilities: {alwaysMatch: {}}});
         if (created?.capabilities?.['moz:processID'] !== child.pid ||
                 created.capabilities.browserName !== 'firefox') {
