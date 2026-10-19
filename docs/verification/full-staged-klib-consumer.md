@@ -1,0 +1,13 @@
+# Full staged KLIB consumer
+
+The external project at `consumers/qualification/portable/full-klib` compiles the approved portable test sources against separately published core and facade Maven KLIBs. It has no engine project dependency. The core and facade tests run in separate modules. Both modules resolve both publications.
+
+The local producer supports `linuxX64:Linux x64:current:debug-g` and `js:Node.js:current:development`. The approved manifest selects 2,523 methods for each lane. Other Native and JS/Wasm lanes remain requirements. This local route does not claim they ran.
+
+Use `tools/qualification/full_klib_consumer.py run` with a clean exact-source checkout, a staged Maven repository, independent core and facade KLIB SHA-256 values, pinned Gradle 9.5.0, JDK 21, and a selected Node executable. Set `JAVA_HOME`, `GRADLE_USER_HOME`, and `TMPDIR` explicitly. Put `--output` outside the source checkout on durable storage. The producer refuses an occupied output directory.
+
+The Native compiler receives the Gradle-resolved cached core or facade KLIB as `-friend-modules`. The JS compiler receives the resolved KLIB as `-Xfriend-modules`. Each resolved file must match the staged KLIB bytes. Native uses Gradle's Linux test task and its original XML. Node uses its built-in test runner and retains the original TAP. The capture step derives normalized XML IDs only from those original method rows. It rejects missing, extra, duplicate, failed, or skipped methods.
+
+Transport the complete raw directory or a tar that preserves file mtimes. An auditor must calculate `independent_gates.archive_digest` from the transported directory and independently select the two binary hashes, runtime identity, and trusted toolchain JSON. Run `full_klib_consumer.py verify` from a separate clean checkout of the exact candidate, with `--archive`, `--expected-archive-digest`, both binary hashes, `--runtime-identity`, and `--trusted-toolchain`. The verifier compares original rows with normalized XML, checks both provider graphs and test programs, then calls the independent staged-consumer gate. A staged-consumer pass is one gate; it does not pass the full lane.
+
+The trusted toolchain JSON must contain the exact `toolchain` fields selected by an auditor from the runner: JDK home, version and executable hash; Gradle version and executable hash; Node version and executable hash; Gradle user home; and KGP version. A copy of the producer receipt is not an independent toolchain selection.
