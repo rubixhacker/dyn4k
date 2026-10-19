@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "consumers/qualification/portable/full-android"
 VERSION = "0.1.0-alpha.1"
 MODULES = ("dyn4k-core", "dyn4k")
+SOURCE_ROOTS = ("dyn4k-core/src/commonTest/kotlin", "dyn4k/src/commonTest/kotlin",
+                "dyn4k-core/src/androidHostTest/kotlin")
 sys.path.insert(0, str(ROOT / "tools/qualification"))
 import independent_gates
 sys.path.insert(0, str(ROOT / "tools/android-runtime"))
@@ -54,14 +56,38 @@ def staged_aar(staging, module):
             f"{artifact}-{VERSION}.aar")
 
 
+def original_source_hashes(checkout):
+    sources = {}
+    for root in SOURCE_ROOTS:
+        directory = checkout / root
+        if not directory.is_dir():
+            raise ValueError(f"original source root is absent: {root}")
+        for path in sorted(directory.rglob("*.kt")):
+            if not path.is_file() or not path.resolve().is_relative_to(checkout.resolve()):
+                raise ValueError(f"original source escapes checkout: {path}")
+            sources[path.relative_to(checkout).as_posix()] = sha256(path)
+    return sources
+
+
+def verified_original_sources(checkout, archived):
+    if not isinstance(archived, dict):
+        raise ValueError("archived original source map is malformed")
+    for key in archived:
+        if (not isinstance(key, str) or "\\" in key or
+                any(part in ("", ".", "..") for part in key.split("/")) or
+                not any(key.startswith(root + "/") for root in SOURCE_ROOTS) or
+                not key.endswith(".kt")):
+            raise ValueError(f"archived original source path is foreign or unsafe: {key}")
+    rebuilt = original_source_hashes(checkout)
+    if archived != rebuilt:
+        raise ValueError("archived original source file set or hashes differ")
+    return rebuilt
+
+
 def prepare(checkout, staging, output):
     manifest, cases = approved_cases(checkout)
     output.mkdir(parents=True, exist_ok=True)
-    source_paths = sorted({str(path.relative_to(checkout)) for source_dir in (
-        "dyn4k-core/src/commonTest/kotlin", "dyn4k/src/commonTest/kotlin",
-        "dyn4k-core/src/androidHostTest/kotlin")
-        for path in (checkout / source_dir).rglob("*.kt")})
-    source_hashes = {name: sha256(checkout / name) for name in source_paths}
+    source_hashes = original_source_hashes(checkout)
     for case in cases:
         if source_hashes[case["source"]["path"]] != case["source"]["sha256"]:
             raise ValueError(f"approved source changed: {case['id']}")
@@ -290,15 +316,25 @@ def dex_transformation(debug_apk, release_apk, mapping, usage, archive):
 def archived_dex_descriptors(archive, prefix, apk_name):
     directory = archive / prefix
     names = sorted(path.name for path in directory.glob("classes*.dex"))
-    if not names:
-        raise ValueError("archived DEX files are absent")
     descriptors = set()
     with zipfile.ZipFile(archive / apk_name) as apk:
+        apk_names = sorted(name for name in apk.namelist()
+                           if re.fullmatch(r"classes\d*\.dex", name))
+        if not names or names != apk_names:
+            raise ValueError("archived DEX file set differs from APK")
         for name in names:
             if apk.read(name) != (directory / name).read_bytes():
                 raise ValueError(f"archived {name} differs from installed APK build")
-            dump = (directory / (name + ".dexdump.txt")).read_text()
-            descriptors.update(re.findall(r"Class descriptor\s+: '([^']+)'", dump))
+            command = [str(SDK / "build-tools/36.0.0/dexdump"), "-f",
+                       str(directory / name)]
+            run = subprocess.run(command, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, check=False)
+            if run.returncode:
+                raise ValueError(f"pinned dexdump failed for {prefix}/{name}: {run.returncode}")
+            if run.stdout != (directory / (name + ".dexdump.txt")).read_bytes():
+                raise ValueError(f"archived dexdump output differs from DEX: {prefix}/{name}")
+            descriptors.update(re.findall(r"Class descriptor\s+: '([^']+)'",
+                                          run.stdout.decode()))
     if not descriptors:
         raise ValueError("archived DEX class inventory is empty")
     return descriptors
@@ -376,12 +412,10 @@ def verify_archive(checkout, archive, expected_digest, expected_core_aar,
     if receipt["candidate_sha"] != candidate or receipt["artifact_hashes"] != expected:
         raise ValueError("candidate or independent staged AAR hashes differ")
     source = json.loads((archive / "source-toolchain.json").read_text())
-    rebuilt = source_and_toolchain(checkout, {"source_hashes": source["source_hashes"]})
+    original_sources = verified_original_sources(checkout, source["source_hashes"])
+    rebuilt = source_and_toolchain(checkout, {"source_hashes": original_sources})
     if source != rebuilt:
         raise ValueError("original source, consumer source, producer, or toolchain hash differs")
-    for path, expected_sha in source["source_hashes"].items():
-        if sha256(checkout / path) != expected_sha:
-            raise ValueError(f"original assertion source differs: {path}")
     asset = (archive / "cases.tsv").read_text().splitlines()
     expected_asset = ["\t".join((case["id"], case["classname"], case["method"]))
                       for case in cases]
