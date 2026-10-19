@@ -33,6 +33,7 @@ BUILD_PATHS = tuple(f"{CONSUMER}/{name}" for name in
 LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
 REPORTER = "tools/qualification/browser_wasi/browser-karma-reporter.js"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def sha(data):
@@ -202,7 +203,7 @@ def gradle_args(repository, staging, archive, work, inputs, lane, hashes, gradle
 def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
     repository, staging, output, gradle, browser = map(
         lambda value: Path(value).resolve(), (repository, staging, output, gradle, browser))
-    if lane not in LANES or not HEX64.fullmatch(candidate):
+    if lane not in LANES or not HEX40.fullmatch(candidate):
         raise ValueError("selected full browser lane or candidate differs")
     if git(repository, "rev-parse", "HEAD").decode().strip() != candidate:
         raise ValueError("producer checkout differs from candidate")
