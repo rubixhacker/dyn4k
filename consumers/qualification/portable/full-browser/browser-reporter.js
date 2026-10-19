@@ -32,12 +32,14 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
         const record = JSON.stringify({sha256: crypto.createHash('sha256')
             .update(message).digest('hex'), message}) + '\n';
         fs.writeSync(raw, record);
-        if (message.startsWith('##teamcity[') && message.length > 32768) {
-            throw new Error('TeamCity service message exceeds 32768 characters');
+        if (message.startsWith('##teamcity[') && message.length > 262144) {
+            throw new Error('TeamCity service message exceeds 262144 characters');
         }
+        const pause = new Int32Array(new SharedArrayBuffer(4));
         let remaining = message;
         while (remaining.length) {
-            let width = Math.min(32768, remaining.length);
+            let width = Math.min(message.startsWith('##teamcity[') ? 262144 : 32768,
+                remaining.length);
             if (width < remaining.length && /[\uD800-\uDBFF]/.test(remaining[width - 1])) {
                 width -= 1;
             }
@@ -45,7 +47,16 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             remaining = remaining.slice(width);
             const bytes = Buffer.from(part.endsWith('\n') ? part : part + '\n', 'utf8');
             for (let offset = 0; offset < bytes.length;) {
-                const written = fs.writeSync(1, bytes, offset, bytes.length - offset);
+                let written;
+                try {
+                    written = fs.writeSync(1, bytes, offset, bytes.length - offset);
+                } catch (error) {
+                    if (error.code === 'EINTR' || error.code === 'EAGAIN') {
+                        Atomics.wait(pause, 0, 0, 1);
+                        continue;
+                    }
+                    throw error;
+                }
                 if (!Number.isInteger(written) || written <= 0) {
                     throw new Error('Karma result write made no progress');
                 }
