@@ -182,7 +182,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                      "Upload full Java compatibility raw archive"):
             with self.subTest(step=name):
                 self.assertRegex(ubuntu, re.escape("- name: " + name) + r"\n\s+if: always\(\)")
-        self.assertEqual(2, ubuntu.count("sha256sum -c"))
+        self.assertEqual(3, ubuntu.count("sha256sum -c"))
+        self.assertLess(ubuntu.index("- name: Audit staged artifact contract"),
+                        ubuntu.index("- name: Verify Java vector subclass dispatch"))
+        self.assertIn('--candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json"', ubuntu)
+        self.assertIn('--repository "$GITHUB_WORKSPACE"', ubuntu)
         self.assertEqual(2, ubuntu.count("tar -tzf"))
         self.assertIn("diff -qr \"$RUNNER_TEMP/full-common\"", ubuntu)
         self.assertIn("--output \"$RUNNER_TEMP/full-ci-transport-check/full-ci\"", ubuntu)
