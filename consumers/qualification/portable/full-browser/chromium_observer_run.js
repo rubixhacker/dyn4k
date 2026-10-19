@@ -46,6 +46,12 @@ function unique(file, value) {
     fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value) + '\n',
         {mode: 0o600, flag: 'wx'});
 }
+function observedUrlMatches(value, captureUrl) {
+    if (typeof value !== 'string' || !value.startsWith('/') ||
+            value.startsWith('//')) return false;
+    const observed = new URL(value, captureUrl);
+    return observed.origin === captureUrl.origin;
+}
 async function moduleHandoff(root, repository, candidate, target, browser, archive,
         consumer, module) {
     const directory = path.join(root, module);
@@ -122,7 +128,7 @@ async function moduleHandoff(root, repository, candidate, target, browser, archi
                 observation.started_ns !== ready.started_ns ||
                 observation.finished_ns < request.requested_ns ||
                 observation.responses?.length < (target === 'wasmJs' ? 3 : 2) ||
-                observation.responses.some(item => new URL(item.url).port !== captureUrl.port ||
+                observation.responses.some(item => !observedUrlMatches(item.url, captureUrl) ||
                     !/^[0-9a-f]{64}$/.test(item.body_sha256) || item.size <= 0)) {
             throw new Error(`${module} independent observation differs`);
         }
@@ -191,4 +197,4 @@ if (require.main === module) main(process.argv.slice(2)).catch(error => {
     process.stderr.write(`Chromium observer handoff: ${error.stack || error}\n`);
     process.exitCode = 1;
 });
-module.exports = {waitFor, option};
+module.exports = {waitFor, option, observedUrlMatches};

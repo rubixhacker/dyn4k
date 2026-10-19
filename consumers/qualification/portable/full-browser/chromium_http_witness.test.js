@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {Cdp, endpoint, waitForControl, validateControl} =
     require('./chromium_http_witness.js');
+const {observedUrlMatches} = require('./chromium_observer_run.js');
 
 class FakeSocket {
     constructor() { this.sent = []; }
@@ -141,4 +142,12 @@ test('both generated JS and Wasm module handoffs preserve distinct offers', () =
             {offer_sha256: offer, browser_pid: 41}, 200), /differs/);
         }
     }
+});
+
+test('observer response URLs are exact Karma-relative paths', () => {
+    const capture = new URL('http://localhost:44281/?id=one');
+    assert.equal(observedUrlMatches('/absolute/tmp/_karma_webpack_/runtime.js?one',
+        capture), true);
+    assert.equal(observedUrlMatches('http://elsewhere:44281/runtime.js', capture), false);
+    assert.equal(observedUrlMatches('//elsewhere:44281/runtime.js', capture), false);
 });
