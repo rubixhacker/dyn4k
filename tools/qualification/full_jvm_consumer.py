@@ -312,13 +312,6 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     receipt = json.loads((root / "receipt.json").read_bytes())
     if publication is None:
         raise ValueError("independent JVM mode publication is required")
-    staging = mode_publication(publication, repository, candidate, configuration,
-                               expected_hashes, expected_publication_digest)
-    if (receipt.get("mode_publication") != {
-            "path": str(Path(publication).resolve()),
-            "archive_digest": expected_publication_digest}
-            or receipt.get("producer_paths", {}).get("staging") != str(staging)):
-        raise ValueError("full JVM archive differs from verified mode publication")
     manifest, contract = selected_contract(repository, lane)
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("version") != version
@@ -326,6 +319,13 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
             or receipt.get("consumer_group") != "full-suite"
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(contract)):
         raise ValueError("full JVM receipt differs from approved candidate contract")
+    staging = mode_publication(publication, repository, candidate, configuration,
+                               expected_hashes, expected_publication_digest)
+    if (receipt.get("mode_publication") != {
+            "path": str(Path(publication).resolve()),
+            "archive_digest": expected_publication_digest}
+            or receipt.get("producer_paths", {}).get("staging") != str(staging)):
+        raise ValueError("full JVM archive differs from verified mode publication")
     cases = contract["cases"]
     sources = source_inventory(repository, candidate, cases)
     expected_inputs = input_bytes(cases, sources, lane)
