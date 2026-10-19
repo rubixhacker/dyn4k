@@ -18,8 +18,9 @@ ARCHIVE = os.environ.get("DYN4K_FULL_JVM_ARCHIVE")
 TEST_LANE = os.environ.get("DYN4K_FULL_JVM_LANE", route.LANE)
 JAVA_EXECUTABLE_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
 GRADLE_EXECUTABLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
-RUNTIME_EXECUTABLE_SHA256 = route.sha((Path("/tmp/dyn4k-tools/jdk8" if
+RUNTIME_EXECUTABLE_SHA256 = (route.sha((Path("/tmp/dyn4k-tools/jdk8" if
     ":minimum:" in TEST_LANE else "/tmp/dyn4k-tools/jdk21") / "bin/java").read_bytes())
+    if ARCHIVE else None)
 
 
 def verify_archive(root, repository, candidate, hashes, identity, digest):

@@ -278,6 +278,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     command = process.get("command", [])
     paths = receipt.get("producer_paths")
     toolchain = receipt.get("toolchain")
+    required_runtime_major = "1.8" if version == "minimum" else "21"
     if (not isinstance(paths, dict)
             or set(paths) != {"checkout", "staging", "archive_root", "inputs", "gradle"}
             or any(not isinstance(value, str) or not Path(value).is_absolute()
@@ -290,8 +291,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                                   "gradle_user_home"}
             or toolchain["gradle_version"] != "Gradle 9.5.0"
             or 'version "21' not in toolchain["java_version"]
-            or f'version "{"1.8" if version == "minimum" else "21"}'
-            not in toolchain["runtime_java_version"]
+            or f'version "{required_runtime_major}' not in toolchain["runtime_java_version"]
             or receipt.get("runtime_identity") != runtime_identity
             or not runtime_identity.startswith(toolchain["runtime_java_version"] + " | ")
             or any(not SHA256.fullmatch(str(toolchain[key]))
