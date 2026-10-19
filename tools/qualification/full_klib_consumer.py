@@ -51,8 +51,10 @@ def contract(repository, lane):
     return manifest, selected
 
 
-def sources(repository, candidate, cases):
-    roots = tuple(f"{module}/src/commonTest/kotlin" for module in MODULES)
+def sources(repository, candidate, lane, cases):
+    platform_root = "nativeTest" if lane.startswith("linuxX64:") else "jsTest"
+    roots = tuple(f"{module}/src/commonTest/kotlin" for module in MODULES) + (
+        f"dyn4k-core/src/{platform_root}/kotlin",)
     tracked = sorted(path for path in git(repository, "ls-tree", "-r", "--name-only",
                                           candidate, "--", *roots).decode().splitlines()
                      if path.endswith(".kt"))
@@ -75,7 +77,7 @@ def sources(repository, candidate, cases):
 
 def input_bytes(repository, candidate, lane):
     _, selected = contract(repository, lane)
-    inventory = sources(repository, candidate, selected["cases"])
+    inventory = sources(repository, candidate, lane, selected["cases"])
     by_module = {module: sorted((item for item in selected["cases"]
                                  if item["module"] == module), key=lambda item: item["id"])
                  for module in MODULES}

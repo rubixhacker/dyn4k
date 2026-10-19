@@ -1,6 +1,6 @@
 # Full staged KLIB consumer
 
-The external project at `consumers/qualification/portable/full-klib` compiles the approved portable test sources against separately published core and facade Maven KLIBs. It has no engine project dependency. The core and facade tests run in separate modules. Both modules resolve both publications.
+The external project at `consumers/qualification/portable/full-klib` compiles the approved portable test sources against separately published core and facade Maven KLIBs. It also compiles the unchanged Native or JS test `actual` source required by the common tests. It has no engine project dependency. The core and facade tests run in separate modules. Both modules resolve both publications.
 
 The local producer supports `linuxX64:Linux x64:current:debug-g` and `js:Node.js:current:development`. The approved manifest selects 2,523 methods for each lane. Other Native and JS/Wasm lanes remain requirements. This local route does not claim they ran.
 

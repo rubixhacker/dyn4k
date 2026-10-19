@@ -32,6 +32,12 @@ kotlin {
                 kotlin.include("**/$it")
             }
         }
+        val linuxX64Test by getting {
+            kotlin.setSrcDirs(listOf(file("$checkout/dyn4k-core/src/nativeTest/kotlin")))
+        }
+        val jsTest by getting {
+            kotlin.setSrcDirs(listOf(file("$checkout/dyn4k-core/src/jsTest/kotlin")))
+        }
     }
 }
 

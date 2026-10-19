@@ -51,11 +51,16 @@ tasks.register("qualificationValidateInputs") {
             parts[0] to parts[1]
         }
         check(sources.isNotEmpty() && sources.size == inventory.readLines().size)
-        val live = listOf("dyn4k-core", "dyn4k").flatMap { module ->
+        val common = listOf("dyn4k-core", "dyn4k").flatMap { module ->
             file("$checkout/$module/src/commonTest/kotlin").walkTopDown()
                 .filter { it.isFile && it.extension == "kt" }
                 .map { it.relativeTo(checkout).invariantSeparatorsPath }.toList()
-        }.toSet()
+        }
+        val platform = if (target == "linuxX64") "nativeTest" else "jsTest"
+        val platformSources = file("$checkout/dyn4k-core/src/$platform/kotlin")
+            .walkTopDown().filter { it.isFile && it.extension == "kt" }
+            .map { it.relativeTo(checkout).invariantSeparatorsPath }.toList()
+        val live = (common + platformSources).toSet()
         check(sources.keys == live)
         sources.forEach { (path, digest) -> check(hash(file("$checkout/$path")) == digest) }
         for (module in listOf("dyn4k-core", "dyn4k")) {

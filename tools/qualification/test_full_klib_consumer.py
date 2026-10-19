@@ -24,7 +24,7 @@ class FullKlibConsumerTests(unittest.TestCase):
             _, selected = route.contract(REPOSITORY, lane)
             self.assertEqual(len(selected["cases"]), 2523)
             prepared = route.input_bytes(REPOSITORY, candidate, lane)
-            self.assertEqual(len(prepared["source-inventory.tsv"].splitlines()), 169)
+            self.assertEqual(len(prepared["source-inventory.tsv"].splitlines()), 170)
             self.assertEqual(len(prepared["core-cases.tsv"].splitlines()), 2465)
             self.assertEqual(len(prepared["facade-cases.tsv"].splitlines()), 58)
 
