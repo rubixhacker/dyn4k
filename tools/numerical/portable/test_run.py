@@ -374,8 +374,11 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(node.count("-Pkotlin.compiler.execution.strategy=in-process"), 0)
             for host in ("node-wasm-js", "node-wasm-wasi"):
                 traced, trace_log = run.method_command(host, method, lane)
-                self.assertEqual(traced[5], "trace=execve")
-                self.assertEqual(trace_log, lane / f"native-exec-{method}.log")
+                self.assertIsNone(trace_log)
+                self.assertIn(":wasmJsTestTestDevelopmentExecutableCompileSync" if
+                              host == "node-wasm-js" else
+                              ":compileTestDevelopmentExecutableKotlinWasmWasi", traced)
+                self.assertNotIn("--tests", traced)
                 self.assertEqual(traced.count("-Pkotlin.compiler.execution.strategy=in-process"), 1)
 
     def test_traced_method_rejects_missing_tracer_and_unknown_method(self):
@@ -838,6 +841,205 @@ class DetachedNativeBundleTest(unittest.TestCase):
 
 
 class NodeStreamTest(unittest.TestCase):
+    def test_direct_wasm_worker_stream_and_process_are_bound(self):
+        method = "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lane = root / "node-wasm-wasi"
+            lane.mkdir()
+            binary = root / "node"
+            binary.write_bytes(b"node executable")
+            sources = {name: root / "linked" / name for name in
+                       (f"{run.WASM_MODULE}.mjs", f"{run.WASM_MODULE}.wasm",
+                        "custom-formatters.js")}
+            for source in sources.values():
+                source.parent.mkdir(exist_ok=True)
+                source.write_bytes(source.name.encode())
+            output = ("##teamcity[testStarted name='" + method + "']\n"
+                      'NUMERICAL_JSON {"kind":"inputs","id":"case"}\n'
+                      "##teamcity[testFinished name='" + method + "']\n").encode()
+            def worker(command, **kwargs):
+                actual = command[8:]
+                kwargs["stdout"].write(output)
+                (lane / f"native-exec-{method}.log").write_text(
+                    f'1 execve("{binary}", {json.dumps(actual)}, 0x0) = 0\n')
+                return subprocess.CompletedProcess(command, 0)
+            with patch.object(run, "wasm_payload_paths", return_value=sources), \
+                    patch.object(run.shutil, "which", side_effect=["/usr/bin/strace", str(binary)]), \
+                    patch.object(run.subprocess, "run", side_effect=worker):
+                execution = run.run_wasm_method("node-wasm-wasi", method, lane,
+                                                os.environ.copy(), 0)
+            self.assertEqual(execution, lane / f"native-exec-{method}.log")
+            self.assertEqual((lane / f"native-output-{method}.log").read_bytes(), output)
+            self.assertEqual((lane / "producer-bundle" / method / "static/runUnitTests.mjs")
+                             .read_bytes(), run.WASM_RUNNER)
+            self.assertEqual(run.node_stream_xml(method,
+                lane / f"native-output-{method}.log", lane / "xml" / f"{method}.xml"), 1)
+
+    def test_failed_wasm_method_keeps_counts_without_process_key(self):
+        method = "defaultContactsFrictionSleepAndWake"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged.klib"
+            staged.write_bytes(b"staged")
+            def fail(*args, **kwargs):
+                return subprocess.CompletedProcess(args[0], 1)
+            with patch.multiple(run, MATRIX_METHODS=(method,), MATRIX_METHOD_CASE_COUNTS=(3,)), \
+                    patch.object(run, "artifacts", return_value={"target": staged}), \
+                    patch.object(run, "retain_wasm_publications"), \
+                    patch.object(run, "comparison_coverage", return_value={}), \
+                    patch.object(run, "declared_cases", return_value=[]), \
+                    patch.object(run, "method_command", return_value=(["gradle"], None)), \
+                    patch.object(run.subprocess, "run", side_effect=fail):
+                result = run.execute("node-wasm-wasi", root, "a" * 40, "b" * 64, [])
+            self.assertEqual(result["failed_methods"], [method])
+            self.assertEqual(result["completed_methods"], 0)
+            self.assertEqual(result["executed_cases"], 0)
+            self.assertNotEqual(result["reason"], "'process'")
+
+    def test_wasm_replay_rejects_linked_trace_and_later_case_with_matching_bytes(self):
+        cases = [{"id": "first-case"}, {"id": "later-case"}]
+        commit, source = "a" * 40, "b" * 64
+        for relative in ("trace.jsonl", "cases/later-case.jsonl"):
+            for kind in ("symlink", "hardlink"):
+                with self.subTest(relative=relative, kind=kind), \
+                        tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    output = root / "archive"
+                    lane = output / "node-wasm-js"
+                    (lane / "cases").mkdir(parents=True)
+                    log = output / "publication.log"
+                    log.write_bytes(b"publication\n")
+                    (output / "publication.json").write_text(json.dumps({
+                        "candidate_commit": commit, "source_sha256": source,
+                        "publication_log_sha256": run.digest(log)}))
+                    payload = b'{"kind":"inputs","id":"first-case"}\n'
+                    trace = lane / "trace.jsonl"
+                    trace.write_bytes(payload)
+                    for case in cases:
+                        (lane / "cases" / f'{case["id"]}.jsonl').write_bytes(payload)
+                    receipt = {"trace_sha256": run.digest(trace), "cases_sha256": {
+                        case["id"]: run.digest(lane / "cases" / f'{case["id"]}.jsonl')
+                        for case in cases}}
+                    (lane / "receipt.json").write_text(json.dumps(receipt))
+                    (lane / "result.json").write_text(json.dumps({
+                        "candidate_commit": commit, "source_sha256": source,
+                        "executed_cases": len(cases), "methods": [], "failed_methods": []}))
+                    target = lane / relative
+                    external = root / "same-recorded-bytes.jsonl"
+                    external.write_bytes(target.read_bytes())
+                    target.unlink()
+                    if kind == "symlink":
+                        target.symlink_to(external)
+                    else:
+                        os.link(external, target)
+                    self.assertEqual(run.digest(target), receipt["trace_sha256"] if
+                                     relative == "trace.jsonl" else
+                                     receipt["cases_sha256"]["later-case"])
+                    reason = ("native bundle path is a symlink" if kind == "symlink" else
+                              "native bundle file has an external hard link")
+                    with patch.object(run, "clean_identity", return_value=(commit, source)), \
+                            patch.object(run, "declared_cases", return_value=cases), \
+                            self.assertRaisesRegex(run.Rejected, reason):
+                        run.verify_wasm_archive(output, "node-wasm-js")
+
+    def _check_relocated_wasm_method(self, host):
+        archive = os.environ.get("DYN4K_WASM_ARCHIVE")
+        baseline = os.environ.get("DYN4K_WASM_BASELINE")
+        attestation = os.environ.get("DYN4K_WASM_ATTESTATION")
+        if not archive:
+            self.skipTest("set DYN4K_WASM_ARCHIVE to a retained complete archive")
+        if not baseline or not attestation:
+            self.skipTest("set DYN4K_WASM_BASELINE and DYN4K_WASM_ATTESTATION")
+        import baseline_capture
+        import prospective_compare
+        import receipt
+        method = run.MATRIX_METHODS[0]
+        source = Path(archive) / host
+        captured = json.loads(run._bundle_file(source, "result.json").read_text())
+        item = captured["methods"][0]
+        self.assertEqual(item["method"], method)
+        process = item["process"]
+        self.assertFalse(Path(process["worker_command"][1]).exists())
+        relatives = [f"gradle-{method}.log", f"native-exec-{method}.log",
+                     f"native-output-{method}.log", f"xml/{method}.xml",
+                     f"producer-bundle/{method}/static/runUnitTests.mjs"]
+        relatives += [f"producer-bundle/{method}/kotlin/{name}"
+                      for name in run.wasm_payload_paths(host)]
+        case = declared_cases()[0]
+        relatives += ["receipt.json", f"cases/{case['id']}.jsonl"]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            lane = output / host
+            for relative in relatives:
+                original = run._bundle_file(source, relative)
+                copied = lane / relative
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(original, copied)
+                self.assertEqual(run.digest(copied), run.digest(original))
+            for relative in ("publication.json", "publication.log"):
+                original = run._bundle_file(source.parent, relative)
+                shutil.copy2(original, output / relative)
+                self.assertEqual(run.digest(output / relative), run.digest(original))
+            shutil.copy2(lane / f"cases/{case['id']}.jsonl", lane / "trace.jsonl")
+            proof = run.runtime(host, lane / f"gradle-{method}.log",
+                                lane / f"native-exec-{method}.log",
+                                run.artifacts(host)["target"])
+            self.assertEqual(proof, process)
+            original_execution = (lane / f"native-exec-{method}.log").read_text()
+            (lane / f"native-exec-{method}.log").write_text(
+                original_execution.replace(process["worker_command"][1],
+                                           process["worker_command"][1] + ".changed"))
+            with self.assertRaisesRegex(run.Rejected, "direct Wasm worker command differs"):
+                run.runtime(host, lane / f"gradle-{method}.log",
+                            lane / f"native-exec-{method}.log",
+                            run.artifacts(host)["target"])
+            (lane / f"native-exec-{method}.log").write_text(original_execution)
+            runner = lane / f"producer-bundle/{method}/static/runUnitTests.mjs"
+            original_runner = runner.read_bytes()
+            runner.write_bytes(original_runner + b"\n")
+            with self.assertRaisesRegex(run.Rejected, "direct Wasm method or runner identity differs"):
+                run.runtime(host, lane / f"gradle-{method}.log",
+                            lane / f"native-exec-{method}.log",
+                            run.artifacts(host)["target"])
+            runner.write_bytes(original_runner)
+
+            def check_bounded_identity(_receipt, _publication, _commit, _source,
+                                       _artifacts, runtime_proof):
+                expected = hashlib.sha256(json.dumps([process], sort_keys=True).encode()).hexdigest()
+                self.assertEqual(runtime_proof["method_process_sha256"], expected)
+                self.assertEqual(runtime_proof["method_executions"], 1)
+                self.assertEqual(runtime_proof["executable_sha256"], process["executable_sha256"])
+
+            with patch.object(run, "MATRIX_METHODS", (method,)), \
+                    patch.object(run, "clean_identity", return_value=(
+                        captured["candidate_commit"], captured["source_sha256"])), \
+                    patch.object(prospective_compare, "declared_cases", return_value=[case]), \
+                    patch.object(baseline_capture, "verify_attestation", return_value={
+                        "case_map_sha256": "bounded", "source_sha256": "bounded"}), \
+                    patch.object(baseline_capture, "fixture_source_sha256",
+                                 return_value="bounded"), \
+                    patch.object(prospective_compare, "verify_baseline_manifest"), \
+                    patch.object(prospective_compare, "verify_baseline_bytes"), \
+                    patch.object(prospective_compare, "verify_policy_catalog"), \
+                    patch.object(prospective_compare, "verify_candidate_identity",
+                                 side_effect=check_bounded_identity), \
+                    patch.object(receipt, "verify"), \
+                    patch.object(baseline_capture, "verify_case_slices"):
+                comparison = prospective_compare.compare_host(
+                    Path(baseline), lane, [], Path(attestation))
+            self.assertEqual(comparison["cases"], 1)
+            self.assertEqual(comparison["results"][0]["case_id"], case["id"])
+            self.assertEqual(comparison["results"][0]["status"],
+                             "PASSED_NUMERICAL_POLICY")
+            self.assertEqual(comparison["results"][0]["qualification"], "UNPASSED")
+
+    def test_relocated_wasm_js_method_preserves_recorded_process_proof(self):
+        self._check_relocated_wasm_method("node-wasm-js")
+
+    def test_relocated_wasm_wasi_method_preserves_recorded_process_proof(self):
+        self._check_relocated_wasm_method("node-wasm-wasi")
+
     def test_retained_node_inputs_replay_after_producer_files_are_removed(self):
         method = "geometryCollisionBoundaryAndScale"
         with tempfile.TemporaryDirectory() as directory:

@@ -43,6 +43,11 @@ HOST_TASKS = {
     "node-wasm-js": "wasmJsNodeTest",
     "node-wasm-wasi": "wasmWasiNodeTest",
 }
+WASM_HOSTS = ("node-wasm-js", "node-wasm-wasi")
+WASM_MODULE = "dyn4k-portable-numerical-consumer-test"
+WASM_RUNNER = (f"import * as exports from '../kotlin/{WASM_MODULE}.mjs';\n"
+               'if (typeof exports.startUnitTests !== "function") throw new Error("test entry is absent");\n'
+               'exports.startUnitTests();\n').encode()
 MATRIX_METHODS = (
     "geometryCollisionBoundaryAndScale",
     "freeMotionForcesDampingAndRestitution",
@@ -465,6 +470,64 @@ def _java_version_line(probe):
 
 def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
             require_loaded=False, native_bundle=None, node_modules=None, node_bundle=None):
+    if host in WASM_HOSTS:
+        method = Path(log_path).stem.removeprefix("gradle-")
+        lane = Path(log_path).parent
+        runner = _bundle_file(lane, f"producer-bundle/{method}/static/runUnitTests.mjs")
+        if method not in MATRIX_METHODS or execution_log is None or not runner.is_file() or \
+                runner.read_bytes() != WASM_RUNNER:
+            raise Rejected("direct Wasm method or runner identity differs")
+        executed = []
+        with Path(execution_log).open(encoding="utf-8", errors="replace") as source:
+            for line in source:
+                found = re.search(r'\bexecve\("([^"]+)", \[(.*?)\], .*\) = 0$', line)
+                if found and "runUnitTests.mjs" in found.group(2):
+                    executed.append((Path(found.group(1)).resolve(),
+                                     re.findall(r'"([^"\n]*)"', found.group(2))))
+        if len(executed) != 1:
+            raise Rejected(f"expected one direct Wasm worker, found {len(executed)}")
+        binary, arguments = executed[0]
+        if len(arguments) != 4:
+            raise Rejected("direct Wasm worker command differs")
+        original_runner = _recorded_absolute_path(arguments[1])
+        if len(original_runner.parents) < 4:
+            raise Rejected("direct Wasm worker command differs")
+        original_lane = original_runner.parents[3]
+        if original_runner != original_lane / "producer-bundle" / method / \
+                "static/runUnitTests.mjs":
+            raise Rejected("direct Wasm worker command differs")
+        command = wasm_command(method, binary, original_runner)
+        if arguments != command or not binary.is_file():
+            raise Rejected("direct Wasm worker command differs")
+        source_hashes = {}
+        payload_hashes = {}
+        for name, source in wasm_payload_paths(host).items():
+            archived = _bundle_file(lane, f"producer-bundle/{method}/kotlin/{name}")
+            if not archived.is_file() or not source.is_file() or \
+                    digest(archived) != digest(source):
+                raise Rejected(f"direct Wasm linked payload differs: {name}")
+            source_hashes[str(source)] = digest(source)
+            payload_hashes[str(original_lane / "producer-bundle" / method / "kotlin" / name)] = \
+                digest(archived)
+        stream = lane / f"native-output-{method}.log"
+        xml = lane / "xml" / f"{method}.xml"
+        node_stream_xml(method, stream, xml)
+        probe = subprocess.run((str(binary), "--version"), capture_output=True,
+                               text=True, check=False)
+        if probe.returncode or not probe.stdout.strip():
+            raise Rejected("direct Wasm Node version probe failed")
+        return {"host": host, "os": platform.platform(), "machine": platform.machine(),
+                "device": False, "executable": str(binary),
+                "executable_sha256": digest(binary), "version": probe.stdout.strip(),
+                "process_executions": 1, "worker_command": command,
+                "worker_command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
+                "build_log_sha256": digest(log_path),
+                "execution_log_sha256": digest(execution_log),
+                "native_output_sha256": digest(stream), "xml_sha256": digest(xml),
+                "bundle": {"runner_sha256": digest(runner),
+                           "payload_sha256": payload_hashes,
+                           "compiler_output_sha256": source_hashes},
+                "dependency": _compiled_dependency_proof(host, log_path, Path(dependency))}
     if host == "node-js" and node_modules is not None:
         method = Path(log_path).stem.removeprefix("gradle-")
         if method not in MATRIX_METHODS or execution_log is None:
@@ -834,9 +897,11 @@ def method_command(host, method, lane):
         raise Rejected(f"unknown numerical matrix method: {method}")
     task = (":linkDebugTestLinuxX64" if host == "linux-x64" else
             ":jsTestTestDevelopmentExecutableCompileSync" if host == "node-js" else
+            ":wasmJsTestTestDevelopmentExecutableCompileSync" if host == "node-wasm-js" else
+            ":compileTestDevelopmentExecutableKotlinWasmWasi" if host == "node-wasm-wasi" else
             HOST_TASKS[host])
     command = [str(ROOT / "gradlew"), "-p", str(PORTABLE), task]
-    if host not in ("linux-x64", "node-js"):
+    if host not in ("linux-x64", "node-js", *WASM_HOSTS):
         command.extend(("--tests", f"portable.PortableMatrixTest.{method}"))
     command.extend((
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
@@ -847,9 +912,9 @@ def method_command(host, method, lane):
         command.extend(("-PportableJvm8=true",
                         "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
     execution_log = None
-    if host == "linux-x64":
+    if host == "linux-x64" or host in WASM_HOSTS:
         command.append("-Pkotlin.compiler.execution.strategy=in-process")
-    if host == "jvm8" or host in ("node-wasm-js", "node-wasm-wasi"):
+    if host == "jvm8":
         tracer = shutil.which("strace")
         if tracer is None:
             raise Rejected("strace is unavailable for native process binding")
@@ -859,6 +924,65 @@ def method_command(host, method, lane):
         command = [tracer, "-f", "-s", "65535", "-e", calls, "-o",
                    str(execution_log), *command]
     return command, execution_log
+
+
+def wasm_payload_paths(host):
+    target = "wasmJs" if host == "node-wasm-js" else "wasmWasi"
+    source = PORTABLE / "build/compileSync" / target / "test/testDevelopmentExecutable/kotlin"
+    names = [f"{WASM_MODULE}.mjs", f"{WASM_MODULE}.wasm", "custom-formatters.js"]
+    if host == "node-wasm-js":
+        names += [f"{WASM_MODULE}.import-object.mjs", f"{WASM_MODULE}.js-builtins.mjs"]
+    return {name: source / name for name in names}
+
+
+def wasm_command(method, binary, runner):
+    if method not in MATRIX_METHODS:
+        raise Rejected(f"unknown numerical matrix method: {method}")
+    return [str(binary), str(runner), "--include", f"portable.PortableMatrixTest.{method}"]
+
+
+def run_wasm_method(host, method, lane, env, started):
+    tracer = shutil.which("strace")
+    executable = shutil.which("node", path=env.get("PATH"))
+    if tracer is None or executable is None:
+        raise Rejected("Node or strace is unavailable for direct Wasm execution")
+    bundle = lane / "producer-bundle" / method
+    kotlin = bundle / "kotlin"
+    kotlin.mkdir(parents=True)
+    sources = wasm_payload_paths(host)
+    for name, source in sources.items():
+        if not source.is_file() or source.stat().st_mtime_ns < started:
+            raise Rejected(f"current Wasm linked payload is absent or stale: {name}")
+        _copy_bundle_file(source, bundle, f"kotlin/{name}")
+    static = bundle / "static"
+    static.mkdir()
+    runner = static / "runUnitTests.mjs"
+    runner.write_bytes(WASM_RUNNER)
+    command = wasm_command(method, Path(executable).resolve(), runner)
+    execution_log = lane / f"native-exec-{method}.log"
+    stream = lane / f"native-output-{method}.log"
+    node_env = env.copy()
+    node_env.pop("NODE_OPTIONS", None)
+    with stream.open("xb") as output:
+        completed = subprocess.run([tracer, "-f", "-s", "65535", "-e", "trace=execve",
+                                    "-o", str(execution_log), *command],
+                                   cwd=bundle, env=node_env, stdout=output,
+                                   stderr=subprocess.STDOUT, check=False)
+    if completed.returncode:
+        raise Rejected(f"direct Wasm method exited {completed.returncode}")
+    xml_dir = lane / "xml"
+    xml_dir.mkdir(exist_ok=True)
+    node_stream_xml(method, stream, xml_dir / f"{method}.xml", create=True)
+    return execution_log
+
+
+def retain_wasm_publications(lane, target_artifacts):
+    bundle = lane / "producer-bundle"
+    bundle.mkdir()
+    for role, source in target_artifacts.items():
+        archived = _copy_bundle_file(source, bundle, f"publications/{role}{source.suffix}")
+        if digest(archived) != digest(source):
+            raise Rejected(f"retained Wasm {role} publication differs")
 
 
 def node_command(method, modules, executable, bundle=None):
@@ -912,7 +1036,7 @@ def build_node_method(method, lane, env):
 
 
 def method_xml_source(host, lane, method, started):
-    if host in ("linux-x64", "node-js"):
+    if host in ("linux-x64", "node-js", *WASM_HOSTS):
         reports = [lane / "xml" / f"{method}.xml"]
     else:
         reports = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
@@ -1354,6 +1478,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                               "No verified pinned baseline archive was supplied")}}
     trace = None
     try:
+        if host in WASM_HOSTS:
+            retain_wasm_publications(lane, target_artifacts)
         attributes = {key: 0 for key in ("tests", "skipped", "failures", "errors")}
         raw_counts = {"expected_cases": len(declared_cases()), "input_records": 0,
                       "observed_cases": 0, "completed_cases": 0, "states": 0,
@@ -1403,6 +1529,13 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                     method_result["reason"] = str(error)
                     outcome["status"] = "FAILED"
                     continue
+            if host in WASM_HOSTS and not gradle_exit:
+                try:
+                    execution_log = run_wasm_method(host, method, lane, env, started)
+                except Rejected as error:
+                    method_result["reason"] = str(error)
+                    outcome["status"] = "FAILED"
+                    continue
             if execution_log is not None and execution_log.is_file():
                 method_result["execution_log_sha256"] = digest(execution_log)
             try:
@@ -1411,7 +1544,12 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                 method_result["reason"] = str(error)
                 outcome["status"] = "FAILED"
                 continue
-            trace, row_attributes, row_counts = extract_xml(host, lane, method, xml)
+            try:
+                trace, row_attributes, row_counts = extract_xml(host, lane, method, xml)
+            except (Rejected, OSError, ValueError) as error:
+                method_result["reason"] = str(error)
+                outcome["status"] = "FAILED"
+                continue
             method_result["xml"] = row_attributes
             method_result["xml_sha256"] = digest(lane / "xml" / f"{method}.xml")
             method_result["cases"] = row_counts["completed_cases"]
@@ -1439,6 +1577,17 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                 outcome["status"] = "FAILED"
         outcome["methods"] = methods
         raw_counts["observed_cases"] = len(raw_counts["per_case"])
+        outcome["xml"] = attributes
+        outcome["raw_counts"] = raw_counts
+        outcome["started_cases"] = raw_counts["observed_cases"]
+        outcome["executed_cases"] = raw_counts["completed_cases"]
+        outcome["incomplete_cases"] = sorted(case_id for case_id, counts in
+                                             raw_counts["per_case"].items()
+                                             if counts["case_ends"] != 1)
+        outcome["failed_methods"] = [item["method"] for item in methods
+                                     if item["gradle_exit"] or "reason" in item]
+        outcome["completed_methods"] = sum("process" in item and
+            item.get("cases") == len(method_case_ids(item["method"])) for item in methods)
         if not runtimes:
             raise Rejected("no executed target runtime was bound")
         executed_runtime = runtimes[0]
@@ -1447,16 +1596,10 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         executed_runtime["method_executions"] = len(runtimes)
         executed_runtime["dependency_sha256"] = artifact_sha256["target"]
         executed_runtime["method_process_sha256"] = hashlib.sha256(json.dumps(
-            [item["process"] for item in methods], sort_keys=True).encode()).hexdigest()
+            [item["process"] for item in methods if "process" in item],
+            sort_keys=True).encode()).hexdigest()
         if bundle_manifest is not None:
             outcome["native_bundle_sha256"] = finish_native_bundle(lane, bundle_manifest)
-        outcome["xml"] = attributes
-        outcome["raw_counts"] = raw_counts
-        outcome["started_cases"] = raw_counts["observed_cases"]
-        outcome["executed_cases"] = raw_counts["completed_cases"]
-        outcome["incomplete_cases"] = sorted(case_id for case_id, counts in
-                                             raw_counts["per_case"].items()
-                                             if counts["case_ends"] != 1)
         outcome["runtime"] = executed_runtime
         comparisons = compare_frozen(lane, reference_dirs, frozen_baseline,
                                      frozen_attestation)
@@ -1603,6 +1746,136 @@ def verify_linux_native_archive(output):
             "cases": receipt["counts"]["executed_cases"]}
 
 
+def verify_wasm_archive(output, host):
+    from baseline_capture import verify_case_slices, verify_xml_trace
+
+    if host not in WASM_HOSTS:
+        raise Rejected("Wasm replay host differs")
+    commit, source_sha256 = clean_identity()
+    publication = json.loads(_bundle_file(output, "publication.json").read_text())
+    if publication.get("candidate_commit") != commit or \
+            publication.get("source_sha256") != source_sha256 or \
+            digest(_bundle_file(output, "publication.log")) != publication.get("publication_log_sha256"):
+        raise Rejected("Wasm publication identity differs")
+    lane = output / host
+    result = json.loads(_bundle_file(lane, "result.json").read_text())
+    receipt = json.loads(_bundle_file(lane, "receipt.json").read_text())
+    cases = declared_cases()
+    trace = _bundle_file(lane, "trace.jsonl")
+    for case in cases:
+        _bundle_file(lane, f"cases/{case['id']}.jsonl")
+    methods = result.get("methods", [])
+    if [item.get("method") for item in methods] != list(MATRIX_METHODS) or \
+            result.get("candidate_commit") != commit or \
+            result.get("source_sha256") != source_sha256 or \
+            result.get("executed_cases") != len(cases) or \
+            result.get("failed_methods"):
+        raise Rejected("Wasm method or source inventory differs")
+    artifacts_in_archive = {}
+    for role, name in artifact_relative_paths(host).items():
+        original = STAGED / name
+        archived = _bundle_file(lane, f"producer-bundle/publications/{role}{original.suffix}")
+        if digest(archived) != publication["artifact_sha256"][name]:
+            raise Rejected(f"Wasm retained {role} publication differs")
+        artifacts_in_archive[role] = archived
+    if receipt.get("artifact_sha256") != result.get("artifact_sha256") or \
+            result["artifact_sha256"] != {role: digest(path) for role, path in
+                                          artifacts_in_archive.items()}:
+        raise Rejected("Wasm staged artifact identity differs")
+    proofs = []
+    for item in methods:
+        method = item["method"]
+        if item.get("gradle_exit") or item.get("cases") != len(method_case_ids(method)):
+            raise Rejected(f"Wasm method did not complete: {method}")
+        log = _bundle_file(lane, f"gradle-{method}.log")
+        execution = _bundle_file(lane, f"native-exec-{method}.log")
+        stream = _bundle_file(lane, f"native-output-{method}.log")
+        xml = _bundle_file(lane, f"xml/{method}.xml")
+        for path, field in ((log, "log_sha256"), (execution, "execution_log_sha256"),
+                            (xml, "xml_sha256")):
+            if digest(path) != item.get(field):
+                raise Rejected(f"Wasm method file differs: {method}: {field}")
+        process = item["process"]
+        if digest(stream) != process["native_output_sha256"] or \
+                digest(log) != process["build_log_sha256"] or \
+                digest(execution) != process["execution_log_sha256"] or \
+                digest(xml) != process["xml_sha256"]:
+            raise Rejected(f"Wasm process file differs: {method}")
+        node_stream_xml(method, stream, xml)
+        command = process["worker_command"]
+        original_runner = _recorded_absolute_path(command[1])
+        original_lane = original_runner.parents[3]
+        if original_runner != original_lane / "producer-bundle" / method / \
+                "static/runUnitTests.mjs" or command != wasm_command(
+                    method, _recorded_absolute_path(command[0]), original_runner):
+            raise Rejected(f"Wasm worker command differs: {method}")
+        worker_lines = []
+        with execution.open(encoding="utf-8", errors="replace") as source:
+            for line in source:
+                found = re.search(r'\bexecve\("([^"]+)", \[(.*?)\], .*\) = 0$', line)
+                if found and "runUnitTests.mjs" in found.group(2):
+                    worker_lines.append((found.group(1), re.findall(r'"([^"\n]*)"',
+                                                                found.group(2))))
+        if worker_lines != [(command[0], command)]:
+            raise Rejected(f"Wasm executed worker differs: {method}")
+        version = subprocess.run((command[0], "--version"), capture_output=True,
+                                 text=True, check=False)
+        if digest(Path(command[0])) != process["executable_sha256"] or \
+                version.returncode or version.stdout.strip() != process["version"] or \
+                process.get("process_executions") != 1 or \
+                process.get("worker_command_sha256") != hashlib.sha256(
+                    json.dumps(command).encode()).hexdigest():
+            raise Rejected(f"Wasm executed Node binary differs: {method}")
+        runner = _bundle_file(lane, f"producer-bundle/{method}/static/runUnitTests.mjs")
+        if runner.read_bytes() != WASM_RUNNER or \
+                digest(runner) != process["bundle"]["runner_sha256"]:
+            raise Rejected(f"Wasm retained runner differs: {method}")
+        expected_payloads = {}
+        expected_sources = {}
+        linked_root = ("wasmJs" if host == "node-wasm-js" else "wasmWasi")
+        source_suffix = Path("tools/numerical/portable/build/compileSync") / linked_root / \
+            "test/testDevelopmentExecutable/kotlin"
+        for name in wasm_payload_paths(host):
+            archived = _bundle_file(lane, f"producer-bundle/{method}/kotlin/{name}")
+            original = original_lane / "producer-bundle" / method / "kotlin" / name
+            expected_payloads[str(original)] = digest(archived)
+            sources = [Path(path) for path in process["bundle"]["compiler_output_sha256"]
+                       if Path(path).name == name]
+            if len(sources) != 1 or sources[0].parts[-len(source_suffix.parts)-1:] != \
+                    (*source_suffix.parts, name):
+                raise Rejected(f"Wasm linked source path differs: {method}: {name}")
+            expected_sources[str(sources[0])] = digest(archived)
+        if process["bundle"]["payload_sha256"] != expected_payloads or \
+                process["bundle"]["compiler_output_sha256"] != expected_sources:
+            raise Rejected(f"Wasm retained linked payload differs: {method}")
+        dependency = _compiled_dependency_proof(host, log, artifacts_in_archive["target"],
+                    input_files={entry["path"]: artifacts_in_archive["target"] for entry in
+                                 process["dependency"]["tasks"]},
+                    original_dependency=process["dependency"]["artifact"])
+        if dependency != process["dependency"]:
+            raise Rejected(f"Wasm compiler dependency differs: {method}")
+        proofs.append(process)
+    runtime_proof = {**runtime_identity(proofs[0]), "method_executions": len(proofs),
+                     "dependency_sha256": digest(artifacts_in_archive["target"]),
+                     "method_process_sha256": hashlib.sha256(json.dumps(
+                         proofs, sort_keys=True).encode()).hexdigest()}
+    if runtime_proof != result.get("runtime") or runtime_proof != receipt.get("runtime"):
+        raise Rejected("Wasm runtime inventory differs")
+    raw_counts = result["raw_counts"]
+    verify_xml_trace(lane, [{**item, "completed_cases": item["cases"]} for item in methods],
+                     raw_counts, receipt["trace_sha256"])
+    verify_case_slices(lane, raw_counts["per_case"])
+    archived_receipt = {**receipt,
+                        "artifact_paths": {role: str(path) for role, path in
+                                           artifacts_in_archive.items()}}
+    verify_receipt(archived_receipt, trace, cases,
+                   Identity(commit, source_sha256, result["artifact_sha256"], runtime_proof),
+                   artifacts_in_archive)
+    return {"status": "PASSED_PRODUCER_REPLAY", "qualification": "UNPASSED",
+            "host": host, "candidate_commit": commit, "methods": len(methods),
+            "cases": receipt["counts"]["executed_cases"]}
+
+
 def capture_node_method(output, method, modules):
     commit, source_sha256 = clean_identity()
     modules = Path(modules).resolve()
@@ -1690,6 +1963,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--verify-linux-native-existing", action="store_true")
+    parser.add_argument("--verify-wasm-existing", action="store_true")
     parser.add_argument("--node-method", choices=MATRIX_METHODS)
     parser.add_argument("--verify-node-method-existing", action="store_true")
     parser.add_argument("--node-executable", type=Path)
@@ -1740,6 +2014,16 @@ def main():
         try:
             result = verify_linux_native_archive(output)
             print(json.dumps(result, sort_keys=True))
+            return 0
+        except (Rejected, OSError, ValueError, KeyError, TypeError) as error:
+            print(json.dumps({"status": "FAILED", "reason": str(error)}, sort_keys=True))
+            return 1
+    if args.verify_wasm_existing:
+        try:
+            if not args.hosts or any(host not in WASM_HOSTS for host in args.hosts):
+                raise Rejected("Wasm replay requires only Wasm Node hosts")
+            results = [verify_wasm_archive(output, host) for host in args.hosts]
+            print(json.dumps(results, sort_keys=True))
             return 0
         except (Rejected, OSError, ValueError, KeyError, TypeError) as error:
             print(json.dumps({"status": "FAILED", "reason": str(error)}, sort_keys=True))
