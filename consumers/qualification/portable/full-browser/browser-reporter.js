@@ -29,7 +29,7 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     const archive = process.env.DYN4K_BROWSER_SELECTED_ARCHIVE;
     const recordPath = process.env.DYN4K_BROWSER_SELECTED_ATTESTATION;
     const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
-    if (files.length !== 2 || files[1] !== selected ||
+    if (files.filter(file => file === selected).length !== 1 ||
             JSON.stringify(config.preprocessors[selected]) !== JSON.stringify(['webpack', 'sourcemap'])) {
         throw new Error('Karma selected bundle path or preprocessor differs: ' +
             JSON.stringify({files, selected, preprocessors: config.preprocessors}));
