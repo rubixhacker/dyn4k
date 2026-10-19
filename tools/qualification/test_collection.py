@@ -25,6 +25,13 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual("MISSING", result["independent_signature"])
             self.assertEqual(112, result["required_lanes"])
             self.assertEqual(set(collection.REQUIRED), set(result["missing_artifacts"]))
+            self.assertEqual([
+                "all 112 exact-source common gate archives and runtime identities",
+                "independently audited archive digests and 21-target artifact hashes",
+                "complete candidate manifest bound to a verified staged audit",
+                "exact staged repository bytes available to the public qualifier",
+                "detached Ed25519 audit signature and pinned trusted public-key fingerprint",
+            ], result["external_inputs_required"])
             inputs = json.loads((output / "assembly-inputs.json").read_text())
             self.assertEqual(112, len(inputs))
             self.assertTrue(all(value == {"archives": {}} for value in inputs.values()))

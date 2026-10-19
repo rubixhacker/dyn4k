@@ -258,8 +258,7 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None):
         "independently audited archive digests and 21-target artifact hashes",
         "complete candidate manifest bound to a verified staged audit",
         "exact staged repository bytes available to the public qualifier",
-        "detached Ed25519 audit signature and pinned trusted public-key fingerprint",
-        "reviewed signed 112-lane adapter integration"]
+        "detached Ed25519 audit signature and pinned trusted public-key fingerprint"]
     (output / "collection.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
