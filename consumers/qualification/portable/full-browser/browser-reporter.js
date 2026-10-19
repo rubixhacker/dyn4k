@@ -21,6 +21,84 @@ fs.writeFileSync(process.env.DYN4K_BROWSER_REPORTER_ATTESTATION,
         producer_path: producer, producer_sha256: producerHash}) + '\n');
 const raw = fs.openSync(process.env.DYN4K_BROWSER_RAW_KARMA, 'wx', 0o600);
 const OriginalReporter = plugin[producerKey][1];
+const responseRoot = process.env.DYN4K_BROWSER_HTTP_ARCHIVE;
+const responseRecord = process.env.DYN4K_BROWSER_HTTP_ATTESTATION;
+const sourceRoot = process.env.DYN4K_BROWSER_HTTP_SOURCES;
+const selectedName = path.basename(process.env.DYN4K_BROWSER_SELECTED_BUNDLE);
+const targetName = process.env.DYN4K_BROWSER_TARGET || 'js';
+const packageName = path.basename(path.dirname(path.dirname(
+    process.env.DYN4K_BROWSER_SELECTED_BUNDLE)));
+const requiredAssets = targetName === 'wasmJs'
+    ? [packageName + '.mjs', packageName + '.wasm',
+        packageName + '.import-object.mjs', packageName + '.js-builtins.mjs',
+        'custom-formatters.js']
+    : [];
+const responses = [];
+let responseError = null;
+fs.mkdirSync(responseRoot, {recursive: false});
+fs.mkdirSync(sourceRoot, {recursive: false});
+const witnessKey = 'middleware:qualification-response';
+if (config.plugins.some(candidate => Object.prototype.hasOwnProperty.call(candidate, witnessKey)) ||
+        config.beforeMiddleware) {
+    throw new Error('Karma response witness middleware differs');
+}
+function createResponseWitness() {
+    return function(request, response, next) {
+        let url;
+        try {
+            url = new URL(request.url, 'http://karma.invalid');
+        } catch (error) {
+            return next();
+        }
+        const name = path.posix.basename(url.pathname);
+        if (!(url.pathname.includes('/_karma_webpack_') &&
+                (name.endsWith('.js') || name.endsWith('.wasm'))) &&
+                !requiredAssets.includes(name)) return next();
+        const ordinal = responses.length;
+        const item = {ordinal, name, url: request.url, method: request.method,
+            started_ns: Date.now() * 1000000};
+        responses.push(item);
+        const parts = [];
+        let size = 0;
+        function add(chunk, encoding) {
+            if (chunk === undefined || chunk === null) return;
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8');
+            size += bytes.length;
+            if (size > 64 * 1024 * 1024) responseError = 'Karma response body exceeds 64 MiB';
+            else parts.push(bytes);
+        }
+        const write = response.write.bind(response);
+        const end = response.end.bind(response);
+        response.write = function(chunk, encoding, callback) {
+            add(chunk, typeof encoding === 'string' ? encoding : undefined);
+            return write(chunk, encoding, callback);
+        };
+        response.end = function(chunk, encoding, callback) {
+            add(chunk, typeof encoding === 'string' ? encoding : undefined);
+            return end(chunk, encoding, callback);
+        };
+        response.once('finish', () => {
+            try {
+                const bytes = Buffer.concat(parts);
+                const relative = `${String(ordinal).padStart(4, '0')}.body`;
+                fs.writeFileSync(path.join(responseRoot, relative), bytes,
+                    {flag: 'wx', mode: 0o600});
+                Object.assign(item, {status: response.statusCode,
+                    content_encoding: response.getHeader('content-encoding') || null,
+                    range: request.headers.range || null, size: size,
+                    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+                    body_path: 'http-responses/' + relative,
+                    finished_ns: Date.now() * 1000000});
+            } catch (error) {
+                responseError = String(error);
+            }
+        });
+        next();
+    };
+}
+createResponseWitness.$inject = [];
+config.plugins.push({[witnessKey]: ['factory', createResponseWitness]});
+config.set({beforeMiddleware: ['qualification-response']});
 function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     OriginalReporter.call(this, baseReporterDecorator, karmaConfig, emitter);
     if (typeof this.write !== 'function') {
@@ -121,6 +199,32 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             input_sha256: inputHashes, tmpdir};
     }
     const runtime = runtimeSelection();
+    const webpackRoot = path.dirname(runtime.effective_files[0].pattern);
+    function generatedSources(copy) {
+        const names = fs.readdirSync(webpackRoot).filter(name =>
+            name.endsWith('.js') || name.endsWith('.wasm')).sort();
+        if (names.length !== (target === 'wasmJs' ? 5 : 4) ||
+                !names.includes('commons.js') ||
+                !names.includes('runtime.js') ||
+                !names.some(name => /^kotlin-test-karma-runner\.[0-9]+\.js$/.test(name)) ||
+                !names.some(name => new RegExp('^' +
+                    (target === 'js' ? packageName : 'load') + '\\.[0-9]+\\.js$').test(name)) ||
+                (target === 'wasmJs' &&
+                    !names.some(name => /^[0-9a-f]{20}\.wasm$/.test(name)))) {
+            throw new Error('Karma generated executable inventory differs');
+        }
+        return names.map(name => {
+            const source = path.join(webpackRoot, name);
+            if (fs.lstatSync(source).isSymbolicLink()) {
+                throw new Error('Karma generated executable is symbolic');
+            }
+            const bytes = fs.readFileSync(source);
+            if (copy) fs.writeFileSync(path.join(sourceRoot, name), bytes,
+                {flag: 'wx', mode: 0o600});
+            return {name, source_path: source, size: bytes.length,
+                sha256: crypto.createHash('sha256').update(bytes).digest('hex')};
+        });
+    }
     function wasmAssets(copy) {
         if (target !== 'wasmJs') return null;
         const packageName = path.basename(path.dirname(path.dirname(selected)));
@@ -162,17 +266,59 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             ...(target === 'wasmJs' ? {assets: wasmAssets(true)} : {}),
             node_pid: process.pid, browser_id: browser.id, browser_name: browser.name,
             captured_ns: Date.now() * 1000000};
+        evidence.generated = generatedSources(true);
     };
     this.onRunComplete = function() {
         if (evidence === null || JSON.stringify(runtimeSelection()) !== JSON.stringify(runtime) ||
                 crypto.createHash('sha256').update(fs.readFileSync(selected))
                 .digest('hex') !== evidence.sha256 ||
+                JSON.stringify(generatedSources(false)) !== JSON.stringify(evidence.generated) ||
                 (target === 'wasmJs' && JSON.stringify(wasmAssets(false)) !==
                     JSON.stringify(evidence.assets))) {
             throw new Error('Karma selected bundle changed during browser execution');
         }
+        const requiredBodies = ['runtime.js', 'commons.js',
+            ...evidence.generated.filter(item => item.name.endsWith('.wasm')).map(item => item.name)];
+        const allowedBodies = [...evidence.generated.map(item => item.name), ...requiredAssets];
+        if (responseError || responses.length < requiredBodies.length ||
+                responses.length > allowedBodies.length ||
+                responses.some((item, index) => item.ordinal !== index ||
+                    item.status !== 200 || item.method !== 'GET' ||
+                    item.content_encoding !== null || item.range !== null ||
+                    item.finished_ns === undefined) ||
+                new Set(responses.map(item => item.name)).size !== responses.length ||
+                requiredBodies.some(name => !responses.some(item => item.name === name)) ||
+                responses.some(item => !allowedBodies.includes(item.name))) {
+            fs.writeFileSync(responseRecord + '.rejected', JSON.stringify({responseError,
+                requiredBodies, allowedBodies, responses}) + '\n',
+                {flag: 'wx', mode: 0o600});
+            throw new Error('Karma HTTP response body witness is incomplete: ' + responseError);
+        }
+        const expectedBodies = new Map(evidence.generated.map(item =>
+            [item.name, path.join(sourceRoot, item.name)]));
+        if (target === 'wasmJs') {
+            for (const name of requiredAssets) {
+                expectedBodies.set(name, path.join(assetArchive, name));
+            }
+        }
+        for (const item of responses) {
+            if (crypto.createHash('sha256').update(fs.readFileSync(expectedBodies.get(item.name)))
+                    .digest('hex') !== item.sha256) {
+                throw new Error('Karma HTTP response differs from selected executable');
+            }
+        }
+        if (target === 'wasmJs' &&
+                fs.readFileSync(path.join(sourceRoot, evidence.generated.find(item =>
+                    item.name.endsWith('.wasm')).name)).compare(
+                    fs.readFileSync(path.join(assetArchive, packageName + '.wasm'))) !== 0) {
+            throw new Error('Karma emitted Wasm differs from selected package');
+        }
         originalRunComplete.call(this);
         evidence.complete_ns = Date.now() * 1000000;
+        fs.writeFileSync(responseRecord, JSON.stringify({browser_id: evidence.browser_id,
+            browser_name: evidence.browser_name, node_pid: evidence.node_pid,
+            captured_ns: evidence.captured_ns, complete_ns: evidence.complete_ns,
+            generated: evidence.generated, responses}) + '\n', {flag: 'wx', mode: 0o600});
         fs.writeFileSync(recordPath, JSON.stringify(evidence) + '\n', {flag: 'wx', mode: 0o600});
     };
     this.write = function(message) {

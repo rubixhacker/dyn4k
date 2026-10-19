@@ -532,7 +532,7 @@ class SelectedBundleTest(unittest.TestCase):
             "    ['preprocessor.js', '6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6'],",
             "    ['karma-webpack-output.js', '7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7']",
             "]);",
-            "const fakeFs = {readFileSync: name => Buffer.from(name), realpathSync: name => name,",
+            "const fakeFs = {readFileSync: name => Buffer.from(name), realpathSync: name => name, mkdirSync: () => {},",
             "    writeFileSync: () => {}, openSync: () => 1};",
             "const fakeCrypto = {createHash: () => ({update(data) {this.name = data.toString(); return this;},",
             "    digest() {return this.name.endsWith('/karma/lib/preprocessor.js')",
@@ -555,7 +555,7 @@ class SelectedBundleTest(unittest.TestCase):
             "}",
             "OriginalReporter.$inject = [];",
             "const key = 'reporter:karma-kotlin-reporter';",
-            "const config = {plugins: [{[key]: ['type', OriginalReporter]}],",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], set: () => {},",
             "    files: paths.map((pattern, index) => ({pattern, served: true,",
             "        included: index !== 6, watched: false,",
             "        ...(index === 4 || index === 5 ? {nocache: false} : {})})),",
@@ -569,6 +569,7 @@ class SelectedBundleTest(unittest.TestCase):
             "    DYN4K_BROWSER_SELECTED_ATTESTATION: '/evidence/selected.json',",
             "    DYN4K_BROWSER_WORK_ROOT: work, DYN4K_BROWSER_TMPDIR: tmpdir};",
             "vm.runInNewContext(source, {config, require: fakeRequire, process: {env, pid: 12}, Buffer});",
+            "assert.equal(config.plugins[1]['middleware:qualification-response'][1].$inject.length, 0);",
             "const Reporter = config.plugins[0][key][1];",
             "assert.doesNotThrow(() => new Reporter(null, config, null));",
             "for (const field of ['included', 'served']) {",
@@ -620,10 +621,10 @@ class SelectedBundleTest(unittest.TestCase):
             "}",
             "OriginalReporter.$inject = [];",
             "const key = 'reporter:karma-kotlin-reporter';",
-            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files,",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files, set: () => {},",
             "    preprocessors: {[runner]: ['webpack', 'sourcemap'],",
             "        [selected]: ['webpack', 'sourcemap']}};",
-            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync,",
+            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync, mkdirSync: () => {},",
             "    writeFileSync: () => {}, openSync: () => 1};",
             "function injectedRequire(name) {",
             "    if (name === 'node:fs') return interceptedFs;",
@@ -695,10 +696,10 @@ class SelectedBundleTest(unittest.TestCase):
             "  this.onBrowserStart = () => {}; this.onRunComplete = () => {};}",
             "OriginalReporter.$inject = [];",
             "const key = 'reporter:karma-kotlin-reporter';",
-            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files,",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files, set: () => {},",
             "  preprocessors: {[runner]: ['webpack', 'sourcemap'],",
             "    [selected]: ['webpack', 'sourcemap']}};",
-            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync,",
+            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync, mkdirSync: () => {},",
             "  writeFileSync: () => {}, openSync: () => 1};",
             "function injectedRequire(name) {",
             "  if (name === 'node:fs') return interceptedFs;",
@@ -866,6 +867,151 @@ class SelectedBundleTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "served executable assets"):
                     browser.selected_bundle(folder, work, "core", "development", record,
                                             155, True, "wasmJs", "Chromium")
+
+
+class HttpResponseWitnessTest(unittest.TestCase):
+    def fixture(self, root, target="wasmJs", commons_first=False):
+        folder = root / "core"
+        folder.mkdir()
+        (folder / "http-responses").mkdir()
+        (folder / "http-sources").mkdir()
+        package = "dyn4k-full-staged-browser-consumer-core-test"
+        generated_names = ["runtime.js", "commons.js",
+                           "kotlin-test-karma-runner.123.js",
+                           (package if target == "js" else "load") + ".456.js"]
+        if target == "wasmJs":
+            generated_names.append("a" * 20 + ".wasm")
+        asset_names = ([] if target == "js" else
+                       [package + ".mjs", package + ".wasm",
+                        package + ".import-object.mjs", package + ".js-builtins.mjs",
+                        "custom-formatters.js"])
+        names = (list(reversed(generated_names[:2])) if commons_first
+                 else generated_names[:2]) + generated_names[4:]
+        webpack = root / "_karma_webpack_123"
+        def body(name):
+            return ("served " + (package + ".wasm" if name.endswith(".wasm")
+                                  and name in generated_names else name)).encode()
+        generated = [{"name": name, "source_path": str(webpack / name),
+                      "size": len(body(name)), "sha256": browser.sha(body(name))}
+                     for name in generated_names]
+        evidence = {"browser_id": "selected-browser", "browser_name": "browser",
+                    "node_pid": 123, "captured_ns": 2, "complete_ns": 30,
+                    "effective_files": [{"pattern": str(webpack / "runtime.js")}],
+                    "generated": generated}
+        (folder / "selected-bundle.json").write_text(json.dumps(evidence))
+        assets = folder / "assets"
+        assets.mkdir()
+        for name in asset_names:
+            (folder / "assets" / name).write_bytes(body(name))
+        for name in generated_names[2:]:
+            (folder / "http-sources" / name).write_bytes(body(name))
+        items = []
+        for index, name in enumerate(names):
+            raw = body(name)
+            source = folder / "http-sources" / name
+            source.write_bytes(raw)
+            (folder / "http-responses" / f"{index:04d}.body").write_bytes(raw)
+            items.append({"ordinal": index, "name": name,
+                          "url": "/absolute/tmp/" + name + "?source=1",
+                          "method": "GET", "started_ns": 3 + index * 2,
+                          "finished_ns": 4 + index * 2, "status": 200,
+                          "content_encoding": None, "range": None,
+                          "size": len(raw), "sha256": browser.sha(raw),
+                          "body_path": f"http-responses/{index:04d}.body"})
+        witness = {key: evidence[key] for key in (
+            "browser_id", "browser_name", "node_pid", "captured_ns", "complete_ns")}
+        witness.update(generated=generated, responses=items)
+        (folder / "http-responses.json").write_text(json.dumps(witness))
+        return folder, witness, {"started_ns": 1, "finished_ns": 31}
+
+    def test_original_http_bodies_are_replayed(self):
+        for target in ("js", "wasmJs"):
+            for commons_first in (False, True):
+                with self.subTest(target=target, commons_first=commons_first), \
+                        tempfile.TemporaryDirectory() as directory:
+                    folder, witness, process = self.fixture(
+                        Path(directory), target, commons_first)
+                    witness["captured_ns"] = 22
+                    (folder / "http-responses.json").write_text(json.dumps(witness))
+                    evidence = json.loads((folder / "selected-bundle.json").read_text())
+                    evidence["captured_ns"] = 22
+                    (folder / "selected-bundle.json").write_text(json.dumps(evidence))
+                    self.assertEqual(browser.verify_http_responses(folder, process, target),
+                                     witness["responses"])
+
+    def test_changed_missing_duplicate_reordered_and_uncorrelated_bodies_reject(self):
+        changes = {
+            "changed": lambda folder, witness: (folder / "http-responses/0001.body")
+                .write_bytes(b"changed"),
+            "missing": lambda folder, witness: (folder / "http-responses/0001.body").unlink(),
+            "missing_runtime": lambda folder, witness: witness["responses"].pop(0),
+            "missing_wasm": lambda folder, witness: witness["responses"].pop(),
+            "duplicate": lambda folder, witness: witness["responses"].append(
+                dict(witness["responses"][1])),
+            "reordered": lambda folder, witness: witness["responses"].reverse(),
+            "uncorrelated": lambda folder, witness: witness.update(browser_id="other-browser"),
+            "wrong_window": lambda folder, witness: witness["responses"][1].update(
+                started_ns=32),
+            "wrong_url": lambda folder, witness: witness["responses"][1].update(
+                url="/absolute/tmp/other.mjs"),
+            "partial": lambda folder, witness: witness["responses"][1].update(status=206),
+        }
+        for name, mutate in changes.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                folder, witness, process = self.fixture(Path(directory))
+                mutate(folder, witness)
+                (folder / "http-responses.json").write_text(json.dumps(witness))
+                with self.assertRaisesRegex(ValueError, "Karma HTTP response"):
+                    browser.verify_http_responses(folder, process, "wasmJs")
+
+
+class PublicHttpReplayTest(unittest.TestCase):
+    def test_resealed_real_archive_rejects_adverse_http_evidence(self):
+        selected = os.environ.get("DYN4K_HTTP_REPLAY_ARCHIVE")
+        if selected is None:
+            self.skipTest("set DYN4K_HTTP_REPLAY_ARCHIVE to a real schema-3 archive")
+        source = Path(selected)
+        receipt = json.loads((source / "receipt.json").read_text())
+        self.assertEqual(receipt["schema"], 3)
+        repository = Path(__file__).resolve().parents[2]
+        changes = ("changed", "missing", "duplicate", "reordered", "uncorrelated")
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory(
+                    dir=Path.home().resolve(), prefix="dyn4k-http-replay-") as directory:
+                archive = Path(directory) / "archive"
+                shutil.copytree(source, archive, copy_function=shutil.copy2)
+                altered = json.loads((archive / "receipt.json").read_text())
+                body = archive / "core/http-responses/0001.body"
+                witness_path = archive / "core/http-responses.json"
+                witness = json.loads(witness_path.read_text())
+                if change == "changed":
+                    old = body.stat()
+                    body.write_bytes(b"changed HTTP response")
+                    os.utime(body, ns=(old.st_atime_ns, old.st_mtime_ns))
+                elif change == "missing":
+                    body.unlink()
+                    altered["files"] = [item for item in altered["files"]
+                                        if item["path"] != "core/http-responses/0001.body"]
+                else:
+                    if change == "duplicate":
+                        witness["responses"].append(dict(witness["responses"][1]))
+                    elif change == "reordered":
+                        witness["responses"].reverse()
+                    else:
+                        witness["browser_id"] = "other-browser"
+                    old = witness_path.stat()
+                    witness_path.write_bytes(browser.encoded(witness) + b"\n")
+                    os.utime(witness_path, ns=(old.st_atime_ns, old.st_mtime_ns))
+                for item in altered["files"]:
+                    if item["path"] in {"core/http-responses/0001.body",
+                                        "core/http-responses.json"}:
+                        item["sha256"] = browser.file_hash(archive / item["path"])
+                (archive / "receipt.json").write_bytes(browser.encoded(altered) + b"\n")
+                digest = browser.independent_gates.archive_digest(archive)
+                with self.assertRaisesRegex(ValueError, "Karma HTTP response"):
+                    browser.verify(repository, altered["candidate_sha"], altered["lane"],
+                                   archive, digest, Path(altered["toolchain"]["browser"]),
+                                   altered["staged_hashes"])
 
 
 if __name__ == "__main__":

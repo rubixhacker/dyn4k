@@ -446,7 +446,7 @@ def reporter_producer_path(folder):
 
 
 def selected_bundle(folder, work, short, mode, process_record, major, require_effective=False,
-                    target="js", family="Chromium", observed_folder=None):
+                    target="js", family="Chromium", observed_folder=None, require_http=False):
     linked, selected = configured_bundle(
         (folder / "karma.conf.js").read_bytes(), work, short, mode,
         (folder / "browser-reporter.js").read_bytes(), process_record["karma_port"],
@@ -457,6 +457,8 @@ def selected_bundle(folder, work, short, mode, process_record, major, require_ef
     base_keys = {"source_path", "archive_path", "sha256", "node_pid",
                  "browser_id", "browser_name", "captured_ns", "complete_ns"}
     effective_keys = {"effective_files", "effective_preprocessors", "input_sha256", "tmpdir"}
+    if require_http:
+        effective_keys.add("generated")
     asset_keys = {"assets"} if target == "wasmJs" else set()
     observed_folder = folder if observed_folder is None else observed_folder
     if (set(evidence) != base_keys | (effective_keys if require_effective else set()) | asset_keys
@@ -495,6 +497,94 @@ def selected_bundle(folder, work, short, mode, process_record, major, require_ef
                    file_hash(folder / "linked-executable.wasm")):
             raise ValueError("Wasm JS served executable assets differ from linked product")
     return linked, selected
+
+
+def verify_http_responses(folder, process_record, target="js", short="core"):
+    evidence = json.loads((folder / "selected-bundle.json").read_text())
+    witness = json.loads((folder / "http-responses.json").read_text())
+    package = f"dyn4k-full-staged-browser-consumer-{short}-test"
+    assets = ([] if target == "js" else
+              [f"{package}.mjs", f"{package}.wasm",
+              f"{package}.import-object.mjs", f"{package}.js-builtins.mjs",
+              "custom-formatters.js"])
+    generated = witness.get("generated")
+    source_generated = evidence.get("generated")
+    if (not isinstance(generated, list) or generated != source_generated
+            or len(generated) != (5 if target == "wasmJs" else 4)
+            or any(not isinstance(item, dict)
+                or set(item) != {"name", "source_path", "size", "sha256"}
+                for item in generated)):
+        raise ValueError("Karma HTTP generated source inventory differs")
+    generated_names = [item["name"] for item in generated]
+    if (len(set(generated_names)) != len(generated) or "runtime.js" not in generated_names
+            or "commons.js" not in generated_names
+            or not any(re.fullmatch(r"kotlin-test-karma-runner\.[0-9]+\.js", name)
+                       for name in generated_names)
+            or not any(re.fullmatch(rf"{re.escape(package if target == 'js' else 'load')}"
+                                    r"\.[0-9]+\.js", name) for name in generated_names)
+            or (target == "wasmJs" and not any(
+                re.fullmatch(r"[0-9a-f]{20}\.wasm", name) for name in generated_names))):
+        raise ValueError("Karma HTTP generated executable names differ")
+    webpack = Path(evidence["effective_files"][0]["pattern"]).parent
+    for item in generated:
+        source = folder / "http-sources" / item["name"]
+        if (item["source_path"] != str(webpack / item["name"])
+                or not source.is_file() or source.stat().st_size != item["size"]
+                or file_hash(source) != item["sha256"]):
+            raise ValueError("Karma HTTP generated source bytes differ")
+    emitted_wasm = next((name for name in generated_names if name.endswith(".wasm")), None)
+    if (target == "wasmJs" and (emitted_wasm is None or
+            (folder / "http-sources" / emitted_wasm).read_bytes() !=
+            (folder / "assets" / f"{package}.wasm").read_bytes())):
+        raise ValueError("Karma HTTP emitted Wasm differs from selected package")
+    allowed = set(generated_names + assets)
+    required = {"runtime.js", "commons.js"}
+    if emitted_wasm is not None:
+        required.add(emitted_wasm)
+    items = witness.get("responses")
+    if (set(witness) != {"browser_id", "browser_name", "node_pid", "captured_ns",
+                         "complete_ns", "generated", "responses"}
+            or any(witness[key] != evidence[key] for key in
+                   ("browser_id", "browser_name", "node_pid", "captured_ns", "complete_ns"))
+            or not isinstance(items, list)
+            or not len(required) <= len(items) <= len(allowed)
+            or len({item.get("name") for item in items if isinstance(item, dict)}) != len(items)
+            or not required <= {item.get("name") for item in items if isinstance(item, dict)} <= allowed):
+        raise ValueError("Karma HTTP response witness is missing or uncorrelated")
+    previous = process_record["started_ns"]
+    for index, item in enumerate(items):
+        relative = f"http-responses/{index:04d}.body"
+        if (not isinstance(item, dict)
+                or set(item) != {"ordinal", "name", "url", "method", "started_ns",
+                                "finished_ns", "status", "content_encoding", "range",
+                                "size", "sha256", "body_path"}
+                or type(item["ordinal"]) is not int or item["ordinal"] != index
+                or type(item["started_ns"]) is not int
+                or type(item["finished_ns"]) is not int
+                or not previous <= item["started_ns"] <= item["finished_ns"] <= witness["complete_ns"]
+                or item["method"] != "GET" or item["status"] != 200
+                or item["content_encoding"] is not None or item["range"] is not None
+                or item["body_path"] != relative
+                or not isinstance(item["url"], str)
+                or not re.fullmatch(r"/(?:absolute|base)/[^?#]+(?:\?[^#]*)?", item["url"])
+                or Path(item["url"].split("?", 1)[0]).name != item["name"]
+                or type(item["size"]) is not int or not 0 < item["size"] <= 64 * 1024 * 1024
+                or not isinstance(item["sha256"], str)
+                or not HEX64.fullmatch(item["sha256"])):
+            raise ValueError("Karma HTTP response order, URL, or process interval differs")
+        body = folder / relative
+        expected = (folder / "http-sources" / item["name"]
+                    if item["name"] in generated_names else folder / "assets" / item["name"])
+        if (not body.is_file() or body.stat().st_size != item["size"]
+                or file_hash(body) != item["sha256"]
+                or body.read_bytes() != expected.read_bytes()):
+            raise ValueError("Karma HTTP response body differs from selected source")
+        previous = item["started_ns"]
+    if witness["node_pid"] <= 0 or not (
+            process_record["started_ns"] <= witness["captured_ns"]
+            <= witness["complete_ns"] <= process_record["finished_ns"]):
+        raise ValueError("Karma HTTP response process binding differs")
+    return items
 
 
 def runtime_pin(family, role, browser, selected_sha=None):
@@ -752,6 +842,9 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                               DYN4K_BROWSER_SELECTED_ARCHIVE=str(destination / "karma-selected.js"),
                               DYN4K_BROWSER_ASSETS_ARCHIVE=str(destination / "assets"),
                               DYN4K_BROWSER_SELECTED_ATTESTATION=str(destination / "selected-bundle.json"),
+                              DYN4K_BROWSER_HTTP_ARCHIVE=str(destination / "http-responses"),
+                              DYN4K_BROWSER_HTTP_ATTESTATION=str(destination / "http-responses.json"),
+                              DYN4K_BROWSER_HTTP_SOURCES=str(destination / "http-sources"),
                               DYN4K_BROWSER_WORK_ROOT=str(work),
                               DYN4K_BROWSER_TMPDIR=os.environ["TMPDIR"])
             command = base + [f":{short}:{target}BrowserTest"]
@@ -792,7 +885,9 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
             copy(generated, destination / "karma.conf.js")
             copy(reporter, destination / "browser-reporter.js")
             selected_bundle(destination, work, short, configuration, processes[short], major,
-                            require_effective=True, target=target, family=family)
+                            require_effective=True, target=target, family=family,
+                            require_http=True)
+            verify_http_responses(destination, processes[short], target, short)
             if not launches.is_file() or not attestation.is_file() or not raw_karma.is_file():
                 raise ValueError("real browser process or reporter producer is absent")
             if json.loads(attestation.read_text()) != {
@@ -825,7 +920,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
     run_finished = time.time_ns()
-    receipt = {"schema": 2, "status": "PASSED", "lane": lane,
+    receipt = {"schema": 3, "status": "PASSED", "lane": lane,
                "candidate_sha": candidate,
                "source_tree": git(repository, "rev-parse", f"{candidate}^{{tree}}").decode().strip(),
                "consumer_contract_sha256": independent_gates.digest(contract(repository, lane)),
@@ -865,8 +960,12 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
     independent_gates._inventory(archive, receipt)
     selected = contract(repository, lane)
     schema = receipt.get("schema")
+    has_http_producer = b"DYN4K_BROWSER_HTTP_ARCHIVE" in original(
+        repository, candidate, REPORTER)
     if (type(schema) is not int
-            or not (schema == 2 and candidate not in LEGACY_LOCK_CANDIDATES
+            or not (schema == 3 and has_http_producer
+                    or schema == 2 and not has_http_producer
+                    and candidate not in LEGACY_LOCK_CANDIDATES
                     or schema == 1 and candidate in LEGACY_LOCK_CANDIDATES)
             or receipt.get("status") != "PASSED"
             or receipt.get("lane") != lane or receipt.get("candidate_sha") != candidate
@@ -877,7 +976,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
     for name, raw in inputs.items():
         if (archive / "inputs" / name).read_bytes() != raw:
             raise ValueError(f"archived original source or method input differs: {name}")
-    if schema == 2:
+    if schema in (2, 3):
         target = lane_parts(lane)[0]
         lock = repository / CONSUMER / "kotlin-js-store" / (
             "yarn.lock" if target == "js" else "wasm/yarn.lock")
@@ -967,7 +1066,10 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                             candidate == LEGACY_CANDIDATE_SHA
                             and receipt["browser_support_sha256"][REPORTER]
                             == LEGACY_REPORTER_SHA256), target=target, family=family,
-                        observed_folder=captured_archive / short)
+                        observed_folder=captured_archive / short,
+                        require_http=schema == 3)
+        if schema == 3:
+            verify_http_responses(folder, record, target, short)
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = bundle_paths(Path(paths["work"]), short, mode, target)[0]
