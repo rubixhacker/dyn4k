@@ -710,7 +710,7 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
             or set(session) != {"kind", "protocol", "module", "target", "candidate_sha",
                                 "browser_pid", "bidi_browser_pid", "context_id", "session_id",
                                 "collector_id", "started_ns", "bidi_port", "bidi_socket_inode",
-                                "source_path", "source_sha256"}
+                                "contexts", "source_path", "source_sha256"}
             or session["kind"] != "session" or session["protocol"] != 1
             or session["module"] != short or session["target"] != target
             or session["candidate_sha"] != candidate
@@ -727,6 +727,28 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
             or session["source_sha256"] != source_sha256
             or len(responses) != len(server)):
         raise ValueError("Firefox process witness session or response count differs")
+    contexts = {}
+    if not isinstance(session["contexts"], list):
+        raise ValueError("Firefox process witness contexts differ")
+    for created in session["contexts"]:
+        if not isinstance(created, dict) or set(created) != {"observed_ns", "params"}:
+            raise ValueError("Firefox process witness context event differs")
+        parameters = created["params"]
+        if not isinstance(parameters, dict):
+            raise ValueError("Firefox process witness context parameters differ")
+        identity = parameters.get("context")
+        if (not isinstance(identity, str) or not identity or identity in contexts
+                or "parent" not in parameters
+                or not (parameters.get("parent") is None or
+                        isinstance(parameters.get("parent"), str))
+                or type(created["observed_ns"]) is not int
+                or not process_record["started_ns"] <= created["observed_ns"]
+                <= process_record["finished_ns"]):
+            raise ValueError("Firefox process witness context identity or time differs")
+        contexts[identity] = created
+    root = contexts.get(session["context_id"])
+    if root is None or root["params"]["parent"] is not None:
+        raise ValueError("Firefox process witness root context differs")
     served_by_url = {item["url"]: item for item in server}
     if len(served_by_url) != len(server):
         raise ValueError("Firefox process witness server URLs are duplicated")
@@ -754,9 +776,20 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
         served = served_by_url.get(relative_url)
         relative = f"firefox-bodies/{index:04d}.body"
         body = folder / relative
+        context = row["context_id"]
+        if not isinstance(context, str) or type(row.get("request_ns")) is not int:
+            raise ValueError("Firefox process witness response context differs")
+        ancestry = set()
+        while context != session["context_id"] and context in contexts and context not in ancestry:
+            ancestry.add(context)
+            if contexts[context]["observed_ns"] > row["request_ns"]:
+                raise ValueError("Firefox process witness context follows request")
+            context = contexts[context]["params"]["parent"]
         if (row["kind"] != "response" or type(row["ordinal"]) is not int
                 or row["ordinal"] != index or row["browser_pid"] != pid
-                or row["context_id"] != session["context_id"]
+                or context != session["context_id"]
+                or row["context_id"] not in contexts
+                or contexts[row["context_id"]]["observed_ns"] > row["request_ns"]
                 or not isinstance(row["request_id"], str) or not row["request_id"]
                 or row["request_id"] in seen_ids or row["url"] in seen_urls
                 or address is None or address.scheme != "http"
@@ -764,8 +797,8 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
                 or address.port != process_record["karma_port"]
                 or served is None or row["method"] != "GET" or row["status"] != 200
                 or row["from_cache"] is not False
-                or request_event.get("context") != session["context_id"]
-                or response_event.get("context") != session["context_id"]
+                or request_event.get("context") != row["context_id"]
+                or response_event.get("context") != row["context_id"]
                 or request_event.get("isBlocked") is not False
                 or response_event.get("isBlocked") is not False
                 or request.get("request") != row["request_id"]

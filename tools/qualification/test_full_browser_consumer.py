@@ -1027,6 +1027,9 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                      "context_id": "context", "session_id": "session",
                      "collector_id": "collector", "started_ns": 110,
                      "bidi_port": 40000, "bidi_socket_inode": "4567",
+                     "contexts": [
+                         {"observed_ns": 105, "params": {"context": "context", "parent": None}},
+                         {"observed_ns": 115, "params": {"context": "frame", "parent": "context"}}],
                      "source_path": "/checkout/firefox_bidi_witness.js",
                      "source_sha256": "c" * 64}]
             for index, name in enumerate(("runtime.js", "commons.js", "abc.wasm")):
@@ -1042,7 +1045,7 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                                "started_ns": 122 + index * 10,
                                "finished_ns": 126 + index * 10})
                 rows.append({"kind": "response", "ordinal": index,
-                             "request_id": request_id, "context_id": "context",
+                             "request_id": request_id, "context_id": "frame",
                              "browser_pid": 314, "url": url, "method": "GET",
                              "status": 200, "mime_type": "application/javascript",
                              "from_cache": False, "request_ns": 120 + index * 10,
@@ -1051,11 +1054,11 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                              "body_path": f"firefox-bodies/{index:04d}.body",
                              "body_size": len(body), "body_sha256": browser.sha(body),
                              "events": {
-                                 "request": {"context": "context", "isBlocked": False,
+                                 "request": {"context": "frame", "isBlocked": False,
                                              "timestamp": 120 + index * 10,
                                              "request": {"request": request_id,
                                                          "url": url, "method": "GET"}},
-                                 "response": {"context": "context", "isBlocked": False,
+                                 "response": {"context": "frame", "isBlocked": False,
                                               "timestamp": 127 + index * 10,
                                               "request": {"request": request_id,
                                                           "url": url},
@@ -1079,6 +1082,11 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                     ("missing process", lambda items: items[0].update(browser_pid=315)),
                     ("wrong hash", lambda items: items[1].update(body_sha256="0" * 64)),
                     ("stale source", lambda items: items[0].update(source_sha256="0" * 64)),
+                    ("missing frame", lambda items: items[0]["contexts"].pop()),
+                    ("foreign frame", lambda items: items[0]["contexts"][1]["params"].update(
+                        parent="other")),
+                    ("late frame", lambda items: items[0]["contexts"][1].update(
+                        observed_ns=130)),
                     ("wrong Wasm body", lambda items: items[3].update(body_sha256="0" * 64)),
                     ("duplicate request", lambda items: items[2].update(request_id="request-0")),
                     ("duplicate URL", lambda items: items[2].update(url=items[1]["url"])),

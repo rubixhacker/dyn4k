@@ -171,6 +171,7 @@ async function main() {
     const seenUrls = new Set();
     const responses = [];
     const pendingBodies = new Set();
+    const contexts = [];
     const minimumResponses = target === 'wasmJs' ? 3 : 2;
     let client;
     let session;
@@ -217,8 +218,14 @@ async function main() {
         const collector = await client.send('network.addDataCollector',
             {dataTypes: ['response'], maxEncodedDataSize: 128 * 1024 * 1024});
         if (!collector?.collector) throw new Error('BiDi response collector is absent');
+        client.onEvent = message => {
+            if (message.method === 'browsingContext.contextCreated') {
+                contexts.push({observed_ns: now(), params: message.params});
+            }
+        };
         await client.send('session.subscribe', {events: [
-            'network.beforeRequestSent', 'network.responseCompleted', 'network.fetchError']});
+            'network.beforeRequestSent', 'network.responseCompleted', 'network.fetchError',
+            'browsingContext.contextCreated']});
         await client.send('network.setCacheBehavior', {cacheBehavior: 'bypass'});
         const context = await client.send('browsingContext.create', {type: 'tab'});
         if (!context?.context) throw new Error('BiDi browser context is absent');
@@ -228,11 +235,15 @@ async function main() {
             context_id: context.context, session_id: created.sessionId,
             collector_id: collector.collector, started_ns: now(),
             bidi_port: port, bidi_socket_inode: socketInode,
+            contexts,
             source_path: fs.realpathSync(__filename),
             source_sha256: hash(fs.readFileSync(__filename))};
         client.onEvent = message => {
             const event = message.params;
-            if (message.method === 'network.beforeRequestSent' &&
+            if (message.method === 'browsingContext.contextCreated') {
+                contexts.push({observed_ns: now(), params: event});
+                persist();
+            } else if (message.method === 'network.beforeRequestSent' &&
                     selected(event.request.url)) {
                 const id = event.request.request;
                 if (requests.has(id) || seenUrls.has(event.request.url)) {
@@ -266,7 +277,7 @@ async function main() {
                     fs.writeFileSync(path.join(path.dirname(archive), relative), bytes,
                         {flag: 'wx', mode: 0o600});
                     responses[item.ordinal] = {kind: 'response', ordinal: item.ordinal,
-                        request_id: id, context_id: session.context_id,
+                        request_id: id, context_id: event.context,
                         browser_pid: child.pid, url: event.response.url,
                         method: item.request.request.method,
                         status: event.response.status,
