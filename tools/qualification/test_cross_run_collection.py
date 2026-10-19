@@ -38,8 +38,7 @@ class CrossRunCollectionTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
         self.assertIn("cross_run_only:\n", workflow)
         self.assertIn("cross_run_source_index:\n", workflow)
-        for job in ("staged-jvm-and-linux", "hosted-publications", "hosted-native",
-                    "safari-browser"):
+        for job in ("staged-jvm-and-linux", "hosted-publications", "hosted-native"):
             body = workflow.split(f"  {job}:\n", 1)[1].split("\n  ", 1)[0]
             self.assertIn("inputs.cross_run_only != true", body)
         central = workflow.split("  central-qualification-collection:\n", 1)[1]

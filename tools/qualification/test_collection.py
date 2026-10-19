@@ -18,7 +18,7 @@ HEAD = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                text=True).strip()
 
 EXPECTED_CENTRAL_NEEDS = ["staged-jvm-and-linux", "hosted-publications",
-                          "hosted-native", "safari-browser"]
+                          "hosted-native"]
 EXPECTED_PUSH_BRANCHES = ["main", "codex/port-qualification-harness",
                           "codex/dyn4k-port", "codex/port-publication-assembly"]
 
@@ -323,7 +323,6 @@ class CollectionTests(unittest.TestCase):
             "      - staged-jvm-and-linux\n"
             "      - hosted-publications\n"
             "      - hosted-native\n"
-            "      - safari-browser\n"
         )
         self.assertEqual(1, workflow.count(approved_block))
 
@@ -352,7 +351,6 @@ class CollectionTests(unittest.TestCase):
                     "      - staged-jvm-and-linux\n"
                     "      - hosted-publications\n"
                     "      - hosted-native\n"
-                    "      - safari-browser\n"
                     "    runs-on: ubuntu-latest\n"
                     "    steps:\n"
                     "      - run: true\n"
@@ -365,7 +363,6 @@ class CollectionTests(unittest.TestCase):
                     "      - staged-jvm-and-linux\n"
                     "      - hosted-publications\n"
                     "      - hosted-native\n"
-                    "      - safari-browser\n"
                     "    runs-on: ubuntu-latest\n"
                     "    steps:\n"
                     "      - run: true\n"
