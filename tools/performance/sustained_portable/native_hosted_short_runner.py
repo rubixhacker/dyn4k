@@ -108,10 +108,12 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     row = errors[0]
     if (not isinstance(row, dict) or
             row.get("classification") != "terminal_esrch_exit_confirmed" or
+            type(row.get("errno")) is not int or
             row.get("errno") != errno.ESRCH or
             type(row.get("exit_code")) is not int or row["exit_code"] != 0 or
             type(row.get("returncode_at_error")) is not int or
             row["returncode_at_error"] != 0 or
+            type(row.get("returncode_checked_monotonic_ns")) is not int or
             row.get("returncode_checked_monotonic_ns") !=
                 row.get("exit_observed_monotonic_ns") or
             "macOS process resident bytes unavailable" not in row.get("error", "")):
@@ -122,7 +124,8 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     return (all(type(stamp) is int for stamp in stamps) and
             list(stamps) == sorted(stamps) and
             stamps[3] - stamps[2] <= 1_000_000 and
-            all(sample[0] < row["monotonic_ns"] for sample in resident["samples"]))
+            all(type(sample[0]) is int and sample[0] < row["monotonic_ns"]
+                for sample in resident["samples"]))
 
 def execute(label, argv, timeout=300):
     output = evidence / label

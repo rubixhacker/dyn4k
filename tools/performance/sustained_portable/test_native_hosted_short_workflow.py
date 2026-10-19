@@ -19,7 +19,7 @@ RUN_EXPRESSION_LIMIT = 21000
 # After a workflow edit, independently parse every run value before updating its digest.
 AUDITED_WORKFLOW_SHA256 = {
     "full-hosted-mac-product-diagnostic.yml": "cef244e7f6ee8864313754dbd030e20fa34ec6d43dc3742b66b1b9f3a4191405",
-    "full-hosted-safari-product-diagnostic.yml": "08036865fe9c8cccedda7faab46900482ef6b949c67cb79df8754ea5f97adf58",
+    "full-hosted-safari-product-diagnostic.yml": "217aa4242e7f2127d72b0829975862640879f6106d7d5342547b204fd4f557a8",
     "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
     "performance-host-capacity-control.yml": "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6",
     "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
@@ -283,6 +283,43 @@ class HostedRawFileContract(unittest.TestCase):
         functions.append(resident_check)
         exec(compile(ast.Module(body=functions, type_ignores=[]),
                      str(RUNNER), "exec"), self.scope)
+
+    def terminal_receipt(self):
+        terminal = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
+                    "exit_observed_monotonic_ns": 32, "exit_code": 0,
+                    "returncode_at_error": 0,
+                    "returncode_checked_monotonic_ns": 32,
+                    "errno": errno.ESRCH, "classification": "terminal_esrch_exit_confirmed",
+                    "error": "[Errno 3] macOS process resident bytes unavailable"}
+        resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
+                    "errors": [terminal]}
+        capture = {"rss_observation": {"errors": 1}}
+        execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
+                     "termination": "natural", "exit_code": 0}
+        return resident, capture, execution
+
+    def test_terminal_esrch_accepts_exact_integer_receipt(self):
+        resident, capture, execution = self.terminal_receipt()
+        self.assertTrue(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_rejects_float_returncode_check_time(self):
+        resident, capture, execution = self.terminal_receipt()
+        resident["errors"][0]["returncode_checked_monotonic_ns"] = 32.0
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_rejects_float_errno(self):
+        resident, capture, execution = self.terminal_receipt()
+        resident["errors"][0]["errno"] = float(errno.ESRCH)
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_rejects_boolean_sample_time(self):
+        resident, capture, execution = self.terminal_receipt()
+        resident["samples"][0][0] = True
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
 
     def test_later_zero_exit_does_not_prove_probe_time_exit(self):
         row = {"monotonic_ns": 10, "error_observed_monotonic_ns": 11,
