@@ -214,12 +214,12 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None):
         root = Path(root)
         row = {"name": name, "route": None, "status": "FAILED"}
         try:
+            row["files"] = files_in(root)
             route = artifact_route(name, candidate_sha)
             row["route"] = route
             if route in seen:
                 raise ValueError(f"duplicate producer artifact route: {route}")
             seen.add(route)
-            row["files"] = files_in(root)
             row["status"] = inspect_artifact(route, root, candidate_sha, tree, extracted,
                                              repository, upstream)
             if route == "publication-ubuntu" and row["status"] == "PRODUCER_VERIFIED":

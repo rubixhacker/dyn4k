@@ -40,9 +40,12 @@ class CollectionTests(unittest.TestCase):
             wrong = "0" * 40 if HEAD != "0" * 40 else "1" * 40
             bad = root / f"full-ci-{wrong}"
             bad.mkdir()
+            (bad / "raw.log").write_text("failed exact-source producer\n")
             result = collection.collect(ROOT, HEAD, [(bad.name, bad)], root / "wrong")
             self.assertEqual("FAILED", result["status"])
             self.assertIn("candidate", result["artifacts"][0]["reason"])
+            self.assertEqual(collection.digest(bad / "raw.log"),
+                             result["artifacts"][0]["files"]["raw.log"])
             self.assertIn("full-ci", result["missing_artifacts"])
             first, second = root / "first", root / "second"
             first.mkdir()
