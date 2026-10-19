@@ -1,7 +1,17 @@
-# Hosted Native host short captures
+# Native host short captures
 
-Dispatch `Native host short performance producer` manually for one target and
-one build mode. Select `macosArm64` for `macos-26` or `mingwX64` for
+## Local macOS route
+
+Run `macosArm64` on the installed local Mac over SSH with Xcode 26.5 and
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Follow the
+[Native host guide](native-hosts.md) for local staging and capture. Do not
+dispatch the GitHub-hosted macOS workflow. Retain the raw short and memory
+archives at the selected source commit. A local ARM64 run does not establish
+minimum-version or physical-device support.
+
+## Windows workflow route
+
+Dispatch `Native host short performance producer` for `mingwX64` on
 `windows-2025`. Select `development` or `optimized`. Each dispatch stages the
 selected target and root publications from `GITHUB_SHA`, then builds a consumer
 inventory from that staged repository. The job runs the direct Kotlin and

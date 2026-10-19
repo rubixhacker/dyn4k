@@ -1,6 +1,6 @@
 # Full hosted common corpus workflow
 
-The hosted jobs run the reviewed common core and facade corpus against staged artifacts. Read `receipt.json` and the raw files together. A successful receipt establishes only the executed host, runtime, and configurations. It does not qualify every support lane.
+The full host runner runs the reviewed common core and facade corpus against staged artifacts. Run Apple and Safari routes on the installed local Mac over SSH with Xcode 26.5. Do not dispatch GitHub-hosted macOS jobs. Read `receipt.json` and the raw files together. A successful receipt establishes only the executed host, runtime, and configurations. It does not qualify every support lane.
 
 ## What runs
 

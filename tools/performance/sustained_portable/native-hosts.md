@@ -185,9 +185,11 @@ RVA `0x4011` in both retained f666 Windows runs. That byte is outside the
 parsed base relocations. Its cause has not been established from the bounded
 receipt, so the observer does not normalize it or accept that image.
 
-## macOS ARM64 hosted runner
+## Local macOS ARM64 runner
 
-Use an ARM64 macOS runner with the selected Xcode toolchain.
+Use the installed ARM64 Mac over SSH with Xcode 26.5. Set
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for the task.
+Do not run the GitHub-hosted macOS route.
 
 ```sh
 export JAVA_HOME=/path/to/jdk21

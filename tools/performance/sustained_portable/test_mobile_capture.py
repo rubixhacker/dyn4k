@@ -39,6 +39,13 @@ def apple_derivation(linked, harness, target="iosX64", build="development"):
 
 
 class MobileCaptureAdverseTest(unittest.TestCase):
+    def test_simulator_xcode_pin_accepts_26_5_and_rejects_26_4_1(self):
+        self.assertEqual("Xcode 26.5\nBuild version 17F42\n",
+                         mobile_capture.validate_xcode_version(
+                             "Xcode 26.5\nBuild version 17F42\n"))
+        with self.assertRaisesRegex(ValueError, "pinned 26.5"):
+            mobile_capture.validate_xcode_version("Xcode 26.4.1\nBuild version 17E303\n")
+
     def test_adb_route_rejects_shared_owner_lease(self):
         for port, serial in ((5038, "task-device"), (5049, "emulator-5558"),
                              (5037, "task-device")):
@@ -157,7 +164,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                 if label in ("apple-selected-signature", "apple-installed-signature"):
                     signature_checks.append((label, argv))
                 if label == "apple-xcode":
-                    output = "Xcode 26.4.1\nBuild version 1\n"
+                    output = "Xcode 26.5\nBuild version 17F42\n"
                 elif label == "apple-device-list":
                     output = '{"devices": {}}'
                 elif label == "apple-architecture":
@@ -343,7 +350,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
 
             def setup(_archive, label, argv, **_kwargs):
                 if label == "apple-xcode":
-                    output = "Xcode 26.4.1\nBuild version 1\n"
+                    output = "Xcode 26.5\nBuild version 17F42\n"
                 elif label == "apple-device-list":
                     output = '{"devices": {}}'
                 elif label == "apple-architecture":

@@ -276,6 +276,17 @@ class UnreadableFile(GrowingFile):
 
 
 class HostedRawFileContract(unittest.TestCase):
+    def test_native_runner_xcode_pin_accepts_26_5_and_rejects_26_4_1(self):
+        tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
+        validator = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef)
+                         and node.name == "validate_xcode_version")
+        scope = {}
+        exec(compile(ast.Module(body=[validator], type_ignores=[]), str(RUNNER), "exec"), scope)
+        scope["validate_xcode_version"]("Xcode 26.5\nBuild version 17F42\n")
+        with self.assertRaisesRegex(RuntimeError, "not 26.5"):
+            scope["validate_xcode_version"]("Xcode 26.4.1\nBuild version 17E303\n")
+
     def setUp(self):
         (self.raw_node, self.sidecar_node, self.route_node, self.receipt_node,
          self.gradle_node, self.guard_node) = workflow_nodes()
@@ -795,7 +806,6 @@ class HostedRawFileContract(unittest.TestCase):
         self.assertIn('if Path(__file__).resolve() != selected_runner:', RUNNER.read_text())
         self.assertIn("macos-26", source)
         self.assertIn("windows-2025", source)
-        self.assertIn("Xcode_26.4.1", source)
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)
             route = {"qualification": "unpassed", "commands": {}, "scenarios": {},

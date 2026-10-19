@@ -59,7 +59,7 @@ an invalid variant reference valid under the trusted external digest.
 Keep the trusted manifest digest with the exact candidate evidence before transferring a bundle.
 
 The Linux job cross compiles and stages all 21 targets.
-The hosted macOS job stages nine Apple targets.
+The installed local Mac stages nine Apple targets with Xcode 26.5.
 The hosted Windows job stages Windows x64.
 Each job publishes both modules and the root coordinates for its selected targets.
 Their audits apply to the targets selected on that host.
@@ -67,7 +67,7 @@ The full 112-lane runtime matrix remains separate from publication staging.
 
 Stage completion proves that the selected host produced and audited artifact bytes.
 It does not prove execution on a physical device, minimum runtime, or sustained performance.
-Record failed or unavailable hosted jobs as failed or not run until their raw bundles pass verification.
+Record failed or unavailable local Mac and Windows jobs as failed or not run until their raw bundles pass verification.
 The current workflow does not run the complete unchanged Java corpus on Java 8 and 21.
 It also lacks strict API, extension, and static-import archive checks for JVM and Android.
 Those checks require the separately reviewed strict verifier before they can pass CI.
