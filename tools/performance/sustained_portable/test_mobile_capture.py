@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import mobile_capture
+import native_host_capture
 import test_capture
 
 
@@ -38,7 +39,113 @@ def apple_derivation(linked, harness, target="iosX64", build="development"):
     }
 
 
+def simulator_test_toolchain(root, archive, inventory):
+    developer = root / "Xcode.app/Contents/Developer"
+    developer.mkdir(parents=True, exist_ok=True)
+    archive.mkdir(exist_ok=True)
+    inventory.setdefault("source_sha", "a" * 40)
+    inventory.setdefault("producer_tree", "b" * 40)
+    (archive / "inventory.json").write_text(json.dumps(inventory))
+    return str(developer), str(developer / "usr/bin/xcodebuild")
+
+
+def write_simulator_toolchain_evidence(archive, inventory, process):
+    setup = archive / "setup"
+    setup.mkdir(exist_ok=True)
+    developer = "/Applications/Xcode.app/Contents/Developer"
+    selected = developer + "/usr/bin/xcodebuild"
+    receipt = {"format": "portable-apple-toolchain-v1",
+               "source_sha": inventory["source_sha"],
+               "producer_tree": inventory["producer_tree"],
+               "inventory_sha256": mobile_capture.capture.digest(archive / "inventory.json"),
+               "developer_dir": developer, "xcodebuild_path": selected,
+               "xcrun_find_argv": ["xcrun", "--find", "xcodebuild"],
+               "xcrun_find_output": selected + "\n",
+               "xcode_version_argv": [selected, "-version"],
+               "xcode_version": "Xcode 26.5\nBuild version 17F42\n"}
+    sidecar = archive / "apple-toolchain.json"
+    sidecar.write_text(json.dumps(receipt, indent=2) + "\n")
+    for label, argv, output in (
+            ("apple-xcode-find", receipt["xcrun_find_argv"], receipt["xcrun_find_output"]),
+            ("apple-xcode", receipt["xcode_version_argv"], receipt["xcode_version"])):
+        (setup / f"{label}.stdout.bin").write_bytes(output.encode())
+        (setup / f"{label}.stderr.bin").write_bytes(b"")
+        (setup / f"{label}.json").write_text(json.dumps({
+            "argv": argv, "exit_code": 0, "timed_out": False, "launch_error": None,
+            "developer_dir": developer, "started_ns": 1, "ended_ns": 2}))
+    for label, argv in (
+            ("apple-device-list", ["xcrun", "simctl", "list", "-j", "devices", "available"]),
+            ("apple-launch-help", ["xcrun", "simctl", "help", "launch"]),
+            ("apple-install", ["xcrun", "simctl", "install", "selected-udid", "selected.app"]),
+            ("apple-container", ["xcrun", "simctl", "get_app_container", "selected-udid", "bundle", "app"]),
+            ("apple-data-container", ["xcrun", "simctl", "get_app_container", "selected-udid", "bundle", "data"]),
+            ("apple-launch", process["command"])):
+        record = setup / f"{label}.json"
+        data = json.loads(record.read_text()) if record.exists() else {
+            "argv": argv, "exit_code": 0, "started_ns": 2, "ended_ns": 3}
+        data.update({"developer_dir": developer, "timed_out": False, "launch_error": None})
+        record.write_text(json.dumps(data))
+    process["xcode"] = receipt["xcode_version"].strip()
+    process["apple_toolchain"] = {"receipt_sha256": mobile_capture.capture.digest(sidecar),
+                                  "developer_dir": developer, "xcodebuild_path": selected}
+
+
 class MobileCaptureAdverseTest(unittest.TestCase):
+    def test_public_simulator_toolchain_replay_rejects_changed_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)
+            inventory = {"source_sha": "a" * 40, "producer_tree": "b" * 40}
+            inventory_path = archive / "inventory.json"
+            inventory_path.write_text(json.dumps(inventory))
+            process = {"command": ["xcrun", "simctl", "launch", "selected-udid", "bundle"]}
+            write_simulator_toolchain_evidence(archive, inventory, process)
+            result_path = archive / "result.json"
+            result = {"protocol": "valid", "qualification": "unpassed",
+                      "target": "iosX64", "source_sha": inventory["source_sha"],
+                      "producer_tree": inventory["producer_tree"], "process": process}
+            result_path.write_text(json.dumps(result))
+            command = [sys.executable, "-B", str(Path(mobile_capture.__file__)),
+                       "verify", "--archive", str(archive)]
+
+            def replay():
+                return subprocess.run(command, capture_output=True, text=True)
+
+            valid = replay()
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            self.assertIn('"apple_toolchain": "verified"', valid.stdout)
+            for path, changed in (
+                    (archive / "apple-toolchain.json", lambda value: value.replace("17F42", "17F43")),
+                    (archive / "apple-toolchain.json",
+                     lambda value: value.replace("a" * 40, "c" * 40)),
+                    (archive / "setup/apple-xcode-find.stdout.bin",
+                     lambda value: value.replace("Xcode.app", "Other.app")),
+                    (archive / "setup/apple-xcode.stdout.bin",
+                     lambda value: value.replace("17F42", "17E303")),
+                    (archive / "setup/apple-xcode.stderr.bin", lambda _value: "unexpected warning"),
+                    (archive / "setup/apple-xcode.json",
+                     lambda value: value.replace("Developer", "OtherDeveloper")),
+                    (archive / "setup/apple-launch.json",
+                     lambda value: value.replace("Developer", "OtherDeveloper")),
+                    (inventory_path, lambda value: value.replace("a" * 40, "c" * 40)),
+                    (result_path, lambda value: value.replace('"source_sha": "' + "a" * 40,
+                                                              '"source_sha": "' + "c" * 40)),
+                    (result_path, lambda value: value.replace(process["apple_toolchain"]["receipt_sha256"],
+                                                              "0" * 64))):
+                original = path.read_bytes()
+                path.write_bytes(changed(original.decode()).encode())
+                with self.subTest(path=path.name):
+                    rejected = replay()
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    self.assertIn("qualification: unpassed", rejected.stderr)
+                path.write_bytes(original)
+            sidecar = archive / "apple-toolchain.json"
+            original = sidecar.read_bytes()
+            sidecar.unlink()
+            missing = replay()
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("qualification: unpassed", missing.stderr)
+            sidecar.write_bytes(original)
+
     def test_signed_image_derivation_binds_raw_copy_and_signed_package(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -87,6 +194,69 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                       "Build version 17 F42", "Build version 17F42!", "17F42"):
             with self.subTest(build=build), self.assertRaisesRegex(ValueError, "pinned 26.5"):
                 mobile_capture.validate_xcode_version(f"Xcode 26.5\n{build}\n")
+
+    def test_simulator_toolchain_uses_selected_executable_when_path_disagrees(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            developer = root / "Xcode.app/Contents/Developer"
+            developer.mkdir(parents=True)
+            selected = str(developer / "usr/bin/xcodebuild")
+            invoked = []
+
+            def setup(_archive, label, argv, **kwargs):
+                invoked.append((label, argv, kwargs.get("env", {}).get("DEVELOPER_DIR")))
+                if label == "apple-xcode-find":
+                    output = selected + "\n"
+                elif argv == [selected, "-version"]:
+                    output = "Xcode 26.4.1\nBuild version 17E303\n"
+                elif argv == ["xcodebuild", "-version"]:
+                    output = "Xcode 26.5\nBuild version 17F42\n"
+                else:
+                    raise AssertionError(argv)
+                return subprocess.CompletedProcess(argv, 0, output, "")
+
+            with patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=setup):
+                with self.assertRaisesRegex(ValueError, "pinned 26.5"):
+                    mobile_capture.observe_simulator_toolchain(root, "a" * 40,
+                                                                 "b" * 40, "c" * 64)
+            self.assertEqual(invoked, [
+                ("apple-xcode-find", ["xcrun", "--find", "xcodebuild"], str(developer)),
+                ("apple-xcode", [selected, "-version"], str(developer)),
+            ])
+
+            def selected_good(_archive, label, argv, **kwargs):
+                if label == "apple-xcode-find":
+                    output = selected + "\n"
+                elif argv == [selected, "-version"]:
+                    output = "Xcode 26.5\nBuild version 17F42\n"
+                else:
+                    raise AssertionError(argv)
+                self.assertEqual(kwargs["env"]["DEVELOPER_DIR"], str(developer))
+                return subprocess.CompletedProcess(argv, 0, output, "")
+
+            with patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=selected_good):
+                receipt, selected_env = mobile_capture.observe_simulator_toolchain(
+                    root, "a" * 40, "b" * 40, "c" * 64)
+            native_host_capture.validate_apple_toolchain_receipt(receipt)
+            self.assertEqual(receipt["xcode_version_argv"], [selected, "-version"])
+            self.assertEqual(selected_env["DEVELOPER_DIR"], str(developer))
+            self.assertEqual(json.loads((root / "apple-toolchain.json").read_text()), receipt)
+            with patch.dict(os.environ, {"DEVELOPER_DIR": ""}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=selected_good) as commands:
+                with self.assertRaisesRegex(ValueError, "DEVELOPER_DIR"):
+                    mobile_capture.observe_simulator_toolchain(root, "a" * 40,
+                                                                 "b" * 40, "c" * 64)
+            commands.assert_not_called()
+            with patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 patch.object(mobile_capture, "setup_command", return_value=subprocess.CompletedProcess(
+                     ["xcrun", "--find", "xcodebuild"], 0,
+                     "/Other/Xcode.app/Contents/Developer/usr/bin/xcodebuild\n", "")) as commands:
+                with self.assertRaisesRegex(ValueError, "DEVELOPER_DIR binding"):
+                    mobile_capture.observe_simulator_toolchain(root, "a" * 40,
+                                                                 "b" * 40, "c" * 64)
+            self.assertEqual(commands.call_count, 1)
 
     def test_adb_route_rejects_shared_owner_lease(self):
         for port, serial in ((5038, "task-device"), (5049, "emulator-5558"),
@@ -201,13 +371,19 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "signed_image_sha256": mobile_capture.capture.digest(selected / "Dyn4kPerformance"),
                          "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
+            developer, selected_xcodebuild = simulator_test_toolchain(root, archive, inventory)
             launches = []
             signature_checks = []
 
             def setup(_archive, label, argv, **_kwargs):
+                if argv[:2] == ["xcrun", "simctl"]:
+                    self.assertEqual(_kwargs["env"]["DEVELOPER_DIR"], developer)
                 if label in ("apple-selected-signature", "apple-installed-signature"):
                     signature_checks.append((label, argv))
-                if label == "apple-xcode":
+                if label == "apple-xcode-find":
+                    output = selected_xcodebuild + "\n"
+                elif label == "apple-xcode":
+                    self.assertEqual(argv, [selected_xcodebuild, "-version"])
                     output = "Xcode 26.5\nBuild version 17F42\n"
                 elif label == "apple-device-list":
                     output = '{"devices": {}}'
@@ -257,7 +433,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                 return real_wait_ack(barrier, captured_source, captured_nonce, token,
                                      timeout, capture_archive)
 
-            with patch.object(mobile_capture, "setup_command", side_effect=setup), \
+            with patch.dict(os.environ, {"DEVELOPER_DIR": developer}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=setup), \
                  patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}), \
                  patch.object(mobile_capture, "apple_process_path",
                               side_effect=[installed_image, installed_image, installed_image, None]), \
@@ -276,6 +453,9 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertNotEqual(process["image"]["sha256"], inventory["linked_sha256"])
             self.assertEqual(process["image"]["sha256"], inventory["signed_image_sha256"])
             self.assertEqual(process["installed_image_size"], identity["size"])
+            self.assertEqual(process["apple_toolchain"]["xcodebuild_path"], selected_xcodebuild)
+            self.assertEqual(process["apple_toolchain"]["receipt_sha256"],
+                             mobile_capture.capture.digest(archive / "apple-toolchain.json"))
             self.assertEqual(len(launches), 1)
             self.assertEqual(signature_checks, [
                 ("apple-selected-signature", ["codesign", "--verify", str(selected)]),
@@ -298,7 +478,9 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             archive = root / "failed-archive"
             archive.mkdir()
             args.archive = archive
-            with patch.object(mobile_capture, "setup_command", side_effect=setup), \
+            simulator_test_toolchain(root, archive, inventory)
+            with patch.dict(os.environ, {"DEVELOPER_DIR": developer}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=setup), \
                  patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}), \
                  patch.object(mobile_capture, "apple_process_path", return_value=installed_image), \
                  patch.object(mobile_capture, "apple_process_vnode",
@@ -388,12 +570,15 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "signed_image_size": image.stat().st_size,
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
                          "image_derivation": apple_derivation(linked, image)}
+            archive = root / "archive"
+            developer, selected_xcodebuild = simulator_test_toolchain(root, archive, inventory)
             checked = []
             def invalid_signature(_archive, label, argv, **kwargs):
                 checked.append(label)
                 if label == "apple-selected-signature":
                     raise ValueError("selected signature changed")
-                output = {"apple-xcode": "Xcode 26.5\nBuild version 17F42\n",
+                output = {"apple-xcode-find": selected_xcodebuild + "\n",
+                          "apple-xcode": "Xcode 26.5\nBuild version 17F42\n",
                           "apple-device-list": '{"devices": {}}',
                           "apple-architecture": "x86_64\n",
                           "apple-launch-help":
@@ -401,8 +586,9 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                           "--stderr=<path> Redirect the application's standard error to a file.\n"}
                 return subprocess.CompletedProcess(argv, 0, output.get(label, ""), "")
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
-                                   archive=root / "archive", timeout=1)
-            with patch.object(mobile_capture, "setup_command", side_effect=invalid_signature), \
+                                   archive=archive, timeout=1)
+            with patch.dict(os.environ, {"DEVELOPER_DIR": developer}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=invalid_signature), \
                  patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}):
                 with self.assertRaisesRegex(ValueError, "signature changed"):
                     mobile_capture.run_simulator(
@@ -431,11 +617,15 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "signed_image_sha256": selected_sha,
                          "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
+            developer, selected_xcodebuild = simulator_test_toolchain(root, archive, inventory)
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
 
             def setup(_archive, label, argv, **_kwargs):
-                if label == "apple-xcode":
+                if label == "apple-xcode-find":
+                    output = selected_xcodebuild + "\n"
+                elif label == "apple-xcode":
+                    self.assertEqual(argv, [selected_xcodebuild, "-version"])
                     output = "Xcode 26.5\nBuild version 17F42\n"
                 elif label == "apple-device-list":
                     output = '{"devices": {}}'
@@ -462,7 +652,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                     output = ""
                 return subprocess.CompletedProcess(argv, 0, output, "")
 
-            with patch.object(mobile_capture, "setup_command", side_effect=setup), \
+            with patch.dict(os.environ, {"DEVELOPER_DIR": developer}), \
+                 patch.object(mobile_capture, "setup_command", side_effect=setup), \
                  patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}), \
                  patch.object(mobile_capture, "apple_process_path",
                               return_value=installed / "Dyn4kPerformance"), \
@@ -638,6 +829,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "signed_image_sha256": mobile_capture.capture.digest(executable),
                          "signed_image_size": executable.stat().st_size,
                          "image_derivation": apple_derivation(linked, executable)}
+            inventory_path.write_text(json.dumps(inventory))
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
             data_container = root / "data"
@@ -692,6 +884,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                 (args.archive / "attestation.ready.bin").write_bytes(fixture.nonce.encode())
                 (args.archive / "attestation.release.bin").write_bytes(release_token.encode())
                 (args.archive / "attestation.ack.bin").write_bytes(ack_bytes)
+                write_simulator_toolchain_evidence(args.archive, inventory, process)
                 return raw, b"", process
 
             with patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
@@ -710,6 +903,22 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual(result["executable_sha256"], package["Dyn4kPerformance"])
             self.assertEqual(mobile_capture.validate_simulator_attestation(
                 archive, result["process"], fixture.source, fixture.nonce), commitment)
+            args.archive = root / "toolchain-raw-tampered"
+            def invalid_toolchain(*_unused):
+                observed = simulator()
+                (args.archive / "setup/apple-xcode.stdout.bin").write_bytes(
+                    b"Xcode 26.4.1\nBuild version 17E303\n")
+                return observed
+            with patch.object(mobile_capture.capture, "required_file", return_value=inventory_path), \
+                 patch.object(mobile_capture, "validate_inventory",
+                              return_value=(inventory, executable, artifacts)), \
+                 patch.object(mobile_capture.secrets, "token_hex", return_value=fixture.nonce), \
+                 patch.object(mobile_capture, "run_simulator", side_effect=invalid_toolchain):
+                self.assertEqual(mobile_capture.run(args), 1)
+            rejected = json.loads((args.archive / "result.json").read_text())
+            self.assertNotIn("protocol", rejected)
+            self.assertIn("toolchain", rejected["error"])
+            args.archive = archive
             (archive / "attestation.ack.bin").write_bytes(b"forged ack")
             with self.assertRaisesRegex(ValueError, "attestation barrier"):
                 mobile_capture.validate_simulator_attestation(
@@ -843,6 +1052,20 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual(record["argv"], argv)
             self.assertEqual(record["exit_code"], 7)
             self.assertGreater(record["ended_ns"], record["started_ns"])
+
+    def test_setup_command_records_selected_developer_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)
+            argv = ["xcrun", "simctl", "help", "launch"]
+            selected_env = {"DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"}
+            completed = subprocess.CompletedProcess(argv, 0, b"help\n", b"")
+            with patch.object(mobile_capture.subprocess, "run", return_value=completed) as run:
+                mobile_capture.setup_command(archive, "apple-launch-help", argv, env=selected_env)
+            run.assert_called_once_with(argv, capture_output=True, timeout=30, env=selected_env)
+            record = json.loads((archive / "setup/apple-launch-help.json").read_text())
+            self.assertEqual(record["developer_dir"], selected_env["DEVELOPER_DIR"])
+            self.assertEqual(record["argv"], argv)
+            self.assertEqual((archive / "setup/apple-launch-help.stdout.bin").read_bytes(), b"help\n")
 
     def test_setup_command_preserves_partial_timeout_bytes(self):
         with tempfile.TemporaryDirectory() as directory:

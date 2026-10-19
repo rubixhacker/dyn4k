@@ -77,6 +77,7 @@ Do not use GitHub-hosted macOS execution. Use an ARM64 Mac for the
 ARM64 simulators and an x86_64 Mac for `iosX64`.
 
 ```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --inventory "$PWD/consumers/performance/portable/build/portable-inventory/iosSimulatorArm64-development.json" \
   --target iosSimulatorArm64 --build development \
@@ -85,9 +86,29 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --archive /absolute/new/archive/ios-native-direct --steps 30 --warmup 3
 ```
 
-The launcher checks Xcode 26.5, host architecture, and simulator family.
-It checks the raw link against its inventory hash, the recorded copy and
-signing derivation, and selected and installed app package bytes. The signed
+The launcher requires `DEVELOPER_DIR` for the installed local Xcode. It runs
+`xcrun --find xcodebuild` in that developer context, checks that the selected
+path belongs to it, then executes that exact binary for the Xcode 26.5 version
+and build observation. All `xcrun simctl` setup and launch commands receive
+the same `DEVELOPER_DIR`. The raw find and version commands remain under
+`setup/`; `apple-toolchain.json` binds their argv, output, selected path,
+developer directory, source SHA, producer tree, and inventory hash. The
+launcher also checks host architecture and simulator family.
+
+Replay the archived toolchain observation with:
+
+```sh
+python3 -B tools/performance/sustained_portable/mobile_capture.py verify \
+  --archive /absolute/archive/ios-native-direct
+```
+
+Replay compares the sidecar with raw find and version records, selected
+developer context on `simctl` commands, archived inventory, and result
+receipt. It reports only the toolchain evidence check. A successful replay
+does not qualify the simulator run or its performance.
+
+The launcher checks the raw link against its inventory hash, the recorded copy
+and signing derivation, and selected and installed app package bytes. The signed
 package executable is the selected process image. Its independent hash and
 size are in the build inventory. The launcher compares them with the installed
 app and live PID observation. It verifies the selected and

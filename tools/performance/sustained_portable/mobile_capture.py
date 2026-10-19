@@ -12,9 +12,11 @@ import select
 import shlex
 import stat
 import subprocess
+import sys
 import time
 
 import capture
+import native_host_capture
 
 
 APPLE_SIMULATORS = {
@@ -48,12 +50,12 @@ def command(argv, *, check=True, timeout=30):
     return result
 
 
-def setup_command(archive, label, argv, *, check=True, timeout=30):
+def setup_command(archive, label, argv, *, check=True, timeout=30, env=None):
     setup = archive / "setup"
     setup.mkdir(exist_ok=True)
     started = time.monotonic_ns()
     try:
-        result = subprocess.run(argv, capture_output=True, timeout=timeout)
+        result = subprocess.run(argv, capture_output=True, timeout=timeout, env=env)
         stdout, stderr = result.stdout, result.stderr
         exit_code, timed_out, launch_error = result.returncode, False, None
     except subprocess.TimeoutExpired as error:
@@ -68,6 +70,7 @@ def setup_command(archive, label, argv, *, check=True, timeout=30):
     (setup / f"{label}.json").write_text(json.dumps({
         "argv": argv, "exit_code": exit_code, "timed_out": timed_out,
         "launch_error": launch_error, "started_ns": started, "ended_ns": ended,
+        "developer_dir": env.get("DEVELOPER_DIR") if env is not None else None,
     }, indent=2) + "\n")
     if timed_out:
         raise ValueError(f"setup command timed out: {argv}")
@@ -479,30 +482,58 @@ def wait_simulator_ack(barrier, source, nonce, token, timeout, archive):
     raise ValueError("simulator app acknowledgement is missing")
 
 
+def observe_simulator_toolchain(archive, source_sha, producer_tree, inventory_sha256):
+    selected = os.environ.get("DEVELOPER_DIR", "")
+    if not selected or not Path(selected).is_absolute() or not Path(selected).is_dir():
+        raise ValueError("set DEVELOPER_DIR to the installed Xcode Developer directory")
+    developer = str(Path(selected).resolve())
+    selected_env = os.environ.copy()
+    selected_env["DEVELOPER_DIR"] = developer
+    find_argv = ["xcrun", "--find", "xcodebuild"]
+    find_output = setup_command(archive, "apple-xcode-find", find_argv,
+                                env=selected_env).stdout
+    selected_path = native_host_capture.selected_xcodebuild_path(developer, find_output)
+    version_argv = [selected_path, "-version"]
+    version_output = setup_command(archive, "apple-xcode", version_argv,
+                                   env=selected_env).stdout
+    receipt = native_host_capture.validate_apple_toolchain_receipt({
+        "format": "portable-apple-toolchain-v1", "source_sha": source_sha,
+        "producer_tree": producer_tree, "inventory_sha256": inventory_sha256,
+        "developer_dir": developer, "xcodebuild_path": selected_path,
+        "xcrun_find_argv": find_argv, "xcrun_find_output": find_output,
+        "xcode_version_argv": version_argv, "xcode_version": version_output,
+    })
+    (archive / "apple-toolchain.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    return receipt, selected_env
+
+
 def run_simulator(args, inventory, harness, producer, nonce):
     if not args.udid:
         raise ValueError("set --udid for the selected Apple simulator")
-    xcode = setup_command(args.archive, "apple-xcode", ["xcodebuild", "-version"]).stdout
-    validate_xcode_version(xcode)
-    listing = json.loads(setup_command(args.archive, "apple-device-list",
+    toolchain, selected_env = observe_simulator_toolchain(
+        args.archive, inventory["source_sha"], inventory["producer_tree"],
+        capture.digest(args.archive / "inventory.json"))
+    def apple_setup(label, argv, **kwargs):
+        return setup_command(args.archive, label, argv, env=selected_env, **kwargs)
+    listing = json.loads(apple_setup("apple-device-list",
                                        ["xcrun", "simctl", "list", "-j", "devices", "available"]).stdout)
     device = validate_simulator(args.target, args.udid, listing)
-    architecture = setup_command(args.archive, "apple-architecture",
+    architecture = apple_setup("apple-architecture",
                                  ["xcrun", "lipo", "-archs", str(harness)]).stdout.split()
     expected_arch = "x86_64" if args.target == "iosX64" else "arm64"
     if architecture != [expected_arch]:
         raise ValueError("Apple executable architecture differs from selected simulator")
-    help_result = setup_command(args.archive, "apple-launch-help", ["xcrun", "simctl", "help", "launch"])
+    help_result = apple_setup("apple-launch-help", ["xcrun", "simctl", "help", "launch"])
     validate_simctl_launch_help(help_result.stdout + help_result.stderr)
     app = inventory["app_bundle"]
     bundle = inventory["bundle_id"]
-    setup_command(args.archive, "apple-selected-signature", ["codesign", "--verify", app])
-    setup_command(args.archive, "apple-install", ["xcrun", "simctl", "install", args.udid, app], timeout=120)
-    container = setup_command(args.archive, "apple-container",
+    apple_setup("apple-selected-signature", ["codesign", "--verify", app])
+    apple_setup("apple-install", ["xcrun", "simctl", "install", args.udid, app], timeout=120)
+    container = apple_setup("apple-container",
                               ["xcrun", "simctl", "get_app_container", args.udid, bundle, "app"]).stdout.strip()
     installed_app = Path(container)
     installed = installed_app / harness.name
-    setup_command(args.archive, "apple-installed-signature", ["codesign", "--verify", str(installed_app)])
+    apple_setup("apple-installed-signature", ["codesign", "--verify", str(installed_app)])
     installed_bundle = validate_installed_bundle(Path(app), installed_app)
     selected_sha = capture.digest(harness)
     selected_size = harness.stat().st_size
@@ -520,7 +551,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
     prelaunch_image = apple_file_identity(installed)
     if prelaunch_image["size"] != selected_size:
         raise ValueError("installed simulator executable size differs from selected signed package")
-    data_container = Path(setup_command(args.archive, "apple-data-container",
+    data_container = Path(apple_setup("apple-data-container",
         ["xcrun", "simctl", "get_app_container", args.udid, bundle, "data"]).stdout.strip())
     if not data_container.is_absolute() or not data_container.is_dir() or data_container.is_symlink():
         raise ValueError("simulator app data container is missing or invalid")
@@ -545,7 +576,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
     image = None
     attestation = None
     try:
-        setup_command(args.archive, "apple-launch", launch, timeout=args.timeout)
+        apple_setup("apple-launch", launch, timeout=args.timeout)
         launch_stdout = (args.archive / "setup/apple-launch.stdout.bin").read_bytes()
         pid = simulator_launch_pid(launch_stdout, bundle)
         barrier = wait_simulator_ready(data_container, nonce, args.timeout)
@@ -614,7 +645,12 @@ def run_simulator(args, inventory, harness, producer, nonce):
     ended = time.monotonic_ns()
     return stdout, stderr, {"command": launch, "launch_exit_code": 0,
                             "app_exit_code": None,
-                            "image": image, "runtime": device, "xcode": xcode.strip(),
+                            "image": image, "runtime": device,
+                            "xcode": toolchain["xcode_version"].strip(),
+                            "apple_toolchain": {"receipt_sha256": capture.digest(
+                                args.archive / "apple-toolchain.json"),
+                                "developer_dir": toolchain["developer_dir"],
+                                "xcodebuild_path": toolchain["xcodebuild_path"]},
                             "attestation": attestation,
                             "bundle_id": bundle,
                             "installed_image_sha256": capture.digest(installed),
@@ -779,6 +815,81 @@ def validate_simulator_attestation(archive, process, source, nonce):
     return commitment
 
 
+def verify_simulator_toolchain_archive(archive, result=None):
+    if result is None:
+        result_path = archive / "result.json"
+        if result_path.is_symlink() or not result_path.is_file():
+            raise ValueError("simulator toolchain result receipt is missing or substituted")
+        result = json.loads(result_path.read_text())
+        if not isinstance(result, dict):
+            raise ValueError("simulator toolchain result receipt is malformed")
+        if result.get("protocol") != "valid" or result.get("qualification") != "unpassed":
+            raise ValueError("simulator toolchain replay requires a valid unpassed capture")
+    if not isinstance(result, dict) or result.get("target") not in APPLE_SIMULATORS:
+        raise ValueError("simulator toolchain replay target is missing or invalid")
+    inventory_path = archive / "inventory.json"
+    sidecar = archive / "apple-toolchain.json"
+    if any(path.is_symlink() or not path.is_file() for path in (inventory_path, sidecar)):
+        raise ValueError("simulator toolchain inventory or sidecar is missing or substituted")
+    inventory = json.loads(inventory_path.read_text())
+    toolchain = native_host_capture.validate_apple_toolchain_receipt(
+        json.loads(sidecar.read_text()))
+    process = result.get("process")
+    if not isinstance(inventory, dict) or not isinstance(process, dict):
+        raise ValueError("simulator toolchain source or process receipt is missing")
+    expected_process = {"receipt_sha256": capture.digest(sidecar),
+                        "developer_dir": toolchain["developer_dir"],
+                        "xcodebuild_path": toolchain["xcodebuild_path"]}
+    if (toolchain["inventory_sha256"] != capture.digest(inventory_path)
+            or any(value.get("source_sha") != toolchain["source_sha"]
+                   or value.get("producer_tree") != toolchain["producer_tree"]
+                   for value in (inventory, result))
+            or process.get("apple_toolchain") != expected_process
+            or process.get("xcode") != toolchain["xcode_version"].strip()):
+        raise ValueError("simulator toolchain sidecar differs from source or process receipt")
+    for label, argv, output in (
+            ("apple-xcode-find", toolchain["xcrun_find_argv"], toolchain["xcrun_find_output"]),
+            ("apple-xcode", toolchain["xcode_version_argv"], toolchain["xcode_version"])):
+        base = archive / "setup" / label
+        paths = (base.with_suffix(".json"), base.with_suffix(".stdout.bin"),
+                 base.with_suffix(".stderr.bin"))
+        if any(path.is_symlink() or not path.is_file() for path in paths):
+            raise ValueError(f"simulator toolchain raw {label} observation is missing")
+        record = json.loads(paths[0].read_text())
+        if (not isinstance(record, dict)
+                or record.get("argv") != argv or record.get("exit_code") != 0
+                or record.get("timed_out") is not False
+                or record.get("launch_error") is not None
+                or record.get("developer_dir") != toolchain["developer_dir"]
+                or paths[1].read_bytes() != output.encode("utf-8")
+                or paths[2].read_bytes()):
+            raise ValueError(f"simulator toolchain raw {label} observation differs from sidecar")
+    simctl_commands = {
+        "apple-device-list": ["xcrun", "simctl", "list", "-j", "devices", "available"],
+        "apple-launch-help": ["xcrun", "simctl", "help", "launch"],
+        "apple-install": ["xcrun", "simctl", "install"],
+        "apple-container": ["xcrun", "simctl", "get_app_container"],
+        "apple-data-container": ["xcrun", "simctl", "get_app_container"],
+        "apple-launch": ["xcrun", "simctl", "launch"],
+    }
+    for label, prefix in simctl_commands.items():
+        path = archive / "setup" / f"{label}.json"
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"simulator toolchain {label} context receipt is missing")
+        record = json.loads(path.read_text())
+        if not isinstance(record, dict):
+            raise ValueError(f"simulator toolchain {label} context receipt is malformed")
+        argv = record.get("argv")
+        if (not isinstance(argv, list) or argv[:len(prefix)] != prefix
+                or record.get("developer_dir") != toolchain["developer_dir"]
+                or record.get("exit_code") != 0
+                or record.get("timed_out") is not False
+                or record.get("launch_error") is not None
+                or (label == "apple-launch" and argv != process.get("command"))):
+            raise ValueError(f"simulator toolchain {label} context differs from selected developer")
+    return toolchain
+
+
 def run(args):
     if not args.archive.is_absolute() or args.archive.exists():
         raise ValueError("archive must be a new absolute path")
@@ -865,6 +976,8 @@ def run(args):
             protocol_bytes, scenario, inventory["source_sha"], inventory["producer_tree"],
             {"core": artifacts["dyn4k-core"]["sha256"], "kotlin": artifacts["dyn4k"]["sha256"]},
             args.build, nonce, args.steps, args.warmup, "timing")
+        if args.target in APPLE_SIMULATORS:
+            verify_simulator_toolchain_archive(args.archive, receipt)
         receipt.update({"protocol": "valid", "clock_counts": {key: len(value) for key, value in clocks.items()},
                         "step_count": len(rows), "provider": provider, "run": summary})
     except (OSError, ValueError, KeyError, IndexError, TypeError, UnicodeError,
@@ -875,6 +988,17 @@ def run(args):
 
 
 def main():
+    if sys.argv[1:2] == ["verify"]:
+        verify_parser = argparse.ArgumentParser(description="Replay archived simulator Xcode observation")
+        verify_parser.add_argument("verify")
+        verify_parser.add_argument("--archive", type=Path, required=True)
+        verify_args = verify_parser.parse_args()
+        try:
+            verify_simulator_toolchain_archive(verify_args.archive)
+        except (OSError, ValueError, KeyError, TypeError, UnicodeError) as error:
+            verify_parser.exit(1, f"qualification: unpassed; {error}\n")
+        print(json.dumps({"apple_toolchain": "verified", "archive": str(verify_args.archive)}))
+        return
     parser = argparse.ArgumentParser(description="Capture one mobile Native fixture run")
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
