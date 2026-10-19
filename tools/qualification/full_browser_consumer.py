@@ -7,6 +7,7 @@ import os
 import platform
 import plistlib
 import re
+import runpy
 import shutil
 import socket
 import stat
@@ -51,6 +52,9 @@ LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
 REPORTER = f"{CONSUMER}/browser-reporter.js"
 CHROMIUM_WITNESS = f"{CONSUMER}/chromium_http_witness.js"
 SAFARI_WITNESS = f"{CONSUMER}/safari_response_witness.py"
+SAFARI_OBSERVER = f"{CONSUMER}/safari_karma_observer.js"
+SAFARI_WORKER = f"{CONSUMER}/safari_response_worker.js"
+SAFARI_BOOTSTRAP = f"{CONSUMER}/safari_response_bootstrap.js"
 YARN_LOCK = f"{CONSUMER}/consumer-yarn.lock"
 MULTI_BROWSER_YARN_LOCK = f"{CONSUMER}/consumer-multibrowser-yarn.lock"
 WASM_YARN_LOCK = f"{CONSUMER}/consumer-wasm-yarn.lock"
@@ -340,7 +344,8 @@ def bundle_paths(work, short, mode, target="js", runner_path=None):
     return linked, selected, runner
 
 
-def configured_bundle(raw, work, short, mode, reporter, port, target="js", family="Chromium"):
+def configured_bundle(raw, work, short, mode, reporter, port, target="js", family="Chromium",
+                      safari_observer=None):
     if not raw.startswith(KARMA_HEADER):
         raise ValueError("archived Karma configuration header differs")
     try:
@@ -395,9 +400,11 @@ def configured_bundle(raw, work, short, mode, reporter, port, target="js", famil
     if not suffix.startswith(reporter):
         raise ValueError("archived Karma reporter script differs")
     suffix = suffix[len(reporter):]
+    observer_suffix = (b"\n// qualification-z-safari-observer.js\n" + safari_observer
+                       if safari_observer is not None else b"")
     port_match = re.fullmatch(
-        rb"\n\n// qualification-port\.js\nconfig\.set\(\{port: ([1-9][0-9]{0,4})\}\);\n{5}\}\n",
-        suffix)
+        rb"\n\n// qualification-port\.js\nconfig\.set\(\{port: ([1-9][0-9]{0,4})\}\);\n"
+        + re.escape(observer_suffix) + rb"\n{4}\}\n", suffix)
     if port_match is None or int(port_match[1]) != port or not 1 <= port <= 65535:
         raise ValueError("archived Karma port or later override differs")
     return linked, selected
@@ -450,10 +457,11 @@ def reporter_producer_path(folder):
 
 def selected_bundle(folder, work, short, mode, process_record, major, require_effective=False,
                     target="js", family="Chromium", observed_folder=None, require_http=False):
+    observer = folder / "safari-karma-observer.js"
     linked, selected = configured_bundle(
         (folder / "karma.conf.js").read_bytes(), work, short, mode,
         (folder / "browser-reporter.js").read_bytes(), process_record["karma_port"],
-        target, family)
+        target, family, observer.read_bytes() if observer.is_file() else None)
     evidence = json.loads((folder / "selected-bundle.json").read_text())
     selected_bytes = (folder / "karma-selected.js").read_bytes()
     linked_bytes = (folder / "linked-executable.js").read_bytes()
@@ -695,71 +703,50 @@ def verify_chromium_process_witness(folder, process_record, launches, server,
 
 def verify_safari_response_witness(folder, process_record, launches, server,
                                    short, target, candidate, source_path,
-                                   source_sha256):
+                                   source_sha256, worker_sha256, bootstrap_sha256,
+                                   observer_sha256):
     path = folder / "safari-browser-responses.jsonl"
     if not path.is_file():
         raise ValueError("Safari browser response-body witness is absent")
+    if (file_hash(Path(source_path)) != source_sha256
+            or file_hash(folder / "safari-karma-observer.js") != observer_sha256
+            or file_hash(folder / "safari-response-worker.js") != worker_sha256
+            or file_hash(folder / "safari-response-bootstrap.js") != bootstrap_sha256):
+        raise ValueError("Safari browser observer source differs")
+    attested = json.loads((folder / "safari-worker-source.json").read_text())
+    selected = json.loads((folder / "selected-bundle.json").read_text())
+    if attested != {"observer_sha256": observer_sha256,
+                    "worker_sha256": worker_sha256,
+                    "bootstrap_sha256": bootstrap_sha256,
+                    "node_pid": selected["node_pid"],
+                    "token": process_record["browser_token"],
+                    "port": process_record["karma_port"]}:
+        raise ValueError("Safari browser worker source process differs")
     try:
-        session, *responses = [json.loads(line) for line in path.read_text().splitlines()]
+        records = [json.loads(line) for line in path.read_text().splitlines()]
     except (ValueError, TypeError):
         raise ValueError("Safari browser response-body witness is malformed") from None
-    pid = session.get("browser_pid") if isinstance(session, dict) else None
-    if (len(launches) != 1 or type(pid) is not int or pid != launches[0]["pid"]
-            or set(session) != {"kind", "protocol", "candidate_sha", "module",
-                                "target", "browser_pid", "source_path",
-                                "source_sha256", "started_ns", "finished_ns"}
-            or session["kind"] != "session" or session["protocol"] != 1
-            or session["candidate_sha"] != candidate
-            or session["module"] != short or session["target"] != target
-            or session["source_path"] != source_path
-            or session["source_sha256"] != source_sha256
-            or type(session["started_ns"]) is not int
-            or type(session["finished_ns"]) is not int
-            or not process_record["started_ns"] <= session["started_ns"]
-            <= session["finished_ns"] <= process_record["finished_ns"]
-            or len(responses) != len(server)):
+    expected = runpy.run_path(source_path)["safari_records"](
+        folder, process_record, launches, candidate, short, target, source_path,
+        source_sha256, worker_sha256, bootstrap_sha256, observer_sha256)
+    if records != expected or len(records) != len(server) + 1:
         raise ValueError("Safari browser response-body session or source differs")
+    responses = records[1:]
     served_by_url = {item["url"]: item for item in server}
     if len(served_by_url) != len(server):
         raise ValueError("Safari Karma response URLs are duplicated")
-    request_ids = set()
-    previous = session["started_ns"]
     for index, row in enumerate(responses):
-        if not isinstance(row, dict) or set(row) != {
-                "kind", "ordinal", "request_id", "browser_pid", "url",
-                "method", "status", "source", "request_ns", "response_ns",
-                "finished_ns", "body_path", "body_size", "body_sha256"}:
-            raise ValueError("Safari browser response-body record differs")
-        address = urlsplit(row["url"]) if isinstance(row["url"], str) else None
-        relative = (address.path + ("?" + address.query if address.query else "")
-                    if address else None)
+        address = urlsplit(row["url"])
+        relative = address.path + ("?" + address.query if address.query else "")
         served = served_by_url.get(relative)
         body_path = f"safari-browser-bodies/{index:04d}.body"
         body = folder / body_path
-        if (row["kind"] != "response" or type(row["ordinal"]) is not int
-                or row["ordinal"] != index or row["browser_pid"] != pid
-                or not isinstance(row["request_id"], str) or not row["request_id"]
-                or row["request_id"] in request_ids
-                or address is None or address.scheme != "http"
-                or address.hostname not in {"localhost", "127.0.0.1"}
-                or address.port != process_record["karma_port"]
-                or served is None or row["method"] != "GET"
-                or row["status"] != 200 or row["source"] != "network"
-                or type(row["request_ns"]) is not int
-                or type(row["response_ns"]) is not int
-                or type(row["finished_ns"]) is not int
-                or not previous <= row["request_ns"] <= row["response_ns"]
-                <= row["finished_ns"] <= session["finished_ns"]
-                or row["body_path"] != body_path
-                or type(row["body_size"]) is not int
+        if (served is None or row["body_path"] != body_path
                 or row["body_size"] != served["size"]
                 or row["body_sha256"] != served["sha256"]
-                or not body.is_file() or body.stat().st_size != row["body_size"]
-                or file_hash(body) != row["body_sha256"]):
+                or body.read_bytes() != (folder / served["body_path"]).read_bytes()):
             raise ValueError("Safari browser response URL, body, or process differs")
-        request_ids.add(row["request_id"])
         served_by_url.pop(relative)
-        previous = row["request_ns"]
     if served_by_url:
         raise ValueError("Safari browser response witness omitted selected body")
     return responses
@@ -945,13 +932,6 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     for module in MODULES:
         if file_hash(staged(staging, module, target)) != hashes[module]:
             raise ValueError(f"independent staged {module} {target} KLIB hash differs")
-    if family == "Safari":
-        output.mkdir(parents=True, exist_ok=True)
-        preflight = process([sys.executable, str(repository / SAFARI_WITNESS)],
-                            repository, os.environ.copy(),
-                            output / "safari-probe.stdout", output / "safari-probe.stderr")
-        if preflight["exit_code"]:
-            raise ValueError("Safari browser response-body observer is unavailable; see safari-probe.stderr")
     inputs_content = input_bytes(repository, candidate, lane)
     run_started = time.time_ns()
     inputs = output.parent / f"{output.name}-inputs"
@@ -1009,6 +989,9 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
             reporter = config_root / "qualification-browser-reporter.js"
             port_file = config_root / "qualification-port.js"
             reporter.write_bytes((repository / REPORTER).read_bytes())
+            if family == "Safari":
+                (config_root / "qualification-z-safari-observer.js").write_bytes(
+                    (repository / SAFARI_OBSERVER).read_bytes())
             with socket.socket() as reservation:
                 reservation.bind(("127.0.0.1", 0))
                 port = reservation.getsockname()[1]
@@ -1038,6 +1021,14 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                               DYN4K_BROWSER_HTTP_SOURCES=str(destination / "http-sources"),
                               DYN4K_BROWSER_WORK_ROOT=str(work),
                               DYN4K_BROWSER_TMPDIR=os.environ["TMPDIR"])
+            if family == "Safari":
+                module_env.update(
+                    DYN4K_BROWSER_KARMA_PORT=str(port),
+                    DYN4K_SAFARI_REDIRECT_ARCHIVE=str(destination / "safari-redirect.html"),
+                    DYN4K_SAFARI_OBSERVER_ARCHIVE=str(destination),
+                    DYN4K_SAFARI_OBSERVER_SOURCE=str(repository / SAFARI_OBSERVER),
+                    DYN4K_SAFARI_WORKER_SOURCE=str(repository / SAFARI_WORKER),
+                    DYN4K_SAFARI_BOOTSTRAP_SOURCE=str(repository / SAFARI_BOOTSTRAP))
             command = base + [f":{short}:{target}BrowserTest"]
             execution = process(command, inputs, module_env,
                                 destination / "gradle.stdout", destination / "gradle.stderr")
@@ -1075,6 +1066,10 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                 raise ValueError("external browser Karma configuration lacks isolated port")
             copy(generated, destination / "karma.conf.js")
             copy(reporter, destination / "browser-reporter.js")
+            if family == "Safari":
+                copy(repository / SAFARI_OBSERVER, destination / "safari-karma-observer.js")
+                copy(repository / SAFARI_WORKER, destination / "safari-response-worker.js")
+                copy(repository / SAFARI_BOOTSTRAP, destination / "safari-response-bootstrap.js")
             selected_bundle(destination, work, short, configuration, processes[short], major,
                             require_effective=True, target=target, family=family,
                             require_http=True)
@@ -1096,13 +1091,24 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                     short, target, candidate, str(chromium_witness),
                     sha(original(repository, candidate, CHROMIUM_WITNESS)))
             if family == "Safari":
+                runpy.run_path(str(repository / SAFARI_WITNESS))["seal"](
+                    destination, processes[short], observations, candidate, short, target,
+                    str(repository / SAFARI_WITNESS),
+                    sha(original(repository, candidate, SAFARI_WITNESS)),
+                    sha(original(repository, candidate, SAFARI_WORKER)),
+                    sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
+                    sha(original(repository, candidate, SAFARI_OBSERVER)))
                 verify_safari_response_witness(destination, processes[short],
                     observations, verify_http_responses(destination, processes[short], target, short),
                     short, target, candidate, str(repository / SAFARI_WITNESS),
-                    sha(original(repository, candidate, SAFARI_WITNESS)))
+                    sha(original(repository, candidate, SAFARI_WITNESS)),
+                    sha(original(repository, candidate, SAFARI_WORKER)),
+                    sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
+                    sha(original(repository, candidate, SAFARI_OBSERVER)))
     finally:
         for config_root in config_roots:
-            for name in ("qualification-port.js", "qualification-browser-reporter.js"):
+            for name in ("qualification-port.js", "qualification-browser-reporter.js",
+                         "qualification-z-safari-observer.js"):
                 path = config_root / name
                 if path.exists():
                     path.unlink()
@@ -1135,7 +1141,9 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                "browser_support_sha256": {path: sha(original(repository, candidate, path))
                                           for path in (launcher.relative_to(repository).as_posix(), REPORTER,
                                                        *((CHROMIUM_WITNESS,) if family == "Chromium" else
-                                                         (SAFARI_WITNESS,) if family == "Safari" else ()))},
+                                                         (SAFARI_WITNESS, SAFARI_OBSERVER,
+                                                          SAFARI_WORKER, SAFARI_BOOTSTRAP)
+                                                         if family == "Safari" else ()))},
                "toolchain": identity, "staged_hashes": hashes,
                "runtime_identity": f"{platform.system()} {platform.release()} {platform.machine()}",
                "paths": {"checkout": str(repository), "staging": str(staging),
@@ -1169,7 +1177,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
         repository, candidate, REPORTER)
     has_cdp_producer = b"DYN4K_BROWSER_CDP_ARCHIVE" in original(
         repository, candidate, "tools/qualification/full_browser_consumer.py")
-    has_safari_producer = b'SAFARI_WITNESS = ' in original(
+    has_safari_producer = b'SAFARI_WORKER = ' in original(
         repository, candidate, "tools/qualification/full_browser_consumer.py")
     chromium = lane.split(":")[1] == "Chromium"
     safari = lane.split(":")[1] == "Safari"
@@ -1211,7 +1219,8 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
     if receipt.get("browser_support_sha256") != {
             path: sha(original(repository, candidate, path)) for path in
             (support, REPORTER, *((CHROMIUM_WITNESS,) if schema == 4 else
-                                  (SAFARI_WITNESS,) if schema == 5 else ())) }:
+                                  (SAFARI_WITNESS, SAFARI_OBSERVER, SAFARI_WORKER,
+                                   SAFARI_BOOTSTRAP) if schema == 5 else ())) }:
         raise ValueError("browser launcher or reporter source differs")
     target, family, role, mode = lane_parts(lane)
     major, pinned = runtime_pin(family, role, binary, browser_sha256)
@@ -1298,7 +1307,10 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
             if schema == 5:
                 verify_safari_response_witness(folder, record, launches, served,
                     short, target, candidate, str(repository / SAFARI_WITNESS),
-                    sha(original(repository, candidate, SAFARI_WITNESS)))
+                    sha(original(repository, candidate, SAFARI_WITNESS)),
+                    sha(original(repository, candidate, SAFARI_WORKER)),
+                    sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
+                    sha(original(repository, candidate, SAFARI_OBSERVER)))
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = bundle_paths(Path(paths["work"]), short, mode, target)[0]

@@ -1,84 +1,152 @@
 #!/usr/bin/env python3
+import hashlib
 import json
-import selectors
-import subprocess
-import sys
-import time
+import re
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
-class SafariMcp:
-    def __init__(self, executable="/usr/bin/safaridriver", timeout=8):
-        self.timeout = timeout
-        self.child = subprocess.Popen(
-            [executable, "--mcp"], stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(self.child.stdout, selectors.EVENT_READ)
-        self.pending = b""
-        self.next_id = 0
-
-    def close(self):
-        self.selector.close()
-        if self.child.poll() is None:
-            self.child.terminate()
-            try:
-                self.child.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.child.kill()
-                self.child.wait()
-        self.child.stdin.close()
-        self.child.stdout.close()
-        self.child.stderr.close()
-
-    def call(self, method, params):
-        self.next_id += 1
-        request_id = self.next_id
-        message = {"jsonrpc": "2.0", "id": request_id,
-                   "method": method, "params": params}
-        self.child.stdin.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
-        self.child.stdin.flush()
-        deadline = time.monotonic() + self.timeout
-        while True:
-            line, separator, rest = self.pending.partition(b"\n")
-            if separator:
-                self.pending = rest
-                reply = json.loads(line)
-                if reply.get("id") == request_id:
-                    if "error" in reply:
-                        raise ValueError(f"Safari MCP {method} failed: {reply['error']}")
-                    return reply.get("result")
-                continue
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(f"Safari MCP {method} timed out")
-            if not self.selector.select(remaining):
-                raise TimeoutError(f"Safari MCP {method} timed out")
-            chunk = self.child.stdout.read1(65536)
-            if not chunk:
-                raise ValueError(f"Safari MCP {method} closed")
-            self.pending += chunk
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
 
 
-def probe():
-    client = SafariMcp()
+def safari_records(folder, process, launches, candidate, module, target,
+                   source_path, source_sha256, worker_sha256, bootstrap_sha256,
+                   observer_sha256):
+    folder = Path(folder)
+    raw = folder / "safari-worker-events.jsonl"
+    redirect = folder / "safari-redirect.html"
+    if not raw.is_file() or not redirect.is_file() or len(launches) != 1:
+        raise ValueError("Safari worker events, redirect, or selected launch are absent")
+    match = re.search(r'location\.replace\(("[^"\n]+")\)', redirect.read_text())
+    if not match:
+        raise ValueError("Safari observer redirect differs")
+    bootstrap_url = json.loads(match[1])
+    bootstrap_address = urlsplit(bootstrap_url)
+    params = parse_qs(bootstrap_address.query)
+    port = process["karma_port"]
+    token = process["browser_token"]
+    if (bootstrap_address.scheme != "http" or bootstrap_address.hostname != "localhost"
+            or bootstrap_address.port != port
+            or bootstrap_address.path != "/__dyn4k_bootstrap"
+            or params.get("token") != [token] or len(params.get("target", [])) != 1):
+        raise ValueError("Safari observer bootstrap origin or token differs")
+    target_url = params["target"][0]
+    address = urlsplit(target_url)
+    if (address.scheme != "http" or address.hostname != "localhost"
+            or address.port != port):
+        raise ValueError("Safari observed Karma target differs")
     try:
-        initialized = client.call("initialize", {
-            "protocolVersion": "2024-11-05", "capabilities": {},
-            "clientInfo": {"name": "dyn4k-safari-response-probe", "version": "1"}})
-        if initialized.get("serverInfo", {}).get("name") != "Safari":
-            raise ValueError("local Safari MCP server identity differs")
-        result = client.call("tools/call", {"name": "list_tabs", "arguments": {}})
-        if not isinstance(result, dict) or result.get("isError"):
-            detail = result.get("content") if isinstance(result, dict) else result
-            raise ValueError(f"Safari browser session unavailable: {detail}")
-        return {"status": "AVAILABLE", "protocol": initialized.get("protocolVersion")}
-    finally:
-        client.close()
+        events = [json.loads(line) for line in raw.read_text().splitlines()]
+    except ValueError:
+        raise ValueError("Safari worker event stream is malformed") from None
+    if (len(events) < 3 or events[0].get("kind") != "control"
+            or events[1].get("kind") != "navigation"
+            or any(item.get("kind") not in {"navigation", "response"}
+                   for item in events[1:])):
+        raise ValueError("Safari worker control, navigation, or responses are absent")
+    control, navigation = events[:2]
+    if (set(control) != {"kind", "token", "target", "client_id",
+                         "bootstrap_url", "observed_ns"}
+            or control["token"] != token or control["target"] != target_url
+            or control["bootstrap_url"] != bootstrap_url
+            or not isinstance(control["client_id"], str) or not control["client_id"]):
+        raise ValueError("Safari worker first-load control differs")
+    event_keys = {"token", "kind", "request_id", "url", "client_id",
+                  "client_url", "resulting_client_id", "status", "request_ns",
+                  "response_ns", "finished_ns", "body_path", "body_size",
+                  "body_sha256", "observed_ns"}
+    page_client_id = navigation.get("resulting_client_id")
+    if (set(navigation) != event_keys or navigation["token"] != token
+            or navigation["url"] != target_url
+            or navigation["client_id"] != control["client_id"]
+            or navigation["client_url"] != bootstrap_url
+            or not isinstance(page_client_id, str) or not page_client_id
+            or navigation["body_path"] is not None
+            or navigation["body_size"] != 0
+            or navigation["body_sha256"] != digest(b"")):
+        raise ValueError("Safari worker controlled navigation differs")
+    previous_observed = control["observed_ns"]
+    ids = set()
+    clients = {control["client_id"]: bootstrap_url}
+    navigations = []
+    responses = []
+    for item in events[1:]:
+        if (set(item) != event_keys or item["token"] != token
+                or not isinstance(item["request_id"], str)
+                or not item["request_id"] or item["request_id"] in ids
+                or item["status"] != 200
+                or any(type(item[key]) is not int for key in
+                       ("request_ns", "response_ns", "finished_ns", "observed_ns"))
+                or not process["started_ns"] <= item["request_ns"] <= item["response_ns"]
+                <= item["finished_ns"] <= item["observed_ns"]
+                <= process["finished_ns"]
+                or item["observed_ns"] < previous_observed):
+            raise ValueError("Safari worker request identity or timing differs")
+        ids.add(item["request_id"])
+        previous_observed = item["observed_ns"]
+        if item["client_id"] not in clients or item["client_url"] != clients[item["client_id"]]:
+            raise ValueError("Safari worker request client lineage differs")
+        if item["kind"] == "navigation":
+            next_client = item["resulting_client_id"]
+            next_url = urlsplit(item["url"])
+            if (not isinstance(next_client, str) or not next_client
+                    or next_client in clients or item["body_path"] is not None
+                    or item["body_size"] != 0 or item["body_sha256"] != digest(b"")
+                    or next_url.scheme != "http" or next_url.hostname != "localhost"
+                    or next_url.port != port):
+                raise ValueError("Safari worker navigation chain differs")
+            clients[next_client] = item["url"]
+            navigations.append({"request_id": item["request_id"],
+                                "from_client_id": item["client_id"],
+                                "to_client_id": next_client, "url": item["url"]})
+        else:
+            responses.append(item)
+    if not responses:
+        raise ValueError("Safari worker selected responses are absent")
+    if not process["started_ns"] <= control["observed_ns"] <= navigation["observed_ns"]:
+        raise ValueError("Safari worker first-load timing differs")
+    sealed = []
+    for index, item in enumerate(responses):
+        body_path = f"safari-browser-bodies/{index:04d}.body"
+        body = folder / body_path
+        address = urlsplit(item["url"])
+        if (item["resulting_client_id"] != ""
+                or address.scheme != "http" or address.hostname != "localhost"
+                or address.port != port or item["body_path"] != body_path
+                or not body.is_file() or body.is_symlink()
+                or body.stat().st_size != item["body_size"]
+                or digest(body.read_bytes()) != item["body_sha256"]):
+            raise ValueError("Safari worker selected response body or client differs")
+        sealed.append({"kind": "response", "ordinal": index,
+                       "request_id": item["request_id"],
+                       "browser_pid": launches[0]["pid"], "url": item["url"],
+                       "method": "GET", "status": item["status"],
+                       "source": "service-worker-clone",
+                       "request_ns": item["request_ns"],
+                       "response_ns": item["response_ns"],
+                       "finished_ns": item["observed_ns"],
+                       "body_path": body_path, "body_size": item["body_size"],
+                       "body_sha256": item["body_sha256"]})
+    session = {"kind": "session", "protocol": 2, "candidate_sha": candidate,
+               "module": module, "target": target,
+               "browser_pid": launches[0]["pid"], "source_path": source_path,
+               "source_sha256": source_sha256, "worker_sha256": worker_sha256,
+               "bootstrap_sha256": bootstrap_sha256,
+               "observer_sha256": observer_sha256,
+               "control_client_id": control["client_id"],
+               "page_client_id": page_client_id, "target_url": target_url,
+               "navigations": navigations,
+               "browser_token": token, "redirect_sha256": digest(redirect.read_bytes()),
+               "started_ns": control["observed_ns"],
+               "finished_ns": max(item["observed_ns"] for item in responses)}
+    return [session, *sealed]
 
 
-if __name__ == "__main__":
-    try:
-        print(json.dumps(probe(), sort_keys=True))
-    except (OSError, ValueError, TimeoutError) as error:
-        print(f"UNAVAILABLE: {error}", file=sys.stderr)
-        sys.exit(2)
+def seal(folder, *args):
+    records = safari_records(folder, *args)
+    path = Path(folder) / "safari-browser-responses.jsonl"
+    with path.open("x") as stream:
+        for row in records:
+            stream.write(json.dumps(row, sort_keys=True) + "\n")
+    return records

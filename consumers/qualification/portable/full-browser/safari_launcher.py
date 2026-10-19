@@ -4,10 +4,12 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 
 def digest(path):
@@ -56,6 +58,23 @@ def observe(before, selected, record, token):
     print("new selected Safari process image was not observed", file=sys.stderr)
 
 
+def observer_redirect(original, archive, port, token):
+    source = original.read_text()
+    matches = re.findall(r"window\.location\s*=\s*'([^']+)'", source)
+    if len(matches) != 1:
+        raise ValueError("Karma Safari redirect target differs")
+    target = matches[0]
+    address = urlsplit(target)
+    if (address.scheme != "http" or address.hostname != "localhost"
+            or address.port != port or not target.startswith(f"http://localhost:{port}/")):
+        raise ValueError("Karma Safari redirect origin differs")
+    bootstrap = (f"http://localhost:{port}/__dyn4k_bootstrap?token={token}"
+                 f"&target={quote(target, safe='')}")
+    archive.write_text("<!doctype html><meta charset=\"utf-8\"><script>"
+                       f"location.replace({json.dumps(bootstrap)})</script>\n")
+    return archive
+
+
 def main():
     selected = Path(os.environ["DYN4K_BROWSER_SELECTED_BINARY"]).resolve()
     record = Path(os.environ["DYN4K_BROWSER_ATTESTATION"])
@@ -65,9 +84,17 @@ def main():
             observe(before, selected, record, os.environ["DYN4K_BROWSER_TOKEN"])
         finally:
             os._exit(0)
+    redirect = sys.argv[1:]
+    if os.environ.get("DYN4K_SAFARI_REDIRECT_ARCHIVE"):
+        if len(redirect) != 1:
+            raise ValueError("Karma Safari redirect arguments differ")
+        redirect = [str(observer_redirect(
+            Path(redirect[0]), Path(os.environ["DYN4K_SAFARI_REDIRECT_ARCHIVE"]),
+            int(os.environ["DYN4K_BROWSER_KARMA_PORT"]),
+            os.environ["DYN4K_BROWSER_TOKEN"]))]
     app = selected.parents[2]
     os.execv("/usr/bin/open", ["/usr/bin/open", "-n", "-W", "-a", str(app),
-                                *sys.argv[1:]])
+                                *redirect])
 
 
 if __name__ == "__main__":
