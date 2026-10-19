@@ -1,6 +1,5 @@
 import hashlib
 import json
-import re
 import subprocess
 import tarfile
 import tempfile
@@ -10,6 +9,7 @@ from pathlib import Path
 
 import collection
 import independent_gates
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,17 +18,10 @@ HEAD = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
 
 
 def central_collection_needs(workflow):
-    marker = "  central-qualification-collection:\n"
-    if marker not in workflow:
-        raise AssertionError("central collection job is missing")
-    remainder = workflow.split(marker, 1)[1]
-    next_job = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", remainder)
-    central = remainder[:next_job.start()] if next_job else remainder
-    dependencies = re.search(r"(?m)^    needs:\n((?:^      - [^\n]+\n)+)", central)
-    if dependencies is None:
-        raise AssertionError("central collection must declare producer dependencies")
-    return [line.removeprefix("      - ")
-            for line in dependencies.group(1).splitlines()]
+    document = yaml.load(workflow, Loader=yaml.BaseLoader)
+    jobs = document.get("jobs", {})
+    central = jobs.get("central-qualification-collection", {})
+    return central.get("needs")
 
 
 class CollectionTests(unittest.TestCase):
@@ -172,6 +165,9 @@ class CollectionTests(unittest.TestCase):
 
     def test_workflow_runs_after_producers_and_retains_raw_results(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
+        document = yaml.load(workflow, Loader=yaml.BaseLoader)
+        self.assertIn("on", document)
+        self.assertIn("main", document["on"]["push"]["branches"])
         self.assertEqual(
             ["staged-jvm-and-linux", "hosted-publications", "hosted-native", "safari-browser"],
             central_collection_needs(workflow),
@@ -186,45 +182,48 @@ class CollectionTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
         expected = ["staged-jvm-and-linux", "hosted-publications", "hosted-native",
                     "safari-browser"]
-        needs_pattern = re.compile(
-            r"(?m)^    needs:\n((?:^      - [^\n]+\n)+)")
-        match = needs_pattern.search(workflow, workflow.index(
-            "  central-qualification-collection:\n"))
-        self.assertIsNotNone(match)
-        block = match.group(0)
-
-        for replacement in (
-                "    needs:\n      - staged-jvm-and-linux\n",
-                "    needs:\n      - staged-jvm-and-linux\n"
-                "      - hosted-publications\n      - hosted-native\n"
-                "      - safari-browser\n      - safari-browser\n",
-                "    needs:\n      - staged-jvm-and-linux\n"
-                "      - hosted-publications\n      - hosted-native\n"
-                "      - wrong-producer\n",
-                "    needs:\n      - safari-browser\n"
-                "      - hosted-native\n      - hosted-publications\n"
-                "      - staged-jvm-and-linux\n",
-        ):
-            with self.subTest(replacement=replacement):
-                altered = workflow[:match.start()] + replacement + workflow[match.end():]
-                self.assertNotEqual(expected, central_collection_needs(altered))
-
-        without_central_needs = workflow[:match.start()] + workflow[match.end():]
-        with self.assertRaisesRegex(AssertionError, "must declare producer dependencies"):
-            central_collection_needs(without_central_needs)
-        later_job_only = without_central_needs + (
-            "\n  spare-diagnostic:\n"
+        approved_block = (
             "    needs:\n"
             "      - staged-jvm-and-linux\n"
             "      - hosted-publications\n"
             "      - hosted-native\n"
             "      - safari-browser\n"
-            "    runs-on: ubuntu-latest\n"
-            "    steps:\n"
-            "      - run: true\n"
         )
-        with self.assertRaisesRegex(AssertionError, "must declare producer dependencies"):
-            central_collection_needs(later_job_only)
+        self.assertEqual(1, workflow.count(approved_block))
+
+        for dependencies in (
+                ["staged-jvm-and-linux"],
+                expected + ["safari-browser"],
+                ["staged-jvm-and-linux", "hosted-publications", "hosted-native",
+                 "wrong-producer"],
+                list(reversed(expected)),
+        ):
+            replacement = "    needs:\n" + "".join(
+                f"      - {dependency}\n" for dependency in dependencies)
+            with self.subTest(dependencies=dependencies):
+                altered = workflow.replace(approved_block, replacement, 1)
+                self.assertNotEqual(expected, central_collection_needs(altered))
+
+        without_central_needs = workflow.replace(approved_block, "", 1)
+        self.assertIsNone(central_collection_needs(without_central_needs))
+        for job_key in ('"spare-diagnostic":', "spare-diagnostic :",
+                        "spare-diagnostic: # diagnostic"):
+            with self.subTest(job_key=job_key):
+                later_job_only = without_central_needs + (
+                    f"\n  {job_key}\n"
+                    "    needs:\n"
+                    "      - staged-jvm-and-linux\n"
+                    "      - hosted-publications\n"
+                    "      - hosted-native\n"
+                    "      - safari-browser\n"
+                    "    runs-on: ubuntu-latest\n"
+                    "    steps:\n"
+                    "      - run: true\n"
+                )
+                document = yaml.load(later_job_only, Loader=yaml.BaseLoader)
+                self.assertIn("on", document)
+                self.assertIn("main", document["on"]["push"]["branches"])
+                self.assertIsNone(central_collection_needs(later_job_only))
 
     def test_workflow_download_survives_replay_setup_failure(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
