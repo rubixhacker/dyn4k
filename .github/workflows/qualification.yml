@@ -272,8 +272,19 @@ jobs:
             if ! python3 tools/qualification/subclass_audit.py \
               --baseline "$baseline" --repository "$GITHUB_WORKSPACE" \
               --candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json" \
-              --stdlib "${stdlibs[0]}" --java-home "$java_home" \
-              --output "$RUNNER_TEMP/subclass-dispatch/$jdk"; then
+              --stdlib "${stdlibs[0]}" --java-home "$java_home" --jdk-major "$jdk" \
+              --output "$RUNNER_TEMP/subclass-dispatch/$jdk" \
+              > "$RUNNER_TEMP/subclass-dispatch/run-$jdk.stdout" \
+              2> "$RUNNER_TEMP/subclass-dispatch/run-$jdk.stderr"; then
+              result=1
+            fi
+            if ! python3 tools/qualification/subclass_audit.py --verify \
+              --baseline "$baseline" --repository "$GITHUB_WORKSPACE" \
+              --candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json" \
+              --stdlib "${stdlibs[0]}" --java-home "$java_home" --jdk-major "$jdk" \
+              --output "$RUNNER_TEMP/subclass-dispatch/$jdk" \
+              > "$RUNNER_TEMP/subclass-dispatch/verify-$jdk.stdout" \
+              2> "$RUNNER_TEMP/subclass-dispatch/verify-$jdk.stderr"; then
               result=1
             fi
           done
