@@ -114,7 +114,10 @@ tasks.register("qualificationEvidence") {
             "--core-cases", providers.gradleProperty("qualificationCoreCases").get(),
             "--facade-cases", providers.gradleProperty("qualificationFacadeCases").get(),
             "--lane-script", providers.gradleProperty("qualificationLaneScript").get())
-        val result = ProcessBuilder(command).directory(rootDir).inheritIO().start().waitFor()
+        val process = ProcessBuilder(command).directory(rootDir).redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().readText()
+        if (output.isNotBlank()) logger.lifecycle(output.trimEnd())
+        val result = process.waitFor()
         check(result == 0) { "KLIB raw result capture failed: $result" }
     }
 }
