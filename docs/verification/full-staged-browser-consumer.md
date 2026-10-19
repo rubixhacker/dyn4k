@@ -26,6 +26,22 @@ For Chromium, a separate launcher starts the selected executable at `about:blank
 
 The Chromium DevTools client rejects outstanding commands when its socket closes or errors. Connection and command waits each have a 15-second deadline. DevTools HTTP discovery also has a 15-second deadline across retries. Each request and its JSON body read use the remaining time, and the request is aborted when that time expires. A lost connection, missing reply, or silent discovery response fails the capture instead of leaving the producer waiting indefinitely. Historical archives remain bound to their exact original candidate source.
 
+For a separate Chromium process observer, run the consumer through `chromium_observer_run.js`. Use a new home-backed handoff directory and archive for each lane. Set the exact selected hashes and tool paths before invoking it:
+
+```sh
+TMPDIR="$HOME/h88tmp" JAVA_HOME=/tmp/dyn4k-tools/jdk21 GRADLE_USER_HOME="$HOME/.gradle" \
+node consumers/qualification/portable/full-browser/chromium_observer_run.js \
+  --handoff-root "$HANDOFF_ROOT" -- \
+  python3 tools/qualification/full_browser_consumer.py run \
+  --repository "$CHECKOUT" --candidate "$CANDIDATE_SHA" --lane "$LANE" \
+  --staging "$STAGING" --output "$ARCHIVE" \
+  --gradle /tmp/dyn4k-tools/gradle-9.5.0/bin/gradle \
+  --browser /tmp/dyn4k-browser-wasi-tools/chrome-155/chrome-linux64/chrome \
+  --core-sha256 "$CORE_SHA256" --facade-sha256 "$FACADE_SHA256"
+```
+
+Use `js:Chromium:current:development` or `wasmJs:Chromium:current:development` for the shown browser. The controller waits for each module's exact-source offer, starts `independent_browser_observer.js` against its live PID and DevTools socket, and waits for its readiness before allowing navigation. After Karma ends the module test, the producer holds Chromium open. The controller then signals the observer to finish, retains its raw JSON and logs outside the archive, and releases the browser only after checking the observer result. The offer digest and fresh token bind each step to the candidate, module, target, selected source, capture URL, PID, socket, and process time. Missing, stale, wrong-process, premature, or timed-out controls fail the attempt. A run without `DYN4K_BROWSER_OBSERVER_ROOT` keeps the historical producer behavior. The external observation still requires an independent archive audit and signed witness before a central lane can pass.
+
 In production mode, the test task copies optimized Wasm products into Karma's package before browser launch. Replay checks those package bytes against the linked optimized Wasm and module files.
 
 `verify` requires the exact candidate, lane, browser executable, both staged KLIB hashes, and an independently calculated archive digest. Safari replay also requires its independently selected executable hash. Replay checks the complete archive inventory before any executable consideration. It verifies source and method hashes, task and mode, raw rows, provider graphs, config bytes, selected assets, HTTP bodies, and process identity. It rejects a changed digest, symlink, wrong runtime, changed bundle, or execution outside the process interval.

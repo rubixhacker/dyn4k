@@ -20,6 +20,39 @@ if (require.main === module && (!archive || !launcher || !['core', 'facade'].inc
 function now() { return Date.now() * 1000000; }
 function hash(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function validateControl(record, expected, afterNs, timeKey = 'ready_ns') {
+    const keys = [...Object.keys(expected), timeKey,
+        ...(timeKey === 'released_ns' ? ['observer_sha256'] : [])].sort();
+    if (!record || typeof record !== 'object' || Array.isArray(record) ||
+            JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(keys) ||
+            Object.entries(expected).some(([key, value]) => record[key] !== value) ||
+            timeKey === 'released_ns' && !/^[0-9a-f]{64}$/.test(record.observer_sha256)) {
+        throw new Error('Chromium observer control identity differs');
+    }
+    if (!Number.isSafeInteger(record[timeKey]) || record[timeKey] <= afterNs) {
+        throw new Error('Chromium observer control is stale');
+    }
+    return record;
+}
+async function waitForControl(file, expected, afterNs, timeoutMs = 15000,
+        forbidden = [], timeKey = 'ready_ns') {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (forbidden.some(item => fs.existsSync(item))) {
+            throw new Error('Chromium observer control arrived prematurely');
+        }
+        if (fs.existsSync(file)) {
+            const stat = fs.lstatSync(file);
+            if (!stat.isFile() || stat.nlink !== 1 || stat.size > 4096) {
+                throw new Error('Chromium observer control file differs');
+            }
+            return validateControl(JSON.parse(fs.readFileSync(file, 'utf8')),
+                expected, afterNs, timeKey);
+        }
+        await delay(Math.min(20, deadline - Date.now()));
+    }
+    throw new Error('Chromium observer control timed out');
+}
 function listeningSocketInode(pid, port) {
     const hexPort = port.toString(16).toUpperCase().padStart(4, '0');
     const sockets = fs.readdirSync(`/proc/${pid}/fd`).map(fd => {
@@ -163,6 +196,12 @@ function selected(url) {
 }
 
 async function main() {
+    const handoffRoot = process.env.DYN4K_BROWSER_OBSERVER_ROOT;
+    if (handoffRoot && (!path.isAbsolute(handoffRoot) ||
+            !fs.statSync(handoffRoot).isDirectory() ||
+            fs.realpathSync(handoffRoot) !== handoffRoot)) {
+        throw new Error('Chromium observer handoff root differs');
+    }
     const port = await reservePort();
     const profile = fs.mkdtempSync(path.join(process.env.DYN4K_BROWSER_TMPDIR || os.tmpdir(),
         'dyn4k-cdp-'));
@@ -182,12 +221,43 @@ async function main() {
     let failure = null;
     let stopSignal = null;
     let stopTimer = null;
+    let handoff;
+    let handoffFinish;
     const minimumResponses = target === 'wasmJs' ? 3 : 2;
     function stopWhenCaptured() {
         if (stopSignal && requests.size >= minimumResponses &&
                 responses.filter(Boolean).length === requests.size) {
-            if (stopTimer) clearTimeout(stopTimer);
-            child.kill(stopSignal);
+            if (!handoff) {
+                if (stopTimer) clearTimeout(stopTimer);
+                child.kill(stopSignal);
+            } else if (!handoffFinish) {
+                handoffFinish = (async () => {
+                    if (fs.existsSync(handoff.stop)) {
+                        throw new Error('Chromium observer stopped prematurely');
+                    }
+                    const requestedNs = now();
+                    fs.writeFileSync(handoff.stopRequest,
+                        JSON.stringify({offer_sha256: handoff.digest,
+                            browser_pid: child.pid, requested_ns: requestedNs}) + '\n',
+                        {mode: 0o600, flag: 'wx'});
+                    const release = await waitForControl(handoff.release,
+                        {offer_sha256: handoff.digest, browser_pid: child.pid},
+                        requestedNs, 15000, [], 'released_ns');
+                    const raw = fs.readFileSync(handoff.observation);
+                    const observation = JSON.parse(raw);
+                    if (hash(raw) !== release.observer_sha256 ||
+                            observation.browser_pid !== child.pid ||
+                            observation.responses?.length !== requests.size ||
+                            observation.finished_ns > release.released_ns) {
+                        throw new Error('Chromium observer output differs');
+                    }
+                    if (stopTimer) clearTimeout(stopTimer);
+                    child.kill(stopSignal);
+                })().catch(error => {
+                    failure = failure || error.message;
+                    child.kill(stopSignal);
+                });
+            }
         }
     }
     function persist() {
@@ -205,7 +275,7 @@ async function main() {
             stopTimer = setTimeout(() => {
                 failure = failure || 'CDP selected bodies did not finish before browser shutdown';
                 child.kill(signal);
-            }, 5000);
+            }, handoffRoot ? 20000 : 5000);
             stopWhenCaptured();
         });
     }
@@ -281,14 +351,42 @@ async function main() {
             maxResourceBufferSize: 64 * 1024 * 1024});
         await page.send('Page.enable');
         persist();
+        if (handoffRoot) {
+            const directory = path.join(handoffRoot, moduleName);
+            fs.mkdirSync(directory, {mode: 0o700});
+            const offer = {token: crypto.randomBytes(32).toString('hex'),
+                module: moduleName, target, candidate_sha: candidate,
+                browser_pid: child.pid, browser_path: fs.realpathSync(`/proc/${child.pid}/exe`),
+                devtools_port: port, devtools_socket_inode: session.devtools_socket_inode,
+                capture_url: urls[0], source_path: session.source_path,
+                source_sha256: session.source_sha256,
+                session_started_ns: session.started_ns, offered_ns: now()};
+            const offerBytes = Buffer.from(JSON.stringify(offer) + '\n');
+            handoff = {digest: hash(offerBytes),
+                allow: path.join(directory, 'allow.json'),
+                stop: path.join(directory, 'stop'),
+                stopRequest: path.join(directory, 'stop-request.json'),
+                release: path.join(directory, 'release.json'),
+                observation: path.join(directory, 'observer.json')};
+            fs.writeFileSync(path.join(directory, 'offer.json'), offerBytes,
+                {mode: 0o600, flag: 'wx'});
+            await waitForControl(handoff.allow,
+                {offer_sha256: handoff.digest, browser_pid: child.pid},
+                offer.offered_ns, 15000,
+                [handoff.stop, handoff.stopRequest, handoff.release]);
+        }
         await page.send('Page.navigate', {url: urls[0]});
         const result = await finished;
+        if (handoffFinish) await handoffFinish;
         await Promise.allSettled([...pendingBodies]);
         persist();
         if (requests.size < minimumResponses ||
                 responses.filter(Boolean).length !== requests.size)
             failure = failure || 'CDP selected response transcript is incomplete';
         if (failure) throw new Error(failure);
+        if (handoff && !handoffFinish) {
+            throw new Error('Chromium observer handoff ended before release');
+        }
         if (result.code !== 0 && result.signal !== 'SIGTERM')
             throw new Error(`Chromium exited ${result.code ?? result.signal}`);
     } finally {
@@ -313,4 +411,4 @@ if (require.main === module) {
         process.exitCode = 1;
     });
 }
-module.exports = {Cdp, endpoint};
+module.exports = {Cdp, endpoint, validateControl, waitForControl};

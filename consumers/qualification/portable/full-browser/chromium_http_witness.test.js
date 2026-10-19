@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {Cdp, endpoint} = require('./chromium_http_witness.js');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {Cdp, endpoint, waitForControl, validateControl} =
+    require('./chromium_http_witness.js');
 
 class FakeSocket {
     constructor() { this.sent = []; }
@@ -90,4 +94,43 @@ test('normal discovery retries and clears request timers', async () => {
     await new Promise(resolve => setTimeout(resolve, 110));
     assert.equal(requests[0].signal.aborted, false);
     assert.equal(requests[1].signal.aborted, false);
+});
+
+test('missing observer readiness times out without navigation permission', async () => {
+    const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'cdp-handshake-'));
+    try {
+        await assert.rejects(waitForControl(path.join(root, 'allow.json'),
+            {offer_sha256: 'fresh', browser_pid: 41}, 0, 30), /timed out/);
+    } finally { fs.rmSync(root, {recursive: true}); }
+});
+
+test('wrong process and stale readiness fail closed', () => {
+    assert.throws(() => validateControl({offer_sha256: 'fresh', browser_pid: 42,
+        ready_ns: 201}, {offer_sha256: 'fresh', browser_pid: 41}, 200), /differs/);
+    assert.throws(() => validateControl({offer_sha256: 'fresh', browser_pid: 41,
+        ready_ns: 199}, {offer_sha256: 'fresh', browser_pid: 41}, 200), /stale/);
+});
+
+test('premature stop fails before observer release', async () => {
+    const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'cdp-handshake-'));
+    try {
+        fs.writeFileSync(path.join(root, 'stop'), '');
+        await assert.rejects(waitForControl(path.join(root, 'allow.json'),
+            {offer_sha256: 'fresh', browser_pid: 41}, 0, 50,
+            [path.join(root, 'stop')]), /premature/);
+    } finally { fs.rmSync(root, {recursive: true}); }
+});
+
+test('both generated JS and Wasm module handoffs preserve distinct offers', () => {
+    for (const target of ['js', 'wasmJs']) {
+        for (const module of ['core', 'facade']) {
+            const offer = `${target}:${module}:fresh`;
+            assert.deepEqual(validateControl({offer_sha256: offer, browser_pid: 41,
+                ready_ns: 201}, {offer_sha256: offer, browser_pid: 41}, 200),
+            {offer_sha256: offer, browser_pid: 41, ready_ns: 201});
+            assert.throws(() => validateControl({offer_sha256: `${target}:other:fresh`,
+                browser_pid: 41, ready_ns: 201},
+            {offer_sha256: offer, browser_pid: 41}, 200), /differs/);
+        }
+    }
 });
