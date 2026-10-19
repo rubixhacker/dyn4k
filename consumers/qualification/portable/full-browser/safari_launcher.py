@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -20,12 +21,25 @@ def image_path(pid):
     return Path(os.fsdecode(buffer.value)).resolve() if size > 0 else None
 
 
-def observe(pid, selected, record, token):
-    deadline = time.monotonic() + 5
+def safari_pids(selected):
+    result = subprocess.run(["/usr/bin/pgrep", "-x", "Safari"],
+                            capture_output=True, text=True, check=False)
+    return {pid for value in result.stdout.split() if value.isdecimal()
+            for pid in (int(value),) if image_path(pid) == selected}
+
+
+def observe(before, selected, record, token):
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        image = image_path(pid)
-        if image == selected:
-            fingerprint = digest(image)
+        launched = safari_pids(selected) - before
+        if len(launched) == 1:
+            pid = launched.pop()
+            image = image_path(pid)
+            if image == selected:
+                fingerprint = digest(image)
+            else:
+                time.sleep(0.01)
+                continue
             if fingerprint == digest(selected):
                 row = {"token": token, "runtime": "safari",
                        "selected_binary": str(selected), "selected_sha256": fingerprint,
@@ -39,19 +53,21 @@ def observe(pid, selected, record, token):
                     fcntl.flock(stream, fcntl.LOCK_UN)
                 return
         time.sleep(0.01)
-    print("selected Safari process image was not observed", file=sys.stderr)
+    print("new selected Safari process image was not observed", file=sys.stderr)
 
 
 def main():
     selected = Path(os.environ["DYN4K_BROWSER_SELECTED_BINARY"]).resolve()
     record = Path(os.environ["DYN4K_BROWSER_ATTESTATION"])
-    pid = os.getpid()
+    before = safari_pids(selected)
     if os.fork() == 0:
         try:
-            observe(pid, selected, record, os.environ["DYN4K_BROWSER_TOKEN"])
+            observe(before, selected, record, os.environ["DYN4K_BROWSER_TOKEN"])
         finally:
             os._exit(0)
-    os.execv(str(selected), [str(selected), *sys.argv[1:]])
+    app = selected.parents[2]
+    os.execv("/usr/bin/open", ["/usr/bin/open", "-n", "-W", "-a", str(app),
+                                *sys.argv[1:]])
 
 
 if __name__ == "__main__":

@@ -1,15 +1,62 @@
 import unittest
 import xml.etree.ElementTree as ET
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from unittest import mock
 
 import full_browser_consumer as browser
+
+
+class SafariLauncherTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[2] / (
+            "consumers/qualification/portable/full-browser/safari_launcher.py")
+        spec = importlib.util.spec_from_file_location("full_browser_safari_launcher", path)
+        cls.launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.launcher)
+
+    def test_launchservices_waits_for_a_new_selected_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = root / "Safari.app/Contents/MacOS/Safari"
+            selected.parent.mkdir(parents=True)
+            selected.write_bytes(b"selected Safari")
+            record = root / "launches.jsonl"
+            redirect = root / "redirect.html"
+            redirect.write_text("redirect")
+            env = {"DYN4K_BROWSER_SELECTED_BINARY": str(selected),
+                   "DYN4K_BROWSER_ATTESTATION": str(record),
+                   "DYN4K_BROWSER_TOKEN": "test-token"}
+            with mock.patch.dict(os.environ, env), mock.patch.object(
+                    sys, "argv", ["safari_launcher.py", str(redirect)]), mock.patch.object(
+                    self.launcher, "safari_pids", return_value={17}), mock.patch.object(
+                    self.launcher.os, "fork", return_value=1), mock.patch.object(
+                    self.launcher.os, "execv") as execv:
+                self.launcher.main()
+            execv.assert_called_once_with("/usr/bin/open", [
+                "/usr/bin/open", "-n", "-W", "-a", str(selected.parents[2]),
+                str(redirect)])
+
+    def test_observer_records_only_new_selected_safari_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = root / "Safari"
+            selected.write_bytes(b"selected Safari")
+            record = root / "launches.jsonl"
+            with mock.patch.object(self.launcher, "safari_pids", return_value={17, 19}), \
+                    mock.patch.object(self.launcher, "image_path", return_value=selected):
+                self.launcher.observe({17}, selected, record, "test-token")
+            row = json.loads(record.read_text())
+            self.assertEqual(row["pid"], 19)
+            self.assertEqual(row["process_sha256"], browser.sha(b"selected Safari"))
 
 
 class ToolchainPinTest(unittest.TestCase):
