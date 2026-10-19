@@ -8,6 +8,7 @@ import javax.xml.transform.stream.StreamResult
 import org.w3c.dom.Element
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     kotlin("jvm") version "2.4.20" apply false
@@ -163,12 +164,15 @@ tasks.register("qualificationEvidence") {
         val buildProof = listOf("core", "facade").map { module ->
             val kotlinTask = project(":$module").tasks.getByName("compileTestKotlin") as KotlinJvmCompile
             val testTask = project(":$module").tasks.getByName("test") as Test
+            val javaTask = project(":$module").tasks.getByName("compileTestJava") as JavaCompile
             val launcher = testTask.javaLauncher.get()
             check(launcher.metadata.installationPath.asFile.canonicalFile == runtimeHome)
             val args = kotlinTask.compilerOptions.freeCompilerArgs.get()
             check(args.contains("-Xno-optimize") == (configuration == "no-optimize"))
             check(testTask.jvmArgs.contains("-Xint") == (configuration == "no-optimize"))
             mapOf("module" to module, "compiler_args" to args,
+                "kotlin_jvm_target" to kotlinTask.compilerOptions.jvmTarget.get().target,
+                "java_release" to javaTask.options.release.get(),
                 "test_jvm_args" to testTask.jvmArgs,
                 "test_java_executable" to launcher.executablePath.asFile.canonicalPath,
                 "test_java_home" to launcher.metadata.installationPath.asFile.canonicalPath,

@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     kotlin("jvm")
@@ -30,8 +32,13 @@ sourceSets.test {
 
 tasks.named<KotlinJvmCompile>("compileTestKotlin") {
     dependsOn(":qualificationValidateInputs")
+    compilerOptions.jvmTarget.set(if (runtimeMajor == 8) JvmTarget.JVM_1_8 else JvmTarget.JVM_21)
     compilerOptions.freeCompilerArgs.add("-Xfriend-paths=${facadeJar.absolutePath}")
     if (configuration == "no-optimize") compilerOptions.freeCompilerArgs.add("-Xno-optimize")
+}
+
+tasks.named<JavaCompile>("compileTestJava") {
+    options.release.set(runtimeMajor)
 }
 
 tasks.test {

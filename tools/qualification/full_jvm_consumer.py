@@ -343,6 +343,8 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                 or item.get("test_java_executable") != runtime_executable
                 or item.get("test_java_sha256") != expected_runtime_java_executable_sha256
                 or item.get("test_java_version") != (8 if version == "minimum" else 21)
+                or item.get("kotlin_jvm_target") != ("1.8" if version == "minimum" else "21")
+                or item.get("java_release") != (8 if version == "minimum" else 21)
                 or ("-Xno-optimize" in args) != (configuration == "no-optimize")
                 or ("-Xint" in jvm_args) != (configuration == "no-optimize")
                 or "-XshowSettings:properties" not in jvm_args):
