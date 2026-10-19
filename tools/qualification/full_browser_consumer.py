@@ -225,6 +225,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
         if file_hash(staged(staging, module)) != hashes[module]:
             raise ValueError(f"independent staged {module} JS KLIB hash differs")
     inputs_content = input_bytes(repository, candidate, lane)
+    run_started = time.time_ns()
     inputs = output.parent / f"{output.name}-inputs"
     if inputs.exists() and any(inputs.iterdir()):
         raise ValueError("original source input directory is not empty")
@@ -247,7 +248,6 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                DYN4K_BROWSER_SELECTED_BINARY=str(browser),
                DYN4K_BROWSER_RUNTIME="chromium")
     base = gradle_args(repository, staging, output, work, inputs, lane, hashes, gradle)
-    run_started = time.time_ns()
     graph_process = process(base + ["qualificationGraphs"], inputs, env,
                             output / "graph.stdout", output / "graph.stderr")
     if graph_process["exit_code"]:
