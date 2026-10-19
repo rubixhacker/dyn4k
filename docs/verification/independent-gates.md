@@ -27,7 +27,37 @@ The verifier rehashes each named manifest. It checks source identity and route-s
 
 The importable `evaluate` function verifies one selected lane and its four global gates. It accepts the approved manifest and independent archive, artifact, runtime, and producer-scope audits. `evaluate_assembly` verifies every approved lane from a 112-entry input map. Its digest binds each lane result, selected case count, and `qualify_adapter` record. The adapter emits complete case results only after a full selected-suite consumer route and every required gate pass. `qualify.py` still needs an integration owner to ingest that record with its own candidate and artifact audits. The CLI exits zero only when every required result passes.
 
-For assembly, pass `--assembly /audit/lanes.json` instead of `--lane` and repeated `--archive` arguments. The JSON object has one key per approved lane ID. Each lane maps to `archives`, `expected_artifact_hashes`, `expected_runtime_identity`, `expected_archive_digests`, and `expected_producer_scopes`. Archive values are paths. The adapter independently reruns `evaluate` for all 112 lanes. It rejects missing lanes, wrong binary hashes, inconsistent global receipts, and unbound passing gates. A missing archive remains `NOT_RUN` in the assembled result.
+For low-level gate evaluation, pass `--assembly /audit/lanes.json` instead of `--lane` and repeated `--archive` arguments. The JSON object has one key per approved lane ID. Each lane maps to `archives`, `expected_artifact_hashes`, `expected_runtime_identity`, `expected_archive_digests`, and `expected_producer_scopes`. Archive values are paths. The evaluator reruns `evaluate` for all 112 lanes. It rejects missing lanes, wrong binary hashes, inconsistent global receipts, and unbound passing gates. A missing archive remains `NOT_RUN` in the assembled result. This gate result does not authenticate the supplied audit values.
+
+## Assemble the qualification record
+
+`independent_adapter.py assemble` writes one digest-bound qualification record for all 112 approved lanes. With no archive map, it evaluates every gate as `NOT_RUN` and exits with code 1:
+
+```sh
+python3 tools/qualification/independent_adapter.py assemble \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --output /audit/independent-assembly.json
+```
+
+With raw archives, the command requires a complete 112-lane map and a detached, independently signed audit. Supply the public key and its separately trusted DER SHA-256 fingerprint. The candidate manifest and staged audit must bind the same source and all 21 target binaries.
+
+```sh
+python3 tools/qualification/independent_adapter.py assemble \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --archive-map /audit/archive-map.json \
+  --signed-audit /audit/independent-audit.json \
+  --audit-signature /audit/independent-audit.sig \
+  --trusted-public-key /trust/auditor-public.pem \
+  --trusted-key-sha256 "$AUDITOR_KEY_SHA256" \
+  --candidate-manifest /audit/candidate-manifest.json \
+  --staged-audit /audit/artifact-audit.json \
+  --evidence /audit/lane-evidence.json \
+  --output /audit/independent-assembly.json
+```
+
+The archive map uses the `record --independent-archives` schema. The signed audit uses the corresponding `record --independent-audit` schema. `--evidence` uses the `record --evidence` lane map and is optional while lanes remain unexecuted. A claimed green lane cannot pass without verified raw gate archives. An attempted invalid archive is `FAILED`; a missing archive is `NOT_RUN`. The output includes every selected case count, gate result, qualifier result, manifest digest, archive map digest, signed audit digest, and final result digest. The command verifies stable copies of the signed inputs. It never creates a signing key or signature.
+
+The current qualification workflow produces bounded common, hosted, and full CI archives. It does not assemble an exact-candidate 112-lane archive map, candidate manifest, staged audit, and external signature in one job. The full hosted external consumer executes foundation cases; its raw archive cannot satisfy the 2,523 or 2,526 selected-case consumer route. The workflow needs a coordinator-owned collection and audit step after the runtime producers finish. A producer must execute the complete selected suite through each staged external consumer before that gate can pass. Current-source numerical, physical, sustained, and review obligations remain separate.
 
 ## Common raw archive
 

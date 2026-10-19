@@ -1,5 +1,7 @@
 import copy
+import contextlib
 import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -10,13 +12,179 @@ from pathlib import Path
 from unittest import mock
 
 import independent_adapter
+import independent_gates
 import qualify
 
 
 LANE = "jvm:Java:minimum:no-optimize"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class IndependentAdapterTests(unittest.TestCase):
+    def test_public_assembly_accounts_for_every_lane_without_raw_archives(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "assembly.json"
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = independent_adapter.main([
+                    "assemble", "--candidate-sha", candidate,
+                    "--repository", str(ROOT), "--output", str(output)])
+            self.assertEqual(1, exit_code)
+            assembled = json.loads(output.read_text())
+            self.assertEqual(candidate, assembled["candidate_sha"])
+            self.assertEqual(112, len(assembled["lanes"]))
+            self.assertEqual({"PASSED": 0, "FAILED": 0, "UNAVAILABLE": 0,
+                              "NOT_RUN": 112}, assembled["counts"])
+            self.assertEqual("NOT_RUN", assembled["status"])
+            self.assertEqual("NOT_RUN", assembled["lanes"][LANE]["status"])
+            self.assertEqual("NOT_RUN", assembled["independent_gates"][LANE]["status"])
+            self.assertEqual(2526, assembled["selected_cases"][LANE])
+            self.assertIsNone(assembled["signed_audit_sha256"])
+            self.assertEqual(assembled["result_sha256"], independent_gates.digest(
+                {key: value for key, value in assembled.items() if key != "result_sha256"}))
+
+    def test_public_assembly_rejects_unsigned_or_partial_archive_map(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_map = root / "archives.json"
+            output = root / "assembly.json"
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate,
+                                               "lanes": {LANE: {}}}))
+            with self.assertRaisesRegex(ValueError, "all 112"):
+                independent_adapter.assemble_lanes(
+                    ROOT, candidate, archive_map_path=archive_map)
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate,
+                                               "lanes": {lane: {} for lane in
+                                                         independent_gates.load_approved_manifest(ROOT)["lanes"]}}))
+            with self.assertRaisesRegex(ValueError, "signed audit"):
+                independent_adapter.assemble_lanes(
+                    ROOT, candidate, archive_map_path=archive_map)
+            cli = subprocess.run([
+                sys.executable, str(ROOT / "tools/qualification/independent_adapter.py"),
+                "assemble", "--repository", str(ROOT), "--candidate-sha", candidate,
+                "--archive-map", str(archive_map), "--output", str(output)],
+                capture_output=True, text=True)
+            self.assertEqual(2, cli.returncode)
+            self.assertIn("requires signed audit", cli.stderr)
+            self.assertNotIn("Traceback", cli.stderr)
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": "f" * 40,
+                                               "lanes": {lane: {} for lane in
+                                                         independent_gates.load_approved_manifest(ROOT)["lanes"]}}))
+            with self.assertRaisesRegex(ValueError, "exact candidate"):
+                independent_adapter.assemble_lanes(
+                    ROOT, candidate, archive_map_path=archive_map)
+            self.assertFalse(output.exists())
+
+    def test_signed_112_lane_assembly_records_missing_and_failed_raw_archives(self):
+        candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=ROOT, text=True).strip()
+        suite = independent_gates.load_approved_manifest(ROOT)
+        targets = {row["target"] for row in qualify.matrix()}
+        hashes = {target: {module: hashlib.sha256(
+            f"synthetic:{target}:{module}".encode()).hexdigest()
+            for module in qualify.MODULES} for target in targets}
+        staged = {"candidate_sha": candidate, "status": "PASSED", "artifacts": [
+            {"path": qualify.target_binary_path(module, target), "sha256": value}
+            for target, modules in hashes.items() for module, value in modules.items()]}
+        selected = {lane: {"runtime_identity": f"synthetic:{lane}",
+                           "artifact_hashes": hashes[details["target"]],
+                           "runtime_version": "synthetic", "configuration": details["configuration"],
+                           "suite_id": suite["id"]}
+                    for lane, details in suite["lanes"].items()}
+        candidate_manifest = {"schema": 1, "candidate_sha": candidate,
+                              "suite_manifest_sha256": qualify.manifest_digest(suite),
+                              "audit_manifest_sha256": qualify.manifest_digest(staged),
+                              "lanes": selected}
+        signed = {"schema": 1, "candidate_sha": candidate,
+                  "suite_manifest_sha256": qualify.manifest_digest(suite),
+                  "candidate_manifest_sha256": qualify.manifest_digest(candidate_manifest),
+                  "staged_audit_sha256": qualify.manifest_digest(staged),
+                  "expected_all_target_hashes": hashes,
+                  "lanes": {lane: {"expected_artifact_hashes": hashes[details["target"]],
+                                     "expected_runtime_identity": f"synthetic:{lane}",
+                                     "expected_archive_digests": {}}
+                            for lane, details in suite["lanes"].items()}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_map = root / "archive-map.json"
+            paths = {lane: {} for lane in suite["lanes"]}
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate,
+                                               "lanes": paths}))
+            candidate_path = root / "candidate.json"
+            candidate_path.write_text(json.dumps(candidate_manifest))
+            staged_path = root / "staged.json"
+            staged_path.write_text(json.dumps(staged))
+            audit_path, signature, public, fingerprint = self.signed_inputs(root, signed)
+            evidence_path = root / "lane-evidence.json"
+
+            def assemble(with_evidence=False):
+                with mock.patch("qualify.require_clean_checkout"), mock.patch(
+                        "qualify.verify_audit_against_staging"):
+                    return independent_adapter.assemble_lanes(
+                        ROOT, candidate, archive_map, audit_path, signature, public,
+                        fingerprint, candidate_path, staged_path,
+                        evidence_path if with_evidence else None)
+
+            report = assemble()
+            self.assertEqual(112, report["required_lanes"])
+            self.assertEqual(112, report["counts"]["NOT_RUN"])
+            self.assertEqual(0, report["counts"]["PASSED"])
+            self.assertEqual(hashlib.sha256(archive_map.read_bytes()).hexdigest(),
+                             report["archive_map_sha256"])
+            audit_bytes = audit_path.read_bytes()
+            original_verify = independent_adapter.verify_lanes
+
+            def change_audit_after_verification(*args, **kwargs):
+                checked = original_verify(*args, **kwargs)
+                audit_path.write_bytes(audit_bytes + b" ")
+                return checked
+
+            with mock.patch.object(independent_adapter, "verify_lanes",
+                                   side_effect=change_audit_after_verification):
+                report = assemble()
+            self.assertEqual(hashlib.sha256(audit_bytes).hexdigest(),
+                             report["signed_audit_sha256"])
+            audit_path.write_bytes(audit_bytes)
+            lane = next(case for case in qualify.expand(qualify.matrix())
+                        if case["id"] == LANE)
+            case_ids = [case["id"] for case in suite["cases"]
+                        if case["scope"] in suite["lanes"][LANE]["case_scopes"]]
+            gate_names = suite["lanes"][LANE]["required_gates"] + suite["global_gates"]
+            claimed = {
+                **lane, "candidate_sha": candidate, "runtime_identity": f"synthetic:{LANE}",
+                "runtime_version": "synthetic", "expected": len(case_ids),
+                "executed": len(case_ids), "failures": 0, "skipped": 0,
+                "consumer": "PASSED", "suite_id": suite["id"],
+                "artifact_hashes": hashes["jvm"], "invocation_id": "a" * 32,
+                "exit_code": 0, "command": ["synthetic"],
+                "candidate_manifest_sha256": qualify.manifest_digest(candidate_manifest),
+                "suite_manifest_sha256": qualify.manifest_digest(suite),
+                "audit_manifest_sha256": qualify.manifest_digest(staged),
+                "case_results": [{"id": name, "status": "PASSED"} for name in case_ids],
+                "gate_results": {name: {"status": "PASSED", "receipt_sha256": "b" * 64}
+                                 for name in gate_names},
+            }
+            self.assertEqual("PASSED", qualify.evaluate(
+                lane, claimed, candidate, candidate_manifest, suite, staged)["status"])
+            evidence_path.write_text(json.dumps({LANE: claimed}))
+            report = assemble(with_evidence=True)
+            self.assertEqual("NOT_RUN", report["lanes"][LANE]["status"])
+            self.assertEqual(0, report["counts"]["PASSED"])
+            paths[LANE] = {"staged-consumer": str(root / "missing-raw-archive")}
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate,
+                                               "lanes": paths}))
+            report = assemble()
+            self.assertEqual(1, report["counts"]["FAILED"])
+            self.assertEqual(111, report["counts"]["NOT_RUN"])
+            self.assertIn("missing", report["independent_gates"][LANE]["gates"][
+                "staged-consumer"]["reason"])
+            audit_path.write_text(audit_path.read_text() + " ")
+            with self.assertRaisesRegex(ValueError, "signature"):
+                assemble()
+
     def signed_inputs(self, root, audit):
         key = root / "signing.pem"
         public = root / "trusted.pem"

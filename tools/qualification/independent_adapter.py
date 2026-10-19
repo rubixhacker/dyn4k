@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import json
 import re
@@ -115,9 +116,22 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
             raise ValueError("signed 21-target artifact hash map is incomplete")
         if identities_bound and all_hashes != audited_targets:
             raise ValueError("signed 21-target artifact hashes differ from staged audit")
+    all_lanes = (len(suite_manifest["lanes"]) == 112
+                 and set(supplied["lanes"]) == set(suite_manifest["lanes"]))
+    if all_lanes:
+        full_suite_manifest.validate_manifest(suite_manifest, repository)
     results = {}
     for lane_id, paths in supplied["lanes"].items():
-        selected = full_suite_manifest.select_lane(suite_manifest, lane_id, repository)
+        if all_lanes:
+            lane_spec = suite_manifest["lanes"][lane_id]
+            selected = {
+                "case_ids": [case["id"] for case in suite_manifest["cases"]
+                             if case["scope"] in lane_spec["case_scopes"]],
+                "required_gates": lane_spec["required_gates"],
+                "global_gates": suite_manifest["global_gates"],
+            }
+        else:
+            selected = full_suite_manifest.select_lane(suite_manifest, lane_id, repository)
         if not isinstance(paths, dict) or not all(isinstance(path, str) and path
                                                    for path in paths.values()):
             raise ValueError(f"independent archive paths are invalid: {lane_id}")
@@ -276,3 +290,145 @@ def apply(results, evidence, verified, evaluate_lane=None):
             if gate_status == "UNAVAILABLE":
                 result["availability_audit_status"] = "VERIFIED"
     return results
+
+
+def assemble_lanes(repository, candidate_sha, archive_map_path=None, audit_path=None,
+                   signature_path=None, public_key_path=None, key_sha256=None,
+                   candidate_manifest_path=None, staged_audit_path=None,
+                   evidence_path=None, performance_key=None):
+    import independent_gates
+    import qualify
+
+    repository = Path(repository)
+    manifest = independent_gates.load_approved_manifest(repository)
+    lane_ids = set(manifest["lanes"])
+    if len(lane_ids) != 112:
+        raise ValueError("assembly requires all 112 approved lanes")
+    signed_inputs = (audit_path, signature_path, public_key_path, key_sha256,
+                     candidate_manifest_path, staged_audit_path)
+    archive_map_sha256 = None
+    signed_audit_sha256 = None
+    if archive_map_path is None:
+        if any(item is not None for item in signed_inputs) or evidence_path or performance_key:
+            raise ValueError("signed audit inputs require an archive map")
+        raw = independent_gates.evaluate_assembly(
+            manifest, candidate_sha,
+            {lane_id: {"archives": {}} for lane_id in manifest["lanes"]}, repository)
+        verified = {}
+        gate_results = raw["lane_results"]
+        selected_cases = raw["selected_cases"]
+        evidence = {}
+        candidate_manifest = None
+        staged_audit = None
+    else:
+        archive_map_bytes = Path(archive_map_path).read_bytes()
+        supplied = _decode(archive_map_bytes)
+        if (not isinstance(supplied, dict) or set(supplied) != {"schema", "candidate_sha", "lanes"}
+                or supplied.get("schema") != 1 or supplied.get("candidate_sha") != candidate_sha
+                or not isinstance(supplied.get("lanes"), dict)
+                or set(supplied["lanes"]) != lane_ids):
+            raise ValueError("archive map must name all 112 approved lanes for the exact candidate")
+        if any(item is None for item in signed_inputs):
+            raise ValueError("archive map requires signed audit, pinned key, candidate manifest, and staged audit")
+        qualify.require_clean_checkout(repository, candidate_sha)
+        candidate_manifest = _load(candidate_manifest_path)
+        staged_audit = _load(staged_audit_path)
+        evidence = _load(evidence_path) if evidence_path else {}
+        if not isinstance(evidence, dict) or set(evidence) - lane_ids:
+            raise ValueError("qualification evidence has unknown lane IDs")
+        archive_map_sha256 = hashlib.sha256(archive_map_bytes).hexdigest()
+        with tempfile.TemporaryDirectory(prefix="dyn4k-assembly-inputs-") as temporary:
+            stable = {}
+            for name, source in (("archive-map.json", archive_map_path),
+                                 ("audit.json", audit_path),
+                                 ("audit.sig", signature_path),
+                                 ("trusted.pem", public_key_path),
+                                 ("performance.key", performance_key)):
+                if source is not None:
+                    target = Path(temporary) / name
+                    target.write_bytes(archive_map_bytes if name == "archive-map.json"
+                                       else Path(source).read_bytes())
+                    stable[name] = target
+            signed_audit_sha256 = hashlib.sha256(stable["audit.json"].read_bytes()).hexdigest()
+            verified = verify_lanes(
+                repository, candidate_sha, manifest, stable["archive-map.json"],
+                stable["audit.json"], stable["audit.sig"], stable["trusted.pem"],
+                key_sha256, stable.get("performance.key"),
+                candidate_manifest, staged_audit)
+        if set(verified) != lane_ids:
+            raise ValueError("signed audit did not verify all 112 approved lanes")
+        gate_results = {lane_id: item["verification"] for lane_id, item in verified.items()}
+        selected_cases = {lane_id: len(item["selected_case_ids"])
+                          for lane_id, item in verified.items()}
+    cases = {item["id"]: item for item in qualify.expand(qualify.matrix())}
+    if set(cases) != lane_ids:
+        raise ValueError("qualification matrix differs from the approved 112 lanes")
+    if verified:
+        rows = [qualify.evaluate(cases[lane_id], evidence.get(lane_id), candidate_sha,
+                                 candidate_manifest, manifest, staged_audit)
+                for lane_id in manifest["lanes"]]
+        apply(rows, evidence, verified,
+              lambda lane_id, observed: qualify.evaluate(
+                  cases[lane_id], observed, candidate_sha, candidate_manifest,
+                  manifest, staged_audit))
+    else:
+        rows = [{"id": lane_id, "status": gate_results[lane_id]["status"],
+                 "reason": "no signed raw gate archives supplied"}
+                for lane_id in manifest["lanes"]]
+    lanes = {row["id"]: row for row in rows}
+    counts = {status: sum(row["status"] == status for row in rows)
+              for status in ("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN")}
+    status = next((state for state in ("FAILED", "UNAVAILABLE", "NOT_RUN")
+                   if counts[state]), "PASSED")
+    assembled = {
+        "schema": 1, "kind": "independent-qualified-assembly",
+        "candidate_sha": candidate_sha,
+        "manifest_sha256": independent_gates.digest(manifest),
+        "archive_map_sha256": archive_map_sha256,
+        "signed_audit_sha256": signed_audit_sha256,
+        "trusted_audit_key_sha256": key_sha256,
+        "candidate_manifest_sha256": (qualify.manifest_digest(candidate_manifest)
+                                      if candidate_manifest is not None else None),
+        "staged_audit_sha256": (qualify.manifest_digest(staged_audit)
+                                if staged_audit is not None else None),
+        "required_lanes": len(lanes), "selected_cases": selected_cases,
+        "lanes": lanes, "independent_gates": gate_results,
+        "counts": counts, "status": status,
+    }
+    assembled["result_sha256"] = independent_gates.digest(assembled)
+    return assembled
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Assemble all approved qualification lanes")
+    sub = parser.add_subparsers(dest="action", required=True)
+    assemble = sub.add_parser("assemble")
+    assemble.add_argument("--repository", type=Path,
+                          default=Path(__file__).resolve().parents[2])
+    assemble.add_argument("--candidate-sha", required=True)
+    assemble.add_argument("--archive-map", type=Path)
+    assemble.add_argument("--signed-audit", type=Path)
+    assemble.add_argument("--audit-signature", type=Path)
+    assemble.add_argument("--trusted-public-key", type=Path)
+    assemble.add_argument("--trusted-key-sha256")
+    assemble.add_argument("--candidate-manifest", type=Path)
+    assemble.add_argument("--staged-audit", type=Path)
+    assemble.add_argument("--evidence", type=Path)
+    assemble.add_argument("--performance-key", type=Path)
+    assemble.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        result = assemble_lanes(
+            args.repository, args.candidate_sha, args.archive_map,
+            args.signed_audit, args.audit_signature, args.trusted_public_key,
+            args.trusted_key_sha256, args.candidate_manifest, args.staged_audit,
+            args.evidence, args.performance_key)
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
+        parser.error(str(error))
+    args.output.write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result["counts"], sort_keys=True))
+    return 0 if result["status"] == "PASSED" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
