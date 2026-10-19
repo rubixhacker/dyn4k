@@ -257,6 +257,7 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None):
         "all 112 exact-source common gate archives and runtime identities",
         "independently audited archive digests and 21-target artifact hashes",
         "complete candidate manifest bound to a verified staged audit",
+        "exact staged repository bytes available to the public qualifier",
         "detached Ed25519 audit signature and pinned trusted public-key fingerprint",
         "reviewed signed 112-lane adapter integration"]
     (output / "collection.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -293,6 +294,8 @@ def ingest_external(repository, candidate_sha, artifacts, output, audit_inputs,
     missing = [name for name in names if not (audit_inputs / name).is_file()]
     if not SHA64.fullmatch(str(trusted_key_sha256 or "")):
         missing.append("externally pinned trusted Ed25519 key SHA-256")
+    if not (Path(repository) / "build/staging-repository").is_dir():
+        missing.append("verified staged repository bytes at build/staging-repository")
     result = {"candidate_sha": candidate_sha, "status": "NOT_RUN",
               "missing_external_inputs": missing}
     if missing:
