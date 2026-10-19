@@ -293,10 +293,25 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
             if not identities_bound or "staged-consumer" not in paths:
                 raise ValueError(f"signed browser candidate and staged audit are missing: {lane_id}")
             import full_browser_adapter
+            import full_browser_consumer
 
-            public = full_browser_adapter.verify_full_browser_staged_consumer(
-                repository, candidate_sha, lane_id, selected, paths["staged-consumer"],
-                expected, consumer_gate, audited_targets["js"])
+            browser_archive = Path(paths["staged-consumer"])
+            browser_receipt = independent_gates._json(browser_archive / "receipt.json")
+            if (browser_receipt.get("schema") == 1
+                    and candidate_sha in full_browser_consumer.LEGACY_LOCK_CANDIDATES):
+                public = full_browser_adapter.verify_full_browser_staged_consumer(
+                    repository, candidate_sha, lane_id, selected, browser_archive,
+                    expected, consumer_gate, audited_targets["js"])
+            elif browser_receipt.get("schema") in (2, 3):
+                public = full_signed_routes.verify_browser(
+                    repository, candidate_sha, lane_id, browser_archive, expected,
+                    expected["expected_artifact_hashes"],
+                    expected["expected_runtime_identity"],
+                    expected["expected_archive_digests"]["staged-consumer"])
+                if public != consumer_gate.get("public_verification"):
+                    raise ValueError(f"signed browser public result differs from independent gate: {lane_id}")
+            else:
+                raise ValueError(f"browser receipt schema differs from selected gate: {lane_id}")
             if (public.get("status") != consumer_gate["status"]
                     or public.get("archive_sha256") != consumer_gate.get("archive_sha256")
                     or public.get("selected_cases") != consumer_gate.get("selected_cases")

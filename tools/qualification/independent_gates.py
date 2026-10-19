@@ -2132,11 +2132,109 @@ def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repositor
             raise ValueError("unexecuted producer attempt is not independently audited")
         return _result(gate, "NOT_RUN", "independently audited producer did not execute",
                        archive_sha256=expected_digest)
-    public = full_signed_routes.verify(repository, candidate_sha, lane_id, root,
-                                       signed_lane, hashes, runtime, expected_digest)
+    if receipt.get("status") != "PASSED":
+        raise ValueError("dedicated producer did not report a passing execution")
+    if family == "browser":
+        import full_browser_consumer
+
+        has_http_producer = b"DYN4K_BROWSER_HTTP_ARCHIVE" in full_browser_consumer.original(
+            repository, candidate_sha, full_browser_consumer.REPORTER)
+        if (receipt.get("schema") == 3 and not has_http_producer
+                or receipt.get("schema") == 2 and has_http_producer):
+            raise ValueError("browser receipt schema differs from exact producer source")
+        public = full_signed_routes.verify_browser(
+            repository, candidate_sha, lane_id, root, signed_lane,
+            hashes, runtime, expected_digest)
+        if receipt.get("schema") == 3:
+            _browser_consumption_witness(root, receipt, signed_lane)
+    else:
+        public = full_signed_routes.verify(repository, candidate_sha, lane_id, root,
+                                           signed_lane, hashes, runtime, expected_digest)
+    if public != {"status": "PASSED", "lane": lane_id,
+                  "selected_cases": 2523, "archive_sha256": expected_digest,
+                  "candidate_sha": candidate_sha}:
+        raise ValueError("signed full consumer public result differs from selected gate")
     return _result(gate, "PASSED", f"{family} public full consumer verified",
                    archive_sha256=expected_digest, complete_selected_suite=True,
                    selected_cases=2523, public_verification=public)
+
+
+def _browser_consumption_witness(root, receipt, signed_lane):
+    binding = signed_lane.get("expected_execution_witness")
+    if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
+        raise ValueError("independently signed browser process witness is missing")
+    path = Path(binding["path"])
+    if (not path.is_absolute() or not path.is_file() or path.is_symlink()
+            or path.resolve().is_relative_to(root.resolve())
+            or not SHA64.fullmatch(str(binding["sha256"]))
+            or hashlib.sha256(path.read_bytes()).hexdigest() != binding["sha256"]):
+        raise ValueError("independent browser process witness bytes differ")
+    witness = json.loads(path.read_bytes(), object_pairs_hook=_strict_object,
+                         parse_constant=lambda value: (_ for _ in ()).throw(
+                             ValueError(f"non-finite browser witness value: {value}")))
+    observed = witness.get("browser_consumption") if isinstance(witness, dict) else None
+    if not isinstance(observed, dict) or set(observed) != {"core", "facade"}:
+        raise ValueError("independent browser process consumption is missing")
+    modules = receipt.get("modules")
+    if not isinstance(modules, dict) or set(modules) != {"core", "facade"}:
+        raise ValueError("browser producer process inventory differs")
+    for short in ("core", "facade"):
+        process = modules[short]
+        browser = observed[short]
+        folder = root / short
+        launches = [_strict_json_line(line) for line in
+                    _file_path(root, f"{short}/browser-launches.jsonl").read_bytes().splitlines()]
+        captured = _json(_file_path(root, f"{short}/http-responses.json"))
+        if (not isinstance(process, dict) or not isinstance(browser, dict)
+                or set(browser) != {"protocol", "clock", "browser_pid", "browser_sha256",
+                                    "started_ns", "finished_ns", "responses"}
+                or browser["protocol"] not in {"cdp", "bidi", "web-inspector"}
+                or browser["clock"] != "unix-epoch-ns"
+                or len(launches) != 1 or not isinstance(launches[0], dict)
+                or type(browser["browser_pid"]) is not int or browser["browser_pid"] <= 0
+                or browser["browser_pid"] != launches[0].get("pid")
+                or browser["browser_sha256"] != launches[0].get("process_sha256")
+                or browser["browser_sha256"] != receipt.get("toolchain", {}).get("browser_sha256")
+                or type(browser["started_ns"]) is not int
+                or type(browser["finished_ns"]) is not int
+                or not process.get("started_ns", 0) <= browser["started_ns"]
+                    <= browser["finished_ns"] <= process.get("finished_ns", 0)
+                or not isinstance(captured, dict)
+                or not isinstance(captured.get("responses"), list)
+                or not isinstance(browser["responses"], list)
+                or len(browser["responses"]) != len(captured["responses"])):
+            raise ValueError("independent browser process observation differs")
+        server = {item["url"]: item for item in captured["responses"]}
+        if len(server) != len(captured["responses"]):
+            raise ValueError("browser server response URLs are duplicated")
+        seen = set()
+        for item in browser["responses"]:
+            if (not isinstance(item, dict)
+                    or set(item) != {"url", "body_sha256", "size", "request_ns",
+                                     "response_ns", "finished_ns"}
+                    or type(item["url"]) is not str or item["url"] in seen
+                    or item["url"] not in server
+                    or item["body_sha256"] != server[item["url"]].get("sha256")
+                    or item["size"] != server[item["url"]].get("size")
+                    or type(server[item["url"]].get("started_ns")) is not int
+                    or type(server[item["url"]].get("finished_ns")) is not int
+                    or any(type(item[key]) is not int for key in
+                           ("request_ns", "response_ns", "finished_ns"))
+                    or not browser["started_ns"] <= item["request_ns"]
+                        <= item["response_ns"] <= item["finished_ns"]
+                        <= browser["finished_ns"]
+                    or not item["request_ns"] <= server[item["url"]]["started_ns"]
+                        <= item["response_ns"]
+                    or not server[item["url"]]["started_ns"]
+                        <= server[item["url"]]["finished_ns"] <= item["finished_ns"]):
+                raise ValueError("independent browser response body or interval differs")
+            seen.add(item["url"])
+
+
+def _strict_json_line(raw):
+    return json.loads(raw, object_pairs_hook=_strict_object,
+                      parse_constant=lambda value: (_ for _ in ()).throw(
+                          ValueError(f"non-finite browser launch value: {value}")))
 
 
 def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
@@ -2163,7 +2261,13 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             import full_signed_routes
 
             family = full_signed_routes.route_table(repository, manifest)[lane_id]
-            if family in {"wasm-node", "native-host", "android-native", "apple-device"}:
+            if family == "browser":
+                approved = load_approved_manifest(repository)
+                if manifest != approved or lane != approved["lanes"][lane_id]:
+                    raise ValueError("approved full browser lane or suite differs")
+            if (family in {"wasm-node", "native-host", "android-native", "apple-device"}
+                    or family == "browser" and _json(_file_path(root, "receipt.json")).get(
+                        "schema") in (2, 3)):
                 if expected_signed_lane is None:
                     if not (family == "android-native"
                             and full_signed_routes.PUBLIC_REPLAY_ACTIVE.get()):
@@ -2202,7 +2306,8 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                      or "browser_support_sha256" in receipt)):
             import full_browser_consumer
 
-            if (lane_id not in full_browser_consumer.LANES
+            if (candidate_sha not in full_browser_consumer.LEGACY_LOCK_CANDIDATES
+                    or lane_id not in full_browser_consumer.LANES
                     or type(candidate_sha) is not str
                     or not SHA40.fullmatch(candidate_sha)
                     or type(receipt.get("schema")) is not int

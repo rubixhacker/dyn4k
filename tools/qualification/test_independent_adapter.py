@@ -1140,45 +1140,138 @@ class IndependentAdapterTests(unittest.TestCase):
                           gate["reason"])
             replay.assert_not_called()
 
-    def test_signed_browser_dispatch_preserves_generic_result_identity(self):
+    def test_signed_schema3_chromium_adapter_handoff_and_wrong_module_map(self):
         import full_browser_adapter
+        import full_signed_routes
 
         current = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        lanes = sorted(BROWSER_ARCHIVES)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
+                root, lanes, repository=ROOT, candidate_sha=current)
+            mapped = json.loads(archive_map.read_text())
+            signed_bundles = {}
+            for index, lane in enumerate(lanes):
+                archive = root / f"browser-{index}"
+                archive.mkdir()
+                (archive / "receipt.json").write_text(json.dumps({
+                    "schema": 3, "candidate_sha": current, "lane": lane,
+                    "status": "PASSED"}))
+                mapped["lanes"][lane]["staged-consumer"] = str(archive)
+                signed["lanes"][lane]["expected_archive_digests"][
+                    "staged-consumer"] = independent_gates.archive_digest(archive)
+                signed_bundles[lane] = {
+                    short: {"karma_selected_js": "a" * 64,
+                            "linked_executable_js": "b" * 64}
+                    for short in ("core", "facade")}
+                signed["lanes"][lane]["expected_browser_bundles"] = signed_bundles[lane]
+            archive_map.write_text(json.dumps(mapped))
+            wrong_public = set()
+
+            def generic(manifest, sha, lane, archives, repository, *expectations):
+                selected = [case["id"] for case in manifest["cases"]
+                            if case["scope"] in manifest["lanes"][lane]["case_scopes"]]
+                self.assertEqual(2523, len(selected))
+                digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
+                public_result = {"status": "PASSED", "candidate_sha": sha,
+                                 "lane": lane, "archive_sha256": digest,
+                                 "selected_cases": len(selected) - (lane in wrong_public)}
+                gate_names = set(manifest["lanes"][lane]["required_gates"]
+                                 + manifest["global_gates"])
+                gates = {name: {"gate": name, "status": "NOT_RUN"} for name in gate_names}
+                gates["staged-consumer"] = {
+                    "gate": "staged-consumer", "status": "PASSED",
+                    "complete_selected_suite": True, "selected_cases": len(selected),
+                    "archive_sha256": digest, "public_verification": public_result}
+                result = {"candidate_sha": sha, "lane": lane,
+                          "status": "NOT_RUN", "gates": gates}
+                result["result_sha256"] = independent_gates.digest(result)
+                return result
+
+            def replay(repository, sha, lane, archive, expected, hashes, runtime, digest):
+                if expected["expected_browser_bundles"] != signed_bundles[lane]:
+                    raise ValueError("signed browser module bundle map differs")
+                self.assertEqual(ROOT, repository)
+                self.assertEqual(current, sha)
+                self.assertEqual(BROWSER_HASHES, hashes)
+                self.assertEqual(digest, independent_gates.archive_digest(Path(archive)))
+                return {"status": "PASSED", "candidate_sha": sha, "lane": lane,
+                        "archive_sha256": digest, "selected_cases": 2523}
+
+            def verify(audit_input):
+                audit, signature, public, fingerprint = self.signed_inputs(root, audit_input)
+                with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                      mock.patch("full_suite_manifest.validate_manifest"),
+                      mock.patch.object(independent_gates, "evaluate", side_effect=generic),
+                      mock.patch.object(full_signed_routes, "verify_browser",
+                                        side_effect=replay) as signed_replay,
+                      mock.patch.object(full_browser_adapter,
+                                        "verify_full_browser_staged_consumer",
+                                        wraps=full_browser_adapter.verify_full_browser_staged_consumer)
+                      as legacy):
+                    verified = independent_adapter.verify_lanes(
+                        ROOT, current, suite, archive_map, audit, signature, public,
+                        fingerprint, candidate_manifest=candidate, artifact_audit=staged)
+                legacy.assert_not_called()
+                return verified, signed_replay.call_args_list
+
+            verified, calls = verify(signed)
+            self.assertEqual(lanes, sorted(call.args[2] for call in calls))
+            for lane in lanes:
+                self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
+                    "staged-consumer"]["status"])
+                self.assertTrue(verified[lane]["identities_bound"])
+                self.assertEqual("NOT_RUN", verified[lane]["verification"]["status"])
+            changed = copy.deepcopy(signed)
+            changed["lanes"][lanes[0]]["expected_browser_bundles"]["core"][
+                "linked_executable_js"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "signed browser module bundle map differs"):
+                verify(changed)
+            wrong_public.add(lanes[0])
+            with self.assertRaisesRegex(ValueError, "signed browser public result differs"):
+                verify(signed)
+
+    def test_pinned_schema1_chromium_keeps_scalar_bundle_handoff(self):
+        import full_browser_adapter
+        import full_signed_routes
+
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane], repository=ROOT, candidate_sha=current)
+                root, [lane])
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
+            digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
+            public_result = {"status": "PASSED", "candidate_sha": BROWSER_CANDIDATE,
+                             "lane": lane, "archive_sha256": digest,
+                             "selected_cases": 2523}
             gate_names = set(suite["lanes"][lane]["required_gates"]
                              + suite["global_gates"])
             gates = {name: {"gate": name, "status": "NOT_RUN"} for name in gate_names}
-            digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
-            gate = {"gate": "staged-consumer", "status": "PASSED",
-                    "complete_selected_suite": True, "selected_cases": 2523,
-                    "archive_sha256": digest}
-            gates["staged-consumer"] = gate
-            generic = {"candidate_sha": current, "lane": lane,
+            gates["staged-consumer"] = {
+                "gate": "staged-consumer", "status": "PASSED",
+                "complete_selected_suite": True, "selected_cases": 2523,
+                "archive_sha256": digest}
+            generic = {"candidate_sha": BROWSER_CANDIDATE, "lane": lane,
                        "status": "NOT_RUN", "gates": gates}
             generic["result_sha256"] = independent_gates.digest(generic)
-            public_result = {"status": "PASSED", "candidate_sha": current,
-                             "lane": lane, "archive_sha256": digest,
-                             "selected_cases": 2523}
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch("full_suite_manifest.validate_manifest"),
                   mock.patch.object(independent_gates, "evaluate", return_value=generic),
                   mock.patch.object(full_browser_adapter,
                                     "verify_full_browser_staged_consumer",
-                                    return_value=public_result) as replay):
+                                    return_value=public_result) as legacy,
+                  mock.patch.object(full_signed_routes, "verify_browser") as signed_replay):
                 verified = independent_adapter.verify_lanes(
-                    ROOT, current, suite, archive_map,
+                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
-            self.assertIs(gate, replay.call_args.args[6])
-            self.assertEqual(staged["artifacts"][0]["sha256"],
-                             replay.call_args.args[7]["dyn4k-core"])
-            self.assertTrue(verified[lane]["identities_bound"])
-            self.assertEqual("NOT_RUN", verified[lane]["verification"]["status"])
+            self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            legacy.assert_called_once()
+            signed_replay.assert_not_called()
 
 
 if __name__ == "__main__":
