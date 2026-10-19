@@ -79,6 +79,15 @@ kotlin {
         commonMain { kotlin.srcDir(generatePortableIdentity) }
         commonMain.dependencies { implementation("io.github.rubixhacker:dyn4k:0.1.0-alpha.1") }
         commonTest.dependencies { implementation(kotlin("test")) }
+        listOf(
+            "linuxX64", "linuxArm64", "macosArm64",
+            "iosArm64", "iosSimulatorArm64", "iosX64",
+            "tvosArm64", "tvosSimulatorArm64",
+            "watchosArm64", "watchosDeviceArm64", "watchosSimulatorArm64",
+            "androidNativeArm32", "androidNativeArm64", "androidNativeX86", "androidNativeX64",
+        ).forEach { target ->
+            getByName("${target}Main").kotlin.srcDir("src/posixNativeMain/kotlin")
+        }
     }
 }
 
