@@ -5,7 +5,6 @@ import re
 import subprocess
 from contextvars import ContextVar
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import independent_gates
 
@@ -200,45 +199,145 @@ def _browser_bundle_bytes(root, bundles, wasm):
     return executables
 
 
-def _browser_response_proof(root, responses, witness):
+def _browser_response_proof(root, responses, witness, receipt, wasm):
     if (not isinstance(responses, dict) or set(responses) != {"core", "facade"}
-            or witness.get("responses") != responses):
-        raise ValueError("browser responses differ from independent witness")
+            or witness.get("responses") != responses
+            or receipt.get("schema") != 3
+            or not isinstance(receipt.get("modules"), dict)):
+        raise ValueError("browser HTTP responses differ from signed witness or producer")
     for short in ("core", "facade"):
-        selected = independent_gates._json(root / short / "selected-bundle.json")
-        assets = selected.get("assets") if isinstance(selected, dict) else None
-        observed = responses[short]
-        process = witness["processes"][short]
-        if (not isinstance(assets, list) or not isinstance(observed, list)
-                or len(observed) != len(assets) or not observed
-                or len({item.get("name") for item in observed if isinstance(item, dict)})
-                != len(observed)
-                or {item.get("name") for item in observed} !=
-                {item.get("name") for item in assets}):
-            raise ValueError("browser response inventory differs from served assets")
-        asset_hashes = {item["name"]: item["sha256"] for item in assets}
-        for item in observed:
-            if (set(item) != {"name", "sha256", "url", "status", "body_path",
-                              "observed_at_ns", "browser_id"}
-                    or type(item["status"]) is not int or item["status"] != 200
+        folder = root / short
+        selected = independent_gates._json(folder / "selected-bundle.json")
+        captured = independent_gates._json(folder / "http-responses.json")
+        signed = responses[short]
+        process = receipt["modules"].get(short)
+        package = f"dyn4k-full-staged-browser-consumer-{short}-test"
+        if (not isinstance(selected, dict) or not isinstance(captured, dict)
+                or not isinstance(signed, dict) or captured != signed
+                or not isinstance(process, dict)
+                or type(process.get("started_ns")) is not int
+                or type(process.get("finished_ns")) is not int
+                or process["started_ns"] <= 0
+                or process["finished_ns"] < process["started_ns"]
+                or any(captured.get(key) != selected.get(key) for key in
+                       ("browser_id", "browser_name", "node_pid", "captured_ns",
+                        "complete_ns"))
+                or set(captured) != {"browser_id", "browser_name", "node_pid",
+                                     "captured_ns", "complete_ns", "generated", "responses"}
+                or type(captured["node_pid"]) is not int or captured["node_pid"] <= 0
+                or type(captured["captured_ns"]) is not int
+                or type(captured["complete_ns"]) is not int
+                or not process["started_ns"] <= captured["captured_ns"]
+                    <= captured["complete_ns"] <= process["finished_ns"]):
+            raise ValueError("browser HTTP response archive or Gradle interval differs")
+        generated = captured["generated"]
+        effective = selected.get("effective_files")
+        if (not isinstance(generated, list) or generated != selected.get("generated")
+                or len(generated) != (5 if wasm else 4)
+                or not isinstance(effective, list) or not effective
+                or not isinstance(effective[0], dict)
+                or type(effective[0].get("pattern")) is not str):
+            raise ValueError("browser generated source inventory differs")
+        webpack = Path(effective[0]["pattern"]).parent
+        generated_names = [item.get("name") for item in generated
+                           if isinstance(item, dict)]
+        if (len(generated_names) != len(generated)
+                or any(type(name) is not str for name in generated_names)
+                or len(set(generated_names)) != len(generated)
+                or "runtime.js" not in generated_names
+                or "commons.js" not in generated_names
+                or not any(re.fullmatch(r"kotlin-test-karma-runner\.[0-9]+\.js", name)
+                           for name in generated_names)
+                or not any(re.fullmatch(
+                    rf"{re.escape('load' if wasm else package)}\.[0-9]+\.js", name)
+                    for name in generated_names)):
+            raise ValueError("browser generated executable names differ")
+        emitted_wasm = next((name for name in generated_names if name.endswith(".wasm")),
+                            None)
+        if wasm and (emitted_wasm is None
+                     or re.fullmatch(r"[0-9a-f]{20}\.wasm", emitted_wasm) is None):
+            raise ValueError("browser generated Wasm name differs")
+        generated_hashes = {}
+        for item in generated:
+            name = item["name"]
+            source = folder / "http-sources" / name
+            if (set(item) != {"name", "source_path", "size", "sha256"}
+                    or type(name) is not str or Path(name).name != name
+                    or "\\" in name
+                    or item["source_path"] != str(webpack / name)
+                    or type(item["size"]) is not int or item["size"] <= 0
+                    or _file(source, item["sha256"], "browser generated source").stat().st_size
+                    != item["size"]):
+                raise ValueError("browser generated source bytes or mapping differ")
+            generated_hashes[name] = item["sha256"]
+        assets = selected.get("assets")
+        asset_hashes = {}
+        if wasm:
+            if (not isinstance(assets, list) or any(not isinstance(item, dict)
+                    or set(item) != {"name", "sha256"}
+                    or type(item["name"]) is not str
+                    or Path(item["name"]).name != item["name"]
+                    or type(item["sha256"]) is not str
+                    or SHA.fullmatch(item["sha256"]) is None for item in assets)):
+                raise ValueError("browser selected package assets differ")
+            asset_hashes = {item["name"]: item["sha256"] for item in assets}
+            selected_wasm = folder / "assets" / f"{package}.wasm"
+            if (len(asset_hashes) != len(assets)
+                    or asset_hashes.get(f"{package}.wasm") != generated_hashes[emitted_wasm]
+                    or _file(selected_wasm, generated_hashes[emitted_wasm],
+                             "browser selected Wasm").read_bytes() !=
+                    _file(folder / "linked-executable.wasm", generated_hashes[emitted_wasm],
+                          "browser linked Wasm").read_bytes()):
+                raise ValueError("browser emitted Wasm differs from selected package")
+        allowed_assets = ({f"{package}.mjs", f"{package}.wasm",
+                           f"{package}.import-object.mjs", f"{package}.js-builtins.mjs",
+                           "custom-formatters.js"} if wasm else set())
+        allowed = set(generated_names) | (allowed_assets & set(asset_hashes))
+        required = {"runtime.js", "commons.js"}
+        if wasm:
+            required.add(emitted_wasm)
+        items = captured["responses"]
+        if (not isinstance(items, list) or not required <=
+                {item.get("name") for item in items if isinstance(item, dict)} <= allowed
+                or len(items) > len(allowed)
+                or len({item.get("name") for item in items if isinstance(item, dict)})
+                != len(items)):
+            raise ValueError("browser HTTP response inventory differs")
+        previous = process["started_ns"]
+        for index, item in enumerate(items):
+            if (not isinstance(item, dict)
+                    or set(item) != {"ordinal", "name", "url", "method", "started_ns",
+                                     "finished_ns", "status", "content_encoding", "range",
+                                     "size", "sha256", "body_path"}
+                    or type(item["ordinal"]) is not int or item["ordinal"] != index
+                    or type(item["started_ns"]) is not int
+                    or type(item["finished_ns"]) is not int
+                    or not previous <= item["started_ns"] <= item["finished_ns"]
+                        <= captured["complete_ns"]
+                    or item["method"] != "GET" or item["status"] != 200
+                    or item["content_encoding"] is not None or item["range"] is not None
+                    or item["body_path"] != f"http-responses/{index:04d}.body"
                     or type(item["url"]) is not str
-                    or urlparse(item["url"]).scheme not in ("http", "https")
-                    or not urlparse(item["url"]).netloc
-                    or Path(unquote(urlparse(item["url"]).path)).name != item["name"]
-                    or item["browser_id"] != selected.get("browser_id")
-                    or type(item["observed_at_ns"]) is not int
-                    or not process["started_ns"] <= item["observed_at_ns"] <=
-                    process["finished_ns"]
-                    or item["sha256"] != asset_hashes[item["name"]]):
-                raise ValueError("browser HTTP response observation differs")
-            body = Path(item["body_path"])
-            if (not body.is_absolute() or not body.is_file() or body.is_symlink()
-                    or body.resolve() != body
-                    or body.is_relative_to(root.resolve()) or body.stat().st_nlink != 1
-                    or hashlib.sha256(body.read_bytes()).hexdigest() != item["sha256"]
-                    or hashlib.sha256((root / short / "assets" / item["name"])
-                                      .read_bytes()).hexdigest() != item["sha256"]):
-                raise ValueError("browser observed HTTP response body differs from archive")
+                    or re.fullmatch(r"/(?:absolute|base)/[^?#]+(?:\?[^#]*)?",
+                                    item["url"]) is None
+                    or Path(item["url"].split("?", 1)[0]).name != item["name"]
+                    or type(item["size"]) is not int
+                    or not 0 < item["size"] <= 64 * 1024 * 1024
+                    or type(item["sha256"]) is not str
+                    or SHA.fullmatch(item["sha256"]) is None
+                    or item["sha256"] != generated_hashes.get(
+                        item["name"], asset_hashes.get(item["name"]))):
+                raise ValueError("browser HTTP response order or interval differs")
+            source = (folder / "http-sources" / item["name"]
+                      if item["name"] in generated_hashes
+                      else folder / "assets" / item["name"])
+            body = _file(folder / item["body_path"], item["sha256"],
+                         "browser HTTP response body")
+            if (body.stat().st_size != item["size"]
+                    or body.read_bytes() != _file(source, item["sha256"],
+                                                  "browser served source").read_bytes()):
+                raise ValueError("browser HTTP response bytes differ from selected source")
+            previous = item["started_ns"]
 
 
 def verify_browser(repository, candidate, lane, root, expected, hashes, runtime, digest):
@@ -288,12 +387,115 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
     if public != {"status": "PASSED", "lane": lane, "selected_cases": len(_selected(repository, lane)),
                   "archive_sha256": digest, "candidate_sha": candidate}:
         raise ValueError("browser public verifier differs from signed lane")
-    if lane.startswith("wasmJs:"):
+    if receipt.get("schema") == 3 or lane.startswith("wasmJs:"):
         responses = expected.get("expected_browser_responses")
         witness = execution_witness(expected, candidate, lane, digest, runtime,
                                     lane.rsplit(":", 1)[1], executables, hashes,
                                     toolchain["gradle_sha256"], root)
-        _browser_response_proof(root, responses, witness)
+        _browser_response_proof(root, responses, witness, receipt,
+                                lane.startswith("wasmJs:"))
+    return public
+
+
+def _verify_native_cross(repository, candidate, lane, root, receipt, expected,
+                         hashes, runtime, digest):
+    import full_native_host_consumer
+
+    manifest = independent_gates.load_approved_manifest(repository)
+    selected_lane = manifest["lanes"][lane]
+    selected = _selected(repository, lane)
+    contract_sha = independent_gates.digest(
+        independent_gates.consumer_contract(manifest, lane))
+    if (selected_lane["target"] != "linuxArm64"
+            or tuple(lane.split(":")) != tuple(selected_lane[key] for key in
+                ("target", "runtime", "version", "configuration"))
+            or receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
+            or receipt.get("artifact_hash_provenance") != "audited"
+            or independent_gates.archive_digest(root) != digest):
+        raise ValueError("signed Native cross runtime archive or lane differs")
+    build_digest = _sha(expected.get("expected_native_build_archive_sha256"),
+                        "cross build archive")
+    build_root = root / "build"
+    if (build_root.is_symlink() or not build_root.is_dir()
+            or receipt.get("build_archive_sha256") != build_digest
+            or independent_gates.archive_digest(build_root) != build_digest):
+        raise ValueError("signed Native cross build archive differs")
+    build = independent_gates._json(build_root / "receipt.json")
+    selection = expected.get("expected_native_selection")
+    host = expected.get("expected_native_host")
+    build_host = expected.get("expected_native_build_host")
+    toolchain = expected.get("expected_native_toolchain")
+    executables = expected.get("expected_native_build_executables")
+    if (not isinstance(selection, dict) or not isinstance(host, dict)
+            or not isinstance(build_host, dict) or not isinstance(toolchain, dict)
+            or not isinstance(executables, dict) or set(executables) != {"core", "facade"}
+            or any(type(value) is not str or SHA.fullmatch(value) is None
+                   for value in executables.values())
+            or receipt.get("selection") != selection
+            or receipt.get("runtime_host") != host
+            or receipt.get("runtime_host_after") != host
+            or receipt.get("build_host") != build_host
+            or runtime != full_native_host_consumer.digest(
+                full_native_host_consumer.encoded(host))):
+        raise ValueError("signed Native cross runtime host or selection differs")
+    full_native_host_consumer.validate_cross_build_host(build_host)
+    full_native_host_consumer.validate_host(lane, selection, host)
+    if (not isinstance(build, dict) or build.get("schema") != 2
+            or build.get("status") != "COMPILED_ONLY"
+            or build.get("phase") != "linux-x64-cross-build"
+            or build.get("candidate_sha") != candidate or build.get("lane") != lane
+            or build.get("source_tree") != receipt.get("source_tree")
+            or build.get("consumer_contract_sha256") != contract_sha
+            or build.get("artifact_hashes") != hashes
+            or build.get("artifact_hash_provenance") != "audited"
+            or build.get("build_host") != build_host
+            or build.get("toolchain") != toolchain
+            or build.get("selected_cases") != len(selected)):
+        raise ValueError("signed Native cross build toolchain or contract differs")
+    if (not isinstance(toolchain.get("java_version"), str)
+            or re.search(r'version "21(?:\.|\")', toolchain["java_version"]) is None
+            or toolchain.get("gradle_version") != "Gradle 9.5.0"
+            or toolchain.get("kgp_version") != "2.4.20"
+            or not isinstance(toolchain.get("native_version"), str)
+            or "Kotlin/Native: 2.4.20" not in toolchain.get("native_version", "")
+            or any(type(toolchain.get(key)) is not str
+                   or not Path(toolchain[key]).is_absolute() for key in
+                   ("gradle_executable", "python_executable", "java_home", "native_home"))
+            or any(type(toolchain.get(key)) is not str
+                   or SHA.fullmatch(toolchain[key]) is None for key in
+                   ("gradle_sha256", "python_sha256", "java_sha256",
+                    "native_sha256", "native_compiler_sha256"))):
+        raise ValueError("signed Native cross build toolchain version differs")
+    products = build.get("products")
+    if (not isinstance(products, dict) or set(products) != {"core", "facade"}
+            or any(not isinstance(products[name], dict)
+                   or products[name].get("sha256") != executables[name]
+                   or products[name].get("archive") != f"runtime/{name}.program"
+                   for name in executables)):
+        raise ValueError("signed Native cross build executable identity differs")
+    for name, sha in executables.items():
+        _file(build_root / "runtime" / f"{name}.program", sha,
+              f"cross build {name}")
+    order = receipt.get("method_order")
+    processes = receipt.get("processes")
+    if (receipt.get("selected_cases") != len(selected)
+            or not isinstance(order, list) or len(order) != len(selected)
+            or any(type(item) is not str for item in order)
+            or set(order) != {item["id"] for item in selected}
+            or not isinstance(processes, dict) or set(processes) != {"core", "facade"}
+            or any(not isinstance(processes[name], dict)
+                   or processes[name].get("exit_code") != 0
+                   or not isinstance(processes[name].get("observed_process"), dict)
+                   or type(processes[name]["observed_process"].get("pid")) is not int
+                   or processes[name]["observed_process"]["pid"] <= 0
+                   for name in ("core", "facade"))):
+        raise ValueError("signed Native cross runtime execution is incomplete")
+    public = full_native_host_consumer.verify_cross_run(
+        root, repository, candidate, lane, hashes, selection, digest, build_digest, toolchain)
+    if public != {"status": "PASSED", "lane": lane, "candidate_sha": candidate,
+                  "archive_sha256": digest, "selected_cases": len(selected),
+                  "artifact_hash_provenance": "audited", "complete_selected_suite": True}:
+        raise ValueError("Native cross runtime public replay differs")
     return public
 
 
@@ -317,6 +519,9 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
                                     "native-host": "native_host",
                                     "android-native": "android_native",
                                     "apple-device": "apple_device"}[family])
+    if family == "native-host" and receipt.get("schema") == 3:
+        return _verify_native_cross(repository, candidate, lane, root, receipt,
+                                    expected, hashes, runtime, digest)
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("consumer_group") != "full-suite"):
         raise ValueError("dedicated producer candidate or lane differs")

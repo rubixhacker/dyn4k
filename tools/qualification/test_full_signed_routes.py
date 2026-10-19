@@ -58,6 +58,62 @@ class SignedRouteTests(unittest.TestCase):
         expected["expected_execution_witness"] = {
             "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
+    def _http_fixture(self, archive, wasm):
+        responses, modules = {}, {}
+        for short in ("core", "facade"):
+            folder = archive / short
+            (folder / "http-sources").mkdir(parents=True)
+            (folder / "http-responses").mkdir()
+            package = f"dyn4k-full-staged-browser-consumer-{short}-test"
+            emitted = "0123456789abcdefabcd.wasm"
+            names = ["commons.js", "kotlin-test-karma-runner.123.js", "runtime.js",
+                     f"{'load' if wasm else package}.456.js"]
+            if wasm:
+                names.append(emitted)
+            generated = []
+            for name in sorted(names):
+                data = (short + name).encode()
+                (folder / "http-sources" / name).write_bytes(data)
+                generated.append({"name": name,
+                                  "source_path": f"/tmp/webpack/{short}/{name}",
+                                  "size": len(data),
+                                  "sha256": hashlib.sha256(data).hexdigest()})
+            assets = []
+            if wasm:
+                (folder / "assets").mkdir()
+                data = (short + emitted).encode()
+                asset = f"{package}.wasm"
+                (folder / "assets" / asset).write_bytes(data)
+                (folder / "linked-executable.wasm").write_bytes(data)
+                assets = [{"name": asset, "sha256": hashlib.sha256(data).hexdigest()}]
+            selected = {"browser_id": short + "-browser", "browser_name": "Chromium",
+                        "node_pid": 123, "captured_ns": 17, "complete_ns": 20,
+                        "effective_files": [{"pattern": f"/tmp/webpack/{short}/runtime.js"}],
+                        "generated": generated}
+            if wasm:
+                selected["assets"] = assets
+            (folder / "selected-bundle.json").write_text(json.dumps(selected))
+            observed = []
+            for index, name in enumerate(["runtime.js", "commons.js"] +
+                                         ([emitted] if wasm else [])):
+                data = (short + name).encode()
+                (folder / "http-responses" / f"{index:04d}.body").write_bytes(data)
+                observed.append({"ordinal": index, "name": name,
+                                 "url": f"/absolute/tmp/webpack/{short}/{name}?hash",
+                                 "method": "GET", "started_ns": 12 + index,
+                                 "finished_ns": 13 + index, "status": 200,
+                                 "content_encoding": None, "range": None,
+                                 "size": len(data),
+                                 "sha256": hashlib.sha256(data).hexdigest(),
+                                 "body_path": f"http-responses/{index:04d}.body"})
+            responses[short] = {key: selected[key] for key in
+                                ("browser_id", "browser_name", "node_pid",
+                                 "captured_ns", "complete_ns", "generated")}
+            responses[short]["responses"] = observed
+            (folder / "http-responses.json").write_text(json.dumps(responses[short]))
+            modules[short] = {"started_ns": 10, "finished_ns": 25}
+        return responses, {"schema": 3, "modules": modules}
+
     def test_wasm_signed_mapping_replays_and_rejects_changed_identity(self):
         lane = "wasmJs:Node.js:current:development"
         with tempfile.TemporaryDirectory() as temporary:
@@ -143,6 +199,8 @@ class SignedRouteTests(unittest.TestCase):
                     full_signed_routes, "_selected", return_value=[None] * 2523), patch(
                     "full_native_host_consumer.digest", return_value=runtime), patch(
                     "full_native_host_consumer.validate_host"), patch(
+                    "full_native_host_consumer.verify_cross_run",
+                    side_effect=AssertionError("ordinary route used cross verifier")), patch(
                     "full_native_host_consumer.verify", return_value=public):
                 self.assertEqual(full_signed_routes.verify(
                     ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64), public)
@@ -157,6 +215,150 @@ class SignedRouteTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "audited artifacts"):
                     full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
                                               expected, HASHES, runtime, "c" * 64)
+
+    def test_native_cross_run_signed_build_and_execution_route(self):
+        lane = "linuxArm64:Linux ARM64:current:debug-g"
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            paths = {name: base / relative for name, relative in (
+                ("gradle", "gradle"), ("python", "python"),
+                ("java", "jdk/bin/java"), ("native", "native/bin/kotlinc-native"),
+                ("compiler", "native/konan/lib/kotlin-native-compiler-embeddable.jar"))}
+            for name, path in paths.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(name.encode())
+            toolchain = {"gradle_executable": str(paths["gradle"]),
+                         "gradle_sha256": hashlib.sha256(paths["gradle"].read_bytes()).hexdigest(),
+                         "gradle_version": "Gradle 9.5.0", "kgp_version": "2.4.20",
+                         "python_executable": str(paths["python"]),
+                         "python_sha256": hashlib.sha256(paths["python"].read_bytes()).hexdigest(),
+                         "java_home": str(paths["java"].parent.parent),
+                         "java_version": 'openjdk version "21.0.12"',
+                         "java_sha256": hashlib.sha256(paths["java"].read_bytes()).hexdigest(),
+                         "native_home": str(base / "native"),
+                         "native_version": "Kotlin/Native: 2.4.20",
+                         "native_sha256": hashlib.sha256(paths["native"].read_bytes()).hexdigest(),
+                         "native_compiler_sha256": hashlib.sha256(
+                             paths["compiler"].read_bytes()).hexdigest()}
+            selection = {"lane": lane, "role": "current", "system": "Linux",
+                         "machine": "aarch64", "os_version": "6.17.0", "libc": "2.39"}
+            host = {key: value for key, value in selection.items()
+                    if key not in ("lane", "role")}
+            build_host = {"system": "Linux", "machine": "x86_64"}
+            runtime = full_native_host_consumer.digest(
+                full_native_host_consumer.encoded(host))
+            archive = base / "archive"
+            build = archive / "build"
+            (build / "runtime").mkdir(parents=True)
+            products = {}
+            executables = {}
+            for short in ("core", "facade"):
+                binary = build / "runtime" / f"{short}.program"
+                binary.write_bytes(short.encode())
+                sha = hashlib.sha256(binary.read_bytes()).hexdigest()
+                products[short] = {"archive": f"runtime/{short}.program", "sha256": sha,
+                                   "mode": "debugTest", "elf_class": 64,
+                                   "elf_machine": "AArch64"}
+                executables[short] = sha
+            contract_sha = independent_gates.digest(
+                independent_gates.consumer_contract(MANIFEST, lane))
+            build_receipt = {"schema": 2, "status": "COMPILED_ONLY",
+                             "phase": "linux-x64-cross-build", "candidate_sha": CANDIDATE,
+                             "lane": lane, "source_tree": "e" * 40,
+                             "consumer_contract_sha256": contract_sha,
+                             "artifact_hashes": HASHES,
+                             "artifact_hash_provenance": "audited",
+                             "build_host": build_host, "toolchain": toolchain,
+                             "products": products, "selected_cases": 2523}
+            (build / "receipt.json").write_text(json.dumps(build_receipt))
+            build_digest = independent_gates.archive_digest(build)
+            methods = [case["id"] for case in
+                       independent_gates.consumer_contract(MANIFEST, lane)["cases"]]
+            receipt = {"schema": 3, "status": "PASSED", "candidate_sha": CANDIDATE,
+                       "lane": lane, "source_tree": "e" * 40,
+                       "artifact_hashes": HASHES, "artifact_hash_provenance": "audited",
+                       "build_archive_sha256": build_digest, "build_host": build_host,
+                       "runtime_host": host, "runtime_host_after": host,
+                       "selection": selection, "selected_cases": 2523,
+                       "method_order": methods,
+                       "processes": {short: {"exit_code": 0,
+                                             "observed_process": {"pid": index + 1}}
+                                     for index, short in enumerate(("core", "facade"))}}
+            (archive / "receipt.json").write_text(json.dumps(receipt))
+            digest = independent_gates.archive_digest(archive)
+            expected = {"expected_artifact_hashes": HASHES,
+                        "expected_runtime_identity": runtime,
+                        "expected_archive_digests": {"staged-consumer": digest},
+                        "expected_native_selection": selection,
+                        "expected_native_host": host,
+                        "expected_native_build_host": build_host,
+                        "expected_native_toolchain": toolchain,
+                        "expected_native_build_archive_sha256": build_digest,
+                        "expected_native_build_executables": executables}
+            public = {"status": "PASSED", "lane": lane, "candidate_sha": CANDIDATE,
+                      "archive_sha256": digest, "selected_cases": 2523,
+                      "artifact_hash_provenance": "audited",
+                      "complete_selected_suite": True}
+            for path in paths.values():
+                path.unlink()
+            with patch.object(full_signed_routes, "_source"), patch(
+                    "full_native_host_consumer.verify", side_effect=AssertionError(
+                        "cross route used ordinary verifier")), patch(
+                    "full_native_host_consumer.verify_cross_run", return_value=public) as cross_verify:
+                self.assertEqual(full_signed_routes.verify(
+                    ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, digest), public)
+                cross_verify.assert_called_once_with(
+                    archive, ROOT, CANDIDATE, lane, HASHES, selection, digest,
+                    build_digest, toolchain)
+                cross_verify.return_value = {**public, "complete_selected_suite": False}
+                with self.assertRaisesRegex(ValueError, "public replay differs"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                cross_verify.return_value = public
+                expected["expected_native_build_archive_sha256"] = "0" * 64
+                with self.assertRaisesRegex(ValueError, "cross build archive"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_native_build_archive_sha256"] = build_digest
+                expected["expected_native_host"] = {**host, "machine": "x86_64"}
+                with self.assertRaisesRegex(ValueError, "cross runtime host"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_native_host"] = host
+                expected["expected_native_build_host"] = {**build_host,
+                                                          "machine": "aarch64"}
+                with self.assertRaisesRegex(ValueError, "cross runtime host"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_native_build_host"] = build_host
+                expected["expected_native_toolchain"] = {**toolchain,
+                                                         "java_sha256": "0" * 64}
+                with self.assertRaisesRegex(ValueError, "cross build toolchain"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_native_toolchain"] = toolchain
+                expected["expected_native_build_executables"] = {**executables,
+                                                                  "core": "0" * 64}
+                with self.assertRaisesRegex(ValueError, "cross build executable"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_native_build_executables"] = executables
+                receipt["method_order"] = []
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                digest = independent_gates.archive_digest(archive)
+                expected["expected_archive_digests"]["staged-consumer"] = digest
+                with self.assertRaisesRegex(ValueError, "cross runtime execution"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                receipt["method_order"] = methods
+                (build / "runtime/core.program").write_bytes(b"changed")
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                digest = independent_gates.archive_digest(archive)
+                expected["expected_archive_digests"]["staged-consumer"] = digest
+                with self.assertRaisesRegex(ValueError, "cross build archive"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                self.assertEqual(cross_verify.call_count, 2)
 
     def test_windows_native_host_uses_signed_windows_toolchain_files(self):
         lane = "mingwX64:Windows x64:current:debug-g"
@@ -597,47 +799,46 @@ class SignedRouteTests(unittest.TestCase):
             (archive / "extra.txt").write_text("not receipt only")
             self.assertEqual(result(), "FAILED")
 
-    def test_browser_response_requires_independently_captured_body(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            archive = base / "archive"
-            responses = {}
-            witness = {"responses": {}, "processes": {}}
-            for short in ("core", "facade"):
-                folder = archive / short
-                (folder / "assets").mkdir(parents=True)
-                (folder / "assets/test.wasm").write_bytes(short.encode())
-                (folder / "selected-bundle.json").write_text(json.dumps({
-                    "browser_id": short + "-browser",
-                    "assets": [{"name": "test.wasm", "sha256": hashlib.sha256(
-                        short.encode()).hexdigest()}]}))
-                observed = base / f"observed-{short}.wasm"
-                observed.write_bytes(short.encode())
-                responses[short] = [{"name": "test.wasm",
-                                     "url": f"http://127.0.0.1:9876/{short}/test.wasm",
-                                     "status": 200,
-                                     "sha256": hashlib.sha256(short.encode()).hexdigest(),
-                                     "body_path": str(observed), "observed_at_ns": 5,
-                                     "browser_id": short + "-browser"}]
-                witness["processes"][short] = {"started_ns": 1, "finished_ns": 10,
-                                                 "pid": 123}
-            witness["responses"] = json.loads(json.dumps(responses))
-            full_signed_routes._browser_response_proof(archive, responses, witness)
-            (base / "observed-core.wasm").unlink()
-            with self.assertRaisesRegex(ValueError, "observed.*body"):
-                full_signed_routes._browser_response_proof(archive, responses, witness)
-            (base / "observed-core.wasm").write_bytes(b"forged")
-            with self.assertRaisesRegex(ValueError, "observed.*body"):
-                full_signed_routes._browser_response_proof(archive, responses, witness)
-            (base / "observed-core.wasm").write_bytes(b"core")
-            witness["responses"]["core"][0]["status"] = 404
-            with self.assertRaisesRegex(ValueError, "independent witness"):
-                full_signed_routes._browser_response_proof(archive, responses, witness)
-            witness["responses"]["core"][0]["status"] = 200
-            responses["core"][0]["url"] = "http://127.0.0.1:9876/core/other.wasm"
-            witness["responses"]["core"][0]["url"] = responses["core"][0]["url"]
-            with self.assertRaisesRegex(ValueError, "HTTP response observation"):
-                full_signed_routes._browser_response_proof(archive, responses, witness)
+    def test_browser_http_generated_responses_bind_order_source_and_body(self):
+        for wasm in (False, True):
+            with self.subTest(wasm=wasm), tempfile.TemporaryDirectory() as temporary:
+                archive = Path(temporary) / "archive"
+                responses, receipt = self._http_fixture(archive, wasm)
+                witness = {"responses": json.loads(json.dumps(responses))}
+                check = lambda: full_signed_routes._browser_response_proof(
+                    archive, responses, witness, receipt, wasm)
+                check()
+                body = archive / "core/http-responses/0000.body"
+                body.write_bytes(b"forged")
+                with self.assertRaisesRegex(ValueError, "response body.*bytes differ"):
+                    check()
+                body.write_bytes(b"coreruntime.js")
+                witness["responses"]["core"]["responses"][0]["status"] = 404
+                with self.assertRaisesRegex(ValueError, "signed witness"):
+                    check()
+                witness["responses"] = json.loads(json.dumps(responses))
+                original = responses["core"]["responses"][0]["ordinal"]
+                responses["core"]["responses"][0]["ordinal"] = 1
+                witness["responses"] = json.loads(json.dumps(responses))
+                (archive / "core/http-responses.json").write_text(json.dumps(responses["core"]))
+                with self.assertRaisesRegex(ValueError, "response order"):
+                    check()
+                responses["core"]["responses"][0]["ordinal"] = original
+                witness["responses"] = json.loads(json.dumps(responses))
+                (archive / "core/http-responses.json").write_text(json.dumps(responses["core"]))
+                receipt["modules"]["core"]["started_ns"] = 13
+                with self.assertRaisesRegex(ValueError, "response order"):
+                    check()
+                receipt["modules"]["core"]["started_ns"] = 10
+                generated = responses["core"]["generated"]
+                generated[0]["source_path"] = "/tmp/wrong/commons.js"
+                witness["responses"] = json.loads(json.dumps(responses))
+                (archive / "core/http-responses.json").write_text(json.dumps(responses["core"]))
+                selected = json.loads((archive / "core/selected-bundle.json").read_text())
+                selected["generated"] = generated
+                (archive / "core/selected-bundle.json").write_text(json.dumps(selected))
+                with self.assertRaisesRegex(ValueError, "generated source bytes or mapping"):
+                    check()
 
     def test_wasm_browser_signed_route_requires_response_capture(self):
         import full_browser_consumer
@@ -647,6 +848,9 @@ class SignedRouteTests(unittest.TestCase):
             base = Path(temporary)
             runtime = "Linux test x86_64"
             receipt = self._receipt(lane, runtime)
+            receipt["schema"] = 3
+            for key in ("consumer_group", "target", "runtime", "version", "configuration"):
+                receipt.pop(key)
             receipt["staged_hashes"] = dict(HASHES)
             toolchain = {"browser": str(base / "chromium"),
                          "browser_sha256": "d" * 64, "java_home": str(base),
@@ -656,14 +860,16 @@ class SignedRouteTests(unittest.TestCase):
                          "kgp_version": "2.4.20", "gradle_version": "9.5.0"}
             receipt["toolchain"] = toolchain
             archive = self._archive(base, receipt)
-            bundles, responses, executables = {}, {}, {}
+            responses, http_receipt = self._http_fixture(archive, True)
+            receipt["modules"] = http_receipt["modules"]
+            (archive / "receipt.json").write_text(json.dumps(receipt))
+            bundles, executables = {}, {}
             for short in ("core", "facade"):
                 folder = archive / short
-                (folder / "assets").mkdir(parents=True)
                 files = {"karma-selected.js": (short + " selected").encode(),
                          "linked-executable.js": (short + " linked").encode(),
-                         "linked-executable.wasm": (short + " wasm").encode(),
-                         "assets/test.wasm": (short + " wasm").encode()}
+                         "linked-executable.wasm": (short +
+                             "0123456789abcdefabcd.wasm").encode()}
                 for name, data in files.items():
                     (folder / name).write_bytes(data)
                 sha = {name: hashlib.sha256(data).hexdigest()
@@ -671,18 +877,10 @@ class SignedRouteTests(unittest.TestCase):
                 bundles[short] = {"karma_selected_js": sha["karma-selected.js"],
                                   "linked_executable_js": sha["linked-executable.js"],
                                   "linked_executable_wasm": sha["linked-executable.wasm"],
-                                  "assets": {"test.wasm": sha["assets/test.wasm"]}}
+                                  "assets": {item["name"]: item["sha256"] for item in
+                                             json.loads((folder / "selected-bundle.json")
+                                                        .read_text())["assets"]}}
                 executables[short] = sha["linked-executable.js"]
-                (folder / "selected-bundle.json").write_text(json.dumps({
-                    "browser_id": short + "-browser",
-                    "assets": [{"name": "test.wasm", "sha256": sha["assets/test.wasm"]}]}))
-                body = base / f"captured-{short}.wasm"
-                body.write_bytes(files["assets/test.wasm"])
-                responses[short] = [{"name": "test.wasm",
-                                     "url": f"http://127.0.0.1:9876/{short}/test.wasm",
-                                     "status": 200, "sha256": sha["assets/test.wasm"],
-                                     "body_path": str(body), "observed_at_ns": 2,
-                                     "browser_id": short + "-browser"}]
             expected = {"expected_artifact_hashes": HASHES,
                         "expected_runtime_identity": runtime,
                         "expected_archive_digests": {"staged-consumer": "c" * 64},
@@ -699,8 +897,11 @@ class SignedRouteTests(unittest.TestCase):
                 witness_path.read_bytes()).hexdigest()
             public = {"status": "PASSED", "lane": lane, "selected_cases": 2523,
                       "archive_sha256": "c" * 64, "candidate_sha": CANDIDATE}
-            with patch.object(full_signed_routes, "_source"), patch.object(
-                    full_signed_routes, "_file"), patch.object(
+            actual_file = full_signed_routes._file
+            with patch.object(full_signed_routes, "_source") as source_check, patch.object(
+                    full_signed_routes, "_file", side_effect=lambda path, sha, label:
+                    Path(path) if label in ("browser", "JDK 21", "Gradle") else
+                    actual_file(path, sha, label)), patch.object(
                     full_signed_routes, "_selected", return_value=[None] * 2523), patch(
                     "independent_gates.archive_digest", return_value="c" * 64), patch(
                     "full_browser_consumer.runtime_pin"), patch(
@@ -708,8 +909,14 @@ class SignedRouteTests(unittest.TestCase):
                 self.assertEqual(full_signed_routes.verify_browser(
                     ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64),
                     public)
-                (base / "captured-core.wasm").unlink()
-                with self.assertRaisesRegex(ValueError, "observed.*body"):
+                source_check.assert_called_once_with(ROOT, CANDIDATE, "browser")
+                signed_witness = expected.pop("expected_execution_witness")
+                with self.assertRaisesRegex(ValueError, "witness"):
+                    full_signed_routes.verify_browser(
+                        ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64)
+                expected["expected_execution_witness"] = signed_witness
+                (archive / "core/http-responses/0000.body").unlink()
+                with self.assertRaisesRegex(ValueError, "response body"):
                     full_signed_routes.verify_browser(
                         ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64)
 
