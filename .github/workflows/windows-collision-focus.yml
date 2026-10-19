@@ -72,7 +72,7 @@ jobs:
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
           $testOutput = (Get-Content -LiteralPath $stdoutPath -Raw) + "`n" + `
             (Get-Content -LiteralPath $stderrPath -Raw)
-          $didSkip = $testOutput -match '(?m)^test_windows_handle_anchored_round_trip_and_links .* \.\.\. skipped\b'
+          $didSkip = $testOutput -match '(?m)^test_windows_handle_anchored_round_trip_and_links .* [.][.][.] skipped([ ]|$)'
           $ranOne = $testOutput -match '(?m)^Ran 1 test in '
           $metadata = [ordered]@{
             candidate_sha = $candidateSha

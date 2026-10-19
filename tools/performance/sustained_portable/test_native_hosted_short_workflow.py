@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -29,7 +30,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
     "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
-    "windows-collision-focus.yml": "b4a41e0719ecbdb7fbd70889afe4b4caad646ecd2ca7cd4b1ec30a6b5b05f6cb",
+    "windows-collision-focus.yml": "48994d4493716a809d238f5264e8a46c8c8c1cb4844895719961185952ef201b",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
@@ -238,6 +239,26 @@ class WorkflowExpressionLimit(unittest.TestCase):
                 self.assertIn(evidence, source)
         self.assertIn("if: always()", source)
         self.assertIn("path: ${{ runner.temp }}/windows-collision-focus/", source)
+        self.assertIn("$testOutput -notmatch '(?m)^OK$'", source)
+        assignment = re.search(
+            r"(?m)^\s*\$didSkip = \$testOutput -match '([^']+)'$", source)
+        self.assertIsNotNone(assignment)
+        test_script = (
+            "import unittest\n"
+            "class SkippedNativeArchiveTest(unittest.TestCase):\n"
+            "    @unittest.skip('synthetic workflow guard check')\n"
+            "    def test_windows_handle_anchored_round_trip_and_links(self):\n"
+            "        self.fail('a skipped test must not run')\n"
+            "unittest.main(verbosity=2)\n")
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", test_script],
+            capture_output=True, text=True, timeout=5, check=False)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertRegex(output, assignment.group(1))
+        self.assertRegex(output, r"(?m)^Ran 1 test in ")
+        self.assertRegex(output, r"(?m)^OK \(skipped=1\)$")
+        self.assertNotRegex(output, r"(?m)^OK$")
 
 
 def workflow_nodes():
