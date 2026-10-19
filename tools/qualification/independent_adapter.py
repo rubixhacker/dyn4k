@@ -71,10 +71,16 @@ def _verify_full_jvm_staged_consumer(repository, candidate_sha, lane_id, selecte
     java_hash = expected.get("expected_java_executable_sha256")
     gradle_hash = expected.get("expected_gradle_executable_sha256")
     runtime_java_hash = expected.get("expected_runtime_java_executable_sha256")
+    publication_path = expected.get("expected_mode_publication_path")
+    publication_digest = expected.get("expected_mode_publication_digest")
     if (type(java_hash) is not str or not SHA256.fullmatch(java_hash)
             or type(gradle_hash) is not str or not SHA256.fullmatch(gradle_hash)
             or type(runtime_java_hash) is not str or not SHA256.fullmatch(runtime_java_hash)):
         raise ValueError(f"signed JVM executable SHA-256 values are missing or invalid: {lane_id}")
+    if (type(publication_path) is not str or not Path(publication_path).is_absolute()
+            or type(publication_digest) is not str
+            or not SHA256.fullmatch(publication_digest)):
+        raise ValueError(f"signed JVM mode publication is missing or invalid: {lane_id}")
     hashes = expected.get("expected_artifact_hashes")
     runtime = expected.get("expected_runtime_identity")
     digest = expected["expected_archive_digests"].get("staged-consumer")
@@ -89,7 +95,8 @@ def _verify_full_jvm_staged_consumer(repository, candidate_sha, lane_id, selecte
         raise ValueError(f"signed JVM lane selects a different case suite: {lane_id}")
     public = full_jvm_consumer.verify(
         paths["staged-consumer"], repository, candidate_sha, hashes, runtime, digest,
-        java_hash, gradle_hash, runtime_java_hash, lane_id)
+        java_hash, gradle_hash, runtime_java_hash, lane_id,
+        publication_path, publication_digest)
     if public != gate_result:
         raise ValueError(f"public JVM verifier differs from independent gate: {lane_id}")
 
@@ -98,6 +105,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                  audit_path, signature_path, public_key_path, key_sha256,
                  performance_key=None, candidate_manifest=None, artifact_audit=None):
     import independent_gates
+    import full_jvm_consumer
     import qualify
 
     repository = Path(repository)
@@ -171,14 +179,24 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
         if not isinstance(expected, dict):
             raise ValueError(f"signed lane audit is invalid: {lane_id}")
         gate_names = set(selected["required_gates"] + selected["global_gates"])
+        mode_artifacts = False
         if identities_bound:
             lane = candidate_manifest["lanes"].get(lane_id)
             target = suite_manifest["lanes"][lane_id]["target"]
             hashes = expected.get("expected_artifact_hashes")
             runtime = expected.get("expected_runtime_identity")
+            if (target == "jvm" and lane_id in full_jvm_consumer.LANES
+                    and hashes != audited_targets.get(target)):
+                mode_artifacts = True
+                mode_path = expected.get("expected_mode_publication_path")
+                mode_digest = expected.get("expected_mode_publication_digest")
+                if (type(mode_path) is not str or not Path(mode_path).is_absolute()
+                        or type(mode_digest) is not str
+                        or not SHA256.fullmatch(mode_digest)):
+                    raise ValueError(f"signed target artifacts require mode publication: {lane_id}")
             if (not isinstance(lane, dict)
-                    or hashes != audited_targets.get(target)
-                    or hashes != lane.get("artifact_hashes")
+                    or (not mode_artifacts and hashes != audited_targets.get(target))
+                    or (not mode_artifacts and hashes != lane.get("artifact_hashes"))
                     or not isinstance(runtime, str) or not runtime
                     or runtime != lane.get("runtime_identity")):
                 raise ValueError(f"signed target artifacts or runtime differ from staging: {lane_id}")
@@ -221,7 +239,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 result["gates"]["staged-consumer"])
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
-                            "identities_bound": identities_bound}
+                            "identities_bound": identities_bound and not mode_artifacts}
     _check_global_consistency(results, suite_manifest)
     return results
 

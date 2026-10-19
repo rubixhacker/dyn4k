@@ -306,6 +306,8 @@ class IndependentAdapterTests(unittest.TestCase):
             "case_scopes": ["portable"]}}, "global_gates": []}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         java_hash, gradle_hash, runtime_java_hash = "d" * 64, "e" * 64, "9" * 64
+        publication_digest = "8" * 64
+        publication_path = "/independent/jvm-mode-publication"
         archive_digest = "f" * 64
         runtime = "audited Java 21 runtime"
         fake = self.fake_verifier()
@@ -334,6 +336,9 @@ class IndependentAdapterTests(unittest.TestCase):
                                        "expected_java_executable_sha256": java_hash,
                                        "expected_gradle_executable_sha256": gradle_hash,
                                        "expected_runtime_java_executable_sha256": runtime_java_hash}}}
+            signed["lanes"][lane].update(
+                expected_mode_publication_path=publication_path,
+                expected_mode_publication_digest=publication_digest)
             selection = {"case_ids": [item["id"] for item in cases],
                          "required_gates": ["staged-consumer"], "global_gates": []}
 
@@ -353,13 +358,20 @@ class IndependentAdapterTests(unittest.TestCase):
                 "staged-consumer"]["status"])
             replay.assert_called_once_with(
                 str(archive), root, candidate, hashes, runtime, archive_digest,
-                java_hash, gradle_hash, runtime_java_hash, lane)
+                java_hash, gradle_hash, runtime_java_hash, lane,
+                publication_path, publication_digest)
             for field, value in (("expected_java_executable_sha256", None),
                                  ("expected_gradle_executable_sha256", "0" * 63),
                                  ("expected_runtime_java_executable_sha256", None)):
                 changed = copy.deepcopy(signed)
                 changed["lanes"][lane][field] = value
                 with self.assertRaisesRegex(ValueError, "signed JVM executable"):
+                    verify(changed)
+            for field, value in (("expected_mode_publication_path", None),
+                                 ("expected_mode_publication_digest", "0" * 63)):
+                changed = copy.deepcopy(signed)
+                changed["lanes"][lane][field] = value
+                with self.assertRaisesRegex(ValueError, "signed JVM mode publication"):
                     verify(changed)
             with self.assertRaisesRegex(ValueError, "public JVM verifier differs"):
                 verify(signed, {"status": "FAILED"})
@@ -386,6 +398,8 @@ class IndependentAdapterTests(unittest.TestCase):
                     "expected_java_executable_sha256": "d" * 64,
                     "expected_gradle_executable_sha256": "e" * 64,
                     "expected_runtime_java_executable_sha256": "f" * 64}
+        expected.update(expected_mode_publication_path="/independent/mode-publication",
+                        expected_mode_publication_digest="1" * 64)
         cases = [{"id": "selected"}]
         selected = {"case_ids": ["selected"]}
         gate = {"status": "PASSED"}
@@ -400,7 +414,8 @@ class IndependentAdapterTests(unittest.TestCase):
                 contract.assert_called_once_with(ROOT, lane)
                 replay.assert_called_once_with(
                     "/independent/archive", ROOT, "0" * 40, hashes, "audited runtime",
-                    "c" * 64, "d" * 64, "e" * 64, "f" * 64, lane)
+                    "c" * 64, "d" * 64, "e" * 64, "f" * 64, lane,
+                    "/independent/mode-publication", "1" * 64)
         with self.assertRaisesRegex(ValueError, "does not cover lane"):
             independent_adapter._verify_full_jvm_staged_consumer(
                 ROOT, "0" * 40, "jvm:Java:minimum:equivalent", selected,
@@ -410,14 +425,17 @@ class IndependentAdapterTests(unittest.TestCase):
         import full_jvm_consumer
 
         tar_path = os.environ.get("DYN4K_RETAINED_FULL_JVM_ARCHIVE")
-        if not tar_path:
-            self.skipTest("retained full JVM archive path was not supplied")
+        publication = os.environ.get("DYN4K_JVM_MODE_PUBLICATION")
+        if not tar_path or not publication:
+            self.skipTest("retained full JVM and mode archive paths were not supplied")
         candidate = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                             text=True).strip()
         lane = os.environ.get("DYN4K_FULL_JVM_LANE", full_jvm_consumer.LANE)
         suite = independent_gates.load_approved_manifest(ROOT)
-        hashes = {"dyn4k-core": "48928d2825cb84db80e1b6e6294d8f86dd722573850ad8c60399b7fdedc07d4e",
-                  "dyn4k": "abf1619a63c24e41ebe8023c9686cc7173c2b3c6552412b0bfbdb94677242291"}
+        hashes = {module: hashlib.sha256(full_jvm_consumer.target_binary(
+            Path(publication) / "staged", module).read_bytes()).hexdigest()
+            for module in full_jvm_consumer.MODULES}
+        publication_digest = independent_gates.archive_digest(publication)
         java_hash = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
         gradle_hash = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
         runtime_home = Path("/tmp/dyn4k-tools/jdk8" if ":minimum:" in lane
@@ -455,6 +473,9 @@ class IndependentAdapterTests(unittest.TestCase):
                               "expected_java_executable_sha256": java_hash,
                               "expected_gradle_executable_sha256": gradle_hash,
                               "expected_runtime_java_executable_sha256": runtime_hash}}}
+                signed["lanes"][lane].update(
+                    expected_mode_publication_path=str(Path(publication).resolve()),
+                    expected_mode_publication_digest=publication_digest)
                 audit_path, signature, public, fingerprint = self.signed_inputs(root, signed)
                 generic = independent_gates.evaluate_gate(
                     "staged-consumer", path, candidate, lane, suite["lanes"][lane],
@@ -582,6 +603,10 @@ class IndependentAdapterTests(unittest.TestCase):
                 **hashes, "dyn4k-core": "c" * 64}
             with self.assertRaisesRegex(ValueError, "target artifacts"):
                 verify(changed)
+            changed["lanes"][LANE].update(
+                expected_mode_publication_path="/independent/mode-publication",
+                expected_mode_publication_digest="d" * 64)
+            self.assertFalse(verify(changed)[LANE]["identities_bound"])
             changed = copy.deepcopy(signed)
             changed["lanes"][LANE]["expected_runtime_identity"] = "other runner"
             with self.assertRaisesRegex(ValueError, "runtime"):

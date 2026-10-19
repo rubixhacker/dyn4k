@@ -3,12 +3,14 @@ import argparse
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import independent_gates
+import compiler_modes
 from full_staged_consumer import GROUP, LANE, MODULES, SHA256, VERSION, encoded, git_blob, sha
 
 
@@ -103,8 +105,57 @@ def target_binary(staging, module):
     return staging / GROUP.replace(".", "/") / f"{module}-jvm" / VERSION / name
 
 
+def mode_publication(publication, repository, candidate, configuration, hashes, digest):
+    if Path(publication).is_symlink():
+        raise ValueError("independent JVM mode publication is symbolic")
+    publication = Path(publication).resolve()
+    repository = Path(repository).resolve()
+    if (not publication.is_dir() or publication.is_symlink()
+            or not SHA256.fullmatch(str(digest))
+            or independent_gates.archive_digest(publication) != digest):
+        raise ValueError("independent JVM mode publication digest differs")
+    if repository != compiler_modes.ROOT:
+        raise ValueError("JVM mode publication verifier requires its producing checkout")
+    result = compiler_modes.replay(publication, candidate, "jvm", configuration)
+    if result["status"] != "PASSED":
+        raise ValueError(f"JVM mode publication is unpassed: {result['problems']}")
+    receipt = json.loads((publication / "receipt.json").read_bytes())
+    staging = publication / "staged"
+    if (receipt.get("mode") != configuration or receipt.get("candidate_sha") != candidate
+            or receipt.get("flags") != compiler_modes.jvm_flags(configuration)
+            or set(receipt.get("artifacts", {})) != set(MODULES)
+            or any(receipt["artifacts"][module] != {
+                "path": target_binary(staging, module).relative_to(publication).as_posix(),
+                "sha256": hashes[module]} for module in MODULES)
+            or any(sha(target_binary(staging, module).read_bytes()) != hashes[module]
+                   for module in MODULES)):
+        raise ValueError("JVM mode publication differs from independently selected JARs")
+    return staging
+
+
+def test_worker_proof(output, checkout, runtime_executable):
+    launches = re.findall(r"^Starting process 'Gradle Test Executor [^\n]*$", output, re.M)
+    project = Path(checkout) / CONSUMER
+    if len(launches) != 2:
+        raise ValueError("both Gradle Test Executor launches are required")
+    for module in ("core", "facade"):
+        task = f"> Task :{module}:test\n"
+        pattern = (r"Starting process 'Gradle Test Executor (\d+)'\. Working directory: "
+                   + re.escape(str(project / module)) + r" Command: "
+                   + re.escape(runtime_executable) + r" .+"
+                   + re.escape("worker.org.gradle.process.internal.worker.GradleWorkerMain")
+                   + r" 'Gradle Test Executor \1'")
+        matches = [line for line in launches if re.fullmatch(pattern, line)]
+        if (len(matches) != 1 or task not in output
+                or output.index(task) > output.index(matches[0])):
+            raise ValueError(f"{module} Gradle Test Executor launch or test task differs")
+    if launches[0] == launches[1]:
+        raise ValueError("Gradle Test Executor launches are duplicated")
+
+
 def run(repository, candidate, staging, output, gradle, expected_hashes,
-        lane=LANE, runtime_java_home=None):
+        lane=LANE, runtime_java_home=None, publication=None,
+        expected_publication_digest=None):
     version, configuration = lane_parts(lane)
     if runtime_java_home is None:
         raise ValueError("independent JVM test runtime home is required")
@@ -117,6 +168,12 @@ def run(repository, candidate, staging, output, gradle, expected_hashes,
                                     text=True)
     if head != candidate or dirty:
         raise ValueError("full JVM producer requires exact clean candidate checkout")
+    if publication is None:
+        raise ValueError("independent JVM mode publication is required")
+    mode_staging = mode_publication(publication, repository, candidate, configuration,
+                                    expected_hashes, expected_publication_digest)
+    if staging != mode_staging:
+        raise ValueError("staging differs from verified JVM mode publication")
     if output.exists() and any(output.iterdir()):
         raise ValueError("full JVM raw output must be empty")
     java_home = Path(os.environ["JAVA_HOME"]).resolve()
@@ -183,6 +240,8 @@ def run(repository, candidate, staging, output, gradle, expected_hashes,
                              "gradle_executable_sha256": sha(gradle.read_bytes()),
                              "gradle_user_home": str(gradle_home)},
                "artifact_hashes": expected_hashes,
+               "mode_publication": {"path": str(Path(publication).resolve()),
+                                    "archive_digest": expected_publication_digest},
                "process": {"command": command, "cwd": str(inputs), "exit_code": 0,
                            "started_ns": started, "finished_ns": finished,
                            "stdout": "stdout.txt", "stderr": "stderr.txt"},
@@ -236,7 +295,8 @@ def _same_report(raw, normalized, case_map):
 def verify(root, repository, candidate, expected_hashes, runtime_identity,
            expected_archive_digest, expected_java_executable_sha256=None,
            expected_gradle_executable_sha256=None,
-           expected_runtime_java_executable_sha256=None, lane=LANE):
+           expected_runtime_java_executable_sha256=None, lane=LANE,
+           publication=None, expected_publication_digest=None):
     version, configuration = lane_parts(lane)
     expected_executables = {
         "java_executable_sha256": expected_java_executable_sha256,
@@ -250,6 +310,15 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     if not root.is_dir() or root.is_symlink():
         raise ValueError("full JVM archive is missing or symbolic")
     receipt = json.loads((root / "receipt.json").read_bytes())
+    if publication is None:
+        raise ValueError("independent JVM mode publication is required")
+    staging = mode_publication(publication, repository, candidate, configuration,
+                               expected_hashes, expected_publication_digest)
+    if (receipt.get("mode_publication") != {
+            "path": str(Path(publication).resolve()),
+            "archive_digest": expected_publication_digest}
+            or receipt.get("producer_paths", {}).get("staging") != str(staging)):
+        raise ValueError("full JVM archive differs from verified mode publication")
     manifest, contract = selected_contract(repository, lane)
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("version") != version
@@ -324,9 +393,9 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
         raise ValueError("external Gradle command differs from candidate or staged bytes")
     output = (root / process["stdout"]).read_text()
     runtime_executable = str(Path(toolchain["runtime_java_home"]) / "bin/java")
-    if (f"QUALIFICATION_BUILD_CONFIGURATION={configuration}" not in output.splitlines()
-            or output.count(f"Command: {runtime_executable} ") < 2):
+    if f"QUALIFICATION_BUILD_CONFIGURATION={configuration}" not in output.splitlines():
         raise ValueError("external test JVM process or build configuration is unproven")
+    test_worker_proof(output, paths["checkout"], runtime_executable)
     proof_bytes = (root / "build-configuration.json").read_bytes()
     if f"QUALIFICATION_BUILD_CONFIGURATION_SHA256={sha(proof_bytes)}" not in output.splitlines():
         raise ValueError("external build configuration proof is not bound to process")
@@ -426,6 +495,8 @@ def main():
     produce.add_argument("--repository", required=True)
     produce.add_argument("--candidate-sha", required=True)
     produce.add_argument("--staging", required=True)
+    produce.add_argument("--mode-publication", required=True)
+    produce.add_argument("--expected-mode-publication-digest", required=True)
     produce.add_argument("--output", required=True)
     produce.add_argument("--gradle", required=True)
     produce.add_argument("--lane", choices=LANES, required=True)
@@ -436,6 +507,8 @@ def main():
     replay.add_argument("--repository", required=True)
     replay.add_argument("--candidate-sha", required=True)
     replay.add_argument("--archive", required=True)
+    replay.add_argument("--mode-publication", required=True)
+    replay.add_argument("--expected-mode-publication-digest", required=True)
     replay.add_argument("--lane", choices=LANES, required=True)
     replay.add_argument("--expected-core-sha256", required=True)
     replay.add_argument("--expected-facade-sha256", required=True)
@@ -453,7 +526,8 @@ def main():
         if any(not SHA256.fullmatch(value) for value in hashes.values()):
             parser.error("independent target JAR hashes are required")
         result = run(args.repository, args.candidate_sha, args.staging, args.output,
-                     args.gradle, hashes, args.lane, args.runtime_java_home)
+                     args.gradle, hashes, args.lane, args.runtime_java_home,
+                     args.mode_publication, args.expected_mode_publication_digest)
     else:
         hashes = {"dyn4k-core": args.expected_core_sha256,
                   "dyn4k": args.expected_facade_sha256}
@@ -461,7 +535,8 @@ def main():
                         hashes, args.runtime_identity, args.expected_archive_digest,
                         args.expected_java_executable_sha256,
                         args.expected_gradle_executable_sha256,
-                        args.expected_runtime_java_executable_sha256, args.lane)
+                        args.expected_runtime_java_executable_sha256, args.lane,
+                        args.mode_publication, args.expected_mode_publication_digest)
     print(json.dumps(result, sort_keys=True))
 
 

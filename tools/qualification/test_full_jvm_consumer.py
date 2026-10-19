@@ -15,6 +15,10 @@ import independent_gates
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 ARCHIVE = os.environ.get("DYN4K_FULL_JVM_ARCHIVE")
+PUBLICATION = os.environ.get("DYN4K_JVM_MODE_PUBLICATION")
+DEFAULT_PUBLICATION = os.environ.get("DYN4K_JVM_DEFAULT_PUBLICATION")
+PUBLICATION_DIGEST = (independent_gates.archive_digest(PUBLICATION)
+                      if ARCHIVE and PUBLICATION else None)
 TEST_LANE = os.environ.get("DYN4K_FULL_JVM_LANE", route.LANE)
 JAVA_EXECUTABLE_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
 GRADLE_EXECUTABLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
@@ -26,7 +30,8 @@ RUNTIME_EXECUTABLE_SHA256 = (route.sha((Path("/tmp/dyn4k-tools/jdk8" if
 def verify_archive(root, repository, candidate, hashes, identity, digest):
     return route.verify(root, repository, candidate, hashes, identity, digest,
                         JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256,
-                        RUNTIME_EXECUTABLE_SHA256, TEST_LANE)
+                        RUNTIME_EXECUTABLE_SHA256, TEST_LANE,
+                        PUBLICATION, PUBLICATION_DIGEST)
 
 
 class FullJvmConsumerTests(unittest.TestCase):
@@ -41,7 +46,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                     route.verify("missing-archive", REPOSITORY, "0" * 40, {}, "Java",
                                  "0" * 64, java_hash, gradle_hash)
 
-    @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
+    @unittest.skipUnless(ARCHIVE and PUBLICATION, "requires retained JVM and mode archives")
     def test_resealed_forged_toolchain_hashes_fail_public_verify(self):
         root = Path(ARCHIVE)
         receipt = json.loads((root / "receipt.json").read_bytes())
@@ -74,13 +79,15 @@ class FullJvmConsumerTests(unittest.TestCase):
                     "--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256,
                     "--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256,
                     "--expected-runtime-java-executable-sha256", RUNTIME_EXECUTABLE_SHA256,
+                    "--mode-publication", PUBLICATION,
+                    "--expected-mode-publication-digest", PUBLICATION_DIGEST,
                 ]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("independent executable SHA-256 differs",
                               result.stderr)
 
-    @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
+    @unittest.skipUnless(ARCHIVE and PUBLICATION, "requires retained JVM and mode archives")
     def test_public_cli_requires_independent_executable_hashes(self):
         root = Path(ARCHIVE)
         receipt = json.loads((root / "receipt.json").read_bytes())
@@ -94,7 +101,10 @@ class FullJvmConsumerTests(unittest.TestCase):
         java = ["--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256]
         gradle = ["--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256]
         runtime_java = ["--expected-runtime-java-executable-sha256", RUNTIME_EXECUTABLE_SHA256]
-        positive = subprocess.run(base + java + gradle + runtime_java, capture_output=True, text=True)
+        publication = ["--mode-publication", PUBLICATION,
+                       "--expected-mode-publication-digest", PUBLICATION_DIGEST]
+        positive = subprocess.run(base + java + gradle + runtime_java + publication,
+                                  capture_output=True, text=True)
         self.assertEqual(positive.returncode, 0, positive.stderr)
         self.assertEqual(json.loads(positive.stdout)["selected_cases"], 2526)
         adverse = (
@@ -114,7 +124,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         )
         for arguments, error in adverse:
             with self.subTest(arguments=arguments[-2:]):
-                result = subprocess.run(arguments, capture_output=True, text=True)
+                result = subprocess.run(arguments + publication, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(error, result.stderr)
 
@@ -151,7 +161,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported full JVM lane"):
             route.selected_contract(REPOSITORY, "jvm:Java:minimum:equivalent")
 
-    @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
+    @unittest.skipUnless(ARCHIVE and PUBLICATION, "requires retained JVM and mode archives")
     def test_public_replay_and_resealed_adverse_archive(self):
         root = Path(ARCHIVE)
         receipt = json.loads((root / "receipt.json").read_bytes())
@@ -168,6 +178,37 @@ class FullJvmConsumerTests(unittest.TestCase):
             {"staged-consumer": digest})
         self.assertEqual(lane["gates"]["staged-consumer"]["status"], "PASSED")
         self.assertEqual(lane["status"], "NOT_RUN")
+
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "wrong-publication"
+            shutil.copytree(PUBLICATION, copied, copy_function=shutil.copy2)
+            staged = route.target_binary(copied / "staged", "dyn4k-core")
+            staged.write_bytes(b"wrong library JAR")
+            with self.assertRaises(ValueError):
+                route.verify(root, REPOSITORY, candidate, hashes, identity, digest,
+                             JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256,
+                             RUNTIME_EXECUTABLE_SHA256, TEST_LANE, copied,
+                             independent_gates.archive_digest(copied))
+
+        if TEST_LANE.endswith(":no-optimize") and DEFAULT_PUBLICATION:
+            with tempfile.TemporaryDirectory() as directory:
+                copied = Path(directory) / "copy"
+                shutil.copytree(root, copied, copy_function=shutil.copy2)
+                altered = copy.deepcopy(receipt)
+                default = Path(DEFAULT_PUBLICATION).resolve()
+                default_hashes = {module: route.sha(route.target_binary(
+                    default / "staged", module).read_bytes()) for module in route.MODULES}
+                altered["artifact_hashes"] = default_hashes
+                altered["mode_publication"] = {
+                    "path": str(default),
+                    "archive_digest": independent_gates.archive_digest(default)}
+                (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
+                forged_digest = independent_gates.archive_digest(copied)
+                with self.assertRaisesRegex(ValueError, "mode publication"):
+                    route.verify(copied, REPOSITORY, candidate, default_hashes, identity,
+                                 forged_digest, JAVA_EXECUTABLE_SHA256,
+                                 GRADLE_EXECUTABLE_SHA256, RUNTIME_EXECUTABLE_SHA256,
+                                 TEST_LANE, default, altered["mode_publication"]["archive_digest"])
 
         def copied_archive(directory):
             copied = Path(directory) / "copy"
@@ -196,6 +237,18 @@ class FullJvmConsumerTests(unittest.TestCase):
             os.utime(stdout, ns=(stamp, stamp))
             (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
             return independent_gates.archive_digest(copied)
+
+        with tempfile.TemporaryDirectory() as directory:
+            copied, altered = copied_archive(directory)
+            stdout = copied / "stdout.txt"
+            lines = stdout.read_text().splitlines(keepends=True)
+            executor = next(index for index, line in enumerate(lines)
+                            if line.startswith("Starting process 'Gradle Test Executor "))
+            lines[executor] = "Starting process 'Gradle Test Executor removed'.\n"
+            stdout.write_text("".join(lines))
+            forged_digest = reseal(copied, altered, {"stdout.txt": None})
+            with self.assertRaisesRegex(ValueError, "Gradle Test Executor"):
+                verify_archive(copied, REPOSITORY, candidate, hashes, identity, forged_digest)
 
         with tempfile.TemporaryDirectory() as directory:
             copied, altered = copied_archive(directory)
@@ -287,7 +340,8 @@ class FullJvmConsumerTests(unittest.TestCase):
             route.verify(root, REPOSITORY, candidate, hashes, identity, digest,
                          JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256,
                          RUNTIME_EXECUTABLE_SHA256,
-                         next(lane for lane in route.LANES if lane != TEST_LANE))
+                         next(lane for lane in route.LANES if lane != TEST_LANE),
+                         PUBLICATION, PUBLICATION_DIGEST)
         with self.assertRaises(ValueError):
             verify_archive(root, REPOSITORY, candidate, hashes, "wrong runtime", digest)
 
