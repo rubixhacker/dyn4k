@@ -143,6 +143,8 @@ def _report(raw, target, selected):
             raise ValueError("native raw case is foreign")
         observed.append(identity)
         case.set("id", identity)
+    if len(observed) != len(set(observed)):
+        raise ValueError("native raw cases duplicate an original method")
     return observed, ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 

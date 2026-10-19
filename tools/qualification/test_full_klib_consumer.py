@@ -58,6 +58,19 @@ class FullKlibConsumerTests(unittest.TestCase):
                         raw.replace(b'tests="1"', b'tests="2"')):
             with self.subTest(altered=altered), self.assertRaises(ValueError):
                 route._report(altered, "linuxX64", selected)
+        duplicate = raw.replace(b'tests="1"', b'tests="2"').replace(
+            b'</testsuite>',
+            b'<testcase classname="linuxX64Test.a.B" name="method[linuxX64]" time="0.1"/>'
+            b'</testsuite>')
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            route._report(duplicate, "linuxX64", selected)
+        for outcome in (b"skipped", b"failure"):
+            altered = raw.replace(b' name="method[linuxX64]" time="0.1"/>',
+                                  b' name="method[linuxX64]" time="0.1"><' + outcome +
+                                  b'/></testcase>')
+            altered = altered.replace(outcome + b'="0"', outcome + b'="1"')
+            with self.subTest(outcome=outcome), self.assertRaises(ValueError):
+                route._report(altered, "linuxX64", selected)
 
     @unittest.skipUnless(os.environ.get("DYN4K_KLIB_BOUNDED_TAP"),
                          "requires retained original bounded Node TAP")
@@ -79,6 +92,10 @@ class FullKlibConsumerTests(unittest.TestCase):
                        selected)
         with self.assertRaises(ValueError):
             route._tap(tap.replace(b"ok 1 - equalDistanceEdges", b"ok 1 - fakeMethod"),
+                       selected)
+        with self.assertRaises(ValueError):
+            route._tap(tap.replace(b"# Subtest: equalDistanceEdges",
+                                   b"# Subtest: equalDistanceEdges\n        # Subtest: equalDistanceEdges"),
                        selected)
 
     @unittest.skipUnless(ARCHIVE and TRUSTED, "requires retained real full KLIB archive")
@@ -139,6 +156,13 @@ class FullKlibConsumerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path, changed = copied(directory)
+            changed["runtime"] = "wrong-runtime"
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "runtime differs"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
             graph_path = path / "provider-graph.json"
             graph = json.loads(graph_path.read_bytes())
             provider = next(item for item in graph["compile"][0]["artifacts"]
@@ -159,6 +183,16 @@ class FullKlibConsumerTests(unittest.TestCase):
 
         if lane.startswith("linuxX64:"):
             raw = receipt["raw_consumer_xml"][0]
+            with tempfile.TemporaryDirectory() as directory:
+                path, changed = copied(directory)
+                xml_path = path / raw
+                suite = ET.fromstring(xml_path.read_bytes())
+                suite.append(copy.deepcopy(next(suite.iter("testcase"))))
+                suite.set("tests", str(int(suite.get("tests")) + 1))
+                xml_path.write_bytes(ET.tostring(suite))
+                reseal(path, changed)
+                with self.assertRaisesRegex(ValueError, "duplicate"):
+                    check(path, changed)
             with tempfile.TemporaryDirectory() as directory:
                 path, changed = copied(directory)
                 xml_path = path / raw
