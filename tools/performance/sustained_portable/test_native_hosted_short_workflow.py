@@ -305,6 +305,67 @@ class HostedRawFileContract(unittest.TestCase):
         capture["rss_observation"]["errors"] = 0
         return resident, capture, execution
 
+    def test_no_error_method_matches_each_selected_target(self):
+        check = self.scope["resident_probe_errors_complete"]
+        methods = {"macosArm64": "proc_pidinfo_task_resident",
+                   "mingwX64": "GetProcessMemoryInfo_working_set"}
+        for target, expected in methods.items():
+            for method in (None, "", next(value for value in methods.values()
+                                            if value != expected)):
+                with self.subTest(target=target, method=method):
+                    resident, capture, execution = self.no_error_receipt()
+                    resident["method"] = method
+                    self.assertFalse(check(resident, capture, execution, target))
+            with self.subTest(target=target, method=expected):
+                resident, capture, execution = self.no_error_receipt()
+                resident["method"] = expected
+                self.assertTrue(check(resident, capture, execution, target))
+
+    def test_terminal_method_matches_selected_target(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for method in (None, "", "GetProcessMemoryInfo_working_set"):
+            with self.subTest(method=method):
+                resident, capture, execution = self.terminal_receipt()
+                resident["method"] = method
+                self.assertFalse(check(resident, capture, execution, "macosArm64"))
+        resident, capture, execution = self.terminal_receipt()
+        self.assertFalse(check(resident, capture, execution, "mingwX64"))
+
+    def test_memory_identity_requires_exact_positive_pids_in_each_sidecar(self):
+        tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
+        identity_guard = next(node.test for node in ast.walk(tree)
+                              if isinstance(node, ast.If) and any(
+                                  isinstance(child, ast.Raise) and
+                                  isinstance(child.exc, ast.Call) and
+                                  any(isinstance(arg, ast.Constant) and
+                                      arg.value == "Native memory receipt or sidecar identity differs"
+                                      for arg in child.exc.args)
+                                  for child in node.body))
+        expression = compile(ast.Expression(body=identity_guard), str(RUNNER), "eval")
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)
+            for name in ("stdout.raw", "stderr.raw", "rss.csv", "heap.csv"):
+                (archive / name).touch()
+            capture = {"mode": "memory", "source_sha": "source", "target": "mingwX64",
+                       "build": "development", "scenario": {"api": "direct_kotlin"},
+                       "pid": 1, "process_image_identity": "observed",
+                       "managed_heap_observation": {
+                           "status": "observed_kotlin_heap_after_collection", "stages": 3}}
+            execution = {"pid": 1, "raw_collection": "selected_process_exited",
+                         "termination": "natural", "exit_code": 0}
+            resident = {"pid": 1}
+            scope = {"capture": capture, "execution": execution, "resident": resident,
+                     "run": {"mode": "memory", "qualification": "unpassed"},
+                     "sha": "source", "target": "mingwX64", "build": "development",
+                     "api": "direct_kotlin", "archive": archive}
+            self.assertFalse(eval(expression, scope))
+            for record in (capture, execution, resident):
+                for malformed in (1.0, True, False, 0, -1, "1", None):
+                    with self.subTest(record=record, malformed=malformed):
+                        record["pid"] = malformed
+                        self.assertTrue(eval(expression, scope))
+                        record["pid"] = 1
+
     def test_ordered_live_sample_clocks_accept_in_both_routes(self):
         check = self.scope["resident_probe_errors_complete"]
         for no_error in (False, True):

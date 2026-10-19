@@ -92,6 +92,10 @@ def sidecar_bytes(path):
     return snapshot
 
 def resident_probe_errors_complete(resident, capture, execution, selected_target):
+    expected_method = {"macosArm64": "proc_pidinfo_task_resident",
+                       "mingwX64": "GetProcessMemoryInfo_working_set"}.get(selected_target)
+    if expected_method is None or resident.get("method") != expected_method:
+        return False
     samples = resident["samples"]
     declared_samples = capture["rss_observation"].get("samples")
     if (type(samples) is not list or not samples or
@@ -116,8 +120,7 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
         return False
     if not errors:
         return True
-    if (selected_target != "macosArm64" or len(errors) != 1 or
-            resident["method"] != "proc_pidinfo_task_resident"):
+    if selected_target != "macosArm64" or len(errors) != 1:
         return False
     row = errors[0]
     if (not isinstance(row, dict) or
@@ -379,6 +382,8 @@ try:
                         if (capture["mode"] != "memory" or run["mode"] != "memory" or
                             capture["source_sha"] != sha or capture["target"] != target or
                             capture["build"] != build or capture["scenario"]["api"] != api or
+                            any(type(pid) is not int or pid <= 0 for pid in
+                                (execution["pid"], capture["pid"], resident["pid"])) or
                             execution["pid"] != capture["pid"] or resident["pid"] != execution["pid"] or
                             capture["process_image_identity"] != "observed" or
                             execution["raw_collection"] != "selected_process_exited" or
