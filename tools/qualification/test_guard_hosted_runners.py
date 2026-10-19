@@ -37,6 +37,14 @@ class HostedRunnerGuardTest(unittest.TestCase):
         self.write("valid.yml", VALID)
         self.assertEqual((1, []), scan(self.root))
 
+    def test_documented_ubuntu_arm_runner(self) -> None:
+        self.write("arm.yml", VALID.replace("ubuntu-latest", "ubuntu-24.04-arm"))
+        self.assertEqual((1, []), scan(self.root))
+
+    def test_unknown_ubuntu_arm_runner_is_rejected(self) -> None:
+        self.write("unknown.yml", VALID.replace("ubuntu-latest", "ubuntu-24.04-arm64"))
+        self.assertTrue(any("explicit Linux/Windows" in error for error in scan(self.root)[1]))
+
     def test_new_workflow_is_scanned(self) -> None:
         self.write("valid.yml", VALID)
         self.write("new.yaml", VALID.replace("windows-2025", "macos-26"))
