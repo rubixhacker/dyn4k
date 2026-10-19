@@ -1,5 +1,6 @@
 import unittest
 import xml.etree.ElementTree as ET
+import json
 
 import full_browser_consumer as browser
 
@@ -56,6 +57,33 @@ class BrowserRowsTest(unittest.TestCase):
             browser.selected_map(b"a\tA\tm\na\tA\tm\n")
         with self.assertRaisesRegex(ValueError, "differs"):
             browser.selected_map(b"a\tA\n")
+
+    def karma(self, methods):
+        suite = "org.dyn4j SampleTest.Chrome Headless 155.0.0.0 (Linux 0.0.0)"
+        flow = "karmaTC123"
+        messages = [f"##teamcity[testSuiteStarted name='{suite}' flowId='{flow}']"]
+        for method in methods:
+            messages.extend((
+                f"##teamcity[testStarted name='{method}' captureStandardOutput='true' flowId='{flow}']",
+                f"##teamcity[testFinished name='{method}' duration='' flowId='{flow}']"))
+        messages.append(f"##teamcity[testSuiteFinished name='{suite}' duration='%s' flowId='{flow}']")
+        return b"".join((json.dumps({"sha256": browser.sha(message.encode()),
+                                     "message": message}) + "\n").encode()
+                        for message in messages)
+
+    def test_raw_karma_methods_are_replayed(self):
+        self.assertEqual(browser.karma_rows(self.karma(["second", "first"]),
+                                            self.selected, 155),
+                         ["core:second", "core:first"])
+
+    def test_raw_karma_rejects_missing_duplicate_and_foreign_methods(self):
+        for methods in (["first"], ["first", "first"], ["first", "foreign"]):
+            with self.subTest(methods=methods), self.assertRaises(ValueError):
+                browser.karma_rows(self.karma(methods), self.selected, 155)
+
+    def test_raw_karma_rejects_wrong_runtime(self):
+        with self.assertRaisesRegex(ValueError, "suite start"):
+            browser.karma_rows(self.karma(["first", "second"]), self.selected, 119)
 
 
 if __name__ == "__main__":

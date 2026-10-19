@@ -19,6 +19,8 @@ import independent_gates
 CONSUMER = "consumers/qualification/portable/full-browser"
 MODULES = ("dyn4k-core", "dyn4k")
 VERSION = "0.1.0-alpha.1"
+JAVA_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
+GRADLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
 CHROMIUM = {
     "minimum": (119, "c81049295247b6892c802dcad33dcab0a0337fce31800f923f51bdb0c07e6d11"),
     "current": (155, "b866a2964538c825538c454de4867973b926650da57ec12dc3328807d768247b"),
@@ -147,6 +149,73 @@ def selected_map(data):
     return {(line[1], line[2]): line[0] for line in lines}
 
 
+def karma_rows(raw, expected, major):
+    active_suite = None
+    active_method = None
+    observed = []
+    flow = None
+    starts = finishes = 0
+    for line in raw.decode().splitlines():
+        item = json.loads(line)
+        message = item["message"]
+        if set(item) != {"sha256", "message"} or item["sha256"] != sha(message.encode()):
+            raise ValueError("original Karma message bytes differ")
+        if message.startswith("##teamcity[testSuiteStarted"):
+            match = re.fullmatch(
+                rf"##teamcity\[testSuiteStarted name='(.+)\.Chrome Headless "
+                rf"{major}(?:\.\d+)+ \(Linux (?:\d+\.)+\d+\)' flowId='([^']+)'\]",
+                message)
+            if match is None or active_suite is not None or active_method is not None:
+                raise ValueError("original Karma suite start differs")
+            parts = match[1].split(" ", 1)
+            if len(parts) != 2:
+                raise ValueError("original Karma class identity differs")
+            active_suite = (f"{parts[0]}.{parts[1]}", message.split(" name='", 1)[1].split("' flowId=", 1)[0])
+            if flow is None:
+                flow = match[2]
+            elif flow != match[2]:
+                raise ValueError("original Karma flow differs")
+        elif message.startswith("##teamcity[testSuiteFinished"):
+            match = re.fullmatch(
+                r"##teamcity\[testSuiteFinished name='([^']+)' duration='(?:\d*|%s)' flowId='([^']+)'\]",
+                message)
+            if (match is None or active_suite is None or active_method is not None
+                    or match[1] != active_suite[1] or match[2] != flow):
+                raise ValueError("original Karma suite finish differs")
+            active_suite = None
+        elif message.startswith("##teamcity[testStarted"):
+            match = re.fullmatch(
+                r"##teamcity\[testStarted name='([^']+)' captureStandardOutput='true' flowId='([^']+)'\]",
+                message)
+            if (match is None or active_suite is None or active_method is not None
+                    or match[2] != flow):
+                raise ValueError("original Karma method start differs")
+            identity = expected.get((active_suite[0], match[1]))
+            if identity is None:
+                raise ValueError("original Karma method is foreign")
+            active_method = (match[1], identity)
+            observed.append(identity)
+            starts += 1
+        elif message.startswith("##teamcity[testFinished"):
+            match = re.fullmatch(
+                r"##teamcity\[testFinished name='([^']+)' duration='\d*' flowId='([^']+)'\]",
+                message)
+            if (match is None or active_method is None or match[1] != active_method[0]
+                    or match[2] != flow):
+                raise ValueError("original Karma method finish differs")
+            active_method = None
+            finishes += 1
+        elif message.startswith(("##teamcity[testFailed", "##teamcity[testIgnored")):
+            raise ValueError("original Karma method failed or skipped")
+        elif message.startswith("##teamcity[testStdOut") and active_method is None:
+            raise ValueError("original Karma diagnostic has no method")
+    if (active_suite is not None or active_method is not None
+            or starts != finishes or len(observed) != len(expected)
+            or len(observed) != len(set(observed)) or set(observed) != set(expected.values())):
+        raise ValueError("original Karma method stream is incomplete or duplicate")
+    return observed
+
+
 def file_hash(path):
     return sha(path.read_bytes())
 
@@ -165,7 +234,8 @@ def toolchain(gradle, browser):
     gradle_version = subprocess.check_output([str(gradle), "--version"], text=True)
     browser_version = subprocess.check_output([str(browser), "--version"], text=True).strip()
     if ('version "21' not in java_version or "Gradle 9.5.0" not in gradle_version
-            or "Chrome" not in browser_version):
+            or "Chrome" not in browser_version or file_hash(java) != JAVA_SHA256
+            or file_hash(gradle) != GRADLE_SHA256):
         raise ValueError("pinned toolchain version differs")
     return {"java_home": str(java_home), "java_version": java_version,
             "java_sha256": file_hash(java), "gradle": str(gradle),
@@ -298,6 +368,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                 copy(report, destination / "xml" / report.name)
             if len(observed) != len(selected) or set(observed) != set(selected.values()):
                 raise ValueError(f"external {short} full original method set is incomplete")
+            karma_rows(raw_karma.read_bytes(), selected, major)
             module_rows[short] = observed
             package = f"dyn4k-full-staged-browser-consumer-{short}-test"
             configuration = lane.rsplit(":", 1)[1]
@@ -305,7 +376,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
             linked = work / short / "compileSync/js/test" / f"test{mode}Executable" / "kotlin" / f"{package}.js"
             if not linked.is_file():
                 raise ValueError(f"external {short} linked {configuration} bundle is absent")
-            copy(linked, destination / "linked-executable.js")
+            processes[short]["linked_sha256"] = copy(linked, destination / "linked-executable.js")
             generated = work / "root/js/packages" / package / "karma.conf.js"
             if (not generated.is_file()
                     or f"config.set({{port: {port}}});" not in generated.read_text()
@@ -413,6 +484,10 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
         raise ValueError("wrong Chromium binary or version")
     if receipt.get("staged_hashes") != hashes:
         raise ValueError("independently selected staged KLIB hashes differ")
+    if (receipt["toolchain"].get("java_sha256") != JAVA_SHA256
+            or receipt["toolchain"].get("gradle_sha256") != GRADLE_SHA256
+            or receipt["toolchain"].get("kgp_version") != "2.4.20"):
+        raise ValueError("pinned JDK, Gradle, or KGP identity differs")
     paths = receipt["paths"]
     if (set(paths) != {"checkout", "staging", "archive", "inputs", "work"}
             or paths["archive"] != str(archive)
@@ -446,11 +521,11 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
             raise ValueError("full original browser method rows differ")
         if receipt["row_order_sha256"].get(short) != sha(encoded(observed)):
             raise ValueError("original browser method order differs")
+        record = receipt["modules"][short]
         if (file_hash(folder / "browser-reporter.js") != receipt["browser_support_sha256"][REPORTER]
-                or file_hash(folder / "linked-executable.js") == sha(b"")):
+                or file_hash(folder / "linked-executable.js") != record["linked_sha256"]):
             raise ValueError("browser reporter or linked bundle differs")
         launches = [json.loads(line) for line in (folder / "browser-launches.jsonl").read_text().splitlines()]
-        record = receipt["modules"][short]
         if (record.get("command") != base + [f":{short}:jsBrowserTest"]
                 or record.get("cwd") != paths["inputs"]
                 or type(record.get("pid")) is not int
@@ -474,6 +549,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
         expected_bundle = (f"{receipt['paths']['work']}/{short}/compileSync/js/test/"
                            f"test{mode.capitalize()}Executable/kotlin/{package}.js")
         if (f"> Task :{short}:jsBrowserTest" not in text
+                or "BUILD SUCCESSFUL" not in text or " FAILED" in text
                 or f"QUALIFICATION_LANE={lane}" not in (archive / "graph.stdout").read_text()
                 or (mode == "production" and
                     f"qualification test input: {expected_bundle}" not in text)):
@@ -486,13 +562,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
                                          "kotlin-web-helpers/dist/karma-kotlin-reporter.js",
                         "producer_sha256": "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"}:
             raise ValueError("browser reporter producer attestation differs")
-        raw_messages = [json.loads(line) for line in
-                        (folder / "raw-karma.jsonl").read_text().splitlines()]
-        if (not raw_messages or any(set(item) != {"sha256", "message"}
-                or item["sha256"] != sha(item["message"].encode()) for item in raw_messages)
-                or not any("##teamcity[testStarted" in item["message"]
-                           for item in raw_messages)):
-            raise ValueError("original raw Karma result stream differs")
+        karma_rows((folder / "raw-karma.jsonl").read_bytes(), source, major)
     graph = independent_gates._json(archive / "provider-graph.json")
     if (set(graph) != {"compile", "runtime", "gradle_user_home"}
             or graph["gradle_user_home"] != receipt["toolchain"]["gradle_user_home"]):
