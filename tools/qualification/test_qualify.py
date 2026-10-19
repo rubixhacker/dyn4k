@@ -101,22 +101,26 @@ class QualificationTests(unittest.TestCase):
                        "jvm_mode_publication": None}, sha, alternate, suite, audit)["status"])
         self.assertNotEqual(observed["default"], observed["no-optimize"])
 
-    def test_resealed_forged_jvm_publication_is_rejected(self):
+    def test_forged_jvm_jar_hash_reaches_measured_byte_check(self):
         case, binding, hashes = self.mode_fixture("default")
-        with tempfile.TemporaryDirectory() as temporary:
-            archive = Path(temporary) / "forged"
-            shutil.copytree(binding["publication_archive"], archive, copy_function=shutil.copy2)
-            receipt_path = archive / "receipt.json"
-            receipt = json.loads(receipt_path.read_text())
-            receipt["artifacts"]["dyn4k-core"]["sha256"] = "0" * 64
-            receipt_path.write_text(json.dumps(receipt))
-            forged = {**binding, "publication_archive": str(archive),
-                      "archive_digest": independent_gates.archive_digest(archive),
-                      "artifact_hashes": {**hashes, "dyn4k-core": "0" * 64}}
-            with self.assertRaisesRegex(ValueError, "JVM mode publication"):
+        archive = Path(binding["publication_archive"])
+        receipt = json.loads((archive / "receipt.json").read_text())
+        self.assertTrue(Path(receipt["processes"][0]["log"]).is_relative_to(archive))
+        receipt["artifacts"]["dyn4k-core"]["sha256"] = "0" * 64
+        forged = {**binding,
+                  "artifact_hashes": {**hashes, "dyn4k-core": "0" * 64}}
+        with mock.patch.object(qualify, "load_json_strict", return_value=receipt) as selected:
+            with self.assertRaisesRegex(
+                    ValueError, "^JVM mode publication dyn4k-core JAR differs$"):
                 qualify.verify_jvm_mode_publication(
                     forged, case, binding["candidate_sha"], forged["artifact_hashes"])
-            receipt_path.write_bytes(Path(binding["publication_archive"], "receipt.json").read_bytes())
+        selected.assert_called_once_with(archive / "receipt.json")
+
+    def test_copied_jvm_publication_cannot_borrow_original_logs(self):
+        case, binding, hashes = self.mode_fixture("default")
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "copied"
+            shutil.copytree(binding["publication_archive"], archive, copy_function=shutil.copy2)
             copied = {**binding, "publication_archive": str(archive),
                       "archive_digest": independent_gates.archive_digest(archive)}
             with self.assertRaisesRegex(ValueError, "log escapes selected archive"):
