@@ -2392,13 +2392,14 @@ class IndependentGateSeamTests(unittest.TestCase):
 
 
 class FullBrowserGenericGateTests(unittest.TestCase):
-    CANDIDATE = "2e3665ba110e18d9669f847eb714e31befa391ce"
     LANE = "js:Chromium:current:development"
     HASHES = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
     RUNTIME = "Linux fixture x86_64"
 
     @classmethod
     def setUpClass(cls):
+        cls.CANDIDATE = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         cls.manifest = independent_gates.load_approved_manifest(ROOT)
 
     def setUp(self):

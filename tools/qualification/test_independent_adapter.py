@@ -1006,11 +1006,21 @@ class IndependentAdapterTests(unittest.TestCase):
                   "lanes": expected}
         return suite, candidate, staged, archive_map, signed
 
+    def historical_browser_verifier_matches(self):
+        import full_browser_consumer
+
+        source = "tools/qualification/full_browser_consumer.py"
+        return (Path(full_browser_consumer.__file__).read_bytes()
+                == full_browser_consumer.original(BROWSER_PRODUCER, BROWSER_CANDIDATE,
+                                                  source))
+
     def test_signed_browser_dispatch_uses_real_generic_gate_for_all_four_routes(self):
         import full_browser_adapter
 
         if not BROWSER_PRODUCER.is_dir():
             self.skipTest("retained browser producer checkout is unavailable")
+        if not self.historical_browser_verifier_matches():
+            self.skipTest("historical browser replay requires its exact verifier source")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
@@ -1041,6 +1051,8 @@ class IndependentAdapterTests(unittest.TestCase):
 
         if not BROWSER_PRODUCER.is_dir():
             self.skipTest("retained browser producer checkout is unavailable")
+        if not self.historical_browser_verifier_matches():
+            self.skipTest("historical browser replay requires its exact verifier source")
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1100,6 +1112,72 @@ class IndependentAdapterTests(unittest.TestCase):
             self.assertEqual("FAILED", verified[lane]["verification"]["gates"][
                 "staged-consumer"]["status"])
             fabricated.assert_not_called()
+
+    def test_historical_browser_archive_rejects_newer_public_verifier(self):
+        import full_browser_adapter
+
+        if not BROWSER_PRODUCER.is_dir():
+            self.skipTest("retained browser producer checkout is unavailable")
+        if self.historical_browser_verifier_matches():
+            self.skipTest("historical verifier matches this checkout")
+        lane = "js:Chromium:current:development"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
+                root, [lane])
+            audit, signature, public, fingerprint = self.signed_inputs(root, signed)
+            with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch.object(full_browser_adapter,
+                                    "verify_full_browser_staged_consumer") as replay):
+                verified = independent_adapter.verify_lanes(
+                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    audit, signature, public, fingerprint,
+                    candidate_manifest=candidate, artifact_audit=staged)
+            gate = verified[lane]["verification"]["gates"]["staged-consumer"]
+            self.assertEqual("FAILED", gate["status"])
+            self.assertIn("public Chromium verifier differs from exact candidate",
+                          gate["reason"])
+            replay.assert_not_called()
+
+    def test_signed_browser_dispatch_preserves_generic_result_identity(self):
+        import full_browser_adapter
+
+        if not BROWSER_PRODUCER.is_dir():
+            self.skipTest("retained browser producer checkout is unavailable")
+        lane = "js:Chromium:current:development"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
+                root, [lane])
+            audit, signature, public, fingerprint = self.signed_inputs(root, signed)
+            gate_names = set(suite["lanes"][lane]["required_gates"]
+                             + suite["global_gates"])
+            gates = {name: {"gate": name, "status": "NOT_RUN"} for name in gate_names}
+            digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
+            gate = {"gate": "staged-consumer", "status": "PASSED",
+                    "complete_selected_suite": True, "selected_cases": 2523,
+                    "archive_sha256": digest}
+            gates["staged-consumer"] = gate
+            generic = {"candidate_sha": BROWSER_CANDIDATE, "lane": lane,
+                       "status": "NOT_RUN", "gates": gates}
+            generic["result_sha256"] = independent_gates.digest(generic)
+            public_result = {"status": "PASSED", "candidate_sha": BROWSER_CANDIDATE,
+                             "lane": lane, "archive_sha256": digest,
+                             "selected_cases": 2523}
+            with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch.object(independent_gates, "evaluate", return_value=generic),
+                  mock.patch.object(full_browser_adapter,
+                                    "verify_full_browser_staged_consumer",
+                                    return_value=public_result) as replay):
+                verified = independent_adapter.verify_lanes(
+                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    audit, signature, public, fingerprint,
+                    candidate_manifest=candidate, artifact_audit=staged)
+            self.assertIs(gate, replay.call_args.args[6])
+            self.assertEqual(staged["artifacts"][0]["sha256"],
+                             replay.call_args.args[7]["dyn4k-core"])
+            self.assertTrue(verified[lane]["identities_bound"])
+            self.assertEqual("NOT_RUN", verified[lane]["verification"]["status"])
 
 
 if __name__ == "__main__":
