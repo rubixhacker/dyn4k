@@ -367,7 +367,12 @@ class ExtractionTest(unittest.TestCase):
             self.assertIn(":linkDebugTestLinuxX64", native)
             self.assertNotIn("--tests", native)
             self.assertNotIn("linuxX64Test", native)
-            for host in ("node-js", "node-wasm-js", "node-wasm-wasi"):
+            node, node_log = run.method_command("node-js", method, lane)
+            self.assertIsNone(node_log)
+            self.assertIn(":jsTestTestDevelopmentExecutableCompileSync", node)
+            self.assertNotIn("--tests", node)
+            self.assertEqual(node.count("-Pkotlin.compiler.execution.strategy=in-process"), 0)
+            for host in ("node-wasm-js", "node-wasm-wasi"):
                 traced, trace_log = run.method_command(host, method, lane)
                 self.assertEqual(traced[5], "trace=execve")
                 self.assertEqual(trace_log, lane / f"native-exec-{method}.log")
@@ -830,6 +835,27 @@ class DetachedNativeBundleTest(unittest.TestCase):
                         redirect_stdout(io.StringIO()) as printed:
                     self.assertEqual(run.main(), 1)
                 self.assertEqual(json.loads(printed.getvalue())["status"], "FAILED")
+
+
+class NodeStreamTest(unittest.TestCase):
+    def test_file_backed_node_stream_replays_and_rejects_failed_test(self):
+        method = "defaultContactsFrictionSleepAndWake"
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "node-output.log"
+            xml = Path(directory) / "method.xml"
+            source.write_text(
+                "##teamcity[testStarted name='defaultContactsFrictionSleepAndWake' flowId='7']\n"
+                'NUMERICAL_JSON {"kind":"inputs","id":"contacts-default-30"}\n'
+                'NUMERICAL_JSON {"kind":"case-end","id":"contacts-default-30"}\n'
+                "##teamcity[testFinished name='defaultContactsFrictionSleepAndWake' duration='1' flowId='7']\n")
+            self.assertEqual(run.node_stream_xml(method, source, xml, create=True), 2)
+            self.assertEqual(run.node_stream_xml(method, source, xml), 2)
+            xml.write_bytes(xml.read_bytes().replace(b'contacts-default-30', b'contacts-default-60', 1))
+            with self.assertRaisesRegex(run.Rejected, "Node XML differs"):
+                run.node_stream_xml(method, source, xml)
+            source.write_text(source.read_text().replace("testFinished", "testFailed"))
+            with self.assertRaisesRegex(run.Rejected, "Node test failed or skipped"):
+                run.node_stream_xml(method, source, Path(directory) / "failed.xml", create=True)
 
 
 if __name__ == "__main__":

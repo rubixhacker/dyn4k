@@ -12,6 +12,10 @@ ANDROID_HOME="$HOME/Android/Sdk" python3 tools/numerical/portable/run.py \
 
 The runner has seven host routes: JVM 21, JVM 8, Android host, Linux x64, Node JS, Node Wasm JS, and Node Wasm WASI. The JVM 8 route uses `/tmp/dyn4k-tools/jdk8`. Android host uses a JVM and does not qualify an Android device. The publication log and manifest bind staged artifacts to the clean source revision.
 
+The Node JS route compiles the test bundle with Gradle, then executes the cached Node and Mocha worker with output sent directly to an archive file. The runner derives XML from that file and checks the executed command, bundle, compiler input, XML, and case slices. Supply existing test modules with `--node-modules /absolute/path/to/node_modules` when the worktree has no cached `build/js/node_modules`. The route clears inherited `NODE_OPTIONS` for the Node worker; it does not raise the heap limit. Missing cached modules are a producer failure.
+
+For a bounded Node diagnostic, use `--node-method defaultContactsFrictionSleepAndWake --output /absolute/archive --node-modules /absolute/path/to/node_modules`. Replay it with `--verify-node-method-existing --output /absolute/archive`. This archive proves only that method's three cases and retains `UNPASSED` target qualification. It does not replace the full 332-case Node lane.
+
 The runner reruns 15 matrix methods separately to retain each raw JUnit report and compiler-input proof. It then assembles one ordered JSONL trace and case inventory. Each completed lane retains method logs and XML, the whole trace, case slices, a receipt, and a result. The verifier checks each method's process, runtime version, executed payload, and staged dependency. JVM receipts bind provider class bytes. The Java 8 process trace also requires the test worker to open the staged JAR. Node and native receipts bind compiler inputs and executed bundles or binaries. Missing process or dependency proof fails the receipt. Unexecuted lanes get `NOT_RUN` or `UNAVAILABLE` receipts with zero cases and unpassed qualification. Android device and Android Native x64 remain `NOT_RUN` in this consumer.
 
 ## Recorded contract
