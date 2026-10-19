@@ -10,6 +10,9 @@ val staging = file(providers.gradleProperty("qualificationRepository").get())
 val archive = file(providers.gradleProperty("qualificationArchiveRoot").get())
 val workRoot = file(providers.gradleProperty("qualificationWorkRoot").get())
 val lane = providers.gradleProperty("qualificationLaneId").get()
+val target = lane.substringBefore(':')
+val publication = if (target == "js") "js" else "wasm-js"
+val configuration = if (target == "js") "jsTest" else "wasmJsTest"
 val version = "0.1.0-alpha.1"
 
 layout.buildDirectory.set(file("$workRoot/root"))
@@ -21,7 +24,7 @@ fun hash(file: File): String = MessageDigest.getInstance("SHA-256")
     .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
 
 fun staged(module: String): File = file(
-    "$staging/io/github/rubixhacker/$module-js/$version/$module-js-$version.klib")
+    "$staging/io/github/rubixhacker/$module-$publication/$version/$module-$publication-$version.klib")
 
 fun graph(projectName: String, name: String): Map<String, Any> {
     val resolved = project(":$projectName").configurations.getByName(name)
@@ -38,7 +41,7 @@ fun graph(projectName: String, name: String): Map<String, Any> {
 
 tasks.register("qualificationValidateInputs") {
     doLast {
-        check(lane.matches(Regex("js:Chromium:(minimum|current):(development|production)")))
+        check(lane.matches(Regex("(js|wasmJs):(Chromium|Firefox|Safari):(minimum|current):(development|production)")))
         val inventory = file(providers.gradleProperty("qualificationSourceInventory").get())
         val sources = inventory.readLines().filter { it.isNotBlank() }.associate { line ->
             val parts = line.split('\t')
@@ -47,7 +50,7 @@ tasks.register("qualificationValidateInputs") {
         }
         check(sources.isNotEmpty() && sources.size == inventory.readLines().size)
         val roots = listOf("dyn4k-core/src/commonTest/kotlin", "dyn4k/src/commonTest/kotlin",
-            "dyn4k-core/src/jsTest/kotlin")
+            "dyn4k-core/src/${configuration}/kotlin")
         val live = roots.flatMap { root ->
             file("$checkout/$root").walkTopDown().filter { it.isFile && it.extension == "kt" }
                 .map { it.relativeTo(checkout).invariantSeparatorsPath }.toList()
@@ -66,8 +69,8 @@ tasks.register("qualificationGraphs") {
     dependsOn("qualificationValidateInputs")
     doLast {
         val graphs = mapOf(
-            "compile" to listOf("core", "facade").map { graph(it, "jsTestCompileClasspath") },
-            "runtime" to listOf("core", "facade").map { graph(it, "jsTestRuntimeClasspath") },
+            "compile" to listOf("core", "facade").map { graph(it, "${configuration}CompileClasspath") },
+            "runtime" to listOf("core", "facade").map { graph(it, "${configuration}RuntimeClasspath") },
             "gradle_user_home" to gradle.gradleUserHomeDir.absolutePath)
         val path = file("$archive/provider-graph.json")
         path.parentFile.mkdirs()
@@ -75,7 +78,7 @@ tasks.register("qualificationGraphs") {
         println("QUALIFICATION_LANE=$lane")
         println("QUALIFICATION_PROVIDER_GRAPH_SHA256=${hash(path)}")
         for (module in listOf("dyn4k-core", "dyn4k")) {
-            val copy = file("$archive/resolved/$module-js-$version.klib")
+            val copy = file("$archive/resolved/$module-$publication-$version.klib")
             copy.parentFile.mkdirs()
             staged(module).copyTo(copy, overwrite = true)
             println("QUALIFICATION_RESOLVED_${module.uppercase().replace('-', '_')}_SHA256=${hash(copy)}")

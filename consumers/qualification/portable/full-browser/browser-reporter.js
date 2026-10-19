@@ -28,11 +28,23 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     }
     const selected = process.env.DYN4K_BROWSER_SELECTED_BUNDLE;
     const archive = process.env.DYN4K_BROWSER_SELECTED_ARCHIVE;
+    const assetArchive = process.env.DYN4K_BROWSER_ASSETS_ARCHIVE;
     const recordPath = process.env.DYN4K_BROWSER_SELECTED_ATTESTATION;
     const work = process.env.DYN4K_BROWSER_WORK_ROOT;
     const tmpdir = process.env.DYN4K_BROWSER_TMPDIR;
-    const root = path.join(work, 'root/js/node_modules');
-    const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');
+    const target = process.env.DYN4K_BROWSER_TARGET || 'js';
+    if (target !== 'js' && target !== 'wasmJs') {
+        throw new Error('unsupported browser target');
+    }
+    const runner = target === 'js'
+        ? path.join(work, 'root/js/node_modules/kotlin-web-helpers/dist/kotlin-test-karma-runner.js')
+        : config.files.map(file => typeof file === 'string' ? file : file.pattern)
+            .find(file => typeof file === 'string' &&
+                file.endsWith('/kotlin-web-helpers/dist/kotlin-test-karma-runner.js'));
+    if (!runner) {
+        throw new Error('Karma runner is absent');
+    }
+    const root = path.resolve(path.dirname(runner), '../..');
     const inputHashes = {
         [path.join(root, 'mocha/mocha.js')]:
             '8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6',
@@ -56,6 +68,12 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
         [path.join(root, 'kotlin-web-helpers/dist/karma-webpack-output.js')]:
             '7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7'
     };
+    if (target === 'wasmJs') {
+        inputHashes[path.join(root, 'kotlin-web-helpers/dist/static/context.html')] =
+            '0451957d938729d37d045f2eb855ea0b2afa50815ff2ed9488dd18e7135fc69d';
+        inputHashes[path.join(root, 'kotlin-web-helpers/dist/static/debug.html')] =
+            '695977572217887870de5bf75b6c4ba3be2b6780e20a0f2dd83af1c8660ce03e';
+    }
     function runtimeSelection() {
         for (const [name, digest] of Object.entries(inputHashes)) {
             if (crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex') !== digest) {
@@ -81,7 +99,8 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             throw new Error('Karma generated webpack path differs');
         }
         const expectedPaths = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),
-            path.join(root, 'mocha/mocha.js'), path.join(root, 'karma-mocha/lib/adapter.js'),
+            path.join(fs.realpathSync(root), 'mocha/mocha.js'),
+            path.join(fs.realpathSync(root), 'karma-mocha/lib/adapter.js'),
             runner, selected, path.join(webpack, '**/*')];
         const expected = expectedPaths.map((pattern, index) => ({pattern,
             served: true, included: index !== 6, watched: false,
@@ -93,12 +112,41 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
                 Object.keys(preprocessors).length !== 2 ||
                 Object.keys(expectedPreprocessors).some(key =>
                     JSON.stringify(preprocessors[key]) !== JSON.stringify(expectedPreprocessors[key]))) {
+            fs.writeFileSync(recordPath + '.rejected', JSON.stringify({files, expected,
+                preprocessors, expectedPreprocessors, target}) + '\n',
+                {flag: 'wx', mode: 0o600});
             throw new Error('Karma effective files or preprocessors differ');
         }
         return {effective_files: files, effective_preprocessors: expectedPreprocessors,
             input_sha256: inputHashes, tmpdir};
     }
     const runtime = runtimeSelection();
+    function wasmAssets(copy) {
+        if (target !== 'wasmJs') return null;
+        const packageName = path.basename(path.dirname(path.dirname(selected)));
+        const kotlin = path.join(work, 'root/wasm/packages', packageName, 'kotlin');
+        const names = fs.readdirSync(kotlin).sort();
+        const expected = [packageName + '.wasm', packageName + '.mjs',
+            packageName + '.wasm.map', 'custom-formatters.js',
+            packageName + '.js-builtins.mjs', packageName + '.import-object.mjs'].sort();
+        if (JSON.stringify(names) !== JSON.stringify(expected)) {
+            throw new Error('Wasm JS package executable inventory differs');
+        }
+        if (copy) fs.mkdirSync(assetArchive, {recursive: false});
+        const assets = names.map(name => {
+            const source = path.join(kotlin, name);
+            if (fs.lstatSync(source).isSymbolicLink()) {
+                throw new Error('Wasm JS package asset is symbolic');
+            }
+            const bytes = fs.readFileSync(source);
+            if (copy) {
+                fs.writeFileSync(path.join(assetArchive, name), bytes,
+                    {flag: 'wx', mode: 0o600});
+            }
+            return {name, sha256: crypto.createHash('sha256').update(bytes).digest('hex')};
+        });
+        return assets;
+    }
     let evidence = null;
     const originalBrowserStart = this.onBrowserStart;
     const originalRunComplete = this.onRunComplete;
@@ -111,13 +159,16 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
         fs.writeFileSync(archive, bytes, {flag: 'wx', mode: 0o600});
         evidence = {...runtime, source_path: selected, archive_path: archive,
             sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+            ...(target === 'wasmJs' ? {assets: wasmAssets(true)} : {}),
             node_pid: process.pid, browser_id: browser.id, browser_name: browser.name,
             captured_ns: Date.now() * 1000000};
     };
     this.onRunComplete = function() {
         if (evidence === null || JSON.stringify(runtimeSelection()) !== JSON.stringify(runtime) ||
                 crypto.createHash('sha256').update(fs.readFileSync(selected))
-                .digest('hex') !== evidence.sha256) {
+                .digest('hex') !== evidence.sha256 ||
+                (target === 'wasmJs' && JSON.stringify(wasmAssets(false)) !==
+                    JSON.stringify(evidence.assets))) {
             throw new Error('Karma selected bundle changed during browser execution');
         }
         originalRunComplete.call(this);

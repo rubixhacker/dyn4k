@@ -217,6 +217,8 @@ def _archive_paths(root):
             relative = path.relative_to(root).as_posix()
             _file_path_name(relative)
             if path.is_file():
+                if path.stat().st_nlink != 1:
+                    raise ValueError(f"hardlinked archive file: {relative}")
                 actual.add(relative)
             elif not path.is_dir():
                 raise ValueError(f"nonregular archive path: {relative}")
@@ -1181,7 +1183,12 @@ def _producer_manifest_contract(root, gate, scope, candidate_sha):
 def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
              expected_artifact_hashes, expected_runtime_identity, gate,
              expected_producer_scopes):
-    if receipt.get("schema") != 1 or receipt.get("candidate_sha") != candidate_sha:
+    import full_klib_consumer
+
+    klib_schema = (gate == "staged-consumer" and receipt.get("schema") == 2
+                   and lane_id in full_klib_consumer.LOCAL_LANES)
+    if (receipt.get("schema") != 1 and not klib_schema
+            or receipt.get("candidate_sha") != candidate_sha):
         raise ValueError("raw candidate SHA differs")
     source_tree = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "rev-parse", f"{candidate_sha}^{{tree}}"],
@@ -1224,7 +1231,9 @@ def _binding(root, receipt, candidate_sha, lane_id, lane, repository,
     return process
 
 
-def _process_proof(root, process, gate, lane_id):
+def _process_proof(root, process, gate, lane_id, receipt=None):
+    import full_klib_consumer
+
     command = process["command"]
     executable = Path(command[0]).name.lower()
     allowed = {"gradlew", "gradle", "adb", "xcrun", "node", "wasmtime",
@@ -1242,10 +1251,23 @@ def _process_proof(root, process, gate, lane_id):
         if "stdout" not in process:
             raise ValueError(f"raw {gate} process output is missing")
         output = _file_path(root, process["stdout"]).read_text()
-        if f"QUALIFICATION_LANE={lane_id}" not in output.splitlines():
+        klib_v2 = (gate == "staged-consumer" and isinstance(receipt, dict)
+                   and receipt.get("schema") == 2 and lane_id in command
+                   and lane_id in full_klib_consumer.LOCAL_LANES)
+        marker = f"QUALIFICATION_LANE={lane_id}"
+        lines = output.splitlines()
+        if klib_v2:
+            lane_seen = any(line == marker or line.endswith(
+                " [QUIET] [system.out] " + marker) or line ==
+                "[QUIET] [system.out] " + marker for line in lines)
+        else:
+            lane_seen = marker in lines
+        if not lane_seen:
             raise ValueError(f"raw {gate} output lacks exact lane execution marker")
         if executable in {"gradlew", "gradle"}:
-            if not re.search(r"(?m)^> Task :[^\s]+", output):
+            task_pattern = (r"(?m)^(?:[^\n]+ )?\[LIFECYCLE\] \[[^\]\n]+\] > Task :[^\s]+$"
+                            if klib_v2 else r"(?m)^> Task :[^\s]+")
+            if not re.search(task_pattern, output):
                 raise ValueError(f"raw {gate} Gradle task output is absent")
             expected = "BUILD FAILED" if process["exit_code"] != 0 else "BUILD SUCCESSFUL"
             if expected not in output:
@@ -1259,7 +1281,8 @@ def _process_file_binding(root, process, relative, label):
     path = _file_path(root, relative)
     marker = f"QUALIFICATION_{label}_SHA256={hashlib.sha256(path.read_bytes()).hexdigest()}"
     output = _file_path(root, process["stdout"]).read_text()
-    if marker not in output.splitlines():
+    if not any(line == marker or line.endswith(" " + marker)
+               for line in output.splitlines()):
         raise ValueError(f"raw process output does not bind {relative}")
 
 
@@ -1295,7 +1318,8 @@ def _external_unavailable(receipt, candidate_sha, lane_id, gate):
             or (gate not in GLOBAL_GATES and receipt.get("lane") != lane_id)
             or (receipt.get("lane") is not None and receipt.get("lane") != lane_id)
             or not isinstance(reason, str) or not reason.strip()
-            or not isinstance(receipt.get("observed_by"), str) or not receipt["observed_by"]
+            or not isinstance(receipt.get("observed_by"), str)
+            or not receipt["observed_by"].strip()
             or type(receipt.get("observed_at_ns")) is not int
             or receipt["observed_at_ns"] <= 0):
         raise ValueError("external unavailability observation is incomplete or misbound")
@@ -1937,7 +1961,8 @@ def _performance_resource(root, candidate_sha, expected_artifact_hashes,
 def evaluate(manifest, candidate_sha, lane_id, archives, repository,
              expected_artifact_hashes=None, expected_runtime_identity=None,
              expected_archive_digests=None, expected_all_target_hashes=None,
-             expected_producer_scopes=None, expected_performance_key=None):
+             expected_producer_scopes=None, expected_performance_key=None,
+             expected_signed_lane=None):
     repository = Path(repository)
     if digest(manifest) != APPROVED_MANIFEST_SHA256:
         raise ValueError("manifest differs from independently approved complete suite")
@@ -1977,7 +2002,8 @@ def evaluate(manifest, candidate_sha, lane_id, archives, repository,
                                     expected_runtime_identity,
                                     expected_archive_digests.get(gate),
                                     expected_all_target_hashes, manifest,
-                                    expected_producer_scopes, expected_performance_key)
+                                    expected_producer_scopes, expected_performance_key,
+                                    expected_signed_lane)
     statuses = {item["status"] for item in gates.values()}
     status = next((state for state in ("FAILED", "UNAVAILABLE", "NOT_RUN")
                    if state in statuses), "PASSED")
@@ -2070,11 +2096,49 @@ def evaluate_assembly(manifest, candidate_sha, lane_inputs, repository,
     return assembled
 
 
+def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repository,
+                                   hashes, runtime, expected_digest, signed_lane, family):
+    import full_signed_routes
+
+    _archive_paths(root)
+    if family == "wasm-node":
+        import full_wasm_node_consumer
+        measured = full_wasm_node_consumer.archive_digest(root)
+    else:
+        measured = archive_digest(root)
+    if not SHA64.fullmatch(str(expected_digest or "")) or measured != expected_digest:
+        raise ValueError("independently signed archive digest differs")
+    receipt = _json(_file_path(root, "receipt.json"))
+    if not isinstance(receipt, dict):
+        raise ValueError("dedicated producer receipt is invalid")
+    if receipt.get("status") == "UNAVAILABLE":
+        if _archive_paths(root) != {"receipt.json"}:
+            raise ValueError("unavailability receipt has unexpected raw files")
+        if signed_lane.get("expected_unavailability") != receipt:
+            raise ValueError("unavailability is not independently audited")
+        observation = _external_unavailable(receipt, candidate_sha, lane_id, gate)
+        return _result(gate, "UNAVAILABLE", observation["reason"],
+                       archive_sha256=expected_digest,
+                       observation_sha256=observation["observation_sha256"])
+    if receipt.get("status") == "NOT_RUN":
+        if signed_lane.get("expected_not_run") != receipt:
+            raise ValueError("unexecuted producer attempt is not independently audited")
+        return _result(gate, "NOT_RUN", "independently audited producer did not execute",
+                       archive_sha256=expected_digest)
+    public = full_signed_routes.verify(repository, candidate_sha, lane_id, root,
+                                       signed_lane, hashes, runtime, expected_digest)
+    return _result(gate, "PASSED", f"{family} public full consumer verified",
+                   archive_sha256=expected_digest, complete_selected_suite=True,
+                   selected_cases=2523, public_verification=public)
+
+
 def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                   expected_artifact_hashes, expected_runtime_identity,
                   expected_archive_digest=None, expected_all_target_hashes=None,
                   manifest=None, expected_producer_scopes=None,
-                  expected_performance_key=None):
+                  expected_performance_key=None, expected_signed_lane=None):
+    import full_browser_consumer
+
     if archive is None:
         if gate == "physical-correctness":
             return _result(gate, "NOT_RUN", "no raw candidate physical archive supplied",
@@ -2087,6 +2151,21 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
     try:
         if not root.is_dir() or root.is_symlink():
             raise ValueError("raw archive directory is missing or symbolic")
+        if (gate == "staged-consumer" and isinstance(manifest, dict)
+                and len(manifest.get("lanes", {})) == 112):
+            import full_signed_routes
+
+            family = full_signed_routes.route_table(repository, manifest)[lane_id]
+            if family in {"wasm-node", "native-host", "android-native", "apple-device"}:
+                if expected_signed_lane is None:
+                    if not (family == "android-native"
+                            and full_signed_routes.PUBLIC_REPLAY_ACTIVE.get()):
+                        raise ValueError("dedicated staged consumer requires independently signed lane")
+                else:
+                    return _evaluate_signed_full_consumer(
+                        gate, root, candidate_sha, lane_id, repository,
+                        expected_artifact_hashes, expected_runtime_identity,
+                        expected_archive_digest, expected_signed_lane, family)
         if gate == "staged-consumer" and (root / "verification.json").is_file():
             _archive_paths(root)
             summary = _bounded_bundle(root, candidate_sha, lane,
@@ -2100,13 +2179,18 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
         if receipt.get("status") == "UNAVAILABLE":
             if {path.name for path in root.iterdir()} != {"receipt.json"}:
                 raise ValueError("unavailability receipt has unexpected raw files")
+            if gate == "staged-consumer" and expected_signed_lane is not None:
+                if (expected_signed_lane.get("expected_unavailability") != receipt
+                        or not SHA64.fullmatch(str(expected_archive_digest or ""))
+                        or archive_digest(root) != expected_archive_digest):
+                    raise ValueError("unavailability is not independently audited")
             return _external_unavailable(receipt, candidate_sha, lane_id, gate)
         if receipt.get("status") == "PASSED":
             if not SHA64.fullmatch(str(expected_archive_digest or "")):
                 raise ValueError("independent archive provenance digest is missing")
             if archive_digest(root) != expected_archive_digest:
                 raise ValueError("independent archive provenance digest differs")
-        if (gate == "staged-consumer" and lane_id.startswith("js:Chromium:")
+        if (gate == "staged-consumer" and lane_id in full_browser_consumer.LANES
                 and ("consumer_contract_sha256" in receipt
                      or "browser_support_sha256" in receipt)):
             import full_browser_consumer
@@ -2170,10 +2254,10 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
         if receipt["status"] == "FAILED":
             if process["exit_code"] == 0:
                 raise ValueError("producer reports failure but raw process exited successfully")
-            _process_proof(root, process, gate, lane_id)
+            _process_proof(root, process, gate, lane_id, receipt)
             return _result(gate, "FAILED", f"raw command exited {process['exit_code']}",
                            archive_sha256=archive_sha)
-        _process_proof(root, process, gate, lane_id)
+        _process_proof(root, process, gate, lane_id, receipt)
         if gate == "duplicate-provider":
             reason = _duplicate_provider(root, receipt, process)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)

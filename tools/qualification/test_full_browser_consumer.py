@@ -1,12 +1,107 @@
 import unittest
 import xml.etree.ElementTree as ET
 import json
+import os
+import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
 import full_browser_consumer as browser
+
+
+class ArchiveLocationTest(unittest.TestCase):
+    def test_relocated_copy_keeps_observed_capture_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "checkout"
+            repository.mkdir()
+            observed = root / "observed"
+            observed.mkdir()
+            (observed / "raw.txt").write_bytes(b"original observation")
+            relocated = root / "relocated"
+            shutil.copytree(observed, relocated, copy_function=shutil.copy2)
+            paths = {"checkout": str(repository), "archive": str(observed),
+                     "staging": str(root / "staging"), "inputs": str(root / "inputs"),
+                     "work": str(root / "work")}
+            self.assertEqual(browser.capture_archive_root(paths, relocated, repository),
+                             observed)
+            self.assertEqual(browser.capture_archive_root(paths, observed, repository),
+                             observed)
+            alias = root / "alias"
+            alias.symlink_to(relocated, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "archive path"):
+                browser.capture_archive_root(paths, alias, repository)
+            with self.assertRaisesRegex(ValueError, "archive path"):
+                browser.capture_archive_root(paths, relocated / ".." / "relocated",
+                                             repository)
+            linked = root / "hardlinked"
+            linked.mkdir()
+            os.link(observed / "raw.txt", linked / "raw.txt")
+            with self.assertRaisesRegex(ValueError, "hardlink"):
+                browser.capture_archive_root(paths, linked, repository)
+
+
+class LiveYarnLockTest(unittest.TestCase):
+    def test_mutation_after_graph_is_rejected_and_retained(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "archive"
+            archive.mkdir()
+            lock = root / "yarn.lock"
+            lock.write_bytes(b"committed lock\n")
+            graph = {"pid": 11, "finished_ns": time.time_ns() - 1_000_000}
+            graph_record = browser.capture_live_lock(
+                lock, b"committed lock\n", archive, "graph", graph)
+            self.assertEqual(graph_record["sha256"], browser.sha(b"committed lock\n"))
+            lock.write_bytes(b"changed during resolution\n")
+            core = {"pid": 12, "finished_ns": time.time_ns() - 1_000_000}
+            with self.assertRaisesRegex(ValueError, "live Yarn lock differs"):
+                browser.capture_live_lock(lock, b"committed lock\n", archive,
+                                          "core", core)
+            self.assertEqual((archive / "lock-observations/core.yarn.lock").read_bytes(),
+                             b"changed during resolution\n")
+            self.assertTrue((archive / "lock-observations/core.json").is_file())
+
+    def test_public_replay_requires_each_process_bound_lock_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "archive"
+            archive.mkdir()
+            lock = root / "yarn.lock"
+            fixture = b"committed lock\n"
+            lock.write_bytes(fixture)
+            started = time.time_ns() - 1_000_000
+            processes = {}
+            observations = []
+            for stage, pid in (("graph", 11), ("core", 12), ("facade", 13)):
+                process = {"pid": pid, "started_ns": started,
+                           "finished_ns": time.time_ns()}
+                processes[stage] = process
+                observations.append(browser.capture_live_lock(
+                    lock, fixture, archive, stage, process))
+                started = time.time_ns()
+            receipt = {"schema": 2, "lock_observations": observations,
+                       "process": {"started_ns": processes["graph"]["started_ns"],
+                                   "finished_ns": time.time_ns(),
+                                   "graph": processes["graph"]},
+                       "modules": {"core": processes["core"],
+                                   "facade": processes["facade"]}}
+            browser.verify_live_lock_observations(archive, receipt, fixture, lock)
+            (archive / "lock-observations/core.yarn.lock").write_bytes(b"resealed")
+            with self.assertRaisesRegex(ValueError, "live Yarn lock"):
+                browser.verify_live_lock_observations(archive, receipt, fixture, lock)
+            (archive / "lock-observations/core.yarn.lock").write_bytes(fixture)
+            receipt["lock_observations"] = [observations[0],
+                                            {**observations[1], "observed_ns": 0},
+                                            observations[2]]
+            with self.assertRaisesRegex(ValueError, "live Yarn lock"):
+                browser.verify_live_lock_observations(archive, receipt, fixture, lock)
+            receipt["lock_observations"] = observations[:2]
+            with self.assertRaisesRegex(ValueError, "live Yarn lock"):
+                browser.verify_live_lock_observations(archive, receipt, fixture, lock)
 
 
 class BrowserRowsTest(unittest.TestCase):
@@ -103,24 +198,123 @@ class BrowserRowsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "suite start"):
             browser.karma_rows(self.karma(["first", "second"]), self.selected, 119)
 
+    def test_approved_browser_matrix_has_all_24_routes(self):
+        self.assertEqual(len(browser.LANES), 24)
+        for target in ("js", "wasmJs"):
+            for family in ("Chromium", "Firefox", "Safari"):
+                for role in ("minimum", "current"):
+                    for mode in ("development", "production"):
+                        self.assertIn(f"{target}:{family}:{role}:{mode}", browser.LANES)
+
+    def test_target_lock_fixture_is_selected_from_candidate(self):
+        selected = []
+        def original(_, candidate, path):
+            selected.append((candidate, path))
+            return b"locked"
+        with mock.patch.object(browser, "contract", return_value={"cases": []}), \
+                mock.patch.object(browser, "source_inventory", return_value={}), \
+                mock.patch.object(browser, "original", side_effect=original):
+            browser.input_bytes(Path("/source"), "f" * 40,
+                                "js:Firefox:current:development")
+            browser.input_bytes(Path("/source"), "f" * 40,
+                                "wasmJs:Chromium:current:development")
+            browser.input_bytes(Path("/source"), browser.LEGACY_CANDIDATE_SHA,
+                                "js:Chromium:current:development")
+        self.assertEqual([path for _, path in selected],
+                         [browser.MULTI_BROWSER_YARN_LOCK,
+                          browser.WASM_YARN_LOCK, browser.YARN_LOCK])
+
+    def test_firefox_and_wasm_rows_bind_target_family_and_version(self):
+        for target, family, major in (("js", "Firefox", 158),
+                                      ("wasmJs", "Chromium", 155),
+                                      ("wasmJs", "Firefox", 120)):
+            with self.subTest(target=target, family=family):
+                suite = self.xml(["first", "second"])
+                suite.set("name", f"{target}BrowserTest.org.dyn4j.SampleTest")
+                label = "ChromeHeadless" if family == "Chromium" else family
+                for case in suite:
+                    case.set("classname", f"{target}BrowserTest.org.dyn4j.SampleTest")
+                    case.set("name", f"{case.get('name').split('[')[0]}"
+                             f"[{target}, browser, {label}{major}.0, Linux0.0.0]")
+                self.assertEqual(browser.rows(ET.tostring(suite), self.selected, major,
+                                              target, family),
+                                 ["core:first", "core:second"])
+                with self.assertRaisesRegex(ValueError, "runtime"):
+                    browser.rows(ET.tostring(suite), self.selected, major + 1,
+                                 target, family)
+
+    def test_firefox_process_image_must_match_selected_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selected = Path(directory) / "firefox"
+            selected.write_bytes(b"selected")
+            item = {"token": "token", "runtime": "firefox",
+                    "selected_binary": str(selected),
+                    "selected_sha256": browser.sha(b"selected"),
+                    "process_executable": str(selected),
+                    "process_sha256": browser.sha(b"selected"), "pid": 12}
+            self.assertTrue(browser.observed_browser(
+                item, "token", "Firefox", selected, browser.sha(b"selected")))
+            for key, value in (("runtime", "chromium"),
+                               ("selected_sha256", browser.sha(b"changed")),
+                               ("process_executable", str(Path(directory) / "foreign")),
+                               ("pid", 0)):
+                changed = {**item, key: value}
+                self.assertFalse(browser.observed_browser(
+                    changed, "token", "Firefox", selected, browser.sha(b"selected")))
+
 
 class SelectedBundleTest(unittest.TestCase):
     middle = b");\nconfig.set({webpack: createWebpackConfig()});\n\n"
     reporter = b"const reviewedReporter = true;\n"
     port = 34567
 
-    def settings(self, work, mode):
-        _, selected, runner = browser.bundle_paths(work, "core", mode)
+    def settings(self, work, mode, target="js", family="Chromium"):
+        tooling = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
+                   "9c7852378f220e63c4f92e7d93026c2f/node_modules/"
+                   "kotlin-web-helpers/dist/kotlin-test-karma-runner.js")
+        _, selected, runner = browser.bundle_paths(
+            work, "core", mode, target, tooling if target == "wasmJs" else None)
         paths = [str(runner), str(selected)]
-        return {"singleRun": True, "autoWatch": False,
-                "basePath": str(work / "root/js/packages" /
+        result = {"singleRun": True, "autoWatch": False,
+                "basePath": str(work / "root" / ("js" if target == "js" else "wasm") / "packages" /
                                 "dyn4k-full-staged-browser-consumer-core-test"),
                 "files": paths, "frameworks": ["webpack-output", "mocha", "webpack"],
-                "client": {"args": []}, "browsers": ["ChromeHeadless"],
+                "client": {"args": []},
+                "browsers": [{"Chromium": "ChromeHeadless", "Firefox": "FirefoxHeadless",
+                              "Safari": "Safari"}[family]],
                 "customLaunchers": {}, "failOnFailingTestSuite": False,
                 "failOnEmptyTestSuite": False, "reporters": ["karma-kotlin-reporter"],
                 "preprocessors": {path: ["webpack", "sourcemap"] for path in paths},
                 "proxies": {}, "webpackCopy": []}
+        if target == "wasmJs":
+            result["customContextFile"] = str(runner.parent / "static/context.html")
+            result["customDebugFile"] = str(runner.parent / "static/debug.html")
+        return result
+
+    def test_other_browser_karma_config_and_bundle_selection(self):
+        work = Path("/evidence/build")
+        with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256",
+                               browser.sha(self.middle)), mock.patch.object(
+                                   browser, "WASM_KARMA_GENERATED_MIDDLE_SHA256",
+                                   browser.sha(self.middle)):
+            for target, family in (("js", "Firefox"), ("js", "Safari"),
+                                   ("wasmJs", "Chromium"), ("wasmJs", "Firefox"),
+                                   ("wasmJs", "Safari")):
+                for mode in ("development", "production"):
+                    with self.subTest(target=target, family=family, mode=mode):
+                        settings = self.settings(work, mode, target, family)
+                        linked, selected = browser.configured_bundle(
+                            self.config(settings), work, "core", mode, self.reporter,
+                            self.port, target, family)
+                        self.assertEqual(selected, browser.bundle_paths(
+                            work, "core", mode, target,
+                            Path(settings["files"][0]) if target == "wasmJs" else None)[1])
+                        self.assertEqual(linked.suffix, ".js" if target == "js" else ".mjs")
+                        settings["browsers"] = ["ChromeHeadless"] if family != "Chromium" else ["FirefoxHeadless"]
+                        with self.assertRaisesRegex(ValueError, "selected bundle"):
+                            browser.configured_bundle(self.config(settings), work, "core",
+                                                      mode, self.reporter, self.port,
+                                                      target, family)
 
     def config(self, settings):
         return (browser.KARMA_HEADER + json.dumps(settings).encode() + self.middle
@@ -189,7 +383,8 @@ class SelectedBundleTest(unittest.TestCase):
         _, selected, runner = browser.bundle_paths(work, "core", "development")
         root = work / "root/js/node_modules"
         paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
-                 str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+                 str(root.resolve() / "mocha/mocha.js"),
+                 str(root.resolve() / "karma-mocha/lib/adapter.js"),
                  str(runner), str(selected), str(webpack / "**/*")]
         evidence = {"tmpdir": str(webpack.parent),
                     "effective_files": [{"pattern": path, "served": True,
@@ -215,6 +410,39 @@ class SelectedBundleTest(unittest.TestCase):
         del evidence["effective_files"][5]["isBinary"]
         with self.assertRaisesRegex(ValueError, "effective file list"):
             browser.effective_files(evidence, work, "core", "development")
+
+    def test_wasm_effective_patterns_pin_loader_and_tooling(self):
+        work = Path("/evidence/build")
+        tmpdir = Path("/evidence/tmp")
+        runner = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
+                  "9c7852378f220e63c4f92e7d93026c2f/node_modules/"
+                  "kotlin-web-helpers/dist/kotlin-test-karma-runner.js")
+        _, selected, _ = browser.bundle_paths(work, "core", "development",
+                                               "wasmJs", runner)
+        root = runner.parents[2]
+        webpack = tmpdir / "_karma_webpack_456"
+        paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+                 str(root.resolve() / "mocha/mocha.js"),
+                 str(root.resolve() / "karma-mocha/lib/adapter.js"),
+                 str(runner), str(selected), str(webpack / "**/*")]
+        evidence = {"tmpdir": str(tmpdir),
+                    "effective_files": [{"pattern": path, "served": True,
+                                         "included": index != 6, "watched": False,
+                                         "nocache": False, "type": None, "isBinary": None}
+                                        for index, path in enumerate(paths)],
+                    "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
+                                                for path in (runner, selected)},
+                    "input_sha256": {str(root / name): digest for name, digest
+                                     in browser.WASM_INPUT_SHA256.items()}}
+        browser.effective_files(evidence, work, "core", "development", "wasmJs")
+        for field, changed in (("served", False), ("included", False),
+                               ("isBinary", True), ("pattern", "/evidence/foreign.mjs")):
+            with self.subTest(field=field):
+                original = evidence["effective_files"][5][field]
+                evidence["effective_files"][5][field] = changed
+                with self.assertRaisesRegex(ValueError, "effective files"):
+                    browser.effective_files(evidence, work, "core", "development", "wasmJs")
+                evidence["effective_files"][5][field] = original
 
     def test_reporter_node_vm_rejects_unserved_or_excluded_selected_script(self):
         script = "\n".join((
@@ -380,6 +608,68 @@ class SelectedBundleTest(unittest.TestCase):
                                    check=False, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_reporter_wasm_pattern_rejects_unserved_loader(self):
+        reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
+        root = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
+                "9c7852378f220e63c4f92e7d93026c2f/node_modules")
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const vm = require('node:vm');",
+            "const {createRequire} = require('node:module');",
+            "const source = fs.readFileSync(process.argv[1], 'utf8');",
+            "const root = process.argv[2];",
+            "const karma = createRequire(path.join(root, 'karma/package.json'))('karma/lib/config');",
+            "const work = '/evidence/build';",
+            "const tmpdir = '/evidence/tmp';",
+            "const webpack = path.join(tmpdir, '_karma_webpack_123');",
+            "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
+            "const selected = path.join(work, 'root/wasm/packages/test/static/load.mjs');",
+            "const paths = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),",
+            "  path.join(fs.realpathSync(root), 'mocha/mocha.js'),",
+            "  path.join(fs.realpathSync(root), 'karma-mocha/lib/adapter.js'),",
+            "  runner, selected, path.join(webpack, '**/*')];",
+            "const files = paths.map((pattern, index) => ({pattern, served: true,",
+            "  included: index !== 6, watched: false, nocache: false}));",
+            "function OriginalReporter() {this.write = () => {};",
+            "  this.onBrowserStart = () => {}; this.onRunComplete = () => {};}",
+            "OriginalReporter.$inject = [];",
+            "const key = 'reporter:karma-kotlin-reporter';",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files,",
+            "  preprocessors: {[runner]: ['webpack', 'sourcemap'],",
+            "    [selected]: ['webpack', 'sourcemap']}};",
+            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync,",
+            "  writeFileSync: () => {}, openSync: () => 1};",
+            "function injectedRequire(name) {",
+            "  if (name === 'node:fs') return interceptedFs;",
+            "  if (name === 'node:crypto') return require('node:crypto');",
+            "  if (name === 'node:path') return path;",
+            "  if (name === 'karma/lib/config') return karma;",
+            "  throw Error(name);}",
+            "injectedRequire.resolve = () => path.join(root,",
+            "  'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "const env = {DYN4K_BROWSER_TARGET: 'wasmJs',",
+            "  DYN4K_BROWSER_REPORTER_SOURCE: process.argv[1],",
+            "  DYN4K_BROWSER_REPORTER_ATTESTATION: '/evidence/reporter.json',",
+            "  DYN4K_BROWSER_RAW_KARMA: '/evidence/raw.jsonl',",
+            "  DYN4K_BROWSER_SELECTED_BUNDLE: selected,",
+            "  DYN4K_BROWSER_SELECTED_ARCHIVE: '/evidence/selected.mjs',",
+            "  DYN4K_BROWSER_SELECTED_ATTESTATION: '/evidence/selected.json',",
+            "  DYN4K_BROWSER_WORK_ROOT: work, DYN4K_BROWSER_TMPDIR: tmpdir};",
+            "vm.runInNewContext(source, {config, require: injectedRequire,",
+            "  process: {env, pid: 123}, Buffer});",
+            "const Reporter = config.plugins[0][key][1];",
+            "assert.doesNotThrow(() => new Reporter(null, config, null));",
+            "files[5].served = false;",
+            "assert.throws(() => new Reporter(null, config, null), /effective files/);",
+            "files[5].served = true; files[5].isBinary = true;",
+            "assert.throws(() => new Reporter(null, config, null), /binary pattern/);",
+        ))
+        completed = subprocess.run(["node", "-e", script, str(reporter), str(root)],
+                                   check=False, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -439,11 +729,84 @@ class SelectedBundleTest(unittest.TestCase):
                 (folder / "selected-bundle.json").write_text(json.dumps(evidence))
                 browser.selected_bundle(folder, work, "core", "development", record, 155,
                                         require_effective=True)
+                with tempfile.TemporaryDirectory() as relocated_directory:
+                    relocated = Path(relocated_directory) / "archive"
+                    shutil.copytree(folder, relocated, copy_function=shutil.copy2)
+                    browser.selected_bundle(relocated, work, "core", "development",
+                                            record, 155, require_effective=True,
+                                            observed_folder=folder)
+                    with self.assertRaisesRegex(ValueError, "source-process binding"):
+                        browser.selected_bundle(relocated, work, "core", "development",
+                                                record, 155, require_effective=True)
                 evidence["effective_files"][5]["isBinary"] = True
                 (folder / "selected-bundle.json").write_text(json.dumps(evidence))
                 with self.assertRaisesRegex(ValueError, "effective files"):
                     browser.selected_bundle(folder, work, "core", "development", record, 155,
                                             require_effective=True)
+
+    def test_wasm_archive_rejects_changed_served_wasm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            work = folder / "build"
+            settings = self.settings(work, "development", "wasmJs", "Chromium")
+            runner = Path(settings["files"][0])
+            root = runner.parents[2]
+            linked, selected, _ = browser.bundle_paths(work, "core", "development",
+                                                        "wasmJs", runner)
+            webpack = folder / "tmp/_karma_webpack_123"
+            patterns = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+                        str(root.resolve() / "mocha/mocha.js"),
+                        str(root.resolve() / "karma-mocha/lib/adapter.js"),
+                        str(runner), str(selected), str(webpack / "**/*")]
+            package = "dyn4k-full-staged-browser-consumer-core-test"
+            names = sorted((f"{package}.wasm", f"{package}.mjs",
+                            f"{package}.wasm.map", "custom-formatters.js",
+                            f"{package}.js-builtins.mjs",
+                            f"{package}.import-object.mjs"))
+            assets = folder / "assets"
+            assets.mkdir()
+            for name in names:
+                (assets / name).write_bytes(name.encode())
+            (folder / "karma.conf.js").write_bytes(self.config(settings))
+            (folder / "browser-reporter.js").write_bytes(self.reporter)
+            (folder / "linked-executable.js").write_bytes(f"{package}.mjs".encode())
+            (folder / "linked-executable.wasm").write_bytes(f"{package}.wasm".encode())
+            (folder / "karma-selected.js").write_bytes(b"loader")
+            evidence = {"source_path": str(selected),
+                        "archive_path": str(folder / "karma-selected.js"),
+                        "sha256": browser.sha(b"loader"), "node_pid": 11,
+                        "browser_id": "browser-id",
+                        "browser_name": "Chrome Headless 155.0.0.0 (Linux 0.0.0)",
+                        "captured_ns": 2, "complete_ns": 3,
+                        "tmpdir": str(webpack.parent),
+                        "effective_files": [{"pattern": path, "served": True,
+                                             "included": index != 6, "watched": False,
+                                             "nocache": False, "type": None,
+                                             "isBinary": None}
+                                            for index, path in enumerate(patterns)],
+                        "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
+                                                    for path in (runner, selected)},
+                        "input_sha256": {str(root / name): digest for name, digest
+                                         in browser.WASM_INPUT_SHA256.items()},
+                        "assets": [{"name": name, "sha256": browser.sha(name.encode())}
+                                   for name in names]}
+            (folder / "selected-bundle.json").write_text(json.dumps(evidence))
+            record = {"started_ns": 1, "finished_ns": 4,
+                      "linked_sha256": browser.sha(f"{package}.mjs".encode()),
+                      "linked_wasm_sha256": browser.sha(f"{package}.wasm".encode()),
+                      "karma_port": self.port}
+            with mock.patch.object(browser, "WASM_KARMA_GENERATED_MIDDLE_SHA256",
+                                   browser.sha(self.middle)):
+                browser.selected_bundle(folder, work, "core", "development", record,
+                                        155, True, "wasmJs", "Chromium")
+                outside = {**record, "started_ns": 3}
+                with self.assertRaisesRegex(ValueError, "source-process binding"):
+                    browser.selected_bundle(folder, work, "core", "development", outside,
+                                            155, True, "wasmJs", "Chromium")
+                (assets / f"{package}.wasm").write_bytes(b"changed")
+                with self.assertRaisesRegex(ValueError, "served executable assets"):
+                    browser.selected_bundle(folder, work, "core", "development", record,
+                                            155, True, "wasmJs", "Chromium")
 
 
 if __name__ == "__main__":

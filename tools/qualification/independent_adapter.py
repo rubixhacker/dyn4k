@@ -109,6 +109,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
     import full_jvm_consumer
     import full_klib_adapter
     import full_klib_consumer
+    import full_signed_routes
     import qualify
 
     repository = Path(repository)
@@ -128,6 +129,8 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
         raise ValueError("signed independent audit differs from selected candidate lanes")
     if suite_sha256 != independent_gates.APPROVED_MANIFEST_SHA256:
         raise ValueError("independent verifier and complete suite disagree")
+    routes = (full_signed_routes.route_table(repository, suite_manifest)
+              if len(suite_manifest["lanes"]) == 112 else {})
     identities_bound = candidate_manifest is not None and artifact_audit is not None
     if identities_bound:
         if (not isinstance(candidate_manifest, dict)
@@ -240,7 +243,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
             {gate: Path(path) for gate, path in paths.items()}, repository,
             expected.get("expected_artifact_hashes"),
             expected.get("expected_runtime_identity"), digests, all_hashes,
-            expected.get("expected_producer_scopes"), performance_key)
+            expected.get("expected_producer_scopes"), performance_key, expected)
         if (result.get("result_sha256") != independent_gates.digest(
                 {key: value for key, value in result.items() if key != "result_sha256"})
                 or set(result.get("gates", {})) != gate_names
@@ -264,6 +267,20 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                     repository, candidate_sha, lane_id, selected["case_ids"],
                     paths["staged-consumer"], consumer_gate, expected,
                     audited_targets.get(suite_manifest["lanes"][lane_id]["target"]))
+                if all_lanes and lane_id.startswith("linuxX64:"):
+                    root = Path(paths["staged-consumer"])
+                    executables = {name: hashlib.sha256(
+                        (root / f"runtime/{name}.program").read_bytes()).hexdigest()
+                                   for name in ("core", "facade")}
+                    if executables != expected.get("expected_klib_native_executables"):
+                        raise ValueError(f"signed KLIB Native executable hashes differ: {lane_id}")
+                    full_signed_routes.execution_witness(
+                        expected, candidate_sha, lane_id,
+                        expected["expected_archive_digests"]["staged-consumer"],
+                        expected["expected_runtime_identity"],
+                        suite_manifest["lanes"][lane_id]["configuration"], executables,
+                        expected["expected_artifact_hashes"],
+                        expected["expected_klib_toolchain"]["gradle_sha256"], root)
             else:
                 full_android_adapter.verify_full_android_staged_consumer(
                     repository, candidate_sha, lane_id, selected,
@@ -286,6 +303,21 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                     or public.get("candidate_sha") != candidate_sha
                     or public.get("lane") != lane_id):
                 raise ValueError(f"public browser verifier differs from independent gate: {lane_id}")
+        if routes.get(lane_id) == "browser" and lane_id not in (
+                "js:Chromium:minimum:development", "js:Chromium:minimum:production",
+                "js:Chromium:current:development", "js:Chromium:current:production"):
+            if consumer_gate["status"] == "PASSED":
+                if not identities_bound or "staged-consumer" not in paths:
+                    raise ValueError(f"signed browser candidate and staged audit are missing: {lane_id}")
+                public = full_signed_routes.verify_browser(
+                    repository, candidate_sha, lane_id, paths["staged-consumer"],
+                    expected, expected["expected_artifact_hashes"],
+                    expected["expected_runtime_identity"],
+                    expected["expected_archive_digests"]["staged-consumer"])
+                if (public.get("status") != consumer_gate["status"]
+                        or public.get("archive_sha256") != consumer_gate.get("archive_sha256")
+                        or public.get("selected_cases") != consumer_gate.get("selected_cases")):
+                    raise ValueError(f"public browser verifier differs from signed gate: {lane_id}")
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
                             "identities_bound": identities_bound and (target != "jvm" or mode_bound)}

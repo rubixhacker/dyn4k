@@ -1,0 +1,252 @@
+name: Full staged Native host consumer
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Linux ARM64 attempt or Windows Server diagnostic
+        required: true
+        type: choice
+        options:
+          - linuxArm64
+          - mingwX64
+      version_role:
+        description: Exact selected runtime role
+        required: true
+        type: choice
+        options:
+          - current
+          - minimum
+      mode:
+        description: Native compiler and executable mode
+        required: true
+        type: choice
+        options:
+          - debug-g
+          - optimized-opt
+      runtime_selection:
+        description: JSON with exact host OS and simulator identity; blank probes the selected host
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux_x64_cross_build:
+    if: inputs.target == 'linuxArm64'
+    runs-on: ubuntu-24.04
+    outputs:
+      build_digest: ${{ steps.build.outputs.build_digest }}
+      transport_digest: ${{ steps.build.outputs.transport_digest }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      DYN4K_ROLE: ${{ inputs.version_role }}
+      DYN4K_MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare home backed evidence directory
+        shell: bash
+        run: |
+          root="$HOME/dyn4k-native-consumer-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$root/tmp" "$root/staging"
+          echo "DYN4K_RUN_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Cross build selected external Native consumer
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          lane="linuxArm64:Linux ARM64:$DYN4K_ROLE:$DYN4K_MODE"
+          root="$DYN4K_RUN_ROOT"
+          export TMPDIR="$root/tmp"
+          export GRADLE_USER_HOME="$HOME/.gradle"
+          candidate=$(git rev-parse HEAD)
+          test "$candidate" = "$GITHUB_SHA"
+          gradle="$GITHUB_WORKSPACE/gradlew"
+          "$gradle" --no-daemon --console=plain \
+            :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository \
+            :dyn4k:publishKotlinMultiplatformPublicationToStagingRepository \
+            :dyn4k-core:publishLinuxArm64PublicationToStagingRepository \
+            :dyn4k:publishLinuxArm64PublicationToStagingRepository \
+            > "$root/staging.stdout" 2> "$root/staging.stderr"
+          cp -a build/staging-repository/. "$root/staging/"
+          native_home=$(find "$HOME/.konan" -maxdepth 1 -type d \
+            -name 'kotlin-native-prebuilt-linux-x86_64-2.4.20' -print -quit)
+          test -n "$native_home"
+          base="$root/staging/io/github/rubixhacker"
+          core="$base/dyn4k-core-linuxarm64/0.1.0-alpha.1/dyn4k-core-linuxarm64-0.1.0-alpha.1.klib"
+          facade="$base/dyn4k-linuxarm64/0.1.0-alpha.1/dyn4k-linuxarm64-0.1.0-alpha.1.klib"
+          core_sha=$(sha256sum "$core" | cut -d' ' -f1)
+          facade_sha=$(sha256sum "$facade" | cut -d' ' -f1)
+          printf '{"source":"staging-self","dyn4k-core":"%s","dyn4k":"%s"}\n' \
+            "$core_sha" "$facade_sha" > "$root/staging-hashes.json"
+          python3 tools/qualification/full_native_host_consumer.py cross-build \
+            --repository "$GITHUB_WORKSPACE" --candidate-sha "$candidate" \
+            --lane "$lane" --staging "$root/staging" --output "$root/build-raw" \
+            --gradle "$gradle" --native-home "$native_home" \
+            --expected-core-sha256 "$core_sha" \
+            --expected-facade-sha256 "$facade_sha" --hash-provenance staging-self \
+            > "$root/build-result.json" 2> "$root/build.stderr"
+          python3 tools/qualification/full_native_host_consumer.py pack \
+            --archive "$root/build-raw" --output "$root/build-raw.tar" \
+            > "$root/transport.json"
+          build_digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_archive_sha256"])' "$root/build-result.json")
+          transport_digest=$(sha256sum "$root/build-raw.tar" | cut -d' ' -f1)
+          echo "build_digest=$build_digest" >> "$GITHUB_OUTPUT"
+          echo "transport_digest=$transport_digest" >> "$GITHUB_OUTPUT"
+      - name: Pack failed cross build attempt
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$DYN4K_RUN_ROOT/build-raw" && ! -f "$DYN4K_RUN_ROOT/build-raw.tar" ]]; then
+            python3 tools/qualification/full_native_host_consumer.py pack \
+              --archive "$DYN4K_RUN_ROOT/build-raw" --output "$DYN4K_RUN_ROOT/failed-build-raw.tar" \
+              > "$DYN4K_RUN_ROOT/failed-transport.json"
+          fi
+      - name: Retain cross build and failed attempt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-native-cross-build-${{ github.sha }}-${{ inputs.version_role }}-${{ inputs.mode }}
+          path: |
+            ${{ env.DYN4K_RUN_ROOT }}/build-raw.tar
+            ${{ env.DYN4K_RUN_ROOT }}/failed-build-raw.tar
+            ${{ env.DYN4K_RUN_ROOT }}/transport.json
+            ${{ env.DYN4K_RUN_ROOT }}/failed-transport.json
+            ${{ env.DYN4K_RUN_ROOT }}/build-result.json
+            ${{ env.DYN4K_RUN_ROOT }}/build.stderr
+            ${{ env.DYN4K_RUN_ROOT }}/staging-hashes.json
+            ${{ env.DYN4K_RUN_ROOT }}/staging.stdout
+            ${{ env.DYN4K_RUN_ROOT }}/staging.stderr
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  linux_arm_runtime:
+    if: inputs.target == 'linuxArm64'
+    needs: linux_x64_cross_build
+    runs-on: ubuntu-24.04-arm
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      DYN4K_SELECTION_JSON: ${{ inputs.runtime_selection }}
+      DYN4K_ROLE: ${{ inputs.version_role }}
+      DYN4K_MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: full-native-cross-build-${{ github.sha }}-${{ inputs.version_role }}-${{ inputs.mode }}
+          path: ${{ runner.temp }}/dyn4k-cross-transfer
+      - name: Prepare home backed runtime directory
+        shell: bash
+        run: |
+          root="$HOME/dyn4k-native-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$root/tmp"
+          echo "DYN4K_RUN_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Run exact transferred ARM64 executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$DYN4K_RUN_ROOT"
+          export TMPDIR="$root/tmp"
+          lane="linuxArm64:Linux ARM64:$DYN4K_ROLE:$DYN4K_MODE"
+          candidate=$(git rev-parse HEAD)
+          test "$candidate" = "$GITHUB_SHA"
+          transfer="$RUNNER_TEMP/dyn4k-cross-transfer"
+          test "$(sha256sum "$transfer/build-raw.tar" | cut -d' ' -f1)" = \
+            "${{ needs.linux_x64_cross_build.outputs.transport_digest }}"
+          python3 tools/qualification/full_native_host_consumer.py unpack \
+            --transport "$transfer/build-raw.tar" --output "$root/cross-build" \
+            > "$root/unpack.json"
+          cp "$transfer/staging-hashes.json" "$root/staging-hashes.json"
+          if [[ -n "$DYN4K_SELECTION_JSON" ]]; then
+            printf '%s' "$DYN4K_SELECTION_JSON" > "$root/runtime-selection.json"
+          else
+            python3 tools/qualification/full_native_host_consumer.py probe --lane "$lane" \
+              > "$root/runtime-selection.json"
+          fi
+          core_sha=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["dyn4k-core"])' "$root/staging-hashes.json")
+          facade_sha=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["dyn4k"])' "$root/staging-hashes.json")
+          python3 tools/qualification/full_native_host_consumer.py probe-arm-image \
+            --repository "$GITHUB_WORKSPACE" --candidate-sha "$candidate" \
+            --lane "$lane" --build-archive "$root/cross-build" \
+            --expected-build-archive-digest "${{ needs.linux_x64_cross_build.outputs.build_digest }}" \
+            --output "$root/probe" --runtime-selection "$root/runtime-selection.json" \
+            --expected-core-sha256 "$core_sha" \
+            --expected-facade-sha256 "$facade_sha" \
+            > "$root/probe-result.json" 2> "$root/probe.stderr"
+          python3 tools/qualification/full_native_host_consumer.py cross-run \
+            --repository "$GITHUB_WORKSPACE" --candidate-sha "$candidate" \
+            --lane "$lane" --build-archive "$root/cross-build" \
+            --expected-build-archive-digest "${{ needs.linux_x64_cross_build.outputs.build_digest }}" \
+            --output "$root/raw" --runtime-selection "$root/runtime-selection.json" \
+            --expected-core-sha256 "$core_sha" \
+            --expected-facade-sha256 "$facade_sha" \
+            > "$root/runtime-result.json" 2> "$root/runtime.stderr"
+      - name: Pack raw ARM64 runtime attempt
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$DYN4K_RUN_ROOT/raw" ]]; then
+            python3 tools/qualification/full_native_host_consumer.py pack \
+              --archive "$DYN4K_RUN_ROOT/raw" --output "$DYN4K_RUN_ROOT/raw.tar" \
+              > "$DYN4K_RUN_ROOT/transport.json"
+          fi
+          if [[ -d "$DYN4K_RUN_ROOT/probe" ]]; then
+            python3 tools/qualification/full_native_host_consumer.py pack \
+              --archive "$DYN4K_RUN_ROOT/probe" --output "$DYN4K_RUN_ROOT/probe.tar" \
+              > "$DYN4K_RUN_ROOT/probe-transport.json"
+          fi
+      - name: Retain ARM64 runtime and failed attempt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-native-arm-runtime-${{ github.sha }}-${{ inputs.version_role }}-${{ inputs.mode }}
+          path: |
+            ${{ env.DYN4K_RUN_ROOT }}/raw.tar
+            ${{ env.DYN4K_RUN_ROOT }}/transport.json
+            ${{ env.DYN4K_RUN_ROOT }}/runtime-result.json
+            ${{ env.DYN4K_RUN_ROOT }}/runtime.stderr
+            ${{ env.DYN4K_RUN_ROOT }}/runtime-selection.json
+            ${{ env.DYN4K_RUN_ROOT }}/staging-hashes.json
+            ${{ env.DYN4K_RUN_ROOT }}/unpack.json
+            ${{ env.DYN4K_RUN_ROOT }}/probe.tar
+            ${{ env.DYN4K_RUN_ROOT }}/probe-transport.json
+            ${{ env.DYN4K_RUN_ROOT }}/probe-result.json
+            ${{ env.DYN4K_RUN_ROOT }}/probe.stderr
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  windows_server_diagnostic:
+    if: inputs.target == 'mingwX64'
+    runs-on: windows-2025
+    steps:
+      - name: Probe Windows product identity
+        shell: pwsh
+        run: |
+          $root = Join-Path $HOME "dyn4k-windows-diagnostic-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "DYN4K_RUN_ROOT=$root"
+          $product = Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, ProductType
+          $product | ConvertTo-Json -Compress |
+            Out-File -Encoding utf8 (Join-Path $root 'windows-product.json')
+          if ($product.ProductType -ne 1) {
+            throw 'SERVER_DIAGNOSTIC_ONLY: hosted Windows Server cannot qualify a Windows client lane'
+          }
+          throw 'HOSTED_WINDOWS_DIAGNOSTIC_ONLY: client qualification requires a separately selected host'
+      - name: Retain Windows product probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-native-windows-diagnostic-${{ github.sha }}
+          path: ${{ env.DYN4K_RUN_ROOT }}/windows-product.json
+          if-no-files-found: warn

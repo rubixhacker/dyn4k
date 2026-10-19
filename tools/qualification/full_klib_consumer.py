@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -20,10 +21,194 @@ MODULES = ("dyn4k-core", "dyn4k")
 GROUP = "io.github.rubixhacker"
 VERSION = "0.1.0-alpha.1"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+LEGACY_CANDIDATE = "d629b9e388db08b3c7e24b22ff853ac387b951ce"
 LOCAL_LANES = {
-    "linuxX64:Linux x64:current:debug-g": ("linuxX64", "linuxx64"),
-    "js:Node.js:current:development": ("js", "js"),
+    **{f"linuxX64:Linux x64:{version}:{mode}": ("linuxX64", "linuxx64")
+       for version in ("minimum", "current") for mode in ("debug-g", "optimized-opt")},
+    **{f"js:Node.js:{version}:{mode}": ("js", "js")
+       for version in ("minimum", "current") for mode in ("development", "production")},
 }
+
+
+def mode_path(lane):
+    mode = lane.rsplit(":", 1)[1]
+    if lane.startswith("linuxX64:"):
+        return ("releaseTest" if mode == "optimized-opt" else "debugTest")
+    return "testProductionExecutable" if mode == "production" else "testDevelopmentExecutable"
+
+
+def runtime_observation(lane, node):
+    observation = {"system": platform.system(), "kernel_release": platform.release(),
+                   "machine": platform.machine(), "glibc": platform.libc_ver()[1],
+                   "node_version": subprocess.check_output([str(node), "--version"],
+                                                           text=True).strip()}
+    validate_runtime(lane, observation)
+    return observation
+
+
+def validate_runtime(lane, observation):
+    if (not all(isinstance(observation.get(key), str) and observation[key]
+                for key in ("system", "kernel_release", "machine", "node_version"))
+            or not isinstance(observation.get("glibc"), str)):
+        raise ValueError("external runtime identity is unavailable or malformed")
+    if lane.startswith("linuxX64:"):
+        if (observation["system"] != "Linux" or observation["machine"] != "x86_64"
+                or not re.match(r"\d+\.\d+\.\d+", observation["kernel_release"])
+                or not re.fullmatch(r"\d+\.\d+", observation["glibc"])):
+            raise ValueError("Linux x64 runtime identity is unavailable or malformed")
+        kernel = tuple(map(int, observation["kernel_release"].split("-", 1)[0].split(".")[:3]))
+        glibc = tuple(map(int, observation["glibc"].split(".")))
+        if kernel < (4, 9, 156) or glibc < (2, 19):
+            raise ValueError("Linux x64 runtime is below approved minimum")
+        if ":minimum:" in lane and (kernel != (4, 9, 156) or glibc != (2, 19)):
+            raise ValueError("minimum Linux x64 runner unavailable: requires kernel 4.9.156 and glibc 2.19")
+        if ":current:" in lane and kernel == (4, 9, 156) and glibc == (2, 19):
+            raise ValueError("current Linux x64 runner cannot equal the minimum profile")
+    node_match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", observation["node_version"])
+    if not node_match:
+        raise ValueError("Node runtime version is unavailable or malformed")
+    node_version = tuple(map(int, node_match.groups()))
+    if lane.startswith("js:") and node_version < (22, 0, 0):
+        raise ValueError("Node runtime is below approved minimum")
+    if lane.startswith("js:") and ":minimum:" in lane and node_version != (22, 0, 0):
+        raise ValueError("minimum Node.js runner unavailable: requires Node.js 22.0.0")
+    if lane.startswith("js:") and ":current:" in lane and node_version == (22, 0, 0):
+        raise ValueError("current Node.js runner cannot equal the minimum profile")
+
+
+def observed_runtime_identity(observation, java_version):
+    libc = f" glibc {observation['glibc']}" if observation["glibc"] else ""
+    return (f"{observation['system']} {observation['kernel_release']} "
+            f"{observation['machine']}{libc} | "
+            f"{java_version} | {observation['node_version']}")
+
+
+def consumer_builds(schema):
+    common = (f"{CONSUMER}/build.gradle.kts", f"{CONSUMER}/settings.gradle.kts",
+              f"{CONSUMER}/core/build.gradle.kts", f"{CONSUMER}/facade/build.gradle.kts",
+              f"{CONSUMER}/node-test-preload.cjs")
+    lanes = (f"{CONSUMER}/linuxX64/Linux x64/current/build.gradle.kts",
+             f"{CONSUMER}/js/Node.js/current/build.gradle.kts")
+    if schema == 2:
+        lanes += (f"{CONSUMER}/linuxX64/Linux x64/minimum/build.gradle.kts",
+                  f"{CONSUMER}/js/Node.js/minimum/build.gradle.kts")
+    return common + lanes
+
+
+def require_compiler_evidence(evidence, graph, variant, selected_mode):
+    if not isinstance(evidence, list) or len(evidence) != 2:
+        raise ValueError("external compiler evidence is incomplete")
+    for short, module in (("core", "dyn4k-core"), ("facade", "dyn4k")):
+        entry = next((item for item in evidence
+                      if isinstance(item, dict) and item.get("module") == short), None)
+        artifact = next(item for item in graph["compile"]
+                        if item["project"] == short)["artifacts"]
+        resolved = next(item["file"] for item in artifact if item["component"] ==
+                        f"{GROUP}:{module}-{variant}:{VERSION}")
+        if variant == "linuxx64":
+            link_mode = "Release" if selected_mode == "releaseTest" else "Debug"
+            expected_args = ["-opt" if selected_mode == "releaseTest" else "-g",
+                             "-friend-modules", resolved]
+            compile_task = f":{short}:compileTestKotlinLinuxX64"
+            executable_task = f":{short}:link{link_mode}TestLinuxX64"
+            link_args = []
+        else:
+            js_mode = "Production" if selected_mode == "testProductionExecutable" else "Development"
+            friend_arg = f"-Xfriend-modules={resolved}"
+            expected_args = [f"-Xir-per-module-output-name=dyn4k-full-staged-klib-consumer-{short}-test",
+                             friend_arg]
+            compile_task = f":{short}:compileTestKotlinJs"
+            executable_task = f":{short}:compileTest{js_mode}ExecutableKotlinJs"
+            link_args = [friend_arg]
+        if entry != {"module": short, "compile_task": compile_task,
+                      "compile_args": expected_args,
+                      "executable_task": executable_task,
+                      "executable_args": link_args}:
+            raise ValueError("external compiler mode or friend KLIB differs")
+
+
+def _option_values(args, option):
+    return [args[index + 1] for index, value in enumerate(args[:-1]) if value == option]
+
+
+def _actual_invocations(output, variant):
+    invocations = {}
+    if variant == "js":
+        pattern = re.compile(r"\[KOTLIN\] (:(?:core|facade):\S+) Kotlin compiler args: (.*)")
+        for line in output.splitlines():
+            match = pattern.search(line)
+            if match:
+                invocations.setdefault(match[1], []).append(shlex.split(match[2]))
+    else:
+        pattern = re.compile(r'\[DEBUG\] \[konanc\] Run in-process tool "konanc"'
+                             r'.*?\nArguments = \[\n(.*?)\n\]', re.S)
+        task_pattern = re.compile(r"Executing actions for task '(:\S+)'\.")
+        for match in pattern.finditer(output):
+            tasks = task_pattern.findall(output[:match.start()])
+            if tasks:
+                invocations.setdefault(tasks[-1], []).append(
+                    [line.strip() for line in match[1].splitlines()])
+    return invocations
+
+
+def require_actual_invocations(output, graph, variant, selected_mode, paths):
+    invocations = _actual_invocations(output, variant)
+    for short, module in (("core", "dyn4k-core"), ("facade", "dyn4k")):
+        artifacts = next(item for item in graph["compile"]
+                         if item["project"] == short)["artifacts"]
+        binaries = {name: next(item["file"] for item in artifacts if item["component"] ==
+                               f"{GROUP}:{name}-{variant}:{VERSION}") for name in MODULES}
+        friend = binaries[module]
+        if variant == "linuxx64":
+            link_mode = "Release" if selected_mode == "releaseTest" else "Debug"
+            compile_task = f":{short}:compileTestKotlinLinuxX64"
+            executable_task = f":{short}:link{link_mode}TestLinuxX64"
+            expected = ((compile_task, "library", f"{paths['work_root']}/{short}/classes/"
+                         f"kotlin/linuxX64/test/klib/{short}_test"),
+                        (executable_task, "program", f"{paths['work_root']}/{short}/bin/"
+                         f"linuxX64/{selected_mode}/test.kexe"))
+            for task, produce, destination in expected:
+                entries = invocations.get(task, [])
+                if len(entries) != 1:
+                    raise ValueError(f"actual Native compiler invocation is missing: {task}")
+                args = entries[0]
+                modes = [arg for arg in args if arg in ("-g", "-opt")]
+                desired = "-opt" if selected_mode == "releaseTest" else "-g"
+                if (not modes or modes[-1] != desired
+                        or _option_values(args, "-target") != ["linux_x64"]
+                        or _option_values(args, "-produce") != [produce]
+                        or _option_values(args, "-output") != [destination]
+                        or not _option_values(args, "-friend-modules")
+                        or _option_values(args, "-friend-modules")[-1] != friend
+                        or not set(binaries.values()).issubset(
+                            set(_option_values(args, "-library")))):
+                    raise ValueError(f"actual Native compiler mode or staged KLIB differs: {task}")
+        else:
+            mode = "Production" if selected_mode == "testProductionExecutable" else "Development"
+            compile_task = f":{short}:compileTestKotlinJs"
+            executable_task = f":{short}:compileTest{mode}ExecutableKotlinJs"
+            for task in (compile_task, executable_task):
+                entries = invocations.get(task, [])
+                if len(entries) != 1:
+                    raise ValueError(f"actual JS compiler invocation is missing: {task}")
+                args = entries[0]
+                libraries = _option_values(args, "-libraries")
+                if (len(libraries) != 1 or
+                        not set(binaries.values()).issubset(set(libraries[0].split(":")))
+                        or args.count(f"-Xfriend-modules={friend}") != 1
+                        or _option_values(args, "-target") != ["es5"]):
+                    raise ValueError(f"actual JS compiler or staged KLIB differs: {task}")
+                if task == executable_task:
+                    output_dir = (f"{paths['work_root']}/{short}/compileSync/js/test/"
+                                  f"{selected_mode}/kotlin")
+                    if (_option_values(args, "-ir-output-dir") != [output_dir]
+                            or args.count("-Xir-produce-js") != 1
+                            or ("-Xir-dce" in args) != (mode == "Production")):
+                        raise ValueError(f"actual JS executable mode differs: {task}")
+                elif ("-Xir-produce-js" in args or
+                      _option_values(args, "-ir-output-dir") != [
+                          f"{paths['work_root']}/{short}/classes/kotlin/js/test"]):
+                    raise ValueError(f"actual JS test compile differs: {task}")
 
 
 def sha(data):
@@ -212,6 +397,7 @@ def _tap(raw, selected):
 def capture(repository, project, archive, work_root, lane, node, inputs):
     repository, project, archive, work_root = map(Path, (repository, project, archive, work_root))
     target, _ = LOCAL_LANES[lane]
+    selected_mode = mode_path(lane)
     observed = []
     for module, short in (("dyn4k-core", "core"), ("dyn4k", "facade")):
         selected = _selected_cases(inputs[f"{short}-cases.tsv"])
@@ -230,14 +416,14 @@ def capture(repository, project, archive, work_root, lane, node, inputs):
                 (raw_root / report.name).write_bytes(raw)
                 (normal_root / report.name).write_bytes(normal)
                 observed.extend(ids)
-            executable = work_root / short / "bin/linuxX64/debugTest/test.kexe"
+            executable = work_root / short / "bin/linuxX64" / selected_mode / "test.kexe"
             if not executable.is_file():
                 raise ValueError("native external test executable is absent")
             runtime = {"module": short, "command": [str(executable)],
                        "executable_sha256": sha(executable.read_bytes())}
             program = executable
         else:
-            built = work_root / short / "compileSync/js/test/testDevelopmentExecutable/kotlin"
+            built = work_root / short / "compileSync/js/test" / selected_mode / "kotlin"
             scripts = sorted(built.glob(f"dyn4k-full-staged-klib-consumer-{short}-test.js"))
             if len(scripts) != 1:
                 raise ValueError("Node external test program is absent or ambiguous")
@@ -322,6 +508,7 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
     if 'version "21' not in java_version or "Gradle 9.5.0" not in gradle_version:
         raise ValueError("producer requires pinned JDK 21 and Gradle 9.5.0")
     manifest, selected = contract(repository, lane)
+    observation = runtime_observation(lane, node)
     variant = LOCAL_LANES[lane][1]
     native_identity = None
     if variant == "linuxx64":
@@ -349,7 +536,9 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
     command = [str(gradle), "-p", str(repository / CONSUMER),
                "--project-cache-dir", str(work_root / "gradle-project-cache"),
                "--offline", "--no-daemon",
-               "--console=plain", "--rerun-tasks", "--init-script", str(inputs / "lane-script"),
+               "--console=plain", "--rerun-tasks", "--debug", "--max-workers=1",
+               "--no-parallel", "--init-script",
+               str(inputs / "lane-script"),
                f"-PqualificationCheckout={repository}",
                f"-PqualificationRepository={staging}",
                f"-PqualificationArchiveRoot={output}",
@@ -372,17 +561,17 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
     if exit_code:
         raise ValueError(f"external full KLIB Gradle process exited {exit_code}")
     lane_info = manifest["lanes"][lane]
-    runtime_identity = (f"{platform.system()} {platform.release()} {platform.machine()} | "
-                        f"{java_version} | {subprocess.check_output([str(node), '--version'], text=True).strip()}")
+    observed_identity = observed_runtime_identity(observation, java_version)
     raw_xml = sorted(path.relative_to(output).as_posix() for path in
                      (output / "reports/raw").rglob("TEST-*.xml"))
     normal_xml = sorted(path.relative_to(output).as_posix() for path in
                         (output / "reports/normalized").rglob("TEST-*.xml"))
-    receipt = {"schema": 1, "status": "PASSED", "candidate_sha": candidate,
+    receipt = {"schema": 2, "status": "PASSED", "candidate_sha": candidate,
                "source_tree": git(repository, "rev-parse", f"{candidate}^{{tree}}").decode().strip(),
                "lane": lane, **{key: lane_info[key] for key in
                                 ("target", "runtime", "version", "configuration")},
-               "runtime_identity": runtime_identity, "artifact_hashes": hashes,
+               "runtime_identity": observed_identity, "runtime_observation": observation,
+               "artifact_hashes": hashes,
                "consumer_group": "full-suite",
                "consumer_contract_sha256": independent_gates.digest(selected),
                "source_inventory_sha256": sha((inputs / "source-inventory.tsv").read_bytes()),
@@ -409,13 +598,7 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
                "raw_consumer_tap": sorted(path.relative_to(output).as_posix() for path in
                                           (output / "reports/raw").rglob("node.tap")),
                "consumer_build_sha256": {path: sha(git(repository, "show", f"{candidate}:{path}"))
-                                         for path in (f"{CONSUMER}/build.gradle.kts",
-                                                      f"{CONSUMER}/settings.gradle.kts",
-                                                      f"{CONSUMER}/core/build.gradle.kts",
-                                                      f"{CONSUMER}/facade/build.gradle.kts",
-                                                      f"{CONSUMER}/node-test-preload.cjs",
-                                                      f"{CONSUMER}/linuxX64/Linux x64/current/build.gradle.kts",
-                                                      f"{CONSUMER}/js/Node.js/current/build.gradle.kts")},
+                                         for path in consumer_builds(2)},
                "producer_sha256": sha(git(repository, "show",
                                            f"{candidate}:tools/qualification/full_klib_consumer.py")),
                "files": [{"path": path.relative_to(output).as_posix(),
@@ -439,12 +622,46 @@ def _authenticate_archive(root, expected_digest):
     return receipt
 
 
+def _process_marker(lines, marker, schema):
+    return any(line == marker or (schema == 2 and (
+        _gradle_message(line, "QUIET", "system.out", marker)
+        or _gradle_message(line, "LIFECYCLE", "org.gradle.api.Task", marker)))
+        for line in lines)
+
+
+def _gradle_message(line, level, logger, message):
+    suffix = f" [{level}] [{logger}] {message}"
+    if not line.endswith(suffix):
+        return False
+    return re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{4}",
+        line[:-len(suffix)]) is not None
+
+
+def _process_task(lines, task, schema):
+    if schema != 2:
+        return any(line.startswith(f"> Task {task}") for line in lines)
+    action = f"Executing actions for task '{task}'."
+    lifecycle = f"> Task {task}"
+    return (any(_gradle_message(line, "DEBUG",
+                                "org.gradle.api.internal.tasks.execution.TaskExecution",
+                                action) for line in lines)
+            and any(_gradle_message(line, "LIFECYCLE",
+                                    "class org.gradle.internal.buildevents.TaskExecutionLogger",
+                                    lifecycle) for line in lines))
+
+
 def verify(root, repository, candidate, lane, hashes, runtime_identity,
            archive_digest, trusted_toolchain, replay_node=None):
     root, repository = Path(root), Path(repository).resolve()
     if lane not in LOCAL_LANES:
         raise ValueError("full KLIB lane is absent")
     receipt = _authenticate_archive(root, archive_digest)
+    schema = receipt.get("schema")
+    if schema not in (1, 2) or (schema == 1 and (
+            candidate != LEGACY_CANDIDATE or lane not in (
+                "linuxX64:Linux x64:current:debug-g", "js:Node.js:current:development"))):
+        raise ValueError("full KLIB receipt schema differs from selected lane")
     manifest, selected = contract(repository, lane)
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(selected)
@@ -456,11 +673,7 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
             raise ValueError(f"archived original input differs: {name}")
     if receipt.get("source_inventory_sha256") != sha(inputs["source-inventory.tsv"]):
         raise ValueError("receipt original source inventory differs")
-    builds = (f"{CONSUMER}/build.gradle.kts", f"{CONSUMER}/settings.gradle.kts",
-              f"{CONSUMER}/core/build.gradle.kts", f"{CONSUMER}/facade/build.gradle.kts",
-              f"{CONSUMER}/node-test-preload.cjs",
-              f"{CONSUMER}/linuxX64/Linux x64/current/build.gradle.kts",
-              f"{CONSUMER}/js/Node.js/current/build.gradle.kts")
+    builds = consumer_builds(schema)
     if receipt.get("consumer_build_sha256") != {
             path: sha(git(repository, "show", f"{candidate}:{path}")) for path in builds}:
         raise ValueError("external consumer build differs from exact source")
@@ -469,6 +682,16 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         raise ValueError("external producer differs from exact source")
     if receipt.get("toolchain") != trusted_toolchain:
         raise ValueError("producer toolchain differs from independent runner identity")
+    if schema == 2:
+        observation = receipt.get("runtime_observation")
+        if not isinstance(observation, dict):
+            raise ValueError("external runtime observation is missing")
+        validate_runtime(lane, observation)
+        if (observation["node_version"] != trusted_toolchain["node_version"]
+                or receipt.get("runtime_identity") != observed_runtime_identity(
+                    observation, trusted_toolchain["java_version"])
+                or receipt["runtime_identity"] != runtime_identity):
+            raise ValueError("external runtime observation differs from independent identity")
     paths, process = receipt.get("producer_paths"), receipt.get("process")
     if not isinstance(paths, dict) or not isinstance(process, dict):
         raise ValueError("producer path or process record is missing")
@@ -482,6 +705,8 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
     expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
                         "--project-cache-dir", f"{paths['work_root']}/gradle-project-cache",
                         "--offline", "--no-daemon", "--console=plain", "--rerun-tasks",
+                        *(["--debug", "--max-workers=1", "--no-parallel"]
+                          if schema == 2 else []),
                         "--init-script", f"{paths['inputs']}/lane-script",
                         f"-PqualificationCheckout={paths['checkout']}",
                         f"-PqualificationRepository={paths['staging']}",
@@ -501,17 +726,31 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
             or type(process.get("parent_pid")) is not int or process["parent_pid"] <= 0):
         raise ValueError("external Gradle process identity is absent")
     output_lines = (root / "stdout.txt").read_text().splitlines()
-    if ("QUALIFICATION_CASE_COUNT=2523" not in output_lines
-            or f"QUALIFICATION_LANE={lane}" not in output_lines
-            or f"QUALIFICATION_SOURCE_INVENTORY_TSV_SHA256={sha(inputs['source-inventory.tsv'])}"
-            not in output_lines):
+    if (not _process_marker(output_lines, "QUALIFICATION_CASE_COUNT=2523", schema)
+            or not _process_marker(output_lines, f"QUALIFICATION_LANE={lane}", schema)
+            or not _process_marker(output_lines,
+                                   "QUALIFICATION_SOURCE_INVENTORY_TSV_SHA256="
+                                   f"{sha(inputs['source-inventory.tsv'])}", schema)):
         raise ValueError("raw process output does not bind full original sources and methods")
-    tasks = ((":core:linuxX64Test", ":facade:linuxX64Test") if lane.startswith("linuxX64:")
-             else (":core:compileTestDevelopmentExecutableKotlinJs",
-                   ":facade:compileTestDevelopmentExecutableKotlinJs"))
-    if any(not any(line.startswith(f"> Task {task}") for line in output_lines)
-           for task in tasks):
+    selected_mode = mode_path(lane)
+    if lane.startswith("linuxX64:"):
+        link_mode = "Release" if selected_mode == "releaseTest" else "Debug"
+        tasks = tuple(task for short in ("core", "facade") for task in (
+            f":{short}:compileTestKotlinLinuxX64", f":{short}:link{link_mode}TestLinuxX64",
+            f":{short}:linuxX64Test")) if schema == 2 else (
+            ":core:linuxX64Test", ":facade:linuxX64Test")
+    else:
+        js_mode = "Production" if selected_mode == "testProductionExecutable" else "Development"
+        tasks = tuple(task for short in ("core", "facade") for task in (
+            f":{short}:compileTestKotlinJs",
+            f":{short}:compileTest{js_mode}ExecutableKotlinJs")) if schema == 2 else (
+            ":core:compileTestDevelopmentExecutableKotlinJs",
+            ":facade:compileTestDevelopmentExecutableKotlinJs")
+    if any(not _process_task(output_lines, task, schema) for task in tasks):
         raise ValueError("raw process output omits a required external runtime task")
+    if schema == 2 and not _process_task(
+            output_lines, ":qualificationCompilerEvidence", schema):
+        raise ValueError("raw process output omits measured compiler options")
     variant = LOCAL_LANES[lane][1]
     graph = json.loads((root / "provider-graph.json").read_bytes())
     if (set(graph) != {"compile", "runtime", "gradle_user_home"}
@@ -554,6 +793,15 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                         or (staged.name != item["name"] and
                             not item["name"].lower().startswith(f"{module}-{variant}"))):
                     raise ValueError("resolved external KLIB differs from staged publication")
+    if schema == 2:
+        compiler_path = root / "compiler-evidence.json"
+        if not _process_marker(output_lines, "QUALIFICATION_COMPILER_EVIDENCE_SHA256="
+                               f"{sha(compiler_path.read_bytes())}", schema):
+            raise ValueError("compiler option evidence is not bound to Gradle output")
+        require_compiler_evidence(json.loads(compiler_path.read_bytes()), graph,
+                                  variant, selected_mode)
+        require_actual_invocations((root / "stdout.txt").read_text(), graph,
+                                   variant, selected_mode, paths)
     expected = {item["id"] for item in selected["cases"]}
     observed = []
     raw_paths = receipt.get("raw_consumer_xml", [])
@@ -590,8 +838,11 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         ids, expected_normal = _report((root / raw).read_bytes(), "linuxX64", selected_map)
         if normal.read_bytes() != expected_normal or not ids:
             raise ValueError("normalized native XML is not derived from raw assertions")
-        if f"QUALIFICATION_RAW_XML_SHA256={sha((root / raw).read_bytes())}" not in output_lines:
+        if not _process_marker(output_lines,
+                               f"QUALIFICATION_RAW_XML_SHA256={sha((root / raw).read_bytes())}",
+                               schema):
             raise ValueError("raw Native XML is not bound to the process output")
+    raw_tap_ids = {}
     for tap in tap_paths:
         parts = Path(tap).parts
         normal = root / "reports/normalized" / parts[2] / "TEST-Node.xml"
@@ -601,7 +852,10 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         ids, expected_normal = _tap((root / tap).read_bytes(), selected_map)
         if normal.read_bytes() != expected_normal or not ids:
             raise ValueError("normalized Node XML is not derived from raw TAP")
-        if f"QUALIFICATION_RAW_TAP_SHA256={sha((root / tap).read_bytes())}" not in output_lines:
+        raw_tap_ids[parts[2]] = ids
+        if not _process_marker(output_lines,
+                               f"QUALIFICATION_RAW_TAP_SHA256={sha((root / tap).read_bytes())}",
+                               schema):
             raise ValueError("raw Node TAP is not bound to the process output")
     if not raw_paths and not receipt.get("raw_consumer_tap"):
         raise ValueError("original native XML or Node TAP is absent")
@@ -610,19 +864,28 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         program = root / f"runtime/{short}.program"
         if runtime.get("module") != short:
             raise ValueError("external runtime module differs")
-        if (f"QUALIFICATION_RUNTIME_{short.upper()}_SHA256="
-                f"{sha((root / f'runtime/{short}.json').read_bytes())}" not in output_lines
-                or f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256="
-                f"{sha(program.read_bytes())}" not in output_lines):
+        if (not _process_marker(output_lines,
+                                f"QUALIFICATION_RUNTIME_{short.upper()}_SHA256="
+                                f"{sha((root / f'runtime/{short}.json').read_bytes())}", schema)
+                or not _process_marker(output_lines,
+                                       f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256="
+                                       f"{sha(program.read_bytes())}", schema)):
             raise ValueError("external runtime program is not bound to process output")
         if variant == "linuxx64":
             if (runtime.get("executable_sha256") != sha(program.read_bytes())
                     or runtime.get("command") != [
-                        f"{paths['work_root']}/{short}/bin/linuxX64/debugTest/test.kexe"]):
+                        f"{paths['work_root']}/{short}/bin/linuxX64/{selected_mode}/test.kexe"]):
                 raise ValueError("native runtime process differs from linked executable")
         else:
+            if replay_node is None:
+                raise ValueError("independent Node replay is required")
+            checkout = Path(paths["checkout"]).resolve()
+            if (repository == checkout or repository.is_relative_to(checkout)
+                    or checkout.is_relative_to(repository)
+                    or git(repository, "status", "--porcelain").strip()):
+                raise ValueError("Node replay requires an unrelated clean source checkout")
             expected_program = (f"{paths['work_root']}/{short}/compileSync/js/test/"
-                                f"testDevelopmentExecutable/kotlin/"
+                                f"{selected_mode}/kotlin/"
                                 f"dyn4k-full-staged-klib-consumer-{short}-test.js")
             bundle_root = root / "runtime/bundle" / short
             bundle = {path.relative_to(bundle_root).as_posix(): sha(path.read_bytes())
@@ -645,32 +908,43 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                     or not process["started_ns"] <= runtime.get("started_ns", -1)
                     <= runtime.get("finished_ns", -1) <= process["finished_ns"]):
                 raise ValueError("Node runtime process differs from linked test program")
-            if replay_node is not None:
-                _authenticate_archive(root, archive_digest)
-                node_file = Path(replay_node).resolve()
-                if sha(node_file.read_bytes()) != trusted_toolchain["node_sha256"]:
-                    raise ValueError("replay Node binary differs from independent identity")
-                with tempfile.TemporaryDirectory(prefix="dyn4k-klib-replay-") as scratch:
-                    snapshot = Path(scratch) / "bundle"
-                    shutil.copytree(bundle_root, snapshot)
-                    snapshot_hashes = {
-                        path.relative_to(snapshot).as_posix(): sha(path.read_bytes())
-                        for path in snapshot.rglob("*") if path.is_file() and not path.is_symlink()}
-                    if snapshot_hashes != bundle:
-                        raise ValueError("authenticated Node replay bundle differs")
-                    replay_command = [
-                        str(node_file), "--test", "--test-reporter=tap",
-                        "--require", str(repository / CONSUMER / "node-test-preload.cjs"),
-                        str(snapshot / program_name)]
-                    replay = subprocess.run(replay_command, cwd=snapshot,
-                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                            check=False)
-                if replay.returncode:
-                    raise ValueError("transported Node test bundle failed public replay")
-                selected_map = _selected_cases(root / "inputs" / f"{short}-cases.tsv")
-                replay_ids, _ = _tap(replay.stdout, selected_map)
-                if set(replay_ids) != set(selected_map.values()):
-                    raise ValueError("transported Node test bundle changes original method outcomes")
+            _authenticate_archive(root, archive_digest)
+            preload_path = repository / CONSUMER / "node-test-preload.cjs"
+            if preload_path.is_symlink() or not preload_path.is_file():
+                raise ValueError("live Node replay preload differs from exact candidate")
+            preload_bytes = preload_path.read_bytes()
+            candidate_preload = git(repository, "show",
+                                    f"{candidate}:{CONSUMER}/node-test-preload.cjs")
+            if preload_bytes != candidate_preload:
+                raise ValueError("live Node replay preload differs from exact candidate")
+            node_file = Path(replay_node).resolve()
+            if sha(node_file.read_bytes()) != trusted_toolchain["node_sha256"]:
+                raise ValueError("replay Node binary differs from independent identity")
+            with tempfile.TemporaryDirectory(prefix="dyn4k-klib-replay-") as scratch:
+                snapshot = Path(scratch) / "bundle"
+                shutil.copytree(bundle_root, snapshot)
+                snapshot_preload = Path(scratch) / "node-test-preload.cjs"
+                snapshot_preload.write_bytes(preload_bytes)
+                if snapshot_preload.read_bytes() != candidate_preload:
+                    raise ValueError("copied Node replay preload differs from exact candidate")
+                snapshot_hashes = {
+                    path.relative_to(snapshot).as_posix(): sha(path.read_bytes())
+                    for path in snapshot.rglob("*") if path.is_file() and not path.is_symlink()}
+                if snapshot_hashes != bundle:
+                    raise ValueError("authenticated Node replay bundle differs")
+                replay_command = [
+                    str(node_file), "--test", "--test-reporter=tap",
+                    "--require", str(snapshot_preload),
+                    str(snapshot / program_name)]
+                replay = subprocess.run(replay_command, cwd=snapshot,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        check=False)
+            if replay.returncode:
+                raise ValueError("transported Node test bundle failed public replay")
+            selected_map = _selected_cases(root / "inputs" / f"{short}-cases.tsv")
+            replay_ids, _ = _tap(replay.stdout, selected_map)
+            if replay_ids != raw_tap_ids[short]:
+                raise ValueError("transported Node test bundle changes original method order or outcomes")
     allowed = {item["path"] for item in receipt["files"]} | {"receipt.json"}
     actual = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
     if actual != allowed:
