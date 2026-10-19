@@ -17,11 +17,21 @@ SOURCE_ROOTS = (
     "dyn4k/src/commonTest/kotlin", "dyn4k/src/jvmTest/kotlin", "dyn4k/src/jvmTest/java",
 )
 CONSUMER = "consumers/qualification/portable/full-jvm"
+LANES = tuple(f"jvm:Java:{version}:{configuration}"
+              for version in ("minimum", "current")
+              for configuration in ("no-optimize", "default"))
 
 
-def selected_contract(repository):
+def lane_parts(lane):
+    if lane not in LANES:
+        raise ValueError(f"unsupported full JVM lane: {lane}")
+    return lane.split(":")[2:]
+
+
+def selected_contract(repository, lane=LANE):
+    lane_parts(lane)
     manifest = independent_gates.load_approved_manifest(repository)
-    contract = independent_gates.consumer_contract(manifest, LANE)
+    contract = independent_gates.consumer_contract(manifest, lane)
     cases = contract["cases"]
     if (len(cases) != 2526 or len({item["id"] for item in cases}) != 2526
             or sum(item["module"] == "dyn4k-core" for item in cases) != 2465
@@ -53,7 +63,8 @@ def source_inventory(repository, candidate, cases):
     return sources
 
 
-def input_bytes(cases, sources):
+def input_bytes(cases, sources, lane=LANE):
+    lane_parts(lane)
     by_module = {module: sorted((item for item in cases if item["module"] == module),
                                 key=lambda item: item["id"]) for module in MODULES}
     return {
@@ -65,7 +76,7 @@ def input_bytes(cases, sources):
         "facade-cases.tsv": "".join(
             f"{item['id']}\t{item['classname']}\t{item['method']}\n"
             for item in by_module["dyn4k"]).encode(),
-        LANE: ("gradle.settingsEvaluated { settings ->\n"
+        lane: ("gradle.settingsEvaluated { settings ->\n"
                "  if (settings.rootProject.name != 'dyn4k-full-staged-jvm-consumer') {\n"
                "    throw new GradleException('qualification project differs')\n"
                "  }\n"
@@ -73,14 +84,14 @@ def input_bytes(cases, sources):
     }
 
 
-def prepare(repository, candidate, destination):
+def prepare(repository, candidate, destination, lane=LANE):
     repository, destination = Path(repository).resolve(), Path(destination).resolve()
-    manifest, contract = selected_contract(repository)
+    manifest, contract = selected_contract(repository, lane)
     sources = source_inventory(repository, candidate, contract["cases"])
     if destination.exists() and any(destination.iterdir()):
         raise ValueError("JVM input directory must be empty")
     destination.mkdir(parents=True, exist_ok=True)
-    for name, data in input_bytes(contract["cases"], sources).items():
+    for name, data in input_bytes(contract["cases"], sources, lane).items():
         (destination / name).write_bytes(data)
     return {"manifest_sha256": independent_gates.digest(manifest),
             "contract_sha256": independent_gates.digest(contract),
@@ -92,9 +103,14 @@ def target_binary(staging, module):
     return staging / GROUP.replace(".", "/") / f"{module}-jvm" / VERSION / name
 
 
-def run(repository, candidate, staging, output, gradle, expected_hashes):
+def run(repository, candidate, staging, output, gradle, expected_hashes,
+        lane=LANE, runtime_java_home=None):
+    version, configuration = lane_parts(lane)
+    if runtime_java_home is None:
+        raise ValueError("independent JVM test runtime home is required")
     repository, staging, output, gradle = (Path(value).resolve()
                                            for value in (repository, staging, output, gradle))
+    runtime_java_home = Path(runtime_java_home).resolve()
     head = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"],
                                    text=True).strip()
     dirty = subprocess.check_output(["git", "-C", str(repository), "status", "--porcelain"],
@@ -107,6 +123,12 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
     gradle_home = Path(os.environ["GRADLE_USER_HOME"]).resolve()
     java_version = subprocess.check_output([str(java_home / "bin/java"), "-version"],
                                            stderr=subprocess.STDOUT, text=True).splitlines()[0]
+    runtime_java_version = subprocess.check_output(
+        [str(runtime_java_home / "bin/java"), "-version"],
+        stderr=subprocess.STDOUT, text=True).splitlines()[0]
+    expected_runtime_major = "1.8" if version == "minimum" else "21"
+    if f'version "{expected_runtime_major}' not in runtime_java_version:
+        raise ValueError(f"full JVM {version} lane requires Java {expected_runtime_major}")
     gradle_version = subprocess.check_output([str(gradle), "--version"], text=True)
     if 'version "21' not in java_version or "Gradle 9.5.0" not in gradle_version:
         raise ValueError("full JVM producer requires JDK 21 and Gradle 9.5.0")
@@ -114,10 +136,10 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
         if sha(target_binary(staging, module).read_bytes()) != expected_hashes[module]:
             raise ValueError(f"staged {module} target JAR differs from independent hash")
     inputs = output.parent / f"{output.name}-inputs"
-    prepared = prepare(repository, candidate, inputs)
+    prepared = prepare(repository, candidate, inputs, lane)
     output.mkdir(parents=True, exist_ok=True)
     command = [str(gradle), "-p", str(repository / CONSUMER), "--offline", "--no-daemon",
-               "--console=plain", "--rerun-tasks", "--init-script", str(inputs / LANE),
+               "--console=plain", "--info", "--rerun-tasks", "--init-script", str(inputs / lane),
                f"-PqualificationCheckout={repository}",
                f"-PqualificationRepository={staging}",
                f"-PqualificationArchiveRoot={output}",
@@ -126,8 +148,12 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                f"-PqualificationFacadeCases={inputs / 'facade-cases.tsv'}",
                f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}",
                f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}",
-               f"-PqualificationLaneId={LANE}",
-               f"-PqualificationLaneScript={inputs / LANE}", LANE]
+               f"-PqualificationLaneId={lane}",
+               f"-PqualificationLaneScript={inputs / lane}",
+               f"-PqualificationRuntimeJavaHome={runtime_java_home}",
+               f"-PqualificationRuntimeJavaSha256={sha((runtime_java_home / 'bin/java').read_bytes())}",
+               f"-PqualificationBuildConfiguration={configuration}",
+               f"-Dorg.gradle.java.installations.paths={runtime_java_home},{java_home}", lane]
     started = time.time_ns()
     with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
         for log in ("stdout.txt", "stderr.txt"):
@@ -141,15 +167,18 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                "source_tree": subprocess.check_output(
                    ["git", "-C", str(repository), "rev-parse", f"{candidate}^{{tree}}"],
                    text=True).strip(),
-               "lane": LANE, "target": "jvm", "runtime": "Java", "version": "current",
-               "configuration": "default",
-               "runtime_identity": f"{java_version} | {platform.system()} {platform.release()} {platform.machine()}",
+               "lane": lane, "target": "jvm", "runtime": "Java", "version": version,
+               "configuration": configuration,
+               "runtime_identity": f"{runtime_java_version} | {platform.system()} {platform.release()} {platform.machine()}",
                "producer_paths": {"checkout": str(repository), "staging": str(staging),
                                   "archive_root": str(output), "inputs": str(inputs),
                                   "gradle": str(gradle)},
                "toolchain": {"java_home": str(java_home),
                              "java_version": java_version,
                              "java_executable_sha256": sha((java_home / "bin/java").read_bytes()),
+                             "runtime_java_home": str(runtime_java_home),
+                             "runtime_java_version": runtime_java_version,
+                             "runtime_java_executable_sha256": sha((runtime_java_home / "bin/java").read_bytes()),
                              "gradle_version": "Gradle 9.5.0",
                              "gradle_executable_sha256": sha(gradle.read_bytes()),
                              "gradle_user_home": str(gradle_home)},
@@ -163,7 +192,8 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                    path: sha(git_blob(repository, candidate, path)) for path in (
                        f"{CONSUMER}/build.gradle.kts", f"{CONSUMER}/core/build.gradle.kts",
                        f"{CONSUMER}/facade/build.gradle.kts", f"{CONSUMER}/settings.gradle.kts",
-                       f"{CONSUMER}/jvm/Java/current/build.gradle.kts")},
+                       f"{CONSUMER}/jvm/Java/current/build.gradle.kts",
+                       f"{CONSUMER}/jvm/Java/minimum/build.gradle.kts")},
                "provider_graph": "provider-graph.json",
                "resolved_artifacts": {
                    module: f"resolved/{module}-jvm-{VERSION}.jar" for module in MODULES},
@@ -205,10 +235,13 @@ def _same_report(raw, normalized, case_map):
 
 def verify(root, repository, candidate, expected_hashes, runtime_identity,
            expected_archive_digest, expected_java_executable_sha256=None,
-           expected_gradle_executable_sha256=None):
+           expected_gradle_executable_sha256=None,
+           expected_runtime_java_executable_sha256=None, lane=LANE):
+    version, configuration = lane_parts(lane)
     expected_executables = {
         "java_executable_sha256": expected_java_executable_sha256,
         "gradle_executable_sha256": expected_gradle_executable_sha256,
+        "runtime_java_executable_sha256": expected_runtime_java_executable_sha256,
     }
     if any(type(value) is not str or not SHA256.fullmatch(value)
            for value in expected_executables.values()):
@@ -217,16 +250,18 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     if not root.is_dir() or root.is_symlink():
         raise ValueError("full JVM archive is missing or symbolic")
     receipt = json.loads((root / "receipt.json").read_bytes())
-    manifest, contract = selected_contract(repository)
-    if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != LANE
+    manifest, contract = selected_contract(repository, lane)
+    if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
+            or receipt.get("version") != version
+            or receipt.get("configuration") != configuration
             or receipt.get("consumer_group") != "full-suite"
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(contract)):
         raise ValueError("full JVM receipt differs from approved candidate contract")
     cases = contract["cases"]
     sources = source_inventory(repository, candidate, cases)
-    expected_inputs = input_bytes(cases, sources)
+    expected_inputs = input_bytes(cases, sources, lane)
     expected_files = {f"inputs/{name}": data for name, data in expected_inputs.items()}
-    expected_files["inputs/lane-script"] = expected_files.pop(f"inputs/{LANE}")
+    expected_files["inputs/lane-script"] = expected_files.pop(f"inputs/{lane}")
     if receipt.get("source_inventory_sha256") != sha(expected_inputs["source-inventory.tsv"]):
         raise ValueError("receipt source inventory differs from exact candidate")
     for relative, data in expected_files.items():
@@ -234,7 +269,8 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
             raise ValueError(f"archived full JVM input differs: {relative}")
     builds = (f"{CONSUMER}/build.gradle.kts", f"{CONSUMER}/core/build.gradle.kts",
               f"{CONSUMER}/facade/build.gradle.kts", f"{CONSUMER}/settings.gradle.kts",
-              f"{CONSUMER}/jvm/Java/current/build.gradle.kts")
+              f"{CONSUMER}/jvm/Java/current/build.gradle.kts",
+              f"{CONSUMER}/jvm/Java/minimum/build.gradle.kts")
     if receipt.get("consumer_build_sha256") != {
             path: sha(git_blob(repository, candidate, path)) for path in builds}:
         raise ValueError("consumer build source differs from exact candidate")
@@ -248,22 +284,27 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                    for value in paths.values())
             or not isinstance(toolchain, dict)
             or set(toolchain) != {"java_home", "java_version", "java_executable_sha256",
+                                  "runtime_java_home", "runtime_java_version",
+                                  "runtime_java_executable_sha256",
                                   "gradle_version", "gradle_executable_sha256",
                                   "gradle_user_home"}
             or toolchain["gradle_version"] != "Gradle 9.5.0"
             or 'version "21' not in toolchain["java_version"]
-            or not receipt.get("runtime_identity", "").startswith(toolchain["java_version"] + " | ")
+            or f'version "{"1.8" if version == "minimum" else "21"}'
+            not in toolchain["runtime_java_version"]
+            or receipt.get("runtime_identity") != runtime_identity
+            or not runtime_identity.startswith(toolchain["runtime_java_version"] + " | ")
             or any(not SHA256.fullmatch(str(toolchain[key]))
-                   for key in ("java_executable_sha256", "gradle_executable_sha256"))
+                   for key in expected_executables)
             or any(not Path(toolchain[key]).is_absolute()
-                   for key in ("java_home", "gradle_user_home"))):
+                   for key in ("java_home", "runtime_java_home", "gradle_user_home"))):
         raise ValueError("producer paths or pinned toolchain are incomplete")
     if any(toolchain[key] != value for key, value in expected_executables.items()):
         raise ValueError("independent Java or Gradle executable SHA-256 differs from receipt")
     inputs = Path(paths["inputs"])
     expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
-                        "--offline", "--no-daemon", "--console=plain", "--rerun-tasks",
-                        "--init-script", str(inputs / LANE),
+                        "--offline", "--no-daemon", "--console=plain", "--info", "--rerun-tasks",
+                        "--init-script", str(inputs / lane),
                         f"-PqualificationCheckout={paths['checkout']}",
                         f"-PqualificationRepository={paths['staging']}",
                         f"-PqualificationArchiveRoot={paths['archive_root']}",
@@ -272,10 +313,40 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                         f"-PqualificationFacadeCases={inputs / 'facade-cases.tsv'}",
                         f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}",
                         f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}",
-                        f"-PqualificationLaneId={LANE}",
-                        f"-PqualificationLaneScript={inputs / LANE}", LANE]
+                        f"-PqualificationLaneId={lane}",
+                        f"-PqualificationLaneScript={inputs / lane}",
+                        f"-PqualificationRuntimeJavaHome={toolchain['runtime_java_home']}",
+                        f"-PqualificationRuntimeJavaSha256={expected_runtime_java_executable_sha256}",
+                        f"-PqualificationBuildConfiguration={configuration}",
+                        f"-Dorg.gradle.java.installations.paths={toolchain['runtime_java_home']},{toolchain['java_home']}",
+                        lane]
     if command != expected_command or process.get("cwd") != paths["inputs"]:
         raise ValueError("external Gradle command differs from candidate or staged bytes")
+    output = (root / process["stdout"]).read_text()
+    runtime_executable = str(Path(toolchain["runtime_java_home"]) / "bin/java")
+    if (f"QUALIFICATION_BUILD_CONFIGURATION={configuration}" not in output.splitlines()
+            or output.count(f"Command: {runtime_executable} ") < 2):
+        raise ValueError("external test JVM process or build configuration is unproven")
+    proof_bytes = (root / "build-configuration.json").read_bytes()
+    if f"QUALIFICATION_BUILD_CONFIGURATION_SHA256={sha(proof_bytes)}" not in output.splitlines():
+        raise ValueError("external build configuration proof is not bound to process")
+    proof = json.loads(proof_bytes)
+    if (set(proof) != {"lane", "configuration", "modules"}
+            or proof["lane"] != lane or proof["configuration"] != configuration
+            or not isinstance(proof["modules"], list) or len(proof["modules"]) != 2
+            or {item.get("module") for item in proof["modules"]} != {"core", "facade"}):
+        raise ValueError("external build configuration proof differs from selected lane")
+    for item in proof["modules"]:
+        args, jvm_args = item.get("compiler_args"), item.get("test_jvm_args")
+        if (not isinstance(args, list) or not isinstance(jvm_args, list)
+                or item.get("test_java_home") != toolchain["runtime_java_home"]
+                or item.get("test_java_executable") != runtime_executable
+                or item.get("test_java_sha256") != expected_runtime_java_executable_sha256
+                or item.get("test_java_version") != (8 if version == "minimum" else 21)
+                or ("-Xno-optimize" in args) != (configuration == "no-optimize")
+                or ("-Xint" in jvm_args) != (configuration == "no-optimize")
+                or "-XshowSettings:properties" not in jvm_args):
+            raise ValueError("external compile or test JVM configuration differs")
     if (receipt.get("raw_consumer_xml") is None or not isinstance(
             receipt["raw_consumer_xml"], list)):
         raise ValueError("original Gradle XML inventory is missing")
@@ -329,12 +400,12 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                         or sha(copied.read_bytes()) != expected_hashes[module]):
                     raise ValueError("external provider graph differs from pinned staged binary")
     allowed = set(expected_files) | {"receipt.json", "stdout.txt", "stderr.txt",
-                                    "provider-graph.json"} | set(raw_paths) | set(normal_paths) | {
+                                    "provider-graph.json", "build-configuration.json"} | set(raw_paths) | set(normal_paths) | {
         f"resolved/{module}-jvm-{VERSION}.jar" for module in MODULES}
     if {str(path.relative_to(root)) for path in root.rglob("*") if path.is_file()} != allowed:
         raise ValueError("full JVM archive has missing or unlisted files")
     gate = independent_gates.evaluate_gate(
-        "staged-consumer", root, candidate, LANE, manifest["lanes"][LANE], repository,
+        "staged-consumer", root, candidate, lane, manifest["lanes"][lane], repository,
         expected_hashes, runtime_identity, expected_archive_digest, manifest=manifest)
     if gate["status"] != "PASSED" or gate.get("complete_selected_suite") is not True:
         raise ValueError(f"independent full JVM staged consumer gate failed: {gate['reason']}")
@@ -348,41 +419,47 @@ def main():
     prep.add_argument("--repository", required=True)
     prep.add_argument("--candidate-sha", required=True)
     prep.add_argument("--destination", required=True)
+    prep.add_argument("--lane", choices=LANES, default=LANE)
     produce = sub.add_parser("run")
     produce.add_argument("--repository", required=True)
     produce.add_argument("--candidate-sha", required=True)
     produce.add_argument("--staging", required=True)
     produce.add_argument("--output", required=True)
     produce.add_argument("--gradle", required=True)
+    produce.add_argument("--lane", choices=LANES, required=True)
+    produce.add_argument("--runtime-java-home", required=True)
     produce.add_argument("--expected-core-sha256", required=True)
     produce.add_argument("--expected-facade-sha256", required=True)
     replay = sub.add_parser("verify")
     replay.add_argument("--repository", required=True)
     replay.add_argument("--candidate-sha", required=True)
     replay.add_argument("--archive", required=True)
+    replay.add_argument("--lane", choices=LANES, required=True)
     replay.add_argument("--expected-core-sha256", required=True)
     replay.add_argument("--expected-facade-sha256", required=True)
     replay.add_argument("--runtime-identity", required=True)
     replay.add_argument("--expected-archive-digest", required=True)
     replay.add_argument("--expected-java-executable-sha256", required=True)
     replay.add_argument("--expected-gradle-executable-sha256", required=True)
+    replay.add_argument("--expected-runtime-java-executable-sha256", required=True)
     args = parser.parse_args()
     if args.action == "prepare":
-        result = prepare(args.repository, args.candidate_sha, args.destination)
+        result = prepare(args.repository, args.candidate_sha, args.destination, args.lane)
     elif args.action == "run":
         hashes = {"dyn4k-core": args.expected_core_sha256,
                   "dyn4k": args.expected_facade_sha256}
         if any(not SHA256.fullmatch(value) for value in hashes.values()):
             parser.error("independent target JAR hashes are required")
         result = run(args.repository, args.candidate_sha, args.staging, args.output,
-                     args.gradle, hashes)
+                     args.gradle, hashes, args.lane, args.runtime_java_home)
     else:
         hashes = {"dyn4k-core": args.expected_core_sha256,
                   "dyn4k": args.expected_facade_sha256}
         result = verify(args.archive, args.repository, args.candidate_sha,
                         hashes, args.runtime_identity, args.expected_archive_digest,
                         args.expected_java_executable_sha256,
-                        args.expected_gradle_executable_sha256)
+                        args.expected_gradle_executable_sha256,
+                        args.expected_runtime_java_executable_sha256, args.lane)
     print(json.dumps(result, sort_keys=True))
 
 

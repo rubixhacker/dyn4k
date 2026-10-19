@@ -304,7 +304,7 @@ class IndependentAdapterTests(unittest.TestCase):
             "target": "jvm", "required_gates": ["staged-consumer"],
             "case_scopes": ["portable"]}}, "global_gates": []}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
-        java_hash, gradle_hash = "d" * 64, "e" * 64
+        java_hash, gradle_hash, runtime_java_hash = "d" * 64, "e" * 64, "9" * 64
         archive_digest = "f" * 64
         runtime = "audited Java 21 runtime"
         fake = self.fake_verifier()
@@ -331,7 +331,8 @@ class IndependentAdapterTests(unittest.TestCase):
                                        "expected_archive_digests": {
                                            "staged-consumer": archive_digest},
                                        "expected_java_executable_sha256": java_hash,
-                                       "expected_gradle_executable_sha256": gradle_hash}}}
+                                       "expected_gradle_executable_sha256": gradle_hash,
+                                       "expected_runtime_java_executable_sha256": runtime_java_hash}}}
             selection = {"case_ids": [item["id"] for item in cases],
                          "required_gates": ["staged-consumer"], "global_gates": []}
 
@@ -351,9 +352,10 @@ class IndependentAdapterTests(unittest.TestCase):
                 "staged-consumer"]["status"])
             replay.assert_called_once_with(
                 str(archive), root, candidate, hashes, runtime, archive_digest,
-                java_hash, gradle_hash)
+                java_hash, gradle_hash, runtime_java_hash, lane)
             for field, value in (("expected_java_executable_sha256", None),
-                                 ("expected_gradle_executable_sha256", "0" * 63)):
+                                 ("expected_gradle_executable_sha256", "0" * 63),
+                                 ("expected_runtime_java_executable_sha256", None)):
                 changed = copy.deepcopy(signed)
                 changed["lanes"][lane][field] = value
                 with self.assertRaisesRegex(ValueError, "signed JVM executable"):

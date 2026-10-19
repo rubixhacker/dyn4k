@@ -7,6 +7,9 @@ plugins {
 val checkout = file(providers.gradleProperty("qualificationCheckout").get())
 val staging = file(providers.gradleProperty("qualificationRepository").get())
 val facadeJar = file("$staging/io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar")
+val configuration = providers.gradleProperty("qualificationBuildConfiguration").get()
+val runtimeHome = file(providers.gradleProperty("qualificationRuntimeJavaHome").get())
+val runtimeMajor = if (providers.gradleProperty("qualificationLaneId").get().contains(":minimum:")) 8 else 21
 
 repositories {
     maven { url = uri(staging) }
@@ -28,10 +31,19 @@ sourceSets.test {
 tasks.named<KotlinJvmCompile>("compileTestKotlin") {
     dependsOn(":qualificationValidateInputs")
     compilerOptions.freeCompilerArgs.add("-Xfriend-paths=${facadeJar.absolutePath}")
+    if (configuration == "no-optimize") compilerOptions.freeCompilerArgs.add("-Xno-optimize")
 }
 
 tasks.test {
     useJUnit()
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(runtimeMajor))
+    })
+    doFirst {
+        check(javaLauncher.get().metadata.installationPath.asFile.canonicalFile == runtimeHome.canonicalFile)
+    }
+    jvmArgs("-XshowSettings:properties")
+    if (configuration == "no-optimize") jvmArgs("-Xint")
     val selected = file(providers.gradleProperty("qualificationFacadeCases").get()).readLines()
     filter {
         selected.forEach { line ->

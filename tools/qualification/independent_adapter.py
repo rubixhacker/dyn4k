@@ -66,12 +66,14 @@ def _verify_full_jvm_staged_consumer(repository, candidate_sha, lane_id, selecte
                                      paths, expected, gate_result):
     import full_jvm_consumer
 
-    if lane_id != full_jvm_consumer.LANE:
+    if lane_id not in full_jvm_consumer.LANES:
         raise ValueError(f"public full JVM verifier does not cover lane: {lane_id}")
     java_hash = expected.get("expected_java_executable_sha256")
     gradle_hash = expected.get("expected_gradle_executable_sha256")
+    runtime_java_hash = expected.get("expected_runtime_java_executable_sha256")
     if (type(java_hash) is not str or not SHA256.fullmatch(java_hash)
-            or type(gradle_hash) is not str or not SHA256.fullmatch(gradle_hash)):
+            or type(gradle_hash) is not str or not SHA256.fullmatch(gradle_hash)
+            or type(runtime_java_hash) is not str or not SHA256.fullmatch(runtime_java_hash)):
         raise ValueError(f"signed JVM executable SHA-256 values are missing or invalid: {lane_id}")
     hashes = expected.get("expected_artifact_hashes")
     runtime = expected.get("expected_runtime_identity")
@@ -82,12 +84,12 @@ def _verify_full_jvm_staged_consumer(repository, candidate_sha, lane_id, selecte
             or type(runtime) is not str or not runtime
             or type(digest) is not str or not SHA256.fullmatch(digest)):
         raise ValueError(f"signed JVM archive identity is incomplete: {lane_id}")
-    contract = full_jvm_consumer.selected_contract(repository)[1]
+    contract = full_jvm_consumer.selected_contract(repository, lane_id)[1]
     if selected["case_ids"] != [item["id"] for item in contract["cases"]]:
         raise ValueError(f"signed JVM lane selects a different case suite: {lane_id}")
     public = full_jvm_consumer.verify(
         paths["staged-consumer"], repository, candidate_sha, hashes, runtime, digest,
-        java_hash, gradle_hash)
+        java_hash, gradle_hash, runtime_java_hash, lane_id)
     if public != gate_result:
         raise ValueError(f"public JVM verifier differs from independent gate: {lane_id}")
 

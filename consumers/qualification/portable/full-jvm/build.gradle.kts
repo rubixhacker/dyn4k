@@ -6,6 +6,8 @@ import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.transform.stream.StreamResult
 import org.w3c.dom.Element
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     kotlin("jvm") version "2.4.20" apply false
@@ -34,7 +36,8 @@ fun archived(relative: String): File = file("$archive/$relative").also {
 
 tasks.register("qualificationValidateInputs") {
     doLast {
-        check(lane == "jvm:Java:current:default")
+        check(Regex("jvm:Java:(minimum|current):(no-optimize|default)").matches(lane))
+        check(lane.substringAfterLast(':') == providers.gradleProperty("qualificationBuildConfiguration").get())
         val sourceLines = inventory.readLines().filter { it.isNotBlank() }
         val sources = sourceLines.map { line ->
             val parts = line.split('\t')
@@ -154,7 +157,31 @@ tasks.register("qualificationEvidence") {
         facadeCases.copyTo(facadeInput, overwrite = true)
         val scriptInput = archived("inputs/lane-script")
         laneScript.copyTo(scriptInput, overwrite = true)
+        val configuration = providers.gradleProperty("qualificationBuildConfiguration").get()
+        val runtimeHome = file(providers.gradleProperty("qualificationRuntimeJavaHome").get()).canonicalFile
+        val runtimeHash = providers.gradleProperty("qualificationRuntimeJavaSha256").get()
+        val buildProof = listOf("core", "facade").map { module ->
+            val kotlinTask = project(":$module").tasks.getByName("compileTestKotlin") as KotlinJvmCompile
+            val testTask = project(":$module").tasks.getByName("test") as Test
+            val launcher = testTask.javaLauncher.get()
+            check(launcher.metadata.installationPath.asFile.canonicalFile == runtimeHome)
+            val args = kotlinTask.compilerOptions.freeCompilerArgs.get()
+            check(args.contains("-Xno-optimize") == (configuration == "no-optimize"))
+            check(testTask.jvmArgs.contains("-Xint") == (configuration == "no-optimize"))
+            mapOf("module" to module, "compiler_args" to args,
+                "test_jvm_args" to testTask.jvmArgs,
+                "test_java_executable" to launcher.executablePath.asFile.canonicalPath,
+                "test_java_home" to launcher.metadata.installationPath.asFile.canonicalPath,
+                "test_java_version" to launcher.metadata.languageVersion.asInt(),
+                "test_java_sha256" to hash(launcher.executablePath.asFile))
+        }
+        check(buildProof.all { it["test_java_sha256"] == runtimeHash })
+        val buildFile = archived("build-configuration.json")
+        buildFile.writeText(JsonOutput.toJson(mapOf(
+            "lane" to lane, "configuration" to configuration, "modules" to buildProof)))
         println("QUALIFICATION_LANE=$lane")
+        println("QUALIFICATION_BUILD_CONFIGURATION=$configuration")
+        println("QUALIFICATION_BUILD_CONFIGURATION_SHA256=${hash(buildFile)}")
         println("QUALIFICATION_INPUT_SOURCE_COUNT=${inventory.readLines().size}")
         println("QUALIFICATION_CASE_COUNT=${observed.size}")
         println("QUALIFICATION_PROVIDER_GRAPH_SHA256=${hash(graphFile)}")

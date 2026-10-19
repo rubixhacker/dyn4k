@@ -15,13 +15,17 @@ import independent_gates
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 ARCHIVE = os.environ.get("DYN4K_FULL_JVM_ARCHIVE")
+TEST_LANE = os.environ.get("DYN4K_FULL_JVM_LANE", route.LANE)
 JAVA_EXECUTABLE_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
 GRADLE_EXECUTABLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
+RUNTIME_EXECUTABLE_SHA256 = route.sha((Path("/tmp/dyn4k-tools/jdk8" if
+    ":minimum:" in TEST_LANE else "/tmp/dyn4k-tools/jdk21") / "bin/java").read_bytes())
 
 
 def verify_archive(root, repository, candidate, hashes, identity, digest):
     return route.verify(root, repository, candidate, hashes, identity, digest,
-                        JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256)
+                        JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256,
+                        RUNTIME_EXECUTABLE_SHA256, TEST_LANE)
 
 
 class FullJvmConsumerTests(unittest.TestCase):
@@ -59,7 +63,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                                    forged["artifact_hashes"], forged["runtime_identity"], digest)
                 command = [
                     sys.executable, str(REPOSITORY / "tools/qualification/full_jvm_consumer.py"),
-                    "verify", "--repository", str(REPOSITORY), "--candidate-sha",
+                    "verify", "--lane", TEST_LANE, "--repository", str(REPOSITORY), "--candidate-sha",
                     forged["candidate_sha"], "--archive", str(copied),
                     "--expected-core-sha256", forged["artifact_hashes"]["dyn4k-core"],
                     "--expected-facade-sha256", forged["artifact_hashes"]["dyn4k"],
@@ -67,6 +71,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                     "--expected-archive-digest", digest,
                     "--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256,
                     "--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256,
+                    "--expected-runtime-java-executable-sha256", RUNTIME_EXECUTABLE_SHA256,
                 ]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -78,7 +83,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         root = Path(ARCHIVE)
         receipt = json.loads((root / "receipt.json").read_bytes())
         base = [sys.executable, str(REPOSITORY / "tools/qualification/full_jvm_consumer.py"),
-                "verify", "--repository", str(REPOSITORY), "--candidate-sha",
+                "verify", "--lane", TEST_LANE, "--repository", str(REPOSITORY), "--candidate-sha",
                 receipt["candidate_sha"], "--archive", str(root),
                 "--expected-core-sha256", receipt["artifact_hashes"]["dyn4k-core"],
                 "--expected-facade-sha256", receipt["artifact_hashes"]["dyn4k"],
@@ -86,19 +91,21 @@ class FullJvmConsumerTests(unittest.TestCase):
                 "--expected-archive-digest", independent_gates.archive_digest(root)]
         java = ["--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256]
         gradle = ["--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256]
-        positive = subprocess.run(base + java + gradle, capture_output=True, text=True)
+        runtime_java = ["--expected-runtime-java-executable-sha256", RUNTIME_EXECUTABLE_SHA256]
+        positive = subprocess.run(base + java + gradle + runtime_java, capture_output=True, text=True)
         self.assertEqual(positive.returncode, 0, positive.stderr)
         self.assertEqual(json.loads(positive.stdout)["selected_cases"], 2526)
         adverse = (
-            (base + java, "required"),
-            (base + gradle, "required"),
-            (base + ["--expected-java-executable-sha256", "x" * 64] + gradle,
+            (base + java + runtime_java, "required"),
+            (base + gradle + runtime_java, "required"),
+            (base + java + gradle, "required"),
+            (base + ["--expected-java-executable-sha256", "x" * 64] + gradle + runtime_java,
              "independent Java and Gradle executable SHA-256 values are required"),
-            (base + java + ["--expected-gradle-executable-sha256", "x" * 64],
+            (base + java + ["--expected-gradle-executable-sha256", "x" * 64] + runtime_java,
              "independent Java and Gradle executable SHA-256 values are required"),
-            (base + ["--expected-java-executable-sha256", "0" * 64] + gradle,
+            (base + ["--expected-java-executable-sha256", "0" * 64] + gradle + runtime_java,
              "independent Java or Gradle executable SHA-256 differs from receipt"),
-            (base + java + ["--expected-gradle-executable-sha256", "1" * 64],
+            (base + java + ["--expected-gradle-executable-sha256", "1" * 64] + runtime_java,
              "independent Java or Gradle executable SHA-256 differs from receipt"),
         )
         for arguments, error in adverse:
@@ -124,7 +131,7 @@ class FullJvmConsumerTests(unittest.TestCase):
             "subprocess").check_output(["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"],
                                          text=True).strip()
         with tempfile.TemporaryDirectory() as directory:
-            result = route.prepare(REPOSITORY, candidate, Path(directory) / "inputs")
+            result = route.prepare(REPOSITORY, candidate, Path(directory) / "inputs", TEST_LANE)
             self.assertEqual(result["selected_cases"], 2526)
             self.assertEqual(result["source_count"], 175)
             inputs = Path(directory) / "inputs"
@@ -144,7 +151,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         self.assertEqual(positive["selected_cases"], 2526)
         lane = independent_gates.evaluate(
             independent_gates.load_approved_manifest(REPOSITORY), candidate,
-            route.LANE, {"staged-consumer": root}, REPOSITORY, hashes, identity,
+            TEST_LANE, {"staged-consumer": root}, REPOSITORY, hashes, identity,
             {"staged-consumer": digest})
         self.assertEqual(lane["gates"]["staged-consumer"]["status"], "PASSED")
         self.assertEqual(lane["status"], "NOT_RUN")
