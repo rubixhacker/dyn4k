@@ -66,8 +66,14 @@ function load(options = {}) {
         Browser = realRequire(browserPath);
     }
     const originalReconnect = Browser.prototype.reconnect;
+    const simulatedNoFollow = 0x04000000;
+    assert.equal(simulatedNoFollow & (realFs.constants.O_WRONLY |
+        realFs.constants.O_CREAT | realFs.constants.O_EXCL), 0);
+    const hostConstants = options.windowsLikeFs
+        ? {...realFs.constants, O_NOFOLLOW: undefined} : realFs.constants;
     const fakeFs = {
-        constants: realFs.constants,
+        constants: {...hostConstants,
+            O_NOFOLLOW: options.noFollowUnavailable ? undefined : simulatedNoFollow},
         readFileSync(path) {
             if (path === '/fixture/karma-kotlin-reporter.js') {
                 return Buffer.from('producer fixture');
@@ -83,13 +89,18 @@ function load(options = {}) {
         },
         realpathSync(path) {
             assert.equal(path, '/fixture/events');
-            return path;
+            return options.mismatchedRealpath ? '/fixture/elsewhere' : path;
         },
         openSync(path, flags, mode) {
             assert.equal(path, '/fixture/events/dyn4k-core-' + '1'.repeat(32) + '-1234.jsonl');
             assert.equal(mode, 0o600);
             assert.ok(flags & realFs.constants.O_EXCL);
-            assert.ok(flags & realFs.constants.O_NOFOLLOW);
+            assert.ok(flags & fakeFs.constants.O_NOFOLLOW);
+            if (options.linkedTraceFile) {
+                const error = new Error('linked trace file');
+                error.code = 'ELOOP';
+                throw error;
+            }
             return 3;
         },
         closeSync(fd) {
@@ -176,6 +187,21 @@ function load(options = {}) {
     }, config, {});
     return {reporter, config, output, traceOutput, asynchronous, calls, Reporter,
         Browser, originalReconnect};
+}
+
+if (process.argv[3] === '--windows-capability-control' ||
+        process.argv[3] === '--trace-control') {
+    const actual = load({trace: true, windowsLikeFs: true});
+    assert.ok(actual.traceOutput.length > 0);
+    assert.throws(() => load({trace: true, windowsLikeFs: true,
+        noFollowUnavailable: true}), /Safari event trace source or destination is unsafe/);
+    assert.throws(() => load({trace: true, windowsLikeFs: true,
+        mismatchedRealpath: true}), /Safari event trace source or destination is unsafe/);
+    assert.throws(() => load({trace: true, windowsLikeFs: true,
+        linkedDirectory: true}), /Safari event trace source or destination is unsafe/);
+    assert.throws(() => load({trace: true, windowsLikeFs: true,
+        linkedTraceFile: true}), error => error.code === 'ELOOP');
+    if (process.argv[3] === '--windows-capability-control') process.exit(0);
 }
 
 if (process.argv[3] === '--isolation-control') {
