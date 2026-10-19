@@ -4,6 +4,8 @@ This consumer compiles the approved portable assertion sources from an exact dyn
 
 Run each command with JDK 21 at `/tmp/dyn4k-tools/jdk21`, Gradle 9.5.0 at `/tmp/dyn4k-tools/gradle-9.5.0`, and Android SDK at `/var/home/stewart/Android/Sdk`. Set `JAVA_HOME`, `ANDROID_HOME`, and a home backed `TMPDIR` explicitly. Keep each output and archive directory under the session evidence directory.
 
+The producer places Gradle project caches under the selected output directory. This keeps the exact-source checkout clean for staging and public replay.
+
 ```sh
 python3 tools/qualification/full_android_consumer.py compile --staging build/staging-repository --output "$OUTPUT"
 python3 -m unittest tools.qualification.test_full_android_consumer -v

@@ -107,6 +107,7 @@ def prepare(checkout, staging, output):
 
 def gradle_command(checkout, staging, output, *tasks, build_type=None):
     command = ["/tmp/dyn4k-tools/gradle-9.5.0/bin/gradle", "--no-daemon", "--console=plain",
+               f"--project-cache-dir={output / 'project-cache'}",
                "-p", str(PROJECT), f"-PqualificationRepository={staging}",
                f"-PqualificationOutput={output}", f"-PsourceCheckout={checkout}",
                f"-PcoreClasses={output / 'dyn4k-core-classes.jar'}",
