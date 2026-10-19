@@ -34,14 +34,17 @@ EVENT_CLONE = 3
 EVENT_EXEC = 4
 EVENT_EXIT = 6
 WAIT_ALL = 0x40000000
-MAX_EVENTS = 4096
-MAX_PROCESSES = 256
+DEFAULT_EVENTS = 4096
+DEFAULT_PROCESSES = 256
+DEFAULT_LOG_BYTES = 8 * 1024 * 1024
+MAX_EVENTS = 8192
+MAX_PROCESSES = 1024
 MAX_SECONDS = 3600
 MAX_ARCHIVE_FILES = 4096
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_INPUT_BYTES = MAX_ARCHIVE_BYTES
 MAX_IMAGE_BYTES = MAX_ARCHIVE_BYTES
-MAX_LOG_BYTES = 8 * 1024 * 1024
+MAX_LOG_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 libc = ctypes.CDLL(None, use_errno=True)
@@ -214,8 +217,16 @@ def _status(status):
             "signal": os.WTERMSIG(status) if os.WIFSIGNALED(status) else None}
 
 
+def _continue_tracee(pid, event, sig):
+    try:
+        _ptrace(PTRACE_CONT, pid, sig if event == 0 else 0)
+    except ProcessLookupError:
+        if event != EVENT_EXIT:
+            raise
+
+
 class EventLog:
-    def __init__(self, root):
+    def __init__(self, root, event_limit=DEFAULT_EVENTS, byte_limit=DEFAULT_LOG_BYTES):
         requested = Path(root).absolute()
         if ".." in requested.parts or requested.name in ("", ".", ".."):
             raise ObservationError("observer output uses path traversal")
@@ -227,16 +238,21 @@ class EventLog:
         self.head = ZERO
         self.rows = []
         self.size = 0
+        self.event_limit = event_limit
+        self.byte_limit = byte_limit
 
     def add(self, kind, **data):
-        if self.count >= MAX_EVENTS:
+        terminal = kind in ("error", "end")
+        reserved = 0 if terminal else 1 if kind == "archive" else 2
+        if self.count >= self.event_limit - reserved:
             raise ObservationError("event limit exceeded")
         body = {"seq": self.count + 1, "previous_sha256": self.head,
-                "kind": kind, "observed_at_ns": time.monotonic_ns(), **data}
+                "kind": kind, "observed_at_ns": time.monotonic_ns(),
+                "observed_wall_ns": time.time_ns(), **data}
         digest = hashlib.sha256(_json_bytes(body)).hexdigest()
         row = {**body, "sha256": digest}
         raw = _json_bytes(row) + b"\n"
-        if self.size + len(raw) > MAX_LOG_BYTES - 4096:
+        if self.size + len(raw) > self.byte_limit - (0 if terminal else 4096):
             raise ObservationError("event log byte limit exceeded")
         if os.write(self.fd, raw) != len(raw):
             raise ObservationError("short event log write")
@@ -266,9 +282,40 @@ def _expected(spec, deadline=None):
     return result
 
 
+def _generated_expected(spec, existing):
+    result = {}
+    for item in spec:
+        if "=" not in item:
+            raise ObservationError("generated process must be NAME=EXECUTABLE")
+        name, raw = item.split("=", 1)
+        requested = Path(raw)
+        if (not name or name == "build" or name in existing or name in result
+                or "/" in name or not requested.is_absolute() or ".." in requested.parts):
+            raise ObservationError(f"invalid generated process selection: {item}")
+        path = requested.parent.resolve() / requested.name
+        if path.exists() or path.is_symlink():
+            raise ObservationError(f"generated executable already exists: {path}")
+        result[name] = {"path": str(path), "sha256": None}
+    return result
+
+
 def _matching_image(image, expected):
     return (image["executable_path"] == expected["path"] and
-            image["executable_sha256"] == expected["sha256"])
+            (expected["sha256"] is None or
+             image["executable_sha256"] == expected["sha256"]) and
+            all(value in image["argv"] for value in expected.get("argv_contains", [])))
+
+
+def _limits(run):
+    limits = run.get("limits", {"processes": DEFAULT_PROCESSES,
+                                "events": DEFAULT_EVENTS, "log_bytes": DEFAULT_LOG_BYTES})
+    if (not isinstance(limits, dict) or set(limits) != {"processes", "events", "log_bytes"}
+            or any(type(limits[key]) is not int or not floor <= limits[key] <= cap
+                   for key, floor, cap in (("processes", 1, MAX_PROCESSES),
+                                           ("events", DEFAULT_EVENTS, MAX_EVENTS),
+                                           ("log_bytes", DEFAULT_LOG_BYTES, MAX_LOG_BYTES)))):
+        raise ObservationError("observer process, event, or log limit is invalid")
+    return limits
 
 
 def _derive(rows):
@@ -280,6 +327,9 @@ def _derive(rows):
             for row, following in zip(rows, rows[1:])):
         raise ObservationError("event time or archive seal order differs")
     run, end = rows[0], rows[-1]
+    limits = _limits(run)
+    if len(rows) > limits["events"]:
+        raise ObservationError("observer event limit exceeded")
     if end["result"] != "observed" or type(end["lost_events"]) is not int or end["lost_events"] != 0:
         raise ObservationError("observation ended with an error or lost events")
     if any(row["kind"] == "error" for row in rows):
@@ -297,7 +347,7 @@ def _derive(rows):
         kind = row["kind"]
         pid = row.get("pid")
         if kind == "spawn":
-            if pid in identities or len(identities) >= MAX_PROCESSES:
+            if pid in identities or len(identities) >= limits["processes"]:
                 raise ObservationError("duplicate or excessive process creation")
             if row["boot_id"] != boot or type(row["start_ticks"]) is not int:
                 raise ObservationError("invalid process start identity")
@@ -451,6 +501,8 @@ def verify(root):
         row["sha256"] = digest
         rows.append(row)
         previous = digest
+    if len(raw) > _limits(rows[0])["log_bytes"]:
+        raise ObservationError("observer event log byte limit exceeded")
     witness_raw = files["witness.json"]
     witness = _parse_json(witness_raw)
     if witness_raw != _json_bytes(witness) + b"\n":
@@ -491,13 +543,22 @@ def _capture(args, deadline):
         raise ObservationError(f"trace timeout exceeds {MAX_SECONDS} seconds")
     if not args.lane or not args.runtime_identity or not args.mode:
         raise ObservationError("lane, runtime identity, and mode are required")
-    if len(args.argv) > 256 or sum(map(len, args.argv)) > 65536 or len(args.expect) > 32:
+    limits = _limits({"limits": {"processes": getattr(args, "max_processes", DEFAULT_PROCESSES),
+                                 "events": getattr(args, "max_events", DEFAULT_EVENTS),
+                                 "log_bytes": getattr(args, "max_log_bytes", DEFAULT_LOG_BYTES)}})
+    generated = getattr(args, "generated_expect", [])
+    markers = getattr(args, "build_argv_contains", [])
+    if (len(args.argv) > 256 or sum(map(len, args.argv)) > 65536 or
+            len(args.expect) + len(generated) > 32 or len(markers) > 8 or
+            any(not marker or len(marker) > 256 for marker in markers)):
         raise ObservationError("command or expected process limit exceeded")
     expected = _expected(args.expect, deadline)
+    expected.update(_generated_expected(generated, expected))
     if not expected:
         raise ObservationError("at least one child executable is required")
     build_path = Path(args.build_executable or args.argv[0]).resolve(strict=True)
-    build = {"path": str(build_path), "sha256": _sha_file(build_path, deadline)}
+    build = {"path": str(build_path), "sha256": _sha_file(build_path, deadline),
+             "argv_contains": markers}
     artifacts = {}
     for item in args.artifact:
         if "=" not in item:
@@ -506,7 +567,7 @@ def _capture(args, deadline):
         if name in artifacts or not name:
             raise ObservationError("duplicate or empty artifact name")
         artifacts[name] = _sha_file(_safe_input(path), deadline)
-    log = EventLog(args.output)
+    log = EventLog(args.output, limits["events"], limits["log_bytes"])
     root_pid = None
     live = set()
     pending = {}
@@ -514,6 +575,7 @@ def _capture(args, deadline):
     initial_stop = set()
     early_stops = set()
     error = None
+    current_stop = None
     boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     read_pipe, write_pipe = os.pipe2(os.O_CLOEXEC)
     try:
@@ -533,9 +595,10 @@ def _capture(args, deadline):
                 candidate_sha=args.candidate_sha, lane=args.lane,
                 runtime_identity=args.runtime_identity, mode=args.mode,
                 archive_path=str(Path(args.archive).absolute()), staged_artifacts=artifacts,
-                build=build, expected_processes=expected, requested_argv=args.argv)
+                build=build, expected_processes=expected, requested_argv=args.argv,
+                limits=limits)
         while live:
-            if log.count >= MAX_EVENTS - 2:
+            if log.count >= limits["events"] - 2:
                 raise ObservationError("event limit exceeded")
             if time.monotonic() > deadline:
                 raise ObservationError(f"trace timeout after {args.timeout} seconds")
@@ -547,7 +610,12 @@ def _capture(args, deadline):
                 time.sleep(0.001)
                 continue
             if os.WIFEXITED(status) or os.WIFSIGNALED(status):
-                if pid not in pending or _status(status) != pending[pid]:
+                terminal = _status(status)
+                if pid in known and pid not in pending:
+                    log.add("exit", pid=pid, boot_id=boot,
+                            start_ticks=known[pid], origin="terminal_wait", **terminal)
+                    pending[pid] = terminal
+                if pid not in pending or terminal != pending[pid]:
                     detail = os.read(read_pipe, 4096).decode(errors="replace") if pid == root_pid else ""
                     raise ObservationError(f"pid {pid} exited without observed exit: {detail}")
                 log.add("reap", pid=pid, wait_status=status)
@@ -557,6 +625,7 @@ def _capture(args, deadline):
                 raise ObservationError(f"unrecognized wait status for pid {pid}: {status}")
             sig = os.WSTOPSIG(status)
             event = status >> 16
+            current_stop = {"pid": pid, "event": event, "signal": sig, "wait_status": status}
             if pid == root_pid and pid not in known:
                 if sig != signal.SIGSTOP:
                     raise ObservationError("root did not stop before exec")
@@ -586,11 +655,11 @@ def _capture(args, deadline):
                 raise ObservationError(f"unregistered or exited tracee: {pid}")
             if sig == signal.SIGTRAP and event in (EVENT_FORK, EVENT_VFORK, EVENT_CLONE):
                 child = _event_pid(pid)
-                if child in known or len(known) >= MAX_PROCESSES:
+                live.add(child)
+                if child in known or len(known) >= limits["processes"]:
                     raise ObservationError("duplicate or excessive traced child")
                 identity = _identity(child, boot)
                 known[child] = identity["start_ticks"]
-                live.add(child)
                 initial_stop.add(child)
                 log.add("spawn", pid=child, boot_id=boot,
                         start_ticks=identity["start_ticks"], parent_pid=pid,
@@ -612,16 +681,20 @@ def _capture(args, deadline):
                     raise ObservationError(f"pid {pid} changed start identity at exec")
                 log.add("image", boot_id=boot, origin="exec", **image)
             elif sig == signal.SIGTRAP and event == EVENT_EXIT:
-                identity = _identity(pid, boot)
-                if identity["start_ticks"] != known[pid]:
-                    raise ObservationError(f"pid {pid} changed start identity at exit")
-                state = _status(_event_pid(pid))
-                pending[pid] = state
-                log.add("exit", pid=pid, boot_id=boot,
-                        start_ticks=identity["start_ticks"], **state)
+                try:
+                    identity = _identity(pid, boot)
+                    if identity["start_ticks"] != known[pid]:
+                        raise ObservationError(f"pid {pid} changed start identity at exit")
+                    state = _status(_event_pid(pid))
+                except ProcessLookupError:
+                    pass
+                else:
+                    pending[pid] = state
+                    log.add("exit", pid=pid, boot_id=boot,
+                            start_ticks=identity["start_ticks"], origin="ptrace_exit", **state)
             elif event:
                 raise ObservationError(f"unsupported ptrace event {event} for pid {pid}")
-            _ptrace(PTRACE_CONT, pid, sig if event == 0 else 0)
+            _continue_tracee(pid, event, sig)
         observed_images = [row for row in log.rows if row["kind"] == "image"]
         if not any(row["origin"] == "exec" and _matching_image(row, build)
                    for row in observed_images):
@@ -639,8 +712,12 @@ def _capture(args, deadline):
     except BaseException as exc:
         error = exc
         lost_events = int(bool(live))
-        log.add("error", message=f"{type(exc).__name__}: {exc}",
-                errno=getattr(exc, "errno", None), lost_events=lost_events)
+        message = f"{type(exc).__name__}: {exc}"
+        if len(message) > 256:
+            message = message[:253] + "..."
+        log.add("error", message=message,
+                errno=getattr(exc, "errno", None), lost_events=lost_events,
+                current_stop=current_stop)
     finally:
         live.update(early_stops)
         for pid in list(live):
@@ -709,9 +786,14 @@ def main(argv=None):
     run.add_argument("--mode", required=True)
     run.add_argument("--archive", required=True)
     run.add_argument("--build-executable")
+    run.add_argument("--build-argv-contains", action="append", default=[])
     run.add_argument("--artifact", action="append", default=[])
     run.add_argument("--expect", action="append", default=[])
+    run.add_argument("--expect-generated", dest="generated_expect", action="append", default=[])
     run.add_argument("--timeout", type=float, default=20)
+    run.add_argument("--max-processes", type=int, default=DEFAULT_PROCESSES)
+    run.add_argument("--max-events", type=int, default=DEFAULT_EVENTS)
+    run.add_argument("--max-log-bytes", type=int, default=DEFAULT_LOG_BYTES)
     run.add_argument("argv", nargs=argparse.REMAINDER)
     check = commands.add_parser("verify")
     check.add_argument("root")

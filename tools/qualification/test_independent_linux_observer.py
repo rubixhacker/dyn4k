@@ -104,6 +104,114 @@ class IndependentLinuxObserverTest(unittest.TestCase):
                             for process in witness["processes"].values()))
         self.assertEqual(witness, observer.verify(args.output))
 
+    def test_generated_child_image_is_selected_from_stopped_exec(self):
+        generated = self.root / "generated-true"
+        script = (f'import os,shutil,subprocess; p={str(generated)!r}; '
+                  'shutil.copyfile("/usr/bin/true", p); os.chmod(p, 0o700); '
+                  'subprocess.run([p], check=True); '
+                  'subprocess.run(["/usr/bin/echo", "generated"], check=True)')
+        args = self.args("generated", ["facade=/usr/bin/echo"], script)
+        args.generated_expect = [f"core={generated}"]
+        witness = observer.capture(args)
+        self.assertEqual(observer._sha_file(generated),
+                         witness["processes"]["core"]["executable_sha256"])
+        self.assertEqual(witness, observer.verify(args.output))
+
+    def test_generated_child_wrong_path_fails_closed(self):
+        args = self.args("generated-wrong", ["facade=/usr/bin/echo"])
+        args.generated_expect = [f"core={self.root / 'missing-true'}"]
+        with self.assertRaisesRegex(observer.ObservationError,
+                                    "expected executable was not observed: core"):
+            observer.capture(args)
+        self.assertFalse((Path(args.output) / "witness.json").exists())
+
+    def test_disappeared_exit_stop_waits_for_terminal_status_only(self):
+        with mock.patch.object(observer, "_ptrace",
+                               side_effect=ProcessLookupError(errno.ESRCH, "already exited")):
+            observer._continue_tracee(31, observer.EVENT_EXIT, signal.SIGTRAP)
+            with self.assertRaises(ProcessLookupError):
+                observer._continue_tracee(31, observer.EVENT_CLONE, signal.SIGTRAP)
+
+    def test_route_process_limit_fails_closed_and_is_replayed(self):
+        args = self.args("too-many-processes")
+        args.max_processes = 2
+        with self.assertRaisesRegex(observer.ObservationError, "excessive traced child"):
+            observer.capture(args)
+        self.assertFalse((Path(args.output) / "witness.json").exists())
+        root, _ = self.capture("limit-replay")
+        rows = self.rows(root)
+        rows[0]["limits"]["processes"] = 2
+        self.rechain(root, rows)
+        with self.assertRaisesRegex(observer.ObservationError, "excessive process creation"):
+            observer.verify(root)
+
+    def test_route_limit_above_hard_ceiling_is_rejected_before_launch(self):
+        args = self.args("invalid-route-limit")
+        args.max_processes = observer.MAX_PROCESSES + 1
+        with self.assertRaisesRegex(observer.ObservationError, "limit is invalid"):
+            observer.capture(args)
+        self.assertFalse(Path(args.output).exists())
+
+    def test_event_limit_below_retained_trace_floor_is_rejected_before_launch(self):
+        for value in (1, 2, observer.DEFAULT_EVENTS - 1):
+            with self.subTest(value=value):
+                args = self.args(f"small-event-limit-{value}")
+                args.max_events = value
+                with self.assertRaisesRegex(observer.ObservationError, "limit is invalid"):
+                    observer.capture(args)
+                self.assertFalse(Path(args.output).exists())
+
+    def test_log_byte_limit_below_retained_trace_floor_is_rejected_before_launch(self):
+        for value in (1, 1000, observer.DEFAULT_LOG_BYTES - 1):
+            with self.subTest(value=value):
+                args = self.args(f"small-log-limit-{value}")
+                args.max_log_bytes = value
+                with self.assertRaisesRegex(observer.ObservationError, "limit is invalid"):
+                    observer.capture(args)
+                self.assertFalse(Path(args.output).exists())
+
+    def test_event_writer_keeps_terminal_slots_and_bytes(self):
+        count_log = observer.EventLog(self.root / "count-reserve", event_limit=4)
+        try:
+            count_log.add("run")
+            count_log.add("spawn")
+            with self.assertRaisesRegex(observer.ObservationError, "event limit exceeded"):
+                count_log.add("image")
+            count_log.add("error", message="event limit exceeded")
+            count_log.add("end", result="failed", lost_events=1)
+        finally:
+            count_log.close()
+        self.assertEqual(["run", "spawn", "error", "end"],
+                         [row["kind"] for row in self.rows(count_log.root)])
+
+        byte_log = observer.EventLog(self.root / "byte-reserve", byte_limit=8192)
+        try:
+            byte_log.add("run")
+            while True:
+                try:
+                    byte_log.add("sample", payload="x" * 128)
+                except observer.ObservationError as error:
+                    self.assertIn("byte limit exceeded", str(error))
+                    break
+            byte_log.add("error", message="byte limit exceeded")
+            byte_log.add("end", result="failed", lost_events=1)
+        finally:
+            byte_log.close()
+        self.assertEqual(["error", "end"],
+                         [row["kind"] for row in self.rows(byte_log.root)[-2:]])
+
+    def test_build_argv_marker_skips_preflight_interpreter(self):
+        script = ('import subprocess; '
+                  'subprocess.run(["/bin/sh", "-c", "/usr/bin/true"], check=True); '
+                  'subprocess.run(["/bin/sh", "-c", '
+                  '"/usr/bin/true; /usr/bin/echo selected; :", "build-marker"], check=True)')
+        args = self.args("build-marker", script=script)
+        args.build_executable = "/bin/sh"
+        args.build_argv_contains = ["build-marker"]
+        witness = observer.capture(args)
+        self.assertIn("build-marker", witness["build"]["argv"])
+        self.assertEqual(witness, observer.verify(args.output))
+
     def test_changed_event_byte_is_rejected(self):
         root, _ = self.capture()
         path = root / "events.jsonl"
