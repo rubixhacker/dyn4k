@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -236,14 +237,24 @@ def runtime_preflight(lane, executable):
 
 
 def _file_inventory(root):
+    if root.is_symlink():
+        raise ValueError("symbolic archive path")
     files = {}
+    regular = []
     for path in root.rglob("*"):
-        if path.is_symlink():
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
             raise ValueError("symbolic archive path")
-        if path.is_file():
+        if stat.S_ISREG(metadata.st_mode):
+            if metadata.st_nlink != 1:
+                raise ValueError("external archive hardlink")
             relative = path.relative_to(root).as_posix()
             independent_gates._file_path_name(relative)
-            files[relative] = {"sha256": sha(path.read_bytes()), "size": path.stat().st_size}
+            regular.append((path, relative, metadata.st_size))
+        elif not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("nonregular archive path")
+    for path, relative, size in regular:
+        files[relative] = {"sha256": sha(path.read_bytes()), "size": size}
     return files
 
 
@@ -311,6 +322,21 @@ def _build_command(repository, stage, archive, work, inputs, gradle, lane, hashe
              f":core:{task}", f":facade:{task}"])
 
 
+def verify_gradle_output(output, lane, graph_sha256, tasks):
+    lines = output.splitlines()
+    if (lines.count(f"QUALIFICATION_LANE={lane}") != 1
+            or lines.count(f"QUALIFICATION_PROVIDER_GRAPH_SHA256={graph_sha256}") != 1):
+        raise ValueError("raw Gradle output omits provider proof")
+    if (sum(bool(re.fullmatch(r"BUILD SUCCESSFUL in .+", line)) for line in lines) != 1
+            or any(re.fullmatch(r"BUILD FAILED(?: in .+)?", line) for line in lines)):
+        raise ValueError("raw Gradle output omits Gradle success")
+    for task in tasks:
+        if lines.count(f"> Task {task}") != 1:
+            raise ValueError("raw Gradle output omits an executed linked Wasm test task")
+    if not any(re.fullmatch(r"[0-9]+ actionable tasks: .* executed.*", line) for line in lines):
+        raise ValueError("raw Gradle output omits executed task summary")
+
+
 def run(repository, candidate, lane, stage, output, gradle, runtime, hashes):
     repository, stage, output, gradle, runtime = map(
         lambda value: Path(value).resolve(), (repository, stage, output, gradle, runtime))
@@ -368,6 +394,8 @@ def run(repository, candidate, lane, stage, output, gradle, runtime, hashes):
     graph = json.loads((output / "provider-graph.json").read_bytes())
     if not graph:
         raise ValueError("external provider graph is empty")
+    verify_gradle_output((output / "gradle.stdout").read_text(), lane,
+                         sha((output / "provider-graph.json").read_bytes()), command[-2:])
     runtimes = {}
     observed = []
     for module, short in (("dyn4k-core", "core"), ("dyn4k", "facade")):
@@ -461,6 +489,9 @@ def run(repository, candidate, lane, stage, output, gradle, runtime, hashes):
 def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_binary=None,
            replay=False):
     root, repository = Path(root), Path(repository)
+    if not replay:
+        return {"status": "NOT_RUN", "candidate_sha": candidate, "lane": lane,
+                "reason": "transported Wasm bundle replay is required for a public pass"}
     selected = contract(repository, lane)
     if not SHA256.fullmatch(str(expected_digest)) or archive_digest(root) != expected_digest:
         raise ValueError("independent archive digest differs")
@@ -567,17 +598,13 @@ def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_b
             or process["started_ns"] >= process["finished_ns"]):
         raise ValueError("Gradle process proof is incomplete")
     output = (root / process["stdout"]).read_text()
-    if (f"QUALIFICATION_LANE={lane}" not in output
-            or f"QUALIFICATION_PROVIDER_GRAPH_SHA256={sha((root / 'provider-graph.json').read_bytes())}" not in output
-            or "BUILD SUCCESSFUL" not in output):
-        raise ValueError("raw Gradle output omits provider proof")
     original = _build_command(Path(paths["checkout"]), Path(paths["staging"]),
                               Path(paths["archive_root"]), Path(paths["work_root"]),
                               Path(paths["inputs"]), Path(paths["gradle"]), lane, hashes)
     if process.get("command") != original or process.get("cwd") != paths["inputs"]:
         raise ValueError("Gradle command differs from route")
-    if any(f"> Task {task}" not in output for task in original[-2:]):
-        raise ValueError("raw Gradle output omits a linked Wasm test task")
+    verify_gradle_output(output, lane, sha((root / "provider-graph.json").read_bytes()),
+                         original[-2:])
     if (receipt.get("consumer_xml") != [f"reports/normalized/{short}/TEST-Wasm.xml"
                                         for short in ("core", "facade")]
             or receipt.get("raw_events") != [f"reports/raw/{short}/stdout.log"
@@ -625,6 +652,7 @@ def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_b
                 or runtime.get("executable_sha256") != identity["sha256"]
                 or runtime.get("version") != identity["version"]
                 or type(runtime.get("pid")) is not int or runtime["pid"] <= 0
+                or runtime.get("parent_pid") != process["parent_pid"]
                 or not process["started_ns"] <= runtime.get("started_ns", -1)
                 <= runtime.get("finished_ns", -1) <= process["finished_ns"]):
             raise ValueError("executed runtime process differs")

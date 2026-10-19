@@ -82,6 +82,10 @@ python3 tools/qualification/full_wasm_node_consumer.py verify \
 ```
 
 `--replay` executes both retained bundles again from the transported archive.
+Omitting it returns `NOT_RUN`; a static archive inspection cannot pass this
+route. The selected runtime must pass the exact version and byte identity check
+before execution. Archive inventory rejects symbolic paths, external hardlinks,
+and nonregular files before reading their bytes.
 The verifier checks the raw event order and outcomes against every selected
 method, checks the normalized XML against those same raw events, and compares
 the replay order. It rejects changed source, provider, binary, process, event,

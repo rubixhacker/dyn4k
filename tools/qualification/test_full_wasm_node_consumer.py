@@ -1,4 +1,5 @@
 import sys
+import os
 import subprocess
 import tempfile
 import unittest
@@ -102,6 +103,45 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
             (archive / "raw.log").symlink_to(archive / "receipt.json")
             with self.assertRaisesRegex(ValueError, "symbolic"):
                 route.archive_digest(archive)
+
+    def test_public_archive_digest_rejects_external_hardlink_before_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "archive"
+            archive.mkdir()
+            (archive / "receipt.json").write_bytes(b"receipt")
+            outside = root / "mutable-external-bundle.wasm"
+            outside.write_bytes(b"external bytes")
+            linked = archive / "bundle.wasm"
+            os.link(outside, linked)
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("read before hardlink rejection")):
+                with self.assertRaisesRegex(ValueError, "hardlink"):
+                    route.archive_digest(archive)
+
+    def test_public_verify_cannot_pass_when_replay_is_omitted(self):
+        result = route.verify(Path("/missing/archive"), Path("/missing/repository"),
+                              "a" * 40, "wasmWasi:Wasmtime:minimum:development",
+                              {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64},
+                              "d" * 64, Path("/missing/wasmtime"), replay=False)
+        self.assertEqual(result["status"], "NOT_RUN")
+        self.assertIn("replay", result["reason"])
+
+    def test_gradle_proof_rejects_forged_success_without_executed_linked_tasks(self):
+        lane = "wasmWasi:Wasmtime:minimum:development"
+        tasks = [":core:compileTestDevelopmentExecutableKotlinWasmWasi",
+                 ":facade:compileTestDevelopmentExecutableKotlinWasmWasi"]
+        graph = "a" * 64
+        valid = (f"QUALIFICATION_LANE={lane}\n"
+                 f"QUALIFICATION_PROVIDER_GRAPH_SHA256={graph}\n"
+                 + "".join(f"> Task {task}\n" for task in tasks)
+                 + "BUILD SUCCESSFUL in 1s\n4 actionable tasks: 4 executed\n")
+        route.verify_gradle_output(valid, lane, graph, tasks)
+        forged = valid.replace(f"> Task {tasks[0]}\n", f"> Task {tasks[0]} SKIPPED\n")
+        with self.assertRaisesRegex(ValueError, "linked Wasm test task"):
+            route.verify_gradle_output(forged, lane, graph, tasks)
+        forged = valid.replace("BUILD SUCCESSFUL in 1s", "warning: BUILD SUCCESSFUL in 1s")
+        with self.assertRaisesRegex(ValueError, "Gradle success"):
+            route.verify_gradle_output(forged, lane, graph, tasks)
 
     def test_missing_runtime_does_not_hide_wrong_candidate_checkout(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(
