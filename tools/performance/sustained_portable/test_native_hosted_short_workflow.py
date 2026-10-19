@@ -15,6 +15,11 @@ WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-
 RUNNER = Path(__file__).with_name("native_hosted_short_runner.py")
 RAW_LIMIT = 64 * 1024 * 1024
 RUN_EXPRESSION_LIMIT = 21000
+VALID_HEAP_CSV = (b"stage,retained_heap_bytes,gc_epoch\n"
+                  b"constructed,1024,1\nafter_reset,2048,2\nmeasured,3072,3\n")
+VALID_HEAP_STDOUT = (b"DYN4K\tHEAP\tconstructed\t1024\t1\n"
+                     b"DYN4K\tHEAP\tafter_reset\t2048\t2\n"
+                     b"DYN4K\tHEAP\tmeasured\t3072\t3\n")
 # This lock prevents unparsed YAML forms from bypassing the run-size scanner.
 # After a workflow edit, independently parse every run value before updating its digest.
 AUDITED_WORKFLOW_SHA256 = {
@@ -275,12 +280,14 @@ class HostedRawFileContract(unittest.TestCase):
         (self.raw_node, self.sidecar_node, self.route_node, self.receipt_node,
          self.gradle_node, self.guard_node) = workflow_nodes()
         self.scope = {"hashlib": hashlib, "json": json, "Path": Path, "sys": sys,
-                      "errno": errno}
+                      "errno": errno, "re": re}
         tree = ast.parse(RUNNER.read_text(), filename=str(RUNNER))
         resident_check = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
                               and node.name == "resident_probe_errors_complete")
+        heap_check = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                          and node.name == "validate_heap_csv")
         functions = [self.raw_node] + ([self.sidecar_node] if self.sidecar_node else [])
-        functions.append(resident_check)
+        functions.extend((heap_check, resident_check))
         exec(compile(ast.Module(body=functions, type_ignores=[]),
                      str(RUNNER), "exec"), self.scope)
 
@@ -366,12 +373,50 @@ class HostedRawFileContract(unittest.TestCase):
                         self.assertTrue(eval(expression, scope))
                         record["pid"] = 1
 
-    def test_memory_heap_stage_count_in_true_outer_route(self):
+    def test_memory_heap_receipt_in_true_outer_route(self):
+        def stdout_for(heap_csv):
+            return b"".join(b"DYN4K\tHEAP\t" + line.replace(b",", b"\t") + b"\n"
+                            for line in heap_csv.splitlines()[1:] if line)
+
+        def heap_case(label, heap_csv):
+            return label, 3, heap_csv, stdout_for(heap_csv), False
+
+        stage_cases = tuple((f"stages_{stages}", stages, VALID_HEAP_CSV,
+                             VALID_HEAP_STDOUT, type(stages) is int and stages == 3)
+                            for stages in (3, 3.0, 3.5, True, "3", None, 0, -1))
+        heap_cases = (
+            heap_case("header_only", b"stage,retained_heap_bytes,gc_epoch\n"),
+            heap_case("two_rows", VALID_HEAP_CSV.rsplit(b"measured,", 1)[0]),
+            heap_case("garbage", b"not,a,heap,csv\n"),
+            heap_case("wrong_order", b"stage,retained_heap_bytes,gc_epoch\n"
+                      b"after_reset,2048,2\nconstructed,1024,1\nmeasured,3072,3\n"),
+            heap_case("duplicate_stage", b"stage,retained_heap_bytes,gc_epoch\n"
+                      b"constructed,1024,1\nconstructed,2048,2\nmeasured,3072,3\n"),
+            heap_case("extra_row", VALID_HEAP_CSV + b"measured,4096,4\n"),
+            heap_case("blank_row", VALID_HEAP_CSV.replace(b"after_reset,", b"\nafter_reset,")),
+            heap_case("zero_bytes", VALID_HEAP_CSV.replace(b"1024", b"0")),
+            heap_case("negative_bytes", VALID_HEAP_CSV.replace(b"1024", b"-1")),
+            heap_case("float_bytes", VALID_HEAP_CSV.replace(b"1024", b"1024.0")),
+            heap_case("zero_epoch", VALID_HEAP_CSV.replace(b"1024,1", b"1024,0")),
+            heap_case("repeat_epoch", VALID_HEAP_CSV.replace(b"2048,2", b"2048,1")),
+            heap_case("decrease_epoch", VALID_HEAP_CSV.replace(b"3072,3", b"3072,1")),
+            heap_case("float_epoch", VALID_HEAP_CSV.replace(b"2048,2", b"2048,2.0")),
+            heap_case("missing_final_newline", VALID_HEAP_CSV[:-1]),
+            ("missing_raw_heap", 3, VALID_HEAP_CSV, b"", False),
+            ("mismatched_raw_heap", 3, VALID_HEAP_CSV,
+             VALID_HEAP_STDOUT.replace(b"2048", b"2049"), False),
+            ("valid_crlf", 3, VALID_HEAP_CSV.replace(b"\n", b"\r\n"),
+             VALID_HEAP_STDOUT.replace(b"\n", b"\r\n"), True),
+        )
         cases = (("macosArm64", False), ("mingwX64", False),
                  ("macosArm64", True))
         for target, terminal in cases:
-            for stages in (3, 3.0, 3.5, True, "3", None, 0, -1):
-                with self.subTest(target=target, terminal=terminal, stages=stages), \
+            selected_cases = stage_cases + heap_cases
+            if target == "macosArm64" and not terminal:
+                selected_cases += (("oversized", 3, b"x" * (8 * 1024 * 1024 + 1),
+                                    b"", False),)
+            for label, stages, heap_csv, stdout, valid in selected_cases:
+                with self.subTest(target=target, terminal=terminal, case=label), \
                         tempfile.TemporaryDirectory() as directory:
                     evidence = Path(directory)
                     route = {"qualification": "unpassed", "commands": {}, "scenarios": {},
@@ -384,12 +429,9 @@ class HostedRawFileContract(unittest.TestCase):
                         if argv[argv.index("--mode") + 1] != "memory":
                             return True, None, None
                         api = "direct_kotlin" if "direct_kotlin" in label else "compatibility"
-                        stdout = b"native output"
                         (archive / "stdout.raw").write_bytes(stdout)
                         (archive / "stderr.raw").write_bytes(b"")
-                        (archive / "heap.csv").write_text(
-                            "stage,retained_heap_bytes,gc_epoch\n"
-                            "startup,1024,1\nwarmup,1024,2\nmeasured,1024,3\n")
+                        (archive / "heap.csv").write_bytes(heap_csv)
                         (archive / "rss.csv").write_text(
                             "monotonic_ns,resident_bytes\n10,4096\n20,8192\n")
                         error = {"monotonic_ns": 30, "error_observed_monotonic_ns": 31,
@@ -444,14 +486,19 @@ class HostedRawFileContract(unittest.TestCase):
                                       image_control=True)
                     exec(compile(ast.Module(body=[self.route_node], type_ignores=[]),
                                  str(RUNNER), "exec"), self.scope)
-                    expected = "observed_diagnostic" if type(stages) is int and stages == 3 \
-                        else "failed"
+                    expected = "observed_diagnostic" if valid else "failed"
                     for api in ("direct_kotlin", "compatibility"):
-                        self.assertEqual(route["memory_scenarios"][api]["status"], expected)
+                        result = route["memory_scenarios"][api]
+                        self.assertEqual(result["status"], expected)
                         failure = evidence / f"captures/memory/{api}-failure.json"
                         if expected == "failed":
-                            self.assertEqual(json.loads(failure.read_text())
-                                             ["qualification"], "unpassed")
+                            self.assertIn("Native memory sidecar exceeds read limit" if
+                                          label == "oversized" else "Native heap CSV",
+                                          result["error"])
+                            failed = json.loads(failure.read_text())
+                            self.assertEqual(failed["qualification"], "unpassed")
+                            self.assertEqual(failed["raw"]["stdout.raw"]["sha256"],
+                                             hashlib.sha256(stdout).hexdigest())
                         else:
                             self.assertFalse(failure.exists())
 
@@ -759,7 +806,7 @@ class HostedRawFileContract(unittest.TestCase):
                 calls.append((label, argv, timeout))
                 archive = argv[argv.index("--archive") + 1]
                 archive.mkdir(parents=True)
-                (archive / "stdout.raw").write_bytes(b"producer output")
+                (archive / "stdout.raw").write_bytes(VALID_HEAP_STDOUT)
                 (archive / "stderr.raw").write_bytes(b"")
                 (archive / "capture.json").write_text("{}")
                 route["commands"][label] = {"exit_code": 0, "termination": "natural"}
@@ -777,7 +824,7 @@ class HostedRawFileContract(unittest.TestCase):
                         "pid": 123, "raw_collection": "selected_process_exited",
                         "termination": "natural", "exit_code": 0,
                         "started_monotonic_ns": 0, "ended_monotonic_ns": 5,
-                        "stdout_sha256": hashlib.sha256(b"producer output").hexdigest(),
+                        "stdout_sha256": hashlib.sha256(VALID_HEAP_STDOUT).hexdigest(),
                         "stderr_sha256": hashlib.sha256(b"").hexdigest()}))
                     (archive / "rss.json").write_text(json.dumps({
                         "pid": 123, "status": status,
@@ -790,7 +837,7 @@ class HostedRawFileContract(unittest.TestCase):
                     (archive / "rss.csv").write_text(
                         "monotonic_ns,resident_bytes\n" +
                         ("1,4096\n" if api == "compatibility" else ""))
-                    (archive / "heap.csv").write_text("stage,retained_heap_bytes,gc_epoch\n")
+                    (archive / "heap.csv").write_bytes(VALID_HEAP_CSV)
                     (archive / "capture.json").write_text(json.dumps({
                         "mode": "memory", "source_sha": "local-control", "target": "macosArm64",
                         "build": "development", "scenario": {"api": api}, "pid": 123,

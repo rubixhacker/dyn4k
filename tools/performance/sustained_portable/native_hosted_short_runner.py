@@ -91,6 +91,32 @@ def sidecar_bytes(path):
         raise ValueError("Native memory sidecar changed during read")
     return snapshot
 
+def validate_heap_csv(heap_csv, stdout, declared_stages):
+    normalized = heap_csv.replace(b"\r\n", b"\n")
+    if b"\r" in normalized or not normalized.endswith(b"\n"):
+        raise ValueError("Native heap CSV has invalid line endings")
+    lines = normalized[:-1].split(b"\n")
+    stages = (b"constructed", b"after_reset", b"measured")
+    if (type(declared_stages) is not int or declared_stages != len(stages) or
+            len(lines) != declared_stages + 1 or
+            lines[0] != b"stage,retained_heap_bytes,gc_epoch"):
+        raise ValueError("Native heap CSV stages differ from receipt")
+    previous_epoch = 0
+    for stage, line in zip(stages, lines[1:]):
+        fields = line.split(b",")
+        if (len(fields) != 3 or fields[0] != stage or
+                any(re.fullmatch(rb"[1-9][0-9]*", value) is None for value in fields[1:])):
+            raise ValueError("Native heap CSV row is malformed")
+        epoch = int(fields[2])
+        if epoch <= previous_epoch:
+            raise ValueError("Native heap CSV epochs are not increasing")
+        previous_epoch = epoch
+    expected = [b"DYN4K\tHEAP\t" + line.replace(b",", b"\t")
+                for line in lines[1:]]
+    observed = [line for line in stdout.splitlines() if line.startswith(b"DYN4K\tHEAP")]
+    if observed != expected:
+        raise ValueError("Native heap CSV differs from raw HEAP records")
+
 def resident_probe_errors_complete(resident, capture, execution, selected_target):
     expected_method = {"macosArm64": "proc_pidinfo_task_resident",
                        "mingwX64": "GetProcessMemoryInfo_working_set"}.get(selected_target)
@@ -374,6 +400,13 @@ try:
                             checked["heap.csv"]["sha256"] !=
                                 capture["managed_heap_observation"]["heap_csv_sha256"]):
                             raise ValueError("Native memory sidecar bytes differ from receipts")
+                        heap_csv = sidecar_bytes(archive / "heap.csv")
+                        stdout = sidecar_bytes(archive / "stdout.raw")
+                        if (hashlib.sha256(heap_csv).hexdigest() != checked["heap.csv"]["sha256"] or
+                                hashlib.sha256(stdout).hexdigest() != checked["stdout.raw"]["sha256"]):
+                            raise ValueError("Native memory sidecar changed after hash")
+                        validate_heap_csv(heap_csv, stdout,
+                                          capture["managed_heap_observation"].get("stages"))
                         rss_csv = sidecar_bytes(archive / "rss.csv").decode().splitlines()
                         if rss_csv != (["monotonic_ns,resident_bytes"] +
                                        [f"{stamp},{resident_bytes}" for stamp, resident_bytes
