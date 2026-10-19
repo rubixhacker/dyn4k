@@ -952,14 +952,15 @@ class IndependentAdapterTests(unittest.TestCase):
             if observation:
                 self.assertEqual("VERIFIED", result["availability_audit_status"])
 
-    def browser_signed_fixture(self, root, lanes, archive_override=None):
-        suite = independent_gates.load_approved_manifest(BROWSER_PRODUCER)
+    def browser_signed_fixture(self, root, lanes, archive_override=None,
+                               repository=BROWSER_PRODUCER, candidate_sha=BROWSER_CANDIDATE):
+        suite = independent_gates.load_approved_manifest(repository)
         runtime = f"{platform.system()} {platform.release()} {platform.machine()}"
-        staged = {"candidate_sha": BROWSER_CANDIDATE, "status": "PASSED",
+        staged = {"candidate_sha": candidate_sha, "status": "PASSED",
                   "artifacts": [{"path": qualify.target_binary_path(module, "js"),
                                  "sha256": value}
                                 for module, value in BROWSER_HASHES.items()]}
-        candidate = {"candidate_sha": BROWSER_CANDIDATE,
+        candidate = {"candidate_sha": candidate_sha,
                      "suite_manifest_sha256": independent_gates.digest(suite),
                      "audit_manifest_sha256": qualify.manifest_digest(staged),
                      "lanes": {lane: {"artifact_hashes": BROWSER_HASHES,
@@ -997,9 +998,9 @@ class IndependentAdapterTests(unittest.TestCase):
                               "expected_browser_toolchain": toolchain,
                               "expected_browser_bundles": BROWSER_BUNDLES[mode]}
         archive_map = root / "browser-archive-map.json"
-        archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+        archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate_sha,
                                            "lanes": paths}))
-        signed = {"schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+        signed = {"schema": 1, "candidate_sha": candidate_sha,
                   "suite_manifest_sha256": independent_gates.digest(suite),
                   "candidate_manifest_sha256": qualify.manifest_digest(candidate),
                   "staged_audit_sha256": qualify.manifest_digest(staged),
@@ -1142,13 +1143,13 @@ class IndependentAdapterTests(unittest.TestCase):
     def test_signed_browser_dispatch_preserves_generic_result_identity(self):
         import full_browser_adapter
 
-        if not BROWSER_PRODUCER.is_dir():
-            self.skipTest("retained browser producer checkout is unavailable")
+        current = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane])
+                root, [lane], repository=ROOT, candidate_sha=current)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
             gate_names = set(suite["lanes"][lane]["required_gates"]
                              + suite["global_gates"])
@@ -1158,10 +1159,10 @@ class IndependentAdapterTests(unittest.TestCase):
                     "complete_selected_suite": True, "selected_cases": 2523,
                     "archive_sha256": digest}
             gates["staged-consumer"] = gate
-            generic = {"candidate_sha": BROWSER_CANDIDATE, "lane": lane,
+            generic = {"candidate_sha": current, "lane": lane,
                        "status": "NOT_RUN", "gates": gates}
             generic["result_sha256"] = independent_gates.digest(generic)
-            public_result = {"status": "PASSED", "candidate_sha": BROWSER_CANDIDATE,
+            public_result = {"status": "PASSED", "candidate_sha": current,
                              "lane": lane, "archive_sha256": digest,
                              "selected_cases": 2523}
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
@@ -1170,7 +1171,7 @@ class IndependentAdapterTests(unittest.TestCase):
                                     "verify_full_browser_staged_consumer",
                                     return_value=public_result) as replay):
                 verified = independent_adapter.verify_lanes(
-                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    ROOT, current, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
             self.assertIs(gate, replay.call_args.args[6])
