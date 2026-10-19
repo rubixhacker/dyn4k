@@ -82,6 +82,7 @@ class SafariResponseWitnessTest(unittest.TestCase):
                 "observer_sha256": hashes[3], "worker_sha256": hashes[1],
                 "bootstrap_sha256": hashes[2], "node_pid": 99,
                 "token": process["browser_token"], "port": 12345}))
+            (folder / "safari-worker-errors.jsonl").write_text("")
             bootstrap_url = ("http://localhost:12345/__dyn4k_bootstrap?token=" +
                              process["browser_token"] +
                              "&target=http%3A%2F%2Flocalhost%3A12345%2F%3Fid%3D1")
@@ -136,6 +137,10 @@ class SafariResponseWitnessTest(unittest.TestCase):
                 folder, process, launches, "a" * 40, "core", "wasmJs",
                 str(source), *hashes)
             self.assertEqual(len(replay()), 3)
+            (folder / "safari-worker-errors.jsonl").write_text('{"error":"failed"}\n')
+            with self.assertRaisesRegex(ValueError, "fetch failure"):
+                replay()
+            (folder / "safari-worker-errors.jsonl").write_text("")
             iframe_url = "http://localhost:12345/context.html"
             nested = [dict(row) for row in events]
             nested.insert(3, {"kind": "navigation", "token": process["browser_token"],

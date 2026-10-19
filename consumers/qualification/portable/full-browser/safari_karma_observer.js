@@ -7,6 +7,7 @@ const safariFolder = process.env.DYN4K_SAFARI_OBSERVER_ARCHIVE;
 const safariWorker = safariFs.readFileSync(process.env.DYN4K_SAFARI_WORKER_SOURCE);
 const safariBootstrap = safariFs.readFileSync(process.env.DYN4K_SAFARI_BOOTSTRAP_SOURCE);
 const safariEvents = safariPath.join(safariFolder, 'safari-worker-events.jsonl');
+const safariErrors = safariPath.join(safariFolder, 'safari-worker-errors.jsonl');
 const safariBodies = safariPath.join(safariFolder, 'safari-browser-bodies');
 const safariSourceRecord = safariPath.join(safariFolder, 'safari-worker-source.json');
 const safariKey = 'middleware:qualification-safari-observer';
@@ -18,6 +19,7 @@ if (!Number.isInteger(safariPort) || safariPort < 1 || safariPort > 65535 ||
 }
 safariFs.mkdirSync(safariBodies, {recursive: false});
 safariFs.writeFileSync(safariEvents, '', {flag: 'wx', mode: 0o600});
+safariFs.writeFileSync(safariErrors, '', {flag: 'wx', mode: 0o600});
 const safariSourceHashes = {
     observer_sha256: safariCrypto.createHash('sha256').update(
         safariFs.readFileSync(process.env.DYN4K_SAFARI_OBSERVER_SOURCE)).digest('hex'),
@@ -61,8 +63,8 @@ function safariObserver() {
                 address.searchParams.get('token') === safariToken) {
             return safariReply(response, 200, 'text/javascript', safariWorker);
         }
-        if ((address.pathname !== '/__dyn4k_record' &&
-                address.pathname !== '/__dyn4k_control') || request.method !== 'POST') {
+        if (!['/__dyn4k_record', '/__dyn4k_control', '/__dyn4k_error'].includes(
+                address.pathname) || request.method !== 'POST') {
             return safariReply(response, 404, 'text/plain', 'unknown witness route');
         }
         const chunks = [];
@@ -75,7 +77,14 @@ function safariObserver() {
         request.on('end', () => {
             try {
                 const bytes = Buffer.concat(chunks);
-                if (address.pathname === '/__dyn4k_control') {
+                if (address.pathname === '/__dyn4k_error') {
+                    const failure = JSON.parse(bytes.toString('utf8'));
+                    if (failure.token !== safariToken || typeof failure.error !== 'string' ||
+                            typeof failure.url !== 'string') {
+                        throw new Error('Safari worker error record differs');
+                    }
+                    safariFs.appendFileSync(safariErrors, JSON.stringify(failure) + '\n');
+                } else if (address.pathname === '/__dyn4k_control') {
                     const control = JSON.parse(bytes.toString('utf8'));
                     if (control.token !== safariToken || !control.client_id ||
                             !control.target || !control.bootstrap_url ||

@@ -708,6 +708,9 @@ def verify_safari_response_witness(folder, process_record, launches, server,
     path = folder / "safari-browser-responses.jsonl"
     if not path.is_file():
         raise ValueError("Safari browser response-body witness is absent")
+    if (not (folder / "safari-worker-errors.jsonl").is_file()
+            or (folder / "safari-worker-errors.jsonl").stat().st_size):
+        raise ValueError("Safari browser worker reported a fetch failure")
     if (file_hash(Path(source_path)) != source_sha256
             or file_hash(folder / "safari-karma-observer.js") != observer_sha256
             or file_hash(folder / "safari-response-worker.js") != worker_sha256

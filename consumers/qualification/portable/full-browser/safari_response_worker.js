@@ -21,30 +21,41 @@ self.addEventListener('fetch', event => {
     const navigation = event.request.mode === 'navigate';
     if (!selected && !navigation) return;
     event.respondWith((async () => {
-        const request_ns = Date.now() * 1000000;
-        const response = await fetch(event.request);
-        const response_ns = Date.now() * 1000000;
-        if (response.status !== 200 || response.type !== 'basic') {
-            throw new Error('Safari witness received a non-network response');
+        try {
+            const request_ns = Date.now() * 1000000;
+            const response = await fetch(event.request);
+            const response_ns = Date.now() * 1000000;
+            if (response.status !== 200 || response.type !== 'basic') {
+                throw new Error('Safari witness received a non-network response');
+            }
+            const client = await self.clients.get(event.clientId);
+            if (!client || !client.url) throw new Error('Safari witness client is absent');
+            const body = selected ? await response.clone().arrayBuffer() : new ArrayBuffer(0);
+            const request_id = self.crypto.randomUUID();
+            const metadata = {
+                token, kind: selected ? 'response' : 'navigation', request_id,
+                url: event.request.url, client_id: event.clientId,
+                client_url: client.url, resulting_client_id: event.resultingClientId || '',
+                status: response.status, request_ns, response_ns,
+                finished_ns: Date.now() * 1000000
+            };
+            const recorded = await fetch('/__dyn4k_record', {
+                method: 'POST', headers: {'content-type': 'application/octet-stream',
+                    'x-dyn4k-metadata': JSON.stringify(metadata)}, body
+            });
+            if (recorded.status !== 204) {
+                throw new Error('Safari witness body recording failed');
+            }
+            return response;
+        } catch (error) {
+            try {
+                await fetch('/__dyn4k_error', {method: 'POST',
+                    headers: {'content-type': 'application/json'},
+                    body: JSON.stringify({token, url: event.request.url,
+                        client_id: event.clientId, mode: event.request.mode,
+                        error: String(error)})});
+            } catch (_) {}
+            throw error;
         }
-        const client = await self.clients.get(event.clientId);
-        if (!client || !client.url) throw new Error('Safari witness client is absent');
-        const body = selected ? await response.clone().arrayBuffer() : new ArrayBuffer(0);
-        const request_id = self.crypto.randomUUID();
-        const metadata = {
-            token, kind: selected ? 'response' : 'navigation', request_id,
-            url: event.request.url, client_id: event.clientId,
-            client_url: client.url, resulting_client_id: event.resultingClientId || '',
-            status: response.status, request_ns, response_ns,
-            finished_ns: Date.now() * 1000000
-        };
-        const recorded = await fetch('/__dyn4k_record', {
-            method: 'POST', headers: {'content-type': 'application/octet-stream',
-                'x-dyn4k-metadata': JSON.stringify(metadata)}, body
-        });
-        if (recorded.status !== 204) {
-            throw new Error('Safari witness body recording failed');
-        }
-        return response;
     })());
 });
