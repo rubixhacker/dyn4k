@@ -747,7 +747,8 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
             raise ValueError("Firefox process witness context identity or time differs")
         contexts[identity] = created
     root = contexts.get(session["context_id"])
-    if root is None or root["params"]["parent"] is not None:
+    if (root is None or root["params"]["parent"] is not None
+            or root["observed_ns"] > session["started_ns"]):
         raise ValueError("Firefox process witness root context differs")
     served_by_url = {item["url"]: item for item in server}
     if len(served_by_url) != len(server):
@@ -788,7 +789,11 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
             ancestry.add(context)
             if contexts[context]["observed_ns"] > row["request_ns"]:
                 raise ValueError("Firefox process witness context follows request")
-            context = contexts[context]["params"]["parent"]
+            parent = contexts[context]["params"]["parent"]
+            if (parent in contexts and contexts[parent]["observed_ns"]
+                    > contexts[context]["observed_ns"]):
+                raise ValueError("Firefox process witness parent follows child")
+            context = parent
         if (row["kind"] != "response" or type(row["ordinal"]) is not int
                 or row["ordinal"] != index or row["browser_pid"] != pid
                 or context != session["context_id"]

@@ -1097,6 +1097,10 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                         parent="other")),
                     ("late frame", lambda items: items[0]["contexts"][1].update(
                         observed_ns=130 * millisecond)),
+                    ("late root", lambda items: items[0]["contexts"][0].update(
+                        observed_ns=111 * millisecond)),
+                    ("parent after child", lambda items: items[0]["contexts"][1].update(
+                        observed_ns=104 * millisecond)),
                     ("wrong Wasm body", lambda items: items[3].update(body_sha256="0" * 64)),
                     ("duplicate request", lambda items: items[2].update(request_id="request-0")),
                     ("duplicate URL", lambda items: items[2].update(url=items[1]["url"])),
