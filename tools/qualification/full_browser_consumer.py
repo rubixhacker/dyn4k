@@ -50,6 +50,7 @@ BUILD_PATHS = tuple(f"{CONSUMER}/{name}" for name in
 LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
 REPORTER = f"{CONSUMER}/browser-reporter.js"
 CHROMIUM_WITNESS = f"{CONSUMER}/chromium_http_witness.js"
+FIREFOX_WITNESS = f"{CONSUMER}/firefox_bidi_witness.js"
 YARN_LOCK = f"{CONSUMER}/consumer-yarn.lock"
 MULTI_BROWSER_YARN_LOCK = f"{CONSUMER}/consumer-multibrowser-yarn.lock"
 WASM_YARN_LOCK = f"{CONSUMER}/consumer-wasm-yarn.lock"
@@ -692,6 +693,120 @@ def verify_chromium_process_witness(folder, process_record, launches, server,
     return responses
 
 
+def verify_firefox_process_witness(folder, process_record, launches, server,
+                                   short, target, candidate, source_path,
+                                   source_sha256):
+    path = folder / "firefox-bidi.jsonl"
+    if not path.is_file():
+        raise ValueError("Firefox process witness is absent")
+    try:
+        session, *responses = [json.loads(line) for line in path.read_text().splitlines()]
+    except (ValueError, TypeError):
+        raise ValueError("Firefox process witness is malformed") from None
+    if not isinstance(session, dict):
+        raise ValueError("Firefox process witness session is malformed")
+    pid = session.get("browser_pid")
+    if (len(launches) != 1 or type(pid) is not int or pid != launches[0]["pid"]
+            or set(session) != {"kind", "protocol", "module", "target", "candidate_sha",
+                                "browser_pid", "bidi_browser_pid", "context_id", "session_id",
+                                "collector_id", "started_ns", "bidi_port", "bidi_socket_inode",
+                                "source_path", "source_sha256"}
+            or session["kind"] != "session" or session["protocol"] != 1
+            or session["module"] != short or session["target"] != target
+            or session["candidate_sha"] != candidate
+            or session["bidi_browser_pid"] != pid
+            or not all(isinstance(session[key], str) and session[key] for key in
+                       ("context_id", "session_id", "collector_id"))
+            or type(session["started_ns"]) is not int
+            or not process_record["started_ns"] <= session["started_ns"] <= process_record["finished_ns"]
+            or type(session["bidi_port"]) is not int
+            or not 0 < session["bidi_port"] < 65536
+            or not isinstance(session["bidi_socket_inode"], str)
+            or not re.fullmatch(r"[1-9][0-9]*", session["bidi_socket_inode"])
+            or session["source_path"] != source_path
+            or session["source_sha256"] != source_sha256
+            or len(responses) != len(server)):
+        raise ValueError("Firefox process witness session or response count differs")
+    served_by_url = {item["url"]: item for item in server}
+    if len(served_by_url) != len(server):
+        raise ValueError("Firefox process witness server URLs are duplicated")
+    seen_ids = set()
+    seen_urls = set()
+    previous_request_ns = session["started_ns"]
+    for index, row in enumerate(responses):
+        if not isinstance(row, dict) or set(row) != {
+                "kind", "ordinal", "request_id", "context_id", "browser_pid",
+                "url", "method", "status", "mime_type", "from_cache",
+                "request_ns", "response_ns", "finished_ns", "body_path",
+                "body_size", "body_sha256", "events"}:
+            raise ValueError("Firefox process witness response shape differs")
+        events = row["events"]
+        if not isinstance(events, dict) or set(events) != {"request", "response"}:
+            raise ValueError("Firefox process witness event shape differs")
+        request_event, response_event = events["request"], events["response"]
+        if not isinstance(request_event, dict) or not isinstance(response_event, dict):
+            raise ValueError("Firefox process witness raw event differs")
+        request = request_event.get("request", {})
+        completed_request = response_event.get("request", {})
+        completed = response_event.get("response", {})
+        address = urlsplit(row["url"]) if isinstance(row["url"], str) else None
+        relative_url = address.path + ("?" + address.query if address.query else "") if address else None
+        served = served_by_url.get(relative_url)
+        relative = f"firefox-bodies/{index:04d}.body"
+        body = folder / relative
+        if (row["kind"] != "response" or type(row["ordinal"]) is not int
+                or row["ordinal"] != index or row["browser_pid"] != pid
+                or row["context_id"] != session["context_id"]
+                or not isinstance(row["request_id"], str) or not row["request_id"]
+                or row["request_id"] in seen_ids or row["url"] in seen_urls
+                or address is None or address.scheme != "http"
+                or address.hostname not in {"localhost", "127.0.0.1"}
+                or address.port != process_record["karma_port"]
+                or served is None or row["method"] != "GET" or row["status"] != 200
+                or row["from_cache"] is not False
+                or request_event.get("context") != session["context_id"]
+                or response_event.get("context") != session["context_id"]
+                or request_event.get("isBlocked") is not False
+                or response_event.get("isBlocked") is not False
+                or request.get("request") != row["request_id"]
+                or completed_request.get("request") != row["request_id"]
+                or request.get("url") != row["url"]
+                or completed_request.get("url") != row["url"]
+                or completed.get("url") != row["url"]
+                or request.get("method") != "GET"
+                or completed.get("status") != 200
+                or completed.get("fromCache") is not False
+                or completed.get("mimeType") != row["mime_type"]
+                or type(request_event.get("timestamp")) is not int
+                or type(response_event.get("timestamp")) is not int
+                or request_event["timestamp"] > response_event["timestamp"]
+                or type(row["request_ns"]) is not int
+                or type(row["response_ns"]) is not int
+                or type(row["finished_ns"]) is not int
+                or not previous_request_ns <= row["request_ns"] <= row["response_ns"]
+                <= row["finished_ns"] <= process_record["finished_ns"]
+                or row["request_ns"] > served["finished_ns"]
+                or row["finished_ns"] < served["started_ns"]
+                or row["body_path"] != relative
+                or type(row["body_size"]) is not int
+                or not 0 < row["body_size"] <= 64 * 1024 * 1024
+                or not isinstance(row["body_sha256"], str)
+                or not HEX64.fullmatch(row["body_sha256"])
+                or row["body_size"] != served["size"]
+                or row["body_sha256"] != served["sha256"]
+                or not body.is_file() or body.stat().st_size != row["body_size"]
+                or file_hash(body) != row["body_sha256"]
+                or body.read_bytes() != (folder / served["body_path"]).read_bytes()):
+            raise ValueError("Firefox process witness URL, body, time, or process differs")
+        seen_ids.add(row["request_id"])
+        seen_urls.add(row["url"])
+        served_by_url.pop(relative_url)
+        previous_request_ns = row["request_ns"]
+    if served_by_url:
+        raise ValueError("Firefox process witness omitted served responses")
+    return responses
+
+
 def runtime_pin(family, role, browser, selected_sha=None):
     if family in BROWSER_VERSIONS:
         major, pinned = BROWSER_VERSIONS[family][role]
@@ -896,9 +1011,11 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     work = output.parent / f"{output.name}-build"
     work.mkdir(parents=True, exist_ok=True)
     runtime = family.lower()
+    firefox_current = family == "Firefox" and role == "current"
     launcher = repository / (LAUNCHER if family != "Safari" else
                              f"{CONSUMER}/safari_launcher.py")
     chromium_witness = repository / CHROMIUM_WITNESS
+    firefox_witness = repository / FIREFOX_WITNESS
     env = dict(os.environ, JAVA_HOME=str(Path(os.environ["JAVA_HOME"]).resolve()),
                YARN_OFFLINE="true", DYN4K_BROWSER=runtime,
                DYN4K_BROWSER_SELECTED_BINARY=str(browser),
@@ -906,7 +1023,8 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                DYN4K_BROWSER_TARGET=target)
     env[{"Chromium": "CHROME_BIN", "Firefox": "FIREFOX_BIN",
          "Safari": "SAFARI_BIN"}[family]] = str(
-             chromium_witness if family == "Chromium" else launcher)
+             chromium_witness if family == "Chromium" else
+             firefox_witness if firefox_current else launcher)
     base = gradle_args(repository, staging, output, work, inputs, lane, hashes, gradle)
     config_roots = []
     processes = {}
@@ -944,6 +1062,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                               DYN4K_BROWSER_TOKEN=token,
                               DYN4K_BROWSER_ORIGINAL_LAUNCHER=str(launcher),
                               DYN4K_BROWSER_CDP_ARCHIVE=str(destination / "chromium-cdp.jsonl"),
+                              DYN4K_BROWSER_BIDI_ARCHIVE=str(destination / "firefox-bidi.jsonl"),
                               DYN4K_BROWSER_MODULE=short,
                               DYN4K_BROWSER_CANDIDATE=candidate,
                               DYN4K_BROWSER_REPORTER_ATTESTATION=str(attestation),
@@ -1015,6 +1134,11 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                     observations, verify_http_responses(destination, processes[short], target, short),
                     short, target, candidate, str(chromium_witness),
                     sha(original(repository, candidate, CHROMIUM_WITNESS)))
+            if firefox_current:
+                verify_firefox_process_witness(destination, processes[short],
+                    observations, verify_http_responses(destination, processes[short], target, short),
+                    short, target, candidate, str(firefox_witness),
+                    sha(original(repository, candidate, FIREFOX_WITNESS)))
     finally:
         for config_root in config_roots:
             for name in ("qualification-port.js", "qualification-browser-reporter.js"):
@@ -1036,7 +1160,8 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
     run_finished = time.time_ns()
-    receipt = {"schema": 4 if family == "Chromium" else 3,
+    receipt = {"schema": 4 if family == "Chromium" else
+               5 if firefox_current else 3,
                "status": "PASSED", "lane": lane,
                "candidate_sha": candidate,
                "source_tree": git(repository, "rev-parse", f"{candidate}^{{tree}}").decode().strip(),
@@ -1048,7 +1173,8 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                                                "tools/qualification/full_browser_consumer.py")),
                "browser_support_sha256": {path: sha(original(repository, candidate, path))
                                           for path in (launcher.relative_to(repository).as_posix(), REPORTER,
-                                                       *((CHROMIUM_WITNESS,) if family == "Chromium" else ()))},
+                                                       *((CHROMIUM_WITNESS,) if family == "Chromium" else ()),
+                                                       *((FIREFOX_WITNESS,) if firefox_current else ()))},
                "toolchain": identity, "staged_hashes": hashes,
                "runtime_identity": f"{platform.system()} {platform.release()} {platform.machine()}",
                "paths": {"checkout": str(repository), "staging": str(staging),
@@ -1082,10 +1208,16 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
         repository, candidate, REPORTER)
     has_cdp_producer = b"DYN4K_BROWSER_CDP_ARCHIVE" in original(
         repository, candidate, "tools/qualification/full_browser_consumer.py")
+    has_bidi_producer = b"DYN4K_BROWSER_BIDI_ARCHIVE" in original(
+        repository, candidate, "tools/qualification/full_browser_consumer.py")
     chromium = lane.split(":")[1] == "Chromium"
+    firefox = lane.split(":")[1] == "Firefox"
+    firefox_current = firefox and lane.split(":")[2] == "current"
     if (type(schema) is not int
-            or not (schema == 4 and has_http_producer and has_cdp_producer and chromium
+            or not (schema == 5 and has_http_producer and has_bidi_producer and firefox_current
+                    or schema == 4 and has_http_producer and has_cdp_producer and chromium
                     or schema == 3 and has_http_producer and not (chromium and has_cdp_producer)
+                    and not (firefox_current and has_bidi_producer)
                     or schema == 2 and not has_http_producer
                     and candidate not in LEGACY_LOCK_CANDIDATES
                     or schema == 1 and candidate in LEGACY_LOCK_CANDIDATES)
@@ -1098,7 +1230,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
     for name, raw in inputs.items():
         if (archive / "inputs" / name).read_bytes() != raw:
             raise ValueError(f"archived original source or method input differs: {name}")
-    if schema in (2, 3, 4):
+    if schema in (2, 3, 4, 5):
         target = lane_parts(lane)[0]
         lock = repository / CONSUMER / "kotlin-js-store" / (
             "yarn.lock" if target == "js" else "wasm/yarn.lock")
@@ -1117,7 +1249,8 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                f"{CONSUMER}/safari_launcher.py")
     if receipt.get("browser_support_sha256") != {
             path: sha(original(repository, candidate, path)) for path in
-            (support, REPORTER, *((CHROMIUM_WITNESS,) if schema == 4 else ())) }:
+            (support, REPORTER, *((CHROMIUM_WITNESS,) if schema == 4 else ()),
+             *((FIREFOX_WITNESS,) if schema == 5 else ())) }:
         raise ValueError("browser launcher or reporter source differs")
     target, family, role, mode = lane_parts(lane)
     major, pinned = runtime_pin(family, role, binary, browser_sha256)
@@ -1190,8 +1323,8 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                             and receipt["browser_support_sha256"][REPORTER]
                             == LEGACY_REPORTER_SHA256), target=target, family=family,
                         observed_folder=captured_archive / short,
-                        require_http=schema in (3, 4))
-        if schema in (3, 4):
+                        require_http=schema in (3, 4, 5))
+        if schema in (3, 4, 5):
             served = verify_http_responses(folder, record, target, short)
             if schema == 4:
                 witness_source = original(repository, candidate, CHROMIUM_WITNESS)
@@ -1201,6 +1334,11 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                                                 str(repository / CHROMIUM_WITNESS)
                                                 if has_live_source else None,
                                                 sha(witness_source) if has_live_source else None)
+            if schema == 5:
+                verify_firefox_process_witness(
+                    folder, record, launches, served, short, target, candidate,
+                    str(repository / FIREFOX_WITNESS),
+                    sha(original(repository, candidate, FIREFOX_WITNESS)))
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = bundle_paths(Path(paths["work"]), short, mode, target)[0]

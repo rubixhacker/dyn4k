@@ -1014,6 +1014,85 @@ class PublicHttpReplayTest(unittest.TestCase):
                                    altered["staged_hashes"])
 
 
+class FirefoxProcessWitnessTest(unittest.TestCase):
+    def test_bidi_body_transcript_rejects_process_source_url_body_and_time_changes(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            folder = Path(directory)
+            (folder / "firefox-bodies").mkdir()
+            (folder / "http-responses").mkdir()
+            server = []
+            rows = [{"kind": "session", "protocol": 1, "module": "core",
+                     "target": "wasmJs", "candidate_sha": "a" * 40,
+                     "browser_pid": 314, "bidi_browser_pid": 314,
+                     "context_id": "context", "session_id": "session",
+                     "collector_id": "collector", "started_ns": 110,
+                     "bidi_port": 40000, "bidi_socket_inode": "4567",
+                     "source_path": "/checkout/firefox_bidi_witness.js",
+                     "source_sha256": "c" * 64}]
+            for index, name in enumerate(("runtime.js", "commons.js", "abc.wasm")):
+                body = name.encode()
+                relative = f"/absolute/build/{name}"
+                url = f"http://localhost:9876{relative}"
+                request_id = f"request-{index}"
+                (folder / "firefox-bodies" / f"{index:04d}.body").write_bytes(body)
+                (folder / "http-responses" / f"{index:04d}.body").write_bytes(body)
+                server.append({"ordinal": index, "name": name, "url": relative,
+                               "size": len(body), "sha256": browser.sha(body),
+                               "body_path": f"http-responses/{index:04d}.body",
+                               "started_ns": 122 + index * 10,
+                               "finished_ns": 126 + index * 10})
+                rows.append({"kind": "response", "ordinal": index,
+                             "request_id": request_id, "context_id": "context",
+                             "browser_pid": 314, "url": url, "method": "GET",
+                             "status": 200, "mime_type": "application/javascript",
+                             "from_cache": False, "request_ns": 120 + index * 10,
+                             "response_ns": 127 + index * 10,
+                             "finished_ns": 129 + index * 10,
+                             "body_path": f"firefox-bodies/{index:04d}.body",
+                             "body_size": len(body), "body_sha256": browser.sha(body),
+                             "events": {
+                                 "request": {"context": "context", "isBlocked": False,
+                                             "timestamp": 120 + index * 10,
+                                             "request": {"request": request_id,
+                                                         "url": url, "method": "GET"}},
+                                 "response": {"context": "context", "isBlocked": False,
+                                              "timestamp": 127 + index * 10,
+                                              "request": {"request": request_id,
+                                                          "url": url},
+                                              "response": {"url": url, "status": 200,
+                                                           "fromCache": False,
+                                                           "mimeType": "application/javascript"}}}})
+            process = {"started_ns": 100, "finished_ns": 200, "karma_port": 9876}
+
+            def check(transcript):
+                (folder / "firefox-bidi.jsonl").write_text(
+                    "".join(json.dumps(item) + "\n" for item in transcript))
+                return browser.verify_firefox_process_witness(
+                    folder, process, [{"pid": 314}], server, "core", "wasmJs",
+                    "a" * 40, "/checkout/firefox_bidi_witness.js", "c" * 64)
+
+            self.assertEqual(len(check(rows)), 3)
+            server.reverse()
+            self.assertEqual(len(check(rows)), 3)
+            server.reverse()
+            for name, mutate in (
+                    ("missing process", lambda items: items[0].update(browser_pid=315)),
+                    ("wrong hash", lambda items: items[1].update(body_sha256="0" * 64)),
+                    ("stale source", lambda items: items[0].update(source_sha256="0" * 64)),
+                    ("wrong Wasm body", lambda items: items[3].update(body_sha256="0" * 64)),
+                    ("duplicate request", lambda items: items[2].update(request_id="request-0")),
+                    ("duplicate URL", lambda items: items[2].update(url=items[1]["url"])),
+                    ("bad time", lambda items: items[1].update(response_ns=119)),
+                    ("missing response", lambda items: items.pop()),
+                    ("failed request", lambda items: items[1]["events"]["response"].update(
+                        isBlocked=True))):
+                with self.subTest(name=name):
+                    changed = json.loads(json.dumps(rows))
+                    mutate(changed)
+                    with self.assertRaisesRegex(ValueError, "Firefox process witness"):
+                        check(changed)
+
+
 class ChromiumProcessWitnessTest(unittest.TestCase):
     def test_browser_observation_rejects_absent_changed_reordered_and_wrong_process(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
