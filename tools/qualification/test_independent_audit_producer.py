@@ -195,6 +195,88 @@ class IndependentAuditProducerTests(unittest.TestCase):
                               self.stage_path, signature, public, fingerprint,
                               self.observations_path)
 
+    def test_signed_audit_binds_exact_candidate_and_staged_input_bytes(self):
+        for index, (path, key) in enumerate((
+                (self.candidate_path, "candidate_manifest_bytes_sha256"),
+                (self.stage_path, "staged_audit_bytes_sha256"))):
+            prepared = self.prepare(self.root / f"prepared-{index}")
+            signature, public, fingerprint = self.sign(prepared)
+            request_path = prepared / "signing-request.json"
+            request = json.loads(request_path.read_bytes())
+            original = path.read_bytes()
+            path.write_bytes(original + b" ")
+            request[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+            request_path.write_bytes(producer.canonical_json(request))
+            with mock.patch("qualify.verify_audit_against_staging"), mock.patch(
+                    "qualify.require_clean_checkout"):
+                with self.assertRaisesRegex(ValueError, "signed .*input bytes"):
+                    producer.finalize(ROOT, self.candidate, prepared, self.candidate_path,
+                                      self.stage_path, signature, public, fingerprint,
+                                      self.observations_path)
+            path.write_bytes(original)
+
+    def test_verified_jvm_mode_publication_survives_empty_archive_finalization(self):
+        lane = "jvm:Java:minimum:no-optimize"
+        hashes = {module: hashlib.sha256(f"mode:{module}".encode()).hexdigest()
+                  for module in qualify.MODULES}
+        binding = {"publication_archive": str(self.root / "mode-publication"),
+                   "archive_digest": "a" * 64, "artifact_hashes": hashes}
+        self.candidate_manifest["lanes"][lane]["artifact_hashes"] = hashes
+        self.candidate_manifest["lanes"][lane]["jvm_mode_publication"] = binding
+        self.write_inputs()
+        with mock.patch("qualify.verify_audit_against_staging"), mock.patch(
+                "qualify.require_clean_checkout"), mock.patch(
+                "qualify.verify_jvm_mode_publication", return_value=True) as mode_check:
+            prepared = producer.prepare(
+                ROOT, self.candidate, self.candidate_path, self.stage_path,
+                self.observations_path, self.root / "prepared", self.fingerprint)
+            signed = json.loads((prepared / "audit.json").read_bytes())
+            self.assertEqual(binding["publication_archive"], signed["lanes"][lane].get(
+                "expected_mode_publication_path"))
+            self.assertEqual(binding["archive_digest"], signed["lanes"][lane].get(
+                "expected_mode_publication_digest"))
+            signature, public, fingerprint = self.sign(prepared)
+            result = producer.finalize(
+                ROOT, self.candidate, prepared, self.candidate_path, self.stage_path,
+                signature, public, fingerprint, self.observations_path)
+            for field, wrong in (("expected_mode_publication_path", str(self.root / "wrong")),
+                                 ("expected_mode_publication_digest", "0" * 64)):
+                self.observations["lanes"][lane]["signed_fields"] = {field: wrong}
+                self.write_inputs()
+                with self.assertRaisesRegex(ValueError, "signed JVM mode publication differs"):
+                    producer.prepare(ROOT, self.candidate, self.candidate_path,
+                                     self.stage_path, self.observations_path,
+                                     self.root / f"wrong-{field}", self.fingerprint)
+        self.assertGreaterEqual(mode_check.call_count, 2)
+        self.assertEqual(112, result["counts"]["NOT_RUN"])
+        self.assertEqual(0, result["counts"]["PASSED"])
+
+    def test_failed_archive_mutation_during_public_assembly_is_rejected(self):
+        lane = next(iter(self.suite["lanes"]))
+        archive = self.root / "failed-attempt"
+        archive.mkdir()
+        (archive / "receipt.json").write_text(json.dumps({"status": "FAILED"}))
+        self.observations["lanes"][lane]["archives"]["staged-artifacts"] = str(archive)
+        self.write_inputs()
+        prepared = self.prepare()
+        signed = json.loads((prepared / "audit.json").read_bytes())
+        self.assertEqual("FAILED", signed["preflight_results"][lane]["gates"]["staged-artifacts"])
+        signature, public, fingerprint = self.sign(prepared)
+        original_assemble = independent_adapter.assemble_lanes
+
+        def mutate_then_assemble(*args, **kwargs):
+            (archive / "extra.txt").write_text("changed after snapshot")
+            return original_assemble(*args, **kwargs)
+
+        with mock.patch("qualify.verify_audit_against_staging"), mock.patch(
+                "qualify.require_clean_checkout"), mock.patch.object(
+                producer.independent_adapter, "assemble_lanes",
+                side_effect=mutate_then_assemble):
+            with self.assertRaisesRegex(ValueError, "archive bytes or timestamps changed after public assembly"):
+                producer.finalize(ROOT, self.candidate, prepared, self.candidate_path,
+                                  self.stage_path, signature, public, fingerprint,
+                                  self.observations_path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -132,6 +132,8 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
              "suite_manifest_sha256": independent_gates.digest(suite),
              "candidate_manifest_sha256": qualify.manifest_digest(candidate),
              "staged_audit_sha256": qualify.manifest_digest(staged),
+             "candidate_manifest_bytes_sha256": _sha(candidate_manifest_path),
+             "staged_audit_bytes_sha256": _sha(staged_audit_path),
              "trusted_audit_key_sha256": trusted_key_sha256,
              "expected_all_target_hashes": all_hashes, "lanes": {},
              "archive_snapshots": {}, "preflight_results": {}}
@@ -173,6 +175,9 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                     "expected_runtime_identity": lane["runtime_identity"],
                     "expected_archive_digests": {}}
         expected.update(fields)
+        if binding is not None:
+            expected["expected_mode_publication_path"] = binding["publication_archive"]
+            expected["expected_mode_publication_digest"] = binding["archive_digest"]
         paths = observed["archives"]
         gate_names = set(suite["lanes"][lane_id]["required_gates"] + suite["global_gates"])
         if set(paths) - gate_names or any(type(path) is not str for path in paths.values()):
@@ -232,8 +237,8 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                "trusted_audit_key_sha256": trusted_key_sha256,
                "audit_sha256": hashlib.sha256(canonical_json(audit)).hexdigest(),
                "archive_map_sha256": audit["archive_map_sha256"],
-               "candidate_manifest_bytes_sha256": _sha(candidate_manifest_path),
-               "staged_audit_bytes_sha256": _sha(staged_audit_path),
+               "candidate_manifest_bytes_sha256": audit["candidate_manifest_bytes_sha256"],
+               "staged_audit_bytes_sha256": audit["staged_audit_bytes_sha256"],
                "observations_bytes_sha256": _sha(observations_path),
                "performance_key_sha256": audit["performance_key_sha256"]}
     output = Path(output_dir)
@@ -270,6 +275,13 @@ def finalize(repository, candidate_sha, prepared_dir, candidate_manifest_path,
         audit_path, signature_path, public_key_path, trusted_key_sha256)
     if canonical_json(audit) != audit_path.read_bytes():
         raise ValueError("signed audit bytes are not canonical")
+    if (audit.get("candidate_manifest_bytes_sha256") != _sha(candidate_manifest_path)
+            or audit.get("staged_audit_bytes_sha256") != _sha(staged_audit_path)
+            or request.get("candidate_manifest_bytes_sha256")
+            != audit.get("candidate_manifest_bytes_sha256")
+            or request.get("staged_audit_bytes_sha256")
+            != audit.get("staged_audit_bytes_sha256")):
+        raise ValueError("signed candidate or staged input bytes differ")
     if (audit.get("archive_map_sha256") != _sha(map_path)
             or audit.get("candidate_sha") != candidate_sha
             or audit.get("trusted_audit_key_sha256") != trusted_key_sha256
@@ -290,6 +302,11 @@ def finalize(repository, candidate_sha, prepared_dir, candidate_manifest_path,
         repository, candidate_sha, map_path, audit_path, signature_path,
         public_key_path, trusted_key_sha256, candidate_manifest_path,
         staged_audit_path, performance_key=performance_key)
+    for lane_id, entries in audit["archive_snapshots"].items():
+        for gate, recorded in entries.items():
+            if _snapshot(recorded["path"]) != recorded:
+                raise ValueError(
+                    f"archive bytes or timestamps changed after public assembly: {lane_id} {gate}")
     for lane_id, expected in audit["preflight_results"].items():
         if result["independent_gates"][lane_id]["result_sha256"] != expected["result_sha256"]:
             raise ValueError(f"public verifier output changed after audit: {lane_id}")

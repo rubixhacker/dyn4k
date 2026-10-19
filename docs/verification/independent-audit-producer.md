@@ -10,8 +10,8 @@ staged audit must account for both binaries on all 21 targets.
 Run from a clean checkout of the candidate commit. Supply the candidate
 manifest and staged publication audit used by the qualification harness.
 The preparer rechecks the staged files with `qualify.verify_audit_against_staging`.
-Its audit binds their semantic digests. The signing request also binds their
-exact input bytes.
+Its signed audit binds their semantic digests and exact input byte hashes.
+The signing request repeats those hashes for the external signer to check.
 
 Supply a JSON observation with this shape:
 
@@ -35,6 +35,8 @@ nanosecond modification time. It also computes the gate verifier's archive
 digest and runs the public gate evaluator. A malformed attempt remains
 `FAILED`. A receipt that reports `PASSED` cannot fill a missing signed route
 field or replace a public verifier result.
+For a JVM mode publication, `prepare` copies the verified path and digest
+into the signed lane fields and rejects conflicting supplied values.
 
 `signed_fields` contains observations gathered outside the producer archive.
 For a passing staged consumer, supply the fields used by its route in
@@ -92,8 +94,9 @@ python3 tools/qualification/independent_audit_producer.py finalize \
   --output "$ASSEMBLY_RESULT"
 ```
 
-Finalization checks the exact input bytes, all archive files and times, the
-signature, the pinned DER fingerprint, and the public verifier output. It
+Finalization checks the signed exact input hashes, all archive files and times,
+the signature, the pinned DER fingerprint, and the public verifier output. It
+rechecks every archive after public assembly, including failed attempts. It
 compares every lane's public gate result digest with the signed preflight.
 The output contains the assembly `result_sha256`, the signed audit byte digest,
 and the archive map byte digest.
