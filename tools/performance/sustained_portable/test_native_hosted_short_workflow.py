@@ -30,7 +30,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
     "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
-    "windows-collision-focus.yml": "48994d4493716a809d238f5264e8a46c8c8c1cb4844895719961185952ef201b",
+    "windows-collision-focus.yml": "0d7ae31ec15e42211e26b41c8057da394f24557c13a0ba69fa133e2fe8288b68",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
@@ -239,26 +239,57 @@ class WorkflowExpressionLimit(unittest.TestCase):
                 self.assertIn(evidence, source)
         self.assertIn("if: always()", source)
         self.assertIn("path: ${{ runner.temp }}/windows-collision-focus/", source)
-        self.assertIn("$testOutput -notmatch '(?m)^OK$'", source)
+        success_assignment = re.search(
+            r"(?m)^\s*\$hasOkSummary = \$testOutput -cmatch '([^']+)'$", source)
+        self.assertIsNotNone(success_assignment)
+        self.assertIn("if (-not $ranOne -or -not $hasOkSummary)", source)
         assignment = re.search(
             r"(?m)^\s*\$didSkip = \$testOutput -match '([^']+)'$", source)
         self.assertIsNotNone(assignment)
-        test_script = (
+        success_script = (
+            "import unittest\n"
+            "class PassingNativeArchiveTest(unittest.TestCase):\n"
+            "    def test_windows_handle_anchored_round_trip_and_links(self):\n"
+            "        pass\n"
+            "unittest.main(verbosity=2)\n")
+        skip_script = (
             "import unittest\n"
             "class SkippedNativeArchiveTest(unittest.TestCase):\n"
             "    @unittest.skip('synthetic workflow guard check')\n"
             "    def test_windows_handle_anchored_round_trip_and_links(self):\n"
             "        self.fail('a skipped test must not run')\n"
             "unittest.main(verbosity=2)\n")
-        result = subprocess.run(
-            [sys.executable, "-B", "-c", test_script],
-            capture_output=True, text=True, timeout=5, check=False)
-        output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 0, output)
-        self.assertRegex(output, assignment.group(1))
-        self.assertRegex(output, r"(?m)^Ran 1 test in ")
-        self.assertRegex(output, r"(?m)^OK \(skipped=1\)$")
-        self.assertNotRegex(output, r"(?m)^OK$")
+        def run_unittest(script):
+            result = subprocess.run(
+                [sys.executable, "-B", "-c", script],
+                capture_output=True, timeout=5, check=False)
+            output = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, output.decode(errors="replace"))
+            return output
+
+        def with_line_ending(output, ending):
+            return output.replace(b"\r\n", b"\n").replace(b"\n", ending)
+
+        success_output = run_unittest(success_script)
+        skip_output = run_unittest(skip_script)
+        success_pattern = success_assignment.group(1)
+        skip_pattern = assignment.group(1)
+        for ending in (b"\n", b"\r\n"):
+            with self.subTest(line_ending=repr(ending)):
+                success = with_line_ending(success_output, ending).decode()
+                skipped = with_line_ending(skip_output, ending).decode()
+                self.assertRegex(success, r"(?m)^Ran 1 test in ")
+                self.assertRegex(success, success_pattern)
+                self.assertNotRegex(success, skip_pattern)
+                self.assertRegex(skipped, r"(?m)^Ran 1 test in ")
+                self.assertRegex(skipped, r"(?m)^OK \(skipped=1\)")
+                self.assertRegex(skipped, skip_pattern)
+                self.assertNotRegex(skipped, success_pattern)
+
+        for arbitrary in ("not OK\n", "OK extra\n", "OK (skipped=1)\n",
+                          "prefix OK\n", "ok\n", "OK\nextra\n"):
+            with self.subTest(arbitrary=arbitrary):
+                self.assertNotRegex(arbitrary, success_pattern)
 
 
 def workflow_nodes():
