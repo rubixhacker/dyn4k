@@ -298,8 +298,9 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
         raise ValueError("raw output directory must be empty")
     java_home = Path(os.environ["JAVA_HOME"]).resolve()
     gradle_home = Path(os.environ["GRADLE_USER_HOME"]).resolve()
-    java_version = subprocess.check_output([str(java_home / "bin/java"), "-version"],
-                                           stderr=subprocess.STDOUT, text=True).splitlines()[0]
+    java_lines = subprocess.check_output([str(java_home / "bin/java"), "-version"],
+                                         stderr=subprocess.STDOUT, text=True).splitlines()
+    java_version = next((line for line in java_lines if 'version "21' in line), "")
     gradle_version = subprocess.check_output([str(gradle), "--version"], text=True)
     if 'version "21' not in java_version or "Gradle 9.5.0" not in gradle_version:
         raise ValueError("producer requires pinned JDK 21 and Gradle 9.5.0")
@@ -311,8 +312,10 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
         native_home = konan_root / "kotlin-native-prebuilt-linux-x86_64-2.4.20"
         native_executable = native_home / "bin/kotlinc-native"
         native_compiler = native_home / "konan/lib/kotlin-native-compiler-embeddable.jar"
-        native_version = subprocess.check_output([str(native_executable), "-version"],
-                                                 stderr=subprocess.STDOUT, text=True).strip()
+        native_lines = subprocess.check_output([str(native_executable), "-version"],
+                                               stderr=subprocess.STDOUT, text=True).splitlines()
+        native_version = "\n".join(line for line in native_lines
+                                   if line.startswith(("info: kotlinc-native", "Kotlin/Native:")))
         if "Kotlin/Native: 2.4.20" not in native_version:
             raise ValueError("Kotlin/Native compiler version differs from pinned toolchain")
         native_identity = {"home": str(native_home), "version": native_version,
