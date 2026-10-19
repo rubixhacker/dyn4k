@@ -28,6 +28,8 @@ TARGETS = {
     "watchosArm64": ("watchOS physical ILP32", "watchOS", 8, "ILP32"),
     "watchosDeviceArm64": ("watchOS physical LP64", "watchOS", 26, "LP64"),
 }
+MINIMUM_PATCHES = {"iosArm64": "15.8.8", "tvosArm64": "15.6",
+                   "watchosArm64": "8.8.2", "watchosDeviceArm64": "26.6"}
 BUILD_FILES = tuple(f"{CONSUMER}/{name}" for name in (
     "settings.gradle.kts", "build.gradle.kts", "core/build.gradle.kts",
     "facade/build.gradle.kts",
@@ -108,18 +110,48 @@ def staged(staging, module, target):
     return staging / "io/github/rubixhacker" / f"{module}-{variant}" / VERSION / name
 
 
-def expected_os(lane, version):
+def load_os_selection(path, expected_sha256):
+    if not SHA64.fullmatch(expected_sha256 or ""):
+        raise ValueError("independent OS selection digest is missing")
+    selected = Path(path)
+    if selected.is_symlink() or not selected.is_file():
+        raise ValueError("independent OS selection is absent or symbolic")
+    raw = selected.read_bytes()
+    if sha(raw) != expected_sha256:
+        raise ValueError("independent OS selection digest differs")
+    selection = json.loads(raw, object_pairs_hook=independent_gates._strict_object)
+    if (set(selection) != {"schema", "roles"} or selection["schema"] != 1
+            or not isinstance(selection["roles"], dict)
+            or set(selection["roles"]) != set(TARGETS)):
+        raise ValueError("independent OS selection matrix differs")
+    for target, roles in selection["roles"].items():
+        if not isinstance(roles, dict) or set(roles) != {"minimum", "current",
+                                                            "minimum_source", "current_source"}:
+            raise ValueError("independent OS role selection differs")
+        if roles["minimum"] != MINIMUM_PATCHES[target]:
+            raise ValueError("selected minimum is not the audited maintenance patch")
+        floor = TARGETS[target][2]
+        current = roles["current"]
+        if (not isinstance(current, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", current)
+                or int(current.split(".")[0]) <= floor):
+            raise ValueError("selected current runtime must be distinct from minimum release family")
+        for key in ("minimum_source", "current_source"):
+            source = roles[key]
+            if not isinstance(source, str) or urlparse(source).scheme != "https" or urlparse(source).hostname not in ("support.apple.com", "developer.apple.com"):
+                raise ValueError("OS role selection lacks an Apple release source")
+    return selection
+
+
+def expected_os(lane, version, selection):
     match = re.fullmatch(r"([0-9]+)(?:\.([0-9]+)(?:\.([0-9]+))?)?", version)
     if not match:
         raise ValueError("expected device OS must be a numeric version")
-    floor = TARGETS[lane["target"]][2]
-    major = int(match[1])
-    if major < floor or (lane["version"] == "minimum" and major != floor):
-        raise ValueError("device OS does not meet the selected minimum/current role")
+    if version != selection["roles"][lane["target"]][lane["version"]]:
+        raise ValueError("device OS differs from independently selected minimum/current role")
     return version
 
 
-def validate_device(record, lane, udid, model, os_version):
+def validate_device(record, lane, udid, model, os_version, selection):
     if not isinstance(record, dict):
         raise ValueError("physical device record is missing")
     runtime, family, _, abi = TARGETS[lane["target"]]
@@ -130,13 +162,13 @@ def validate_device(record, lane, udid, model, os_version):
             or not isinstance(udid, str) or not udid
             or not isinstance(model, str) or not model):
         raise ValueError("selected physical device identity differs")
-    expected_os(lane, os_version)
+    expected_os(lane, os_version, selection)
     if lane["target"] == "watchosArm64" and "ILP32" not in runtime:
         raise ValueError("watchOS ILP32 lane differs")
     return record
 
 
-def select_device(raw, lane, udid, model, os_version):
+def select_device(raw, lane, udid, model, os_version, selection):
     listing = json.loads(raw)
     devices = listing.get("result", {}).get("devices", [])
     if not isinstance(devices, list):
@@ -164,7 +196,7 @@ def select_device(raw, lane, udid, model, os_version):
               "raw": item}
     if not record["available"]:
         return None
-    return validate_device(record, lane, udid, model, os_version)
+    return validate_device(record, lane, udid, model, os_version, selection)
 
 
 def parse_gtest(raw, selected):
@@ -313,7 +345,9 @@ def record_info_plist(bundle, bundle_id, family, os_version):
     if family == "iOS":
         info["LSRequiresIPhoneOS"] = True
     if family == "watchOS":
-        info["WKWatchKitApp"] = True
+        info["WKApplication"] = True
+        info["WKWatchOnly"] = True
+        info["WKRunsIndependentlyOfCompanionApp"] = True
     with (bundle / "Info.plist").open("wb") as stream:
         plistlib.dump(info, stream)
 
@@ -333,7 +367,8 @@ def run(args):
         raise ValueError("producer checkout differs from candidate")
     if git(repository, "status", "--porcelain", "--untracked-files=all").strip():
         raise ValueError("producer requires a clean exact candidate checkout")
-    expected_os(lane, args.expected_os)
+    selection = load_os_selection(args.os_roles_json, args.os_roles_sha256)
+    expected_os(lane, args.expected_os, selection)
     if not args.udid or not args.model:
         return unavailable(archive, args.candidate, args.lane,
                            "no physical device UDID/model was supplied; test execution NOT_RUN")
@@ -382,7 +417,8 @@ def run(args):
     require_success(list_record, "device discovery")
     if not list_path.is_file():
         raise ValueError("CoreDevice JSON device list is absent")
-    device = select_device(list_path.read_bytes(), lane, args.udid, args.model, args.expected_os)
+    device = select_device(list_path.read_bytes(), lane, args.udid, args.model,
+                           args.expected_os, selection)
     if device is None:
         return unavailable(archive, args.candidate, args.lane,
                            "selected matching physical device is not attached; test execution NOT_RUN")
@@ -523,6 +559,7 @@ def run(args):
                                      ("target", "runtime", "version", "configuration")},
                "runtime_identity": f"{device['model']} | {device['os']} {device['version']} | {device['udid']}",
                "device": device, "artifact_hashes": hashes,
+               "os_roles_sha256": args.os_roles_sha256,
                "consumer_group": "full-suite",
                "consumer_contract_sha256": independent_gates.digest(contract),
                "source_inventory_sha256": sha(inventory.encode()),
@@ -549,13 +586,20 @@ def run(args):
 
 
 def verify(repository, candidate, lane_id, archive, archive_sha256, hashes,
-           expected_runtime_identity, expected_toolchain):
-    repository, archive = Path(repository).resolve(), Path(archive).resolve()
+           expected_runtime_identity, expected_toolchain, os_roles_json=None,
+           os_roles_sha256=None):
+    repository = Path(repository).resolve()
+    archive = Path(archive).absolute()
     lane, contract = lane_contract(repository, lane_id)
     if not SHA40.fullmatch(candidate) or not SHA64.fullmatch(archive_sha256 or ""):
         raise ValueError("independent candidate/archive identity is missing")
-    if archive.is_symlink() or not archive.is_dir():
+    if any(path.is_symlink() for path in (archive, *archive.parents)) or not archive.is_dir():
         raise ValueError("physical Apple archive is absent or symbolic")
+    for path in archive.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("symbolic archive path")
+        if path.is_file() and path.stat().st_nlink != 1:
+            raise ValueError("hardlink in physical Apple archive")
     if independent_gates.archive_digest(archive) != archive_sha256:
         raise ValueError("physical Apple archive differs from independent digest")
     receipt = json.loads(safe_file(archive, "receipt.json").read_bytes(),
@@ -568,10 +612,14 @@ def verify(repository, candidate, lane_id, archive, archive_sha256, hashes,
                 or receipt.get("observed_by") != "full_apple_device_consumer.py"
                 or type(receipt.get("observed_at_ns")) is not int):
             raise ValueError("unavailability receipt differs from selected lane")
-        return {"status": "UNAVAILABLE", "lane": lane_id, "selected_cases": 0,
+        return {"status": "UNAUTHENTICATED", "claimed_status": "UNAVAILABLE",
+                "observed": False, "lane": lane_id, "selected_cases": 0,
                 "archive_sha256": archive_sha256, "execution": "NOT_RUN"}
     if receipt.get("status") != "PASSED" or receipt.get("schema") != 1:
         raise ValueError("physical Apple run is not passed")
+    selection = load_os_selection(os_roles_json, os_roles_sha256)
+    if receipt.get("os_roles_sha256") != os_roles_sha256:
+        raise ValueError("physical Apple OS role selection differs")
     independent_gates._inventory(archive, receipt)
     if (receipt.get("candidate_sha") != candidate
             or receipt.get("source_tree") != git(repository, "rev-parse",
@@ -601,7 +649,8 @@ def verify(repository, candidate, lane_id, archive, archive_sha256, hashes,
     if not isinstance(device, dict):
         raise ValueError("physical device identity is absent")
     selected = select_device(safe_file(archive, "device-list.json").read_bytes(), lane,
-                             device.get("udid"), device.get("model"), device.get("version"))
+                             device.get("udid"), device.get("model"), device.get("version"),
+                             selection)
     if selected is None or selected != {key: value for key, value in device.items()
                                          if key != "raw_sha256"}:
         raise ValueError("device record differs from original CoreDevice listing")
@@ -710,6 +759,10 @@ def verify(repository, candidate, lane_id, archive, archive_sha256, hashes,
                 or info.get("MinimumOSVersion") != device["version"]
                 or proof.get("installed_bundle_id") != bundle_id):
             raise ValueError("installed test host bundle identity differs")
+        if device["os"] == "watchOS" and (info.get("WKApplication") is not True
+                                           or info.get("WKWatchOnly") is not True
+                                           or "WKWatchKitApp" in info):
+            raise ValueError("watchOS single-target app form differs")
         sign = steps[f"{name}-sign"]
         signature = steps[f"{name}-signature"]
         install = steps[f"{name}-install"]
@@ -783,6 +836,8 @@ def main():
     producer.add_argument("--udid")
     producer.add_argument("--model")
     producer.add_argument("--expected-os", required=True)
+    producer.add_argument("--os-roles-json", required=True)
+    producer.add_argument("--os-roles-sha256", required=True)
     producer.add_argument("--signing-identity")
     producer.add_argument("--provisioning-profile")
     producer.add_argument("--core-sha256")
@@ -798,6 +853,8 @@ def main():
     replay.add_argument("--facade-sha256", required=True)
     replay.add_argument("--runtime-identity", required=True)
     replay.add_argument("--toolchain-json", required=True)
+    replay.add_argument("--os-roles-json", required=True)
+    replay.add_argument("--os-roles-sha256", required=True)
     args = parser.parse_args()
     if args.command == "matrix":
         print("\n".join(matrix(Path(args.repository).resolve())))
@@ -808,7 +865,8 @@ def main():
                                 args.archive, args.archive_sha256,
                                 {"dyn4k-core": args.core_sha256, "dyn4k": args.facade_sha256},
                                 args.runtime_identity,
-                                json.loads(Path(args.toolchain_json).read_bytes())), sort_keys=True))
+                                json.loads(Path(args.toolchain_json).read_bytes()),
+                                args.os_roles_json, args.os_roles_sha256), sort_keys=True))
 
 
 if __name__ == "__main__":
