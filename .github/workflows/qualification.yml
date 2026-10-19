@@ -883,6 +883,15 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
+      - name: Download every retained producer artifact
+        id: raw_download
+        if: always()
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: '*'
+          path: ${{ runner.temp }}/producer-artifacts
+          merge-multiple: false
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -901,15 +910,10 @@ jobs:
           git -C "$DYN4K_UPSTREAM_SOURCE" fetch --depth=1 origin 058bf6d982a0fb89b54050f929f6ea9dae53b714
           git -C "$DYN4K_UPSTREAM_SOURCE" checkout --detach FETCH_HEAD
           test "$(git -C "$DYN4K_UPSTREAM_SOURCE" rev-parse HEAD)" = 058bf6d982a0fb89b54050f929f6ea9dae53b714
-      - name: Download every retained producer artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          pattern: '*'
-          path: ${{ runner.temp }}/producer-artifacts
-          merge-multiple: false
       - name: Collect and independently enumerate 112 lanes
         if: always()
+        env:
+          DYN4K_DOWNLOAD_OUTCOME: ${{ steps.raw_download.outcome }}
         run: |
           set +e
           mkdir -p "$RUNNER_TEMP/central-logs" "$RUNNER_TEMP/producer-artifacts"
@@ -943,10 +947,14 @@ jobs:
             > "$RUNNER_TEMP/central-logs/record.stdout" \
             2> "$RUNNER_TEMP/central-logs/record.stderr"
           record_exit=$?
-          printf 'collection=%s\ntransport=%s\nassembly=%s\nrecord=%s\n' \
-            "$collection_exit" "$transport_exit" "$assembly_exit" "$record_exit" \
+          printf 'download=%s\ncollection=%s\ntransport=%s\nassembly=%s\nrecord=%s\n' \
+            "$DYN4K_DOWNLOAD_OUTCOME" "$collection_exit" "$transport_exit" "$assembly_exit" "$record_exit" \
             > "$RUNNER_TEMP/central-logs/exit-codes.txt"
-          test "$collection_exit" -eq 0 && test "$transport_exit" -eq 0 && \
+          if [ "$DYN4K_DOWNLOAD_OUTCOME" != success ]; then
+            echo "::error::Producer artifact download failed or was skipped: $DYN4K_DOWNLOAD_OUTCOME"
+          fi
+          test "$DYN4K_DOWNLOAD_OUTCOME" = success && \
+            test "$collection_exit" -eq 0 && test "$transport_exit" -eq 0 && \
             test "$assembly_exit" -eq 0 && test "$record_exit" -eq 0
       - name: Upload central raw collection and failed routes
         if: always()

@@ -158,6 +158,41 @@ class CollectionTests(unittest.TestCase):
             self.assertIn(command, workflow)
         self.assertIn("if: always()", workflow)
 
+    def test_workflow_download_survives_replay_setup_failure(self):
+        workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
+        central = workflow.split("  central-qualification-collection:\n", 1)[1]
+
+        def assert_download_contract(job):
+            download = job.index("      - name: Download every retained producer artifact\n")
+            next_step = job.index("      - ", download + 1)
+            download_step = job[download:next_step]
+            self.assertIn("        if: always()\n", download_step)
+            self.assertIn("        id: raw_download\n", download_step)
+            self.assertIn("        continue-on-error: true\n", download_step)
+            for fallible in ("      - uses: actions/checkout@v4\n",
+                             "      - uses: actions/setup-java@v4\n",
+                             "      - uses: gradle/actions/setup-gradle@v4\n",
+                             "      - name: Provision pinned upstream source for raw replay\n"):
+                self.assertLess(download, job.index(fallible))
+            self.assertIn("DYN4K_DOWNLOAD_OUTCOME: ${{ steps.raw_download.outcome }}", job)
+            self.assertIn("test \"$DYN4K_DOWNLOAD_OUTCOME\" = success", job)
+            self.assertIn("download=%s", job)
+            self.assertIn("::error::Producer artifact download failed or was skipped", job)
+
+        assert_download_contract(central)
+        download = central.index("      - name: Download every retained producer artifact\n")
+        next_step = central.index("      - ", download + 1)
+        download_step = central[download:next_step]
+        without_condition = central.replace(
+            download_step, download_step.replace("        if: always()\n", ""))
+        with self.assertRaises(AssertionError):
+            assert_download_contract(without_condition)
+        after_fetch = central.replace(download_step, "").replace(
+            "      - name: Collect and independently enumerate 112 lanes\n",
+            download_step + "      - name: Collect and independently enumerate 112 lanes\n")
+        with self.assertRaises(AssertionError):
+            assert_download_contract(after_fetch)
+
 
 if __name__ == "__main__":
     unittest.main()
