@@ -104,6 +104,7 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
     if output.exists() and any(output.iterdir()):
         raise ValueError("full JVM raw output must be empty")
     java_home = Path(os.environ["JAVA_HOME"]).resolve()
+    gradle_home = Path(os.environ["GRADLE_USER_HOME"]).resolve()
     java_version = subprocess.check_output([str(java_home / "bin/java"), "-version"],
                                            stderr=subprocess.STDOUT, text=True).splitlines()[0]
     gradle_version = subprocess.check_output([str(gradle), "--version"], text=True)
@@ -143,6 +144,15 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                "lane": LANE, "target": "jvm", "runtime": "Java", "version": "current",
                "configuration": "default",
                "runtime_identity": f"{java_version} | {platform.system()} {platform.release()} {platform.machine()}",
+               "producer_paths": {"checkout": str(repository), "staging": str(staging),
+                                  "archive_root": str(output), "inputs": str(inputs),
+                                  "gradle": str(gradle)},
+               "toolchain": {"java_home": str(java_home),
+                             "java_version": java_version,
+                             "java_executable_sha256": sha((java_home / "bin/java").read_bytes()),
+                             "gradle_version": "Gradle 9.5.0",
+                             "gradle_executable_sha256": sha(gradle.read_bytes()),
+                             "gradle_user_home": str(gradle_home)},
                "artifact_hashes": expected_hashes,
                "process": {"command": command, "cwd": str(inputs), "exit_code": 0,
                            "started_ns": started, "finished_ns": finished,
@@ -222,12 +232,39 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
         raise ValueError("consumer build source differs from exact candidate")
     process = receipt.get("process", {})
     command = process.get("command", [])
-    if (not command or command[-1] != LANE
-            or f"-PqualificationCheckout={repository}" not in command
-            or f"-PqualificationArchiveRoot={root}" not in command
-            or f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}" not in command
-            or f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}" not in command
-            or "--offline" not in command or "--rerun-tasks" not in command):
+    paths = receipt.get("producer_paths")
+    toolchain = receipt.get("toolchain")
+    if (not isinstance(paths, dict)
+            or set(paths) != {"checkout", "staging", "archive_root", "inputs", "gradle"}
+            or any(not isinstance(value, str) or not Path(value).is_absolute()
+                   for value in paths.values())
+            or not isinstance(toolchain, dict)
+            or set(toolchain) != {"java_home", "java_version", "java_executable_sha256",
+                                  "gradle_version", "gradle_executable_sha256",
+                                  "gradle_user_home"}
+            or toolchain["gradle_version"] != "Gradle 9.5.0"
+            or 'version "21' not in toolchain["java_version"]
+            or not receipt.get("runtime_identity", "").startswith(toolchain["java_version"] + " | ")
+            or any(not SHA256.fullmatch(str(toolchain[key]))
+                   for key in ("java_executable_sha256", "gradle_executable_sha256"))
+            or any(not Path(toolchain[key]).is_absolute()
+                   for key in ("java_home", "gradle_user_home"))):
+        raise ValueError("producer paths or pinned toolchain are incomplete")
+    inputs = Path(paths["inputs"])
+    expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
+                        "--offline", "--no-daemon", "--console=plain", "--rerun-tasks",
+                        "--init-script", str(inputs / LANE),
+                        f"-PqualificationCheckout={paths['checkout']}",
+                        f"-PqualificationRepository={paths['staging']}",
+                        f"-PqualificationArchiveRoot={paths['archive_root']}",
+                        f"-PqualificationSourceInventory={inputs / 'source-inventory.tsv'}",
+                        f"-PqualificationCoreCases={inputs / 'core-cases.tsv'}",
+                        f"-PqualificationFacadeCases={inputs / 'facade-cases.tsv'}",
+                        f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}",
+                        f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}",
+                        f"-PqualificationLaneId={LANE}",
+                        f"-PqualificationLaneScript={inputs / LANE}", LANE]
+    if command != expected_command or process.get("cwd") != paths["inputs"]:
         raise ValueError("external Gradle command differs from candidate or staged bytes")
     if (receipt.get("raw_consumer_xml") is None or not isinstance(
             receipt["raw_consumer_xml"], list)):
@@ -256,12 +293,9 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     if len(observed) != len(cases) or set(observed) != {item["id"] for item in cases}:
         raise ValueError("original Gradle XML omits or duplicates selected methods")
     graph = json.loads((root / "provider-graph.json").read_bytes())
-    staging_flag = next((arg for arg in command if arg.startswith("-PqualificationRepository=")), None)
-    if staging_flag is None:
-        raise ValueError("staged publication repository is missing from command")
-    staging = Path(staging_flag.split("=", 1)[1])
+    staging = Path(paths["staging"])
     if (not staging.is_absolute() or set(graph) != {"compile", "runtime", "gradle_user_home"}
-            or not Path(graph["gradle_user_home"]).is_absolute()):
+            or graph["gradle_user_home"] != toolchain["gradle_user_home"]):
         raise ValueError("external provider graph lacks runtime or staged root")
     for phase in ("compile", "runtime"):
         entries = graph[phase]

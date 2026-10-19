@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import full_jvm_consumer as route
@@ -51,32 +52,96 @@ class FullJvmConsumerTests(unittest.TestCase):
         self.assertEqual(positive["status"], "PASSED")
         self.assertEqual(positive["selected_cases"], 2526)
 
-        with tempfile.TemporaryDirectory() as directory:
+        def copied_archive(directory):
             copied = Path(directory) / "copy"
             shutil.copytree(root, copied, copy_function=shutil.copy2)
             altered = copy.deepcopy(receipt)
-            altered["process"]["command"] = [
-                f"-PqualificationArchiveRoot={copied}" if arg.startswith(
-                    "-PqualificationArchiveRoot=") else arg
-                for arg in altered["process"]["command"]]
+            return copied, altered
+
+        def reseal(copied, altered, changed):
+            entries = {item["path"]: item for item in altered["files"]}
+            stdout = copied / "stdout.txt"
+            output = stdout.read_bytes()
+            for relative, marker in changed.items():
+                path = copied / relative
+                old = entries[relative]["sha256"].encode()
+                new = route.sha(path.read_bytes())
+                if marker:
+                    prefix = f"QUALIFICATION_{marker}_SHA256=".encode()
+                    self.assertIn(prefix + old, output)
+                    output = output.replace(prefix + old, prefix + new.encode())
+                entries[relative]["sha256"] = new
+                stamp = entries[relative]["mtime_ns"]
+                os.utime(path, ns=(stamp, stamp))
+            stdout.write_bytes(output)
+            entries["stdout.txt"]["sha256"] = route.sha(output)
+            stamp = entries["stdout.txt"]["mtime_ns"]
+            os.utime(stdout, ns=(stamp, stamp))
+            (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
+            return independent_gates.archive_digest(copied)
+
+        with tempfile.TemporaryDirectory() as directory:
+            copied, altered = copied_archive(directory)
             (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
             copied_digest = independent_gates.archive_digest(copied)
             self.assertEqual(route.verify(copied, REPOSITORY, candidate, hashes,
                                           identity, copied_digest)["status"], "PASSED")
 
-            raw = copied / altered["raw_consumer_xml"][0]
-            original = raw.read_bytes()
-            raw.write_bytes(original.replace(b'tests="', b'tests="9', 1))
-            os.utime(raw, ns=(raw.stat().st_atime_ns,
-                              next(item["mtime_ns"] for item in altered["files"]
-                                   if item["path"] == altered["raw_consumer_xml"][0])))
-            for item in altered["files"]:
-                if item["path"] == altered["raw_consumer_xml"][0]:
-                    item["sha256"] = route.sha(raw.read_bytes())
-            (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
-            with self.assertRaisesRegex(ValueError, "normalized XML"):
-                route.verify(copied, REPOSITORY, candidate, hashes, identity,
-                             independent_gates.archive_digest(copied))
+        for mutation in ("missing", "duplicate", "foreign", "skipped"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                copied, altered = copied_archive(directory)
+                raw_rel = altered["raw_consumer_xml"][0]
+                normal_rel = raw_rel.replace("reports/raw/", "reports/normalized/")
+                for relative in (raw_rel, normal_rel):
+                    path = copied / relative
+                    suite = ET.fromstring(path.read_bytes())
+                    cases = list(suite.iter("testcase"))
+                    if mutation == "missing":
+                        suite.remove(cases[0])
+                        suite.set("tests", str(len(cases) - 1))
+                    elif mutation == "duplicate":
+                        suite.append(copy.deepcopy(cases[0]))
+                        suite.set("tests", str(len(cases) + 1))
+                    elif mutation == "foreign":
+                        cases[0].set("classname", "foreign.UnapprovedTest")
+                        if relative == normal_rel:
+                            cases[0].set("id", "dyn4k-core:foreign.UnapprovedTest#method")
+                    else:
+                        ET.SubElement(cases[0], "skipped")
+                        suite.set("skipped", "1")
+                    path.write_bytes(ET.tostring(suite))
+                digest = reseal(copied, altered, {raw_rel: "RAW_XML",
+                                                  normal_rel: "CONSUMER_XML"})
+                with self.assertRaises(ValueError):
+                    route.verify(copied, REPOSITORY, candidate, hashes, identity, digest)
+
+        for mutation in ("source-inventory", "source-build", "binary-bytes"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                copied, altered = copied_archive(directory)
+                if mutation == "source-inventory":
+                    relative, marker = "inputs/source-inventory.tsv", "SOURCE_INVENTORY"
+                    path = copied / relative
+                    path.write_bytes(path.read_bytes().replace(b"dyn4k-core", b"other-core", 1))
+                elif mutation == "source-build":
+                    relative, marker = "provider-graph.json", "PROVIDER_GRAPH"
+                    path = copied / relative
+                    graph = json.loads(path.read_bytes())
+                    graph["compile"][0]["artifacts"][0]["file"] = (
+                        str(REPOSITORY / "dyn4k-core/build/libs/forged.jar"))
+                    path.write_bytes(route.encoded(graph))
+                else:
+                    relative = altered["resolved_artifacts"]["dyn4k-core"]
+                    marker = "RESOLVED_DYN4K_CORE"
+                    path = copied / relative
+                    data = bytearray(path.read_bytes())
+                    data[100] ^= 1
+                    path.write_bytes(data)
+                digest = reseal(copied, altered, {relative: marker})
+                with self.assertRaises(ValueError):
+                    route.verify(copied, REPOSITORY, candidate, hashes, identity, digest)
+
+        with self.assertRaises(ValueError):
+            route.verify(root, REPOSITORY, "0" * 40, hashes, identity, digest)
 
 
 if __name__ == "__main__":
