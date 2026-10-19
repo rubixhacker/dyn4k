@@ -1,4 +1,25 @@
 const DYN4K_SAFARI_REPORTER_NEWLINES = true;
+const safariPackage = String(config.basePath || '').split(/[\\/]/).pop();
+const safariModules = Object.assign(Object.create(null), {
+    'dyn4k-dyn4k-core-test': 'dyn4k-core',
+    'dyn4k-dyn4k-test': 'dyn4k',
+    'dyn4k-staged-portable-consumer-test': 'consumer'
+});
+const safariModule = safariModules[safariPackage];
+if (!safariModule || config.urlRoot !== '/' || typeof config.set !== 'function') {
+    throw new Error('Safari Karma package or route is unsafe');
+}
+const safariInvocation = process.env.DYN4K_QUALIFICATION_INVOCATION;
+if (safariInvocation !== undefined && !/^[0-9a-f]{32}$/.test(safariInvocation)) {
+    throw new Error('Safari qualification invocation is unsafe');
+}
+if (!Number.isSafeInteger(process.pid) || process.pid <= 0) {
+    throw new Error('Safari Karma process identity is unsafe');
+}
+// A stale Safari tab can register with a later Karma server on the shared socket path.
+const safariUrlRoot = '/dyn4k-safari/' + (safariInvocation || 'probe') + '/' +
+    safariModule + '/' + process.pid + '/';
+config.set({urlRoot: safariUrlRoot});
 const safariFs = require('node:fs');
 const safariCrypto = require('node:crypto');
 const reporterKey = 'reporter:karma-kotlin-reporter';

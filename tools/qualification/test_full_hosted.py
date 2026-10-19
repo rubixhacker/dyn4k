@@ -149,6 +149,13 @@ class FullHostedTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_safari_reporter_isolates_karma_socket_routes(self):
+        source = Path(__file__).with_name("safari-karma-reporter.js")
+        control = Path(__file__).with_name("safari-reporter-control.js")
+        result = subprocess.run(["node", str(control), str(source), "--isolation-control"],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_safari_replayed_prefix_cannot_satisfy_source_case_contract(self):
         classname = full_hosted.SAFARI_DIAGNOSTIC_CLASS
         suite = ET.Element("testsuite", tests="12", failures="0", errors="0",

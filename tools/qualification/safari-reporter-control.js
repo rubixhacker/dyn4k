@@ -27,9 +27,13 @@ function load(options = {}) {
     const producer = {[key]: ['type', OriginalReporter]};
     const plugin = options.wrongReporter
         ? {[key]: ['type', function WrongReporter() {}]} : producer;
-    const config = {basePath: '/fixture/build/js/packages/dyn4k-dyn4k-core-test',
+    const config = {urlRoot: options.urlRoot === undefined ? '/' : options.urlRoot,
+        basePath: '/fixture/build/js/packages/' +
+            (options.packageName === undefined ? 'dyn4k-dyn4k-core-test'
+                : options.packageName),
         plugins: options.missingReporter ? []
-            : options.duplicateReporter ? [plugin, producer] : [plugin]};
+            : options.duplicateReporter ? [plugin, producer] : [plugin],
+        set(settings) { Object.assign(this, settings); }};
     let Browser = class {
         constructor(id, socket) {
             this.id = id;
@@ -157,18 +161,43 @@ function load(options = {}) {
         [browserPath]: browserModule,
         [serverPath]: {children: options.wrongKarmaModule ? [] : [browserModule]}
     };
-    const fakeProcess = {pid: 1234, env: options.trace ? {
-        DYN4K_SAFARI_EVENT_TRACE_DIR: '/fixture/events',
-        DYN4K_QUALIFICATION_INVOCATION: '1'.repeat(32)
-    } : {}};
+    const environment = options.trace ? {DYN4K_SAFARI_EVENT_TRACE_DIR: '/fixture/events'} : {};
+    if (options.invocation !== null) {
+        environment.DYN4K_QUALIFICATION_INVOCATION =
+            options.invocation === undefined ? '1'.repeat(32) : options.invocation;
+    }
+    const fakeProcess = {pid: options.pid === undefined ? 1234 : options.pid,
+        env: environment};
     vm.runInNewContext(fragment, {config, Buffer, require: fakeRequire,
         process: fakeProcess, Atomics, SharedArrayBuffer, Int32Array});
     const Reporter = plugin[key][1];
     const reporter = new Reporter(instance => {
         instance.write = message => asynchronous.push(message);
     }, config, {});
-    return {reporter, output, traceOutput, asynchronous, calls, Reporter,
+    return {reporter, config, output, traceOutput, asynchronous, calls, Reporter,
         Browser, originalReconnect};
+}
+
+if (process.argv[3] === '--isolation-control') {
+    const core = load();
+    const facade = load({packageName: 'dyn4k-dyn4k-test'});
+    const consumer = load({packageName: 'dyn4k-staged-portable-consumer-test'});
+    const nextInvocation = load({invocation: '2'.repeat(32)});
+    const nextProcess = load({pid: 5678});
+    assert.match(core.config.urlRoot,
+        /^\/dyn4k-safari\/[0-9a-f]{32}\/dyn4k-core\/1234\/$/);
+    assert.equal(new Set([core, facade, consumer, nextInvocation, nextProcess]
+        .map(item => item.config.urlRoot)).size, 5);
+    assert.throws(() => load({invocation: 'bad'}), /Safari.*invocation.*unsafe/);
+    assert.throws(() => load({invocation: ''}), /Safari.*invocation.*unsafe/);
+    assert.throws(() => load({packageName: 'unknown-test'}), /Safari.*package.*unsafe/);
+    assert.throws(() => load({packageName: ''}), /Safari.*package.*unsafe/);
+    assert.throws(() => load({urlRoot: '/socket.io/'}), /Safari.*route.*unsafe/);
+    assert.throws(() => load({pid: 0}), /Safari.*process.*unsafe/);
+    const probe = load({invocation: null});
+    assert.match(probe.config.urlRoot, /^\/dyn4k-safari\/probe\/dyn4k-core\/1234\/$/);
+    assert.equal(core.Browser.prototype.reconnect, core.originalReconnect);
+    process.exit(0);
 }
 
 if (process.argv[3] === '--real-stdout') {
