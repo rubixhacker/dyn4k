@@ -329,8 +329,8 @@ def run(repository, candidate, lane, stage, output, gradle, runtime, hashes):
     java_home = Path(os.environ["JAVA_HOME"]).resolve()
     gradle_home = Path(os.environ["GRADLE_USER_HOME"]).resolve()
     temp_root = Path(os.environ["TMPDIR"]).resolve()
-    if not temp_root.is_relative_to(output.parent):
-        raise ValueError("TMPDIR must be home-backed beside the archive")
+    if not temp_root.is_dir() or not temp_root.is_relative_to(Path.home().resolve()):
+        raise ValueError("TMPDIR must be an existing home-backed directory")
     java = java_home / "bin/java"
     java_version = subprocess.check_output([str(java), "-version"], stderr=subprocess.STDOUT,
                                            text=True).splitlines()[0]
