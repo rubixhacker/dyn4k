@@ -31,7 +31,8 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
     if (files.length !== 2 || files[1] !== selected ||
             JSON.stringify(config.preprocessors[selected]) !== JSON.stringify(['webpack', 'sourcemap'])) {
-        throw new Error('Karma selected bundle path or preprocessor differs');
+        throw new Error('Karma selected bundle path or preprocessor differs: ' +
+            JSON.stringify({files, selected, preprocessors: config.preprocessors}));
     }
     let evidence = null;
     const originalBrowserStart = this.onBrowserStart;
