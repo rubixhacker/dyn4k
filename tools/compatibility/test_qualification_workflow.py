@@ -1,4 +1,3 @@
-import json
 import re
 import unittest
 from pathlib import Path
@@ -14,12 +13,11 @@ def workflow_jobs(workflow):
 
 
 class QualificationWorkflowContractTest(unittest.TestCase):
-    def test_native_monitor_probe_runs_on_both_hosted_publication_runners(self):
+    def test_native_monitor_probe_runs_on_windows_publication_runner(self):
         publications = workflow_jobs(WORKFLOW.read_text())["hosted-publications"]
-        matrix = next(line for line in publications.splitlines()
-                      if line.strip().startswith("matrix: ${{ fromJSON("))
-        choices = [json.loads(value)["include"] for value in re.findall(r"'(\{.*?\})'", matrix)]
-        self.assertEqual(["macos", "windows"], [entry["host"] for entry in choices[1]])
+        self.assertIn("    runs-on: windows-2025\n", publications)
+        self.assertIn("          - host: windows\n            targets: --target mingwX64\n", publications)
+        self.assertNotIn("macos-26", publications)
         step_name = "      - name: Probe native performance monitor\n"
         self.assertEqual(1, publications.count(step_name))
         setup = publications.index("      - uses: actions/setup-python@v5")
@@ -33,40 +31,24 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "tools.performance.test_stress_monitor.StressMonitorTest."
             "test_native_hosted_probe_when_available -v\n", step)
 
-    def test_windows_dispatch_selects_only_windows_without_changing_regular_matrices(self):
+    def test_windows_dispatch_keeps_only_windows_hosted_jobs(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("      windows_diagnostics:\n", workflow)
         self.assertIn("        type: boolean\n", workflow)
         self.assertIn("        default: false\n", workflow)
         jobs = workflow_jobs(workflow)
         guard = "if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true"
-        for name in ("staged-jvm-and-linux", "safari-browser"):
-            with self.subTest(job=name):
-                self.assertIn(guard, jobs[name])
-        expected = {
-            "hosted-publications": (
-                [{"host": "windows", "runner": "windows-2025", "targets": "--target mingwX64"}],
-                ["macos", "windows"],
-            ),
-            "hosted-native": (
-                [{"target": "mingwX64", "runner": "windows-2025"}],
-                ["macosArm64", "iosSimulatorArm64", "tvosSimulatorArm64",
-                 "watchosSimulatorArm64", "iosX64", "mingwX64"],
-            ),
-        }
-        for name, (diagnostic, regular_names) in expected.items():
+        self.assertIn(guard, jobs["staged-jvm-and-linux"])
+        self.assertNotIn("safari-browser", jobs)
+        self.assertIn("hosted-runner-guard", jobs)
+        for name, entry in (("hosted-publications", "host"), ("hosted-native", "target")):
             with self.subTest(job=name):
                 job = jobs[name]
-                matrix = next(line for line in job.splitlines()
-                              if line.strip().startswith("matrix: ${{ fromJSON("))
-                self.assertIn("inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch'", matrix)
-                choices = [json.loads(value)["include"] for value in re.findall(r"'(\{.*?\})'", matrix)]
-                self.assertEqual(2, len(choices))
-                self.assertEqual(diagnostic, choices[0])
-                key = "host" if name == "hosted-publications" else "target"
-                self.assertEqual(regular_names, [entry[key] for entry in choices[1]])
-                self.assertEqual("windows-2025", choices[1][-1]["runner"])
-                self.assertEqual(diagnostic[0], choices[1][-1])
+                self.assertIn("needs: hosted-runner-guard", job)
+                self.assertIn("    runs-on: windows-2025\n", job)
+                self.assertIn(f"          - {entry}: " +
+                              ("windows" if entry == "host" else "mingwX64") + "\n", job)
+                self.assertNotIn("macos-26", job)
 
     def test_windows_failure_collectors_retain_logs_and_failed_status(self):
         jobs = workflow_jobs(WORKFLOW.read_text())
