@@ -24,6 +24,7 @@ VALID_HEAP_STDOUT = (b"DYN4K\tHEAP\tconstructed\t1024\t1\n"
 # After a workflow edit, independently parse every run value before updating its digest.
 AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
+    "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
     "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
@@ -178,7 +179,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertEqual(checked, 49)
+        self.assertEqual(checked, 56)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
