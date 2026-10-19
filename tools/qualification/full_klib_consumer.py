@@ -508,8 +508,10 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
             expected_configuration = ("linuxX64TestCompileKlibraries" if variant == "linuxx64"
                                       else "jsTestCompileClasspath" if phase == "compile"
                                       else "jsTestRuntimeClasspath")
-            if entry["configuration"] != expected_configuration or any(
-                    value.startswith("project ") for value in entry["components"]):
+            projects = {value for value in entry["components"]
+                        if value.startswith("project ")}
+            if (entry["configuration"] != expected_configuration
+                    or projects != {f"project :{entry['project']}"}):
                 raise ValueError("external provider used a project or wrong configuration")
             components = {value for value in entry["components"]
                           if value.startswith(f"{GROUP}:")}
