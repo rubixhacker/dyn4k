@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+sys.dont_write_bytecode = True
 import time
 import xml.etree.ElementTree as ET
 import zipfile
