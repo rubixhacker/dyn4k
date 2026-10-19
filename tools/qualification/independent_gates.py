@@ -2106,6 +2106,56 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                 raise ValueError("independent archive provenance digest is missing")
             if archive_digest(root) != expected_archive_digest:
                 raise ValueError("independent archive provenance digest differs")
+        if (gate == "staged-consumer" and lane_id.startswith("js:Chromium:")
+                and ("consumer_contract_sha256" in receipt
+                     or "browser_support_sha256" in receipt)):
+            import full_browser_consumer
+
+            if (lane_id not in full_browser_consumer.LANES
+                    or type(candidate_sha) is not str
+                    or not SHA40.fullmatch(candidate_sha)
+                    or type(receipt.get("schema")) is not int
+                    or receipt["schema"] != 1 or receipt.get("status") != "PASSED"
+                    or receipt.get("lane") != lane_id
+                    or receipt.get("candidate_sha") != candidate_sha
+                    or type(expected_runtime_identity) is not str
+                    or not expected_runtime_identity
+                    or receipt.get("runtime_identity") != expected_runtime_identity
+                    or not isinstance(expected_artifact_hashes, dict)
+                    or set(expected_artifact_hashes) != set(full_browser_consumer.MODULES)
+                    or any(type(value) is not str or not SHA64.fullmatch(value)
+                           for value in expected_artifact_hashes.values())):
+                raise ValueError("selected full Chromium candidate, runtime, or artifacts differ")
+            approved = load_approved_manifest(repository)
+            if (manifest is not None and manifest != approved
+                    or lane != approved["lanes"][lane_id]):
+                raise ValueError("approved full Chromium lane contract differs")
+            selected = consumer_contract(approved, lane_id)["cases"]
+            browser_cases = full_browser_consumer.contract(repository, lane_id)["cases"]
+            if (len(selected) != 2523
+                    or [item["id"] for item in selected]
+                    != [item["id"] for item in browser_cases]):
+                raise ValueError("approved full Chromium case set differs")
+            producer_path = "tools/qualification/full_browser_consumer.py"
+            if (Path(full_browser_consumer.__file__).read_bytes()
+                    != full_browser_consumer.original(repository, candidate_sha,
+                                                      producer_path)):
+                raise ValueError("public Chromium verifier differs from exact candidate")
+            toolchain = receipt.get("toolchain")
+            browser_path = toolchain.get("browser") if isinstance(toolchain, dict) else None
+            if type(browser_path) is not str or not Path(browser_path).is_absolute():
+                raise ValueError("selected live Chromium executable path is invalid")
+            public = full_browser_consumer.verify(
+                repository, candidate_sha, lane_id, root, expected_archive_digest,
+                browser_path, expected_artifact_hashes)
+            if public != {"status": "PASSED", "lane": lane_id,
+                          "selected_cases": len(selected),
+                          "archive_sha256": expected_archive_digest,
+                          "candidate_sha": candidate_sha}:
+                raise ValueError("public full Chromium replay differs from selected gate")
+            return _result(gate, "PASSED", "full staged Chromium consumer replay verified",
+                           archive_sha256=expected_archive_digest,
+                           complete_selected_suite=True, selected_cases=len(selected))
         archive_sha = _inventory(root, receipt)
         gate_hashes = _gate_artifact_hashes(
             gate, lane, expected_artifact_hashes, expected_all_target_hashes)

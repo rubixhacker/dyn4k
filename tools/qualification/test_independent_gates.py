@@ -2389,3 +2389,107 @@ class IndependentGateSeamTests(unittest.TestCase):
             journeys.write_summary(evidence, report)
             with self.assertRaisesRegex(ValueError, "raw scene, input, physics, or CCD evidence differs"):
                 independent_gates._migration_journeys(root, report["candidate_commit"], hashes)
+
+
+class FullBrowserGenericGateTests(unittest.TestCase):
+    CANDIDATE = "2e3665ba110e18d9669f847eb714e31befa391ce"
+    LANE = "js:Chromium:current:development"
+    HASHES = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
+    RUNTIME = "Linux fixture x86_64"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manifest = independent_gates.load_approved_manifest(ROOT)
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.archive = Path(self.temporary.name)
+        self.receipt = {"schema": 1, "status": "PASSED", "lane": self.LANE,
+                        "candidate_sha": self.CANDIDATE,
+                        "runtime_identity": self.RUNTIME,
+                        "consumer_contract_sha256": "browser archive marker",
+                        "toolchain": {"browser": "/trusted/chrome"}}
+        self.write_receipt()
+
+    def write_receipt(self):
+        (self.archive / "receipt.json").write_text(json.dumps(self.receipt))
+
+    def evaluate(self, **changes):
+        selected = {"gate": "staged-consumer", "archive": self.archive,
+                    "candidate_sha": self.CANDIDATE, "lane_id": self.LANE,
+                    "lane": self.manifest["lanes"][self.LANE], "repository": ROOT,
+                    "expected_artifact_hashes": self.HASHES,
+                    "expected_runtime_identity": self.RUNTIME,
+                    "expected_archive_digest": independent_gates.archive_digest(self.archive),
+                    "manifest": self.manifest}
+        selected.update(changes)
+        return independent_gates.evaluate_gate(**selected)
+
+    def test_full_browser_route_calls_public_replay_and_returns_generic_pass(self):
+        digest = independent_gates.archive_digest(self.archive)
+        public_result = {"status": "PASSED", "lane": self.LANE,
+                         "selected_cases": 2523, "archive_sha256": digest,
+                         "candidate_sha": self.CANDIDATE}
+        with mock.patch("full_browser_consumer.verify", return_value=public_result) as replay:
+            result = self.evaluate()
+        self.assertEqual({"gate": "staged-consumer", "status": "PASSED",
+                          "reason": "full staged Chromium consumer replay verified",
+                          "archive_sha256": digest,
+                          "complete_selected_suite": True, "selected_cases": 2523}, result)
+        replay.assert_called_once_with(ROOT, self.CANDIDATE, self.LANE,
+                                       self.archive, digest, "/trusted/chrome", self.HASHES)
+
+    def test_full_browser_route_rejects_selected_identity_and_suite_mismatch(self):
+        cases = [
+            {"candidate_sha": "f" * 40},
+            {"lane_id": "js:Chromium:foreign:development"},
+            {"expected_runtime_identity": "other runtime"},
+            {"expected_artifact_hashes": {"dyn4k-core": "a" * 64}},
+            {"expected_archive_digest": "f" * 64},
+            {"lane": {**self.manifest["lanes"][self.LANE], "runtime": "other"}},
+            {"manifest": {**self.manifest, "cases": self.manifest["cases"][:-1]}},
+            {"manifest": {**self.manifest, "cases": [*self.manifest["cases"],
+                                                     self.manifest["cases"][-1]]}},
+        ]
+        for change in cases:
+            with self.subTest(change=change), mock.patch("full_browser_consumer.verify") as replay:
+                self.assertEqual("FAILED", self.evaluate(**change)["status"])
+                replay.assert_not_called()
+
+    def test_full_browser_route_rejects_receipt_binary_and_public_mismatch(self):
+        for field, value in (("lane", "js:Chromium:minimum:development"),
+                             ("candidate_sha", "f" * 40),
+                             ("schema", True),
+                             ("runtime_identity", "other runtime"),
+                             ("toolchain", {"browser": "relative/chrome"})):
+            original = self.receipt[field]
+            self.receipt[field] = value
+            self.write_receipt()
+            with self.subTest(field=field), mock.patch("full_browser_consumer.verify") as replay:
+                self.assertEqual("FAILED", self.evaluate()["status"])
+                replay.assert_not_called()
+            self.receipt[field] = original
+        self.write_receipt()
+        with mock.patch("full_browser_consumer.verify", return_value={
+                "status": "PASSED", "lane": self.LANE, "selected_cases": 2522,
+                "archive_sha256": independent_gates.archive_digest(self.archive),
+                "candidate_sha": self.CANDIDATE}):
+            self.assertEqual("FAILED", self.evaluate()["status"])
+        with mock.patch("full_browser_consumer.verify", side_effect=ValueError("raw XML differs")):
+            self.assertEqual("FAILED", self.evaluate()["status"])
+        with (mock.patch("full_browser_consumer.original", return_value=b"different source"),
+              mock.patch("full_browser_consumer.verify") as replay):
+            self.assertEqual("FAILED", self.evaluate()["status"])
+            replay.assert_not_called()
+
+    def test_bounded_browser_archive_keeps_existing_not_run_route(self):
+        (self.archive / "verification.json").write_text("{}")
+        with (mock.patch.object(independent_gates, "_bounded_bundle",
+                                return_value={"executed": 12}) as bounded,
+              mock.patch("full_browser_consumer.verify") as replay):
+            result = self.evaluate()
+        self.assertEqual("NOT_RUN", result["status"])
+        self.assertEqual(12, result["bounded_executed"])
+        bounded.assert_called_once()
+        replay.assert_not_called()
