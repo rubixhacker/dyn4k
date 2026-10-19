@@ -388,6 +388,93 @@ class IndependentAdapterTests(unittest.TestCase):
                         root, candidate, suite, archive_map, audit_path, signature,
                         public, fingerprint)
 
+    def test_signed_local_klib_and_android_dispatch_requires_staged_identity(self):
+        import full_android_adapter
+        import full_klib_consumer
+
+        candidate_sha = "a" * 40
+        routes = ([(lane, target, "full_klib_adapter.verify_staged_consumer")
+                   for lane, (target, _) in full_klib_consumer.LOCAL_LANES.items()]
+                  + [(lane, "android", "full_android_adapter.verify_full_android_staged_consumer")
+                     for lane in full_android_adapter.ROUTES])
+        for lane_id, target, public_name in routes:
+            with self.subTest(lane=lane_id), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                hashes = {module: hashlib.sha256(
+                    f"{target}:{module}".encode()).hexdigest() for module in qualify.MODULES}
+                suite = {"lanes": {lane_id: {"target": target,
+                                            "required_gates": ["staged-consumer"]}},
+                         "global_gates": []}
+                staging = {"candidate_sha": candidate_sha, "status": "PASSED",
+                           "artifacts": [{"path": qualify.target_binary_path(module, target),
+                                          "sha256": value}
+                                         for module, value in hashes.items()]}
+                candidate = {"candidate_sha": candidate_sha,
+                             "suite_manifest_sha256": qualify.manifest_digest(suite),
+                             "audit_manifest_sha256": qualify.manifest_digest(staging),
+                             "lanes": {lane_id: {"artifact_hashes": hashes,
+                                                 "runtime_identity": "audited runtime"}}}
+                expected = {"expected_artifact_hashes": hashes,
+                            "expected_runtime_identity": "audited runtime",
+                            "expected_archive_digests": {"staged-consumer": "b" * 64}}
+                signed = {"schema": 1, "candidate_sha": candidate_sha,
+                          "suite_manifest_sha256": qualify.manifest_digest(suite),
+                          "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                          "staged_audit_sha256": qualify.manifest_digest(staging),
+                          "lanes": {lane_id: expected}}
+                archive = str(root / "transported")
+                archive_map = root / "archive-map.json"
+                archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate_sha,
+                                                   "lanes": {lane_id: {
+                                                       "staged-consumer": archive}}}))
+                fake = self.fake_verifier()
+                fake.APPROVED_MANIFEST_SHA256 = qualify.manifest_digest(suite)
+                selected = {"case_ids": ["approved-case"],
+                            "required_gates": ["staged-consumer"], "global_gates": []}
+                gate = {"status": "PASSED", "complete_selected_suite": True}
+
+                def evaluate(manifest, sha, lane, archives, repository, *expectations):
+                    result = {"candidate_sha": sha, "lane": lane, "status": "NOT_RUN",
+                              "gates": {"staged-consumer": gate}}
+                    return {**result, "result_sha256": qualify.manifest_digest(result)}
+
+                fake.evaluate = evaluate
+
+                def verify(signed_input=signed, bind=True):
+                    audit_path, signature, public, fingerprint = self.signed_inputs(
+                        root, signed_input)
+                    with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
+                            "full_suite_manifest.select_lane", return_value=selected), mock.patch(
+                            "qualify.verify_audit_against_staging"), mock.patch(
+                            public_name) as replay:
+                        result = independent_adapter.verify_lanes(
+                            root, candidate_sha, suite, archive_map, audit_path,
+                            signature, public, fingerprint,
+                            candidate_manifest=candidate if bind else None,
+                            artifact_audit=staging if bind else None)
+                    return result, replay
+
+                verified, replay = verify()
+                self.assertTrue(verified[lane_id]["identities_bound"])
+                if lane_id in full_klib_consumer.LOCAL_LANES:
+                    replay.assert_called_once_with(
+                        root, candidate_sha, lane_id, ["approved-case"], archive,
+                        gate, expected, hashes)
+                else:
+                    replay.assert_called_once_with(
+                        root, candidate_sha, lane_id, selected, archive, expected, gate)
+                gate["status"] = "NOT_RUN"
+                _, replay = verify()
+                replay.assert_not_called()
+                gate["status"] = "PASSED"
+                with self.assertRaisesRegex(ValueError, "identities are unbound"):
+                    verify(bind=False)
+                wrong = copy.deepcopy(signed)
+                wrong["lanes"][lane_id]["expected_artifact_hashes"] = {
+                    **hashes, "dyn4k-core": "c" * 64}
+                with self.assertRaisesRegex(ValueError, "target artifacts"):
+                    verify(wrong)
+
     def test_public_jvm_guard_routes_each_approved_lane(self):
         import full_jvm_consumer
 

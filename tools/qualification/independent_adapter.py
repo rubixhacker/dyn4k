@@ -105,7 +105,10 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                  audit_path, signature_path, public_key_path, key_sha256,
                  performance_key=None, candidate_manifest=None, artifact_audit=None):
     import independent_gates
+    import full_android_adapter
     import full_jvm_consumer
+    import full_klib_adapter
+    import full_klib_consumer
     import qualify
 
     repository = Path(repository)
@@ -232,11 +235,25 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 or result.get("lane") != lane_id
                 or result.get("candidate_sha") != candidate_sha):
             raise ValueError(f"independent verifier result is incomplete: {lane_id}")
+        consumer_gate = result["gates"]["staged-consumer"]
         if (suite_manifest["lanes"][lane_id]["target"] == "jvm"
-                and result["gates"]["staged-consumer"]["status"] == "PASSED"):
+                and consumer_gate["status"] == "PASSED"):
             _verify_full_jvm_staged_consumer(
                 repository, candidate_sha, lane_id, selected, paths, expected,
-                result["gates"]["staged-consumer"])
+                consumer_gate)
+        if (lane_id in full_klib_consumer.LOCAL_LANES
+                or lane_id in full_android_adapter.ROUTES) and consumer_gate["status"] == "PASSED":
+            if not identities_bound:
+                raise ValueError(f"signed candidate and staged identities are unbound: {lane_id}")
+            if lane_id in full_klib_consumer.LOCAL_LANES:
+                full_klib_adapter.verify_staged_consumer(
+                    repository, candidate_sha, lane_id, selected["case_ids"],
+                    paths["staged-consumer"], consumer_gate, expected,
+                    audited_targets.get(suite_manifest["lanes"][lane_id]["target"]))
+            else:
+                full_android_adapter.verify_full_android_staged_consumer(
+                    repository, candidate_sha, lane_id, selected,
+                    paths["staged-consumer"], expected, consumer_gate)
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
                             "identities_bound": identities_bound and not mode_artifacts}
