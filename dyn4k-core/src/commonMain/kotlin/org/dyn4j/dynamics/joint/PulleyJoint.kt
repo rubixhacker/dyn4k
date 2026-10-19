@@ -191,7 +191,11 @@ open class PulleyJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T> {
     open fun getPulleyAnchor1() = pulleyAnchor1
     open fun getPulleyAnchor2() = pulleyAnchor2
     open fun getLength() = length
-    open fun getCurrentLength() = getCurrentLength1() + getCurrentLength2()
+    open fun getCurrentLength(): Double {
+        val anchor1 = body1.getWorldPoint(localAnchor1)
+        val anchor2 = body2.getWorldPoint(localAnchor2)
+        return pulleyAnchor1.distance(anchor1) + pulleyAnchor2.distance(anchor2)
+    }
     open fun setLength(length: Double) {
         if (length < 0.0) throw ValueOutOfRangeException("length", length, ValueOutOfRangeException.MUST_BE_GREATER_THAN_OR_EQUAL_TO, 0.0)
         if (this.length != length) { this.length = length; wakeBodies() }

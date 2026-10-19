@@ -485,7 +485,16 @@ open class WeldJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, AngularLimit
         setLimits(lowerLimit, upperLimit)
     }
     override fun setLimitsEnabled(limit: Double) = setLimitsEnabled(limit, limit)
-    override fun setLimits(limit: Double) = setLimits(limit, limit)
+    override fun setLimits(limit: Double) {
+        if (lowerLimit != limit || upperLimit != limit) {
+            if (limitsEnabled) wake()
+            lowerLimit = limit
+            upperLimit = limit
+            calculateLimitOffsetAndAdjustedLimits()
+            lowerLimitImpulse = 0.0
+            upperLimitImpulse = 0.0
+        }
+    }
     override fun getLimitsReferenceAngle(): Double = referenceAngle
     override fun setLimitsReferenceAngle(angle: Double) {
         if (referenceAngle != angle) {
