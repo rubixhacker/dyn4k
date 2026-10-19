@@ -100,6 +100,14 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
                 type(sample[0]) is not int or type(sample[1]) is not int or
                 sample[1] <= 0 for sample in samples)):
         return False
+    started = execution.get("started_monotonic_ns")
+    ended = execution.get("ended_monotonic_ns")
+    if (type(started) is not int or type(ended) is not int or started >= ended or
+            execution.get("termination") != "natural" or
+            type(execution.get("exit_code")) is not int or execution["exit_code"] != 0 or
+            any(sample[0] < started or sample[0] > ended for sample in samples) or
+            any(left[0] > right[0] for left, right in zip(samples, samples[1:]))):
+        return False
     errors = resident["errors"]
     if not isinstance(errors, list):
         return False
@@ -109,9 +117,7 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     if not errors:
         return True
     if (selected_target != "macosArm64" or len(errors) != 1 or
-            resident["method"] != "proc_pidinfo_task_resident" or
-            execution["termination"] != "natural" or
-            type(execution["exit_code"]) is not int or execution["exit_code"] != 0):
+            resident["method"] != "proc_pidinfo_task_resident"):
         return False
     row = errors[0]
     if (not isinstance(row, dict) or
@@ -127,9 +133,9 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
             type(row.get("error")) is not str or
             "macOS process resident bytes unavailable" not in row.get("error", "")):
         return False
-    stamps = (execution["started_monotonic_ns"], row["monotonic_ns"],
+    stamps = (started, row["monotonic_ns"],
               row["error_observed_monotonic_ns"], row["exit_observed_monotonic_ns"],
-              execution["ended_monotonic_ns"])
+              ended)
     return (all(type(stamp) is int for stamp in stamps) and
             list(stamps) == sorted(stamps) and
             stamps[3] - stamps[2] <= 1_000_000 and

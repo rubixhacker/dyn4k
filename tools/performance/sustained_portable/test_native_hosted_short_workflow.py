@@ -298,6 +298,58 @@ class HostedRawFileContract(unittest.TestCase):
                      "termination": "natural", "exit_code": 0}
         return resident, capture, execution
 
+    def no_error_receipt(self):
+        resident, capture, execution = self.terminal_receipt()
+        resident["method"] = "GetProcessMemoryInfo_working_set"
+        resident["errors"] = []
+        capture["rss_observation"]["errors"] = 0
+        return resident, capture, execution
+
+    def test_ordered_live_sample_clocks_accept_in_both_routes(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for no_error in (False, True):
+            with self.subTest(no_error=no_error):
+                resident, capture, execution = (
+                    self.no_error_receipt() if no_error else self.terminal_receipt())
+                resident["samples"] = [[10, 4096], [20, 8192]]
+                capture["rss_observation"]["samples"] = 2
+                target = "mingwX64" if no_error else "macosArm64"
+                self.assertTrue(check(resident, capture, execution, target))
+
+    def test_sample_clocks_must_fit_process_interval_in_both_routes(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for no_error in (False, True):
+            for stamp in (0, 50):
+                with self.subTest(no_error=no_error, stamp=stamp):
+                    resident, capture, execution = (
+                        self.no_error_receipt() if no_error else self.terminal_receipt())
+                    resident["samples"][0][0] = stamp
+                    target = "mingwX64" if no_error else "macosArm64"
+                    self.assertFalse(check(resident, capture, execution, target))
+
+    def test_sample_clocks_must_be_nondecreasing_in_both_routes(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for no_error in (False, True):
+            with self.subTest(no_error=no_error):
+                resident, capture, execution = (
+                    self.no_error_receipt() if no_error else self.terminal_receipt())
+                resident["samples"] = [[20, 4096], [10, 8192]]
+                capture["rss_observation"]["samples"] = 2
+                target = "mingwX64" if no_error else "macosArm64"
+                self.assertFalse(check(resident, capture, execution, target))
+
+    def test_no_error_route_requires_valid_execution_interval_and_zero_exit(self):
+        check = self.scope["resident_probe_errors_complete"]
+        cases = ({"started_monotonic_ns": True}, {"ended_monotonic_ns": 40.0},
+                 {"started_monotonic_ns": 41}, {"ended_monotonic_ns": 1},
+                 {"started_monotonic_ns": 10, "ended_monotonic_ns": 10},
+                 {"exit_code": False}, {"termination": "host_deadline"})
+        for change in cases:
+            with self.subTest(change=change):
+                resident, capture, execution = self.no_error_receipt()
+                execution.update(change)
+                self.assertFalse(check(resident, capture, execution, "mingwX64"))
+
     def test_terminal_esrch_accepts_exact_integer_receipt(self):
         resident, capture, execution = self.terminal_receipt()
         self.assertTrue(self.scope["resident_probe_errors_complete"](
