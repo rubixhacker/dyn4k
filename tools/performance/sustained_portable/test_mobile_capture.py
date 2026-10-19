@@ -3,6 +3,8 @@ import json
 import io
 import os
 from pathlib import Path
+import plistlib
+import re
 import select
 import subprocess
 import sys
@@ -1064,6 +1066,80 @@ class NativeSimulatorBarrierExecutionTest(unittest.TestCase):
                         if process.poll() is None:
                             process.kill()
                             process.communicate()
+
+
+class MobileAppMetadataTest(unittest.TestCase):
+    @staticmethod
+    def packaged_plist(target, source=None):
+        if source is None:
+            source = (Path(__file__).resolve().parents[3] /
+                      "consumers/performance/portable/build.gradle.kts").read_text()
+        watch = re.search(
+            r'val watchApplication = if \(target\.startsWith\("watchos"\)\)\s*"([^"]*)" else ""',
+            source)
+        if watch is None:
+            raise AssertionError("watchOS package condition is missing")
+        marker = 'app.resolve("Info.plist").writeText("""'
+        template = source.split(marker, 1)[1].split('""")', 1)[0]
+        family = '${families.split(\',\').joinToString("") { "<integer>$it</integer>" }}'
+        template = template.replace(family, '<integer>4</integer>')
+        template = template.replace('$bundleId', 'io.github.rubixhacker.dyn4k.performance.' + target.lower())
+        platform = ('WatchSimulator' if target == 'watchosSimulatorArm64' else
+                    'WatchOS' if target.startswith('watchos') else
+                    'AppleTVSimulator' if target == 'tvosSimulatorArm64' else 'iPhoneSimulator')
+        template = template.replace('$platform', platform)
+        template = template.replace('$minimum', '26.0' if target == 'watchosDeviceArm64'
+                                    else '8.0' if target.startswith('watchos') else '15.0')
+        template = template.replace('$watchApplication', watch.group(1) if target.startswith('watchos') else '')
+        if '$' in template:
+            raise AssertionError("unrendered app plist template variable")
+        return template.encode()
+
+    @staticmethod
+    def require_standalone_watch_app(plist):
+        metadata = plistlib.loads(plist)
+        if (metadata.get('WKApplication') is not True or metadata.get('WKWatchOnly') is not True
+                or 'WKCompanionAppBundleIdentifier' in metadata):
+            raise ValueError('malformed standalone watchOS metadata')
+        return metadata
+
+    def test_packaged_watch_metadata_for_all_watch_targets_and_build_modes(self):
+        for target in ('watchosArm64', 'watchosDeviceArm64', 'watchosSimulatorArm64'):
+            for build in ('development', 'optimized'):
+                with self.subTest(target=target, build=build):
+                    metadata = self.require_standalone_watch_app(self.packaged_plist(target))
+                    self.assertEqual(metadata['CFBundleExecutable'], 'Dyn4kPerformance')
+                    self.assertEqual(metadata['UIDeviceFamily'], [4])
+                    self.assertEqual(metadata['CFBundleSupportedPlatforms'],
+                                     ['WatchSimulator' if 'Simulator' in target else 'WatchOS'])
+        for target in ('iosSimulatorArm64', 'tvosSimulatorArm64'):
+            with self.subTest(target=target):
+                metadata = plistlib.loads(self.packaged_plist(target))
+                self.assertNotIn('WKWatchOnly', metadata)
+
+    def test_missing_false_string_or_companion_watch_metadata_is_rejected(self):
+        valid = self.packaged_plist('watchosSimulatorArm64')
+        marker = b'<key>WKWatchOnly</key><true/>'
+        self.assertIn(marker, valid)
+        malformed = (
+            valid.replace(marker, b''),
+            valid.replace(marker, b'<key>WKWatchOnly</key><false/>'),
+            valid.replace(marker, b'<key>WKWatchOnly</key><string>TRUE</string>'),
+            valid.replace(marker, marker + b'<key>WKCompanionAppBundleIdentifier</key><string>bad</string>'),
+        )
+        for plist in malformed:
+            with self.subTest(plist=plist), self.assertRaisesRegex(ValueError, 'watchOS metadata'):
+                self.require_standalone_watch_app(plist)
+
+    def test_previous_package_source_fails_watch_install_contract(self):
+        source = (Path(__file__).resolve().parents[3] /
+                  "consumers/performance/portable/build.gradle.kts").read_text()
+        fixed = '"<key>WKApplication</key><true/><key>WKWatchOnly</key><true/>"'
+        self.assertIn(fixed, source)
+        previous = source.replace(fixed, '"<key>WKApplication</key><true/>"')
+        with self.assertRaisesRegex(ValueError, 'watchOS metadata'):
+            self.require_standalone_watch_app(
+                self.packaged_plist('watchosSimulatorArm64', previous))
 
 
 if __name__ == "__main__":

@@ -245,7 +245,8 @@ val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
         }
         val bundleId = "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}"
         val minimum = if (target == "watchosDeviceArm64") "26.0" else if (target.startsWith("watchos")) "8.0" else "15.0"
-        val watchApplication = if (target.startsWith("watchos")) "<key>WKApplication</key><true/>" else ""
+        val watchApplication = if (target.startsWith("watchos"))
+            "<key>WKApplication</key><true/><key>WKWatchOnly</key><true/>" else ""
         app.resolve("Info.plist").writeText("""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
