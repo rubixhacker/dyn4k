@@ -31,7 +31,7 @@ BUILD_PATHS = tuple(f"{CONSUMER}/{name}" for name in
                     ("settings.gradle.kts", "build.gradle.kts", "core/build.gradle.kts",
                      "facade/build.gradle.kts"))
 LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
-REPORTER = "tools/qualification/browser_wasi/browser-karma-reporter.js"
+REPORTER = f"{CONSUMER}/browser-reporter.js"
 YARN_LOCK = f"{CONSUMER}/consumer-yarn.lock"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
@@ -252,17 +252,19 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                             output / "graph.stdout", output / "graph.stderr")
     if graph_process["exit_code"]:
         raise ValueError("external JS provider graph process failed")
-    config_root = repository / CONSUMER / "karma.config.d"
-    if config_root.exists():
-        raise ValueError("consumer Karma configuration is already present")
-    config_root.mkdir()
-    reporter = config_root / "qualification-browser-reporter.js"
-    port_file = config_root / "qualification-port.js"
-    reporter.write_bytes((repository / REPORTER).read_bytes())
+    config_roots = []
     processes = {}
     module_rows = {}
     try:
         for module, short in (("dyn4k-core", "core"), ("dyn4k", "facade")):
+            config_root = repository / CONSUMER / short / "karma.config.d"
+            if config_root.exists():
+                raise ValueError("consumer Karma configuration is already present")
+            config_root.mkdir()
+            config_roots.append(config_root)
+            reporter = config_root / "qualification-browser-reporter.js"
+            port_file = config_root / "qualification-port.js"
+            reporter.write_bytes((repository / REPORTER).read_bytes())
             with socket.socket() as reservation:
                 reservation.bind(("127.0.0.1", 0))
                 port = reservation.getsockname()[1]
@@ -272,9 +274,12 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
             token = sha(os.urandom(32))
             launches = destination / "browser-launches.jsonl"
             attestation = destination / "reporter-producer.json"
+            raw_karma = destination / "raw-karma.jsonl"
             module_env = dict(env, DYN4K_BROWSER_ATTESTATION=str(launches),
                               DYN4K_BROWSER_TOKEN=token,
-                              DYN4K_BROWSER_REPORTER_ATTESTATION=str(attestation))
+                              DYN4K_BROWSER_REPORTER_ATTESTATION=str(attestation),
+                              DYN4K_BROWSER_RAW_KARMA=str(raw_karma),
+                              DYN4K_BROWSER_REPORTER_SOURCE=str(reporter))
             command = base + [f":{short}:jsBrowserTest"]
             execution = process(command, inputs, module_env,
                                 destination / "gradle.stdout", destination / "gradle.stderr")
@@ -302,14 +307,18 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                 raise ValueError(f"external {short} linked {configuration} bundle is absent")
             copy(linked, destination / "linked-executable.js")
             generated = work / "root/js/packages" / package / "karma.conf.js"
-            if not generated.is_file() or f"config.set({{port: {port}}});" not in generated.read_text():
+            if (not generated.is_file()
+                    or f"config.set({{port: {port}}});" not in generated.read_text()
+                    or "DYN4K_BROWSER_RAW_KARMA" not in generated.read_text()):
                 raise ValueError("external browser Karma configuration lacks isolated port")
             copy(generated, destination / "karma.conf.js")
-            if not launches.is_file() or not attestation.is_file():
+            if not launches.is_file() or not attestation.is_file() or not raw_karma.is_file():
                 raise ValueError("real browser process or reporter producer is absent")
             copy(reporter, destination / "browser-reporter.js")
             if json.loads(attestation.read_text()) != {
-                    "path": str(reporter), "sha256": file_hash(reporter)}:
+                    "path": str(reporter), "sha256": file_hash(reporter),
+                    "producer_path": str(work / "root/js/node_modules/kotlin-web-helpers/dist/karma-kotlin-reporter.js"),
+                    "producer_sha256": "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"}:
                 raise ValueError("Karma reporter producer identity differs")
             observations = [json.loads(line) for line in launches.read_text().splitlines()]
             if not observations or any(item != {
@@ -320,12 +329,13 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                     for item in observations):
                 raise ValueError("actual pinned Chromium process image differs")
     finally:
-        if port_file.exists():
-            port_file.unlink()
-        if reporter.exists():
-            reporter.unlink()
-        if config_root.exists() and not any(config_root.iterdir()):
-            config_root.rmdir()
+        for config_root in config_roots:
+            for name in ("qualification-port.js", "qualification-browser-reporter.js"):
+                path = config_root / name
+                if path.exists():
+                    path.unlink()
+            if config_root.exists() and not any(config_root.iterdir()):
+                config_root.rmdir()
         if project_lock.exists() and project_lock.read_bytes() == inputs_content["consumer-yarn.lock"]:
             project_lock.unlink()
         if project_lock.parent.exists() and not any(project_lock.parent.iterdir()):
@@ -469,10 +479,20 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
                     f"qualification test input: {expected_bundle}" not in text)):
             raise ValueError("raw process output omits selected browser task or bundle")
         attested = json.loads((folder / "reporter-producer.json").read_text())
-        if attested != {"path": str(repository / CONSUMER / "karma.config.d"
+        if attested != {"path": str(repository / CONSUMER / short / "karma.config.d"
                                      / "qualification-browser-reporter.js"),
-                        "sha256": receipt["browser_support_sha256"][REPORTER]}:
+                        "sha256": receipt["browser_support_sha256"][REPORTER],
+                        "producer_path": f"{paths['work']}/root/js/node_modules/"
+                                         "kotlin-web-helpers/dist/karma-kotlin-reporter.js",
+                        "producer_sha256": "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"}:
             raise ValueError("browser reporter producer attestation differs")
+        raw_messages = [json.loads(line) for line in
+                        (folder / "raw-karma.jsonl").read_text().splitlines()]
+        if (not raw_messages or any(set(item) != {"sha256", "message"}
+                or item["sha256"] != sha(item["message"].encode()) for item in raw_messages)
+                or not any("##teamcity[testStarted" in item["message"]
+                           for item in raw_messages)):
+            raise ValueError("original raw Karma result stream differs")
     graph = independent_gates._json(archive / "provider-graph.json")
     if (set(graph) != {"compile", "runtime", "gradle_user_home"}
             or graph["gradle_user_home"] != receipt["toolchain"]["gradle_user_home"]):
