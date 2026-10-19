@@ -8,7 +8,6 @@ on:
         type: choice
         required: true
         options:
-          - macosArm64
           - mingwX64
       build:
         description: Consumer link mode
@@ -22,11 +21,19 @@ permissions:
   contents: read
 
 jobs:
+  validate-target:
+    runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ inputs.target }}
+    steps:
+      - name: Require the Windows target
+        run: test "$TARGET" = mingwX64
+
   capture:
-    runs-on: ${{ inputs.target == 'macosArm64' && 'macos-26' || 'windows-2025' }}
+    needs: validate-target
+    runs-on: windows-2025
     timeout-minutes: 150
     env:
-      DEVELOPER_DIR: ${{ inputs.target == 'macosArm64' && '/Applications/Xcode_26.4.1.app/Contents/Developer' || '' }}
       PYTHONDONTWRITEBYTECODE: '1'
       TARGET: ${{ inputs.target }}
       BUILD: ${{ inputs.build }}
