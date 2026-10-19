@@ -26,6 +26,14 @@ LANES = {
     for runtime in runtimes for role in ("minimum", "current")
     for mode in ("development", "production")
 }
+RUNTIME_PINS = {
+    ("wasmJs", "Node.js", "minimum"): (22, 23, 3),
+    ("wasmJs", "Node.js", "current"): (26, 12, 0),
+    ("wasmWasi", "Node.js", "minimum"): (24, 22, 0),
+    ("wasmWasi", "Node.js", "current"): (26, 12, 0),
+    ("wasmWasi", "Wasmtime", "minimum"): (37, 0, 3),
+    ("wasmWasi", "Wasmtime", "current"): (49, 0, 3),
+}
 BUILD_FILES = (
     f"{CONSUMER}/settings.gradle.kts",
     f"{CONSUMER}/build.gradle.kts",
@@ -208,23 +216,22 @@ def _version_tuple(text):
 def runtime_preflight(lane, executable):
     target, runtime, role, _ = lane_parts(lane)
     executable = Path(executable)
+    expected = ".".join(map(str, RUNTIME_PINS[(target, runtime, role)]))
+    identity = {"expected_version": expected, "selected_path": str(executable)}
     if not executable.is_file() or executable.is_symlink():
-        return {"status": "NOT_RUN", "reason": "selected runtime executable is absent"}
+        return {**identity, "status": "NOT_RUN",
+                "reason": "selected runtime executable is absent"}
     command = [str(executable), "--version"]
     observed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True, check=False)
     version = observed.stdout.strip()
     actual = _version_tuple(version)
     if observed.returncode or actual is None:
-        return {"status": "FAILED", "reason": "selected runtime version probe failed"}
-    floor = ((22, 0, 0) if target == "wasmJs" else (24, 15, 0)) if runtime == "Node.js" else (37, 0, 0)
-    required_major = (22 if target == "wasmJs" else 24) if runtime == "Node.js" else 37
-    current_major = 26 if runtime == "Node.js" else 49
-    if ((role == "minimum" and (actual[0] != required_major or actual < floor))
-            or (role == "current" and actual[0] != current_major)):
-        return {"status": "FAILED", "reason": "selected runtime version differs from lane",
+        return {**identity, "status": "FAILED", "reason": "selected runtime version probe failed"}
+    if actual != RUNTIME_PINS[(target, runtime, role)]:
+        return {**identity, "status": "FAILED", "reason": "selected runtime version differs from lane",
                 "version": version}
-    return {"status": "PASSED", "version": version,
+    return {**identity, "status": "PASSED", "version": version,
             "sha256": sha(executable.read_bytes()), "path": str(executable.resolve())}
 
 
@@ -313,14 +320,15 @@ def run(repository, candidate, lane, stage, output, gradle, runtime, hashes):
     if output.exists() and any(output.iterdir()):
         raise ValueError("raw output directory must be empty")
     output.mkdir(parents=True, exist_ok=True)
-    preflight = runtime_preflight(lane, runtime)
-    if preflight["status"] != "PASSED":
-        write_json(output / "status.json", {"lane": lane, **preflight})
-        return {"lane": lane, **preflight}
     if git(repository, "rev-parse", "HEAD").decode().strip() != candidate:
         raise ValueError("producer checkout head differs from candidate")
     if git(repository, "status", "--porcelain").strip():
         raise ValueError("producer requires an exact clean candidate checkout")
+    preflight = runtime_preflight(lane, runtime)
+    if preflight["status"] != "PASSED":
+        status = {"candidate_sha": candidate, "lane": lane, **preflight}
+        write_json(output / "status.json", status)
+        return status
     if set(hashes) != set(MODULES) or any(not SHA256.fullmatch(value) for value in hashes.values()):
         raise ValueError("two independently audited staged hashes are required")
     for module in MODULES:

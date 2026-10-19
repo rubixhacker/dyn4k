@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import full_wasm_node_consumer as route
@@ -55,6 +56,26 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
             "wasmWasi:Wasmtime:minimum:development", Path("/missing/wasmtime"))
         self.assertEqual(result["status"], "NOT_RUN")
         self.assertEqual(result["reason"], "selected runtime executable is absent")
+        self.assertEqual(result["expected_version"], "37.0.3")
+        self.assertEqual(result["selected_path"], "/missing/wasmtime")
+
+    def test_runtime_roles_require_candidate_patch_not_only_major(self):
+        versions = (
+            ("wasmJs:Node.js:current:development", "v26.2.0", "FAILED"),
+            ("wasmJs:Node.js:current:development", "v26.12.0", "PASSED"),
+            ("wasmWasi:Node.js:minimum:development", "v24.16.0", "FAILED"),
+            ("wasmWasi:Node.js:minimum:development", "v24.22.0", "PASSED"),
+            ("wasmWasi:Wasmtime:current:development", "wasmtime 46.0.1", "FAILED"),
+            ("wasmWasi:Wasmtime:current:development", "wasmtime 49.0.3", "PASSED"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "runtime"
+            executable.write_bytes(b"selected runtime bytes")
+            for lane, version, status in versions:
+                with self.subTest(lane=lane, version=version), patch.object(
+                        route.subprocess, "run", return_value=subprocess.CompletedProcess(
+                            [str(executable), "--version"], 0, version)):
+                    self.assertEqual(route.runtime_preflight(lane, executable)["status"], status)
 
     def test_public_archive_digest_rejects_changed_bytes_and_symbolic_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -68,6 +89,16 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
             (archive / "raw.log").symlink_to(archive / "receipt.json")
             with self.assertRaisesRegex(ValueError, "symbolic"):
                 route.archive_digest(archive)
+
+    def test_missing_runtime_does_not_hide_wrong_candidate_checkout(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+                route, "git", return_value=b"f" * 40):
+            with self.assertRaisesRegex(ValueError, "head differs"):
+                route.run(Path("/source"), "0" * 40,
+                          "wasmJs:Node.js:minimum:development",
+                          Path(directory) / "stage", Path(directory) / "archive",
+                          Path("/missing/gradle"), Path("/missing/node"),
+                          {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64})
 
 
 if __name__ == "__main__":

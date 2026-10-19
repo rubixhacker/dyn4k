@@ -36,12 +36,21 @@ python3 tools/qualification/full_wasm_node_consumer.py run \
 ```
 
 Change the lane, runtime executable, and target hashes for each route. The
-minimum Node.js family is major version 22 for Wasm JS and version 24.15 or
-later within major 24 for Wasm WASI. The selected current Node.js binary must
-be major version 26. Minimum Wasmtime must be major version 37; current
-Wasmtime must be major version 49. An absent selected executable returns
-`NOT_RUN`. A wrong version or an attempted build or test failure returns
-`FAILED`. The producer leaves each failed attempt in its output directory.
+candidate runtime pins selected on 2026-10-18 are Node.js 22.23.3 for minimum
+Wasm JS, Node.js 24.22.0 for minimum Wasm WASI, and Node.js 26.12.0 for both
+current Node routes. Wasmtime uses 37.0.3 for minimum and 49.0.3 for current.
+These follow the approved latest maintenance patch and newest stable policy.
+Recheck them for a later candidate. The [Node.js 22.23.3](https://nodejs.org/en/blog/release/v22.23.3),
+[24.22.0](https://nodejs.org/en/blog/release/v24.22.0), and
+[26.12.0](https://nodejs.org/en/blog/release/v26.12.0) release records and the
+[Wasmtime 37.0.3](https://github.com/bytecodealliance/wasmtime/releases/tag/v37.0.3)
+and [49.0.3](https://github.com/bytecodealliance/wasmtime/releases/tag/v49.0.3)
+releases identify the selected versions.
+
+An absent selected executable returns `NOT_RUN`. A wrong version or an attempted
+build or test failure returns `FAILED`. The producer leaves each failed attempt
+in its output directory. An older binary that executes every method is useful
+diagnostic evidence. It does not pass the approved minimum or current role.
 
 The archive contains the original source inventory and approved method order,
 both target KLIBs, the compile and runtime provider graphs, raw Gradle output,
