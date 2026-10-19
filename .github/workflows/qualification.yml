@@ -233,6 +233,23 @@ jobs:
           --stage-receipt build/staging-repository/.qualification/ubuntu/receipt.json
           --stage-console build/staging-repository/.qualification/ubuntu/stage.log
           --output "$RUNNER_TEMP/artifact-audit.json"
+      - name: Capture duplicate provider raw diagnostic
+        if: always()
+        run: >-
+          python3 tools/qualification/duplicate_provider.py
+          --repository "$GITHUB_WORKSPACE"
+          --candidate-sha "$GITHUB_SHA"
+          --staging-repository "$GITHUB_WORKSPACE/build/staging-repository"
+          --audit "$RUNNER_TEMP/artifact-audit.json"
+          --output "$RUNNER_TEMP/duplicate-provider"
+      - name: Upload duplicate provider raw diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplicate-provider-${{ github.sha }}
+          path: ${{ runner.temp }}/duplicate-provider/
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Package Linux publication evidence
         if: always()
         run: >-
@@ -857,4 +874,88 @@ jobs:
         with:
           name: qualification-full-${{ github.sha }}-jsSafari
           path: ${{ runner.temp }}/full-hosted-jsSafari.tar
+          if-no-files-found: error
+
+  central-qualification-collection:
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true)
+    needs: [staged-jvm-and-linux, hosted-publications, hosted-native, safari-browser]
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Provision pinned upstream source for raw replay
+        env:
+          DYN4K_UPSTREAM_SOURCE: ${{ runner.temp }}/dyn4j-source
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git init "$DYN4K_UPSTREAM_SOURCE"
+          git -C "$DYN4K_UPSTREAM_SOURCE" remote add origin https://github.com/dyn4j/dyn4j.git
+          git -C "$DYN4K_UPSTREAM_SOURCE" fetch --depth=1 origin 058bf6d982a0fb89b54050f929f6ea9dae53b714
+          git -C "$DYN4K_UPSTREAM_SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$DYN4K_UPSTREAM_SOURCE" rev-parse HEAD)" = 058bf6d982a0fb89b54050f929f6ea9dae53b714
+      - name: Download every retained producer artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: '*'
+          path: ${{ runner.temp }}/producer-artifacts
+          merge-multiple: false
+      - name: Collect and independently enumerate 112 lanes
+        if: always()
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/central-logs" "$RUNNER_TEMP/producer-artifacts"
+          python3 tools/qualification/collection.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --candidate-sha "$GITHUB_SHA" \
+            --artifacts-dir "$RUNNER_TEMP/producer-artifacts" \
+            --upstream "$RUNNER_TEMP/dyn4j-source" \
+            --output "$RUNNER_TEMP/central-collection" \
+            > "$RUNNER_TEMP/central-logs/collection.stdout" \
+            2> "$RUNNER_TEMP/central-logs/collection.stderr"
+          collection_exit=$?
+          python3 tools/qualification/collection.py --verify \
+            --repository "$GITHUB_WORKSPACE" \
+            --candidate-sha "$GITHUB_SHA" \
+            --artifacts-dir "$RUNNER_TEMP/producer-artifacts" \
+            --output "$RUNNER_TEMP/central-collection" \
+            > "$RUNNER_TEMP/central-logs/transport.stdout" \
+            2> "$RUNNER_TEMP/central-logs/transport.stderr"
+          transport_exit=$?
+          python3 tools/qualification/independent_gates.py \
+            --repository "$GITHUB_WORKSPACE" \
+            --candidate-sha "$GITHUB_SHA" \
+            --assembly "$RUNNER_TEMP/central-collection/assembly-inputs.json" \
+            > "$RUNNER_TEMP/central-logs/independent-112.json" \
+            2> "$RUNNER_TEMP/central-logs/independent-112.stderr"
+          assembly_exit=$?
+          python3 tools/qualification/qualify.py record \
+            --candidate-sha "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/central-logs/runtime-matrix.json" \
+            > "$RUNNER_TEMP/central-logs/record.stdout" \
+            2> "$RUNNER_TEMP/central-logs/record.stderr"
+          record_exit=$?
+          printf 'collection=%s\ntransport=%s\nassembly=%s\nrecord=%s\n' \
+            "$collection_exit" "$transport_exit" "$assembly_exit" "$record_exit" \
+            > "$RUNNER_TEMP/central-logs/exit-codes.txt"
+          test "$collection_exit" -eq 0 && test "$transport_exit" -eq 0 && \
+            test "$assembly_exit" -eq 0 && test "$record_exit" -eq 0
+      - name: Upload central raw collection and failed routes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-central-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/central-collection/
+            ${{ runner.temp }}/central-logs/
+            ${{ runner.temp }}/producer-artifacts/
+          include-hidden-files: true
           if-no-files-found: error
