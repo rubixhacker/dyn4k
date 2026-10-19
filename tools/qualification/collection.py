@@ -5,9 +5,13 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -19,6 +23,10 @@ import qualify
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")
 REQUIRED = ("full-ci", "full-common", "publication-ubuntu", "duplicate-provider")
+SOURCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+MAX_SOURCE_BYTES = 10 * 1024**3
+MAX_EXPANDED_BYTES = 20 * 1024**3
+MAX_MEMBERS = 200_000
 
 
 def digest(path):
@@ -104,6 +112,479 @@ def checked_tar(path, destination):
                     raise ValueError("archive timestamp is invalid")
                 os.utime(target, ns=(int(stamp), int(stamp)))
     return destination
+
+
+def _keys(value, required, optional=()):
+    if (not isinstance(value, dict) or not set(required) <= set(value)
+            or set(value) - set(required) - set(optional)):
+        raise ValueError("source index object keys are invalid")
+
+
+def _strict_json(path):
+    return json.loads(Path(path).read_text(),
+                      object_pairs_hook=independent_gates._strict_object,
+                      parse_constant=lambda value: (_ for _ in ()).throw(
+                          ValueError(f"non-finite JSON value: {value}")))
+
+
+def _positive(value):
+    return type(value) is int and value > 0
+
+
+def _safe_source_path(path):
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError("local source path must be absolute")
+    for part in (path, *path.parents):
+        if part.is_symlink():
+            raise ValueError("symbolic source path is forbidden")
+    return path
+
+
+def _file_inventory(root):
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("source directory is missing or symbolic")
+    files = {}
+    count = 0
+    total = 0
+    for base, directories, names in os.walk(root, followlinks=False):
+        for name in directories + names:
+            path = Path(base) / name
+            relative = path.relative_to(root).as_posix()
+            independent_gates._file_path_name(relative)
+            if path.is_symlink():
+                raise ValueError(f"symbolic source member: {relative}")
+            if path.is_file():
+                size = path.stat().st_size
+                total += size
+                count += 1
+                if total > MAX_EXPANDED_BYTES or count > MAX_MEMBERS:
+                    raise ValueError("source directory exceeds transport bounds")
+                files[relative] = {"size": size, "sha256": digest(path)}
+            elif not path.is_dir():
+                raise ValueError(f"nonregular source member: {relative}")
+    return dict(sorted(files.items()))
+
+
+def _inventory_digest(files):
+    return hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def _validate_index(index, candidate_sha, tree, manifest, repository_name,
+                    run_id, run_attempt, allow_local=True):
+    _keys(index, ("schema", "candidate_sha", "source_tree", "sources", "bindings"))
+    if (type(index["schema"]) is not int or index["schema"] != 1
+            or index["candidate_sha"] != candidate_sha
+            or index["source_tree"] != tree):
+        raise ValueError("source index candidate or tree differs")
+    if not isinstance(index["sources"], list) or not isinstance(index["bindings"], list):
+        raise ValueError("source index lists are invalid")
+    ids, artifacts, bindings = set(), set(), set()
+    for source in index["sources"]:
+        _keys(source, ("id", "origin", "transport"))
+        source_id = source["id"]
+        if (not isinstance(source_id, str) or not SOURCE_ID.fullmatch(source_id)
+                or source_id in ids):
+            raise ValueError("source index has duplicate or unsafe source ID")
+        ids.add(source_id)
+        origin, transport = source["origin"], source["transport"]
+        if not isinstance(origin, dict):
+            raise ValueError("source origin is invalid")
+        kind = origin["kind"]
+        if kind == "local":
+            if not allow_local:
+                raise ValueError("workflow token cannot read arbitrary local source paths")
+            _keys(origin, ("kind", "path"))
+            _safe_source_path(origin["path"])
+        elif kind in ("same_run", "github_actions"):
+            common = ("kind", "repository", "workflow", "run_id", "run_attempt",
+                      "name", "head_sha")
+            _keys(origin, common + (("artifact_id", "api_size_in_bytes")
+                                    if kind == "github_actions" else ()))
+            if (origin["repository"] != repository_name
+                    or origin["workflow"] != ".github/workflows/qualification.yml"
+                    or origin["head_sha"] != candidate_sha
+                    or not _positive(origin["run_id"])
+                    or not _positive(origin["run_attempt"])
+                    or not isinstance(origin["name"], str) or not origin["name"]):
+                raise ValueError("source run, workflow, head, or artifact name differs")
+            if kind == "same_run":
+                if origin["run_id"] != run_id or origin["run_attempt"] != run_attempt:
+                    raise ValueError("same-run source identity differs")
+                artifact_route(origin["name"], candidate_sha)
+            else:
+                artifact_id = origin.get("artifact_id")
+                if (not _positive(artifact_id) or artifact_id in artifacts
+                        or not _positive(origin["api_size_in_bytes"])):
+                    raise ValueError("duplicate or invalid GitHub artifact ID")
+                artifacts.add(artifact_id)
+        else:
+            raise ValueError("source origin kind is invalid")
+        _keys(transport, ("format",), ("size", "sha256", "files", "inventory_sha256"))
+        fmt = transport["format"]
+        if fmt == "directory":
+            _keys(transport, ("format", "files", "inventory_sha256"))
+            files = transport["files"]
+            if (not isinstance(files, dict) or not files
+                    or len(files) > MAX_MEMBERS):
+                raise ValueError("source directory inventory is invalid")
+            total = 0
+            for path, record in files.items():
+                independent_gates._file_path_name(path)
+                _keys(record, ("size", "sha256"))
+                if (type(record["size"]) is not int or record["size"] < 0
+                        or not SHA64.fullmatch(str(record["sha256"]))):
+                    raise ValueError("source directory file pin is invalid")
+                total += record["size"]
+            if (total > MAX_EXPANDED_BYTES
+                    or transport["inventory_sha256"] != _inventory_digest(files)):
+                raise ValueError("source directory inventory digest differs")
+        elif fmt in ("zip", "tar", "tar.gz"):
+            _keys(transport, ("format", "size", "sha256"))
+            if (not _positive(transport["size"])
+                    or transport["size"] > MAX_SOURCE_BYTES
+                    or not SHA64.fullmatch(str(transport["sha256"]))):
+                raise ValueError("source archive byte pin is invalid")
+        else:
+            raise ValueError("source transport format is invalid")
+        if kind == "github_actions" and fmt != "zip":
+            raise ValueError("GitHub Actions artifact transport must be ZIP")
+    for binding in index["bindings"]:
+        _keys(binding, ("source_id", "gate", "lane"), ("member_root", "target"))
+        source_id, gate, lane = binding["source_id"], binding["gate"], binding["lane"]
+        if source_id not in ids:
+            raise ValueError("binding names an absent source")
+        if lane is None:
+            if gate not in independent_gates.GLOBAL_GATES:
+                raise ValueError("global binding gate is not approved")
+            target = binding.get("target")
+            if target is not None and target not in {row["target"]
+                                                      for row in manifest["lanes"].values()}:
+                raise ValueError("global binding target is not approved")
+        elif (lane not in manifest["lanes"] or gate not in
+              manifest["lanes"][lane]["required_gates"]):
+            raise ValueError("lane or gate binding is not approved")
+        key = (lane, gate)
+        if key in bindings:
+            raise ValueError("duplicate lane or global gate binding")
+        bindings.add(key)
+        if "member_root" in binding:
+            independent_gates._file_path_name(binding["member_root"])
+    if ids != {binding["source_id"] for binding in index["bindings"]}:
+        raise ValueError("source index has unbound source")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, url):
+        return None
+
+
+def _github_request(url, token, destination=None, limit=None):
+    headers = {"Accept": "application/vnd.github+json",
+               "Authorization": f"Bearer {token}",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        response = opener.open(request, timeout=60)
+    except urllib.error.HTTPError as error:
+        if destination is None or error.code not in (301, 302, 303, 307, 308):
+            raise ValueError(f"GitHub artifact API returned HTTP {error.code}") from error
+        location = error.headers.get("Location", "")
+        parsed = urllib.parse.urlparse(location)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("GitHub artifact redirect is not HTTPS") from error
+        response = urllib.request.urlopen(urllib.request.Request(location), timeout=60)
+    with response:
+        if destination is None:
+            return json.load(response)
+        size = 0
+        with Path(destination).open("wb") as output:
+            while chunk := response.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise ValueError("GitHub artifact download exceeds pinned byte limit")
+                output.write(chunk)
+    return size
+
+
+def _github_artifact(origin, candidate_sha, token, destination, expected_size):
+    if not token:
+        raise ValueError("GitHub Actions token is unavailable")
+    repository = origin["repository"]
+    base = f"https://api.github.com/repos/{repository}/actions"
+    run = _github_request(f"{base}/runs/{origin['run_id']}", token)
+    artifact = _github_request(f"{base}/artifacts/{origin['artifact_id']}", token)
+    workflow_run = artifact.get("workflow_run") or {}
+    if (run.get("id") != origin["run_id"]
+            or run.get("head_sha") != candidate_sha
+            or run.get("run_attempt") != origin["run_attempt"]
+            or run.get("path", "").split("@", 1)[0] != origin["workflow"]
+            or (run.get("repository") or {}).get("full_name") != repository
+            or artifact.get("id") != origin["artifact_id"]
+            or artifact.get("name") != origin["name"]
+            or artifact.get("expired") is not False
+            or workflow_run.get("id") != origin["run_id"]
+            or workflow_run.get("head_sha") != candidate_sha
+            or workflow_run.get("repository_id") != (run.get("repository") or {}).get("id")):
+        raise ValueError("GitHub run or artifact source identity differs")
+    if origin["run_attempt"] != 1:
+        raise ValueError("artifact API does not prove rerun attempt ownership")
+    if (artifact.get("size_in_bytes") != origin["api_size_in_bytes"]
+            or artifact["size_in_bytes"] > MAX_SOURCE_BYTES):
+        raise ValueError("GitHub artifact API byte size differs")
+    _github_request(f"{base}/artifacts/{origin['artifact_id']}/zip", token,
+                    destination, expected_size)
+    return {"run_id": run["id"], "run_attempt": run["run_attempt"],
+            "artifact_id": artifact["id"], "name": artifact["name"],
+            "head_sha": run["head_sha"], "workflow": origin["workflow"],
+            "api_size_in_bytes": artifact["size_in_bytes"]}
+
+
+def _copy_regular(source, destination):
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as original:
+        if not stat.S_ISREG(os.fstat(original.fileno()).st_mode):
+            raise ValueError("source file is not regular")
+        with Path(destination).open("wb") as frozen:
+            shutil.copyfileobj(original, frozen, 1024 * 1024)
+
+
+def _extract_transport(packed, fmt, destination):
+    destination.mkdir(parents=True, exist_ok=False)
+    seen = set()
+    total = 0
+    if fmt == "zip":
+        with zipfile.ZipFile(packed) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_MEMBERS:
+                raise ValueError("ZIP member count exceeds bound")
+            for member in members:
+                name = member.filename.rstrip("/")
+                independent_gates._file_path_name(name)
+                if name in seen:
+                    raise ValueError("duplicate archive member")
+                seen.add(name)
+                mode = stat.S_IFMT(member.external_attr >> 16)
+                directory = member.is_dir()
+                if mode not in (0, stat.S_IFDIR if directory else stat.S_IFREG):
+                    raise ValueError("nonregular ZIP member")
+                total += member.file_size
+                if total > MAX_EXPANDED_BYTES:
+                    raise ValueError("ZIP expanded bytes exceed bound")
+                target = destination.joinpath(*name.split("/"))
+                if directory:
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(member) as original, target.open("wb") as frozen:
+                        shutil.copyfileobj(original, frozen, 1024 * 1024)
+                    if target.stat().st_size != member.file_size:
+                        raise ValueError("ZIP member byte count differs")
+    else:
+        with tarfile.open(packed, "r:*") as archive:
+            for member in archive:
+                name = member.name.rstrip("/")
+                independent_gates._file_path_name(name)
+                if name in seen:
+                    raise ValueError("duplicate archive member")
+                seen.add(name)
+                if len(seen) > MAX_MEMBERS or not (member.isfile() or member.isdir()):
+                    raise ValueError("nonregular or excessive TAR member")
+                total += member.size
+                if total > MAX_EXPANDED_BYTES:
+                    raise ValueError("TAR expanded bytes exceed bound")
+                target = destination.joinpath(*name.split("/"))
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.extractfile(member) as original, target.open("wb") as frozen:
+                        shutil.copyfileobj(original, frozen, 1024 * 1024)
+                    if target.stat().st_size != member.size:
+                        raise ValueError("TAR member byte count differs")
+    return _file_inventory(destination)
+
+
+def _transport_format(normalized, bindings, candidate_sha, manifest):
+    stage = normalized / "build/stage-receipt.json"
+    capture = normalized / "captures/compatibility/result.json"
+    if not (stage.is_file() and capture.is_file()):
+        return "unsupported producer format; raw bytes retained without a gate adapter"
+    stage_receipt = _strict_json(stage)
+    result = _strict_json(capture)
+    if (stage_receipt.get("candidate_sha") != candidate_sha
+            or result.get("source_sha") != candidate_sha
+            or result.get("format") != "portable-mobile-capture-v1"):
+        raise ValueError("mobile capture source identity differs")
+    target = result.get("target")
+    if (target not in stage_receipt.get("targets", [])
+            or target not in {lane["target"] for lane in manifest["lanes"].values()}):
+        raise ValueError("mobile capture target identity differs")
+    for binding in bindings:
+        expected = (binding.get("target") if binding["lane"] is None else
+                    manifest["lanes"][binding["lane"]]["target"])
+        if expected is not None and expected != target:
+            raise ValueError("bound lane or target differs from mobile capture")
+    return ("portable-mobile-capture-v1 source and target bound; "
+            "no complete independent gate adapter or signed audit")
+
+
+def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_dir,
+                          output, repository_name="rubixhacker/dyn4k", run_id=None,
+                          run_attempt=None, github_token=None):
+    output, artifacts_dir = Path(output), Path(artifacts_dir)
+    index_path = _safe_source_path(index_path)
+    original_index = index_path.read_bytes()
+    index = _strict_json(index_path)
+    _validate_index(index, candidate_sha, tree, manifest, repository_name,
+                    run_id, run_attempt, allow_local=github_token is None)
+    if index_path.read_bytes() != original_index:
+        raise ValueError("source index changed while read")
+    (output / "source-index.json").write_bytes(original_index)
+    (output / "raw/sources").mkdir(parents=True)
+    (output / "normalized").mkdir()
+    rows = []
+    for source in index["sources"]:
+        source_id = source["id"]
+        origin, pin = source["origin"], source["transport"]
+        folder = output / "raw/sources" / source_id
+        folder.mkdir()
+        row = {"id": source_id, "origin": origin, "transport": pin,
+               "status": "FAILED"}
+        try:
+            if origin["kind"] == "local":
+                source_path = _safe_source_path(origin["path"])
+            elif origin["kind"] == "same_run":
+                source_path = _safe_source_path(artifacts_dir.resolve() / origin["name"])
+            else:
+                source_path = None
+            if source_path is not None and (
+                    source_path.resolve().is_relative_to(output.resolve())
+                    or output.resolve().is_relative_to(source_path.resolve())):
+                raise ValueError("source and collection output cannot contain each other")
+            if pin["format"] == "directory":
+                if source_path is None:
+                    raise ValueError("GitHub Actions source must be a ZIP")
+                before = _file_inventory(source_path)
+                frozen = folder / "original-directory"
+                shutil.copytree(source_path, frozen, symlinks=True)
+                after = _file_inventory(source_path)
+                copied = _file_inventory(frozen)
+                row["raw_inventory"] = copied
+                if before != after or before != copied:
+                    raise ValueError("source directory changed while copied")
+                if copied != pin["files"] or _inventory_digest(copied) != pin["inventory_sha256"]:
+                    raise ValueError("source directory byte inventory differs")
+                normalized = frozen
+            else:
+                frozen = folder / "original"
+                if source_path is None:
+                    row["api"] = _github_artifact(origin, candidate_sha, github_token,
+                                                   frozen, pin["size"])
+                else:
+                    if not source_path.is_file():
+                        raise ValueError("source archive is missing")
+                    before = (source_path.stat().st_size, digest(source_path))
+                    _copy_regular(source_path, frozen)
+                    after = (source_path.stat().st_size, digest(source_path))
+                    if before != after:
+                        raise ValueError("source archive changed while copied")
+                row["raw_size"] = frozen.stat().st_size
+                row["raw_sha256"] = digest(frozen)
+                if (row["raw_size"] != pin["size"]
+                        or row["raw_sha256"] != pin["sha256"]):
+                    raise ValueError("source archive bytes differ from exact pin")
+                normalized = output / "normalized" / source_id
+                row["normalized_inventory"] = _extract_transport(
+                    frozen, pin["format"], normalized)
+            bindings = [binding for binding in index["bindings"]
+                        if binding["source_id"] == source_id]
+            reasons = []
+            for binding in bindings:
+                root = normalized
+                if binding.get("member_root"):
+                    root = normalized.joinpath(*binding["member_root"].split("/"))
+                if not root.is_dir():
+                    raise ValueError("bound member root is missing")
+                reasons.append(_transport_format(root, [binding], candidate_sha,
+                                                 manifest))
+            row["reason"] = "; ".join(sorted(set(reasons)))
+            row["status"] = "NOT_RUN"
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError, tarfile.TarError,
+                zipfile.BadZipFile, urllib.error.URLError) as error:
+            row["reason"] = str(error)
+            incomplete = output / "normalized" / source_id
+            if incomplete.is_dir() and "normalized_inventory" not in row:
+                shutil.rmtree(incomplete)
+            partial = folder / "original"
+            if partial.is_file():
+                row["raw_size"] = partial.stat().st_size
+                row["raw_sha256"] = digest(partial)
+            partial_dir = folder / "original-directory"
+            if partial_dir.is_dir():
+                try:
+                    row["raw_inventory"] = _file_inventory(partial_dir)
+                except ValueError:
+                    shutil.rmtree(partial_dir)
+                    row["raw_inventory"] = None
+        rows.append(row)
+    ledger = {"schema": 1, "candidate_sha": candidate_sha, "source_tree": tree,
+              "index_sha256": hashlib.sha256(original_index).hexdigest(),
+              "sources": rows,
+              "status": "FAILED" if any(row["status"] == "FAILED" for row in rows)
+              else "NOT_RUN"}
+    (output / "cross-run-ledger.json").write_text(json.dumps(ledger, indent=2) + "\n")
+    return ledger
+
+
+def verify_source_snapshot(output, candidate_sha, tree):
+    output = Path(output)
+    if ((output / "source-index.json").is_symlink()
+            or (output / "cross-run-ledger.json").is_symlink()):
+        raise ValueError("frozen source index or ledger is symbolic")
+    ledger = _strict_json(output / "cross-run-ledger.json")
+    index_bytes = (output / "source-index.json").read_bytes()
+    index = _strict_json(output / "source-index.json")
+    if (ledger.get("candidate_sha") != candidate_sha or ledger.get("source_tree") != tree
+            or hashlib.sha256(index_bytes).hexdigest() != ledger.get("index_sha256")
+            or [source["id"] for source in index["sources"]]
+            != [row["id"] for row in ledger["sources"]]):
+        raise ValueError("frozen cross-run source index or ledger differs")
+    if (output / "raw/sources").is_symlink():
+        raise ValueError("frozen source set is symbolic")
+    if ({path.name for path in (output / "raw/sources").iterdir()}
+            != {source["id"] for source in index["sources"]}):
+        raise ValueError("frozen source set differs")
+    for source, row in zip(index["sources"], ledger["sources"]):
+        folder = output / "raw/sources" / source["id"]
+        if folder.is_symlink() or not folder.is_dir():
+            raise ValueError("frozen source folder is missing or symbolic")
+        if {path.name for path in folder.iterdir()} - {"original", "original-directory"}:
+            raise ValueError("frozen source has unrecorded files")
+        pin = source["transport"]
+        if pin["format"] == "directory":
+            path = folder / "original-directory"
+            if path.is_dir() and _file_inventory(path) != row.get("raw_inventory"):
+                raise ValueError("frozen source directory bytes differ")
+            if row["status"] == "NOT_RUN" and _file_inventory(path) != pin["files"]:
+                raise ValueError("frozen source directory differs from pin")
+        else:
+            path = folder / "original"
+            if path.is_symlink():
+                raise ValueError("frozen source archive is symbolic")
+            if path.is_file() and (path.stat().st_size != row.get("raw_size")
+                                   or digest(path) != row.get("raw_sha256")):
+                raise ValueError("frozen source archive bytes differ")
+            if row["status"] == "NOT_RUN" and (not path.is_file()
+                    or row["raw_size"] != pin["size"] or row["raw_sha256"] != pin["sha256"]):
+                raise ValueError("frozen source archive differs from pin")
+            normalized = output / "normalized" / source["id"]
+            if "normalized_inventory" in row and _file_inventory(normalized) != row[
+                    "normalized_inventory"]:
+                raise ValueError("normalized source archive bytes differ")
+    return True
 
 
 def checked_sidecar(root, stem):
@@ -198,7 +679,9 @@ def unsigned_inputs(manifest, artifacts, rows):
     return inputs
 
 
-def collect(repository, candidate_sha, artifacts, output, upstream=None):
+def collect(repository, candidate_sha, artifacts, output, upstream=None, source_index=None,
+            repository_name="rubixhacker/dyn4k", run_id=None, run_attempt=None,
+            github_token=None, artifacts_dir=None):
     repository, output = Path(repository), Path(output)
     tree = source_tree(repository, candidate_sha)
     manifest = independent_gates.load_approved_manifest(repository)
@@ -230,6 +713,26 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None):
             row["reason"] = str(error)
         rows.append(row)
     missing = sorted(set(REQUIRED) - seen)
+    cross_run = None
+    if source_index is not None:
+        try:
+            cross_run = snapshot_source_index(source_index, candidate_sha, tree, manifest,
+                                              artifacts_dir if artifacts_dir is not None else
+                                              (Path(artifacts[0][1]).parent if artifacts else
+                                               output.parent / "absent-artifacts"),
+                                              output, repository_name, run_id,
+                                              run_attempt, github_token)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+            cross_run = {"schema": 1, "candidate_sha": candidate_sha,
+                         "status": "FAILED", "reason": str(error)}
+            try:
+                rejected = _safe_source_path(source_index)
+                if rejected.is_file():
+                    (output / "source-index.rejected").write_bytes(rejected.read_bytes())
+                    cross_run["rejected_index_sha256"] = digest(output /
+                                                                "source-index.rejected")
+            except (OSError, ValueError, TypeError):
+                pass
     inputs = unsigned_inputs(manifest, artifacts, rows)
     (output / "assembly-inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
     if staged_audit is not None:
@@ -251,8 +754,11 @@ def collect(repository, candidate_sha, artifacts, output, upstream=None):
     report = {"schema": 1, "candidate_sha": candidate_sha, "source_tree": tree,
               "required_lanes": 112, "artifacts": rows, "missing_artifacts": missing,
               "independent_signature": "MISSING",
-              "status": "FAILED" if any(row["status"] == "FAILED" for row in rows)
+              "status": "FAILED" if (any(row["status"] == "FAILED" for row in rows)
+                                     or cross_run is not None and cross_run["status"] == "FAILED")
               else "NOT_RUN", "reason": "signed external audit and complete gate routes are absent"}
+    if cross_run is not None:
+        report["cross_run"] = cross_run
     report["external_inputs_required"] = [
         "all 112 exact-source common gate archives and runtime identities",
         "independently audited archive digests and 21-target artifact hashes",
@@ -281,11 +787,93 @@ def verify_collection(repository, candidate_sha, artifacts, output):
     approved = independent_gates.load_approved_manifest(Path(repository))
     if inputs != unsigned_inputs(approved, supplied, rows):
         raise ValueError("unsigned 112-lane input map differs")
+    cross_run = report.get("cross_run")
+    if cross_run is not None:
+        if "sources" in cross_run:
+            verify_source_snapshot(output, candidate_sha, report["source_tree"])
+            if _strict_json(Path(output) / "cross-run-ledger.json") != cross_run:
+                raise ValueError("cross-run source ledger differs from collection")
+        elif "rejected_index_sha256" in cross_run:
+            if digest(Path(output) / "source-index.rejected") != cross_run[
+                    "rejected_index_sha256"]:
+                raise ValueError("rejected source index bytes differ")
     return True
 
 
+def _snapshot_external_references(archive_map, approved, stable):
+    if (not isinstance(archive_map, dict) or set(archive_map) !=
+            {"schema", "candidate_sha", "lanes"}
+            or type(archive_map["schema"]) is not int or archive_map["schema"] != 1
+            or not isinstance(archive_map["lanes"], dict)
+            or set(archive_map["lanes"]) != set(approved["lanes"])):
+        raise ValueError("external signed archive map lacks exact 112-lane source binding")
+    references = stable / "references"
+    references.mkdir()
+    rewritten = {"schema": 1, "candidate_sha": archive_map["candidate_sha"],
+                 "lanes": {}}
+    snapshots = {}
+    for lane_id, archives in archive_map["lanes"].items():
+        if not isinstance(archives, dict):
+            raise ValueError("external lane archive map is invalid")
+        allowed = set(approved["lanes"][lane_id]["required_gates"])
+        allowed.update(approved["global_gates"])
+        if set(archives) - allowed:
+            raise ValueError("external archive map names an unapproved gate")
+        rewritten["lanes"][lane_id] = {}
+        for gate, selected in archives.items():
+            source = _safe_source_path(selected)
+            if not source.exists():
+                raise ValueError("external referenced archive is missing")
+            if (source.resolve().is_relative_to(stable.resolve())
+                    or stable.resolve().is_relative_to(source.resolve())):
+                raise ValueError("external archive and snapshot cannot contain each other")
+            resolved = str(source.resolve())
+            if resolved not in snapshots:
+                frozen = references / str(len(snapshots))
+                if source.is_dir():
+                    before = _file_inventory(source)
+                    shutil.copytree(source, frozen, symlinks=True)
+                    after = _file_inventory(source)
+                    copied = _file_inventory(frozen)
+                    if before != after or before != copied:
+                        raise ValueError("external archive directory changed while copied")
+                    identity = {"kind": "directory", "files": copied,
+                                "inventory_sha256": _inventory_digest(copied)}
+                elif source.is_file():
+                    before = (source.stat().st_size, digest(source))
+                    if before[0] > MAX_SOURCE_BYTES:
+                        raise ValueError("external archive exceeds byte bound")
+                    _copy_regular(source, frozen)
+                    after = (source.stat().st_size, digest(source))
+                    if before != after or before != (frozen.stat().st_size, digest(frozen)):
+                        raise ValueError("external archive changed while copied")
+                    identity = {"kind": "file", "size": before[0],
+                                "sha256": before[1]}
+                else:
+                    raise ValueError("external archive is nonregular")
+                snapshots[resolved] = {"frozen": str(frozen), "identity": identity}
+            rewritten["lanes"][lane_id][gate] = snapshots[resolved]["frozen"]
+    snapshot_map = stable / "archive-map.snapshot.json"
+    snapshot_map.write_text(json.dumps(rewritten, indent=2) + "\n")
+    return snapshot_map, snapshots
+
+
+def _verify_external_references(snapshots):
+    for item in snapshots.values():
+        path, identity = Path(item["frozen"]), item["identity"]
+        if identity["kind"] == "file":
+            if (not path.is_file() or path.is_symlink()
+                    or path.stat().st_size != identity["size"]
+                    or digest(path) != identity["sha256"]):
+                raise ValueError("frozen external archive file bytes differ")
+        elif (_file_inventory(path) != identity["files"]
+              or _inventory_digest(identity["files"]) != identity["inventory_sha256"]):
+            raise ValueError("frozen external archive directory bytes differ")
+
+
 def ingest_external(repository, candidate_sha, artifacts, output, audit_inputs,
-                    trusted_key_sha256=None):
+                    trusted_key_sha256=None, independent_performance_key=None,
+                    performance_key_sha256=None):
     verify_collection(repository, candidate_sha, artifacts, output)
     audit_inputs, output = Path(audit_inputs), Path(output)
     names = ("archive-map.json", "audit.json", "audit.sig", "public.pem",
@@ -295,6 +883,11 @@ def ingest_external(repository, candidate_sha, artifacts, output, audit_inputs,
         missing.append("externally pinned trusted Ed25519 key SHA-256")
     if not (Path(repository) / "build/staging-repository").is_dir():
         missing.append("verified staged repository bytes at build/staging-repository")
+    if independent_performance_key is not None:
+        if not SHA64.fullmatch(str(performance_key_sha256 or "")):
+            missing.append("externally pinned performance key SHA-256")
+        elif not _safe_source_path(independent_performance_key).is_file():
+            missing.append("independently supplied performance key")
     result = {"candidate_sha": candidate_sha, "status": "NOT_RUN",
               "missing_external_inputs": missing}
     if missing:
@@ -307,11 +900,25 @@ def ingest_external(repository, candidate_sha, artifacts, output, audit_inputs,
         shutil.copyfile(audit_inputs / name, stable / name)
         if digest(stable / name) != original_hashes[name]:
             raise ValueError(f"external audit input changed while copied: {name}")
-    supplied = qualify.load_json_strict(stable / "archive-map.json")
+    supplied = _strict_json(stable / "archive-map.json")
     approved = independent_gates.load_approved_manifest(Path(repository))
-    if (supplied.get("schema") != 1 or supplied.get("candidate_sha") != candidate_sha
-            or set(supplied.get("lanes", {})) != set(approved["lanes"])):
+    if (supplied.get("schema") != 1 or supplied.get("candidate_sha") != candidate_sha):
         raise ValueError("external signed archive map lacks exact 112-lane source binding")
+    snapshot_map, snapshots = _snapshot_external_references(supplied, approved, stable)
+    snapshot_map_sha256 = digest(snapshot_map)
+    performance_copy = None
+    if independent_performance_key is not None:
+        key = _safe_source_path(independent_performance_key)
+        if (key.resolve().is_relative_to(audit_inputs.resolve())
+                or key.resolve().is_relative_to(output.resolve())
+                or any(key.resolve().is_relative_to(Path(root).resolve())
+                       for _, root in artifacts)):
+            raise ValueError("performance key must come from outside producer inputs")
+        performance_copy = stable / "independent-performance-key.pem"
+        _copy_regular(key, performance_copy)
+        if (digest(key) != performance_key_sha256
+                or digest(performance_copy) != performance_key_sha256):
+            raise ValueError("independent performance key bytes differ from external pin")
     for name in ("candidate-manifest.json", "staged-audit.json"):
         if qualify.load_json_strict(stable / name).get("candidate_sha") != candidate_sha:
             raise ValueError(f"external {name} belongs to another candidate")
@@ -322,23 +929,33 @@ def ingest_external(repository, candidate_sha, artifacts, output, audit_inputs,
                "--evidence", str(stable / "evidence.json"),
                "--audit", str(stable / "staged-audit.json"),
                "--candidate-manifest", str(stable / "candidate-manifest.json"),
-               "--independent-archives", str(stable / "archive-map.json"),
+               "--independent-archives", str(snapshot_map),
                "--independent-audit", str(stable / "audit.json"),
                "--independent-audit-signature", str(stable / "audit.sig"),
                "--trusted-audit-public-key", str(stable / "public.pem"),
                "--trusted-audit-key-sha256", trusted_key_sha256,
                "--output", str(output / "signed-runtime-matrix.json")]
+    if performance_copy is not None:
+        command.extend(("--independent-performance-key", str(performance_copy)))
     process = subprocess.run(command, cwd=repository, capture_output=True, check=False)
-    if any(digest(audit_inputs / name) != original_hashes[name] for name in names):
+    if any(digest(audit_inputs / name) != original_hashes[name]
+           or digest(stable / name) != original_hashes[name] for name in names):
         raise ValueError("external audit input changed during verification")
+    if digest(snapshot_map) != snapshot_map_sha256:
+        raise ValueError("frozen external archive map changed during verification")
     verify_collection(repository, candidate_sha, artifacts, output)
+    _verify_external_references(snapshots)
+    if performance_copy is not None and digest(performance_copy) != performance_key_sha256:
+        raise ValueError("frozen independent performance key bytes differ")
     (output / "signed-adapter.stdout").write_bytes(process.stdout)
     (output / "signed-adapter.stderr").write_bytes(process.stderr)
     result.update(status="FAILED" if process.returncode and not
                   (output / "signed-runtime-matrix.json").is_file() else "NOT_RUN",
                   adapter_exit=process.returncode, missing_external_inputs=[],
                   trusted_key_sha256=trusted_key_sha256,
-                  input_sha256=original_hashes)
+                  input_sha256=original_hashes,
+                  referenced_snapshots=snapshots,
+                  performance_key_sha256=performance_key_sha256)
     if (output / "signed-runtime-matrix.json").is_file():
         matrix = qualify.load_json_strict(output / "signed-runtime-matrix.json")
         if matrix.get("candidate_sha") != candidate_sha or matrix.get("total") != 112:
@@ -359,8 +976,14 @@ def main():
     parser.add_argument("--artifacts-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--upstream", type=Path)
+    parser.add_argument("--source-index", type=Path)
+    parser.add_argument("--repository-name", default="rubixhacker/dyn4k")
+    parser.add_argument("--run-id", type=int)
+    parser.add_argument("--run-attempt", type=int)
     parser.add_argument("--audit-input-dir", type=Path)
     parser.add_argument("--trusted-key-sha256")
+    parser.add_argument("--independent-performance-key", type=Path)
+    parser.add_argument("--performance-key-sha256")
     parser.add_argument("--verify", action="store_true")
     args = parser.parse_args()
     artifacts = sorted((path.name, path) for path in args.artifacts_dir.iterdir())
@@ -371,7 +994,9 @@ def main():
     if args.audit_input_dir is not None:
         try:
             result = ingest_external(args.repository, args.candidate_sha, artifacts,
-                                     args.output, args.audit_input_dir, args.trusted_key_sha256)
+                                     args.output, args.audit_input_dir, args.trusted_key_sha256,
+                                     args.independent_performance_key,
+                                     args.performance_key_sha256)
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
             result = {"candidate_sha": args.candidate_sha, "status": "FAILED",
                       "reason": str(error)}
@@ -380,7 +1005,9 @@ def main():
         print(json.dumps(result))
         return 0 if result["status"] == "PASSED" else 1
     report = collect(args.repository, args.candidate_sha, artifacts, args.output,
-                     args.upstream)
+                     args.upstream, args.source_index, args.repository_name,
+                     args.run_id, args.run_attempt,
+                     os.environ.get("DYN4K_GITHUB_TOKEN"), args.artifacts_dir)
     print(json.dumps({key: report[key] for key in ("candidate_sha", "status", "missing_artifacts")}))
     return 0 if report["status"] == "PASSED" else 1
 

@@ -8,6 +8,15 @@ on:
         type: boolean
         required: false
         default: false
+      cross_run_only:
+        description: Collect pinned cross-run archives without recapturing producers
+        type: boolean
+        required: false
+        default: false
+      cross_run_source_index:
+        description: Exact versioned JSON source index for cross-run collection
+        type: string
+        required: false
   push:
     branches:
       - main
@@ -18,7 +27,7 @@ on:
 
 jobs:
   staged-jvm-and-linux:
-    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
+    if: github.event_name != 'workflow_dispatch' || (inputs.windows_diagnostics != true && inputs.cross_run_only != true)
     runs-on: ubuntu-latest
     env:
       DYN4K_UPSTREAM_SOURCE: /tmp/dyn4j-source
@@ -350,6 +359,7 @@ jobs:
           if-no-files-found: error
 
   hosted-publications:
+    if: github.event_name != 'workflow_dispatch' || inputs.cross_run_only != true
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}' || '{"include":[{"host":"macos","runner":"macos-26","targets":"--target macosArm64 --target iosArm64 --target iosSimulatorArm64 --target iosX64 --target tvosArm64 --target tvosSimulatorArm64 --target watchosArm64 --target watchosDeviceArm64 --target watchosSimulatorArm64"},{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}') }}
@@ -491,6 +501,7 @@ jobs:
           if-no-files-found: warn
 
   hosted-native:
+    if: github.event_name != 'workflow_dispatch' || inputs.cross_run_only != true
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"target":"mingwX64","runner":"windows-2025"}]}' || '{"include":[{"target":"macosArm64","runner":"macos-26"},{"target":"iosSimulatorArm64","runner":"macos-26"},{"target":"tvosSimulatorArm64","runner":"macos-26"},{"target":"watchosSimulatorArm64","runner":"macos-26"},{"target":"iosX64","runner":"macos-26-intel"},{"target":"mingwX64","runner":"windows-2025"}]}') }}
@@ -786,7 +797,7 @@ jobs:
           if-no-files-found: warn
 
   safari-browser:
-    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
+    if: github.event_name != 'workflow_dispatch' || (inputs.windows_diagnostics != true && inputs.cross_run_only != true)
     runs-on: macos-26
     timeout-minutes: 120
     env:
@@ -877,13 +888,16 @@ jobs:
           if-no-files-found: error
 
   central-qualification-collection:
-    if: always() && (github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true)
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true || inputs.cross_run_only == true)
     needs:
       - staged-jvm-and-linux
       - hosted-publications
       - hosted-native
       - safari-browser
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
@@ -896,6 +910,17 @@ jobs:
           pattern: '*'
           path: ${{ runner.temp }}/producer-artifacts
           merge-multiple: false
+      - name: Retain explicit cross-run source index
+        if: github.event_name == 'workflow_dispatch' && inputs.cross_run_only == true
+        env:
+          DYN4K_SOURCE_INDEX_JSON: ${{ inputs.cross_run_source_index }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/central-logs"
+          if [ -z "$DYN4K_SOURCE_INDEX_JSON" ]; then
+            printf '%s\n' 'cross-run source index is required' > "$RUNNER_TEMP/central-logs/source-index.error"
+            exit 1
+          fi
+          printf '%s' "$DYN4K_SOURCE_INDEX_JSON" > "$RUNNER_TEMP/cross-run-source-index.json"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -918,14 +943,23 @@ jobs:
         if: always()
         env:
           DYN4K_DOWNLOAD_OUTCOME: ${{ steps.raw_download.outcome }}
+          DYN4K_CROSS_RUN_ONLY: ${{ inputs.cross_run_only }}
+          DYN4K_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
           mkdir -p "$RUNNER_TEMP/central-logs" "$RUNNER_TEMP/producer-artifacts"
+          source_args=()
+          if [ "$DYN4K_CROSS_RUN_ONLY" = true ]; then
+            source_args=(--source-index "$RUNNER_TEMP/cross-run-source-index.json"
+              --repository-name "$GITHUB_REPOSITORY"
+              --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")
+          fi
           python3 tools/qualification/collection.py \
             --repository "$GITHUB_WORKSPACE" \
             --candidate-sha "$GITHUB_SHA" \
             --artifacts-dir "$RUNNER_TEMP/producer-artifacts" \
             --upstream "$RUNNER_TEMP/dyn4j-source" \
+            "${source_args[@]}" \
             --output "$RUNNER_TEMP/central-collection" \
             > "$RUNNER_TEMP/central-logs/collection.stdout" \
             2> "$RUNNER_TEMP/central-logs/collection.stderr"
@@ -969,5 +1003,6 @@ jobs:
             ${{ runner.temp }}/central-collection/
             ${{ runner.temp }}/central-logs/
             ${{ runner.temp }}/producer-artifacts/
+            ${{ runner.temp }}/cross-run-source-index.json
           include-hidden-files: true
           if-no-files-found: error
