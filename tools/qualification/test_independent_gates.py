@@ -2449,6 +2449,47 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates._migration_journeys(root, report["candidate_commit"], hashes)
 
 
+class NativeCrossSignedGateTests(unittest.TestCase):
+    def test_public_cross_result_requires_audited_complete_suite(self):
+        lane = "linuxArm64:Linux ARM64:current:debug-g"
+        candidate = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        manifest = independent_gates.load_approved_manifest(ROOT)
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary)
+            (archive / "receipt.json").write_text(json.dumps({
+                "schema": 3, "status": "PASSED", "lane": lane,
+                "candidate_sha": candidate}))
+            digest = independent_gates.archive_digest(archive)
+            public = {"status": "PASSED", "lane": lane, "candidate_sha": candidate,
+                      "selected_cases": 2523, "archive_sha256": digest,
+                      "artifact_hash_provenance": "audited",
+                      "complete_selected_suite": True}
+            args = {"gate": "staged-consumer", "archive": archive,
+                    "candidate_sha": candidate, "lane_id": lane,
+                    "lane": manifest["lanes"][lane], "repository": ROOT,
+                    "expected_artifact_hashes": {"dyn4k-core": "a" * 64,
+                                                 "dyn4k": "b" * 64},
+                    "expected_runtime_identity": "fixture-arm64",
+                    "expected_archive_digest": digest, "manifest": manifest,
+                    "expected_signed_lane": {"expected_archive_digests": {
+                        "staged-consumer": digest}}}
+            with mock.patch("full_signed_routes.verify", return_value=public) as replay:
+                result = independent_gates.evaluate_gate(**args)
+                self.assertEqual("PASSED", result["status"], result)
+                replay.assert_called_once()
+                for changed in ({"artifact_hash_provenance": "staging-self"},
+                                {"complete_selected_suite": False},
+                                {"complete_selected_suite": None}):
+                    replay.return_value = {**public, **changed}
+                    self.assertEqual("FAILED", independent_gates.evaluate_gate(
+                        **args)["status"])
+                replay.return_value = {key: value for key, value in public.items()
+                                       if key != "complete_selected_suite"}
+                self.assertEqual("FAILED", independent_gates.evaluate_gate(
+                    **args)["status"])
+
+
 class FullBrowserGenericGateTests(unittest.TestCase):
     LANE = "js:Chromium:current:development"
     HASHES = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}

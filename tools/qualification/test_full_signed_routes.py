@@ -42,10 +42,10 @@ class SignedRouteTests(unittest.TestCase):
         return archive
 
     def _witness(self, base, expected, lane, runtime, mode, executables,
-                 build_executable):
+                 build_executable, archive_digest="c" * 64):
         witness = {"schema": "independent-execution-witness/1",
                    "candidate_sha": CANDIDATE, "lane": lane,
-                   "archive_sha256": "c" * 64, "runtime_identity": runtime,
+                   "archive_sha256": archive_digest, "runtime_identity": runtime,
                    "mode": mode, "executables": executables,
                    "staged_artifacts": HASHES, "auditor": "independent test",
                    "build": {"executable_sha256": build_executable, "pid": 10,
@@ -270,6 +270,7 @@ class SignedRouteTests(unittest.TestCase):
                              "artifact_hashes": HASHES,
                              "artifact_hash_provenance": "audited",
                              "build_host": build_host, "toolchain": toolchain,
+                             "process": {"pid": 10, "started_ns": 1, "finished_ns": 2},
                              "products": products, "selected_cases": 2523}
             (build / "receipt.json").write_text(json.dumps(build_receipt))
             build_digest = independent_gates.archive_digest(build)
@@ -282,7 +283,8 @@ class SignedRouteTests(unittest.TestCase):
                        "runtime_host": host, "runtime_host_after": host,
                        "selection": selection, "selected_cases": 2523,
                        "method_order": methods,
-                       "processes": {short: {"exit_code": 0,
+                       "processes": {short: {"exit_code": 0, "pid": index + 1,
+                                             "started_ns": 1, "finished_ns": 2,
                                              "observed_process": {"pid": index + 1}}
                                      for index, short in enumerate(("core", "facade"))}}
             (archive / "receipt.json").write_text(json.dumps(receipt))
@@ -296,6 +298,8 @@ class SignedRouteTests(unittest.TestCase):
                         "expected_native_toolchain": toolchain,
                         "expected_native_build_archive_sha256": build_digest,
                         "expected_native_build_executables": executables}
+            self._witness(base, expected, lane, runtime, "debug-g", executables,
+                          toolchain["gradle_sha256"], digest)
             public = {"status": "PASSED", "lane": lane, "candidate_sha": CANDIDATE,
                       "archive_sha256": digest, "selected_cases": 2523,
                       "artifact_hash_provenance": "audited",
@@ -311,6 +315,52 @@ class SignedRouteTests(unittest.TestCase):
                 cross_verify.assert_called_once_with(
                     archive, ROOT, CANDIDATE, lane, HASHES, selection, digest,
                     build_digest, toolchain)
+                signed_witness = expected.pop("expected_execution_witness")
+                with self.assertRaisesRegex(ValueError, "process witness is missing"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                expected["expected_execution_witness"] = signed_witness
+                witness_path = Path(signed_witness["path"])
+                original_witness = witness_path.read_bytes()
+                witness_path.write_bytes(original_witness + b" ")
+                with self.assertRaisesRegex(ValueError, "witness bytes differ"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                witness_path.write_bytes(original_witness)
+                changed_witness = json.loads(original_witness)
+                changed_witness["processes"]["core"]["pid"] = 99
+                witness_path.write_text(json.dumps(changed_witness))
+                signed_witness["sha256"] = hashlib.sha256(witness_path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(ValueError, "cross.*process witness"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                witness_path.write_bytes(original_witness)
+                signed_witness["sha256"] = hashlib.sha256(original_witness).hexdigest()
+                for section, field, value, reason in (
+                        ("build", "pid", 99, "cross.*process witness"),
+                        ("build", "finished_ns", 3, "cross.*process witness"),
+                        ("core", "finished_ns", 3, "cross.*process witness"),
+                        ("core", "executable_sha256", "0" * 64,
+                         "process witness lacks observed execution")):
+                    changed_witness = json.loads(original_witness)
+                    record = (changed_witness["build"] if section == "build" else
+                              changed_witness["processes"][section])
+                    record[field] = value
+                    witness_path.write_text(json.dumps(changed_witness))
+                    signed_witness["sha256"] = hashlib.sha256(
+                        witness_path.read_bytes()).hexdigest()
+                    with self.assertRaisesRegex(ValueError, reason):
+                        full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                                  expected, HASHES, runtime, digest)
+                changed_witness = json.loads(original_witness)
+                changed_witness["candidate_sha"] = "0" * 40
+                witness_path.write_text(json.dumps(changed_witness))
+                signed_witness["sha256"] = hashlib.sha256(witness_path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(ValueError, "process witness differs from signed route"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, digest)
+                witness_path.write_bytes(original_witness)
+                signed_witness["sha256"] = hashlib.sha256(original_witness).hexdigest()
                 cross_verify.return_value = {**public, "complete_selected_suite": False}
                 with self.assertRaisesRegex(ValueError, "public replay differs"):
                     full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,

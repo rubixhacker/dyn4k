@@ -2156,9 +2156,13 @@ def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repositor
     else:
         public = full_signed_routes.verify(repository, candidate_sha, lane_id, root,
                                            signed_lane, hashes, runtime, expected_digest)
-    if public != {"status": "PASSED", "lane": lane_id,
-                  "selected_cases": 2523, "archive_sha256": expected_digest,
-                  "candidate_sha": candidate_sha}:
+    expected_public = {"status": "PASSED", "lane": lane_id,
+                       "selected_cases": 2523, "archive_sha256": expected_digest,
+                       "candidate_sha": candidate_sha}
+    if family == "native-host" and receipt.get("schema") == 3:
+        expected_public.update({"artifact_hash_provenance": "audited",
+                                "complete_selected_suite": True})
+    if public != expected_public:
         raise ValueError("signed full consumer public result differs from selected gate")
     return _result(gate, "PASSED", f"{family} public full consumer verified",
                    archive_sha256=expected_digest, complete_selected_suite=True,

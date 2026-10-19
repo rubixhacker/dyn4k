@@ -549,6 +549,26 @@ def _verify_native_cross(repository, candidate, lane, root, receipt, expected,
                    or processes[name]["observed_process"]["pid"] <= 0
                    for name in ("core", "facade"))):
         raise ValueError("signed Native cross runtime execution is incomplete")
+    witness = execution_witness(expected, candidate, lane, digest, runtime,
+                                selected_lane["configuration"], executables, hashes,
+                                toolchain["gradle_sha256"], root)
+    recorded_processes = {"build": build.get("process"), **processes}
+    witnessed_processes = {"build": witness["build"], **witness["processes"]}
+    for name in ("build", "core", "facade"):
+        recorded = recorded_processes[name]
+        observed = witnessed_processes[name]
+        if (not isinstance(recorded, dict)
+                or type(recorded.get("pid")) is not int
+                or observed["pid"] != recorded["pid"]
+                or type(recorded.get("started_ns")) is not int
+                or type(recorded.get("finished_ns")) is not int
+                or not recorded["started_ns"] <= observed["started_ns"]
+                    <= observed["finished_ns"] <= recorded["finished_ns"]):
+            raise ValueError("signed Native cross process witness differs from producer")
+    if any(witness["processes"][name]["pid"] !=
+           processes[name]["observed_process"]["pid"]
+           for name in ("core", "facade")):
+        raise ValueError("signed Native cross observed process witness differs")
     public = full_native_host_consumer.verify_cross_run(
         root, repository, candidate, lane, hashes, selection, digest, build_digest, toolchain)
     if public != {"status": "PASSED", "lane": lane, "candidate_sha": candidate,

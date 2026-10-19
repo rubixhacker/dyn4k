@@ -158,6 +158,54 @@ class IndependentAuditProducerTests(unittest.TestCase):
                               self.stage_path, signature, public, fingerprint,
                               self.observations_path)
 
+    def test_native_cross_preparation_binds_only_schema3_build_fields(self):
+        lane = "linuxArm64:Linux ARM64:current:debug-g"
+        archive = self.root / "cross-attempt"
+        archive.mkdir()
+        receipt = {"schema": 3, "status": "PASSED"}
+        (archive / "receipt.json").write_text(json.dumps(receipt))
+        fields = {key: key for key in
+                  producer.ROUTE_FIELDS["native-host"] -
+                  {"expected_native_host_executables"}}
+        fields.update({"expected_native_build_archive_sha256": "a" * 64,
+                       "expected_native_build_host": {"system": "Linux",
+                                                       "machine": "x86_64"},
+                       "expected_native_build_executables": {
+                           "core": "b" * 64, "facade": "c" * 64}})
+        observation = self.observations["lanes"][lane]
+        observation["archives"]["staged-consumer"] = str(archive)
+        observation["signed_fields"] = fields
+        self.write_inputs()
+        prepared = self.prepare()
+        signed = json.loads((prepared / "audit.json").read_bytes())["lanes"][lane]
+        for key, value in fields.items():
+            self.assertEqual(value, signed[key])
+        for index, key in enumerate(sorted(producer.CROSS_FIELDS)):
+            observation["signed_fields"] = {name: value for name, value in fields.items()
+                                             if name != key}
+            self.write_inputs()
+            with self.assertRaisesRegex(ValueError, "signed route fields are incomplete"):
+                self.prepare(self.root / f"missing-{index}")
+        observation["signed_fields"] = dict(fields)
+        observation["signed_fields"]["expected_native_host_executables"] = {
+            "core": "b" * 64, "facade": "c" * 64}
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
+            self.prepare(self.root / "cross-extra")
+        receipt["schema"] = 2
+        (archive / "receipt.json").write_text(json.dumps(receipt))
+        observation["signed_fields"] = dict(fields)
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
+            self.prepare(self.root / "ordinary-extra")
+        observation["archives"].clear()
+        observation["signed_fields"].clear()
+        self.write_inputs()
+        prepared = self.prepare(self.root / "arm-not-run")
+        preflight = json.loads((prepared / "audit.json").read_bytes())[
+            "preflight_results"][lane]["gates"]["staged-consumer"]
+        self.assertEqual("NOT_RUN", preflight)
+
     def test_rejects_wrong_lane_identity_and_unsigned_replacement(self):
         lane = next(iter(self.suite["lanes"]))
         self.candidate_manifest["lanes"][lane]["runtime_identity"] = ""

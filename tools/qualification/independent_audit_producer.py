@@ -35,6 +35,8 @@ ROUTE_FIELDS = {
                      "expected_apple_device_executable_paths",
                      "expected_apple_device_executable_hashes", "expected_apple_os_roles"},
 }
+CROSS_FIELDS = {"expected_native_build_archive_sha256", "expected_native_build_host",
+                "expected_native_build_executables"}
 OPTIONAL_FIELDS = {"expected_producer_scopes", "expected_unavailability", "expected_not_run",
                    "expected_execution_witness", "expected_klib_native_executables",
                    "expected_browser_responses"}
@@ -161,8 +163,24 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                 raise ValueError(f"candidate JVM mode publication is unverified: {lane_id}")
         elif lane.get("artifact_hashes") != all_hashes[target]:
             raise ValueError(f"candidate lane artifact or runtime differs from staging: {lane_id}")
+        paths = observed["archives"]
+        gate_names = set(suite["lanes"][lane_id]["required_gates"] + suite["global_gates"])
+        if set(paths) - gate_names or any(type(path) is not str for path in paths.values()):
+            raise ValueError(f"archive map has an inapplicable gate: {lane_id}")
+        cross = False
+        if (routes[lane_id] == "native-host" and target == "linuxArm64"
+                and "staged-consumer" in paths):
+            try:
+                cross_receipt = _load(Path(paths["staged-consumer"]) / "receipt.json")
+            except (OSError, ValueError, TypeError):
+                cross_receipt = None
+            cross = isinstance(cross_receipt, dict) and cross_receipt.get("schema") == 3
         fields = observed["signed_fields"]
-        allowed = OPTIONAL_FIELDS | ROUTE_FIELDS[routes[lane_id]]
+        route_fields = set(ROUTE_FIELDS[routes[lane_id]])
+        if cross:
+            route_fields.remove("expected_native_host_executables")
+            route_fields |= CROSS_FIELDS
+        allowed = OPTIONAL_FIELDS | route_fields
         if set(fields) - allowed:
             raise ValueError(f"unrecognized signed route field: {lane_id}")
         if binding is not None and (
@@ -178,10 +196,6 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
         if binding is not None:
             expected["expected_mode_publication_path"] = binding["publication_archive"]
             expected["expected_mode_publication_digest"] = binding["archive_digest"]
-        paths = observed["archives"]
-        gate_names = set(suite["lanes"][lane_id]["required_gates"] + suite["global_gates"])
-        if set(paths) - gate_names or any(type(path) is not str for path in paths.values()):
-            raise ValueError(f"archive map has an inapplicable gate: {lane_id}")
         snapshots = {}
         for gate, path in paths.items():
             snapshots[gate] = _snapshot(path)
@@ -190,7 +204,7 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
             except (OSError, ValueError, TypeError):
                 receipt = None
             if isinstance(receipt, dict) and receipt.get("status") == "PASSED" and gate == "staged-consumer":
-                required = set(ROUTE_FIELDS[routes[lane_id]])
+                required = set(route_fields)
                 if lane_id.startswith("linuxX64:"):
                     required |= {"expected_klib_native_executables", "expected_execution_witness"}
                 if lane_id.startswith("wasmJs:"):
