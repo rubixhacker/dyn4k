@@ -28,7 +28,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
     "performance-host-capacity-control.yml": "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6",
     "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
-    "qualification.yml": "fc7dc37ef8978322754671b1bd1c554bec2e88ac37357042765e728ca1184d67",
+    "qualification.yml": "f999ef07987d86706edb7af80aeb0856f87af716a67f0ecf98b03b007d05d34e",
     "safari-yarn-lock-diagnostic.yml": "60789e5d019be7109d9d16c39d5803f2cf50c57d99ca2ddb69602803234a8401",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
