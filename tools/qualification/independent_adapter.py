@@ -268,6 +268,24 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 full_android_adapter.verify_full_android_staged_consumer(
                     repository, candidate_sha, lane_id, selected,
                     paths["staged-consumer"], expected, consumer_gate)
+        if (lane_id in ("js:Chromium:minimum:development",
+                        "js:Chromium:minimum:production",
+                        "js:Chromium:current:development",
+                        "js:Chromium:current:production")
+                and consumer_gate["status"] == "PASSED"):
+            if not identities_bound or "staged-consumer" not in paths:
+                raise ValueError(f"signed browser candidate and staged audit are missing: {lane_id}")
+            import full_browser_adapter
+
+            public = full_browser_adapter.verify_full_browser_staged_consumer(
+                repository, candidate_sha, lane_id, selected, paths["staged-consumer"],
+                expected, consumer_gate, audited_targets["js"])
+            if (public.get("status") != consumer_gate["status"]
+                    or public.get("archive_sha256") != consumer_gate.get("archive_sha256")
+                    or public.get("selected_cases") != consumer_gate.get("selected_cases")
+                    or public.get("candidate_sha") != candidate_sha
+                    or public.get("lane") != lane_id):
+                raise ValueError(f"public browser verifier differs from independent gate: {lane_id}")
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
                             "identities_bound": identities_bound and (target != "jvm" or mode_bound)}

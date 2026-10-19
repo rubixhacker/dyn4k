@@ -21,6 +21,22 @@ import qualify
 
 LANE = "jvm:Java:minimum:no-optimize"
 ROOT = Path(__file__).resolve().parents[2]
+BROWSER_CANDIDATE = "2e3665ba110e18d9669f847eb714e31befa391ce"
+BROWSER_PRODUCER = Path("/var/home/stewart/Workspace/dyn4k-port-full-browser-112")
+BROWSER_ARCHIVES = {
+    "js:Chromium:current:development": ("current-development-attempt3", "a7067184d035e40e844b3dbd537ad64e6bdd27a3c83117975d5adb51bbf84537"),
+    "js:Chromium:current:production": ("current-production-final", "8a0a2987795dbce7d864fc03fc1e5642d61161935001a595f1f1b63cd1175a70"),
+    "js:Chromium:minimum:development": ("minimum-development-final", "60cc34371865de0d0b65d83b41f97abc87bb90d21c208c05089c72080db638b6"),
+    "js:Chromium:minimum:production": ("minimum-production-final", "7adba1140fae071fd796afc047c2be2a745a80a2a2f06b0da4a397961448beae"),
+}
+BROWSER_HASHES = {"dyn4k-core": "244d9e5e0cb914dbc5c336e2905a9f539f7081ca46a0d3d64af76ef27f8c3476",
+                  "dyn4k": "2c22dfef7855937386f4403f2dfe921e039d5363facea670a3a8c15ba0887bb4"}
+BROWSER_BUNDLES = {
+    "development": {"core": "2bf653dfc4aedfa30f3398213adf957f2c587ccdc87319896fec34527a550899",
+                    "facade": "b404d41656f68ccc36091474564abf6817c6f7774a5d7a01722f9d8979a4b23d"},
+    "production": {"core": "c7df91efb09e18e9ca5e26d9f77d07e6ca53ebfd772e1671a056dc6d32e62b68",
+                   "facade": "f8f0f58e8fe371df346371dd12840b57c6d6b27943d122d52de3e9851d8f927d"},
+}
 
 
 class IndependentAdapterTests(unittest.TestCase):
@@ -935,6 +951,155 @@ class IndependentAdapterTests(unittest.TestCase):
             self.assertEqual("UNAVAILABLE" if observation else "FAILED", result["status"])
             if observation:
                 self.assertEqual("VERIFIED", result["availability_audit_status"])
+
+    def browser_signed_fixture(self, root, lanes, archive_override=None):
+        suite = independent_gates.load_approved_manifest(BROWSER_PRODUCER)
+        runtime = f"{platform.system()} {platform.release()} {platform.machine()}"
+        staged = {"candidate_sha": BROWSER_CANDIDATE, "status": "PASSED",
+                  "artifacts": [{"path": qualify.target_binary_path(module, "js"),
+                                 "sha256": value}
+                                for module, value in BROWSER_HASHES.items()]}
+        candidate = {"candidate_sha": BROWSER_CANDIDATE,
+                     "suite_manifest_sha256": independent_gates.digest(suite),
+                     "audit_manifest_sha256": qualify.manifest_digest(staged),
+                     "lanes": {lane: {"artifact_hashes": BROWSER_HASHES,
+                                      "runtime_identity": runtime} for lane in lanes}}
+        paths = {}
+        expected = {}
+        for lane in lanes:
+            role, mode = lane.split(":")[2:]
+            suffix, digest = BROWSER_ARCHIVES[lane]
+            archive = (archive_override if archive_override is not None else
+                       Path("/var/home/stewart/dyn4k-evidence/session-control") /
+                       f"full-browser-f565-review-findings-sol-{suffix}")
+            if archive_override is not None:
+                digest = independent_gates.archive_digest(archive)
+            major = 119 if role == "minimum" else 155
+            version = ("119.0.6045.105" if major == 119 else "155.0.8059.84")
+            toolchain = {
+                "java_home": "/tmp/dyn4k-tools/jdk21",
+                "java_version": 'openjdk version "21.0.12.1" 2026-08-18 LTS',
+                "java_sha256": "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d",
+                "gradle": "/tmp/dyn4k-tools/gradle-9.5.0/bin/gradle",
+                "gradle_sha256": "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b",
+                "gradle_version": "9.5.0", "kgp_version": "2.4.20",
+                "browser": f"/tmp/dyn4k-browser-wasi-tools/chrome-{major}/chrome-linux64/chrome",
+                "browser_sha256": ("c81049295247b6892c802dcad33dcab0a0337fce31800f923f51bdb0c07e6d11"
+                                   if major == 119 else
+                                   "b866a2964538c825538c454de4867973b926650da57ec12dc3328807d768247b"),
+                "browser_version": f"Google Chrome for Testing {version}",
+                "gradle_user_home": "/var/home/stewart/.gradle",
+            }
+            paths[lane] = {"staged-consumer": str(archive)}
+            expected[lane] = {"expected_artifact_hashes": BROWSER_HASHES,
+                              "expected_runtime_identity": runtime,
+                              "expected_archive_digests": {"staged-consumer": digest},
+                              "expected_browser_toolchain": toolchain,
+                              "expected_browser_bundles": BROWSER_BUNDLES[mode]}
+        archive_map = root / "browser-archive-map.json"
+        archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+                                           "lanes": paths}))
+        signed = {"schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+                  "suite_manifest_sha256": independent_gates.digest(suite),
+                  "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                  "staged_audit_sha256": qualify.manifest_digest(staged),
+                  "lanes": expected}
+        return suite, candidate, staged, archive_map, signed
+
+    def test_signed_browser_dispatch_uses_real_generic_gate_for_all_four_routes(self):
+        import full_browser_adapter
+
+        if not BROWSER_PRODUCER.is_dir():
+            self.skipTest("retained browser producer checkout is unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
+                root, BROWSER_ARCHIVES)
+            audit, signature, public, fingerprint = self.signed_inputs(root, signed)
+            original = full_browser_adapter.verify_full_browser_staged_consumer
+            with (mock.patch.object(qualify, "verify_audit_against_staging") as staging,
+                  mock.patch.object(full_browser_adapter,
+                                    "verify_full_browser_staged_consumer",
+                                    side_effect=original) as replay):
+                verified = independent_adapter.verify_lanes(
+                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    audit, signature, public, fingerprint,
+                    candidate_manifest=candidate, artifact_audit=staged)
+            staging.assert_called_once_with(staged, BROWSER_PRODUCER)
+            self.assertEqual(4, replay.call_count)
+            for call in replay.call_args_list:
+                lane = call.args[2]
+                gate = verified[lane]["verification"]["gates"]["staged-consumer"]
+                self.assertIs(gate, call.args[6])
+                self.assertEqual("PASSED", gate["status"])
+                self.assertEqual(2523, gate["selected_cases"])
+                self.assertTrue(verified[lane]["identities_bound"])
+                self.assertEqual("NOT_RUN", verified[lane]["verification"]["status"])
+
+    def test_signed_browser_expectations_and_generic_failure_control_dispatch(self):
+        import full_browser_adapter
+
+        if not BROWSER_PRODUCER.is_dir():
+            self.skipTest("retained browser producer checkout is unavailable")
+        lane = "js:Chromium:current:development"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
+                root, [lane])
+
+            def check(audit_input, archive_map_path=archive_map):
+                audit, signature, public, fingerprint = self.signed_inputs(root, audit_input)
+                with mock.patch.object(qualify, "verify_audit_against_staging"):
+                    return independent_adapter.verify_lanes(
+                        BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map_path,
+                        audit, signature, public, fingerprint,
+                        candidate_manifest=candidate, artifact_audit=staged)
+
+            for field, value in (("expected_browser_bundles", {"core": "0" * 64,
+                                                              "facade": BROWSER_BUNDLES["development"]["facade"]}),
+                                 ("expected_browser_toolchain", {**signed["lanes"][lane][
+                                     "expected_browser_toolchain"], "browser_sha256": "0" * 64}),
+                                 ("expected_artifact_hashes", {**BROWSER_HASHES,
+                                                               "dyn4k-core": "0" * 64}),
+                                 ("expected_runtime_identity", "wrong runtime")):
+                changed = copy.deepcopy(signed)
+                changed["lanes"][lane][field] = value
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    check(changed)
+
+            wrong_digest = copy.deepcopy(signed)
+            wrong_digest["lanes"][lane]["expected_archive_digests"] = {
+                "staged-consumer": "0" * 64}
+            with mock.patch.object(full_browser_adapter,
+                                   "verify_full_browser_staged_consumer",
+                                   return_value={"status": "PASSED"}) as fabricated:
+                verified = check(wrong_digest)
+            self.assertEqual("FAILED", verified[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            fabricated.assert_not_called()
+
+            generic_digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
+            with mock.patch.object(full_browser_adapter,
+                                   "verify_full_browser_staged_consumer",
+                                   return_value={"status": "PASSED", "lane": lane,
+                                                 "candidate_sha": BROWSER_CANDIDATE,
+                                                 "archive_sha256": generic_digest,
+                                                 "selected_cases": 0}):
+                with self.assertRaisesRegex(ValueError, "differs from independent gate"):
+                    check(signed)
+
+            resealed = Path("/var/home/stewart/dyn4k-evidence/session-control/"
+                            "full-browser-f565-review-findings-sol-control-resealed-selected")
+            self.assertTrue(resealed.is_dir(), "retained resealed browser control is missing")
+            _, _, _, bad_map, bad_signed = self.browser_signed_fixture(
+                root, [lane], archive_override=resealed)
+            with mock.patch.object(full_browser_adapter,
+                                   "verify_full_browser_staged_consumer",
+                                   return_value={"status": "PASSED"}) as fabricated:
+                verified = check(bad_signed, bad_map)
+            self.assertEqual("FAILED", verified[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            fabricated.assert_not_called()
 
 
 if __name__ == "__main__":
