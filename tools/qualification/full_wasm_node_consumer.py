@@ -520,6 +520,12 @@ def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_b
     graph = json.loads((root / "provider-graph.json").read_bytes())
     if set(graph) != {"compile", "runtime", "gradle_user_home"}:
         raise ValueError("provider graph phases differ")
+    toolchain = receipt.get("toolchain")
+    if (not isinstance(toolchain, dict) or toolchain.get("kgp_version") != "2.4.20"
+            or toolchain.get("gradle_version") != "Gradle 9.5.0"
+            or not str(toolchain.get("java_version", "")).startswith('openjdk version "21.')
+            or graph["gradle_user_home"] != toolchain.get("gradle_user_home")):
+        raise ValueError("pinned producer toolchain differs")
     variant = variant_for(lane)
     roots = {f"{GROUP}:{module}:{VERSION}" for module in MODULES}
     variants = {f"{GROUP}:{module}-{variant}:{VERSION}" for module in MODULES}
@@ -530,6 +536,9 @@ def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_b
         for entry in entries:
             if entry["configuration"] != f"{target}Test{phase.capitalize()}Classpath":
                 raise ValueError("provider configuration differs")
+            projects = {value for value in entry["components"] if value.startswith("project ")}
+            if projects != {f"project :{entry['project']}"}:
+                raise ValueError("source project replaced a staged provider")
             if {value for value in entry["components"] if value.startswith(f"{GROUP}:")} != roots | variants:
                 raise ValueError("provider graph contains a missing or foreign GAV")
             artifacts = [item for item in entry["artifacts"] if item["component"].startswith(f"{GROUP}:")]
@@ -552,19 +561,30 @@ def verify(root, repository, candidate, lane, hashes, expected_digest, runtime_b
     process = receipt.get("process")
     if (not isinstance(process, dict) or process.get("exit_code") != 0
             or type(process.get("pid")) is not int or process["pid"] <= 0
+            or type(process.get("parent_pid")) is not int or process["parent_pid"] <= 0
             or type(process.get("started_ns")) is not int
             or type(process.get("finished_ns")) is not int
             or process["started_ns"] >= process["finished_ns"]):
         raise ValueError("Gradle process proof is incomplete")
     output = (root / process["stdout"]).read_text()
     if (f"QUALIFICATION_LANE={lane}" not in output
-            or f"QUALIFICATION_PROVIDER_GRAPH_SHA256={sha((root / 'provider-graph.json').read_bytes())}" not in output):
+            or f"QUALIFICATION_PROVIDER_GRAPH_SHA256={sha((root / 'provider-graph.json').read_bytes())}" not in output
+            or "BUILD SUCCESSFUL" not in output):
         raise ValueError("raw Gradle output omits provider proof")
     original = _build_command(Path(paths["checkout"]), Path(paths["staging"]),
                               Path(paths["archive_root"]), Path(paths["work_root"]),
                               Path(paths["inputs"]), Path(paths["gradle"]), lane, hashes)
     if process.get("command") != original or process.get("cwd") != paths["inputs"]:
         raise ValueError("Gradle command differs from route")
+    if any(f"> Task {task}" not in output for task in original[-2:]):
+        raise ValueError("raw Gradle output omits a linked Wasm test task")
+    if (receipt.get("consumer_xml") != [f"reports/normalized/{short}/TEST-Wasm.xml"
+                                        for short in ("core", "facade")]
+            or receipt.get("raw_events") != [f"reports/raw/{short}/stdout.log"
+                                            for short in ("core", "facade")]
+            or receipt.get("runtime_processes") != {short: f"runtime/{short}.json"
+                                                    for short in ("core", "facade")}):
+        raise ValueError("full original runtime or method report inventory differs")
     expected_ids = {row["id"] for row in selected["cases"]}
     observed = []
     for short in ("core", "facade"):
