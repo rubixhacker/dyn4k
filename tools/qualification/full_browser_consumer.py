@@ -32,7 +32,7 @@ BUILD_PATHS = tuple(f"{CONSUMER}/{name}" for name in
                      "facade/build.gradle.kts"))
 LAUNCHER = "tools/qualification/browser_wasi/browser_launcher.py"
 REPORTER = "tools/qualification/browser_wasi/browser-karma-reporter.js"
-YARN_LOCK = "tools/qualification/browser_wasi/fixtures/consumer-yarn.lock"
+YARN_LOCK = f"{CONSUMER}/consumer-yarn.lock"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
