@@ -51,6 +51,12 @@ class FullJvmConsumerTests(unittest.TestCase):
         positive = route.verify(root, REPOSITORY, candidate, hashes, identity, digest)
         self.assertEqual(positive["status"], "PASSED")
         self.assertEqual(positive["selected_cases"], 2526)
+        lane = independent_gates.evaluate(
+            independent_gates.load_approved_manifest(REPOSITORY), candidate,
+            route.LANE, {"staged-consumer": root}, REPOSITORY, hashes, identity,
+            {"staged-consumer": digest})
+        self.assertEqual(lane["gates"]["staged-consumer"]["status"], "PASSED")
+        self.assertEqual(lane["status"], "NOT_RUN")
 
         def copied_archive(directory):
             copied = Path(directory) / "copy"
@@ -139,6 +145,22 @@ class FullJvmConsumerTests(unittest.TestCase):
                 digest = reseal(copied, altered, {relative: marker})
                 with self.assertRaises(ValueError):
                     route.verify(copied, REPOSITORY, candidate, hashes, identity, digest)
+
+        for mutation in ("different-input", "wrong-home", "missing-toolchain"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                copied, altered = copied_archive(directory)
+                if mutation == "different-input":
+                    altered["process"]["command"] = [
+                        arg.replace("/core-cases.tsv", "/other-cases.tsv")
+                        for arg in altered["process"]["command"]]
+                elif mutation == "wrong-home":
+                    altered["toolchain"]["gradle_user_home"] = "/tmp/other-gradle-home"
+                else:
+                    del altered["toolchain"]["java_executable_sha256"]
+                (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
+                with self.assertRaises(ValueError):
+                    route.verify(copied, REPOSITORY, candidate, hashes, identity,
+                                 independent_gates.archive_digest(copied))
 
         with self.assertRaises(ValueError):
             route.verify(root, REPOSITORY, "0" * 40, hashes, identity, digest)
