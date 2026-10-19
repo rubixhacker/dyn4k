@@ -238,6 +238,7 @@ def run(repository, candidate, staging, output, gradle, expected_hashes):
                "candidate_sha": candidate, "lane": LANE,
                "manifest_sha256": independent_gates.digest(manifest),
                "selected_case_count": len(selected),
+               "selected_case_ids": sorted(item["id"] for item in selected),
                "selected_case_ids_sha256": sha(encoded(sorted(item["id"] for item in selected))),
                "observed_case_ids": sorted(case_ids),
                "remaining_case_count": len(selected) - len(case_ids),
@@ -278,6 +279,7 @@ def verify(root, repository, expected_hashes):
             or receipt.get("lane") != LANE
             or receipt.get("manifest_sha256") != independent_gates.digest(manifest)
             or receipt.get("selected_case_count") != len(selected)
+            or receipt.get("selected_case_ids") != sorted(item["id"] for item in selected)
             or receipt.get("selected_case_ids_sha256")
             != sha(encoded(sorted(item["id"] for item in selected)))
             or receipt.get("observed_case_ids") != sorted(expected)
