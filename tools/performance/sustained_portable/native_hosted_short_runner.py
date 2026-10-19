@@ -26,7 +26,7 @@ route = {"source_sha": sha, "target": target, "build": build,
 def validate_xcode_version(output):
     lines = output.splitlines()
     if (len(lines) != 2 or lines[0] != "Xcode 26.5"
-            or not lines[1].startswith("Build version ") or lines[1] == "Build version "):
+            or re.fullmatch(r"Build version [0-9A-Za-z]+", lines[1]) is None):
         raise RuntimeError("selected Xcode is not 26.5")
 
 def path_swap_command(root, output, target, selected, sha):

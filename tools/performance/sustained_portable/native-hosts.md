@@ -230,8 +230,8 @@ its path bytes are never called mapped image bytes. Lookup failure records
 The path-swap control
 must still match the original mapped vnode after the wrapper pathname is
 replaced, and must reject a stale PID. A missing or inaccessible region
-remains unpassed. Hosted macOS ARM64 execution must establish whether the
-libproc region probe succeeds on the selected runner.
+remains unpassed. Local Mac ARM64 execution must establish whether the
+libproc region probe succeeds on the selected Mac.
 
 ## Evidence and remaining paths
 
