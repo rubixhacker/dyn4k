@@ -56,6 +56,10 @@ class NativeHostConsumerTests(unittest.TestCase):
                                     check=False)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("BUILD SUCCESSFUL", result.stdout)
+            dry_run = subprocess.run(command[:-1] + [":core:compileTestKotlinLinuxArm64", "--dry-run"],
+                                     cwd=repository, capture_output=True, text=True, check=False)
+            self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+            self.assertIn(":core:compileTestKotlinLinuxArm64 SKIPPED", dry_run.stdout)
 
     def test_manifest_contains_all_28_selected_routes(self):
         repository = Path(__file__).resolve().parents[2]
@@ -90,6 +94,59 @@ class NativeHostConsumerTests(unittest.TestCase):
                         {"guest_version": "15.0"}, {"guest_family": "tvOS"}):
             with self.subTest(altered=altered), self.assertRaises(ValueError):
                 route.validate_host(simulator, chosen, {**guest, **altered})
+        windows_lane = "mingwX64:Windows x64:current:debug-g"
+        windows = {"lane": windows_lane, "role": "current", "system": "Windows",
+                   "machine": "AMD64", "os_version": "10.0.26100",
+                   "windows_product_type": "client", "windows_product_name": "Windows 11 Pro"}
+        observed_windows = {key: value for key, value in windows.items()
+                            if key not in ("lane", "role")}
+        route.validate_host(windows_lane, windows, observed_windows)
+        for product in ("server", None):
+            with self.subTest(product=product), self.assertRaises(ValueError):
+                route.validate_host(windows_lane, windows,
+                                    {**observed_windows, "windows_product_type": product})
+
+    def test_transport_preserves_nanosecond_mtimes_and_rejects_links(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            (raw / "receipt.json").write_bytes(b"{}")
+            (raw / "evidence.bin").write_bytes(b"original")
+            timestamp = 1_700_000_000_123_456_789
+            for path in raw.iterdir():
+                os.utime(path, ns=(timestamp, timestamp))
+            transport = root / "raw.tar"
+            sha = route.pack_archive(raw, transport)
+            self.assertEqual(sha, route.digest(transport.read_bytes()))
+            relocated = root / "relocated"
+            route.unpack_archive(transport, relocated)
+            self.assertEqual((relocated / "evidence.bin").stat().st_mtime_ns, timestamp)
+            self.assertEqual((relocated / "evidence.bin").read_bytes(), b"original")
+            outside = root / "outside"
+            outside.write_bytes(b"original")
+            (raw / "evidence.bin").unlink()
+            os.link(outside, raw / "evidence.bin")
+            with self.assertRaises(ValueError):
+                route.snapshot_archive(raw, root / "rejected")
+            with self.assertRaises(ValueError):
+                route.pack_archive(raw, root / "linked.tar")
+
+    def test_snapshot_rejects_path_swap_between_scan_and_open(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            (raw / "receipt.json").write_bytes(b"{}")
+            (raw / "evidence.bin").write_bytes(b"original")
+            original = route.os.open
+            def swap(path, flags, *args, **kwargs):
+                if path == "evidence.bin":
+                    (raw / "evidence.bin").unlink()
+                    (raw / "evidence.bin").symlink_to(raw / "receipt.json")
+                return original(path, flags, *args, **kwargs)
+            with patch.object(route.os, "open", side_effect=swap), self.assertRaises((OSError, ValueError)):
+                route.snapshot_archive(raw, root / "relocated")
 
     def test_original_native_rows_reject_missing_duplicate_failing_and_wrong_target(self):
         selected = {("a.B", "one"): "dyn4k-core:a.B#one"}
@@ -155,8 +212,10 @@ class NativeHostConsumerTests(unittest.TestCase):
                           "sha256": hashes[module],
                           "file": str(route.staged_path(Path("/staging"), module, "linuxArm64"))}
                          for index, module in enumerate(route.MODULES)]
-            graph = {"compile": [], "runtime": [], "gradle_user_home": toolchain["gradle_user_home"]}
-            for phase in ("compile", "runtime"):
+            graph = {"compile": [], "runtime_resolution":
+                     "native-test-executable; no separate KLIB runtime resolution",
+                     "gradle_user_home": toolchain["gradle_user_home"]}
+            for phase in ("compile",):
                 graph[phase] = [{"project": short,
                                  "configuration": "linuxArm64TestCompileKlibraries",
                                  "components": components, "artifacts": artifacts}
@@ -165,6 +224,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             for module, data in (("dyn4k-core", b"core-klib"), ("dyn4k", b"facade-klib")):
                 write(f"resolved/{module}-linuxarm64-0.1.0-alpha.1.klib", data)
             products = {}
+            samples = []
             output = ["BUILD SUCCESSFUL", f"QUALIFICATION_LANE={LANE}",
                       "QUALIFICATION_CASE_COUNT=2523",
                       f"QUALIFICATION_PROVIDER_GRAPH_SHA256={route.digest((root / 'provider-graph.json').read_bytes())}"]
@@ -178,10 +238,17 @@ class NativeHostConsumerTests(unittest.TestCase):
                                    Path('/staging'), friend_module, 'linuxArm64'))])]
                 binary = f"binary-{short}".encode()
                 write(f"runtime/{short}.program", binary)
+                sample = {"pid": 200 if short == "core" else 201,
+                          "parent_pid": 101, "image":
+                          f"/producer-build/{short}/bin/linuxArm64/debugTest/test.kexe",
+                          "command": f"/producer-build/{short}/bin/linuxArm64/debugTest/test.kexe",
+                          "image_sha256": route.digest(binary), "observed_ns": time.time_ns(),
+                          "module": short, "simulator_udid": None}
+                samples.append(sample)
                 products[short] = {"archive": f"runtime/{short}.program",
                                    "path": f"/producer-build/{short}/bin/linuxArm64/debugTest/test.kexe",
                                    "sha256": route.digest(binary), "mode": "debugTest",
-                                   "target": "linuxArm64"}
+                                   "target": "linuxArm64", "observed_process": sample}
                 output.append(f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={route.digest(binary)}")
                 raw = report(short)
                 ids, normal = route.original_report(raw, "linuxArm64", route.selected_rows(
@@ -196,8 +263,9 @@ class NativeHostConsumerTests(unittest.TestCase):
                 output += [f"QUALIFICATION_RAW_XML_SHA256={route.digest(raw)}",
                            f"QUALIFICATION_XML_SHA256={route.digest(normal)}"]
             write("runtime/products.json", route.encoded(products))
-            write("reports/method-order.json", route.encoded(observed))
-            output.append(f"QUALIFICATION_METHOD_ORDER_SHA256={route.digest((root / 'reports/method-order.json').read_bytes())}")
+            write("runtime/process-observations.jsonl", b"".join(route.encoded(item) for item in samples))
+            write("reports/report-traversal.json", route.encoded(observed))
+            output.append(f"QUALIFICATION_REPORT_TRAVERSAL_SHA256={route.digest((root / 'reports/report-traversal.json').read_bytes())}")
             for module, value in hashes.items():
                 output.append(f"QUALIFICATION_RESOLVED_{module.upper().replace('-', '_')}_SHA256={value}")
             write("stdout.txt", ("\n".join(output) + "\n").encode())
@@ -255,6 +323,9 @@ class NativeHostConsumerTests(unittest.TestCase):
                     "missing method": (raw_paths[0], report("core", name="missing")),
                     "duplicate method": (raw_paths[0], report("core", duplicate=True)),
                     "failing method": (raw_paths[0], report("core", outcome="failure")),
+                    "changed process image": ("runtime/process-observations.jsonl",
+                        route.encoded({**samples[0], "image_sha256": "0" * 64})
+                        + route.encoded(samples[1])),
                 }
                 for label, (relative, data) in mutations.items():
                     original = (root / relative).read_bytes()

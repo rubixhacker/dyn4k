@@ -67,7 +67,8 @@ tasks.register("qualificationGraphs") {
         val graph = file("$archive/provider-graph.json")
         graph.parentFile.mkdirs()
         graph.writeText(JsonOutput.toJson(mapOf("compile" to entries,
-            "runtime" to entries, "gradle_user_home" to gradle.gradleUserHomeDir.absolutePath)))
+            "runtime_resolution" to "native-test-executable; no separate KLIB runtime resolution",
+            "gradle_user_home" to gradle.gradleUserHomeDir.absolutePath)))
         println("QUALIFICATION_PROVIDER_GRAPH_SHA256=${hash(graph)}")
         expected.forEach { (module, _) ->
             val resolved = project(if (module == "dyn4k-core") ":core" else ":facade")

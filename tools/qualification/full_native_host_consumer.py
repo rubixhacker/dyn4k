@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import hashlib
 import json
 import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -194,6 +199,11 @@ def validate_host(lane, selected, observed):
             raise ValueError("Linux glibc is older than approved minimum")
         if role == "minimum" and not observed["libc"].startswith(libc_floor):
             raise ValueError("minimum Linux glibc differs")
+    if target == "mingwX64":
+        if (observed.get("windows_product_type") != "client"
+                or selected.get("windows_product_type") != "client"
+                or observed.get("windows_product_name") != selected.get("windows_product_name")):
+            raise ValueError("Windows client product identity is absent or differs")
     if system == "Darwin" and observed.get("xcode_version") != "26.4.1":
         raise ValueError("pinned Xcode identity differs")
     if mode not in ("debug-g", "optimized-opt"):
@@ -211,6 +221,14 @@ def observed_host(target, selection):
         xcode = subprocess.check_output(["xcodebuild", "-version"], text=True)
         match = re.search(r"Xcode ([0-9.]+)", xcode)
         observation["xcode_version"] = match.group(1) if match else ""
+    if system == "Windows":
+        probe = subprocess.check_output(["powershell", "-NoProfile", "-Command",
+            "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,ProductType | ConvertTo-Json -Compress"],
+            text=True)
+        product = json.loads(probe)
+        observation["windows_product_name"] = product["Caption"]
+        observation["windows_product_type"] = (
+            "client" if product["ProductType"] == 1 else "server")
     family = TARGETS[target][2]
     if family:
         udid = selection.get("simulator_udid", "")
@@ -237,7 +255,11 @@ def observed_host(target, selection):
 def mode_script(target, mode, simulator_udid=None):
     lines = ["gradle.beforeProject { project ->",
              "  project.plugins.withId('org.jetbrains.kotlin.multiplatform') {",
-             "    project.afterEvaluate {"]
+             "    project.afterEvaluate {",
+             f"      project.tasks.matching {{ it.name == '{target}Test' }}.configureEach {{ task ->",
+             "        task.testLogging.showStandardStreams = true",
+             "        task.testLogging.events('started', 'passed', 'failed', 'skipped', 'standardOut', 'standardError')",
+             "      }"]
     if mode == "optimized-opt":
         lines += [f"      def nativeTarget = project.kotlin.targets.findByName('{target}')",
                   "      if (nativeTarget != null) {",
@@ -256,6 +278,112 @@ def mode_script(target, mode, simulator_udid=None):
 
 def staged_path(staging, module, target):
     return staging / qualify.target_binary_path(module, target)
+
+
+def process_snapshot(expected_folders, simulator_udid):
+    def wanted(image, command):
+        return (any(Path(image).parent == folder for folder in expected_folders)
+                or bool(simulator_udid and simulator_udid in command and "simctl" in command))
+
+    system = platform.system()
+    if system == "Linux":
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdecimal():
+                continue
+            try:
+                image = os.readlink(f"/proc/{entry.name}/exe")
+                command = (Path(f"/proc/{entry.name}/cmdline").read_bytes()
+                           .replace(b"\0", b" ").decode(errors="replace").strip())
+                if not wanted(image, command):
+                    continue
+                status = Path(f"/proc/{entry.name}/status").read_text()
+                parent = int(re.search(r"(?m)^PPid:\s*(\d+)$", status).group(1))
+                yield {"pid": int(entry.name), "parent_pid": parent,
+                       "image": image, "command": command,
+                       "image_sha256": digest(Path(f"/proc/{entry.name}/exe").read_bytes())}
+            except (OSError, AttributeError, ValueError):
+                continue
+    elif system == "Darwin":
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+        listing = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
+        for line in listing.splitlines():
+            match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
+            if not match:
+                continue
+            pid, parent, command = match.groups()
+            buffer = ctypes.create_string_buffer(4096)
+            if libproc.proc_pidpath(int(pid), buffer, len(buffer)) <= 0:
+                continue
+            image = buffer.value.decode(errors="replace")
+            if not wanted(image, command):
+                continue
+            try:
+                sha = digest(Path(image).read_bytes())
+            except OSError:
+                continue
+            yield {"pid": int(pid), "parent_pid": int(parent), "image": image,
+                   "command": command, "image_sha256": sha}
+    elif system == "Windows":
+        script = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
+                  "ExecutablePath,CommandLine | ConvertTo-Json -Compress")
+        rows = json.loads(subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", script], text=True))
+        for row in rows if isinstance(rows, list) else [rows]:
+            image = row.get("ExecutablePath")
+            if not image or not wanted(image, row.get("CommandLine") or ""):
+                continue
+            try:
+                sha = digest(Path(image).read_bytes())
+            except OSError:
+                continue
+            yield {"pid": row["ProcessId"], "parent_pid": row["ParentProcessId"],
+                   "image": image, "command": row.get("CommandLine") or "",
+                   "image_sha256": sha}
+
+
+def observe_test_processes(work_root, target, mode, simulator_udid, stop, destination):
+    binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+    expected = {short: (work_root / short / "bin" / target / binary_mode).resolve()
+                for short in ("core", "facade")}
+    seen = set()
+    with destination.open("wb") as output:
+        while not stop.is_set():
+            try:
+                for sample in process_snapshot(expected.values(), simulator_udid):
+                    image = Path(sample["image"])
+                    short = next((key for key, folder in expected.items()
+                                  if image.parent == folder and image.suffix in (".kexe", ".exe")), None)
+                    simulator_command = (simulator_udid and "simctl spawn" in sample["command"]
+                                         and simulator_udid in sample["command"])
+                    if not short and not simulator_command:
+                        continue
+                    sample.update({"observed_ns": time.time_ns(), "module": short,
+                                   "simulator_udid": simulator_udid if simulator_command else None})
+                    key = (sample["pid"], sample["image_sha256"], short)
+                    if key not in seen:
+                        output.write(encoded(sample))
+                        output.flush()
+                        seen.add(key)
+            except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+                pass
+            stop.wait(0.02 if platform.system() == "Linux" else 0.1)
+
+
+def process_binding(archive, work_root, target, mode, simulator_udid, short, binary_sha):
+    samples = [json.loads(line) for line in (archive / "runtime/process-observations.jsonl").read_bytes().splitlines()]
+    binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+    folder = work_root / short / "bin" / target / binary_mode
+    matches = [sample for sample in samples if sample.get("module") == short
+               and Path(sample["image"]).parent == folder
+               and sample.get("image_sha256") == binary_sha
+               and sample.get("pid", 0) > 0 and sample.get("parent_pid", 0) > 0]
+    if not matches:
+        raise ValueError(f"selected {short} Native test process and executable bytes were not observed")
+    if simulator_udid and not any(sample.get("simulator_udid") == simulator_udid
+                                  and str(folder) in sample.get("command", "")
+                                  for sample in samples):
+        raise ValueError("selected simulator spawn and test executable were not observed")
+    return matches[0]
 
 
 def gradle_command(paths, lane, mode, hashes):
@@ -281,7 +409,7 @@ def gradle_command(paths, lane, mode, hashes):
             "qualificationEvidence"]
 
 
-def capture(archive, work_root, lane, core_cases, facade_cases):
+def capture(archive, work_root, lane, core_cases, facade_cases, simulator_udid=None):
     target, _, _, mode = lane.split(":")
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
     observed = []
@@ -314,14 +442,16 @@ def capture(archive, work_root, lane, core_cases, facade_cases):
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(executable, copy)
         print(f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={digest(copy.read_bytes())}")
+        binding = process_binding(archive, work_root, target, mode, simulator_udid,
+                                  short, digest(copy.read_bytes()))
         records[short] = {"path": str(executable), "sha256": digest(copy.read_bytes()),
                           "archive": copy.relative_to(archive).as_posix(), "mode": binary_mode,
-                          "target": target}
+                          "target": target, "observed_process": binding}
     if len(observed) != 2523 or len(set(observed)) != 2523:
         raise ValueError("original Native full method set is incomplete or duplicate")
-    order = archive / "reports/method-order.json"
+    order = archive / "reports/report-traversal.json"
     order.write_bytes(encoded(observed))
-    print(f"QUALIFICATION_METHOD_ORDER_SHA256={digest(order.read_bytes())}")
+    print(f"QUALIFICATION_REPORT_TRAVERSAL_SHA256={digest(order.read_bytes())}")
     print("QUALIFICATION_CASE_COUNT=2523")
     return records
 
@@ -332,7 +462,137 @@ def archive_files(root):
             for path in sorted(root.rglob("*")) if path.is_file() and path != root / "receipt.json"]
 
 
-def run(repository, candidate, lane, staging, output, gradle, native_home, selection_path, hashes):
+def snapshot_archive(root, destination):
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("raw archive root is absent or linked")
+    members = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if any(part in ("", ".", "..") for part in relative.parts):
+            raise ValueError("unsafe raw archive path")
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("raw archive contains a link or special file")
+        members.append(relative)
+    if not members or Path("receipt.json") not in members:
+        raise ValueError("raw archive receipt is absent")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if os.name == "nt":
+        for relative in members:
+            path = root / relative
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise ValueError("raw archive member changed before copy")
+            with path.open("rb") as source:
+                opened = os.fstat(source.fileno())
+                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                    raise ValueError("raw archive member changed during open")
+                data = source.read()
+                after = os.fstat(source.fileno())
+            current = path.lstat()
+            identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
+                                      value.st_mtime_ns, value.st_nlink)
+            if identity(before) != identity(after) or identity(after) != identity(current):
+                raise ValueError("raw archive member changed during copy")
+            copy = destination / relative
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes(data)
+            os.utime(copy, ns=(before.st_mtime_ns, before.st_mtime_ns))
+        return
+    root_fd = os.open(root, directory_flags)
+    try:
+        for relative in members:
+            parent_fd = os.dup(root_fd)
+            try:
+                for part in relative.parts[:-1]:
+                    child_fd = os.open(part, directory_flags, dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = child_fd
+                before = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
+                if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                    raise ValueError("raw archive member changed before copy")
+                fd = os.open(relative.name, file_flags, dir_fd=parent_fd)
+                try:
+                    opened = os.fstat(fd)
+                    if (opened.st_dev, opened.st_ino, opened.st_nlink) != (before.st_dev, before.st_ino, 1):
+                        raise ValueError("raw archive member changed during open")
+                    with os.fdopen(fd, "rb", closefd=False) as source:
+                        data = source.read()
+                    after = os.fstat(fd)
+                    current = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
+                    identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
+                                              value.st_mtime_ns, value.st_nlink)
+                    if identity(before) != identity(opened) or identity(after) != identity(current):
+                        raise ValueError("raw archive member changed during copy")
+                    copy = destination / relative
+                    copy.parent.mkdir(parents=True, exist_ok=True)
+                    copy.write_bytes(data)
+                    os.utime(copy, ns=(before.st_mtime_ns, before.st_mtime_ns))
+                finally:
+                    os.close(fd)
+            finally:
+                os.close(parent_fd)
+    finally:
+        os.close(root_fd)
+
+
+def pack_archive(root, output):
+    root, output = Path(root), Path(output)
+    if output.exists() or not root.is_dir():
+        raise ValueError("transport output exists or raw archive is absent")
+    mtimes = {}
+    with tarfile.open(output, "w", format=tarfile.PAX_FORMAT) as transport:
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink() or (path.is_file() and path.stat().st_nlink != 1):
+                raise ValueError("raw transport contains a link")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            mtimes[relative] = path.stat().st_mtime_ns
+            transport.add(path, arcname=f"raw/{relative}", recursive=False)
+        data = encoded(mtimes)
+        info = tarfile.TarInfo("transport-mtimes.json")
+        info.size = len(data)
+        import io
+        transport.addfile(info, io.BytesIO(data))
+    return digest(output.read_bytes())
+
+
+def unpack_archive(transport_path, output):
+    output = Path(output)
+    if output.exists() and any(output.iterdir()):
+        raise ValueError("relocated raw output exists")
+    with tarfile.open(transport_path, "r") as transport:
+        members = transport.getmembers()
+        names = [item.name for item in members]
+        if len(names) != len(set(names)) or "transport-mtimes.json" not in names:
+            raise ValueError("raw transport member inventory differs")
+        for member in members:
+            if (not member.isfile() or (member.name != "transport-mtimes.json"
+                and (not member.name.startswith("raw/") or any(
+                    part in ("", ".", "..") for part in member.name.split("/")[1:])))):
+                raise ValueError("raw transport has a link or unsafe path")
+        mtimes = json.loads(transport.extractfile("transport-mtimes.json").read())
+        paths = {name[4:] for name in names if name.startswith("raw/")}
+        if set(mtimes) != paths:
+            raise ValueError("raw transport timestamps differ")
+        output.mkdir(parents=True, exist_ok=True)
+        for relative in sorted(paths):
+            timestamp = mtimes[relative]
+            if type(timestamp) is not int or timestamp < 0:
+                raise ValueError("raw transport timestamp is invalid")
+            destination = output / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(transport.extractfile(f"raw/{relative}").read())
+            os.utime(destination, ns=(timestamp, timestamp))
+    return output
+
+
+def run(repository, candidate, lane, staging, output, gradle, native_home, selection_path, hashes,
+        hash_provenance="audited"):
     repository, staging, output, gradle, native_home = map(lambda value: Path(value).resolve(),
                                               (repository, staging, output, gradle, native_home))
     selection = json.loads(Path(selection_path).read_bytes())
@@ -370,7 +630,8 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
     output.mkdir(parents=True, exist_ok=True)
     started = time.time_ns()
     attempt = {"candidate_sha": candidate, "lane": lane, "status": "NOT_RUN",
-               "host": host, "selection": selection}
+               "host": host, "selection": selection,
+               "artifact_hash_provenance": hash_provenance}
     (output / "attempt.json").write_bytes(encoded(attempt))
     if family and host.get("guest_state") != "Booted":
         command = ["xcrun", "simctl", "boot", selection["simulator_udid"]]
@@ -386,7 +647,12 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
         if status.returncode:
             raise ValueError("selected simulator boot status failed; attempt retained")
         host = observed_host(target, selection)
-    validate_host(lane, selection, host)
+    try:
+        validate_host(lane, selection, host)
+    except ValueError as error:
+        attempt.update({"status": "NOT_RUN", "reason": str(error), "host": host})
+        (output / "attempt.json").write_bytes(encoded(attempt))
+        raise
     (output / "host.json").write_bytes(encoded(host))
     if family:
         command = ["xcrun", "simctl", "spawn", selection["simulator_udid"],
@@ -419,9 +685,19 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
                       "gradle": str(gradle), "native_home": str(native_home),
                       "python": str(Path(sys.executable).resolve())}
     command = gradle_command(producer_paths, lane, mode, hashes)
-    with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
-        process = subprocess.Popen(command, cwd=output, stdout=stdout, stderr=stderr)
-        exit_code = process.wait()
+    stop = threading.Event()
+    monitor = threading.Thread(target=observe_test_processes, args=(work_root, target,
+        mode, selection.get("simulator_udid") if family else None, stop,
+        output / "runtime/process-observations.jsonl"), daemon=True)
+    (output / "runtime").mkdir(exist_ok=True)
+    monitor.start()
+    try:
+        with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
+            process = subprocess.Popen(command, cwd=output, stdout=stdout, stderr=stderr)
+            exit_code = process.wait()
+    finally:
+        stop.set()
+        monitor.join()
     if exit_code:
         attempt.update({"status": "FAILED", "exit_code": exit_code, "command": command,
                         "pid": process.pid})
@@ -434,7 +710,7 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
     (output / "host-after.json").write_bytes(encoded(host_after))
     products = json.loads((output / "runtime/products.json").read_bytes())
     finished = time.time_ns()
-    attempt["status"] = "PASSED"
+    attempt["status"] = "CAPTURED_UNAUDITED" if hash_provenance == "staging-self" else "PASSED"
     (output / "attempt.json").write_bytes(encoded(attempt))
     stamp = (started + finished) // 2
     for path in output.rglob("*"):
@@ -451,11 +727,12 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
                  "python_executable": producer_paths["python"],
                  "python_version": platform.python_version(),
                  "python_sha256": digest(Path(sys.executable).read_bytes())}
-    receipt = {"schema": 1, "status": "PASSED", "candidate_sha": candidate,
+    receipt = {"schema": 1, "status": attempt["status"], "candidate_sha": candidate,
                "source_tree": git(repository, "rev-parse", f"{candidate}^{{tree}}"),
                "lane": lane, **{key: manifest["lanes"][lane][key] for key in
                                 ("target", "runtime", "version", "configuration")},
                "runtime_identity": digest(encoded(host)), "artifact_hashes": hashes,
+               "artifact_hash_provenance": hash_provenance,
                "consumer_group": "full-suite",
                "consumer_contract_sha256": independent_gates.digest(contract),
                "source_inventory_sha256": digest(inputs["source-inventory.tsv"]),
@@ -483,7 +760,7 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
                    ["git", "-C", str(repository), "show", f"{candidate}:{PRODUCER}"])),
                "files": archive_files(output)}
     (output / "receipt.json").write_bytes(encoded(receipt))
-    return {"status": "PASSED", "lane": lane,
+    return {"status": attempt["status"], "lane": lane,
             "archive_sha256": independent_gates.archive_digest(output),
             "selected_cases": 2523}
 
@@ -495,6 +772,16 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
     manifest, contract = lane_contract(repository, lane)
     if not root.is_dir() or root.is_symlink() or not SHA.fullmatch(archive_digest):
         raise ValueError("independent archive provenance is absent")
+    with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+        snapshot = Path(temporary) / "archive"
+        snapshot.mkdir()
+        snapshot_archive(root, snapshot)
+        return verify_snapshot(snapshot, repository, candidate, lane, hashes, selection,
+                               archive_digest, trusted_toolchain, manifest, contract)
+
+
+def verify_snapshot(root, repository, candidate, lane, hashes, selection, archive_digest,
+                    trusted_toolchain, manifest, contract):
     if independent_gates.archive_digest(root) != archive_digest:
         raise ValueError("independent archive provenance digest differs")
     receipt = json.loads((root / "receipt.json").read_bytes())
@@ -505,6 +792,8 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
             or receipt.get("consumer_group") != "full-suite"
             or receipt.get("artifact_hashes") != hashes):
         raise ValueError("archive candidate, lane, or staged KLIB contract differs")
+    if receipt.get("artifact_hash_provenance", "audited") not in ("audited", "staging-self"):
+        raise ValueError("staged KLIB hash selection provenance differs")
     if any(receipt.get(key) != manifest["lanes"][lane][key]
            for key in ("target", "runtime", "version", "configuration")):
         raise ValueError("archive target, runtime, version, or mode differs")
@@ -599,9 +888,9 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
             raise ValueError("selected simulator guest process differs")
     if "QUALIFICATION_CASE_COUNT=2523" not in stdout:
         raise ValueError("original portable case count differs")
-    order = (root / "reports/method-order.json").read_bytes()
-    if f"QUALIFICATION_METHOD_ORDER_SHA256={digest(order)}" not in stdout:
-        raise ValueError("original method order is not process bound")
+    order = (root / "reports/report-traversal.json").read_bytes()
+    if f"QUALIFICATION_REPORT_TRAVERSAL_SHA256={digest(order)}" not in stdout:
+        raise ValueError("original report traversal is not process bound")
     graph_path = independent_gates._file_path(root, receipt["provider_graph"])
     if f"QUALIFICATION_PROVIDER_GRAPH_SHA256={digest(graph_path.read_bytes())}" not in stdout:
         raise ValueError("resolved provider graph is not process bound")
@@ -612,7 +901,9 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
                            for module in MODULES} | {
                            f"io.github.rubixhacker:{module}-{target.lower()}:0.1.0-alpha.1"
                            for module in MODULES}
-    for phase in ("compile", "runtime"):
+    if graph.get("runtime_resolution") != "native-test-executable; no separate KLIB runtime resolution":
+        raise ValueError("Native runtime graph label differs")
+    for phase in ("compile",):
         entries = graph.get(phase)
         if (not isinstance(entries, list) or len(entries) != 2
                 or {entry.get("project") for entry in entries} != {"core", "facade"}):
@@ -658,6 +949,7 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
     if receipt.get("products") != products or set(products) != {"core", "facade"}:
         raise ValueError("selected Native executable inventory differs")
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+    samples = [json.loads(line) for line in (root / "runtime/process-observations.jsonl").read_bytes().splitlines()]
     for short, product in products.items():
         copy = independent_gates._file_path(root, product["archive"])
         expected_path = path_type(paths["work_root"]) / short / "bin" / target / binary_mode
@@ -667,6 +959,21 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
                 or f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={product['sha256']}"
                 not in stdout):
             raise ValueError("selected Native executable bytes, target, or mode differ")
+        binding = product.get("observed_process")
+        if (not isinstance(binding, dict) or binding not in samples
+                or binding.get("module") != short
+                or binding.get("image_sha256") != product["sha256"]
+                or path_type(binding.get("image", "")) != path_type(product["path"])
+                or binding.get("pid", 0) <= 0 or binding.get("parent_pid", 0) <= 0
+                or not process["started_ns"] <= binding.get("observed_ns", -1)
+                <= process["finished_ns"]):
+            raise ValueError("selected Native test process is not bound to executable bytes")
+        if TARGETS[target][2] and not any(
+                sample.get("simulator_udid") == selection["simulator_udid"]
+                and product["path"] in sample.get("command", "")
+                and process["started_ns"] <= sample.get("observed_ns", -1)
+                <= process["finished_ns"] for sample in samples):
+            raise ValueError("selected simulator did not spawn the observed test executable")
     observed = []
     expected_raw_paths = sorted(path.relative_to(root).as_posix() for path in
                                 (root / "reports/raw").rglob("TEST-*.xml"))
@@ -697,15 +1004,24 @@ def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
         observed.extend(module_ids)
     check_method_coverage(observed, [case["id"] for case in contract["cases"]])
     if json.loads(order) != observed:
-        raise ValueError("original Native method order differs from archived execution")
+        raise ValueError("original Native report traversal differs")
     return {"status": "PASSED", "lane": lane, "candidate_sha": candidate,
             "selected_cases": len(observed), "archive_sha256": archive_digest,
+            "artifact_hash_provenance": receipt.get("artifact_hash_provenance", "audited"),
             "complete_selected_suite": True}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
+    probe = sub.add_parser("probe")
+    probe.add_argument("--lane", required=True)
+    pack = sub.add_parser("pack")
+    pack.add_argument("--archive", required=True)
+    pack.add_argument("--output", required=True)
+    unpack = sub.add_parser("unpack")
+    unpack.add_argument("--transport", required=True)
+    unpack.add_argument("--output", required=True)
     capture_parser = sub.add_parser("capture")
     for name in ("repository", "archive", "work-root", "lane", "core-cases", "facade-cases"):
         capture_parser.add_argument(f"--{name}", required=True)
@@ -716,12 +1032,30 @@ def main(argv=None):
             route.add_argument(f"--{name}", required=True)
     for name in ("staging", "output", "gradle", "native-home"):
         produce.add_argument(f"--{name}", required=True)
+    produce.add_argument("--hash-provenance", choices=("audited", "staging-self"),
+                         default="audited")
     for name in ("archive", "expected-archive-digest", "trusted-toolchain"):
         replay.add_argument(f"--{name}", required=True)
     args = parser.parse_args(argv)
+    if args.action == "probe":
+        target, _, role, _ = args.lane.split(":")
+        if target not in TARGETS or TARGETS[target][2]:
+            raise ValueError("host probe requires a supported non-simulator target")
+        host = observed_host(target, {})
+        print(json.dumps({"lane": args.lane, "role": role, **host}, sort_keys=True))
+        return 0
+    if args.action == "pack":
+        print(json.dumps({"transport_sha256": pack_archive(args.archive, args.output)}))
+        return 0
+    if args.action == "unpack":
+        unpack_archive(args.transport, args.output)
+        print(json.dumps({"archive": args.output}))
+        return 0
     if args.action == "capture":
+        selection = json.loads((Path(args.archive) / "inputs/runtime-selection.json").read_bytes())
         records = capture(Path(args.archive), Path(args.work_root), args.lane,
-                          Path(args.core_cases), Path(args.facade_cases))
+                          Path(args.core_cases), Path(args.facade_cases),
+                          selection.get("simulator_udid"))
         path = Path(args.archive) / "runtime/products.json"
         path.write_bytes(encoded(records))
         print(f"QUALIFICATION_RUNTIME_PRODUCTS_SHA256={digest(path.read_bytes())}")
@@ -733,13 +1067,14 @@ def main(argv=None):
     selection = json.loads(Path(args.runtime_selection).read_bytes())
     if args.action == "run":
         result = run(args.repository, args.candidate_sha, args.lane, args.staging,
-                     args.output, args.gradle, args.native_home, args.runtime_selection, hashes)
+                     args.output, args.gradle, args.native_home, args.runtime_selection, hashes,
+                     args.hash_provenance)
     else:
         toolchain = json.loads(Path(args.trusted_toolchain).read_bytes())
         result = verify(args.archive, args.repository, args.candidate_sha, args.lane,
                         hashes, selection, args.expected_archive_digest, toolchain)
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["status"] == "PASSED" else 1
+    return 0 if result["status"] in ("PASSED", "CAPTURED_UNAUDITED") else 1
 
 
 if __name__ == "__main__":

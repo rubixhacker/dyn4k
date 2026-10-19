@@ -1,6 +1,9 @@
 name: Full staged Native host consumer
 
 on:
+  push:
+    branches:
+      - codex/full-staged-native-host-consumer-112
   workflow_dispatch:
     inputs:
       target:
@@ -30,8 +33,8 @@ on:
           - debug-g
           - optimized-opt
       runtime_selection:
-        description: JSON with exact host OS and selected simulator identity
-        required: true
+        description: JSON with exact host OS and simulator identity; blank probes the selected host
+        required: false
         type: string
 
 permissions:
@@ -39,13 +42,19 @@ permissions:
 
 jobs:
   consumer:
-    runs-on: ${{ inputs.target == 'linuxArm64' && 'ubuntu-24.04-arm' || inputs.target == 'mingwX64' && 'windows-2025' || inputs.target == 'iosX64' && 'macos-26-intel' || 'macos-26' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(github.event_name == 'push' && '["linuxArm64"]' || format('["{0}"]', inputs.target)) }}
+        role: ${{ fromJSON(github.event_name == 'push' && '["current","minimum"]' || format('["{0}"]', inputs.version_role)) }}
+        mode: ${{ fromJSON(github.event_name == 'push' && '["debug-g","optimized-opt"]' || format('["{0}"]', inputs.mode)) }}
+    runs-on: ${{ matrix.target == 'linuxArm64' && 'ubuntu-24.04-arm' || matrix.target == 'mingwX64' && 'windows-2025' || matrix.target == 'iosX64' && 'macos-26-intel' || 'macos-26' }}
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      DYN4K_SELECTION_JSON: ${{ inputs.runtime_selection }}
-      DYN4K_TARGET: ${{ inputs.target }}
-      DYN4K_ROLE: ${{ inputs.version_role }}
-      DYN4K_MODE: ${{ inputs.mode }}
+      DYN4K_SELECTION_JSON: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_selection || '' }}
+      DYN4K_TARGET: ${{ matrix.target }}
+      DYN4K_ROLE: ${{ matrix.role }}
+      DYN4K_MODE: ${{ matrix.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,7 +102,12 @@ jobs:
             test -d "$DEVELOPER_DIR"
             xcodebuild -version
           fi
-          printf '%s' "$DYN4K_SELECTION_JSON" > "$root/runtime-selection.json"
+          if [[ -n "$DYN4K_SELECTION_JSON" ]]; then
+            printf '%s' "$DYN4K_SELECTION_JSON" > "$root/runtime-selection.json"
+          else
+            python3 tools/qualification/full_native_host_consumer.py probe --lane "$lane" \
+              > "$root/runtime-selection.json"
+          fi
           candidate=$(git rev-parse HEAD)
           test "$candidate" = "$GITHUB_SHA"
           gradle="$GITHUB_WORKSPACE/gradlew"
@@ -113,13 +127,15 @@ jobs:
           facade="$base/dyn4k-$variant/0.1.0-alpha.1/dyn4k-$variant-0.1.0-alpha.1.klib"
           core_sha=$(sha256sum "$core" | cut -d' ' -f1)
           facade_sha=$(sha256sum "$facade" | cut -d' ' -f1)
+          printf '{"source":"staging-self","dyn4k-core":"%s","dyn4k":"%s"}\n' \
+            "$core_sha" "$facade_sha" > "$root/staging-hashes.json"
           python3 tools/qualification/full_native_host_consumer.py run \
             --repository "$GITHUB_WORKSPACE" --candidate-sha "$candidate" \
             --lane "$lane" --staging "$root/staging" --output "$root/raw" \
             --gradle "$gradle" --native-home "$native_home" \
             --runtime-selection "$root/runtime-selection.json" \
             --expected-core-sha256 "$core_sha" \
-            --expected-facade-sha256 "$facade_sha" \
+            --expected-facade-sha256 "$facade_sha" --hash-provenance staging-self \
             > "$root/producer.stdout" 2> "$root/producer.stderr"
       - name: Run selected Windows Native consumer
         if: runner.os == 'Windows'
@@ -130,7 +146,12 @@ jobs:
           $env:TMPDIR = Join-Path $root 'tmp'
           $env:GRADLE_USER_HOME = Join-Path $HOME '.gradle'
           $lane = 'mingwX64:Windows x64:' + $env:DYN4K_ROLE + ':' + $env:DYN4K_MODE
-          [IO.File]::WriteAllText((Join-Path $root 'runtime-selection.json'), $env:DYN4K_SELECTION_JSON)
+          if ($env:DYN4K_SELECTION_JSON) {
+            [IO.File]::WriteAllText((Join-Path $root 'runtime-selection.json'), $env:DYN4K_SELECTION_JSON)
+          } else {
+            python tools/qualification/full_native_host_consumer.py probe --lane $lane |
+              Out-File -Encoding utf8 (Join-Path $root 'runtime-selection.json')
+          }
           $candidate = (git rev-parse HEAD).Trim()
           if ($candidate -ne $env:GITHUB_SHA) { throw 'candidate SHA differs' }
           $gradle = Join-Path $env:GITHUB_WORKSPACE 'gradlew.bat'
@@ -151,19 +172,38 @@ jobs:
           $facade = Join-Path $base 'dyn4k-mingwx64/0.1.0-alpha.1/dyn4k-mingwx64-0.1.0-alpha.1.klib'
           $coreSha = (Get-FileHash -Algorithm SHA256 $core).Hash.ToLowerInvariant()
           $facadeSha = (Get-FileHash -Algorithm SHA256 $facade).Hash.ToLowerInvariant()
+          @{source='staging-self'; 'dyn4k-core'=$coreSha; dyn4k=$facadeSha} |
+            ConvertTo-Json -Compress | Out-File -Encoding utf8 (Join-Path $root 'staging-hashes.json')
           python tools/qualification/full_native_host_consumer.py run `
             --repository $env:GITHUB_WORKSPACE --candidate-sha $candidate `
             --lane $lane --staging (Join-Path $root 'staging') `
             --output (Join-Path $root 'raw') --gradle $gradle `
             --native-home $nativeHome --runtime-selection (Join-Path $root 'runtime-selection.json') `
             --expected-core-sha256 $coreSha --expected-facade-sha256 $facadeSha `
+            --hash-provenance staging-self `
             > (Join-Path $root 'producer.stdout') 2> (Join-Path $root 'producer.stderr')
           if ($LASTEXITCODE -ne 0) { throw 'Native consumer failed; raw attempt retained' }
+      - name: Pack raw attempt with nanosecond timestamp manifest
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$DYN4K_RUN_ROOT/raw" ]]; then
+            if [[ "$RUNNER_OS" == Windows ]]; then python=python; else python=python3; fi
+            "$python" tools/qualification/full_native_host_consumer.py pack \
+              --archive "$DYN4K_RUN_ROOT/raw" --output "$DYN4K_RUN_ROOT/raw.tar" \
+              > "$DYN4K_RUN_ROOT/transport.json"
+          fi
       - name: Retain selected route and failed attempt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: full-native-host-${{ github.sha }}-${{ inputs.target }}-${{ inputs.version_role }}-${{ inputs.mode }}
-          path: ${{ env.DYN4K_RUN_ROOT }}/
+          name: full-native-host-${{ github.sha }}-${{ matrix.target }}-${{ matrix.role }}-${{ matrix.mode }}
+          path: |
+            ${{ env.DYN4K_RUN_ROOT }}/raw.tar
+            ${{ env.DYN4K_RUN_ROOT }}/transport.json
+            ${{ env.DYN4K_RUN_ROOT }}/producer.stdout
+            ${{ env.DYN4K_RUN_ROOT }}/producer.stderr
+            ${{ env.DYN4K_RUN_ROOT }}/runtime-selection.json
+            ${{ env.DYN4K_RUN_ROOT }}/staging-hashes.json
           include-hidden-files: true
           if-no-files-found: warn

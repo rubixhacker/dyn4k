@@ -6,7 +6,7 @@ The producer accepts these seven target/runtime families: Linux ARM64, Windows x
 
 ## Run one selected lane
 
-Use a clean checkout at the candidate SHA. Stage the two target publications with the pinned build, then copy the Maven repository outside that checkout. Supply the independently measured SHA-256 values of both target KLIBs. Use JDK 21, Gradle 9.5.0, and Kotlin/Native 2.4.20. `JAVA_HOME`, `GRADLE_USER_HOME`, and `TMPDIR` must be explicit. Place `--output` on home backed storage. Each attempt needs a new output path; the producer refuses an occupied path and retains a failed attempt.
+Use a clean checkout at the candidate SHA. Stage the two target publications with the pinned build, then copy the Maven repository outside that checkout. Supply separately audited SHA-256 values of both target KLIBs for a qualification attempt. Use JDK 21, Gradle 9.5.0, and Kotlin/Native 2.4.20. `JAVA_HOME`, `GRADLE_USER_HOME`, and `TMPDIR` must be explicit. Place `--output` on home backed storage. Each attempt needs a new output path; the producer refuses an occupied path and retains a failed attempt.
 
 The independent runtime selection JSON contains the full lane ID, role, host system, machine, and exact observed host OS version. Linux ARM64 also names glibc. A simulator selection also names its UDID, CoreSimulator runtime identifier, and guest OS version. An example current iOS simulator selection is:
 
@@ -23,7 +23,7 @@ The independent runtime selection JSON contains the full lane ID, role, host sys
 }
 ```
 
-Replace every example value with the selected live host and device identity. The producer compares the selection with OS and `simctl` observations. It boots a selected simulator if needed, waits for boot, executes a guest process, binds the Gradle Native test task to the UDID, and checks the same device again after the run. The selected test task must execute and emit its original XML. A link alone, a different target's test task, a shutdown device, or missing original XML cannot pass. The Gradle test task is the simulator test host; it runs the selected executable on the bound simulator.
+Replace every example value with the selected live host and device identity. Windows selection must include `windows_product_type: "client"` and the exact `windows_product_name`; a Server product fails the client lane. The producer compares the selection with OS and `simctl` observations. It boots a selected simulator if needed, waits for boot, binds the Gradle Native test task to the UDID, and checks the same device again after the run. Process sampling must observe the selected test image and its bytes while it runs. Simulator evidence additionally requires the observed `simctl spawn` command to name the selected UDID and executable path. If sampling misses either process, the attempt fails closed. The selected test task must execute and emit its original XML.
 
 ```sh
 export JAVA_HOME=/path/to/pinned/jdk21
@@ -39,11 +39,19 @@ python3 tools/qualification/full_native_host_consumer.py run \
   --expected-facade-sha256 "$AUDITED_FACADE_KLIB_SHA256"
 ```
 
-`debug-g` compiles the test with `-g` and uses `debugTest`. `optimized-opt` compiles with `-opt`, links `releaseTest`, and redirects the selected Native test task to that release executable. The archive retains the mode init script, compiler flag output, link and test task output, original XML, normalized XML with manifest IDs, method order, provider graph, resolved KLIB copies, program bytes, process command and PID, source inventory, host observations, and simulator guest process records. A successful build message without all 2,523 original method outcomes fails capture.
+`debug-g` compiles the test with `-g` and uses `debugTest`. `optimized-opt` compiles with `-opt`, links `releaseTest`, and redirects the selected Native test task to that release executable. The archive retains the mode init script, compiler flags, Gradle's raw Native test events in `stdout.txt`, original XML, normalized XML with manifest IDs, deterministic XML report traversal, compile provider graph, resolved KLIB copies, program bytes, sampled process image and hash, source inventory, host observations, and simulator spawn records. The graph labels the Native runtime as an executable launch; it has no separately resolved KLIB runtime configuration. The report traversal sorts XML filenames and retains testcase order within each file. It does not assert global chronological method execution order. A successful build message without all 2,523 original method outcomes fails capture.
 
 ## Verify a relocated archive
 
-Copy the entire raw directory without changing file modification times. Select the archive digest, source checkout, core and facade KLIB hashes, runtime selection, and toolchain values independently. The trusted toolchain JSON must match the producer's exact JDK 21 executable path, version line, and SHA-256; Gradle 9.5.0 executable path and SHA-256; Gradle user home; KGP 2.4.20; and Kotlin/Native 2.4.20 home, version, executable SHA-256, and compiler JAR SHA-256. Do not derive expected values only from the transported receipt.
+Transport the raw directory through the producer's `pack` and `unpack` commands. The tar contains a timestamp manifest; `unpack` restores exact nanosecond mtimes. Select the archive digest, source checkout, core and facade KLIB hashes, runtime selection, and toolchain values independently. The trusted toolchain JSON must match the producer's exact JDK 21 executable path, version line, and SHA-256; Gradle 9.5.0 executable path and SHA-256; Gradle user home; KGP 2.4.20; and Kotlin/Native 2.4.20 home, version, executable SHA-256, and compiler JAR SHA-256. Do not derive expected values only from the transported receipt or workflow staging copy.
+
+```sh
+python3 tools/qualification/full_native_host_consumer.py pack \
+  --archive "$RAW_DIRECTORY" --output "$HOME/dyn4k-native-evidence/raw.tar"
+python3 tools/qualification/full_native_host_consumer.py unpack \
+  --transport "$HOME/dyn4k-native-evidence/raw.tar" \
+  --output "$HOME/dyn4k-native-evidence/relocated-raw"
+```
 
 ```sh
 python3 tools/qualification/full_native_host_consumer.py verify \
@@ -56,6 +64,6 @@ python3 tools/qualification/full_native_host_consumer.py verify \
   --expected-facade-sha256 "$AUDITED_FACADE_KLIB_SHA256"
 ```
 
-The public verifier authenticates the complete archive and source tree, checks the exact Gradle command and process window, and compares the original XML order and outcomes with the normalized IDs. It checks both Maven provider graphs, resolved KLIB bytes and origins, compiler flags, executable bytes and mode, and host identity. It does not turn a current runtime into a minimum runtime. It does not run numerical, physical, performance, publication, or global qualification gates.
+The public verifier first copies the archive into isolated regular files and rejects hardlinks, symlinks, unsafe paths, and path changes during copying. It authenticates the archive and source tree, checks the exact Gradle command and process window, and compares the deterministic XML report traversal and outcomes with normalized IDs. It checks both compile Maven provider graphs, resolved KLIB bytes and origins, compiler flags, sampled executable process bytes and mode, and host identity. It does not turn a current runtime into a minimum runtime. It does not run numerical, physical, performance, publication, or global qualification gates.
 
-The optional [host workflow](../../.github/workflows/full-staged-native-host.yml) can dispatch one route on available Mac, Windows, or Linux ARM64 labels. It retains failed attempts. Its hosted labels do not supply old minimum OS versions merely because the matrix includes minimum IDs. The workflow has not been pushed or executed from this branch. A public verifier pass still needs the separately owned signed adapter and central independent gate integration before an assembled lane can pass.
+The optional [host workflow](../../.github/workflows/full-staged-native-host.yml) can dispatch one route on available Mac, Windows, or Linux ARM64 labels. It uploads a tar of each existing raw attempt and retains failed attempts. A blank runtime selection probes the observed host; the current hosted Linux ARM64 label does not satisfy the Linux minimum kernel and glibc floors merely because `minimum` was selected. The `windows-2025` runner is a Server probe, not a Windows client qualification host. Workflow KLIB hashes are computed from its own staging copy and are recorded as `staging-self`; they show internal consistency only. Signed intake requires separately audited expected target KLIB hashes. A public verifier pass still needs the separately owned signed adapter and central independent gate integration before an assembled lane can pass.
