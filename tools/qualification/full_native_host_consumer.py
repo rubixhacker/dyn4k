@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import ctypes
 import hashlib
+import io
 import json
 import os
 import platform
@@ -522,9 +524,435 @@ def archive_files(root):
             for path in sorted(root.rglob("*")) if path.is_file() and path != root / "receipt.json"]
 
 
+def windows_component(name):
+    if (not name or name in (".", "..") or len(name) > 255
+            or name[-1] in (".", " ") or any(char in name for char in '\\/:*?"<>|\0')
+            or any(ord(char) < 32 for char in name)
+            or name.split(".", 1)[0].upper() in
+            {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
+             *(f"LPT{n}" for n in range(1, 10))}):
+        raise ValueError("unsafe Windows archive path component")
+    return name
+
+
+def windows_components(path):
+    value = PureWindowsPath(str(path))
+    if (not value.is_absolute() or not re.fullmatch(r"[A-Za-z]:\\", value.anchor)
+            or len(str(path)) >= 32767):
+        raise ValueError("Windows archive path needs a local absolute drive")
+    return value.anchor, tuple(windows_component(part) for part in value.parts[1:])
+
+
+def windows_transport_name(name):
+    if not isinstance(name, str) or not name.startswith("raw/") or "\\" in name:
+        raise ValueError("unsafe Windows transport member")
+    parts = name.split("/")
+    if len(parts) < 2:
+        raise ValueError("unsafe Windows transport member")
+    for part in parts[1:]:
+        windows_component(part)
+    return tuple(parts[1:])
+
+
+def windows_unique_names(names):
+    observed = {}
+    complete = set()
+    for name in names:
+        if name.casefold() in complete:
+            raise ValueError("Windows transport has aliased duplicate members")
+        complete.add(name.casefold())
+        parts = name.split("/")
+        for length in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:length])
+            previous = observed.setdefault(prefix.casefold(), prefix)
+            if previous != prefix:
+                raise ValueError("Windows transport has aliased duplicate members")
+
+
+class WindowsArchiveApi:
+    READ_ATTRIBUTES = 0x80
+    WRITE_ATTRIBUTES = 0x100
+    SYNCHRONIZE = 0x100000
+    LIST_DIRECTORY = 0x1
+    TRAVERSE = 0x20
+    ADD_FILE = 0x2
+    ADD_SUBDIRECTORY = 0x4
+    READ_DATA = 0x1
+    WRITE_DATA = 0x2
+
+    def __init__(self):
+        if os.name != "nt":
+            raise ValueError("Windows archive operation requires a Windows host")
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.nt = ctypes.WinDLL("ntdll")
+        word, dword, handle = ctypes.c_uint16, ctypes.c_uint32, ctypes.c_void_p
+
+        class UnicodeString(ctypes.Structure):
+            _fields_ = [("Length", word), ("MaximumLength", word),
+                        ("Buffer", ctypes.c_wchar_p)]
+
+        class ObjectAttributes(ctypes.Structure):
+            _fields_ = [("Length", dword), ("RootDirectory", handle),
+                        ("ObjectName", ctypes.POINTER(UnicodeString)),
+                        ("Attributes", dword), ("SecurityDescriptor", handle),
+                        ("SecurityQualityOfService", handle)]
+
+        class IoStatusBlock(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_long), ("Information", ctypes.c_size_t)]
+
+        class FileTime(ctypes.Structure):
+            _fields_ = [("low", dword), ("high", dword)]
+
+        class FileInformation(ctypes.Structure):
+            _fields_ = [("attributes", dword), ("created", FileTime),
+                        ("accessed", FileTime), ("modified", FileTime),
+                        ("volume", dword), ("size_high", dword), ("size_low", dword),
+                        ("links", dword), ("index_high", dword), ("index_low", dword)]
+
+        class BasicInformation(ctypes.Structure):
+            _fields_ = [("created", ctypes.c_longlong), ("accessed", ctypes.c_longlong),
+                        ("modified", ctypes.c_longlong), ("changed", ctypes.c_longlong),
+                        ("attributes", dword)]
+
+        self.UnicodeString = UnicodeString
+        self.ObjectAttributes = ObjectAttributes
+        self.IoStatusBlock = IoStatusBlock
+        self.FileTime = FileTime
+        self.FileInformation = FileInformation
+        self.BasicInformation = BasicInformation
+        self.kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, dword, dword, handle,
+                                            dword, dword, handle]
+        self.kernel.CreateFileW.restype = handle
+        self.kernel.CloseHandle.argtypes = [handle]
+        self.kernel.CloseHandle.restype = ctypes.c_int
+        self.kernel.GetFileInformationByHandle.argtypes = [handle,
+                                                           ctypes.POINTER(FileInformation)]
+        self.kernel.GetFileInformationByHandle.restype = ctypes.c_int
+        self.kernel.ReadFile.argtypes = [handle, handle, dword, ctypes.POINTER(dword), handle]
+        self.kernel.ReadFile.restype = ctypes.c_int
+        self.kernel.WriteFile.argtypes = [handle, handle, dword, ctypes.POINTER(dword), handle]
+        self.kernel.WriteFile.restype = ctypes.c_int
+        self.kernel.SetFileTime.argtypes = [handle, handle, handle, ctypes.POINTER(FileTime)]
+        self.kernel.SetFileTime.restype = ctypes.c_int
+        self.kernel.SetFileInformationByHandle.argtypes = [handle, dword, handle, dword]
+        self.kernel.SetFileInformationByHandle.restype = ctypes.c_int
+        self.nt.NtCreateFile.argtypes = [ctypes.POINTER(handle), dword,
+            ctypes.POINTER(ObjectAttributes), ctypes.POINTER(IoStatusBlock), handle,
+            dword, dword, dword, dword, handle, dword]
+        self.nt.NtCreateFile.restype = ctypes.c_long
+
+    def close(self, value):
+        if not self.kernel.CloseHandle(value):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def info(self, value, directory):
+        data = self.FileInformation()
+        if not self.kernel.GetFileInformationByHandle(value, ctypes.byref(data)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if (data.attributes & 0x400 or bool(data.attributes & 0x10) != directory
+                or (not directory and data.links != 1)):
+            raise ValueError("Windows archive contains a reparse point, hardlink, or wrong type")
+        ticks = (data.modified.high << 32) | data.modified.low
+        return ((data.volume, data.index_high, data.index_low, data.links,
+                 (data.size_high << 32) | data.size_low, ticks, data.attributes),
+                (ticks - 116444736000000000) * 100)
+
+    def drive(self, anchor, *, writable=False):
+        access = self.READ_ATTRIBUTES | self.TRAVERSE | self.LIST_DIRECTORY
+        if writable:
+            access |= self.ADD_FILE | self.ADD_SUBDIRECTORY
+        value = self.kernel.CreateFileW("\\\\?\\" + anchor, access, 3, None, 3,
+                                        0x02000000 | 0x00200000, None)
+        if value in (None, ctypes.c_void_p(-1).value):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            self.info(value, True)
+            return value
+        except BaseException:
+            self.close(value)
+            raise
+
+    def child(self, parent, name, *, directory, create=False, writable=False):
+        windows_component(name)
+        text = ctypes.create_unicode_buffer(name)
+        string = self.UnicodeString(len(name) * 2, (len(name) + 1) * 2,
+                                    ctypes.cast(text, ctypes.c_wchar_p))
+        attributes = self.ObjectAttributes(ctypes.sizeof(self.ObjectAttributes), parent,
+                                           ctypes.pointer(string), 0, None, None)
+        status = self.IoStatusBlock()
+        value = ctypes.c_void_p()
+        access = self.READ_ATTRIBUTES | self.SYNCHRONIZE
+        if create:
+            access |= 0x10000
+        if directory:
+            access |= self.LIST_DIRECTORY | self.TRAVERSE
+            if writable:
+                access |= self.ADD_FILE | self.ADD_SUBDIRECTORY
+        else:
+            access |= (self.WRITE_DATA | self.WRITE_ATTRIBUTES) if writable else self.READ_DATA
+        options = 0x00200000 | 0x20 | (0x1 if directory else 0x40)
+        disposition = 2 if create else 1
+        result = self.nt.NtCreateFile(ctypes.byref(value), access, ctypes.byref(attributes),
+            ctypes.byref(status), None, 0x80, 3 if writable else 1,
+            disposition, options, None, 0)
+        if result < 0:
+            raise OSError(f"NtCreateFile rejected anchored archive member: 0x{result & 0xffffffff:08x}")
+        try:
+            self.info(value, directory)
+            return value
+        except BaseException as error:
+            try:
+                if create:
+                    self.discard(value, directory)
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive cleanup failed: {cleanup_error}")
+            try:
+                self.close(value)
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive cleanup failed: {cleanup_error}")
+            raise
+
+    def discard(self, value, directory):
+        if not directory:
+            basic = self.BasicInformation(0, 0, 0, 0, 0x80)
+            if not self.kernel.SetFileInformationByHandle(
+                    value, 0, ctypes.byref(basic), ctypes.sizeof(basic)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        disposition = ctypes.c_byte(1)
+        if not self.kernel.SetFileInformationByHandle(
+                value, 4, ctypes.byref(disposition), ctypes.sizeof(disposition)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    @contextlib.contextmanager
+    def walk(self, path, *, create_last=False, writable=False):
+        anchor, parts = windows_components(path)
+        stack = contextlib.ExitStack()
+        try:
+            current = self.drive(anchor, writable=writable and
+                                 (not parts or create_last and len(parts) == 1))
+            stack.callback(self.close, current)
+            for index, part in enumerate(parts):
+                current = self.child(current, part, directory=True,
+                                     create=create_last and index == len(parts) - 1,
+                                     writable=writable and (index == len(parts) - 1
+                                          or create_last and index == len(parts) - 2))
+                stack.callback(self.close, current)
+            yield current
+        except BaseException as error:
+            try:
+                stack.close()
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive close failed: {cleanup_error}")
+            raise
+        else:
+            stack.close()
+
+    def read(self, value):
+        before, _ = self.info(value, False)
+        remaining = before[4]
+        chunks = []
+        while remaining:
+            length = min(remaining, 1024 * 1024)
+            buffer = ctypes.create_string_buffer(length)
+            count = ctypes.c_uint32()
+            if not self.kernel.ReadFile(value, buffer, length, ctypes.byref(count), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not 0 < count.value <= length:
+                raise ValueError("Windows archive file ended during read")
+            chunks.append(buffer.raw[:count.value])
+            remaining -= count.value
+        if self.info(value, False)[0] != before:
+            raise ValueError("Windows archive file changed during read")
+        return b"".join(chunks)
+
+    def write(self, value, data, mtime_ns, mode):
+        for offset in range(0, len(data), 1024 * 1024):
+            chunk = data[offset:offset + 1024 * 1024]
+            buffer = ctypes.create_string_buffer(chunk)
+            count = ctypes.c_uint32()
+            if not self.kernel.WriteFile(value, buffer, len(chunk), ctypes.byref(count), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if count.value != len(chunk):
+                raise ValueError("Windows archive file write was short")
+        if mtime_ns % 100:
+            raise ValueError("Windows filesystem cannot retain this nanosecond timestamp")
+        ticks = mtime_ns // 100 + 116444736000000000
+        if not 0 <= ticks < 1 << 64:
+            raise ValueError("Windows archive timestamp is outside FILETIME")
+        stamp = self.FileTime(ticks & 0xffffffff, ticks >> 32)
+        if not self.kernel.SetFileTime(value, None, None, ctypes.byref(stamp)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        basic = self.BasicInformation(0, 0, 0, 0, 0x80 if mode & 0o222 else 0x1)
+        if not self.kernel.SetFileInformationByHandle(value, 0, ctypes.byref(basic),
+                                                      ctypes.sizeof(basic)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        info, observed = self.info(value, False)
+        if info[4] != len(data) or observed != mtime_ns:
+            raise ValueError("Windows archive bytes or timestamp differ after write")
+
+    def read_absolute(self, path):
+        anchor, parts = windows_components(path)
+        if not parts:
+            raise ValueError("Windows archive file path is a drive root")
+        with self.walk(PureWindowsPath(anchor, *parts[:-1])) as parent:
+            value = self.child(parent, parts[-1], directory=False)
+            try:
+                return self.read(value)
+            finally:
+                self.close(value)
+
+    def write_absolute(self, path, data):
+        anchor, parts = windows_components(path)
+        if not parts:
+            raise ValueError("Windows archive file path is a drive root")
+        with self.walk(PureWindowsPath(anchor, *parts[:-1]), writable=True) as parent:
+            value = self.child(parent, parts[-1], directory=False, create=True, writable=True)
+            try:
+                self.write(value, data, time.time_ns() // 100 * 100, 0o600)
+            finally:
+                self.close(value)
+
+    def scan(self, root):
+        _, parts = windows_components(root)
+        if not parts:
+            raise ValueError("Windows raw archive root cannot be a drive root")
+        rows = []
+        with self.walk(root) as anchor:
+            def visit(parent, path, prefix):
+                for entry in sorted(os.scandir(path), key=lambda item: item.name.casefold()):
+                    name = windows_component(entry.name)
+                    relative = prefix + (name,)
+                    directory = entry.is_dir(follow_symlinks=False)
+                    value = self.child(parent, name, directory=directory)
+                    try:
+                        before, mtime_ns = self.info(value, directory)
+                        if directory:
+                            visit(value, Path(entry.path), relative)
+                        else:
+                            data = self.read(value)
+                            mode = 0o444 if before[-1] & 1 else 0o666
+                            rows.append((relative, data, mtime_ns, mode))
+                        if self.info(value, directory)[0] != before:
+                            raise ValueError("Windows archive member changed during scan")
+                    finally:
+                        self.close(value)
+            visit(anchor, Path(root), ())
+        windows_unique_names(["/".join(parts) for parts, _, _, _ in rows])
+        return sorted(rows)
+
+    def write_tree(self, destination, rows, *, create):
+        _, parts = windows_components(destination)
+        if not parts:
+            raise ValueError("Windows archive output cannot be a drive root")
+        with self.walk(destination, create_last=create, writable=True) as anchor:
+            if not create and any(os.scandir(destination)):
+                raise ValueError("Windows archive snapshot destination is not empty")
+            directories = {(): anchor}
+            opened = []
+            created_files = []
+            try:
+                for relative, data, mtime_ns, mode in rows:
+                    prefix = ()
+                    for part in relative[:-1]:
+                        child_prefix = prefix + (part,)
+                        if child_prefix not in directories:
+                            directories[child_prefix] = self.child(
+                                directories[prefix], part, directory=True,
+                                create=True, writable=True)
+                            opened.append(directories[child_prefix])
+                        prefix = child_prefix
+                    parent = directories[prefix]
+                    value = self.child(parent, relative[-1], directory=False,
+                                       create=True, writable=True)
+                    if create:
+                        created_files.append(value)
+                    try:
+                        self.write(value, data, mtime_ns, mode)
+                    finally:
+                        if not create:
+                            self.close(value)
+                while created_files:
+                    self.close(created_files[-1])
+                    created_files.pop()
+            except BaseException as error:
+                if create:
+                    cleanup_errors = []
+                    while created_files:
+                        value = created_files.pop()
+                        try:
+                            self.discard(value, False)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                        try:
+                            self.close(value)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                    while opened:
+                        value = opened.pop()
+                        try:
+                            self.discard(value, True)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                        try:
+                            self.close(value)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                    try:
+                        self.discard(anchor, True)
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+                    if cleanup_errors:
+                        error.add_note(f"Windows archive cleanup failed: {cleanup_errors[0]}")
+                raise
+            finally:
+                for value in reversed(opened):
+                    self.close(value)
+
+
+def windows_unpack_archive(transport_path, output):
+    api = WindowsArchiveApi()
+    source = io.BytesIO(api.read_absolute(transport_path))
+    with tarfile.open(fileobj=source, mode="r:*") as transport:
+        members = transport.getmembers()
+        names = [member.name for member in members]
+        windows_unique_names(names)
+        if "transport-mtimes.json" not in names or "raw/receipt.json" not in names:
+            raise ValueError("Windows transport inventory or receipt differs")
+        paths = {}
+        for member in members:
+            if not member.isfile():
+                raise ValueError("Windows transport has a link or special member")
+            if member.name != "transport-mtimes.json":
+                paths[member.name] = windows_transport_name(member.name)
+        mtimes = json.loads(transport.extractfile("transport-mtimes.json").read())
+        if (set(mtimes) != {name[4:] for name in paths}
+                or any(type(value) is not int or value < 0 or value % 100
+                       for value in mtimes.values())):
+            raise ValueError("Windows transport timestamps differ")
+        if any(value // 100 + 116444736000000000 >= 1 << 64
+               for value in mtimes.values()):
+            raise ValueError("Windows transport timestamp is outside FILETIME")
+        rows = []
+        for name in sorted(paths):
+            member = transport.getmember(name)
+            if member.mode & ~0o777:
+                raise ValueError("Windows transport has privileged file mode")
+            rows.append((paths[name], transport.extractfile(member).read(),
+                         mtimes[name[4:]], member.mode))
+    api.write_tree(output, rows, create=True)
+    return Path(output)
+
+
 def snapshot_archive(root, destination, *, platform_name=None):
     if (platform_name or os.name) == "nt":
-        raise ValueError("Windows archive snapshot requires a handle-anchored parent walk")
+        if os.name != "nt":
+            raise ValueError("Windows archive snapshot requires a Windows host")
+        api = WindowsArchiveApi()
+        rows = api.scan(root)
+        if not rows or ("receipt.json",) not in [row[0] for row in rows]:
+            raise ValueError("raw archive receipt is absent")
+        api.write_tree(destination, rows, create=False)
+        return
     if not root.is_dir() or root.is_symlink():
         raise ValueError("raw archive root is absent or linked")
     members = []
@@ -582,6 +1010,27 @@ def pack_archive(root, output):
     root, output = Path(root), Path(output)
     if output.exists() or not root.is_dir():
         raise ValueError("transport output exists or raw archive is absent")
+    if os.name == "nt":
+        api = WindowsArchiveApi()
+        rows = api.scan(root)
+        if not rows or ("receipt.json",) not in [row[0] for row in rows]:
+            raise ValueError("raw archive receipt is absent")
+        mtimes = {"/".join(relative): mtime_ns for relative, _, mtime_ns, _ in rows}
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as transport:
+            for relative, data, mtime_ns, mode in rows:
+                info = tarfile.TarInfo("raw/" + "/".join(relative))
+                info.size = len(data)
+                info.mode = mode
+                info.mtime = mtime_ns // 1_000_000_000
+                transport.addfile(info, io.BytesIO(data))
+            encoded_mtimes = encoded(mtimes)
+            info = tarfile.TarInfo("transport-mtimes.json")
+            info.size = len(encoded_mtimes)
+            transport.addfile(info, io.BytesIO(encoded_mtimes))
+        data = stream.getvalue()
+        api.write_absolute(output, data)
+        return digest(data)
     mtimes = {}
     with tarfile.open(output, "w", format=tarfile.PAX_FORMAT) as transport:
         for path in sorted(root.rglob("*")):
@@ -604,7 +1053,7 @@ def pack_archive(root, output):
 def unpack_archive(transport_path, output):
     output = Path(output)
     if os.name == "nt":
-        raise ValueError("Windows archive unpack requires a handle-anchored parent walk")
+        return windows_unpack_archive(transport_path, output)
     if not output.is_absolute() or output.exists() or output.is_symlink():
         raise ValueError("relocated raw output must be a new, unlinked absolute directory")
     with tarfile.open(transport_path, "r") as transport:
