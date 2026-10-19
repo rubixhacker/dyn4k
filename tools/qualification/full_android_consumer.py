@@ -313,6 +313,29 @@ def dex_transformation(debug_apk, release_apk, mapping, usage, archive):
     return transformation_from_descriptors(debug, release, mapping, usage)
 
 
+def canonical_dexdump(output, relative, current_path=None):
+    first, separator, remaining = output.partition(b"\n")
+    second, next_separator, body = remaining.partition(b"\n")
+    processing = re.fullmatch(rb"Processing '([^'\r\n]+)'\.\.\.", first)
+    opened = re.fullmatch(rb"Opened '([^'\r\n]+)', DEX version '[0-9]{3}'", second)
+    if not separator or not next_separator or not processing or not opened:
+        raise ValueError(f"dexdump path headers are malformed: {relative}")
+    path = processing.group(1)
+    if path != opened.group(1):
+        raise ValueError(f"dexdump path headers differ: {relative}")
+    if current_path is None:
+        parts = path[1:].split(b"/")
+        if (not path.startswith(b"/") or b"\x00" in path or
+                any(part in (b"", b".", b"..") for part in parts) or
+                not path.endswith(b"/" + os.fsencode(relative))):
+            raise ValueError(f"archived dexdump path headers differ from original input: {relative}")
+    elif path != os.fsencode(current_path):
+        raise ValueError(f"regenerated dexdump path headers differ from current input: {relative}")
+    marker = b"<DEX_INPUT_PATH>"
+    return (first[:processing.start(1)] + marker + first[processing.end(1):] + b"\n" +
+            second[:opened.start(1)] + marker + second[opened.end(1):] + b"\n" + body)
+
+
 def archived_dex_descriptors(archive, prefix, apk_name):
     directory = archive / prefix
     names = sorted(path.name for path in directory.glob("classes*.dex"))
@@ -331,7 +354,11 @@ def archived_dex_descriptors(archive, prefix, apk_name):
                                  stderr=subprocess.STDOUT, check=False)
             if run.returncode:
                 raise ValueError(f"pinned dexdump failed for {prefix}/{name}: {run.returncode}")
-            if run.stdout != (directory / (name + ".dexdump.txt")).read_bytes():
+            relative = f"{prefix}/{name}"
+            archived_dump = (directory / (name + ".dexdump.txt")).read_bytes()
+            archived = canonical_dexdump(archived_dump, relative)
+            regenerated = canonical_dexdump(run.stdout, relative, directory / name)
+            if archived != regenerated:
                 raise ValueError(f"archived dexdump output differs from DEX: {prefix}/{name}")
             descriptors.update(re.findall(r"Class descriptor\s+: '([^']+)'",
                                           run.stdout.decode()))

@@ -53,6 +53,12 @@ class OriginalRowTests(unittest.TestCase):
 
 
 class ReplayIntegrityTests(unittest.TestCase):
+    @staticmethod
+    def dexdump(path, body=b"Class descriptor  : 'Lorg/dyn4j/Real;'\n"):
+        encoded = str(path).encode()
+        return (b"Processing '" + encoded + b"'...\nOpened '" + encoded +
+                b"', DEX version '035'\n" + body)
+
     def test_missing_helper_and_foreign_source_paths_fail(self):
         with tempfile.TemporaryDirectory() as temporary:
             checkout = Path(temporary)
@@ -84,13 +90,47 @@ class ReplayIntegrityTests(unittest.TestCase):
             (directory / "classes.dex").write_bytes(dex)
             with zipfile.ZipFile(archive / "app.apk", "w") as apk:
                 apk.writestr("classes.dex", dex)
-            genuine = "Class descriptor  : 'Lorg/dyn4j/Real;'\n"
-            (directory / "classes.dex.dexdump.txt").write_text(
-                genuine + "Class descriptor  : 'Lorg/dyn4j/Invented;'\n")
-            completed = mock.Mock(returncode=0, stdout=genuine.encode(), stderr=None)
+            original = "/original/debug-dex/classes.dex"
+            (directory / "classes.dex.dexdump.txt").write_bytes(
+                self.dexdump(original,
+                             b"Class descriptor  : 'Lorg/dyn4j/Real;'\n"
+                             b"Class descriptor  : 'Lorg/dyn4j/Invented;'\n"))
+            completed = mock.Mock(returncode=0,
+                                  stdout=self.dexdump(directory / "classes.dex"))
             with mock.patch.object(subject.subprocess, "run", return_value=completed):
                 with self.assertRaisesRegex(ValueError, "dexdump output differs"):
                     subject.archived_dex_descriptors(archive, "debug-dex", "app.apk")
+
+    def test_relocated_dexdump_checks_only_path_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary)
+            directory = archive / "debug-dex"
+            directory.mkdir()
+            dex = b"test dex bytes"
+            (directory / "classes.dex").write_bytes(dex)
+            with zipfile.ZipFile(archive / "app.apk", "w") as apk:
+                apk.writestr("classes.dex", dex)
+            original = "/original/debug-dex/classes.dex"
+            (directory / "classes.dex.dexdump.txt").write_bytes(self.dexdump(original))
+            completed = mock.Mock(returncode=0,
+                                  stdout=self.dexdump(directory / "classes.dex"))
+            with mock.patch.object(subject.subprocess, "run", return_value=completed):
+                self.assertEqual(subject.archived_dex_descriptors(
+                    archive, "debug-dex", "app.apk"), {"Lorg/dyn4j/Real;"})
+
+    def test_dexdump_path_headers_must_match_each_input(self):
+        original = "/original/debug-dex/classes.dex"
+        current = "/moved/debug-dex/classes.dex"
+        bad_original = self.dexdump(original).replace(
+            b"Opened '/original/", b"Opened '/foreign/", 1)
+        with self.assertRaisesRegex(ValueError, "dexdump path headers"):
+            subject.canonical_dexdump(bad_original, "debug-dex/classes.dex")
+        with self.assertRaisesRegex(ValueError, "dexdump path headers"):
+            subject.canonical_dexdump(self.dexdump("/original/foreign/classes.dex"),
+                                      "debug-dex/classes.dex")
+        with self.assertRaisesRegex(ValueError, "dexdump path headers"):
+            subject.canonical_dexdump(self.dexdump(original), "debug-dex/classes.dex",
+                                      current)
 
 
 if __name__ == "__main__":
