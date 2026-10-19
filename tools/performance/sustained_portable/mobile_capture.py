@@ -33,6 +33,14 @@ ANDROID_ABIS = {
 TARGETS = set(APPLE_SIMULATORS) | APPLE_DEVICES | set(ANDROID_ABIS)
 
 
+def validate_xcode_version(output):
+    lines = output.splitlines()
+    if (len(lines) != 2 or lines[0] != "Xcode 26.5"
+            or not lines[1].startswith("Build version ") or lines[1] == "Build version "):
+        raise ValueError("selected Xcode differs from pinned 26.5")
+    return output
+
+
 def command(argv, *, check=True, timeout=30):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     if check and result.returncode:
@@ -354,8 +362,7 @@ def run_simulator(args, inventory, harness, producer, nonce):
     if not args.udid:
         raise ValueError("set --udid for the selected Apple simulator")
     xcode = setup_command(args.archive, "apple-xcode", ["xcodebuild", "-version"]).stdout
-    if not xcode.startswith("Xcode 26.4.1\n"):
-        raise ValueError("selected Xcode differs from pinned 26.4.1")
+    validate_xcode_version(xcode)
     listing = json.loads(setup_command(args.archive, "apple-device-list",
                                        ["xcrun", "simctl", "list", "-j", "devices", "available"]).stdout)
     device = validate_simulator(args.target, args.udid, listing)

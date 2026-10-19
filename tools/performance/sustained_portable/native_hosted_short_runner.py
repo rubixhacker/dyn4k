@@ -23,6 +23,12 @@ route = {"source_sha": sha, "target": target, "build": build,
          "qualification": "unpassed", "commands": {}, "scenarios": {},
          "memory_scenarios": {}}
 
+def validate_xcode_version(output):
+    lines = output.splitlines()
+    if (len(lines) != 2 or lines[0] != "Xcode 26.5"
+            or not lines[1].startswith("Build version ") or lines[1] == "Build version "):
+        raise RuntimeError("selected Xcode is not 26.5")
+
 def path_swap_command(root, output, target, selected, sha):
     command = [sys.executable, "-B",
                root / "tools/performance/sustained_portable/host_image_adverse.py",
@@ -238,8 +244,7 @@ try:
         if not Path(os.environ["DEVELOPER_DIR"]).is_dir():
             raise RuntimeError("selected Xcode directory is missing")
         xcode = require("setup/xcode", ["xcodebuild", "-version"]).decode(errors="replace")
-        if "Xcode 26.4.1" not in xcode.splitlines():
-            raise RuntimeError("selected Xcode is not 26.4.1")
+        validate_xcode_version(xcode)
 
     staging = (root / "build/staging-repository").resolve()
     stage_root = staging / ".qualification/native-host-short"

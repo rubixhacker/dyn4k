@@ -68,7 +68,7 @@ class RawArtifactTests(unittest.TestCase):
             consumer = probe(("consumer-macosArm64",), 3)
             hosted = {"candidate_sha": sha, "target": target, "status": "PROBE_PASSED",
                       "runtime": {"system": "Darwin", "machine": "arm64",
-                                  "os_version": "26.6.2", "xcode_version": "26.4.1",
+                                  "os_version": "26.6.2", "xcode_version": "26.5",
                                   "simulators": {}},
                       "source_probe": source, "consumer_probe": consumer,
                       "artifact_hashes": hashes}

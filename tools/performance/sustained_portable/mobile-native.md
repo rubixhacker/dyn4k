@@ -66,7 +66,9 @@ On macOS, select one of `iosSimulatorArm64`, `iosX64`,
 `tvosSimulatorArm64`, or `watchosSimulatorArm64`. Stage the corresponding
 target publications with the same task names. Build the package with the
 same consumer command, replacing the target. Choose a booted simulator UDID
-from `xcrun simctl list -j devices available`. Use an ARM64 Mac for the
+from `xcrun simctl list -j devices available`. Use the installed local Mac
+over SSH with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+Do not use GitHub-hosted macOS execution. Use an ARM64 Mac for the
 ARM64 simulators and an x86_64 Mac for `iosX64`.
 
 ```sh
@@ -78,7 +80,7 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
   --archive /absolute/new/archive/ios-native-direct --steps 30 --warmup 3
 ```
 
-The launcher checks Xcode 26.4.1, host architecture, simulator family,
+The launcher checks Xcode 26.5, host architecture, simulator family,
 selected and installed app package bytes, the linked executable, and the
 observed `proc_pidpath` at the PID returned by `simctl launch`. It also checks
 the OS text mapping's device, inode, and size through `lsof -d txt`. The
@@ -101,7 +103,7 @@ recorded as such. Apple directs users to the installed tool's help for its
 current behavior in the [Xcode command-line reference](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference).
 
 The separate redirect behavior, `lsof` text mapping fields, and process
-lifetime still need an observed short capture on each matching hosted Mac
+lifetime still need an observed short capture on each matching local Mac
 simulator family. The Linux host cannot run `xcrun`. If a hosted `simctl` lacks
 the redirect flags, writes app
 bytes into the launch receipt, or ends the app before `proc_pidpath` and

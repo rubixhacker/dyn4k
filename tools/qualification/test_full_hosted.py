@@ -1484,7 +1484,7 @@ class FullHostedTests(unittest.TestCase):
                     "stderr_sha256": full_hosted.sha256(destination / "stderr.txt")}
 
         runtime = {"system": "Darwin", "machine": "arm64", "os_version": "26.0",
-                   "xcode_version": "26.4.1", "java_version": "21.0.12",
+                   "xcode_version": "26.5", "java_version": "21.0.12",
                    "simulators": {"tvOS": [{"udid": simulator,
                                             "runtime": "com.apple.CoreSimulator.SimRuntime.tvOS-26-0"}]}}
         runner = {"GITHUB_RUN_ID": "synthetic-123", "GITHUB_JOB": "synthetic-hosted",
@@ -1997,7 +1997,7 @@ class FullHostedTests(unittest.TestCase):
                    "runtime": {"system": "Darwin" if safari else "Windows",
                                "machine": "arm64" if safari else "AMD64",
                                "os_version": "26.0" if safari else "10.0.26100",
-                               "xcode_version": "26.4.1" if safari else None,
+                               "xcode_version": "26.5" if safari else None,
                                "safari_version": "26.6.2" if safari else None,
                                "safaridriver_version": "safaridriver 26.6.2" if safari else None,
                                "java_version": "21.0.1",
