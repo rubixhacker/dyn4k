@@ -23,6 +23,7 @@ CONSUMER = "consumers/qualification/portable/full-browser"
 MODULES = ("dyn4k-core", "dyn4k")
 VERSION = "0.1.0-alpha.1"
 JAVA_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
+DARWIN_JAVA_SHA256 = "9be1d0a740ff6502df1a762145e62860f5de4b7e17658d9cb9498da3acf9d16c"
 GRADLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
 CHROMIUM = {
     "minimum": (119, "c81049295247b6892c802dcad33dcab0a0337fce31800f923f51bdb0c07e6d11"),
@@ -513,6 +514,12 @@ def runtime_pin(family, role, browser, selected_sha=None):
     return major, selected_sha
 
 
+def expected_java_sha256(system, family):
+    if system not in ("Linux", "Darwin") or (family == "Safari" and system != "Darwin"):
+        raise ValueError("selected browser host differs")
+    return DARWIN_JAVA_SHA256 if system == "Darwin" else JAVA_SHA256
+
+
 def toolchain(gradle, browser, family="Chromium"):
     java_home = Path(os.environ["JAVA_HOME"]).resolve()
     java = java_home / "bin/java"
@@ -524,7 +531,8 @@ def toolchain(gradle, browser, family="Chromium"):
         subprocess.check_output([str(browser), "--version"], text=True).strip())
     if ('version "21' not in java_version or "Gradle 9.5.0" not in gradle_version
             or {"Chromium": "Chrome", "Firefox": "Firefox", "Safari": ""}[family]
-            not in browser_version or file_hash(java) != JAVA_SHA256
+            not in browser_version or file_hash(java) != expected_java_sha256(
+                platform.system(), family)
             or file_hash(gradle) != GRADLE_SHA256):
         raise ValueError("pinned toolchain version differs")
     return {"java_home": str(java_home), "java_version": java_version,
@@ -897,7 +905,12 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
         raise ValueError("wrong browser binary or version")
     if receipt.get("staged_hashes") != hashes:
         raise ValueError("independently selected staged KLIB hashes differ")
-    if (receipt["toolchain"].get("java_sha256") != JAVA_SHA256
+    runtime_identity = receipt.get("runtime_identity")
+    if (type(runtime_identity) is not str
+            or not re.fullmatch(r"(Linux|Darwin) [^ ]+ [^ ]+", runtime_identity)):
+        raise ValueError("browser runtime host identity differs")
+    if (receipt["toolchain"].get("java_sha256") != expected_java_sha256(
+            runtime_identity.split(" ", 1)[0], family)
             or receipt["toolchain"].get("gradle_sha256") != GRADLE_SHA256
             or receipt["toolchain"].get("kgp_version") != "2.4.20"):
         raise ValueError("pinned JDK, Gradle, or KGP identity differs")

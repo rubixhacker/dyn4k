@@ -12,6 +12,18 @@ from unittest import mock
 import full_browser_consumer as browser
 
 
+class ToolchainPinTest(unittest.TestCase):
+    def test_safari_uses_darwin_jdk_pin(self):
+        self.assertEqual(browser.expected_java_sha256("Darwin", "Safari"),
+                         "9be1d0a740ff6502df1a762145e62860f5de4b7e17658d9cb9498da3acf9d16c")
+        self.assertEqual(browser.expected_java_sha256("Linux", "Chromium"),
+                         browser.JAVA_SHA256)
+        with self.assertRaisesRegex(ValueError, "browser host differs"):
+            browser.expected_java_sha256("Linux", "Safari")
+        with self.assertRaisesRegex(ValueError, "browser host differs"):
+            browser.expected_java_sha256("Windows", "Safari")
+
+
 class ArchiveLocationTest(unittest.TestCase):
     def test_relocated_copy_keeps_observed_capture_root(self):
         with tempfile.TemporaryDirectory() as directory:
