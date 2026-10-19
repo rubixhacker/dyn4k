@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -117,6 +118,14 @@ def rows(xml, expected, major):
     if suite.tag != "testsuite" or not suite.get("name", "").startswith("jsBrowserTest."):
         raise ValueError("original browser XML suite identity differs")
     cases = suite.findall("testcase")
+    for element in (suite, *cases):
+        raw_time = element.get("time")
+        try:
+            duration = float(raw_time)
+        except (TypeError, ValueError):
+            raise ValueError("original browser XML duration is missing or invalid") from None
+        if not math.isfinite(duration) or math.copysign(1.0, duration) < 0:
+            raise ValueError("original browser XML duration is nonfinite or negative")
     counts = {key: sum(case.find(tag) is not None for case in cases)
               for key, tag in (("failures", "failure"), ("errors", "error"),
                                ("skipped", "skipped"))}
@@ -224,6 +233,60 @@ def copy(source, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, target)
     return file_hash(target)
+
+
+def bundle_paths(work, short, mode):
+    package = f"dyn4k-full-staged-browser-consumer-{short}-test"
+    linked = work / short / "compileSync/js/test" / f"test{mode.capitalize()}Executable" / "kotlin" / f"{package}.js"
+    selected = (work / "root/js/packages" / package / "kotlin" / f"{package}.js"
+                if mode == "development" else linked)
+    runner = work / "root/js/node_modules/kotlin-web-helpers/dist/kotlin-test-karma-runner.js"
+    return linked, selected, runner
+
+
+def configured_bundle(raw, work, short, mode):
+    match = re.search(rb"config\.set\(\s*", raw)
+    if match is None:
+        raise ValueError("archived Karma configuration has no base settings")
+    try:
+        configuration, _ = json.JSONDecoder().raw_decode(raw[match.end():].decode())
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("archived Karma base settings are invalid") from None
+    linked, selected, runner = bundle_paths(work, short, mode)
+    paths = [str(runner), str(selected)]
+    if (configuration.get("basePath") != str(work / "root/js/packages" /
+                                               f"dyn4k-full-staged-browser-consumer-{short}-test")
+            or configuration.get("files") != paths
+            or configuration.get("preprocessors") != {path: ["webpack", "sourcemap"] for path in paths}
+            or configuration.get("browsers") != ["ChromeHeadless"]
+            or configuration.get("reporters") != ["karma-kotlin-reporter"]):
+        raise ValueError("archived Karma selected bundle path or preprocessor differs")
+    return linked, selected
+
+
+def selected_bundle(folder, work, short, mode, process_record, major):
+    linked, selected = configured_bundle((folder / "karma.conf.js").read_bytes(), work, short, mode)
+    evidence = json.loads((folder / "selected-bundle.json").read_text())
+    selected_bytes = (folder / "karma-selected.js").read_bytes()
+    linked_bytes = (folder / "linked-executable.js").read_bytes()
+    if (set(evidence) != {"source_path", "archive_path", "sha256", "node_pid",
+                          "browser_id", "browser_name", "captured_ns", "complete_ns"}
+            or evidence["source_path"] != str(selected)
+            or evidence["archive_path"] != str(folder / "karma-selected.js")
+            or evidence["sha256"] != sha(selected_bytes)
+            or sha(selected_bytes) != sha(linked_bytes)
+            or process_record.get("linked_sha256") != sha(linked_bytes)
+            or type(evidence["node_pid"]) is not int or evidence["node_pid"] <= 0
+            or not isinstance(evidence["browser_id"], str) or not evidence["browser_id"]
+            or not isinstance(evidence["browser_name"], str)
+            or not re.fullmatch(rf"Chrome Headless {major}(?:\.\d+)+ \(Linux (?:\d+\.)+\d+\)",
+                                evidence["browser_name"])
+            or type(evidence["captured_ns"]) is not int
+            or type(evidence["complete_ns"]) is not int
+            or not (process_record["started_ns"] <= evidence["captured_ns"]
+                    <= evidence["complete_ns"] <= process_record["finished_ns"])):
+        raise ValueError("Karma-selected bundle bytes or source-process binding differs")
+    return linked, selected
 
 
 def toolchain(gradle, browser):
@@ -345,11 +408,16 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
             launches = destination / "browser-launches.jsonl"
             attestation = destination / "reporter-producer.json"
             raw_karma = destination / "raw-karma.jsonl"
+            configuration = lane.rsplit(":", 1)[1]
+            linked, configured, _ = bundle_paths(work, short, configuration)
             module_env = dict(env, DYN4K_BROWSER_ATTESTATION=str(launches),
                               DYN4K_BROWSER_TOKEN=token,
                               DYN4K_BROWSER_REPORTER_ATTESTATION=str(attestation),
                               DYN4K_BROWSER_RAW_KARMA=str(raw_karma),
-                              DYN4K_BROWSER_REPORTER_SOURCE=str(reporter))
+                              DYN4K_BROWSER_REPORTER_SOURCE=str(reporter),
+                              DYN4K_BROWSER_SELECTED_BUNDLE=str(configured),
+                              DYN4K_BROWSER_SELECTED_ARCHIVE=str(destination / "karma-selected.js"),
+                              DYN4K_BROWSER_SELECTED_ATTESTATION=str(destination / "selected-bundle.json"))
             command = base + [f":{short}:jsBrowserTest"]
             execution = process(command, inputs, module_env,
                                 destination / "gradle.stdout", destination / "gradle.stderr")
@@ -370,19 +438,17 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                 raise ValueError(f"external {short} full original method set is incomplete")
             karma_rows(raw_karma.read_bytes(), selected, major)
             module_rows[short] = observed
-            package = f"dyn4k-full-staged-browser-consumer-{short}-test"
-            configuration = lane.rsplit(":", 1)[1]
-            mode = configuration.capitalize()
-            linked = work / short / "compileSync/js/test" / f"test{mode}Executable" / "kotlin" / f"{package}.js"
             if not linked.is_file():
                 raise ValueError(f"external {short} linked {configuration} bundle is absent")
             processes[short]["linked_sha256"] = copy(linked, destination / "linked-executable.js")
+            package = f"dyn4k-full-staged-browser-consumer-{short}-test"
             generated = work / "root/js/packages" / package / "karma.conf.js"
             if (not generated.is_file()
                     or f"config.set({{port: {port}}});" not in generated.read_text()
                     or "DYN4K_BROWSER_RAW_KARMA" not in generated.read_text()):
                 raise ValueError("external browser Karma configuration lacks isolated port")
             copy(generated, destination / "karma.conf.js")
+            selected_bundle(destination, work, short, configuration, processes[short], major)
             if not launches.is_file() or not attestation.is_file() or not raw_karma.is_file():
                 raise ValueError("real browser process or reporter producer is absent")
             copy(reporter, destination / "browser-reporter.js")
@@ -544,6 +610,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
                 or record["started_ns"] > record["finished_ns"]
                 or file_hash(folder / "karma.conf.js") == sha(b"")):
             raise ValueError("original Gradle or Karma process differs")
+        selected_bundle(folder, Path(paths["work"]), short, mode, record, major)
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = (f"{receipt['paths']['work']}/{short}/compileSync/js/test/"

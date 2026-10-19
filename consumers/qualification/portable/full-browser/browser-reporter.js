@@ -25,6 +25,38 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     if (typeof this.write !== 'function') {
         throw new Error('Kotlin Karma reporter writer is missing');
     }
+    const selected = process.env.DYN4K_BROWSER_SELECTED_BUNDLE;
+    const archive = process.env.DYN4K_BROWSER_SELECTED_ARCHIVE;
+    const recordPath = process.env.DYN4K_BROWSER_SELECTED_ATTESTATION;
+    const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
+    if (files.length !== 2 || files[1] !== selected ||
+            JSON.stringify(config.preprocessors[selected]) !== JSON.stringify(['webpack', 'sourcemap'])) {
+        throw new Error('Karma selected bundle path or preprocessor differs');
+    }
+    let evidence = null;
+    const originalBrowserStart = this.onBrowserStart;
+    const originalRunComplete = this.onRunComplete;
+    this.onBrowserStart = function(browser) {
+        originalBrowserStart.call(this, browser);
+        if (evidence !== null) {
+            throw new Error('Karma started more than one selected browser');
+        }
+        const bytes = fs.readFileSync(selected);
+        fs.writeFileSync(archive, bytes, {flag: 'wx', mode: 0o600});
+        evidence = {source_path: selected, archive_path: archive,
+            sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+            node_pid: process.pid, browser_id: browser.id, browser_name: browser.name,
+            captured_ns: Date.now() * 1000000};
+    };
+    this.onRunComplete = function() {
+        if (evidence === null || crypto.createHash('sha256').update(fs.readFileSync(selected))
+                .digest('hex') !== evidence.sha256) {
+            throw new Error('Karma selected bundle changed during browser execution');
+        }
+        originalRunComplete.call(this);
+        evidence.complete_ns = Date.now() * 1000000;
+        fs.writeFileSync(recordPath, JSON.stringify(evidence) + '\n', {flag: 'wx', mode: 0o600});
+    };
     this.write = function(message) {
         if (typeof message !== 'string') {
             throw new Error('Karma result message is not text');
