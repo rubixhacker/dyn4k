@@ -1,5 +1,6 @@
 import json
 import io
+import contextlib
 import os
 import subprocess
 import sys
@@ -253,6 +254,17 @@ class NativeHostConsumerTests(unittest.TestCase):
         with api.walk("C:\\", writable=True):
             api.drive.assert_called_with("C:\\", writable=True)
 
+    def test_windows_walk_close_failure_preserves_original_error(self):
+        api = route.WindowsArchiveApi.__new__(route.WindowsArchiveApi)
+        api.drive = Mock(return_value=1)
+        api.child = Mock(return_value=2)
+        api.close = Mock(side_effect=OSError("injected root close failure"))
+        with self.assertRaisesRegex(OSError, "injected write failure") as failure:
+            with api.walk(r"C:\new"):
+                raise OSError("injected write failure")
+        self.assertIn("root close failure", " ".join(failure.exception.__notes__))
+        self.assertEqual(api.close.call_count, 2)
+
     def test_windows_transport_parser_rejects_unsafe_members(self):
         timestamp = 1_700_000_000_123_456_700
         def make_transport(entries, mtimes):
@@ -339,6 +351,181 @@ class NativeHostConsumerTests(unittest.TestCase):
                             "--output", str(output)])
             self.assertTrue(output.is_dir())
             self.assertEqual(api.write_tree.call_args.args[1][0][2], maximum)
+
+    def test_windows_public_unpack_cleans_late_write_failure_for_same_path_retry(self):
+        timestamp = 1_700_000_000_123_456_700
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            for name, data in (("raw/receipt.json", b"{}"),
+                               ("raw/nested/core.program", b"image")):
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+            mtimes = route.encoded({"receipt.json": timestamp,
+                                    "nested/core.program": timestamp})
+            member = tarfile.TarInfo("transport-mtimes.json")
+            member.size = len(mtimes)
+            archive.addfile(member, io.BytesIO(mtimes))
+
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            parent = Path(temporary)
+            output = parent / "relocated"
+            existing = parent / "keep.txt"
+            existing.write_bytes(b"user content")
+
+            class FailingArchiveApi:
+                write_tree = route.WindowsArchiveApi.write_tree
+
+                def __init__(self):
+                    self.fail_once = True
+                    self.fail_cleanup_close = False
+                    self.cleaning = False
+
+                def read_absolute(self, _path):
+                    return stream.getvalue()
+
+                @contextlib.contextmanager
+                def walk(self, _path, *, create_last=False, writable=False):
+                    if create_last:
+                        output.mkdir()
+                    yield output
+
+                def child(self, anchor, name, *, directory, create=False, writable=False,
+                          deletable=False):
+                    path = anchor / name
+                    if create:
+                        if directory:
+                            path.mkdir()
+                        else:
+                            path.touch(exist_ok=False)
+                    return path
+
+                def info(self, path, _directory):
+                    details = path.stat()
+                    return ((details.st_dev, details.st_ino, 0), 0)
+
+                def discard(self, path, directory):
+                    self.cleaning = True
+                    if directory:
+                        path.rmdir()
+                    else:
+                        path.unlink()
+
+                def write(self, path, data, _mtime_ns, _mode):
+                    path.write_bytes(data)
+                    if self.fail_once and path.name == "receipt.json":
+                        self.fail_once = False
+                        raise OSError("injected late metadata failure")
+
+                def close(self, value):
+                    if self.fail_cleanup_close and self.cleaning and value.name == "nested":
+                        self.fail_cleanup_close = False
+                        raise OSError("injected cleanup close failure")
+
+            api = FailingArchiveApi()
+            with patch.object(route, "os", SimpleNamespace(name="nt")), patch.object(
+                    route, "WindowsArchiveApi", return_value=api):
+                with self.assertRaisesRegex(OSError, "injected late metadata failure"):
+                    route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                                "--output", r"C:\evidence\relocated"])
+                self.assertFalse(output.exists())
+                self.assertEqual(existing.read_bytes(), b"user content")
+                route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                            "--output", r"C:\evidence\relocated"])
+                with self.assertRaises(FileExistsError):
+                    route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                                "--output", r"C:\evidence\relocated"])
+            self.assertEqual((output / "receipt.json").read_bytes(), b"{}")
+            self.assertEqual((output / "nested/core.program").read_bytes(), b"image")
+            self.assertEqual(existing.read_bytes(), b"user content")
+
+            output = parent / "close-failure"
+            api.fail_once = True
+            api.fail_cleanup_close = True
+            api.cleaning = False
+            with patch.object(route, "os", SimpleNamespace(name="nt")), patch.object(
+                    route, "WindowsArchiveApi", return_value=api):
+                with self.assertRaisesRegex(OSError, "injected late metadata failure") as failure:
+                    route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                                "--output", r"C:\evidence\close-failure"])
+                self.assertIn("cleanup close failure", " ".join(failure.exception.__notes__))
+                self.assertFalse(output.exists())
+                route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                            "--output", r"C:\evidence\close-failure"])
+            self.assertEqual((output / "receipt.json").read_bytes(), b"{}")
+
+    def test_windows_public_unpack_keeps_replacement_with_aliased_file_id(self):
+        timestamp = 1_700_000_000_123_456_700
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w") as archive:
+            receipt = tarfile.TarInfo("raw/receipt.json")
+            receipt.size = 2
+            archive.addfile(receipt, io.BytesIO(b"{}"))
+            mtimes = route.encoded({"receipt.json": timestamp})
+            manifest = tarfile.TarInfo("transport-mtimes.json")
+            manifest.size = len(mtimes)
+            archive.addfile(manifest, io.BytesIO(mtimes))
+
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            output = Path(temporary) / "relocated"
+
+            class ReplacingArchiveApi:
+                write_tree = route.WindowsArchiveApi.write_tree
+
+                def __init__(self):
+                    self.objects = {}
+
+                def read_absolute(self, _path):
+                    return stream.getvalue()
+
+                @contextlib.contextmanager
+                def walk(self, _path, *, create_last=False, writable=False):
+                    if create_last:
+                        output.mkdir()
+                    yield output
+
+                def child(self, parent, name, *, directory, create=False, writable=False,
+                          deletable=False):
+                    path = parent / name
+                    if directory:
+                        if create:
+                            path.mkdir()
+                        return path
+                    if create:
+                        path.touch(exist_ok=False)
+                        self.objects[path] = object()
+                    return SimpleNamespace(path=path, object=self.objects[path])
+
+                def info(self, _value, _directory):
+                    return ((1, 2, 3), 0)
+
+                def write(self, value, data, _mtime_ns, _mode):
+                    value.path.write_bytes(data)
+                    value.path.unlink()
+                    value.path.write_bytes(b"user replacement")
+                    self.objects[value.path] = object()
+                    raise OSError("injected write failure after replacement")
+
+                def discard(self, value, directory):
+                    if directory:
+                        value.rmdir()
+                    elif self.objects.get(value.path) is value.object:
+                        value.path.unlink()
+                        del self.objects[value.path]
+
+                def close(self, _value):
+                    pass
+
+            api = ReplacingArchiveApi()
+            with patch.object(route, "os", SimpleNamespace(name="nt")), patch.object(
+                    route, "WindowsArchiveApi", return_value=api):
+                with self.assertRaisesRegex(OSError, "injected write failure after replacement"):
+                    route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                                "--output", r"C:\evidence\relocated"])
+                self.assertEqual((output / "receipt.json").read_bytes(), b"user replacement")
+                with self.assertRaises(FileExistsError):
+                    route.main(["unpack", "--transport", r"C:\evidence\raw.tar",
+                                "--output", r"C:\evidence\relocated"])
 
     @unittest.skipUnless(os.name == "nt", "requires real Windows handle APIs")
     def test_windows_handle_anchored_round_trip_and_links(self):

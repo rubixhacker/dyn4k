@@ -682,6 +682,8 @@ class WindowsArchiveApi:
         status = self.IoStatusBlock()
         value = ctypes.c_void_p()
         access = self.READ_ATTRIBUTES | self.SYNCHRONIZE
+        if create:
+            access |= 0x10000
         if directory:
             access |= self.LIST_DIRECTORY | self.TRAVERSE
             if writable:
@@ -698,14 +700,34 @@ class WindowsArchiveApi:
         try:
             self.info(value, directory)
             return value
-        except BaseException:
-            self.close(value)
+        except BaseException as error:
+            try:
+                if create:
+                    self.discard(value, directory)
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive cleanup failed: {cleanup_error}")
+            try:
+                self.close(value)
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive cleanup failed: {cleanup_error}")
             raise
+
+    def discard(self, value, directory):
+        if not directory:
+            basic = self.BasicInformation(0, 0, 0, 0, 0x80)
+            if not self.kernel.SetFileInformationByHandle(
+                    value, 0, ctypes.byref(basic), ctypes.sizeof(basic)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        disposition = ctypes.c_byte(1)
+        if not self.kernel.SetFileInformationByHandle(
+                value, 4, ctypes.byref(disposition), ctypes.sizeof(disposition)):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     @contextlib.contextmanager
     def walk(self, path, *, create_last=False, writable=False):
         anchor, parts = windows_components(path)
-        with contextlib.ExitStack() as stack:
+        stack = contextlib.ExitStack()
+        try:
             current = self.drive(anchor, writable=writable and
                                  (not parts or create_last and len(parts) == 1))
             stack.callback(self.close, current)
@@ -716,6 +738,14 @@ class WindowsArchiveApi:
                                           or create_last and index == len(parts) - 2))
                 stack.callback(self.close, current)
             yield current
+        except BaseException as error:
+            try:
+                stack.close()
+            except BaseException as cleanup_error:
+                error.add_note(f"Windows archive close failed: {cleanup_error}")
+            raise
+        else:
+            stack.close()
 
     def read(self, value):
         before, _ = self.info(value, False)
@@ -817,8 +847,10 @@ class WindowsArchiveApi:
         with self.walk(destination, create_last=create, writable=True) as anchor:
             if not create and any(os.scandir(destination)):
                 raise ValueError("Windows archive snapshot destination is not empty")
-            with contextlib.ExitStack() as stack:
-                directories = {(): anchor}
+            directories = {(): anchor}
+            opened = []
+            created_files = []
+            try:
                 for relative, data, mtime_ns, mode in rows:
                     prefix = ()
                     for part in relative[:-1]:
@@ -827,15 +859,54 @@ class WindowsArchiveApi:
                             directories[child_prefix] = self.child(
                                 directories[prefix], part, directory=True,
                                 create=True, writable=True)
-                            stack.callback(self.close, directories[child_prefix])
+                            opened.append(directories[child_prefix])
                         prefix = child_prefix
                     parent = directories[prefix]
                     value = self.child(parent, relative[-1], directory=False,
                                        create=True, writable=True)
+                    if create:
+                        created_files.append(value)
                     try:
                         self.write(value, data, mtime_ns, mode)
                     finally:
-                        self.close(value)
+                        if not create:
+                            self.close(value)
+                while created_files:
+                    self.close(created_files[-1])
+                    created_files.pop()
+            except BaseException as error:
+                if create:
+                    cleanup_errors = []
+                    while created_files:
+                        value = created_files.pop()
+                        try:
+                            self.discard(value, False)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                        try:
+                            self.close(value)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                    while opened:
+                        value = opened.pop()
+                        try:
+                            self.discard(value, True)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                        try:
+                            self.close(value)
+                        except BaseException as cleanup_error:
+                            cleanup_errors.append(cleanup_error)
+                    try:
+                        self.discard(anchor, True)
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+                    if cleanup_errors:
+                        error.add_note(f"Windows archive cleanup failed: {cleanup_errors[0]}")
+                raise
+            finally:
+                for value in reversed(opened):
+                    self.close(value)
 
 
 def windows_unpack_archive(transport_path, output):
@@ -974,7 +1045,6 @@ def pack_archive(root, output):
         data = encoded(mtimes)
         info = tarfile.TarInfo("transport-mtimes.json")
         info.size = len(data)
-        import io
         transport.addfile(info, io.BytesIO(data))
     return digest(output.read_bytes())
 
