@@ -947,18 +947,19 @@ class NodeStreamTest(unittest.TestCase):
             counts = {"completed_cases": 1, "states": 1}
             attributes = {"name": "portable.PortableMatrixTest", "tests": "1",
                           "skipped": "0", "failures": "0", "errors": "0"}
-            def focused_extract(host, lane, selected, xml):
+            def focused_worker(selected, lane, env, modules):
+                xml = lane / "xml" / f"{selected}.xml"
                 xml.parent.mkdir(parents=True)
                 xml.write_text("report")
-                (lane / f"native-output-{method}.log").write_text("output")
+                (lane / f"native-output-{selected}.log").write_text("output")
+                return root / "exec.log"
+            def focused_extract(host, lane, selected, xml):
                 return trace, attributes, counts
             with patch.object(run, "clean_identity", side_effect=[("a" * 40, "b" * 64),
                                                                    ("a" * 40, "c" * 64)]), \
                     patch.object(run, "artifacts", return_value={"target": staged}), \
                     patch.object(run, "method_command", return_value=(["true"], None)), \
-                    patch.object(run, "run_node_method", return_value=root / "exec.log"), \
-                    patch.object(run, "method_xml_source", side_effect=lambda host, lane, selected,
-                                 started: lane / "xml" / f"{selected}.xml"), \
+                    patch.object(run, "run_node_method", side_effect=focused_worker), \
                     patch.object(run, "extract_xml", side_effect=focused_extract), \
                     patch.object(run, "runtime", return_value={}), \
                     patch.object(run, "method_case_ids", return_value=["case"]), \
