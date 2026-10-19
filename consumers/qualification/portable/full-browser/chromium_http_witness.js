@@ -29,7 +29,7 @@ function validateControl(record, expected, afterNs, timeKey = 'ready_ns') {
             timeKey === 'released_ns' && !/^[0-9a-f]{64}$/.test(record.observer_sha256)) {
         throw new Error('Chromium observer control identity differs');
     }
-    if (!Number.isSafeInteger(record[timeKey]) || record[timeKey] <= afterNs) {
+    if (!Number.isInteger(record[timeKey]) || record[timeKey] <= afterNs) {
         throw new Error('Chromium observer control is stale');
     }
     return record;

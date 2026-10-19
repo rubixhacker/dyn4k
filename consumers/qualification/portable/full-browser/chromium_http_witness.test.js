@@ -111,6 +111,14 @@ test('wrong process and stale readiness fail closed', () => {
         ready_ns: 199}, {offer_sha256: 'fresh', browser_pid: 41}, 200), /stale/);
 });
 
+test('current epoch nanoseconds are valid control times', () => {
+    const offered = Date.now() * 1000000;
+    assert.deepEqual(validateControl({offer_sha256: 'fresh', browser_pid: 41,
+        ready_ns: offered + 1000000},
+    {offer_sha256: 'fresh', browser_pid: 41}, offered),
+    {offer_sha256: 'fresh', browser_pid: 41, ready_ns: offered + 1000000});
+});
+
 test('premature stop fails before observer release', async () => {
     const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'cdp-handshake-'));
     try {
