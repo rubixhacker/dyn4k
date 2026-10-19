@@ -181,7 +181,20 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                      "Upload full Java compatibility raw archive"):
             with self.subTest(step=name):
                 self.assertRegex(ubuntu, re.escape("- name: " + name) + r"\n\s+if: always\(\)")
-        self.assertEqual(2, ubuntu.count("sha256sum -c"))
+        self.assertEqual(3, ubuntu.count("sha256sum -c"))
+        self.assertLess(ubuntu.index("- name: Audit staged artifact contract"),
+                        ubuntu.index("- name: Verify Java subclass dispatch"))
+        dispatch = ubuntu[ubuntu.index("- name: Verify Java subclass dispatch"):
+                          ubuntu.index("- name: Upload Java subclass dispatch evidence")]
+        self.assertIn("tools/qualification/subclass_audit.py", dispatch)
+        self.assertIn('for java_home in "$JAVA_HOME_8_X64" "$JAVA_HOME_21_X64"; do', dispatch)
+        self.assertIn('--output "$RUNNER_TEMP/subclass-dispatch/$jdk"', dispatch)
+        self.assertIn('--candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json"', dispatch)
+        self.assertIn('--repository "$GITHUB_WORKSPACE"', dispatch)
+        self.assertIn('--jdk-major "$jdk"', dispatch)
+        self.assertIn('tools/qualification/subclass_audit.py --verify', dispatch)
+        self.assertIn("204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e", dispatch)
+        self.assertIn("if: always()", ubuntu[ubuntu.index("- name: Upload Java subclass dispatch evidence"):])
         self.assertEqual(2, ubuntu.count("tar -tzf"))
         self.assertIn("diff -qr \"$RUNNER_TEMP/full-common\"", ubuntu)
         self.assertIn("--output \"$RUNNER_TEMP/full-ci-transport-check/full-ci\"", ubuntu)

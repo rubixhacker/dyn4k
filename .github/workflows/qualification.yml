@@ -241,6 +241,55 @@ jobs:
           --stage-receipt build/staging-repository/.qualification/ubuntu/receipt.json
           --stage-console build/staging-repository/.qualification/ubuntu/stage.log
           --output "$RUNNER_TEMP/artifact-audit.json"
+      - name: Verify Java subclass dispatch
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/dyn4j-6.0.0.jar"
+          curl --fail --location --silent --show-error \
+            https://repo.maven.apache.org/maven2/org/dyn4j/dyn4j/6.0.0/dyn4j-6.0.0.jar \
+            --output "$baseline"
+          printf '%s  %s\n' \
+            204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e \
+            "$baseline" | sha256sum -c -
+          mapfile -t stdlibs < <(find \
+            "$HOME/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20" \
+            -type f -name 'kotlin-stdlib-2.4.20.jar')
+          test "${#stdlibs[@]}" -eq 1
+          mkdir -p "$RUNNER_TEMP/subclass-dispatch/tmp"
+          export TMPDIR="$RUNNER_TEMP/subclass-dispatch/tmp"
+          result=0
+          for java_home in "$JAVA_HOME_8_X64" "$JAVA_HOME_21_X64"; do
+            if test "$java_home" = "$JAVA_HOME_8_X64"; then jdk=8; else jdk=21; fi
+            if ! python3 tools/qualification/subclass_audit.py \
+              --baseline "$baseline" --repository "$GITHUB_WORKSPACE" \
+              --candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json" \
+              --stdlib "${stdlibs[0]}" --java-home "$java_home" --jdk-major "$jdk" \
+              --output "$RUNNER_TEMP/subclass-dispatch/$jdk" \
+              > "$RUNNER_TEMP/subclass-dispatch/run-$jdk.stdout" \
+              2> "$RUNNER_TEMP/subclass-dispatch/run-$jdk.stderr"; then
+              result=1
+            fi
+            if ! python3 tools/qualification/subclass_audit.py --verify \
+              --baseline "$baseline" --repository "$GITHUB_WORKSPACE" \
+              --candidate-commit "$GITHUB_SHA" --audit "$RUNNER_TEMP/artifact-audit.json" \
+              --stdlib "${stdlibs[0]}" --java-home "$java_home" --jdk-major "$jdk" \
+              --output "$RUNNER_TEMP/subclass-dispatch/$jdk" \
+              > "$RUNNER_TEMP/subclass-dispatch/verify-$jdk.stdout" \
+              2> "$RUNNER_TEMP/subclass-dispatch/verify-$jdk.stderr"; then
+              result=1
+            fi
+          done
+          exit "$result"
+      - name: Upload Java subclass dispatch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subclass-dispatch-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/subclass-dispatch/
+            ${{ runner.temp }}/artifact-audit.json
+          include-hidden-files: true
+          if-no-files-found: warn
       - name: Package Linux publication evidence
         if: always()
         run: >-

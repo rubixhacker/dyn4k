@@ -105,52 +105,64 @@ open class Transform : Transformable, Copyable<Transform> {
     open fun isIdentity() = cost == 1.0 && sint == 0.0 && x == 0.0 && y == 0.0
     open fun getTransformedX(vector: Vector2) = cost * vector.x - sint * vector.y + x
     open fun getTransformedY(vector: Vector2) = sint * vector.x + cost * vector.y + y
-    open fun transformX(vector: Vector2) { vector.x = getTransformedX(vector) }
-    open fun transformY(vector: Vector2) { vector.y = getTransformedY(vector) }
+    open fun transformX(vector: Vector2) { vector.x = cost * vector.x - sint * vector.y + x }
+    open fun transformY(vector: Vector2) { vector.y = sint * vector.x + cost * vector.y + y }
     open fun getTransformed(vector: Vector2): Vector2 {
-        val destination = Vector2()
-        getTransformed(vector, destination)
-        return destination
+        val vx = vector.x; val vy = vector.y
+        return Vector2(cost * vx - sint * vy + x, sint * vx + cost * vy + y)
     }
     open fun getTransformed(vector: Vector2, destination: Vector2) {
         val vx = vector.x; val vy = vector.y
         destination.x = cost * vx - sint * vy + x
         destination.y = sint * vx + cost * vy + y
     }
-    open fun transform(vector: Vector2) = getTransformed(vector, vector)
+    open fun transform(vector: Vector2) {
+        val vx = vector.x; val vy = vector.y
+        vector.x = cost * vx - sint * vy + x
+        vector.y = sint * vx + cost * vy + y
+    }
     open fun getInverseTransformed(vector: Vector2): Vector2 {
-        val destination = Vector2()
-        getInverseTransformed(vector, destination)
-        return destination
+        val tx = vector.x - x; val ty = vector.y - y
+        return Vector2(cost * tx + sint * ty, -sint * tx + cost * ty)
     }
     open fun getInverseTransformed(vector: Vector2, destination: Vector2) {
         val tx = vector.x - x; val ty = vector.y - y
         destination.x = cost * tx + sint * ty
         destination.y = -sint * tx + cost * ty
     }
-    open fun inverseTransform(vector: Vector2) = getInverseTransformed(vector, vector)
+    open fun inverseTransform(vector: Vector2) {
+        val tx = vector.x - x; val ty = vector.y - y
+        vector.x = cost * tx + sint * ty
+        vector.y = -sint * tx + cost * ty
+    }
     open fun getTransformedR(vector: Vector2): Vector2 {
-        val destination = Vector2()
-        getTransformedR(vector, destination)
-        return destination
+        val vx = vector.x; val vy = vector.y
+        return Vector2(cost * vx - sint * vy, sint * vx + cost * vy)
     }
     open fun getTransformedR(vector: Vector2, destination: Vector2) {
         val vx = vector.x; val vy = vector.y
         destination.x = cost * vx - sint * vy
         destination.y = sint * vx + cost * vy
     }
-    open fun transformR(vector: Vector2) = getTransformedR(vector, vector)
+    open fun transformR(vector: Vector2) {
+        val vx = vector.x; val vy = vector.y
+        vector.x = cost * vx - sint * vy
+        vector.y = sint * vx + cost * vy
+    }
     open fun getInverseTransformedR(vector: Vector2): Vector2 {
-        val destination = Vector2()
-        getInverseTransformedR(vector, destination)
-        return destination
+        val vx = vector.x; val vy = vector.y
+        return Vector2(cost * vx + sint * vy, -sint * vx + cost * vy)
     }
     open fun getInverseTransformedR(vector: Vector2, destination: Vector2) {
         val vx = vector.x; val vy = vector.y
         destination.x = cost * vx + sint * vy
         destination.y = -sint * vx + cost * vy
     }
-    open fun inverseTransformR(vector: Vector2) = getInverseTransformedR(vector, vector)
+    open fun inverseTransformR(vector: Vector2) {
+        val vx = vector.x; val vy = vector.y
+        vector.x = cost * vx + sint * vy
+        vector.y = -sint * vx + cost * vy
+    }
 
     open fun getTranslationX() = x
     open fun setTranslationX(x: Double) { this.x = x }
@@ -184,8 +196,9 @@ open class Transform : Transformable, Copyable<Transform> {
     open fun getRotationTransform() = Transform(cost, sint, 0.0, 0.0)
     open fun getValues() = doubleArrayOf(cost, -sint, x, sint, cost, y)
 
-    open fun lerp(end: Transform, alpha: Double) = lerp(end, alpha, this)
-    open fun lerp(end: Transform, alpha: Double, result: Transform) {
+    open fun lerp(end: Transform, alpha: Double) = interpolate(end, alpha, this)
+    open fun lerp(end: Transform, alpha: Double, result: Transform) = interpolate(end, alpha, result)
+    private fun interpolate(end: Transform, alpha: Double, result: Transform) {
         val startCost = cost; val startSint = sint
         val nx = (1.0 - alpha) * x + alpha * end.x
         val ny = (1.0 - alpha) * y + alpha * end.y
@@ -229,14 +242,14 @@ open class Transform : Transformable, Copyable<Transform> {
         translate(dp.x * alpha, dp.y * alpha)
     }
     open fun lerped(dp: Vector2, da: Double, alpha: Double): Transform {
-        val result = copy()
+        val result = Transform(this)
         result.rotateOnly(da * alpha)
         result.translate(dp.x * alpha, dp.y * alpha)
         return result
     }
     open fun lerped(end: Transform, alpha: Double): Transform {
         val result = Transform()
-        lerp(end, alpha, result)
+        interpolate(end, alpha, result)
         return result
     }
 

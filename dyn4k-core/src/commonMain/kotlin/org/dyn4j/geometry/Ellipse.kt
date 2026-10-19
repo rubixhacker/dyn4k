@@ -103,7 +103,7 @@ open class Ellipse : AbstractShape, Convex {
     }
 
     override fun createMass(density: Double): Mass {
-        val mass = getArea() * density
+        val mass = (PI * halfWidth * halfHeight) * density
         return Mass(center, mass, mass * (halfWidth * halfWidth + halfHeight * halfHeight) / 4.0)
     }
     override fun getArea(): Double = PI * halfWidth * halfHeight

@@ -72,7 +72,7 @@ open class AVLTree<E : Comparable<E>> : BinarySearchTree<E> {
     override fun subsetIterator(from: E?, to: E?): MutableIterator<E> = BinarySearchTreeIterator(root, from, to)
     override fun inOrderIterator(): MutableIterator<E> = BinarySearchTreeIterator(root, true)
     override fun reverseOrderIterator(): MutableIterator<E> = BinarySearchTreeIterator(root, false)
-    override fun toString(): String = joinToString(",", "BinarySearchTree[", "]")
+    override fun toString(): String = inOrderIterator().asSequence().joinToString(",", "BinarySearchTree[", "]")
     override fun isBalanced(): Boolean = isBalanced(root)
     override fun isValid(): Boolean = isValid(root) && isUnderHeightLimit()
 

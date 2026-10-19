@@ -96,8 +96,8 @@ open class AABB : Translatable, Copyable<AABB> {
     open fun getTranslated(vector: Vector2) = AABB(minX + vector.x, minY + vector.y, maxX + vector.x, maxY + vector.y)
     open fun getWidth() = maxX - minX
     open fun getHeight() = maxY - minY
-    open fun getPerimeter() = 2.0 * (getWidth() + getHeight())
-    open fun getArea() = getWidth() * getHeight()
+    open fun getPerimeter() = 2.0 * (maxX - minX + maxY - minY)
+    open fun getArea() = (maxX - minX) * (maxY - minY)
 
     open fun union(aabb: AABB): AABB {
         minX = min(minX, aabb.minX)
@@ -117,14 +117,31 @@ open class AABB : Translatable, Copyable<AABB> {
 
     open fun getUnion(aabb: AABB) = copy().union(aabb)
 
-    open fun intersection(aabb: AABB) = intersection(this, aabb)
+    open fun intersection(aabb: AABB): AABB {
+        minX = max(minX, aabb.minX)
+        minY = max(minY, aabb.minY)
+        maxX = min(maxX, aabb.maxX)
+        maxY = min(maxY, aabb.maxY)
+        if (minX > maxX || minY > maxY) {
+            minX = 0.0
+            minY = 0.0
+            maxX = 0.0
+            maxY = 0.0
+        }
+        return this
+    }
 
     open fun intersection(aabb1: AABB, aabb2: AABB): AABB {
         minX = max(aabb1.minX, aabb2.minX)
         minY = max(aabb1.minY, aabb2.minY)
         maxX = min(aabb1.maxX, aabb2.maxX)
         maxY = min(aabb1.maxY, aabb2.maxY)
-        if (minX > maxX || minY > maxY) zero()
+        if (minX > maxX || minY > maxY) {
+            minX = 0.0
+            minY = 0.0
+            maxX = 0.0
+            maxY = 0.0
+        }
         return this
     }
 

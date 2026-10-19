@@ -52,12 +52,18 @@ open class Vector2 : Copyable<Vector2> {
         val dx = this.x - x; val dy = this.y - y
         return nearestSqrt(dx * dx + dy * dy)
     }
-    open fun distance(point: Vector2) = distance(point.x, point.y)
+    open fun distance(point: Vector2): Double {
+        val dx = this.x - point.x; val dy = this.y - point.y
+        return nearestSqrt(dx * dx + dy * dy)
+    }
     open fun distanceSquared(x: Double, y: Double): Double {
         val dx = this.x - x; val dy = this.y - y
         return dx * dx + dy * dy
     }
-    open fun distanceSquared(point: Vector2) = distanceSquared(point.x, point.y)
+    open fun distanceSquared(point: Vector2): Double {
+        val dx = this.x - point.x; val dy = this.y - point.y
+        return dx * dx + dy * dy
+    }
 
     override fun hashCode(): Int {
         var result = 1
@@ -72,51 +78,55 @@ open class Vector2 : Copyable<Vector2> {
         vector === this || (vector != null && x == vector.x && y == vector.y)
     open fun equals(x: Double, y: Double) = this.x == x && this.y == y
     open fun equals(vector: Vector2?, epsilon: Double): Boolean =
-        vector === this || (vector != null && equals(vector.x, vector.y, epsilon))
+        vector === this || (vector != null &&
+            !(abs(vector.x - this.x) > epsilon) && !(abs(vector.y - this.y) > epsilon))
     open fun equals(x: Double, y: Double, epsilon: Double) =
         !(abs(x - this.x) > epsilon) && !(abs(y - this.y) > epsilon)
     override fun toString() = "(" + x + ", " + y + ")"
 
-    open fun set(vector: Vector2): Vector2 = set(vector.x, vector.y)
+    open fun set(vector: Vector2): Vector2 { x = vector.x; y = vector.y; return this }
     open fun set(x: Double, y: Double): Vector2 { this.x = x; this.y = y; return this }
     open fun getXComponent() = Vector2(x, 0.0)
     open fun getYComponent() = Vector2(0.0, y)
     open fun getMagnitude() = nearestSqrt(x * x + y * y)
     open fun getMagnitudeSquared() = x * x + y * y
     open fun setMagnitude(magnitude: Double): Vector2 {
-        if (abs(magnitude) <= Epsilon.E) return zero()
+        if (abs(magnitude) <= Epsilon.E) {
+            x = 0.0; y = 0.0
+            return this
+        }
         if (isZero()) return this
-        val scale = magnitude / getMagnitude()
+        val scale = magnitude / nearestSqrt(x * x + y * y)
         x *= scale; y *= scale
         return this
     }
     open fun getDirection() = atan2(y, x)
     open fun setDirection(angle: Double): Vector2 {
-        val magnitude = getMagnitude()
+        val magnitude = nearestSqrt(x * x + y * y)
         x = magnitude * cos(angle); y = magnitude * sin(angle)
         return this
     }
-    open fun add(vector: Vector2) = add(vector.x, vector.y)
+    open fun add(vector: Vector2): Vector2 { x += vector.x; y += vector.y; return this }
     open fun add(x: Double, y: Double): Vector2 { this.x += x; this.y += y; return this }
-    open fun sum(vector: Vector2) = sum(vector.x, vector.y)
+    open fun sum(vector: Vector2) = Vector2(this.x + vector.x, this.y + vector.y)
     open fun sum(x: Double, y: Double) = Vector2(this.x + x, this.y + y)
-    open fun subtract(vector: Vector2) = subtract(vector.x, vector.y)
+    open fun subtract(vector: Vector2): Vector2 { x -= vector.x; y -= vector.y; return this }
     open fun subtract(x: Double, y: Double): Vector2 { this.x -= x; this.y -= y; return this }
-    open fun difference(vector: Vector2) = difference(vector.x, vector.y)
+    open fun difference(vector: Vector2) = Vector2(this.x - vector.x, this.y - vector.y)
     open fun difference(x: Double, y: Double) = Vector2(this.x - x, this.y - y)
-    open fun to(vector: Vector2) = to(vector.x, vector.y)
+    open fun to(vector: Vector2) = Vector2(vector.x - this.x, vector.y - this.y)
     open fun to(x: Double, y: Double) = Vector2(x - this.x, y - this.y)
     open fun multiply(scalar: Double): Vector2 { x *= scalar; y *= scalar; return this }
     open fun divide(scalar: Double): Vector2 { x /= scalar; y /= scalar; return this }
     open fun product(scalar: Double) = Vector2(x * scalar, y * scalar)
     open fun quotient(scalar: Double) = Vector2(x / scalar, y / scalar)
-    open fun dot(vector: Vector2) = dot(vector.x, vector.y)
+    open fun dot(vector: Vector2) = this.x * vector.x + this.y * vector.y
     open fun dot(x: Double, y: Double) = this.x * x + this.y * y
-    open fun cross(vector: Vector2) = cross(vector.x, vector.y)
+    open fun cross(vector: Vector2) = this.x * vector.y - this.y * vector.x
     open fun cross(x: Double, y: Double) = this.x * y - this.y * x
     open fun cross(z: Double) = Vector2(-y * z, x * z)
-    open fun isOrthogonal(vector: Vector2) = isOrthogonal(vector.x, vector.y)
-    open fun isOrthogonal(x: Double, y: Double) = abs(dot(x, y)) <= Epsilon.E
+    open fun isOrthogonal(vector: Vector2) = abs(this.x * vector.x + this.y * vector.y) <= Epsilon.E
+    open fun isOrthogonal(x: Double, y: Double) = abs(this.x * x + this.y * y) <= Epsilon.E
     open fun isZero() = abs(x) <= Epsilon.E && abs(y) <= Epsilon.E
     open fun negate(): Vector2 { x = -x; y = -y; return this }
     open fun getNegative() = Vector2(-x, -y)
