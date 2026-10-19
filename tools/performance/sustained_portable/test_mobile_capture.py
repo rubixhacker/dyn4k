@@ -39,6 +39,41 @@ def apple_derivation(linked, harness, target="iosX64", build="development"):
 
 
 class MobileCaptureAdverseTest(unittest.TestCase):
+    def test_signed_image_derivation_binds_raw_copy_and_signed_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            linked = root / "linked.kexe"
+            app = root / "Selected.app"
+            app.mkdir()
+            image = app / "Dyn4kPerformance"
+            linked.write_bytes(b"raw link")
+            image.write_bytes(b"signed image")
+            signed_sha = mobile_capture.capture.digest(image)
+            derivation = apple_derivation(linked, image)
+            inventory = {"image_derivation": derivation,
+                         "bundle_sha256": {image.name: signed_sha},
+                         "signed_image_sha256": signed_sha,
+                         "signed_image_size": image.stat().st_size}
+            mobile_capture.validate_apple_image_derivation(
+                inventory, linked, app, image, "iosX64", "development")
+            for key, replacement in (("copied_sha256", "0" * 64),
+                                     ("linked_sha256", "0" * 64),
+                                     ("packaged_sha256", "0" * 64),
+                                     ("codesign_verified", False)):
+                with self.subTest(key=key), self.assertRaisesRegex(ValueError, "derivation"):
+                    mobile_capture.validate_apple_image_derivation(
+                        inventory | {"image_derivation": derivation | {key: replacement}},
+                        linked, app, image, "iosX64", "development")
+            image.write_bytes(b"changed signature")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, app, image, "iosX64", "development")
+            image.write_bytes(b"signed image")
+            linked.write_bytes(b"changed raw link")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, app, image, "iosX64", "development")
+
     def test_simulator_xcode_pin_accepts_26_5_and_rejects_26_4_1(self):
         self.assertEqual("Xcode 26.5\nBuild version 17F42\n",
                          mobile_capture.validate_xcode_version(
@@ -163,6 +198,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "source_sha": source,
                          "linked_sha256": mobile_capture.capture.digest(linked),
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
+                         "signed_image_sha256": mobile_capture.capture.digest(selected / "Dyn4kPerformance"),
+                         "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
             launches = []
             signature_checks = []
@@ -237,6 +274,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual(process["launch"]["pid"], 123)
             self.assertEqual(process["image"]["sha256"], inventory["bundle_sha256"]["Dyn4kPerformance"])
             self.assertNotEqual(process["image"]["sha256"], inventory["linked_sha256"])
+            self.assertEqual(process["image"]["sha256"], inventory["signed_image_sha256"])
             self.assertEqual(process["installed_image_size"], identity["size"])
             self.assertEqual(len(launches), 1)
             self.assertEqual(signature_checks, [
@@ -332,6 +370,45 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual((archive / "attestation.ack.bin").read_bytes(), expected)
             self.assertGreater(observed["ack_ns"], attestation["released_ns"])
 
+    def test_simulator_rejects_invalid_selected_signature_before_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = root / "selected.app"
+            installed = root / "installed.app"
+            for app in (selected, installed):
+                app.mkdir()
+                (app / "Dyn4kPerformance").write_bytes(b"signed image")
+            linked = root / "raw-linked.kexe"
+            linked.write_bytes(b"raw link")
+            image = selected / "Dyn4kPerformance"
+            inventory = {"app_bundle": str(selected),
+                         "bundle_id": "io.github.rubixhacker.dyn4k.performance.iosx64",
+                         "linked_sha256": mobile_capture.capture.digest(linked),
+                         "signed_image_sha256": mobile_capture.capture.digest(image),
+                         "signed_image_size": image.stat().st_size,
+                         "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
+                         "image_derivation": apple_derivation(linked, image)}
+            checked = []
+            def invalid_signature(_archive, label, argv, **kwargs):
+                checked.append(label)
+                if label == "apple-selected-signature":
+                    raise ValueError("selected signature changed")
+                output = {"apple-xcode": "Xcode 26.5\nBuild version 17F42\n",
+                          "apple-device-list": '{"devices": {}}',
+                          "apple-architecture": "x86_64\n",
+                          "apple-launch-help":
+                          "--stdout=<path> Redirect the application's standard output to a file.\n"
+                          "--stderr=<path> Redirect the application's standard error to a file.\n"}
+                return subprocess.CompletedProcess(argv, 0, output.get(label, ""), "")
+            args = SimpleNamespace(udid="selected-udid", target="iosX64",
+                                   archive=root / "archive", timeout=1)
+            with patch.object(mobile_capture, "setup_command", side_effect=invalid_signature), \
+                 patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}):
+                with self.assertRaisesRegex(ValueError, "signature changed"):
+                    mobile_capture.run_simulator(
+                        args, inventory, image, ["fixture"], "nonce")
+            self.assertNotIn("apple-install", checked)
+
     def test_simulator_rejects_executable_replaced_during_launch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -351,6 +428,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "source_sha": "a" * 40,
                          "linked_sha256": mobile_capture.capture.digest(linked),
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed),
+                         "signed_image_sha256": selected_sha,
+                         "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "image_derivation": apple_derivation(linked, selected / "Dyn4kPerformance")}
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
@@ -426,12 +505,14 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                 "app_bundle": str(app),
                 "linked_sha256": mobile_capture.capture.digest(linked),
                 "bundle_sha256": {"Dyn4kPerformance": mobile_capture.capture.digest(signed)},
+                "signed_image_sha256": mobile_capture.capture.digest(signed),
+                "signed_image_size": signed.stat().st_size,
                 "image_derivation": apple_derivation(linked, signed),
             }
             self.assertNotEqual(mobile_capture.capture.digest(linked),
                                 mobile_capture.capture.digest(signed))
             self.assertEqual(mobile_capture.validate_apple_image_derivation(
-                inventory, linked, signed, "iosX64", "development"),
+                inventory, linked, app, signed, "iosX64", "development"),
                 inventory["image_derivation"])
             for field, value in (("linked_sha256", "0" * 64), ("copied_sha256", "0" * 64),
                                  ("copied_size", 1), ("linked_size", float(linked.stat().st_size)),
@@ -444,11 +525,11 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                                                              field: value}}
                 with self.subTest(field=field, value=value), self.assertRaisesRegex(ValueError, "derivation"):
                     mobile_capture.validate_apple_image_derivation(
-                        changed, linked, signed, "iosX64", "development")
+                        changed, linked, app, signed, "iosX64", "development")
             signed.write_bytes(b"substituted signed image")
             with self.assertRaisesRegex(ValueError, "derivation"):
                 mobile_capture.validate_apple_image_derivation(
-                    inventory, linked, signed, "iosX64", "development")
+                    inventory, linked, app, signed, "iosX64", "development")
 
     def test_unsigned_physical_apple_package_must_equal_raw_link(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -461,15 +542,19 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             image.write_bytes(linked.read_bytes())
             inventory = {"app_bundle": str(app),
                          "bundle_sha256": {"Dyn4kPerformance": mobile_capture.capture.digest(image)},
+                         "signed_image_sha256": mobile_capture.capture.digest(image),
+                         "signed_image_size": image.stat().st_size,
                          "image_derivation": apple_derivation(linked, image, target="iosArm64")}
             mobile_capture.validate_apple_image_derivation(
-                inventory, linked, image, "iosArm64", "development")
+                inventory, linked, app, image, "iosArm64", "development")
             image.write_bytes(b"changed physical image")
             inventory["bundle_sha256"]["Dyn4kPerformance"] = mobile_capture.capture.digest(image)
+            inventory["signed_image_sha256"] = mobile_capture.capture.digest(image)
+            inventory["signed_image_size"] = image.stat().st_size
             inventory["image_derivation"] = apple_derivation(linked, image, target="iosArm64")
             with self.assertRaisesRegex(ValueError, "derivation"):
                 mobile_capture.validate_apple_image_derivation(
-                    inventory, linked, image, "iosArm64", "development")
+                    inventory, linked, app, image, "iosArm64", "development")
 
     def test_apple_process_vnode_requires_one_exact_kernel_text_mapping(self):
         executable = Path("/private/tmp/installed.app/Dyn4kPerformance")
@@ -550,6 +635,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "linked_executable": str(linked),
                          "app_bundle": str(selected_app),
                          "bundle_sha256": package,
+                         "signed_image_sha256": mobile_capture.capture.digest(executable),
+                         "signed_image_size": executable.stat().st_size,
                          "image_derivation": apple_derivation(linked, executable)}
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()

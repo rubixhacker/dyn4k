@@ -200,8 +200,7 @@ def selected_artifact(inventory, module, target):
     return matches[0]
 
 
-def validate_apple_image_derivation(inventory, linked, harness, target, build):
-    app = Path(inventory["app_bundle"])
+def validate_apple_image_derivation(inventory, linked, app, harness, target, build):
     simulator = target in APPLE_SIMULATORS
     linked_sha = capture.digest(linked)
     packaged_sha = capture.digest(harness)
@@ -224,7 +223,9 @@ def validate_apple_image_derivation(inventory, linked, harness, target, build):
             or (not simulator and (packaged_sha != linked_sha or packaged_size != linked_size))
             or not isinstance(actual, dict) or actual != expected
             or any(type(actual.get(key)) is not type(value) for key, value in expected.items())
-            or inventory["bundle_sha256"].get(harness.name) != packaged_sha):
+            or inventory["bundle_sha256"].get(harness.name) != packaged_sha
+            or inventory.get("signed_image_sha256") != packaged_sha
+            or inventory.get("signed_image_size") != packaged_size):
         raise ValueError("Apple linked-to-package image derivation differs from selected build")
     return expected
 
@@ -278,8 +279,10 @@ def validate_inventory(path, target, build):
     if not actual_bundle or inventory.get("bundle_sha256") != actual_bundle:
         raise ValueError("mobile package bytes differ from build inventory")
     if apple:
-        validate_apple_image_derivation(inventory, linked, harness, target, build)
-    elif inventory.get("image_derivation") is not None:
+        validate_apple_image_derivation(inventory, linked, app, harness, target, build)
+    elif (inventory.get("image_derivation") is not None
+          or inventory.get("signed_image_sha256") is not None
+          or inventory.get("signed_image_size") is not None):
         raise ValueError("Android Native inventory contains Apple image derivation")
     artifacts = inventory.get("resolved_artifacts")
     if not isinstance(artifacts, list) or not artifacts:
@@ -508,6 +511,8 @@ def run_simulator(args, inventory, harness, producer, nonce):
             or derivation.get("linked_sha256") != inventory["linked_sha256"]
             or derivation.get("packaged_sha256") != selected_sha
             or derivation.get("packaged_size") != selected_size
+            or inventory.get("signed_image_sha256") != selected_sha
+            or inventory.get("signed_image_size") != selected_size
             or installed_bundle != inventory["bundle_sha256"]
             or installed_bundle.get(harness.name) != selected_sha
             or not installed.is_file() or capture.digest(installed) != selected_sha):
@@ -847,7 +852,9 @@ def run(args):
                     or process.get("installed_image_sha256") != signed_sha \
                     or process["image"].get("sha256") != signed_sha \
                     or process.get("installed_image_size") != derivation.get("packaged_size") \
-                    or process["image"].get("size") != derivation.get("packaged_size"):
+                    or process["image"].get("size") != derivation.get("packaged_size") \
+                    or signed_sha != inventory.get("signed_image_sha256") \
+                    or derivation.get("packaged_size") != inventory.get("signed_image_size"):
                 raise ValueError("simulator installed package or link differs from inventory")
             protocol_bytes = simulator_protocol_bytes(
                 stdout, launch_file.read_bytes(), process["bundle_id"], process["image"]["pid"])

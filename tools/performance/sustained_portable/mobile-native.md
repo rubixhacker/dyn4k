@@ -88,8 +88,9 @@ python3 -B tools/performance/sustained_portable/mobile_capture.py \
 The launcher checks Xcode 26.5, host architecture, and simulator family.
 It checks the raw link against its inventory hash, the recorded copy and
 signing derivation, and selected and installed app package bytes. The signed
-package executable is the selected process image. The launcher compares its hash and size with
-the installed app and the live PID observation. It verifies the selected and
+package executable is the selected process image. Its independent hash and
+size are in the build inventory. The launcher compares them with the installed
+app and live PID observation. It verifies the selected and
 installed app signatures and archives both command records. It also checks
 `proc_pidpath` at the PID returned by `simctl launch`. It checks the OS text
 mapping's device, inode, and size through `lsof -d txt`. The

@@ -189,10 +189,16 @@ receipt, so the observer does not normalize it or accept that image.
 
 Use the installed ARM64 Mac over SSH with Xcode 26.5. Set
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for the task.
-Do not run the GitHub-hosted macOS route.
+The local capture checks the exact Xcode version, a valid build line, and
+that `xcrun --find xcodebuild` resolves under the selected developer directory.
+It invokes that exact executable for `-version` and retains both command lines
+and outputs for archive replay.
+It archives the observation in `apple-toolchain.json`, bound to the source and
+build inventory. Do not run the GitHub-hosted macOS route.
 
 ```sh
 export JAVA_HOME=/path/to/jdk21
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 export STAGED_REPO_URI=file:///absolute/path/to/staging-repository
 export STAGED_REPO_ROOT=/absolute/path/to/staging-repository
 export NATIVE_TARGET=macosArm64
@@ -207,6 +213,8 @@ python3 -B tools/performance/sustained_portable/native_host_capture.py \
   --target "$NATIVE_TARGET" --build "$NATIVE_BUILD" \
   --scenario separated.default.small.30hz.direct_kotlin \
   --archive /absolute/new/archive/native-direct --steps 30 --warmup 3
+python3 -B tools/performance/sustained_portable/native_host_capture.py verify \
+  --archive /absolute/new/archive/native-direct
 ```
 
 Repeat for the compatibility scenario and optimized build. Run the live

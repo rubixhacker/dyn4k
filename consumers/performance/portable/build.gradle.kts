@@ -356,6 +356,8 @@ tasks.register("portableMobileBuildInventory") {
             "resolved_artifacts" to artifacts, "linked_executable" to linked.canonicalPath,
             "linked_sha256" to sha256(linked), "harness" to harness.canonicalPath,
             "image_derivation" to imageDerivation,
+            "signed_image_sha256" to if (apple) sha256(harness) else null,
+            "signed_image_size" to if (apple) harness.length() else null,
             "app_bundle" to if (apple) bundleDirectory.canonicalPath else null,
             "bundle_id" to if (apple) "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}" else null,
             "abi" to androidMobileTargets[target], "bundle_sha256" to bundle,
