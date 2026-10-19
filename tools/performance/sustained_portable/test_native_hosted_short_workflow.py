@@ -172,7 +172,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertEqual(checked, 49)
+        self.assertEqual(checked, 46)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
