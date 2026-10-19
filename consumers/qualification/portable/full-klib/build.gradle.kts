@@ -1,4 +1,5 @@
 import groovy.json.JsonOutput
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 import java.security.MessageDigest
 
 plugins {
@@ -18,6 +19,12 @@ val variant = when (target) {
 val configuration = lane.substringAfterLast(':')
 val version = "0.1.0-alpha.1"
 val workRoot = file(providers.gradleProperty("qualificationWorkRoot").get())
+val native = target == "linuxX64"
+val mode = if (configuration == "production") "Production" else "Development"
+val linkMode = if (configuration == "optimized-opt") "Release" else "Debug"
+val runtimeTasks = if (native) listOf(":core:linuxX64Test", ":facade:linuxX64Test")
+    else listOf(":core:compileTest${mode}ExecutableKotlinJs",
+        ":facade:compileTest${mode}ExecutableKotlinJs")
 
 subprojects {
     layout.buildDirectory.set(file("$workRoot/${project.name}"))
@@ -97,14 +104,31 @@ tasks.register("qualificationGraphs") {
     }
 }
 
-tasks.register("qualificationEvidence") {
-    dependsOn("qualificationGraphs")
-    if (target == "linuxX64") {
-        dependsOn(":core:linuxX64Test", ":facade:linuxX64Test")
-    } else {
-        dependsOn(":core:compileTestDevelopmentExecutableKotlinJs",
-            ":facade:compileTestDevelopmentExecutableKotlinJs")
+tasks.register("qualificationCompilerEvidence") {
+    dependsOn(runtimeTasks)
+    doLast {
+        val evidence = listOf("core", "facade").map { module ->
+            val owner = project(":$module")
+            val compileName = if (native) "compileTestKotlinLinuxX64" else "compileTestKotlinJs"
+            val compile = owner.tasks.getByName(compileName) as KotlinCompilationTask<*>
+            val executableName = if (native) "link${linkMode}TestLinuxX64"
+                else "compileTest${mode}ExecutableKotlinJs"
+            val executable = owner.tasks.getByName(executableName)
+            mapOf("module" to module, "compile_task" to compile.path,
+                "compile_args" to compile.compilerOptions.freeCompilerArgs.get(),
+                "executable_task" to executable.path,
+                "executable_args" to (if (native) emptyList<String>() else
+                    (executable as KotlinCompilationTask<*>).compilerOptions.freeCompilerArgs.get()))
+        }
+        val path = file("$archive/compiler-evidence.json")
+        path.parentFile.mkdirs()
+        path.writeText(JsonOutput.toJson(evidence))
+        println("QUALIFICATION_COMPILER_EVIDENCE_SHA256=${hash(path)}")
     }
+}
+
+tasks.register("qualificationEvidence") {
+    dependsOn("qualificationGraphs", "qualificationCompilerEvidence")
     doLast {
         val command = listOf("python3", "$checkout/tools/qualification/full_klib_consumer.py",
             "capture", "--repository", checkout.absolutePath, "--project", rootDir.absolutePath,
