@@ -1,0 +1,746 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path, PurePosixPath, PureWindowsPath
+
+import independent_gates
+import qualify
+
+
+PROJECT = "consumers/qualification/portable/full-native-host"
+PRODUCER = "tools/qualification/full_native_host_consumer.py"
+MODULES = ("dyn4k-core", "dyn4k")
+TARGETS = {
+    "linuxArm64": ("Linux", "aarch64", None, "4.9.156", "2.25"),
+    "mingwX64": ("Windows", "AMD64", None, "10.0.10240", None),
+    "macosArm64": ("Darwin", "arm64", None, "11.", None),
+    "iosSimulatorArm64": ("Darwin", "arm64", "iOS", "15.", None),
+    "iosX64": ("Darwin", "x86_64", "iOS", "15.", None),
+    "tvosSimulatorArm64": ("Darwin", "arm64", "tvOS", "15.", None),
+    "watchosSimulatorArm64": ("Darwin", "arm64", "watchOS", "8.", None),
+}
+SHA = re.compile(r"[0-9a-f]{64}\Z")
+UDID = re.compile(r"[0-9a-fA-F-]{36}\Z")
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def encoded(data):
+    return (json.dumps(data, sort_keys=True, separators=(",", ":"),
+                       allow_nan=False) + "\n").encode()
+
+
+def git(repository, *args):
+    return subprocess.check_output(["git", "--no-replace-objects", "-C",
+                                    str(repository), *args], stderr=subprocess.PIPE).decode().strip()
+
+
+def verify_source_binding(repository, candidate):
+    producer_source = subprocess.check_output(["git", "--no-replace-objects", "-C",
+                                               str(repository), "show", f"{candidate}:{PRODUCER}"])
+    if (git(repository, "rev-parse", "HEAD") != candidate
+            or Path(__file__).resolve() != repository / PRODUCER
+            or Path(__file__).read_bytes() != producer_source):
+        raise ValueError("public verifier differs from exact candidate checkout")
+
+
+def lane_contract(repository, lane):
+    manifest = independent_gates.load_approved_manifest(repository)
+    if lane not in manifest["lanes"] or manifest["lanes"][lane]["target"] not in TARGETS:
+        raise ValueError("lane is not one of the 28 approved Native host routes")
+    contract = independent_gates.consumer_contract(manifest, lane)
+    cases = contract["cases"]
+    if (len(cases) != 2523 or len({case["id"] for case in cases}) != 2523
+            or sum(case["module"] == "dyn4k-core" for case in cases) != 2465
+            or sum(case["module"] == "dyn4k" for case in cases) != 58
+            or any(case["scope"] != "portable" for case in cases)):
+        raise ValueError("approved portable method contract differs")
+    return manifest, contract
+
+
+def source_inputs(repository, candidate, contract):
+    roots = [f"{module}/src/commonTest/kotlin" for module in MODULES]
+    roots.append("dyn4k-core/src/nativeTest/kotlin")
+    tracked = sorted(path for path in git(repository, "ls-tree", "-r", "--name-only",
+                                          candidate, "--", *roots).splitlines()
+                     if path.endswith(".kt"))
+    live = sorted(path.relative_to(repository).as_posix() for root in roots
+                  for path in (repository / root).rglob("*.kt") if path.is_file())
+    if not tracked or tracked != live or len(tracked) != len(set(tracked)):
+        raise ValueError("original Native test source tree differs from candidate")
+    hashes = {}
+    for path in tracked:
+        original = subprocess.check_output(["git", "--no-replace-objects", "-C",
+                                            str(repository), "show", f"{candidate}:{path}"])
+        if (repository / path).read_bytes() != original:
+            raise ValueError(f"original test source differs: {path}")
+        hashes[path] = digest(original)
+    for case in contract["cases"]:
+        if hashes.get(case["source"]["path"]) != case["source"]["sha256"]:
+            raise ValueError(f"approved source differs: {case['id']}")
+    by_module = {module: sorted((case for case in contract["cases"]
+                                 if case["module"] == module), key=lambda case: case["id"])
+                 for module in MODULES}
+    return {
+        "source-inventory.tsv": "".join(f"{path}\t{value}\n"
+                                         for path, value in hashes.items()).encode(),
+        "core-cases.tsv": "".join(f"{case['id']}\t{case['classname']}\t{case['method']}\n"
+                                  for case in by_module["dyn4k-core"]).encode(),
+        "facade-cases.tsv": "".join(f"{case['id']}\t{case['classname']}\t{case['method']}\n"
+                                    for case in by_module["dyn4k"]).encode(),
+    }
+
+
+def selected_rows(raw):
+    rows = [line.split("\t") for line in raw.decode().splitlines()]
+    if any(len(row) != 3 for row in rows):
+        raise ValueError("selected method input is malformed")
+    keys = [(row[1], row[2]) for row in rows]
+    if len(keys) != len(set(keys)) or len(rows) != len({row[0] for row in rows}):
+        raise ValueError("selected method input duplicates a method")
+    return {(row[1], row[2]): row[0] for row in rows}
+
+
+def original_report(raw, target, selected):
+    suite = ET.fromstring(raw)
+    if suite.tag != "testsuite":
+        raise ValueError("Native raw report root differs")
+    cases = list(suite.iter("testcase"))
+    counts = {"tests": len(cases),
+              "failures": sum(case.find("failure") is not None for case in cases),
+              "errors": sum(case.find("error") is not None for case in cases),
+              "skipped": sum(case.find("skipped") is not None for case in cases)}
+    if (any(suite.get(key) is None or int(suite.get(key)) != value
+            for key, value in counts.items())
+            or any(counts[key] for key in ("failures", "errors", "skipped"))):
+        raise ValueError("Native raw report has missing, failing, or skipped methods")
+    try:
+        suite_duration = float(suite.get("time", "nan"))
+    except ValueError as error:
+        raise ValueError("Native raw suite duration is invalid") from error
+    if not 0 <= suite_duration < float("inf"):
+        raise ValueError("Native raw suite duration is invalid")
+    observed = []
+    for case in cases:
+        classname, method = case.get("classname", ""), case.get("name", "")
+        prefix, suffix = f"{target}Test.", f"[{target}]"
+        if not classname.startswith(prefix) or not method.endswith(suffix):
+            raise ValueError("Native raw target identity differs")
+        identity = selected.get((classname[len(prefix):], method[:-len(suffix)]))
+        if identity is None:
+            raise ValueError("Native raw report contains a foreign method")
+        try:
+            duration = float(case.get("time", "nan"))
+        except ValueError as error:
+            raise ValueError("Native raw method duration is invalid") from error
+        if not 0 <= duration < float("inf"):
+            raise ValueError("Native raw method duration is invalid")
+        observed.append(identity)
+        case.set("id", identity)
+    if len(observed) != len(set(observed)):
+        raise ValueError("Native raw report duplicates a method")
+    return observed, ET.tostring(suite, encoding="utf-8", xml_declaration=True)
+
+
+def check_method_coverage(observed, expected):
+    if len(observed) != len(expected) or len(set(observed)) != len(observed) or set(observed) != set(expected):
+        raise ValueError("original Native method set is incomplete, duplicate, or foreign")
+
+
+def validate_host(lane, selected, observed):
+    target, runtime, role, mode = lane.split(":")
+    system, machine, family, floor, libc_floor = TARGETS[target]
+    if (selected.get("lane") != lane or selected.get("role") != role
+            or selected.get("system") != system or selected.get("machine", "").lower() != machine.lower()
+            or observed.get("system") != system or observed.get("machine", "").lower() != machine.lower()):
+        raise ValueError("selected target or host identity differs")
+    if observed.get("os_version") != selected.get("os_version"):
+        raise ValueError("observed host version differs from selected runtime")
+    actual_version = observed.get("guest_version") if family else observed["os_version"]
+    if family and (observed.get("guest_family") != family
+                   or observed.get("guest_udid") != selected.get("simulator_udid")
+                   or observed.get("guest_runtime") != selected.get("simulator_runtime")
+                   or observed.get("guest_version") != selected.get("guest_version")
+                   or observed.get("guest_state") != "Booted"):
+        raise ValueError("simulator device, OS, or boot state differs")
+    if type(actual_version) is not str or not actual_version:
+        raise ValueError("selected runtime version is missing")
+    def parts(value):
+        match = re.match(r"\d+(?:\.\d+)*", value)
+        return tuple(int(part) for part in match.group().split(".")) if match else ()
+
+    if not parts(actual_version) or parts(actual_version) < parts(floor):
+        raise ValueError("runtime is older than the approved minimum")
+    minimum_family = "4.9." if target == "linuxArm64" else floor
+    if role == "minimum" and not actual_version.startswith(minimum_family):
+        raise ValueError("minimum runtime family differs from approved floor")
+    if role == "current" and actual_version.startswith(minimum_family):
+        raise ValueError("current runtime repeats minimum family")
+    if target == "linuxArm64":
+        if observed.get("libc") != selected.get("libc"):
+            raise ValueError("Linux glibc identity differs")
+        if not parts(observed["libc"]) or parts(observed["libc"]) < parts(libc_floor):
+            raise ValueError("Linux glibc is older than approved minimum")
+        if role == "minimum" and not observed["libc"].startswith(libc_floor):
+            raise ValueError("minimum Linux glibc differs")
+    if system == "Darwin" and observed.get("xcode_version") != "26.4.1":
+        raise ValueError("pinned Xcode identity differs")
+    if mode not in ("debug-g", "optimized-opt"):
+        raise ValueError("Native mode differs")
+
+
+def observed_host(target, selection):
+    system = platform.system()
+    observation = {"system": system, "machine": platform.machine(),
+                   "os_version": platform.release() if system == "Linux" else platform.version(),
+                   "libc": platform.libc_ver()[1] if system == "Linux" else None}
+    if system == "Darwin":
+        observation["os_version"] = subprocess.check_output(
+            ["sw_vers", "-productVersion"], text=True).strip()
+        xcode = subprocess.check_output(["xcodebuild", "-version"], text=True)
+        match = re.search(r"Xcode ([0-9.]+)", xcode)
+        observation["xcode_version"] = match.group(1) if match else ""
+    family = TARGETS[target][2]
+    if family:
+        udid = selection.get("simulator_udid", "")
+        if not UDID.fullmatch(udid):
+            raise ValueError("selected simulator UDID is invalid")
+        devices = json.loads(subprocess.check_output(
+            ["xcrun", "simctl", "list", "-j", "devices", "available"]))["devices"]
+        runtimes = json.loads(subprocess.check_output(
+            ["xcrun", "simctl", "list", "-j", "runtimes"]))["runtimes"]
+        matches = [(runtime, device) for runtime, entries in devices.items()
+                   for device in entries if device.get("udid") == udid]
+        if len(matches) != 1:
+            raise ValueError("selected simulator is absent or ambiguous")
+        runtime, device = matches[0]
+        runtime_info = [entry for entry in runtimes if entry.get("identifier") == runtime]
+        if len(runtime_info) != 1 or family.lower() not in runtime.lower():
+            raise ValueError("selected simulator runtime is absent or foreign")
+        observation.update({"guest_family": family, "guest_udid": udid,
+                            "guest_runtime": runtime, "guest_version": runtime_info[0].get("version"),
+                            "guest_state": device.get("state"), "guest_name": device.get("name")})
+    return observation
+
+
+def mode_script(target, mode, simulator_udid=None):
+    lines = ["gradle.beforeProject { project ->",
+             "  project.plugins.withId('org.jetbrains.kotlin.multiplatform') {",
+             "    project.afterEvaluate {"]
+    if mode == "optimized-opt":
+        lines += [f"      def nativeTarget = project.kotlin.targets.findByName('{target}')",
+                  "      if (nativeTarget != null) {",
+                  "        def kind = nativeTarget.binaries.getTest('DEBUG').buildType",
+                  "        nativeTarget.binaries.test([kind.class.valueOf('RELEASE')])",
+                  "        def release = nativeTarget.binaries.getTest('RELEASE')",
+                  f"        project.tasks.matching {{ it.name == '{target}Test' }}.configureEach {{ task ->",
+                  f"          task.dependsOn('linkReleaseTest' + '{target}'.capitalize())",
+                  "          task.executable(release.outputFile)", "        }", "      }"]
+    if simulator_udid:
+        lines += [f"      project.tasks.matching {{ it.name == '{target}Test' }}.configureEach {{ task ->",
+                  f"        task.device.set('{simulator_udid}')", "      }"]
+    lines += ["    }", "  }", "}", ""]
+    return "\n".join(lines).encode()
+
+
+def staged_path(staging, module, target):
+    return staging / qualify.target_binary_path(module, target)
+
+
+def gradle_command(paths, lane, mode, hashes):
+    path_type = PureWindowsPath if lane.startswith("mingwX64:") else PurePosixPath
+    checkout = path_type(paths["checkout"])
+    output = path_type(paths["archive_root"])
+    work_root = path_type(paths["work_root"])
+    return [paths["gradle"], "-p", str(checkout / PROJECT), "--project-cache-dir",
+            str(work_root / "gradle-project-cache"), "--offline", "--no-daemon",
+            "--console=plain", "--info", "--rerun-tasks", "--init-script",
+            str(output / "inputs/mode.init.gradle"),
+            f"-PqualificationCheckout={checkout}",
+            f"-PqualificationRepository={paths['staging']}",
+            f"-PqualificationArchiveRoot={output}",
+            f"-PqualificationWorkRoot={work_root}",
+            f"-PqualificationSourceInventory={output / 'inputs/source-inventory.tsv'}",
+            f"-PqualificationCoreCases={output / 'inputs/core-cases.tsv'}",
+            f"-PqualificationFacadeCases={output / 'inputs/facade-cases.tsv'}",
+            f"-PqualificationCoreSha256={hashes['dyn4k-core']}",
+            f"-PqualificationFacadeSha256={hashes['dyn4k']}",
+            f"-PqualificationLaneId={lane}", f"-PqualificationMode={mode}",
+            f"-PqualificationPython={paths['python']}",
+            "qualificationEvidence"]
+
+
+def capture(archive, work_root, lane, core_cases, facade_cases):
+    target, _, _, mode = lane.split(":")
+    binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+    observed = []
+    records = {}
+    for short, input_path in (("core", core_cases), ("facade", facade_cases)):
+        selected = selected_rows(input_path.read_bytes())
+        source = work_root / short / "test-results" / f"{target}Test"
+        reports = sorted(source.glob("TEST-*.xml"))
+        if not reports:
+            raise ValueError(f"original {short} Native XML is absent")
+        module_ids = []
+        for report in reports:
+            raw = report.read_bytes()
+            ids, normal = original_report(raw, target, selected)
+            module_ids.extend(ids)
+            for section, data in (("raw", raw), ("normalized", normal)):
+                path = archive / "reports" / section / short / report.name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                print(f"QUALIFICATION_{'RAW_' if section == 'raw' else ''}XML_SHA256={digest(data)}")
+        check_method_coverage(module_ids, list(selected.values()))
+        observed.extend(module_ids)
+        binary_dir = work_root / short / "bin" / target / binary_mode
+        binaries = [path for path in binary_dir.glob("*")
+                    if path.is_file() and path.suffix in (".kexe", ".exe")]
+        if len(binaries) != 1:
+            raise ValueError(f"selected {short} Native test executable is absent or ambiguous")
+        executable = binaries[0]
+        copy = archive / "runtime" / f"{short}.program"
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(executable, copy)
+        print(f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={digest(copy.read_bytes())}")
+        records[short] = {"path": str(executable), "sha256": digest(copy.read_bytes()),
+                          "archive": copy.relative_to(archive).as_posix(), "mode": binary_mode,
+                          "target": target}
+    if len(observed) != 2523 or len(set(observed)) != 2523:
+        raise ValueError("original Native full method set is incomplete or duplicate")
+    order = archive / "reports/method-order.json"
+    order.write_bytes(encoded(observed))
+    print(f"QUALIFICATION_METHOD_ORDER_SHA256={digest(order.read_bytes())}")
+    print("QUALIFICATION_CASE_COUNT=2523")
+    return records
+
+
+def archive_files(root):
+    return [{"path": path.relative_to(root).as_posix(), "sha256": digest(path.read_bytes()),
+             "mtime_ns": path.stat().st_mtime_ns}
+            for path in sorted(root.rglob("*")) if path.is_file() and path != root / "receipt.json"]
+
+
+def run(repository, candidate, lane, staging, output, gradle, native_home, selection_path, hashes):
+    repository, staging, output, gradle, native_home = map(lambda value: Path(value).resolve(),
+                                              (repository, staging, output, gradle, native_home))
+    selection = json.loads(Path(selection_path).read_bytes())
+    manifest, contract = lane_contract(repository, lane)
+    target, _, _, mode = lane.split(":")
+    if (git(repository, "rev-parse", "HEAD") != candidate
+            or git(repository, "status", "--porcelain")):
+        raise ValueError("producer requires a clean exact candidate checkout")
+    if output.is_relative_to(repository) or staging.is_relative_to(repository):
+        raise ValueError("external output or Maven repository aliases source checkout")
+    if output.exists() and any(output.iterdir()):
+        raise ValueError("output exists; preserve the earlier attempt")
+    java_home = Path(os.environ["JAVA_HOME"]).resolve()
+    gradle_home = Path(os.environ["GRADLE_USER_HOME"]).resolve()
+    windows = platform.system() == "Windows"
+    java = java_home / "bin" / ("java.exe" if windows else "java")
+    java_version = subprocess.check_output([str(java), "-version"],
+                                           stderr=subprocess.STDOUT, text=True)
+    gradle_version = subprocess.check_output([str(gradle), "--version"], text=True)
+    if 'version "21' not in java_version or "Gradle 9.5.0" not in gradle_version:
+        raise ValueError("pinned JDK 21 or Gradle 9.5.0 differs")
+    native_executable = native_home / "bin" / ("kotlinc-native.bat" if windows
+                                               else "kotlinc-native")
+    native_compiler = native_home / "konan/lib/kotlin-native-compiler-embeddable.jar"
+    native_version = subprocess.check_output([str(native_executable), "-version"],
+                                             stderr=subprocess.STDOUT, text=True)
+    if "Kotlin/Native: 2.4.20" not in native_version or not native_compiler.is_file():
+        raise ValueError("pinned Kotlin/Native 2.4.20 compiler differs")
+    for module in MODULES:
+        if digest(staged_path(staging, module, target).read_bytes()) != hashes[module]:
+            raise ValueError(f"independently selected {module} KLIB differs")
+    inputs = source_inputs(repository, candidate, contract)
+    host = observed_host(target, selection)
+    family = TARGETS[target][2]
+    output.mkdir(parents=True, exist_ok=True)
+    started = time.time_ns()
+    attempt = {"candidate_sha": candidate, "lane": lane, "status": "NOT_RUN",
+               "host": host, "selection": selection}
+    (output / "attempt.json").write_bytes(encoded(attempt))
+    if family and host.get("guest_state") != "Booted":
+        command = ["xcrun", "simctl", "boot", selection["simulator_udid"]]
+        boot = subprocess.run(command, capture_output=True, text=True, check=False)
+        (output / "simctl-boot.json").write_bytes(encoded({"command": command,
+            "exit_code": boot.returncode, "stdout": boot.stdout, "stderr": boot.stderr}))
+        if boot.returncode:
+            raise ValueError("selected simulator boot failed; attempt retained")
+        command = ["xcrun", "simctl", "bootstatus", selection["simulator_udid"], "-b"]
+        status = subprocess.run(command, capture_output=True, text=True, check=False)
+        (output / "simctl-bootstatus.json").write_bytes(encoded({"command": command,
+            "exit_code": status.returncode, "stdout": status.stdout, "stderr": status.stderr}))
+        if status.returncode:
+            raise ValueError("selected simulator boot status failed; attempt retained")
+        host = observed_host(target, selection)
+    validate_host(lane, selection, host)
+    (output / "host.json").write_bytes(encoded(host))
+    if family:
+        command = ["xcrun", "simctl", "spawn", selection["simulator_udid"],
+                   "launchctl", "list"]
+        guest_started = time.time_ns()
+        guest = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        guest_stdout, guest_stderr = guest.communicate()
+        guest_finished = time.time_ns()
+        (output / "simctl-guest.json").write_bytes(encoded({
+            "command": command, "exit_code": guest.returncode, "pid": guest.pid,
+            "started_ns": guest_started, "finished_ns": guest_finished,
+            "stdout_sha256": digest(guest_stdout), "stderr_sha256": digest(guest_stderr)}))
+        (output / "simctl-guest.stdout").write_bytes(guest_stdout)
+        (output / "simctl-guest.stderr").write_bytes(guest_stderr)
+        if guest.returncode:
+            raise ValueError("selected simulator guest process failed; attempt retained")
+    for name, data in inputs.items():
+        path = output / "inputs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    script = mode_script(target, mode, selection.get("simulator_udid") if family else None)
+    (output / "inputs/mode.init.gradle").write_bytes(script)
+    (output / "inputs/runtime-selection.json").write_bytes(encoded(selection))
+    work_root = output.parent / f"{output.name}-build"
+    if work_root.exists():
+        raise ValueError("external build root exists; preserve earlier attempt")
+    work_root.mkdir()
+    producer_paths = {"checkout": str(repository), "staging": str(staging),
+                      "archive_root": str(output), "work_root": str(work_root),
+                      "gradle": str(gradle), "native_home": str(native_home),
+                      "python": str(Path(sys.executable).resolve())}
+    command = gradle_command(producer_paths, lane, mode, hashes)
+    with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
+        process = subprocess.Popen(command, cwd=output, stdout=stdout, stderr=stderr)
+        exit_code = process.wait()
+    if exit_code:
+        attempt.update({"status": "FAILED", "exit_code": exit_code, "command": command,
+                        "pid": process.pid})
+        (output / "attempt.json").write_bytes(encoded(attempt))
+        raise ValueError(f"external Native consumer exited {exit_code}; attempt retained")
+    host_after = observed_host(target, selection)
+    validate_host(lane, selection, host_after)
+    if host_after != host:
+        raise ValueError("selected host or simulator changed during test execution")
+    (output / "host-after.json").write_bytes(encoded(host_after))
+    products = json.loads((output / "runtime/products.json").read_bytes())
+    finished = time.time_ns()
+    attempt["status"] = "PASSED"
+    (output / "attempt.json").write_bytes(encoded(attempt))
+    stamp = (started + finished) // 2
+    for path in output.rglob("*"):
+        if path.is_file():
+            os.utime(path, ns=(stamp, stamp))
+    toolchain = {"java_home": str(java_home), "java_version": java_version.splitlines()[0],
+                 "java_sha256": digest(java.read_bytes()), "gradle_version": "Gradle 9.5.0",
+                 "gradle_executable": str(gradle), "gradle_sha256": digest(gradle.read_bytes()),
+                 "gradle_user_home": str(gradle_home), "kgp_version": "2.4.20",
+                 "native_home": str(native_home),
+                 "native_version": native_version.strip(),
+                 "native_sha256": digest(native_executable.read_bytes()),
+                 "native_compiler_sha256": digest(native_compiler.read_bytes()),
+                 "python_executable": producer_paths["python"],
+                 "python_version": platform.python_version(),
+                 "python_sha256": digest(Path(sys.executable).read_bytes())}
+    receipt = {"schema": 1, "status": "PASSED", "candidate_sha": candidate,
+               "source_tree": git(repository, "rev-parse", f"{candidate}^{{tree}}"),
+               "lane": lane, **{key: manifest["lanes"][lane][key] for key in
+                                ("target", "runtime", "version", "configuration")},
+               "runtime_identity": digest(encoded(host)), "artifact_hashes": hashes,
+               "consumer_group": "full-suite",
+               "consumer_contract_sha256": independent_gates.digest(contract),
+               "source_inventory_sha256": digest(inputs["source-inventory.tsv"]),
+               "producer_paths": producer_paths,
+               "host": host, "host_after": host_after, "selection": selection,
+               "toolchain": toolchain,
+               "process": {"command": command, "cwd": str(output), "exit_code": 0,
+                           "pid": process.pid, "parent_pid": os.getpid(),
+                           "started_ns": started, "finished_ns": finished,
+                           "stdout": "stdout.txt", "stderr": "stderr.txt"},
+               "provider_graph": "provider-graph.json",
+               "resolved_artifacts": {module: f"resolved/{module}-{target.lower()}-0.1.0-alpha.1.klib"
+                                      for module in MODULES},
+               "consumer_xml": sorted(path.relative_to(output).as_posix() for path in
+                                      (output / "reports/normalized").rglob("TEST-*.xml")),
+               "raw_consumer_xml": sorted(path.relative_to(output).as_posix() for path in
+                                          (output / "reports/raw").rglob("TEST-*.xml")),
+               "products": products,
+               "consumer_build_sha256": {path: digest(subprocess.check_output(
+                   ["git", "-C", str(repository), "show", f"{candidate}:{path}"]))
+                   for path in (f"{PROJECT}/build.gradle.kts", f"{PROJECT}/settings.gradle.kts",
+                                f"{PROJECT}/gradle.properties", f"{PROJECT}/core/build.gradle.kts",
+                                f"{PROJECT}/facade/build.gradle.kts")},
+               "producer_sha256": digest(subprocess.check_output(
+                   ["git", "-C", str(repository), "show", f"{candidate}:{PRODUCER}"])),
+               "files": archive_files(output)}
+    (output / "receipt.json").write_bytes(encoded(receipt))
+    return {"status": "PASSED", "lane": lane,
+            "archive_sha256": independent_gates.archive_digest(output),
+            "selected_cases": 2523}
+
+
+def verify(root, repository, candidate, lane, hashes, selection, archive_digest,
+           trusted_toolchain):
+    root, repository = Path(root), Path(repository).resolve()
+    verify_source_binding(repository, candidate)
+    manifest, contract = lane_contract(repository, lane)
+    if not root.is_dir() or root.is_symlink() or not SHA.fullmatch(archive_digest):
+        raise ValueError("independent archive provenance is absent")
+    if independent_gates.archive_digest(root) != archive_digest:
+        raise ValueError("independent archive provenance digest differs")
+    receipt = json.loads((root / "receipt.json").read_bytes())
+    independent_gates._inventory(root, receipt)
+    if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
+            or receipt.get("source_tree") != git(repository, "rev-parse", f"{candidate}^{{tree}}")
+            or receipt.get("consumer_contract_sha256") != independent_gates.digest(contract)
+            or receipt.get("consumer_group") != "full-suite"
+            or receipt.get("artifact_hashes") != hashes):
+        raise ValueError("archive candidate, lane, or staged KLIB contract differs")
+    if any(receipt.get(key) != manifest["lanes"][lane][key]
+           for key in ("target", "runtime", "version", "configuration")):
+        raise ValueError("archive target, runtime, version, or mode differs")
+    if (receipt.get("selection") != selection or receipt.get("toolchain") != trusted_toolchain):
+        raise ValueError("independently selected runtime or toolchain differs")
+    if (not re.search(r'version "21(?:\.|\")', trusted_toolchain.get("java_version", ""))
+            or trusted_toolchain.get("gradle_version") != "Gradle 9.5.0"
+            or trusted_toolchain.get("kgp_version") != "2.4.20"
+            or "Kotlin/Native: 2.4.20" not in trusted_toolchain.get("native_version", "")
+            or any(not SHA.fullmatch(str(trusted_toolchain.get(key, "")))
+                   for key in ("java_sha256", "gradle_sha256", "native_sha256",
+                               "native_compiler_sha256", "python_sha256"))):
+        raise ValueError("independently selected pinned toolchain is invalid")
+    host = json.loads((root / "host.json").read_bytes())
+    validate_host(lane, selection, host)
+    if receipt.get("host") != host or receipt.get("runtime_identity") != digest(encoded(host)):
+        raise ValueError("host identity differs from recorded execution")
+    host_after = json.loads((root / "host-after.json").read_bytes())
+    if receipt.get("host_after") != host_after or host_after != host:
+        raise ValueError("host or simulator changed after Native execution")
+    target, _, _, mode = lane.split(":")
+    for path in (f"{PROJECT}/build.gradle.kts", f"{PROJECT}/settings.gradle.kts",
+                 f"{PROJECT}/gradle.properties", f"{PROJECT}/core/build.gradle.kts",
+                 f"{PROJECT}/facade/build.gradle.kts"):
+        actual = digest(subprocess.check_output(["git", "-C", str(repository),
+                                                "show", f"{candidate}:{path}"]))
+        if receipt["consumer_build_sha256"].get(path) != actual:
+            raise ValueError("external consumer build differs from exact source")
+    if receipt.get("producer_sha256") != digest(subprocess.check_output(
+            ["git", "-C", str(repository), "show", f"{candidate}:{PRODUCER}"])):
+        raise ValueError("public producer differs from exact source")
+    inputs = source_inputs(repository, candidate, contract)
+    for name, data in inputs.items():
+        if (root / "inputs" / name).read_bytes() != data:
+            raise ValueError(f"original source or method input differs: {name}")
+    if receipt.get("source_inventory_sha256") != digest(inputs["source-inventory.tsv"]):
+        raise ValueError("original source inventory digest differs")
+    script = mode_script(target, mode, selection.get("simulator_udid")
+                         if TARGETS[target][2] else None)
+    if (root / "inputs/mode.init.gradle").read_bytes() != script:
+        raise ValueError("Native selected compiler or executable mode differs")
+    if json.loads((root / "inputs/runtime-selection.json").read_bytes()) != selection:
+        raise ValueError("archived runtime selection differs")
+    paths, process = receipt["producer_paths"], receipt["process"]
+    path_type = PureWindowsPath if target == "mingwX64" else PurePosixPath
+    if (set(paths) != {"checkout", "staging", "archive_root", "work_root", "gradle",
+                       "native_home", "python"}
+            or any(not path_type(value).is_absolute() for value in paths.values())
+            or any(path_type(paths[key]).is_relative_to(path_type(paths["checkout"]))
+                   for key in ("archive_root", "work_root", "staging"))
+            or process.get("cwd") != paths["archive_root"]
+            or process.get("command") != gradle_command(paths, lane, mode, hashes)
+            or process.get("exit_code") != 0
+            or process.get("pid", 0) <= 0 or process.get("parent_pid", 0) <= 0):
+        raise ValueError("original Gradle process identity, target, or mode differs")
+    if (trusted_toolchain["gradle_executable"] != paths["gradle"]
+            or trusted_toolchain["native_home"] != paths["native_home"]
+            or trusted_toolchain["python_executable"] != paths["python"]):
+        raise ValueError("producing executable paths differ from selected toolchain")
+    stdout = (root / "stdout.txt").read_text()
+    if "BUILD SUCCESSFUL" not in stdout or f"QUALIFICATION_LANE={lane}" not in stdout:
+        raise ValueError("original Gradle run or lane marker differs")
+    compiler_flags = {}
+    for short in ("core", "facade"):
+        if f"> Task :{short}:{target}Test" not in stdout:
+            raise ValueError("selected Native runtime task did not execute")
+        flag_lines = re.findall(rf"(?m)^QUALIFICATION_COMPILER_FLAGS_{short.upper()}=(.*)$", stdout)
+        chosen = "-g" if mode == "debug-g" else "-opt"
+        foreign = "-opt" if mode == "debug-g" else "-g"
+        if len(flag_lines) != 1:
+            raise ValueError("selected Native compiler mode was not executed")
+        flags = json.loads(flag_lines[0])
+        if (not isinstance(flags, list) or chosen not in flags or foreign in flags
+                or any(type(flag) is not str for flag in flags)):
+            raise ValueError("selected Native compiler mode was not executed")
+        if flags.count("-friend-modules") != 1 or flags.index("-friend-modules") + 1 >= len(flags):
+            raise ValueError("selected staged Native friend module was not compiled")
+        compiler_flags[short] = flags
+    if mode == "optimized-opt" and any(
+            f"> Task :{short}:linkReleaseTest{target[0].upper() + target[1:]}"
+            not in stdout for short in ("core", "facade")):
+        raise ValueError("selected optimized Native test link did not execute")
+    if TARGETS[target][2]:
+        guest = json.loads((root / "simctl-guest.json").read_bytes())
+        if (guest.get("command") != ["xcrun", "simctl", "spawn",
+                                      selection["simulator_udid"], "launchctl", "list"]
+                or guest.get("exit_code") != 0 or guest.get("pid", 0) <= 0
+                or guest.get("stdout_sha256") != digest((root / "simctl-guest.stdout").read_bytes())
+                or guest.get("stderr_sha256") != digest((root / "simctl-guest.stderr").read_bytes())
+                or not process["started_ns"] <= guest.get("started_ns", -1)
+                <= guest.get("finished_ns", -1) <= process["finished_ns"]):
+            raise ValueError("selected simulator guest process differs")
+    if "QUALIFICATION_CASE_COUNT=2523" not in stdout:
+        raise ValueError("original portable case count differs")
+    order = (root / "reports/method-order.json").read_bytes()
+    if f"QUALIFICATION_METHOD_ORDER_SHA256={digest(order)}" not in stdout:
+        raise ValueError("original method order is not process bound")
+    graph_path = independent_gates._file_path(root, receipt["provider_graph"])
+    if f"QUALIFICATION_PROVIDER_GRAPH_SHA256={digest(graph_path.read_bytes())}" not in stdout:
+        raise ValueError("resolved provider graph is not process bound")
+    graph = json.loads(graph_path.read_bytes())
+    if graph.get("gradle_user_home") != trusted_toolchain["gradle_user_home"]:
+        raise ValueError("Gradle provider cache identity differs")
+    expected_components = {f"io.github.rubixhacker:{module}:0.1.0-alpha.1"
+                           for module in MODULES} | {
+                           f"io.github.rubixhacker:{module}-{target.lower()}:0.1.0-alpha.1"
+                           for module in MODULES}
+    for phase in ("compile", "runtime"):
+        entries = graph.get(phase)
+        if (not isinstance(entries, list) or len(entries) != 2
+                or {entry.get("project") for entry in entries} != {"core", "facade"}):
+            raise ValueError("external provider graph is incomplete")
+        for entry in entries:
+            components = {value for value in entry["components"]
+                          if value.startswith("io.github.rubixhacker:")}
+            expected_artifacts = {f"io.github.rubixhacker:{module}-{target.lower()}:0.1.0-alpha.1"
+                                  for module in MODULES}
+            staged_artifacts = [item for item in entry["artifacts"]
+                                if item["component"].startswith("io.github.rubixhacker:")]
+            if (entry["configuration"] != f"{target}TestCompileKlibraries"
+                    or components != expected_components
+                    or len(staged_artifacts) != 2
+                    or {item["component"] for item in staged_artifacts} != expected_artifacts):
+                raise ValueError("external provider graph has a foreign or missing KLIB")
+            for module in MODULES:
+                component = f"io.github.rubixhacker:{module}-{target.lower()}:0.1.0-alpha.1"
+                item = next(value for value in staged_artifacts
+                            if value["component"] == component)
+                candidate_path = path_type(item["file"])
+                cache = path_type(trusted_toolchain["gradle_user_home"]) / "caches/modules-2"
+                staged = path_type(paths["staging"]) / qualify.target_binary_path(module, target)
+                if (item["sha256"] != hashes[module]
+                        or item["size"] != len(independent_gates._file_path(
+                            root, receipt["resolved_artifacts"][module]).read_bytes())
+                        or not candidate_path.is_absolute()
+                        or not (candidate_path == staged
+                                or candidate_path.is_relative_to(cache))):
+                    raise ValueError("resolved provider KLIB hash or origin differs")
+                expected_friend = "dyn4k-core" if entry["project"] == "core" else "dyn4k"
+                if phase == "compile" and module == expected_friend:
+                    flags = compiler_flags[entry["project"]]
+                    if path_type(flags[flags.index("-friend-modules") + 1]) != candidate_path:
+                        raise ValueError("Native friend module differs from resolved staged KLIB")
+    for module, relative in receipt["resolved_artifacts"].items():
+        data = independent_gates._file_path(root, relative).read_bytes()
+        if (digest(data) != hashes[module] or
+                f"QUALIFICATION_RESOLVED_{module.upper().replace('-', '_')}_SHA256={digest(data)}"
+                not in stdout):
+            raise ValueError("resolved staged KLIB bytes differ")
+    products = json.loads((root / "runtime/products.json").read_bytes())
+    if receipt.get("products") != products or set(products) != {"core", "facade"}:
+        raise ValueError("selected Native executable inventory differs")
+    binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+    for short, product in products.items():
+        copy = independent_gates._file_path(root, product["archive"])
+        expected_path = path_type(paths["work_root"]) / short / "bin" / target / binary_mode
+        if (product["mode"] != binary_mode or product["target"] != target
+                or path_type(product["path"]).parent != expected_path
+                or product["sha256"] != digest(copy.read_bytes())
+                or f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={product['sha256']}"
+                not in stdout):
+            raise ValueError("selected Native executable bytes, target, or mode differ")
+    observed = []
+    expected_raw_paths = sorted(path.relative_to(root).as_posix() for path in
+                                (root / "reports/raw").rglob("TEST-*.xml"))
+    expected_normal_paths = sorted(path.relative_to(root).as_posix() for path in
+                                   (root / "reports/normalized").rglob("TEST-*.xml"))
+    if (receipt.get("raw_consumer_xml") != expected_raw_paths
+            or receipt.get("consumer_xml") != expected_normal_paths
+            or {path.replace("reports/raw/", "reports/normalized/", 1)
+                for path in expected_raw_paths} != set(expected_normal_paths)):
+        raise ValueError("original or normalized Native XML inventory differs")
+    for short in ("core", "facade"):
+        selected = selected_rows(inputs[f"{short}-cases.tsv"])
+        raw_paths = sorted(path for path in receipt["raw_consumer_xml"]
+                           if path.startswith(f"reports/raw/{short}/"))
+        if not raw_paths:
+            raise ValueError("original Native XML is absent")
+        module_ids = []
+        for relative in raw_paths:
+            raw = (root / relative).read_bytes()
+            ids, normalized = original_report(raw, target, selected)
+            module_ids.extend(ids)
+            normal = root / relative.replace("reports/raw/", "reports/normalized/", 1)
+            if (normal.read_bytes() != normalized
+                    or f"QUALIFICATION_RAW_XML_SHA256={digest(raw)}" not in stdout
+                    or f"QUALIFICATION_XML_SHA256={digest(normalized)}" not in stdout):
+                raise ValueError("normalized XML differs from process bound original assertions")
+        check_method_coverage(module_ids, list(selected.values()))
+        observed.extend(module_ids)
+    check_method_coverage(observed, [case["id"] for case in contract["cases"]])
+    if json.loads(order) != observed:
+        raise ValueError("original Native method order differs from archived execution")
+    return {"status": "PASSED", "lane": lane, "candidate_sha": candidate,
+            "selected_cases": len(observed), "archive_sha256": archive_digest,
+            "complete_selected_suite": True}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    capture_parser = sub.add_parser("capture")
+    for name in ("repository", "archive", "work-root", "lane", "core-cases", "facade-cases"):
+        capture_parser.add_argument(f"--{name}", required=True)
+    produce, replay = sub.add_parser("run"), sub.add_parser("verify")
+    for route in (produce, replay):
+        for name in ("repository", "candidate-sha", "lane", "expected-core-sha256",
+                     "expected-facade-sha256", "runtime-selection"):
+            route.add_argument(f"--{name}", required=True)
+    for name in ("staging", "output", "gradle", "native-home"):
+        produce.add_argument(f"--{name}", required=True)
+    for name in ("archive", "expected-archive-digest", "trusted-toolchain"):
+        replay.add_argument(f"--{name}", required=True)
+    args = parser.parse_args(argv)
+    if args.action == "capture":
+        records = capture(Path(args.archive), Path(args.work_root), args.lane,
+                          Path(args.core_cases), Path(args.facade_cases))
+        path = Path(args.archive) / "runtime/products.json"
+        path.write_bytes(encoded(records))
+        print(f"QUALIFICATION_RUNTIME_PRODUCTS_SHA256={digest(path.read_bytes())}")
+        return 0
+    hashes = {"dyn4k-core": args.expected_core_sha256,
+              "dyn4k": args.expected_facade_sha256}
+    if any(not SHA.fullmatch(value) for value in hashes.values()):
+        parser.error("independently audited target KLIB SHA-256 values are required")
+    selection = json.loads(Path(args.runtime_selection).read_bytes())
+    if args.action == "run":
+        result = run(args.repository, args.candidate_sha, args.lane, args.staging,
+                     args.output, args.gradle, args.native_home, args.runtime_selection, hashes)
+    else:
+        toolchain = json.loads(Path(args.trusted_toolchain).read_bytes())
+        result = verify(args.archive, args.repository, args.candidate_sha, args.lane,
+                        hashes, selection, args.expected_archive_digest, toolchain)
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result["status"] == "PASSED" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

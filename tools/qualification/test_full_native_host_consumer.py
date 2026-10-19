@@ -1,0 +1,279 @@
+import json
+import os
+import subprocess
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import full_native_host_consumer as route
+import independent_gates
+
+
+LANE = "linuxArm64:Linux ARM64:current:debug-g"
+MODULE_CASES = {
+    "core": ("dyn4k-core:a.B#one", "a.B", "one"),
+    "facade": ("dyn4k:c.D#two", "c.D", "two"),
+}
+
+
+def report(short, name=None, outcome=None, duplicate=False):
+    _, classname, method = MODULE_CASES[short]
+    method = name or method
+    row = (f'<testcase classname="linuxArm64Test.{classname}" '
+           f'name="{method}[linuxArm64]" time="0.1">'
+           f'{f"<{outcome}/>" if outcome else ""}</testcase>')
+    if duplicate:
+        row += row
+    return (f'<testsuite tests="{2 if duplicate else 1}" '
+            f'failures="{1 if outcome == "failure" else 0}" errors="0" '
+            f'skipped="{1 if outcome == "skipped" else 0}" time="0.1">'
+            f'{row}</testsuite>').encode()
+
+
+class NativeHostConsumerTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("DYN4K_NATIVE_GRADLE"),
+                         "requires an existing pinned Gradle and JDK 21")
+    def test_release_mode_init_script_configures_external_project(self):
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            scratch = Path(temporary)
+            script = scratch / "mode.init.gradle"
+            script.write_bytes(route.mode_script("linuxArm64", "optimized-opt"))
+            command = [os.environ["DYN4K_NATIVE_GRADLE"], "-p", str(repository / route.PROJECT),
+                       "--offline", "--no-daemon", "--console=plain", "--init-script", str(script),
+                       f"-PqualificationCheckout={repository}",
+                       f"-PqualificationRepository={scratch / 'staging'}",
+                       f"-PqualificationArchiveRoot={scratch / 'archive'}",
+                       f"-PqualificationWorkRoot={scratch / 'build'}",
+                       f"-PqualificationLaneId={LANE.replace('debug-g', 'optimized-opt')}",
+                       "-PqualificationMode=optimized-opt",
+                       "-PqualificationCoreSha256=" + "a" * 64,
+                       "-PqualificationFacadeSha256=" + "b" * 64,
+                       f"-PqualificationSourceInventory={scratch / 'source.tsv'}", "help"]
+            result = subprocess.run(command, cwd=repository, capture_output=True, text=True,
+                                    check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("BUILD SUCCESSFUL", result.stdout)
+
+    def test_manifest_contains_all_28_selected_routes(self):
+        repository = Path(__file__).resolve().parents[2]
+        manifest = independent_gates.load_approved_manifest(repository)
+        lanes = [lane for lane in manifest["lanes"]
+                 if manifest["lanes"][lane]["target"] in route.TARGETS]
+        self.assertEqual(len(lanes), 28)
+        for lane in lanes:
+            _, contract = route.lane_contract(repository, lane)
+            self.assertEqual(len(contract["cases"]), 2523)
+
+    def test_runtime_target_version_mode_and_simulator_are_distinct(self):
+        selected = {"lane": LANE, "role": "current", "system": "Linux",
+                    "machine": "aarch64", "os_version": "6.1.0", "libc": "2.39"}
+        observed = {key: selected[key] for key in ("system", "machine", "os_version", "libc")}
+        route.validate_host(LANE, selected, observed)
+        for changed in ({"machine": "x86_64"}, {"os_version": "6.2.0"},
+                        {"libc": "2.38"}, {"lane": LANE.replace("debug-g", "optimized-opt")}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                route.validate_host(LANE, {**selected, **changed}, observed)
+        simulator = "iosSimulatorArm64:iOS simulator ARM64:current:debug-g"
+        chosen = {"lane": simulator, "role": "current", "system": "Darwin",
+                  "machine": "arm64", "os_version": "26.4", "guest_version": "26.0",
+                  "simulator_runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+                  "simulator_udid": "12345678-1234-1234-1234-123456789abc"}
+        guest = {"system": "Darwin", "machine": "arm64", "os_version": "26.4",
+                 "xcode_version": "26.4.1", "guest_family": "iOS",
+                 "guest_version": "26.0", "guest_runtime": chosen["simulator_runtime"],
+                 "guest_udid": chosen["simulator_udid"], "guest_state": "Booted"}
+        route.validate_host(simulator, chosen, guest)
+        for altered in ({"guest_state": "Shutdown"}, {"guest_udid": "foreign"},
+                        {"guest_version": "15.0"}, {"guest_family": "tvOS"}):
+            with self.subTest(altered=altered), self.assertRaises(ValueError):
+                route.validate_host(simulator, chosen, {**guest, **altered})
+
+    def test_original_native_rows_reject_missing_duplicate_failing_and_wrong_target(self):
+        selected = {("a.B", "one"): "dyn4k-core:a.B#one"}
+        ids, normalized = route.original_report(report("core"), "linuxArm64", selected)
+        self.assertEqual(ids, ["dyn4k-core:a.B#one"])
+        self.assertIn(b'id="dyn4k-core:a.B#one"', normalized)
+        for raw in (report("core", name="other"), report("core", outcome="failure"),
+                    report("core", outcome="skipped"), report("core", duplicate=True),
+                    report("core").replace(b"linuxArm64Test", b"macosArm64Test")):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                route.original_report(raw, "linuxArm64", selected)
+        with self.assertRaises(ValueError):
+            route.check_method_coverage([], list(selected.values()))
+
+    def test_relocated_replay_rejects_binary_klib_host_and_method_mutations(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary) / "relocated-archive"
+            root.mkdir()
+            selection = {"lane": LANE, "role": "current", "system": "Linux",
+                         "machine": "aarch64", "os_version": "6.1.0", "libc": "2.39"}
+            host = {key: selection[key] for key in ("system", "machine", "os_version", "libc")}
+            hashes = {"dyn4k-core": route.digest(b"core-klib"),
+                      "dyn4k": route.digest(b"facade-klib")}
+            toolchain = {"java_home": "/tools/jdk21",
+                         "java_version": 'openjdk version "21.0.1"',
+                         "java_sha256": "a" * 64,
+                         "gradle_version": "Gradle 9.5.0", "gradle_executable": "/tools/gradle",
+                         "gradle_sha256": "b" * 64,
+                         "gradle_user_home": "/home/runner/.gradle",
+                         "kgp_version": "2.4.20", "native_home": "/tools/konan",
+                         "native_version": "Kotlin/Native: 2.4.20",
+                         "native_sha256": "c" * 64,
+                         "native_compiler_sha256": "d" * 64,
+                         "python_executable": "/tools/python", "python_version": "3.14.0",
+                         "python_sha256": "e" * 64}
+            contract = {"cases": [{"id": item[0], "module": module}
+                                  for module, item in (("dyn4k-core", MODULE_CASES["core"]),
+                                                       ("dyn4k", MODULE_CASES["facade"]))]}
+            manifest = {"lanes": {LANE: {"target": "linuxArm64", "runtime": "Linux ARM64",
+                                          "version": "current", "configuration": "debug-g"}}}
+            inputs = {"source-inventory.tsv": b"source\tsha\n",
+                      "core-cases.tsv": b"dyn4k-core:a.B#one\ta.B\tone\n",
+                      "facade-cases.tsv": b"dyn4k:c.D#two\tc.D\ttwo\n"}
+
+            def write(relative, data):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+
+            write("host.json", route.encoded(host))
+            write("host-after.json", route.encoded(host))
+            write("attempt.json", route.encoded({"status": "PASSED"}))
+            for name, data in inputs.items():
+                write(f"inputs/{name}", data)
+            write("inputs/runtime-selection.json", route.encoded(selection))
+            write("inputs/mode.init.gradle", route.mode_script("linuxArm64", "debug-g"))
+            components = [f"io.github.rubixhacker:{module}:0.1.0-alpha.1"
+                          for module in route.MODULES]
+            components += [f"io.github.rubixhacker:{module}-linuxarm64:0.1.0-alpha.1"
+                           for module in route.MODULES]
+            artifacts = [{"component": components[index + 2], "size": len(b"core-klib")
+                          if module == "dyn4k-core" else len(b"facade-klib"),
+                          "sha256": hashes[module],
+                          "file": str(route.staged_path(Path("/staging"), module, "linuxArm64"))}
+                         for index, module in enumerate(route.MODULES)]
+            graph = {"compile": [], "runtime": [], "gradle_user_home": toolchain["gradle_user_home"]}
+            for phase in ("compile", "runtime"):
+                graph[phase] = [{"project": short,
+                                 "configuration": "linuxArm64TestCompileKlibraries",
+                                 "components": components, "artifacts": artifacts}
+                                for short in ("core", "facade")]
+            write("provider-graph.json", route.encoded(graph))
+            for module, data in (("dyn4k-core", b"core-klib"), ("dyn4k", b"facade-klib")):
+                write(f"resolved/{module}-linuxarm64-0.1.0-alpha.1.klib", data)
+            products = {}
+            output = ["BUILD SUCCESSFUL", f"QUALIFICATION_LANE={LANE}",
+                      "QUALIFICATION_CASE_COUNT=2523",
+                      f"QUALIFICATION_PROVIDER_GRAPH_SHA256={route.digest((root / 'provider-graph.json').read_bytes())}"]
+            observed = []
+            raw_paths, normal_paths = [], []
+            for short in ("core", "facade"):
+                friend_module = "dyn4k-core" if short == "core" else "dyn4k"
+                output += [f"> Task :{short}:linuxArm64Test",
+                           f"QUALIFICATION_COMPILER_FLAGS_{short.upper()}=" + json.dumps(
+                               ["-g", "-friend-modules", str(route.staged_path(
+                                   Path('/staging'), friend_module, 'linuxArm64'))])]
+                binary = f"binary-{short}".encode()
+                write(f"runtime/{short}.program", binary)
+                products[short] = {"archive": f"runtime/{short}.program",
+                                   "path": f"/producer-build/{short}/bin/linuxArm64/debugTest/test.kexe",
+                                   "sha256": route.digest(binary), "mode": "debugTest",
+                                   "target": "linuxArm64"}
+                output.append(f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={route.digest(binary)}")
+                raw = report(short)
+                ids, normal = route.original_report(raw, "linuxArm64", route.selected_rows(
+                    inputs[f"{short}-cases.tsv"]))
+                observed.extend(ids)
+                raw_path = f"reports/raw/{short}/TEST-{short}.xml"
+                normal_path = f"reports/normalized/{short}/TEST-{short}.xml"
+                write(raw_path, raw)
+                write(normal_path, normal)
+                raw_paths.append(raw_path)
+                normal_paths.append(normal_path)
+                output += [f"QUALIFICATION_RAW_XML_SHA256={route.digest(raw)}",
+                           f"QUALIFICATION_XML_SHA256={route.digest(normal)}"]
+            write("runtime/products.json", route.encoded(products))
+            write("reports/method-order.json", route.encoded(observed))
+            output.append(f"QUALIFICATION_METHOD_ORDER_SHA256={route.digest((root / 'reports/method-order.json').read_bytes())}")
+            for module, value in hashes.items():
+                output.append(f"QUALIFICATION_RESOLVED_{module.upper().replace('-', '_')}_SHA256={value}")
+            write("stdout.txt", ("\n".join(output) + "\n").encode())
+            write("stderr.txt", b"")
+            start, finish = time.time_ns() - 1_000_000_000, time.time_ns() + 1_000_000_000
+            build_paths = [f"{route.PROJECT}/{name}" for name in
+                           ("build.gradle.kts", "settings.gradle.kts",
+                            "gradle.properties",
+                            "core/build.gradle.kts", "facade/build.gradle.kts")]
+            paths = {"checkout": "/candidate-checkout", "staging": "/staging",
+                     "archive_root": "/producer-archive", "work_root": "/producer-build",
+                     "gradle": "/tools/gradle", "native_home": "/tools/konan",
+                     "python": "/tools/python"}
+            receipt = {"schema": 1, "candidate_sha": "candidate", "lane": LANE,
+                       **manifest["lanes"][LANE],
+                       "source_tree": "tree", "consumer_group": "full-suite",
+                       "consumer_contract_sha256": independent_gates.digest(contract),
+                       "artifact_hashes": hashes, "selection": selection, "host": host,
+                       "host_after": host,
+                       "runtime_identity": route.digest(route.encoded(host)),
+                       "toolchain": toolchain, "source_inventory_sha256": route.digest(inputs["source-inventory.tsv"]),
+                       "consumer_build_sha256": {path: route.digest(b"code") for path in build_paths},
+                       "producer_sha256": route.digest(b"code"),
+                       "producer_paths": paths,
+                       "process": {"command": route.gradle_command(paths, LANE, "debug-g", hashes),
+                                   "cwd": "/producer-archive", "exit_code": 0,
+                                   "pid": 101, "parent_pid": 100, "started_ns": start,
+                                   "finished_ns": finish, "stdout": "stdout.txt", "stderr": "stderr.txt"},
+                       "provider_graph": "provider-graph.json",
+                       "resolved_artifacts": {module: f"resolved/{module}-linuxarm64-0.1.0-alpha.1.klib"
+                                              for module in route.MODULES},
+                       "products": products, "raw_consumer_xml": raw_paths,
+                       "consumer_xml": normal_paths}
+
+            def seal():
+                receipt["files"] = route.archive_files(root)
+                write("receipt.json", route.encoded(receipt))
+                return independent_gates.archive_digest(root)
+
+            def verify():
+                archive_hash = seal()
+                return route.verify(root, Path(temporary), "candidate", LANE, hashes,
+                                    selection, archive_hash, toolchain)
+
+            with (patch.object(route, "lane_contract", return_value=(manifest, contract)),
+                  patch.object(route, "git", return_value="tree"),
+                  patch.object(route, "verify_source_binding"),
+                  patch.object(route, "source_inputs", return_value=inputs),
+                  patch.object(route.subprocess, "check_output", return_value=b"code")):
+                self.assertEqual(verify()["status"], "PASSED")
+                mutations = {
+                    "wrong KLIB": ("resolved/dyn4k-core-linuxarm64-0.1.0-alpha.1.klib", b"wrong"),
+                    "changed binary": ("runtime/core.program", b"changed"),
+                    "altered host": ("host.json", route.encoded({**host, "machine": "x86_64"})),
+                    "missing method": (raw_paths[0], report("core", name="missing")),
+                    "duplicate method": (raw_paths[0], report("core", duplicate=True)),
+                    "failing method": (raw_paths[0], report("core", outcome="failure")),
+                }
+                for label, (relative, data) in mutations.items():
+                    original = (root / relative).read_bytes()
+                    write(relative, data)
+                    with self.subTest(label=label), self.assertRaises(ValueError):
+                        verify()
+                    write(relative, original)
+                selection["lane"] = LANE.replace("debug-g", "optimized-opt")
+                with self.assertRaises(ValueError):
+                    verify()
+                selection["lane"] = LANE
+                for key, wrong in (("target", "macosArm64"), ("runtime", "macOS ARM64"),
+                                   ("version", "minimum"), ("configuration", "optimized-opt")):
+                    original = receipt[key]
+                    receipt[key] = wrong
+                    with self.subTest(key=key), self.assertRaises(ValueError):
+                        verify()
+                    receipt[key] = original
+
+
+if __name__ == "__main__":
+    unittest.main()

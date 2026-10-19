@@ -1,0 +1,169 @@
+name: Full staged Native host consumer
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Approved Native host target
+        required: true
+        type: choice
+        options:
+          - linuxArm64
+          - mingwX64
+          - macosArm64
+          - iosSimulatorArm64
+          - iosX64
+          - tvosSimulatorArm64
+          - watchosSimulatorArm64
+      version_role:
+        description: Exact selected runtime role
+        required: true
+        type: choice
+        options:
+          - current
+          - minimum
+      mode:
+        description: Native compiler and executable mode
+        required: true
+        type: choice
+        options:
+          - debug-g
+          - optimized-opt
+      runtime_selection:
+        description: JSON with exact host OS and selected simulator identity
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  consumer:
+    runs-on: ${{ inputs.target == 'linuxArm64' && 'ubuntu-24.04-arm' || inputs.target == 'mingwX64' && 'windows-2025' || inputs.target == 'iosX64' && 'macos-26-intel' || 'macos-26' }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      DYN4K_SELECTION_JSON: ${{ inputs.runtime_selection }}
+      DYN4K_TARGET: ${{ inputs.target }}
+      DYN4K_ROLE: ${{ inputs.version_role }}
+      DYN4K_MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare home backed evidence directory
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          root="$HOME/dyn4k-native-consumer-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$root/tmp" "$root/staging"
+          echo "DYN4K_RUN_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Prepare Windows evidence directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = Join-Path $HOME "dyn4k-native-consumer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force (Join-Path $root 'tmp'), (Join-Path $root 'staging') | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "DYN4K_RUN_ROOT=$root"
+      - name: Run selected external Native consumer
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DYN4K_TARGET" in
+            linuxArm64) runtime='Linux ARM64' ;;
+            mingwX64) runtime='Windows x64' ;;
+            macosArm64) runtime='macOS ARM64' ;;
+            iosSimulatorArm64) runtime='iOS simulator ARM64' ;;
+            iosX64) runtime='iOS simulator x64' ;;
+            tvosSimulatorArm64) runtime='tvOS simulator ARM64' ;;
+            watchosSimulatorArm64) runtime='watchOS simulator ARM64' ;;
+            *) exit 2 ;;
+          esac
+          lane="$DYN4K_TARGET:$runtime:$DYN4K_ROLE:$DYN4K_MODE"
+          root="$DYN4K_RUN_ROOT"
+          export TMPDIR="$root/tmp"
+          export GRADLE_USER_HOME="$HOME/.gradle"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            export DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer
+            test -d "$DEVELOPER_DIR"
+            xcodebuild -version
+          fi
+          printf '%s' "$DYN4K_SELECTION_JSON" > "$root/runtime-selection.json"
+          candidate=$(git rev-parse HEAD)
+          test "$candidate" = "$GITHUB_SHA"
+          gradle="$GITHUB_WORKSPACE/gradlew"
+          capital_target="$(printf '%s' "${DYN4K_TARGET:0:1}" | tr '[:lower:]' '[:upper:]')${DYN4K_TARGET:1}"
+          "$gradle" --no-daemon --console=plain \
+            :dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository \
+            :dyn4k:publishKotlinMultiplatformPublicationToStagingRepository \
+            ":dyn4k-core:publish${capital_target}PublicationToStagingRepository" \
+            ":dyn4k:publish${capital_target}PublicationToStagingRepository"
+          cp -a build/staging-repository/. "$root/staging/"
+          native_home=$(find "$HOME/.konan" -maxdepth 1 -type d \
+            -name 'kotlin-native-prebuilt-*-2.4.20' -print -quit)
+          test -n "$native_home"
+          variant=$(printf '%s' "$DYN4K_TARGET" | tr '[:upper:]' '[:lower:]')
+          base="$root/staging/io/github/rubixhacker"
+          core="$base/dyn4k-core-$variant/0.1.0-alpha.1/dyn4k-core-$variant-0.1.0-alpha.1.klib"
+          facade="$base/dyn4k-$variant/0.1.0-alpha.1/dyn4k-$variant-0.1.0-alpha.1.klib"
+          core_sha=$(sha256sum "$core" | cut -d' ' -f1)
+          facade_sha=$(sha256sum "$facade" | cut -d' ' -f1)
+          python3 tools/qualification/full_native_host_consumer.py run \
+            --repository "$GITHUB_WORKSPACE" --candidate-sha "$candidate" \
+            --lane "$lane" --staging "$root/staging" --output "$root/raw" \
+            --gradle "$gradle" --native-home "$native_home" \
+            --runtime-selection "$root/runtime-selection.json" \
+            --expected-core-sha256 "$core_sha" \
+            --expected-facade-sha256 "$facade_sha" \
+            > "$root/producer.stdout" 2> "$root/producer.stderr"
+      - name: Run selected Windows Native consumer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:DYN4K_TARGET -ne 'mingwX64') { throw 'Windows route requires mingwX64' }
+          $root = $env:DYN4K_RUN_ROOT
+          $env:TMPDIR = Join-Path $root 'tmp'
+          $env:GRADLE_USER_HOME = Join-Path $HOME '.gradle'
+          $lane = 'mingwX64:Windows x64:' + $env:DYN4K_ROLE + ':' + $env:DYN4K_MODE
+          [IO.File]::WriteAllText((Join-Path $root 'runtime-selection.json'), $env:DYN4K_SELECTION_JSON)
+          $candidate = (git rev-parse HEAD).Trim()
+          if ($candidate -ne $env:GITHUB_SHA) { throw 'candidate SHA differs' }
+          $gradle = Join-Path $env:GITHUB_WORKSPACE 'gradlew.bat'
+          & $gradle --no-daemon --console=plain `
+            ':dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository' `
+            ':dyn4k:publishKotlinMultiplatformPublicationToStagingRepository' `
+            ':dyn4k-core:publishMingwX64PublicationToStagingRepository' `
+            ':dyn4k:publishMingwX64PublicationToStagingRepository'
+          if ($LASTEXITCODE -ne 0) { throw 'staging failed' }
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE 'build/staging-repository/*') `
+            (Join-Path $root 'staging')
+          $nativeHome = Get-ChildItem (Join-Path $HOME '.konan') -Directory |
+            Where-Object Name -Like 'kotlin-native-prebuilt-*-2.4.20' |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $nativeHome) { throw 'pinned Kotlin/Native distribution is unavailable' }
+          $base = Join-Path $root 'staging/io/github/rubixhacker'
+          $core = Join-Path $base 'dyn4k-core-mingwx64/0.1.0-alpha.1/dyn4k-core-mingwx64-0.1.0-alpha.1.klib'
+          $facade = Join-Path $base 'dyn4k-mingwx64/0.1.0-alpha.1/dyn4k-mingwx64-0.1.0-alpha.1.klib'
+          $coreSha = (Get-FileHash -Algorithm SHA256 $core).Hash.ToLowerInvariant()
+          $facadeSha = (Get-FileHash -Algorithm SHA256 $facade).Hash.ToLowerInvariant()
+          python tools/qualification/full_native_host_consumer.py run `
+            --repository $env:GITHUB_WORKSPACE --candidate-sha $candidate `
+            --lane $lane --staging (Join-Path $root 'staging') `
+            --output (Join-Path $root 'raw') --gradle $gradle `
+            --native-home $nativeHome --runtime-selection (Join-Path $root 'runtime-selection.json') `
+            --expected-core-sha256 $coreSha --expected-facade-sha256 $facadeSha `
+            > (Join-Path $root 'producer.stdout') 2> (Join-Path $root 'producer.stderr')
+          if ($LASTEXITCODE -ne 0) { throw 'Native consumer failed; raw attempt retained' }
+      - name: Retain selected route and failed attempt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-native-host-${{ github.sha }}-${{ inputs.target }}-${{ inputs.version_role }}-${{ inputs.mode }}
+          path: ${{ env.DYN4K_RUN_ROOT }}/
+          include-hidden-files: true
+          if-no-files-found: warn
