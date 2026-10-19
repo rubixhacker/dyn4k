@@ -20,7 +20,7 @@ import host_capacity_control as control
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/performance-host-capacity-control.yml"
-WORKFLOW_SHA256 = "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6"
+WORKFLOW_SHA256 = "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1"
 
 
 def digest(data):
@@ -631,8 +631,8 @@ class HostCapacityControlTest(unittest.TestCase):
         source = WORKFLOW.read_bytes()
         self.assertEqual(WORKFLOW_SHA256, digest(source))
         document = yaml.safe_load(source)
-        self.assertEqual({"macos-26", "windows-2025"},
-                         set(document["jobs"]["capture"]["strategy"]["matrix"]["os"]))
+        self.assertEqual("windows-2025", document["jobs"]["capture"]["runs-on"])
+        self.assertNotIn("strategy", document["jobs"]["capture"])
         steps = document["jobs"]["capture"]["steps"]
         self.assertTrue(all(len(step["run"]) < 21000 for step in steps if "run" in step))
         self.assertEqual(2, sum(step.get("if") == "always()" for step in steps))
