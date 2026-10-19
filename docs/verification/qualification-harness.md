@@ -2,6 +2,12 @@
 
 This harness records what ran against one staged candidate. A build or a host probe alone does not qualify a runtime. [Qualify staged artifacts on every required runtime](https://github.com/rubixhacker/dyn4k/issues/43) remains open while required cases and independent gates lack evidence.
 
+## Hosted runner cost guard
+
+Run `python3 -B tools/qualification/guard_hosted_runners.py` from the repository root before every source push or manual `gh workflow run`. The command checks every active `.github/workflows/*.yml` and `*.yaml` file. It rejects macOS hosted labels and runner expressions without an explicit Linux or Windows hosted label. The coordinator must rerun it after integrating workflow changes.
+
+The guard job in `qualification.yml` starts after dispatch. It cannot prevent the dispatch itself. Keep the seven disabled GitHub workflows disabled until separate review and authorization. Historical Mac-only definitions are in `docs/archive/hosted-macos-workflows/`. This source change does not qualify Apple targets or replace local Mac runtime evidence.
+
 ## What the harness checks
 
 `tools/qualification/qualify.py matrix` emits the complete approved support matrix: 21 targets, 28 target/runtime families, and 112 cases after minimum/current and two build configurations. The configuration names correspond to the [approved support contract](https://github.com/rubixhacker/dyn4k/issues/6#issuecomment-5651793360): JVM no-optimize/default; Android debug/R8; web development/production; Native debug `-g`/optimized `-opt`. A matrix row is a requirement, not a result.
@@ -28,7 +34,7 @@ The Safari manifest pins both exact case names emitted by Safari 26.6.2. Their `
 
 The tracked [complete suite manifest](full-suite-manifest.md) contains 2,523 portable methods and three facade JVM-only methods. Each lane must bind its runtime identity, version, configuration, selected cases, suite ID, and both target binary hashes. The result must match those selections and bind the suite, candidate, and staged audit digests. The audit is recomputed against staged files before acceptance. The manifest defines required cases and gates; it is not execution evidence. Independent review approved its inventory and case selection at revision `2f5eb2d`; runtime qualification remains open.
 
-`record --hosted-probe <json> --raw-bundle <directory>` checks the bounded result's candidate SHA, selected runtime identity, frozen source and consumer manifest digests, exact counts, staged target hashes, and complete raw XML bundle. It stores the result under `bounded_hosted_probes`. It does not promote a bounded probe to a `PASSED` full lane. The macOS 26 and Windows Server 2025 jobs do not establish the approved minimum OS versions. Windows Server 2025 is not a Windows 10 client runtime. Simulator tests do not establish physical Apple device support.
+`record --hosted-probe <json> --raw-bundle <directory>` checks the bounded result's candidate SHA, selected runtime identity, frozen source and consumer manifest digests, exact counts, staged target hashes, and complete raw XML bundle. It stores the result under `bounded_hosted_probes`. It does not promote a bounded probe to a `PASSED` full lane. Historical macOS 26 jobs and Windows Server 2025 jobs do not establish the approved minimum OS versions. Windows Server 2025 is not a Windows 10 client runtime. Simulator tests do not establish physical Apple device support.
 
 `artifact.py verify --candidate-sha <sha> --output <full-hosted-directory-or-tar>` accepts a schema 2 full hosted receipt. It checks the committed corpus, reviewed map, and pair file. It checks archived source bytes, raw XML cases, test executables, and process logs. It also checks runner paths, resolved consumer artifacts, both staged binaries, and exact Gradle metadata links. The receipt must report Java 21, Gradle 9.5.0, and declared KGP 2.4.20.
 

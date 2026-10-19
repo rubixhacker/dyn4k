@@ -8,13 +8,7 @@ permissions:
 
 jobs:
   capture:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - macos-26
-          - windows-2025
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-2025
     timeout-minutes: 5
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -33,13 +27,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: performance-host-capacity-${{ github.sha }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: performance-host-capacity-${{ github.sha }}-windows-2025-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/performance-host-capacity-control/
           if-no-files-found: warn
       - name: Upload test-only replay key separately
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: performance-host-capacity-key-${{ github.sha }}-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: performance-host-capacity-key-${{ github.sha }}-windows-2025-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/performance-host-capacity-key/operator.key
           if-no-files-found: warn

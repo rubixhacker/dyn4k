@@ -17,8 +17,16 @@ on:
   pull_request:
 
 jobs:
+  hosted-runner-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject hosted macOS routes
+        run: python3 -B tools/qualification/guard_hosted_runners.py
+
   staged-jvm-and-linux:
     if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
+    needs: hosted-runner-guard
     runs-on: ubuntu-latest
     env:
       DYN4K_UPSTREAM_SOURCE: /tmp/dyn4j-source
@@ -333,10 +341,14 @@ jobs:
           if-no-files-found: error
 
   hosted-publications:
+    needs: hosted-runner-guard
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}' || '{"include":[{"host":"macos","runner":"macos-26","targets":"--target macosArm64 --target iosArm64 --target iosSimulatorArm64 --target iosX64 --target tvosArm64 --target tvosSimulatorArm64 --target watchosArm64 --target watchosDeviceArm64 --target watchosSimulatorArm64"},{"host":"windows","runner":"windows-2025","targets":"--target mingwX64"}]}') }}
-    runs-on: ${{ matrix.runner }}
+      matrix:
+        include:
+          - host: windows
+            targets: --target mingwX64
+    runs-on: windows-2025
     timeout-minutes: 90
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -362,9 +374,6 @@ jobs:
             platform-tools
             platforms;android-36
             build-tools;36.0.0
-      - name: Select pinned Xcode
-        if: runner.os == 'macOS'
-        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
       - name: Provision pinned upstream source
         env:
@@ -474,10 +483,13 @@ jobs:
           if-no-files-found: warn
 
   hosted-native:
+    needs: hosted-runner-guard
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.windows_diagnostics == true && github.event_name == 'workflow_dispatch' && '{"include":[{"target":"mingwX64","runner":"windows-2025"}]}' || '{"include":[{"target":"macosArm64","runner":"macos-26"},{"target":"iosSimulatorArm64","runner":"macos-26"},{"target":"tvosSimulatorArm64","runner":"macos-26"},{"target":"watchosSimulatorArm64","runner":"macos-26"},{"target":"iosX64","runner":"macos-26-intel"},{"target":"mingwX64","runner":"windows-2025"}]}') }}
-    runs-on: ${{ matrix.runner }}
+      matrix:
+        include:
+          - target: mingwX64
+    runs-on: windows-2025
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -767,94 +779,3 @@ jobs:
           name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.target }}
           path: ${{ runner.temp }}/windows-native-diagnostics/
           if-no-files-found: warn
-
-  safari-browser:
-    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
-    runs-on: macos-26
-    timeout-minutes: 120
-    env:
-      SAFARI_BIN: ${{ github.workspace }}/tools/qualification/safari-launch.sh
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: >-
-            platform-tools
-            platforms;android-36
-            build-tools;36.0.0
-      - name: Select pinned Xcode
-        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.4.1.app/Contents/Developer" >> "$GITHUB_ENV"
-      - name: Enable Safari WebDriver
-        run: sudo safaridriver --enable
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Execute staged Safari browser probe
-        run: >-
-          python tools/qualification/hosted.py run
-          --candidate-sha "${{ github.sha }}"
-          --target jsSafari
-          --output "${{ runner.temp }}/hosted-jsSafari.json"
-      - name: Verify and package Safari raw evidence
-        if: always()
-        run: >-
-          python tools/qualification/artifact.py hosted
-          --candidate-sha "${{ github.sha }}"
-          --target jsSafari
-          --probe "${{ runner.temp }}/hosted-jsSafari.json"
-          --output "${{ runner.temp }}/safari-raw-bundle"
-      - name: Record bounded observation and all full lanes
-        if: always()
-        run: >-
-          python tools/qualification/qualify.py record
-          --candidate-sha "${{ github.sha }}"
-          --hosted-probe "${{ runner.temp }}/safari-raw-bundle/json/hosted-jsSafari.json"
-          --raw-bundle "${{ runner.temp }}/safari-raw-bundle"
-          --output "${{ runner.temp }}/safari-raw-bundle/json/matrix-jsSafari.json"
-      - name: Execute full Safari common corpus and staged consumer
-        if: always()
-        run: >-
-          python tools/qualification/full_hosted.py
-          --candidate-sha "${{ github.sha }}"
-          --target jsSafari
-          --output "${{ runner.temp }}/full-hosted-jsSafari"
-      - name: Independently verify full Safari archive
-        if: always()
-        run: >-
-          python tools/qualification/full_hosted.py --verify
-          --candidate-sha "${{ github.sha }}"
-          --target jsSafari
-          --output "${{ runner.temp }}/full-hosted-jsSafari"
-      - name: Package full Safari archive
-        if: always()
-        run: >-
-          python tools/qualification/full_hosted.py --package
-          --output "${{ runner.temp }}/full-hosted-jsSafari"
-          --archive "${{ runner.temp }}/full-hosted-jsSafari.tar"
-      - name: Verify transportable full Safari archive
-        if: always()
-        run: >-
-          python tools/qualification/full_hosted.py --verify-tar
-          --candidate-sha "${{ github.sha }}"
-          --target jsSafari
-          --archive "${{ runner.temp }}/full-hosted-jsSafari.tar"
-      - name: Upload Safari evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qualification-${{ github.sha }}-jsSafari
-          path: |
-            ${{ runner.temp }}/safari-raw-bundle/
-          if-no-files-found: error
-      - name: Upload full Safari common corpus evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qualification-full-${{ github.sha }}-jsSafari
-          path: ${{ runner.temp }}/full-hosted-jsSafari.tar
-          if-no-files-found: error
