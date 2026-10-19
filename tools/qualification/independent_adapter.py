@@ -62,6 +62,36 @@ def _signed_audit(path, signature, public_key, key_sha256):
     return _decode(audit_bytes)
 
 
+def _verify_full_jvm_staged_consumer(repository, candidate_sha, lane_id, selected,
+                                     paths, expected, gate_result):
+    import full_jvm_consumer
+
+    if lane_id != full_jvm_consumer.LANE:
+        raise ValueError(f"public full JVM verifier does not cover lane: {lane_id}")
+    java_hash = expected.get("expected_java_executable_sha256")
+    gradle_hash = expected.get("expected_gradle_executable_sha256")
+    if (type(java_hash) is not str or not SHA256.fullmatch(java_hash)
+            or type(gradle_hash) is not str or not SHA256.fullmatch(gradle_hash)):
+        raise ValueError(f"signed JVM executable SHA-256 values are missing or invalid: {lane_id}")
+    hashes = expected.get("expected_artifact_hashes")
+    runtime = expected.get("expected_runtime_identity")
+    digest = expected["expected_archive_digests"].get("staged-consumer")
+    if (not isinstance(hashes, dict) or set(hashes) != {"dyn4k-core", "dyn4k"}
+            or any(type(value) is not str or not SHA256.fullmatch(value)
+                   for value in hashes.values())
+            or type(runtime) is not str or not runtime
+            or type(digest) is not str or not SHA256.fullmatch(digest)):
+        raise ValueError(f"signed JVM archive identity is incomplete: {lane_id}")
+    contract = full_jvm_consumer.selected_contract(repository)[1]
+    if selected["case_ids"] != [item["id"] for item in contract["cases"]]:
+        raise ValueError(f"signed JVM lane selects a different case suite: {lane_id}")
+    public = full_jvm_consumer.verify(
+        paths["staged-consumer"], repository, candidate_sha, hashes, runtime, digest,
+        java_hash, gradle_hash)
+    if public != gate_result:
+        raise ValueError(f"public JVM verifier differs from independent gate: {lane_id}")
+
+
 def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                  audit_path, signature_path, public_key_path, key_sha256,
                  performance_key=None, candidate_manifest=None, artifact_audit=None):
@@ -182,6 +212,11 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 or result.get("lane") != lane_id
                 or result.get("candidate_sha") != candidate_sha):
             raise ValueError(f"independent verifier result is incomplete: {lane_id}")
+        if (suite_manifest["lanes"][lane_id]["target"] == "jvm"
+                and result["gates"]["staged-consumer"]["status"] == "PASSED"):
+            _verify_full_jvm_staged_consumer(
+                repository, candidate_sha, lane_id, selected, paths, expected,
+                result["gates"]["staged-consumer"])
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
                             "identities_bound": identities_bound}

@@ -3,6 +3,8 @@ import contextlib
 import hashlib
 import io
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -277,7 +279,8 @@ class IndependentAdapterTests(unittest.TestCase):
                          "global_gates": ["publication-contract"]}
             with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
                     "full_suite_manifest.select_lane", return_value=selection) as selected, mock.patch(
-                    "qualify.verify_audit_against_staging"):
+                    "qualify.verify_audit_against_staging"), mock.patch.object(
+                    independent_adapter, "_verify_full_jvm_staged_consumer"):
                 verified = independent_adapter.verify_lanes(
                     root, sha, suite, archives, audit_path, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=audit)
@@ -289,6 +292,147 @@ class IndependentAdapterTests(unittest.TestCase):
             self.assertEqual("PASSED", result["status"])
             self.assertIn("signed raw gate archives", result["reason"])
             self.assertEqual(5, len(verified[LANE]["selected_case_ids"]))
+
+    def test_signed_jvm_executable_hashes_control_public_replay(self):
+        import full_jvm_consumer
+
+        lane = full_jvm_consumer.LANE
+        candidate = "a" * 40
+        cases = [{"id": "first", "scope": "portable"},
+                 {"id": "second", "scope": "portable"}]
+        suite = {"cases": cases, "lanes": {lane: {
+            "target": "jvm", "required_gates": ["staged-consumer"],
+            "case_scopes": ["portable"]}}, "global_gates": []}
+        hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
+        java_hash, gradle_hash = "d" * 64, "e" * 64
+        archive_digest = "f" * 64
+        runtime = "audited Java 21 runtime"
+        fake = self.fake_verifier()
+        fake.APPROVED_MANIFEST_SHA256 = qualify.manifest_digest(suite)
+        gate = {"status": "PASSED", "complete_selected_suite": True}
+
+        def evaluate(manifest, sha, lane_id, archives, repository, *expectations):
+            result = {"candidate_sha": sha, "lane": lane_id, "status": "NOT_RUN",
+                      "gates": {"staged-consumer": gate}}
+            return {**result, "result_sha256": qualify.manifest_digest(result)}
+
+        fake.evaluate = evaluate
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "resealed-archive"
+            archive.mkdir()
+            archive_map = root / "archives.json"
+            archive_map.write_text(json.dumps({"schema": 1, "candidate_sha": candidate,
+                                               "lanes": {lane: {"staged-consumer": str(archive)}}}))
+            signed = {"schema": 1, "candidate_sha": candidate,
+                      "suite_manifest_sha256": qualify.manifest_digest(suite),
+                      "lanes": {lane: {"expected_artifact_hashes": hashes,
+                                       "expected_runtime_identity": runtime,
+                                       "expected_archive_digests": {
+                                           "staged-consumer": archive_digest},
+                                       "expected_java_executable_sha256": java_hash,
+                                       "expected_gradle_executable_sha256": gradle_hash}}}
+            selection = {"case_ids": [item["id"] for item in cases],
+                         "required_gates": ["staged-consumer"], "global_gates": []}
+
+            def verify(audit_input, public_result=gate):
+                audit_path, signature, public, fingerprint = self.signed_inputs(root, audit_input)
+                with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
+                        "full_suite_manifest.select_lane", return_value=selection), mock.patch(
+                        "full_jvm_consumer.selected_contract", return_value=(suite, {"cases": cases})), mock.patch(
+                        "full_jvm_consumer.verify", return_value=public_result) as replay:
+                    result = independent_adapter.verify_lanes(
+                        root, candidate, suite, archive_map, audit_path, signature,
+                        public, fingerprint)
+                return result, replay
+
+            result, replay = verify(signed)
+            self.assertEqual("PASSED", result[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            replay.assert_called_once_with(
+                str(archive), root, candidate, hashes, runtime, archive_digest,
+                java_hash, gradle_hash)
+            for field, value in (("expected_java_executable_sha256", None),
+                                 ("expected_gradle_executable_sha256", "0" * 63)):
+                changed = copy.deepcopy(signed)
+                changed["lanes"][lane][field] = value
+                with self.assertRaisesRegex(ValueError, "signed JVM executable"):
+                    verify(changed)
+            with self.assertRaisesRegex(ValueError, "public JVM verifier differs"):
+                verify(signed, {"status": "FAILED"})
+            changed = copy.deepcopy(signed)
+            changed["lanes"][lane]["expected_java_executable_sha256"] = "0" * 64
+            audit_path, signature, public, fingerprint = self.signed_inputs(root, changed)
+            with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
+                    "full_suite_manifest.select_lane", return_value=selection), mock.patch(
+                    "full_jvm_consumer.selected_contract", return_value=(suite, {"cases": cases})), mock.patch(
+                    "full_jvm_consumer.verify", side_effect=ValueError(
+                        "independent Java or Gradle executable SHA-256 differs from receipt")):
+                with self.assertRaisesRegex(ValueError, "differs from receipt"):
+                    independent_adapter.verify_lanes(
+                        root, candidate, suite, archive_map, audit_path, signature,
+                        public, fingerprint)
+
+    def test_retained_full_jvm_archive_requires_signed_executable_hashes(self):
+        import full_jvm_consumer
+
+        tar_path = os.environ.get("DYN4K_RETAINED_FULL_JVM_ARCHIVE")
+        if not tar_path:
+            self.skipTest("retained full JVM archive path was not supplied")
+        candidate = "f3922e4d15338c42c788e7dbff3ac7bd71f1fca1"
+        lane = full_jvm_consumer.LANE
+        suite = independent_gates.load_approved_manifest(ROOT)
+        hashes = {"dyn4k-core": "48928d2825cb84db80e1b6e6294d8f86dd722573850ad8c60399b7fdedc07d4e",
+                  "dyn4k": "abf1619a63c24e41ebe8023c9686cc7173c2b3c6552412b0bfbdb94677242291"}
+        java_hash = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
+        gradle_hash = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = root / "original"
+            original.mkdir()
+            subprocess.run(["tar", "-xf", tar_path, "-C", str(original)],
+                           check=True, capture_output=True)
+            receipt = json.loads((original / "receipt.json").read_text())
+            runtime = receipt["runtime_identity"]
+            forged = root / "forged"
+            shutil.copytree(original, forged)
+            forged_receipt = copy.deepcopy(receipt)
+            forged_receipt["toolchain"]["java_executable_sha256"] = "0" * 64
+            forged_receipt["toolchain"]["gradle_executable_sha256"] = "1" * 64
+            (forged / "receipt.json").write_text(json.dumps(forged_receipt))
+            archive_map = root / "archive-map.json"
+
+            def check(path):
+                digest = independent_gates.archive_digest(path)
+                archive_map.write_text(json.dumps({
+                    "schema": 1, "candidate_sha": candidate,
+                    "lanes": {lane: {"staged-consumer": str(path)}}}))
+                signed = {"schema": 1, "candidate_sha": candidate,
+                          "suite_manifest_sha256": independent_gates.digest(suite),
+                          "lanes": {lane: {
+                              "expected_artifact_hashes": hashes,
+                              "expected_runtime_identity": runtime,
+                              "expected_archive_digests": {"staged-consumer": digest},
+                              "expected_java_executable_sha256": java_hash,
+                              "expected_gradle_executable_sha256": gradle_hash}}}
+                audit_path, signature, public, fingerprint = self.signed_inputs(root, signed)
+                generic = independent_gates.evaluate_gate(
+                    "staged-consumer", path, candidate, lane, suite["lanes"][lane],
+                    ROOT, hashes, runtime, digest, manifest=suite)
+                self.assertEqual("PASSED", generic["status"])
+                return independent_adapter.verify_lanes(
+                    ROOT, candidate, suite, archive_map, audit_path, signature,
+                    public, fingerprint)
+
+            verified = check(original)
+            self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            with mock.patch.object(independent_adapter, "_verify_full_jvm_staged_consumer"):
+                unguarded = check(forged)
+            self.assertEqual("PASSED", unguarded[lane]["verification"]["gates"][
+                "staged-consumer"]["status"])
+            with self.assertRaisesRegex(ValueError, "executable SHA-256 differs"):
+                check(forged)
 
     def test_signature_and_key_mismatch_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -385,7 +529,8 @@ class IndependentAdapterTests(unittest.TestCase):
                 audit_path, signature, public, fingerprint = self.signed_inputs(root, audit_input)
                 with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
                         "full_suite_manifest.select_lane", return_value=selection), mock.patch(
-                        "qualify.verify_audit_against_staging"):
+                        "qualify.verify_audit_against_staging"), mock.patch.object(
+                        independent_adapter, "_verify_full_jvm_staged_consumer"):
                     return independent_adapter.verify_lanes(
                         root, sha, suite, archives, audit_path, signature, public,
                         fingerprint, candidate_manifest=candidate_input,
