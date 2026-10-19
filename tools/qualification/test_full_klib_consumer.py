@@ -3,9 +3,11 @@ import copy
 import json
 import shutil
 import tempfile
+import sys
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
 
 import full_klib_consumer as route
 import independent_gates
@@ -17,6 +19,21 @@ TRUSTED = os.environ.get("DYN4K_FULL_KLIB_TRUSTED_TOOLCHAIN")
 
 
 class FullKlibConsumerTests(unittest.TestCase):
+    def test_capture_cli_passes_named_original_inputs(self):
+        command = ["full_klib_consumer.py", "capture", "--repository", "/source",
+                   "--project", "/project", "--archive", "/archive",
+                   "--work-root", "/work", "--lane", "linuxX64:Linux x64:current:debug-g",
+                   "--node", "/node", "--source-inventory", "/source.tsv",
+                   "--core-cases", "/core.tsv", "--facade-cases", "/facade.tsv",
+                   "--lane-script", "/script"]
+        with patch.object(sys, "argv", command), patch.object(route, "capture") as capture:
+            route.main()
+        self.assertEqual(capture.call_args.args[-1], {
+            "source-inventory.tsv": Path("/source.tsv"),
+            "core-cases.tsv": Path("/core.tsv"),
+            "facade-cases.tsv": Path("/facade.tsv"),
+            "lane-script": Path("/script")})
+
     def test_approved_portable_contract_and_exact_sources(self):
         candidate = __import__("subprocess").check_output(
             ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"], text=True).strip()

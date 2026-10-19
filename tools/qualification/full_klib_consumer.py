@@ -685,9 +685,10 @@ def main():
         result = prepare(args.repository, args.candidate_sha, args.lane, args.destination)
     elif args.action == "capture":
         capture(args.repository, args.project, args.archive, args.work_root, args.lane,
-                args.node, {name: Path(getattr(args, name.replace("-", "_")))
-                            for name in ("source-inventory", "core-cases", "facade-cases",
-                                         "lane-script")})
+                args.node, {"source-inventory.tsv": Path(args.source_inventory),
+                            "core-cases.tsv": Path(args.core_cases),
+                            "facade-cases.tsv": Path(args.facade_cases),
+                            "lane-script": Path(args.lane_script)})
         return
     else:
         hashes = {"dyn4k-core": args.expected_core_sha256,
