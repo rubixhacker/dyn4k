@@ -26,6 +26,114 @@ import host_image_adverse
 import host_image
 
 
+class LocalMacToolchainTest(unittest.TestCase):
+    def test_local_wrapper_passes_observed_sidecar_into_actual_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inventory_path = root / "inventory.json"
+            inventory = {"target": "macosArm64", "build": "development",
+                         "source_sha": "a" * 40, "producer_tree": "b" * 40,
+                         "harness": str(root / "harness")}
+            inventory_path.write_text(json.dumps(inventory))
+            developer = "/Applications/Xcode.app/Contents/Developer"
+            receipt = {"format": "portable-apple-toolchain-v1",
+                       "source_sha": inventory["source_sha"],
+                       "producer_tree": inventory["producer_tree"],
+                       "inventory_sha256": capture.digest(inventory_path),
+                       "developer_dir": developer,
+                       "xcodebuild_path": developer + "/usr/bin/xcodebuild",
+                       "xcrun_find_output": developer + "/usr/bin/xcodebuild\n",
+                       "xcode_version": "Xcode 26.5\nBuild version 17F42\n"}
+            argv = ["native_host_capture.py", "--archive", str(root / "archive"),
+                    "--inventory", str(inventory_path), "--publication-root", str(root),
+                    "--scenario", "separated.default.small.30hz.direct_kotlin",
+                    "--target", "macosArm64", "--build", "development",
+                    "--steps", "30", "--warmup", "3"]
+            def launched(command):
+                sidecar = Path(command[command.index("--apple-toolchain-receipt") + 1])
+                self.assertEqual(json.loads(sidecar.read_text()), receipt)
+                self.assertEqual(command[command.index("--source-sha") + 1], receipt["source_sha"])
+                return 0
+            with mock.patch.object(sys, "argv", argv), \
+                 mock.patch.object(native_host_capture.capture, "required_file", return_value=inventory_path), \
+                 mock.patch.object(native_host_capture, "selected_artifact", return_value="/selected.klib"), \
+                 mock.patch.object(native_host_capture, "observe_apple_toolchain", return_value=receipt) as observed, \
+                 mock.patch.object(native_host_capture.subprocess, "call", side_effect=launched):
+                with self.assertRaises(SystemExit) as exited:
+                    native_host_capture.main()
+            self.assertEqual(exited.exception.code, 0)
+            observed.assert_called_once_with(receipt["source_sha"], receipt["producer_tree"],
+                                             receipt["inventory_sha256"])
+
+    def test_local_observation_requires_26_5_build_and_selected_developer_dir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            developer = Path(directory) / "Xcode.app/Contents/Developer"
+            developer.mkdir(parents=True)
+            found = str(developer / "usr/bin/xcodebuild") + "\n"
+            def command(argv, **_kwargs):
+                output = "Xcode 26.5\nBuild version 17F42\n" if argv[0] == "xcodebuild" else found
+                return subprocess.CompletedProcess(argv, 0, output, "")
+            with mock.patch.dict(os.environ, {"DEVELOPER_DIR": str(developer)}), \
+                 mock.patch.object(native_host_capture.subprocess, "run", side_effect=command):
+                receipt = native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
+            self.assertEqual(receipt["xcode_version"], "Xcode 26.5\nBuild version 17F42\n")
+            self.assertEqual(receipt["xcrun_find_output"], found)
+            native_host_capture.validate_apple_toolchain_receipt(receipt)
+            for change in ({"xcode_version": "Xcode 26.4.1\nBuild version 17E303\n"},
+                           {"xcode_version": "Xcode 26.5\nBuild version 17 F42\n"},
+                           {"xcodebuild_path": "/other/Xcode.app/Contents/Developer/usr/bin/xcodebuild"},
+                           {"xcrun_find_output": found + "other\n"},
+                           {"developer_dir": "relative/Developer"}):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    native_host_capture.validate_apple_toolchain_receipt(receipt | change)
+            with mock.patch.dict(os.environ, {"DEVELOPER_DIR": ""}):
+                with self.assertRaisesRegex(ValueError, "DEVELOPER_DIR"):
+                    native_host_capture.observe_apple_toolchain("a" * 40, "b" * 40, "c" * 64)
+
+    def test_public_replay_requires_source_bound_sidecar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)
+            developer = "/Applications/Xcode.app/Contents/Developer"
+            receipt = {"format": "portable-apple-toolchain-v1", "source_sha": "a" * 40,
+                       "producer_tree": "b" * 40, "inventory_sha256": "c" * 64,
+                       "developer_dir": developer,
+                       "xcodebuild_path": developer + "/usr/bin/xcodebuild",
+                       "xcrun_find_output": developer + "/usr/bin/xcodebuild\n",
+                       "xcode_version": "Xcode 26.5\nBuild version 18A1\n"}
+            sidecar = archive / "apple-toolchain.json"
+            sidecar.write_text(json.dumps(receipt) + "\n")
+            (archive / "build-inventory.json").write_text(json.dumps({
+                "source_sha": receipt["source_sha"],
+                "producer_tree": receipt["producer_tree"]}))
+            receipt["inventory_sha256"] = capture.digest(archive / "build-inventory.json")
+            sidecar.write_text(json.dumps(receipt) + "\n")
+            (archive / "capture.json").write_text(json.dumps({
+                "target": "macosArm64", "source_sha": receipt["source_sha"],
+                "producer_tree": receipt["producer_tree"],
+                "build_inventory_sha256": receipt["inventory_sha256"],
+                "apple_toolchain": {"receipt_sha256": capture.digest(sidecar),
+                                    "developer_dir": developer,
+                                    "xcode_version": receipt["xcode_version"]}}))
+            native_host_capture.verify_apple_toolchain_archive(archive)
+            original = json.loads(sidecar.read_text())
+            for change in ({"xcode_version": "Xcode 26.4.1\nBuild version 17E303\n"},
+                           {"xcode_version": "Xcode 26.5\nBuild version 17 F42\n"},
+                           {"developer_dir": "/Other/Xcode.app/Contents/Developer"}):
+                with self.subTest(change=change):
+                    sidecar.write_text(json.dumps(original | change) + "\n")
+                    record = json.loads((archive / "capture.json").read_text())
+                    record["apple_toolchain"]["receipt_sha256"] = capture.digest(sidecar)
+                    record["apple_toolchain"]["developer_dir"] = (original | change)["developer_dir"]
+                    record["apple_toolchain"]["xcode_version"] = (original | change)["xcode_version"]
+                    (archive / "capture.json").write_text(json.dumps(record))
+                    with self.assertRaises(ValueError):
+                        native_host_capture.verify_apple_toolchain_archive(archive)
+            sidecar.write_text(json.dumps(original) + "\n")
+            sidecar.unlink()
+            with self.assertRaisesRegex(ValueError, "toolchain"):
+                native_host_capture.verify_apple_toolchain_archive(archive)
+
+
 class PortableCaptureTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -588,6 +588,11 @@ def capture(args):
     inventory = validate_inventory(inventory_path, args.target, args.build, args.source_sha,
                                    producer_tree, manifest_path, harness, core, kotlin, bundle,
                                    getattr(args, "publication_root", None))
+    apple_receipt_input = getattr(args, "apple_toolchain_receipt", None)
+    if args.target == "macosArm64" and apple_receipt_input is None:
+        raise ValueError("local macOS Native capture requires Apple toolchain sidecar")
+    if args.target != "macosArm64" and apple_receipt_input is not None:
+        raise ValueError("Apple toolchain sidecar requires macOS ARM64 target")
     if getattr(args, "source_link_receipt", None) is not None and args.target != "linuxX64":
         raise ValueError("source-link trace receipt is limited to Linux x64")
     if not args.archive.is_absolute() or args.archive.exists():
@@ -599,6 +604,18 @@ def capture(args):
         shutil.copyfile(harness, selected_executable)
         if digest(selected_executable) != hashes["harness"]:
             raise ValueError("archived selected executable differs from build inventory")
+    apple_toolchain = None
+    if apple_receipt_input is not None:
+        import native_host_capture
+        sidecar = args.archive / "apple-toolchain.json"
+        sidecar.write_bytes(Path(apple_receipt_input).read_bytes())
+        apple_toolchain = native_host_capture.validate_apple_toolchain_receipt(
+            json.loads(sidecar.read_text()))
+        if (apple_toolchain["source_sha"] != args.source_sha
+                or apple_toolchain["producer_tree"] != producer_tree
+                or apple_toolchain["inventory_sha256"] != digest(inventory_path)):
+            raise ValueError("Apple toolchain sidecar differs from selected source or inventory")
+        apple_toolchain_sha = digest(sidecar)
     source_link = None
     verified_receipt_sha = None
     if getattr(args, "source_link_receipt", None) is not None:
@@ -654,12 +671,18 @@ def capture(args):
             command, args.archive, inventory_path, stdin_bytes, host_timeout)
     if source_link is not None and digest(args.archive / "source-link.json") != verified_receipt_sha:
         raise ValueError("archived source-link receipt changed during process capture")
+    if apple_toolchain is not None and digest(args.archive / "apple-toolchain.json") != apple_toolchain_sha:
+        raise ValueError("archived Apple toolchain sidecar changed during process capture")
     process_record = {
         "qualification": "unpassed", "protocol": "portable-development-v1",
         "target": args.target, "build": args.build, "mode": args.mode,
         "scenario": scenario, "source_sha": args.source_sha,
         "producer_tree": producer_tree,
         "build_inventory_sha256": digest(args.archive / "build-inventory.json"),
+        "apple_toolchain": ({"receipt_sha256": apple_toolchain_sha,
+                              "developer_dir": apple_toolchain["developer_dir"],
+                              "xcode_version": apple_toolchain["xcode_version"]}
+                             if apple_toolchain is not None else None),
         "build_inventory": {"gradle": inventory["gradle"], "kgp": inventory["kgp"],
                             "compile_configuration": inventory["compile_configuration"]},
         "publication_inputs": inventory.get("publication_inputs", []),
@@ -781,6 +804,7 @@ def main():
     parser.add_argument("--inventory", required=True)
     parser.add_argument("--publication-root", type=Path)
     parser.add_argument("--source-link-receipt", type=Path)
+    parser.add_argument("--apple-toolchain-receipt", type=Path)
     parser.add_argument("--steps", type=int, required=True)
     parser.add_argument("--warmup", type=int, required=True)
     parser.add_argument("--host-timeout-seconds", type=float, default=45.0)

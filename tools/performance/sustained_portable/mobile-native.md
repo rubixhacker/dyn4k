@@ -84,8 +84,10 @@ The launcher checks Xcode 26.5, host architecture, simulator family,
 selected and installed app package bytes, the linked executable, and the
 observed `proc_pidpath` at the PID returned by `simctl launch`. It also checks
 the OS text mapping's device, inode, and size through `lsof -d txt`. The
-installed executable's SHA-256, size, and file identity must still match the
-selected link during observation. A second package scan after launch must
+raw linked executable's SHA-256 and size must match the pre-sign copy receipt.
+The selected app signature must verify. The signed image has its own SHA-256
+and size in the build inventory, and the installed executable and live process
+must match those signed bytes. A second package scan after launch must
 match the build inventory. A missing or ambiguous text mapping fails closed.
 The `lsof` bytes remain in `setup/apple-process-vnode.stdout.bin`. The command
 and its stderr remain in the matching setup records. Apple's distributed

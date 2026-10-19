@@ -4,6 +4,7 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import java.security.MessageDigest
 
 fun gitValue(vararg arguments: String): String {
@@ -234,6 +235,11 @@ val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
         val image = app.resolve("Dyn4kPerformance")
         executable.copyTo(image, overwrite = true)
         image.setExecutable(true)
+        val copiedSha = sha256(image)
+        val copiedSize = image.length()
+        check(copiedSha == sha256(executable) && copiedSize == executable.length()) {
+            "copied Apple image differs from raw link"
+        }
         val bundleId = "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}"
         val minimum = if (target == "watchosDeviceArm64") "26.0" else if (target.startsWith("watchos")) "8.0" else "15.0"
         val watchApplication = if (target.startsWith("watchos")) "<key>WKApplication</key><true/>" else ""
@@ -253,12 +259,28 @@ val packagePortableMobileApp = tasks.register("packagePortableMobileApp") {
 $watchApplication
 </dict></plist>
 """)
-        if ("Simulator" in target || target == "iosX64") {
+        val simulator = "Simulator" in target || target == "iosX64"
+        if (simulator) {
             val signing = ProcessBuilder("codesign", "--force", "--sign", "-", "--timestamp=none", app.absolutePath)
                 .redirectErrorStream(true).start()
             val output = signing.inputStream.bufferedReader().readText()
             check(signing.waitFor() == 0) { "simulator app signing failed: $output" }
+            val verification = ProcessBuilder("codesign", "--verify", app.absolutePath)
+                .redirectErrorStream(true).start()
+            val verificationOutput = verification.inputStream.bufferedReader().readText()
+            check(verification.waitFor() == 0) { "simulator app signature verification failed: $verificationOutput" }
         }
+        val derivation = mapOf(
+            "format" to "portable-apple-image-derivation-v1", "target" to target,
+            "build" to mobileBuild, "linked_path" to executable.canonicalPath,
+            "linked_sha256" to sha256(executable), "linked_size" to executable.length(),
+            "copied_sha256" to copiedSha, "copied_size" to copiedSize,
+            "package_path" to app.canonicalPath, "packaged_sha256" to sha256(image),
+            "packaged_size" to image.length(), "signing" to if (simulator) "ad_hoc" else "none",
+            "codesign_verified" to simulator,
+        )
+        app.parentFile.resolve("image-derivation.json")
+            .writeText(JsonOutput.prettyPrint(JsonOutput.toJson(derivation)) + "\n")
     }
 }
 
@@ -301,6 +323,10 @@ tasks.register("portableMobileBuildInventory") {
         val bundle = bundleDirectory.walkTopDown().filter { it.isFile }.associate {
             it.relativeTo(bundleDirectory).invariantSeparatorsPath to sha256(it)
         }.toSortedMap()
+        val derivation = if (apple) {
+            @Suppress("UNCHECKED_CAST")
+            JsonSlurper().parse(bundleDirectory.parentFile.resolve("image-derivation.json")) as Map<String, Any?>
+        } else null
         val receipt = mapOf(
             "format" to "portable-mobile-build-inventory-v1", "source_sha" to sourceSha,
             "producer_tree" to tree, "source_files" to sourceFiles,
@@ -310,9 +336,12 @@ tasks.register("portableMobileBuildInventory") {
             "compile_configuration" to "${target}CompileKlibraries", "link_task" to linkTask,
             "resolved_artifacts" to artifacts, "linked_executable" to linked.canonicalPath,
             "linked_sha256" to sha256(linked), "harness" to harness.canonicalPath,
+            "signed_image_sha256" to if (apple) sha256(harness) else null,
+            "signed_image_size" to if (apple) harness.length() else null,
             "app_bundle" to if (apple) bundleDirectory.canonicalPath else null,
             "bundle_id" to if (apple) "io.github.rubixhacker.dyn4k.performance.${target.lowercase()}" else null,
             "abi" to androidMobileTargets[target], "bundle_sha256" to bundle,
+            "image_derivation" to derivation,
         )
         val outputDirectory = layout.buildDirectory.dir("portable-inventory").get().asFile
         outputDirectory.mkdirs()

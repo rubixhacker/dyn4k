@@ -13,6 +13,48 @@ import test_capture
 
 
 class MobileCaptureAdverseTest(unittest.TestCase):
+    def test_signed_image_derivation_binds_raw_copy_and_signed_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            linked = root / "linked.kexe"
+            app = root / "Selected.app"
+            app.mkdir()
+            image = app / "Dyn4kPerformance"
+            linked.write_bytes(b"raw link")
+            image.write_bytes(b"signed image")
+            raw_sha = mobile_capture.capture.digest(linked)
+            signed_sha = mobile_capture.capture.digest(image)
+            derivation = {"format": "portable-apple-image-derivation-v1",
+                          "target": "iosX64", "build": "development",
+                          "linked_path": str(linked), "linked_sha256": raw_sha,
+                          "linked_size": linked.stat().st_size,
+                          "copied_sha256": raw_sha, "copied_size": linked.stat().st_size,
+                          "package_path": str(app), "packaged_sha256": signed_sha,
+                          "packaged_size": image.stat().st_size,
+                          "signing": "ad_hoc", "codesign_verified": True}
+            inventory = {"image_derivation": derivation,
+                         "signed_image_sha256": signed_sha,
+                         "signed_image_size": image.stat().st_size}
+            mobile_capture.validate_apple_image_derivation(
+                inventory, linked, app, image, "iosX64", "development")
+            for key, replacement in (("copied_sha256", "0" * 64),
+                                     ("linked_sha256", "0" * 64),
+                                     ("packaged_sha256", "0" * 64),
+                                     ("codesign_verified", False)):
+                with self.subTest(key=key), self.assertRaisesRegex(ValueError, "derivation"):
+                    mobile_capture.validate_apple_image_derivation(
+                        inventory | {"image_derivation": derivation | {key: replacement}},
+                        linked, app, image, "iosX64", "development")
+            image.write_bytes(b"changed signature")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, app, image, "iosX64", "development")
+            image.write_bytes(b"signed image")
+            linked.write_bytes(b"changed raw link")
+            with self.assertRaisesRegex(ValueError, "derivation"):
+                mobile_capture.validate_apple_image_derivation(
+                    inventory, linked, app, image, "iosX64", "development")
+
     def test_simulator_xcode_pin_accepts_26_5_and_rejects_26_4_1(self):
         self.assertEqual("Xcode 26.5\nBuild version 17F42\n",
                          mobile_capture.validate_xcode_version(
@@ -122,15 +164,19 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             for path in (selected, installed, data, archive):
                 path.mkdir()
             for app in (selected, installed):
-                (app / "Dyn4kPerformance").write_bytes(b"same executable")
+                (app / "Dyn4kPerformance").write_bytes(b"signed executable")
                 (app / "Info.plist").write_bytes(b"same package")
+            linked = root / "linked.kexe"
+            linked.write_bytes(b"raw linked executable")
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
             app_raw = b"DYN4K\tCOMPLETE\tnonce\n"
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
-                         "linked_sha256": mobile_capture.capture.digest(selected / "Dyn4kPerformance"),
+                         "linked_sha256": mobile_capture.capture.digest(linked),
+                         "signed_image_sha256": mobile_capture.capture.digest(selected / "Dyn4kPerformance"),
+                         "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed)}
             launches = []
 
@@ -179,12 +225,24 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             self.assertEqual((archive / "stderr.bin").read_bytes(), stderr)
             self.assertEqual((archive / "setup/apple-launch.stdout.bin").read_bytes(), launch_raw)
             self.assertEqual(process["launch"]["pid"], 123)
-            self.assertEqual(process["image"]["sha256"], inventory["linked_sha256"])
+            self.assertEqual(process["image"]["sha256"], inventory["signed_image_sha256"])
             self.assertEqual(process["installed_image_size"], identity["size"])
             self.assertEqual(len(launches), 1)
             self.assertNotIn("--console", launches[0])
             self.assertTrue(any(arg.startswith("--stdout=") for arg in launches[0]))
             self.assertTrue(any(arg.startswith("--stderr=") for arg in launches[0]))
+            checked = []
+            def invalid_signature(_archive, label, argv, **kwargs):
+                checked.append(label)
+                if label == "apple-signature":
+                    raise ValueError("selected signature changed")
+                return setup(_archive, label, argv, **kwargs)
+            with patch.object(mobile_capture, "setup_command", side_effect=invalid_signature), \
+                 patch.object(mobile_capture, "validate_simulator", return_value={"udid": args.udid}):
+                with self.assertRaisesRegex(ValueError, "signature changed"):
+                    mobile_capture.run_simulator(
+                        args, inventory, selected / "Dyn4kPerformance", ["fixture"], "nonce")
+            self.assertNotIn("apple-install", checked)
 
     def test_simulator_rejects_executable_replaced_during_launch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -200,6 +258,8 @@ class MobileCaptureAdverseTest(unittest.TestCase):
             selected_sha = mobile_capture.capture.digest(selected / "Dyn4kPerformance")
             inventory = {"app_bundle": str(selected), "bundle_id": bundle,
                          "linked_sha256": selected_sha,
+                         "signed_image_sha256": selected_sha,
+                         "signed_image_size": (selected / "Dyn4kPerformance").stat().st_size,
                          "bundle_sha256": mobile_capture.validate_installed_bundle(selected, installed)}
             args = SimpleNamespace(udid="selected-udid", target="iosX64",
                                    archive=archive, timeout=1)
@@ -327,7 +387,9 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                          "dyn4k": {"sha256": fixture.hashes["kotlin"]}}
             package = {"Dyn4kPerformance": mobile_capture.capture.digest(executable)}
             inventory = {"source_sha": fixture.source, "producer_tree": fixture.producer_tree,
-                         "build": "development", "linked_sha256": mobile_capture.capture.digest(executable),
+                         "build": "development", "linked_sha256": "f" * 64,
+                         "signed_image_sha256": mobile_capture.capture.digest(executable),
+                         "signed_image_size": executable.stat().st_size,
                          "bundle_sha256": package}
             bundle = "io.github.rubixhacker.dyn4k.performance.iosx64"
             launch_raw = (bundle + ": 123\n").encode()
@@ -340,7 +402,7 @@ class MobileCaptureAdverseTest(unittest.TestCase):
                        "output": {"stdout_sha256": mobile_capture.hashlib.sha256(raw).hexdigest(),
                                   "stderr_sha256": mobile_capture.hashlib.sha256(b"").hexdigest()},
                        "linked_sha256": inventory["linked_sha256"],
-                       "installed_image_sha256": inventory["linked_sha256"],
+                       "installed_image_sha256": inventory["signed_image_sha256"],
                        "installed_image_size": executable.stat().st_size,
                        "installed_bundle_sha256": package}
 
