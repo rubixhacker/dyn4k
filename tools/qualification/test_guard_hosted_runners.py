@@ -41,6 +41,15 @@ class HostedRunnerGuardTest(unittest.TestCase):
         self.write("arm.yml", VALID.replace("ubuntu-latest", "ubuntu-24.04-arm"))
         self.assertEqual((1, []), scan(self.root))
 
+    def test_self_hosted_mac_mini_runner(self) -> None:
+        self.write("macmini.yml", VALID.replace("windows-2025", "mac-mini"))
+        self.assertEqual((1, []), scan(self.root))
+
+    def test_self_hosted_mac_mini_label_is_not_a_hosted_macos_label(self) -> None:
+        self.write("macmini.yml", VALID.replace("windows-2025", "mac-mini"))
+        errors = scan(self.root)[1]
+        self.assertFalse(any("macOS hosted label" in error for error in errors))
+
     def test_unknown_ubuntu_arm_runner_is_rejected(self) -> None:
         self.write("unknown.yml", VALID.replace("ubuntu-latest", "ubuntu-24.04-arm64"))
         self.assertTrue(any("explicit Linux/Windows" in error for error in scan(self.root)[1]))
