@@ -1742,6 +1742,9 @@ class IndependentGateSeamTests(unittest.TestCase):
     def test_every_route_rejects_wrong_lane_and_candidate(self):
         names = (set(self.manifest["lanes"][LANE]["required_gates"])
                  | set(self.manifest["global_gates"]))
+        all_hashes = {row["target"]: {"dyn4k-core": "a" * 64,
+                                      "dyn4k": "b" * 64}
+                      for row in qualify.matrix()}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "stdout.txt").write_text("execution\n")
@@ -1771,7 +1774,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                         result = independent_gates.evaluate(
                             self.manifest, BASE, LANE, {gate: root}, ROOT,
                             receipt["artifact_hashes"], "OpenJDK 8",
-                            {gate: independent_gates.archive_digest(root)})["gates"][gate]
+                            {gate: independent_gates.archive_digest(root)},
+                            expected_all_target_hashes=all_hashes)["gates"][gate]
                         self.assertEqual("FAILED", result["status"])
                         self.assertIn("candidate" if field == "candidate_sha" else "lane",
                                       result["reason"])
@@ -1782,7 +1786,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                     result = independent_gates.evaluate(
                         self.manifest, BASE, LANE, {gate: root}, ROOT,
                         receipt["artifact_hashes"], "OpenJDK 8",
-                        {gate: independent_gates.archive_digest(root)})["gates"][gate]
+                        {gate: independent_gates.archive_digest(root)},
+                        expected_all_target_hashes=all_hashes)["gates"][gate]
                     self.assertEqual("FAILED", result["status"])
 
     def test_external_unavailability_needs_bound_observation(self):

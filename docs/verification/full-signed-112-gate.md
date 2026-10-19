@@ -32,7 +32,7 @@ also equal the candidate manifest's lane runtime string.
 | Nonbrowser Wasm | `expected_wasm_runtime`, `expected_wasm_runtime_binary` |
 | Native host and simulator | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_host_executables`, `expected_execution_witness` |
 | Android Native | `expected_android_native_guest`, `expected_android_native_toolchain`, `expected_android_native_executables`, `expected_android_native_adb`, `expected_android_native_serial`, `expected_android_native_replay_output`, `expected_android_native_executable_paths`, `expected_execution_witness` |
-| Physical Apple | `expected_apple_device`, `expected_apple_device_toolchain`, `expected_apple_device_executable_paths`, `expected_apple_device_executable_hashes`, `expected_apple_os_roles` |
+| Physical Apple | `expected_apple_device`, `expected_apple_device_toolchain`, `expected_apple_device_executable_paths`, `expected_apple_device_executable_hashes`, `expected_apple_os_roles` (signed path and digest of an external OS role selection) |
 | Native KLIB | `expected_klib_native_executables`, `expected_execution_witness` |
 
 For nonbrowser Wasm, the signed string has the exact form
@@ -88,21 +88,19 @@ KLIB JS adapter supplies the selected Node executable so its public verifier
 replays the transported program. The KLIB schema 2 raw gate accepts Gradle
 debug prefixes around task and file markers. It requires an observed lane
 marker, even when the command includes the lane. Exact task, file, and 2,523
-method checks remain required. The current public KLIB verifier expects
-`--info` and unprefixed markers. It rejects the retained schema 2 archive
-with `--debug`, `--max-workers=1`, and `--no-parallel` before replay. The owner
-must update that public verifier against the captured command and debug
-output, then obtain independent review. The central adapter keeps the failed
-public result closed.
+method checks remain required. The public KLIB verifier accepts the captured
+schema 2 `--debug`, `--max-workers=1`, and `--no-parallel` command and its
+timestamped Gradle channels. It requires Node replay for JS and checks the
+native executable bytes. The retained archives belong to historical source
+commits; an exact assembled candidate still needs its own captures and signed
+audit.
 
-The current producer review reports identify open source obligations. The
-Native host receipts lack direct child executable proof and can lose file
-times in hosted artifact transport. Android Native API 21 lacks the recorded
-guest `sha256sum` command, and its original link/install records need stronger
-authentication. The reviewed Wasm Node verifier allowed a pass without replay;
-the central adapter requires replay. The reviewed browser Wasm reporter failed
-before cases ran and did not retain browser response bodies. The reviewed
-physical watchOS package and current/minimum OS selection need repair. The
-schema 2 KLIB producer allowed optional Node replay and its effective compiler
-flags and method order need stronger evidence. These are producer ownership
-findings. They do not become passing central results because a route exists.
+The earlier producer reviews recorded source gaps before the current imports.
+The Android Native API 21 installed-byte check, KLIB schema 2 replay, and
+browser Wasm reporter have reviewed source repairs. The Native host Windows
+archive path is under separate repair. Browser Wasm still lacks an
+independently observed HTTP response body and process witness. Native and
+Android Native routes still need independently observed build and runtime
+processes tied to a detached signed audit. Physical Apple routes need actual
+device execution and an external OS role selection. These requirements remain
+open at this assembled source; a route registry does not pass a lane.

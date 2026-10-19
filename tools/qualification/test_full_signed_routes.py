@@ -252,6 +252,24 @@ class SignedRouteTests(unittest.TestCase):
                                               {k: v for k, v in expected.items()
                                                if k != "expected_apple_os_roles"},
                                               HASHES, runtime, "c" * 64)
+                archived_roles = archive / "os-roles.json"
+                archived_roles.write_bytes(os_roles.read_bytes())
+                with self.assertRaisesRegex(ValueError, "outside the producer archive"):
+                    full_signed_routes.verify(
+                        ROOT, CANDIDATE, lane, archive,
+                        expected | {"expected_apple_os_roles":
+                                    {"path": str(archived_roles),
+                                     "sha256": expected["expected_apple_os_roles"]["sha256"]}},
+                        HASHES, runtime, "c" * 64)
+                alias = base / "parent-alias"
+                alias.symlink_to(base, target_is_directory=True)
+                with self.assertRaisesRegex(ValueError, "symbolic paths"):
+                    full_signed_routes.verify(
+                        ROOT, CANDIDATE, lane, archive,
+                        expected | {"expected_apple_os_roles":
+                                    {"path": str(alias / os_roles.name),
+                                     "sha256": expected["expected_apple_os_roles"]["sha256"]}},
+                        HASHES, runtime, "c" * 64)
                 device["version"] = "15.0"
                 expected["expected_runtime_identity"] = "iPhone | iOS 15.0 | device"
                 receipt["runtime_identity"] = expected["expected_runtime_identity"]

@@ -431,8 +431,16 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
         if (not isinstance(os_roles, dict)
                 or set(os_roles) != {"path", "sha256"}):
             raise ValueError("signed physical Apple OS role selection is missing")
+        if type(os_roles["path"]) is not str:
+            raise ValueError("independent Apple OS role selection path is invalid")
+        os_roles_path = Path(os_roles["path"])
+        if (not os_roles_path.is_absolute() or not os_roles_path.is_file()
+                or any(path.is_symlink() for path in
+                       (os_roles_path, *os_roles_path.parents))
+                or os_roles_path.resolve().is_relative_to(root.resolve())):
+            raise ValueError("independent Apple OS role selection must be outside the producer archive and symbolic paths")
         selection = full_apple_device_consumer.load_os_selection(
-            os_roles["path"], _sha(os_roles["sha256"], "Apple OS roles"))
+            os_roles_path, _sha(os_roles["sha256"], "Apple OS roles"))
         full_apple_device_consumer.expected_os(
             selected_lane, device.get("version"), selection)
         paths = expected.get("expected_apple_device_executable_paths")
@@ -453,7 +461,7 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
             raise ValueError("current physical Apple runtime repeats minimum OS family")
         public = full_apple_device_consumer.verify(
             repository, candidate, lane, root, digest, hashes, runtime, toolchain,
-            os_roles["path"], os_roles["sha256"])
+            str(os_roles_path), os_roles["sha256"])
         if (public.get("status") != "PASSED" or public.get("selected_cases") != len(selected)
                 or public.get("archive_sha256") != digest):
             raise ValueError("physical Apple device execution differs")
