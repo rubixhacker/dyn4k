@@ -13,6 +13,8 @@ import unittest
 
 WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-native-host-short.yml"
 RUNNER = Path(__file__).with_name("native_hosted_short_runner.py")
+WINDOWS_COLLISION_WORKFLOW = (Path(__file__).resolve().parents[3]
+                              / ".github/workflows/windows-collision-focus.yml")
 RAW_LIMIT = 64 * 1024 * 1024
 RUN_EXPRESSION_LIMIT = 21000
 VALID_HEAP_CSV = (b"stage,retained_heap_bytes,gc_epoch\n"
@@ -27,7 +29,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
     "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
-    "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
+    "windows-collision-focus.yml": "b4a41e0719ecbdb7fbd70889afe4b4caad646ecd2ca7cd4b1ec30a6b5b05f6cb",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
@@ -179,7 +181,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertEqual(checked, 56)
+        self.assertEqual(checked, 57)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
@@ -216,6 +218,26 @@ class WorkflowExpressionLimit(unittest.TestCase):
         for name, source in sources.items():
             with self.subTest(workflow=name):
                 self.assertNotRegex(source, r"(?m)^\s*runs-on:\s*.*\bmacos-[\w-]+")
+
+    def test_windows_native_archive_api_route_is_isolated_and_records_evidence(self):
+        source = WINDOWS_COLLISION_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("          - historical-pc53\n          - corrected-production\n          - native-archive-api", source)
+        self.assertIn("runs-on: windows-2025", source)
+        self.assertNotRegex(source, r"(?m)^\s*runs-on:\s*.*\bmacos-[\w-]+")
+        self.assertIn("if: inputs.route == 'native-archive-api'", source)
+        self.assertEqual(source.count("if: inputs.route != 'native-archive-api'"), 3)
+        self.assertIn("tools/qualification/test_full_native_host_consumer.py", source)
+        test_name = "NativeHostConsumerTests.test_windows_handle_anchored_round_trip_and_links"
+        self.assertEqual(source.count(test_name), 1)
+        for evidence in ("native-archive-api.json", "native-archive-api.stdout.raw",
+                         "native-archive-api.stderr.raw", "candidate_sha", "os_product",
+                         "python_path", "python_version", "Ran 1 test in", "skipped",
+                         "if ($process.ExitCode -ne 0)", "if ($didSkip)",
+                         "timeout-minutes: 10"):
+            with self.subTest(evidence=evidence):
+                self.assertIn(evidence, source)
+        self.assertIn("if: always()", source)
+        self.assertIn("path: ${{ runner.temp }}/windows-collision-focus/", source)
 
 
 def workflow_nodes():

@@ -11,6 +11,7 @@ on:
         options:
           - historical-pc53
           - corrected-production
+          - native-archive-api
 
 permissions:
   contents: read
@@ -32,18 +33,70 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -ne '${{ github.sha }}') {
             throw "Checkout revision mismatch: $actual"
           }
-      - uses: actions/setup-java@v4
+      - if: inputs.route != 'native-archive-api'
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - if: inputs.route != 'native-archive-api'
+        uses: gradle/actions/setup-gradle@v4
       - name: Run focused native and pinned Java controls
+        if: inputs.route != 'native-archive-api'
         shell: pwsh
         timeout-minutes: 75
         env:
           DYN4K_COLLISION_ROUTE: ${{ inputs.route }}
         run: |
           & (Join-Path $PWD 'tools/diagnostic/windows_collision/run-focused-controls.ps1') -Route $env:DYN4K_COLLISION_ROUTE
+      - name: Run Windows archive API diagnostic
+        if: inputs.route == 'native-archive-api'
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path (Join-Path $env:RUNNER_TEMP 'windows-collision-focus') 'native-archive-api'
+          New-Item -ItemType Directory -Path $archive -Force | Out-Null
+          $candidateSha = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $candidateSha -ne '${{ github.sha }}') {
+            throw "Checkout revision mismatch: $candidateSha"
+          }
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
+          $pythonVersion = (& $pythonPath --version 2>&1 | Out-String).Trim()
+          $testName = 'NativeHostConsumerTests.test_windows_handle_anchored_round_trip_and_links'
+          $stdoutPath = Join-Path $archive 'native-archive-api.stdout.raw'
+          $stderrPath = Join-Path $archive 'native-archive-api.stderr.raw'
+          $arguments = @('-B', 'tools/qualification/test_full_native_host_consumer.py', $testName, '-v')
+          $process = Start-Process -FilePath $pythonPath -ArgumentList $arguments `
+            -WorkingDirectory $env:GITHUB_WORKSPACE -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+          $testOutput = (Get-Content -LiteralPath $stdoutPath -Raw) + "`n" + `
+            (Get-Content -LiteralPath $stderrPath -Raw)
+          $didSkip = $testOutput -match '(?m)^test_windows_handle_anchored_round_trip_and_links .* \.\.\. skipped\b'
+          $ranOne = $testOutput -match '(?m)^Ran 1 test in '
+          $metadata = [ordered]@{
+            candidate_sha = $candidateSha
+            os_product = $os.Caption
+            os_version = $os.Version
+            os_build = $os.BuildNumber
+            python_path = $pythonPath
+            python_version = $pythonVersion
+            test_name = $testName
+            test_arguments = $arguments
+            exit_code = $process.ExitCode
+            skipped = [bool]$didSkip
+          }
+          $metadata | ConvertTo-Json -Depth 4 | Set-Content `
+            -LiteralPath (Join-Path $archive 'native-archive-api.json') -Encoding utf8
+          if ($process.ExitCode -ne 0) {
+            throw "Windows archive API test exited with code $($process.ExitCode)"
+          }
+          if ($didSkip) {
+            throw 'Windows archive API test was skipped'
+          }
+          if (-not $ranOne -or $testOutput -notmatch '(?m)^OK$') {
+            throw 'Expected exactly one passing Windows archive API test'
+          }
       - name: Upload Windows collision evidence
         if: always()
         uses: actions/upload-artifact@v4
