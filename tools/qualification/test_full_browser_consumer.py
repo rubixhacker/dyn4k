@@ -1014,5 +1014,128 @@ class PublicHttpReplayTest(unittest.TestCase):
                                    altered["staged_hashes"])
 
 
+class ChromiumProcessWitnessTest(unittest.TestCase):
+    def test_browser_observation_rejects_absent_changed_reordered_and_wrong_process(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            folder = Path(directory)
+            server = []
+            observations = [{"kind": "session", "protocol": 1, "module": "core",
+                             "target": "js", "candidate_sha": "a" * 40,
+                             "browser_pid": 314, "cdp_browser_pid": 314,
+                             "target_id": "page-1", "started_ns": 110,
+                             "devtools_port": 40000,
+                             "devtools_socket_inode": "4567",
+                             "source_path": "/checkout/chromium_http_witness.js",
+                             "source_sha256": "c" * 64}]
+            for ordinal, name in enumerate(("runtime.js", "commons.js")):
+                body = name.encode()
+                server.append({"ordinal": ordinal, "name": name,
+                               "url": f"/absolute/build/{name}",
+                               "size": len(body), "sha256": browser.sha(body),
+                               "started_ns": 120 + ordinal * 10,
+                               "finished_ns": 125 + ordinal * 10})
+                url = f"http://localhost:9876/absolute/build/{name}"
+                request_id = str(ordinal + 1)
+                observations.append({"kind": "response", "ordinal": ordinal,
+                                     "request_id": str(ordinal + 1),
+                                     "target_id": "page-1", "browser_pid": 314,
+                                     "url": url,
+                                     "method": "GET", "status": 200,
+                                     "mime_type": "application/javascript",
+                                     "from_disk_cache": False,
+                                     "from_service_worker": False,
+                                     "request_ns": 120 + ordinal * 10,
+                                     "response_ns": 122 + ordinal * 10,
+                                     "finished_ns": 126 + ordinal * 10,
+                                     "body_size": len(body),
+                                     "body_sha256": browser.sha(body),
+                                     "events": {
+                                         "request": {"requestId": request_id,
+                                                     "timestamp": ordinal + 1.0,
+                                                     "request": {"url": url, "method": "GET"}},
+                                         "response": {"requestId": request_id,
+                                                      "timestamp": ordinal + 1.1,
+                                                      "response": {"url": url, "status": 200,
+                                                                   "mimeType": "application/javascript"}},
+                                         "finish": {"requestId": request_id,
+                                                    "timestamp": ordinal + 1.05}}})
+            process = {"started_ns": 100, "finished_ns": 200,
+                       "karma_port": 9876, "browser_token": "token"}
+            launches = [{"pid": 314}]
+
+            def check(records):
+                (folder / "chromium-cdp.jsonl").write_text(
+                    "".join(json.dumps(item) + "\n" for item in records))
+                return browser.verify_chromium_process_witness(
+                    folder, process, launches, server, "core", "js", "a" * 40,
+                    "/checkout/chromium_http_witness.js", "c" * 64)
+
+            self.assertEqual(len(check(observations)), 2)
+            server.reverse()
+            self.assertEqual(len(check(observations)), 2)
+            server.reverse()
+            for name, mutate in (
+                    ("missing", lambda rows: rows.pop()),
+                    ("changed body", lambda rows: rows[1].update(body_sha256="0" * 64)),
+                    ("wrong process", lambda rows: rows[0].update(cdp_browser_pid=315)),
+                    ("wrong response process", lambda rows: rows[1].update(browser_pid=315)),
+                    ("reordered", lambda rows: rows.reverse()),
+                    ("wrong source", lambda rows: rows[0].update(candidate_sha="b" * 40)),
+                    ("wrong launcher source", lambda rows: rows[0].update(source_sha256="0" * 64)),
+                    ("wrong URL", lambda rows: rows[1].update(url="http://localhost:9877/absolute/build/runtime.js")),
+                    ("duplicate", lambda rows: rows.append(dict(rows[1])))):
+                with self.subTest(name=name):
+                    changed = json.loads(json.dumps(observations))
+                    mutate(changed)
+                    with self.assertRaisesRegex(ValueError, "Chromium process witness"):
+                        check(changed)
+
+    def test_resealed_real_archive_rejects_browser_process_evidence_changes(self):
+        selected = os.environ.get("DYN4K_CDP_REPLAY_ARCHIVE")
+        if selected is None:
+            self.skipTest("set DYN4K_CDP_REPLAY_ARCHIVE to a real schema-4 archive")
+        source = Path(selected)
+        receipt = json.loads((source / "receipt.json").read_text())
+        self.assertEqual(receipt["schema"], 4)
+        repository = Path(__file__).resolve().parents[2]
+        changes = ("missing", "body", "process", "reordered", "source",
+                   "launcher source", "package")
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory(
+                    dir=Path.home().resolve(), prefix="dyn4k-cdp-replay-") as directory:
+                archive = Path(directory) / "archive"
+                shutil.copytree(source, archive, copy_function=shutil.copy2)
+                altered = json.loads((archive / "receipt.json").read_text())
+                path = archive / "core/chromium-cdp.jsonl"
+                rows = [json.loads(line) for line in path.read_text().splitlines()]
+                if change == "missing":
+                    rows.pop()
+                elif change == "body":
+                    rows[1]["body_sha256"] = "0" * 64
+                elif change == "process":
+                    rows[0]["cdp_browser_pid"] += 1
+                elif change == "reordered":
+                    rows[1], rows[2] = rows[2], rows[1]
+                elif change == "source":
+                    rows[0]["candidate_sha"] = "0" * 40
+                elif change == "launcher source":
+                    rows[0]["source_sha256"] = "0" * 64
+                else:
+                    self.assertEqual(altered["lane"].split(":")[0], "wasmJs")
+                    wasm = next(row for row in rows[1:] if row["url"].split("?")[0].endswith(".wasm"))
+                    wasm["body_sha256"] = "0" * 64
+                old = path.stat()
+                path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+                os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns))
+                next(item for item in altered["files"] if item["path"] ==
+                     "core/chromium-cdp.jsonl")["sha256"] = browser.file_hash(path)
+                (archive / "receipt.json").write_bytes(browser.encoded(altered) + b"\n")
+                digest = browser.independent_gates.archive_digest(archive)
+                with self.assertRaisesRegex(ValueError, "Chromium process witness"):
+                    browser.verify(repository, altered["candidate_sha"], altered["lane"],
+                                   archive, digest, Path(altered["toolchain"]["browser"]),
+                                   altered["staged_hashes"])
+
+
 if __name__ == "__main__":
     unittest.main()
