@@ -776,6 +776,10 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
         served = served_by_url.get(relative_url)
         relative = f"firefox-bodies/{index:04d}.body"
         body = folder / relative
+        request_event_ns = (request_event.get("timestamp") * 1_000_000
+                            if type(request_event.get("timestamp")) is int else None)
+        response_event_ns = (response_event.get("timestamp") * 1_000_000
+                             if type(response_event.get("timestamp")) is int else None)
         context = row["context_id"]
         if not isinstance(context, str) or type(row.get("request_ns")) is not int:
             raise ValueError("Firefox process witness response context differs")
@@ -810,15 +814,19 @@ def verify_firefox_process_witness(folder, process_record, launches, server,
                 or completed.get("status") != 200
                 or completed.get("fromCache") is not False
                 or completed.get("mimeType") != row["mime_type"]
-                or type(request_event.get("timestamp")) is not int
-                or type(response_event.get("timestamp")) is not int
-                or request_event["timestamp"] > response_event["timestamp"]
+                or request_event_ns is None or response_event_ns is None
+                or request_event_ns > response_event_ns
                 or type(row["request_ns"]) is not int
                 or type(row["response_ns"]) is not int
                 or type(row["finished_ns"]) is not int
                 or not previous_request_ns <= row["request_ns"] <= row["response_ns"]
                 <= row["finished_ns"] <= process_record["finished_ns"]
-                or row["request_ns"] > served["finished_ns"]
+                or request_event_ns < process_record["started_ns"] - 1_000_000
+                or response_event_ns > process_record["finished_ns"] + 1_000_000
+                or request_event_ns > row["request_ns"] + 1_000_000
+                or response_event_ns > row["response_ns"] + 1_000_000
+                or request_event_ns > served["started_ns"] + 1_000_000
+                or response_event_ns + 1_000_000 < served["finished_ns"]
                 or row["finished_ns"] < served["started_ns"]
                 or row["body_path"] != relative
                 or type(row["body_size"]) is not int

@@ -1020,16 +1020,19 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
             folder = Path(directory)
             (folder / "firefox-bodies").mkdir()
             (folder / "http-responses").mkdir()
+            millisecond = 1_000_000
             server = []
             rows = [{"kind": "session", "protocol": 1, "module": "core",
                      "target": "wasmJs", "candidate_sha": "a" * 40,
                      "browser_pid": 314, "bidi_browser_pid": 314,
                      "context_id": "context", "session_id": "session",
-                     "collector_id": "collector", "started_ns": 110,
+                     "collector_id": "collector", "started_ns": 110 * millisecond,
                      "bidi_port": 40000, "bidi_socket_inode": "4567",
                      "contexts": [
-                         {"observed_ns": 105, "params": {"context": "context", "parent": None}},
-                         {"observed_ns": 115, "params": {"context": "frame", "parent": "context"}}],
+                         {"observed_ns": 105 * millisecond,
+                          "params": {"context": "context", "parent": None}},
+                         {"observed_ns": 115 * millisecond,
+                          "params": {"context": "frame", "parent": "context"}}],
                      "source_path": "/checkout/firefox_bidi_witness.js",
                      "source_sha256": "c" * 64}]
             for index, name in enumerate(("runtime.js", "commons.js", "abc.wasm")):
@@ -1042,15 +1045,16 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                 server.append({"ordinal": index, "name": name, "url": relative,
                                "size": len(body), "sha256": browser.sha(body),
                                "body_path": f"http-responses/{index:04d}.body",
-                               "started_ns": 122 + index * 10,
-                               "finished_ns": 126 + index * 10})
+                               "started_ns": (122 + index * 10) * millisecond,
+                               "finished_ns": (126 + index * 10) * millisecond})
                 rows.append({"kind": "response", "ordinal": index,
                              "request_id": request_id, "context_id": "frame",
                              "browser_pid": 314, "url": url, "method": "GET",
                              "status": 200, "mime_type": "application/javascript",
-                             "from_cache": False, "request_ns": 120 + index * 10,
-                             "response_ns": 127 + index * 10,
-                             "finished_ns": 129 + index * 10,
+                             "from_cache": False,
+                             "request_ns": (120 + index * 10) * millisecond,
+                             "response_ns": (127 + index * 10) * millisecond,
+                             "finished_ns": (129 + index * 10) * millisecond,
                              "body_path": f"firefox-bodies/{index:04d}.body",
                              "body_size": len(body), "body_sha256": browser.sha(body),
                              "events": {
@@ -1065,7 +1069,8 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                                               "response": {"url": url, "status": 200,
                                                            "fromCache": False,
                                                            "mimeType": "application/javascript"}}}})
-            process = {"started_ns": 100, "finished_ns": 200, "karma_port": 9876}
+            process = {"started_ns": 100 * millisecond,
+                       "finished_ns": 200 * millisecond, "karma_port": 9876}
 
             def check(transcript):
                 (folder / "firefox-bidi.jsonl").write_text(
@@ -1078,6 +1083,11 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
             server.reverse()
             self.assertEqual(len(check(rows)), 3)
             server.reverse()
+            delayed = json.loads(json.dumps(rows))
+            delayed[3]["request_ns"] = 150 * millisecond
+            delayed[3]["response_ns"] = 153 * millisecond
+            delayed[3]["finished_ns"] = 154 * millisecond
+            self.assertEqual(len(check(delayed)), 3)
             for name, mutate in (
                     ("missing process", lambda items: items[0].update(browser_pid=315)),
                     ("wrong hash", lambda items: items[1].update(body_sha256="0" * 64)),
@@ -1086,11 +1096,14 @@ class FirefoxProcessWitnessTest(unittest.TestCase):
                     ("foreign frame", lambda items: items[0]["contexts"][1]["params"].update(
                         parent="other")),
                     ("late frame", lambda items: items[0]["contexts"][1].update(
-                        observed_ns=130)),
+                        observed_ns=130 * millisecond)),
                     ("wrong Wasm body", lambda items: items[3].update(body_sha256="0" * 64)),
                     ("duplicate request", lambda items: items[2].update(request_id="request-0")),
                     ("duplicate URL", lambda items: items[2].update(url=items[1]["url"])),
-                    ("bad time", lambda items: items[1].update(response_ns=119)),
+                    ("bad observer time", lambda items: items[1].update(
+                        response_ns=119 * millisecond)),
+                    ("bad protocol time", lambda items: items[1]["events"]["request"].update(
+                        timestamp=150)),
                     ("missing response", lambda items: items.pop()),
                     ("failed request", lambda items: items[1]["events"]["response"].update(
                         isBlocked=True))):
