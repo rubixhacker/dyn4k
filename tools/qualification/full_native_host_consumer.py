@@ -1045,7 +1045,6 @@ def pack_archive(root, output):
         data = encoded(mtimes)
         info = tarfile.TarInfo("transport-mtimes.json")
         info.size = len(data)
-        import io
         transport.addfile(info, io.BytesIO(data))
     return digest(output.read_bytes())
 
