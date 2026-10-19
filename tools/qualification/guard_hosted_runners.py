@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 HOSTED_LABEL = re.compile(
-    r"(?:ubuntu-(?:latest|22\.04|24\.04|26\.04)|windows-(?:latest|2022|2025))\Z"
+    r"(?:ubuntu-(?:latest|22\.04|24\.04|26\.04)|"
+    r"ubuntu-24\.04-arm|windows-(?:latest|2022|2025))\Z"
 )
 MAC_LABEL = re.compile(r"(?i)\bmacos-[a-z0-9][a-z0-9_-]*\b")
 JOB_HEADER = re.compile(r"  ([A-Za-z_][A-Za-z0-9_-]*):(?:\s*#.*)?\Z")
