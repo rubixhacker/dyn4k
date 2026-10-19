@@ -2,9 +2,11 @@ import copy
 import io
 import hashlib
 import json
+import shutil
 import stat
 import subprocess
 import tempfile
+import types
 import unittest
 import warnings
 import zipfile
@@ -24,6 +26,14 @@ LANE = "tvosSimulatorArm64:tvOS simulator ARM64:current:debug-g"
 
 
 class CrossRunCollectionTests(unittest.TestCase):
+    def public_verify(self, root):
+        return subprocess.run(
+            ["python3", "-B", str(ROOT / "tools/qualification/collection.py"),
+             "--repository", str(ROOT), "--candidate-sha", HEAD,
+             "--artifacts-dir", str(root / "artifacts"),
+             "--output", str(root / "collection"), "--verify"],
+            capture_output=True, text=True)
+
     def test_workflow_exposes_cross_run_route_without_recapturing_producers(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
         self.assertIn("cross_run_only:\n", workflow)
@@ -105,6 +115,131 @@ class CrossRunCollectionTests(unittest.TestCase):
             (root / "collection/raw/sources/mobile/original").write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "frozen source archive bytes differ"):
                 collection.verify_collection(ROOT, HEAD, [], root / "collection")
+
+    def test_public_verify_requires_exact_failed_packed_snapshot_children(self):
+        for alteration in ("delete", "alternate"):
+            with self.subTest(alteration=alteration), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _, index_path, _ = self.fixture(root, {"../escape": b"x"})
+                result = self.collect_fixture(root, index_path)
+                self.assertEqual("FAILED", result["cross_run"]["sources"][0]["status"])
+                self.assertEqual(0, self.public_verify(root).returncode)
+                folder = root / "collection/raw/sources/mobile"
+                if alteration == "delete":
+                    (folder / "original").unlink()
+                else:
+                    alternate = folder / "original-directory"
+                    alternate.mkdir()
+                    (alternate / "other.txt").write_text("unrecorded")
+                self.assertNotEqual(0, self.public_verify(root).returncode)
+
+    def test_public_verify_requires_exact_failed_directory_snapshot_children(self):
+        for alteration in ("delete", "alternate"):
+            with self.subTest(alteration=alteration), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / "directory"
+                source.mkdir()
+                (source / "receipt.json").write_text("raw failure\n")
+                files = collection._file_inventory(source)
+                index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                         "sources": [{"id": "failed", "origin": {"kind": "local",
+                                   "path": str(source)}, "transport": {
+                                   "format": "directory", "files": files,
+                                   "inventory_sha256": collection._inventory_digest(files)}}],
+                         "bindings": [{"source_id": "failed", "lane": LANE,
+                                       "gate": "staged-consumer"}]}
+                index["sources"][0]["transport"]["files"]["receipt.json"]["sha256"] = "0" * 64
+                index["sources"][0]["transport"]["inventory_sha256"] = (
+                    collection._inventory_digest(index["sources"][0]["transport"]["files"]))
+                index_path = root / "index.json"
+                index_path.write_text(json.dumps(index))
+                result = self.collect_fixture(root, index_path)
+                self.assertEqual("FAILED", result["cross_run"]["sources"][0]["status"])
+                self.assertEqual(0, self.public_verify(root).returncode)
+                folder = root / "collection/raw/sources/failed"
+                if alteration == "delete":
+                    shutil.rmtree(folder / "original-directory")
+                else:
+                    (folder / "original").write_bytes(b"unrecorded")
+                self.assertNotEqual(0, self.public_verify(root).returncode)
+
+    def test_same_run_rerun_attempt_requires_artifact_provenance(self):
+        manifest = independent_gates.load_approved_manifest(ROOT)
+        index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                 "sources": [{"id": "rerun", "origin": {
+                     "kind": "same_run", "repository": "rubixhacker/dyn4k",
+                     "workflow": ".github/workflows/qualification.yml", "run_id": 42,
+                     "run_attempt": 2, "name": f"full-ci-{HEAD}", "head_sha": HEAD},
+                     "transport": {"format": "zip", "size": 10, "sha256": "a" * 64}}],
+                 "bindings": [{"source_id": "rerun", "lane": LANE,
+                               "gate": "staged-consumer"}]}
+        with self.assertRaisesRegex(ValueError, "attempt ownership"):
+            collection._validate_index(index, HEAD, TREE, manifest,
+                                       "rubixhacker/dyn4k", 42, 2)
+
+    def test_lane_binding_rejects_conflicting_declared_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, index_path, index = self.fixture(root)
+            index["bindings"] = [{"source_id": "mobile", "lane": LANE,
+                                  "gate": "staged-consumer", "target": "jvm"}]
+            index_path.write_text(json.dumps(index))
+            result = self.collect_fixture(root, index_path)
+            self.assertEqual("FAILED", result["status"])
+            self.assertIn("lane binding target differs", result["cross_run"]["reason"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, index_path, index = self.fixture(root)
+            index["bindings"] = [{"source_id": "mobile", "lane": LANE,
+                                  "gate": "staged-consumer",
+                                  "target": "tvosSimulatorArm64"}]
+            index_path.write_text(json.dumps(index))
+            result = self.collect_fixture(root, index_path)
+            self.assertEqual("NOT_RUN", result["status"])
+            self.assertEqual(0, self.public_verify(root).returncode)
+
+    def test_actual_local_and_external_file_size_checked_before_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, index_path, index = self.fixture(root)
+            archive = Path(index["sources"][0]["origin"]["path"])
+            archive.write_bytes(b"x" * 2048)
+            index["sources"][0]["transport"]["size"] = 512
+            index_path.write_text(json.dumps(index))
+            with mock.patch.object(collection, "MAX_SOURCE_BYTES", 1024), \
+                 mock.patch.object(collection, "_copy_regular", wraps=collection._copy_regular) as copied:
+                result = self.collect_fixture(root, index_path)
+                self.assertEqual(0, copied.call_count)
+
+            self.assertEqual("FAILED", result["status"])
+            self.assertIn("source archive exceeds byte bound",
+                          result["cross_run"]["sources"][0]["reason"])
+            self.assertEqual(0, self.public_verify(root).returncode)
+            stable = root / "external"
+            stable.mkdir()
+            manifest = independent_gates.load_approved_manifest(ROOT)
+            lanes = {lane: {} for lane in manifest["lanes"]}
+            lanes[LANE] = {"staged-consumer": str(archive)}
+            archive_map = {"schema": 1, "candidate_sha": HEAD, "lanes": lanes}
+            with mock.patch.object(collection, "MAX_SOURCE_BYTES", 1024), \
+                 mock.patch.object(collection, "_copy_regular", wraps=collection._copy_regular) as copied:
+                with self.assertRaisesRegex(ValueError, "external archive exceeds byte bound"):
+                    collection._snapshot_external_references(archive_map, manifest, stable)
+                self.assertEqual(0, copied.call_count)
+
+    def test_copy_stream_cap_preserves_only_bounded_partial_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "growing.bin"
+            frozen = root / "frozen.bin"
+            source.write_bytes(b"x" * (2 * 1024 * 1024))
+            reported = types.SimpleNamespace(st_mode=stat.S_IFREG, st_size=1024 * 1024)
+            with mock.patch.object(collection.os, "fstat", return_value=reported):
+                with self.assertRaisesRegex(ValueError, "exceeds byte bound while copied"):
+                    collection._copy_regular(source, frozen, limit=1024 * 1024 + 512)
+            self.assertEqual(1024 * 1024, frozen.stat().st_size)
+            with self.assertRaisesRegex(ValueError, "source file exceeds byte bound"):
+                collection.digest(source, 1024 * 1024)
 
     def test_wrong_candidate_target_and_duplicate_bindings_fail(self):
         for mutation, reason in ((lambda value: value.update(candidate_sha="0" * 40),
@@ -212,6 +347,9 @@ class CrossRunCollectionTests(unittest.TestCase):
                 result = self.collect_fixture(root, index_path)
                 self.assertEqual("FAILED", result["cross_run"]["status"])
                 self.assertIn(reason, result["cross_run"]["sources"][0]["reason"])
+                self.assertEqual(0, self.public_verify(root).returncode)
+                if reason == "source archive is missing":
+                    self.assertEqual([], list((root / "collection/raw/sources/mobile").iterdir()))
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _, index_path, _ = self.fixture(root)

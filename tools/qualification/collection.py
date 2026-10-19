@@ -29,8 +29,16 @@ MAX_EXPANDED_BYTES = 20 * 1024**3
 MAX_MEMBERS = 200_000
 
 
-def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def digest(path, limit=None):
+    hashed = hashlib.sha256()
+    total = 0
+    with Path(path).open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            total += len(chunk)
+            if limit is not None and total > limit:
+                raise ValueError("source file exceeds byte bound")
+            hashed.update(chunk)
+    return hashed.hexdigest()
 
 
 def source_tree(repository, candidate_sha):
@@ -212,6 +220,8 @@ def _validate_index(index, candidate_sha, tree, manifest, repository_name,
             if kind == "same_run":
                 if origin["run_id"] != run_id or origin["run_attempt"] != run_attempt:
                     raise ValueError("same-run source identity differs")
+                if origin["run_attempt"] != 1:
+                    raise ValueError("same-run artifact lacks rerun attempt ownership proof")
                 artifact_route(origin["name"], candidate_sha)
             else:
                 artifact_id = origin.get("artifact_id")
@@ -265,6 +275,9 @@ def _validate_index(index, candidate_sha, tree, manifest, repository_name,
         elif (lane not in manifest["lanes"] or gate not in
               manifest["lanes"][lane]["required_gates"]):
             raise ValueError("lane or gate binding is not approved")
+        elif ("target" in binding and binding["target"] !=
+              manifest["lanes"][lane]["target"]):
+            raise ValueError("lane binding target differs from approved target")
         key = (lane, gate)
         if key in bindings:
             raise ValueError("duplicate lane or global gate binding")
@@ -342,13 +355,23 @@ def _github_artifact(origin, candidate_sha, token, destination, expected_size):
             "api_size_in_bytes": artifact["size_in_bytes"]}
 
 
-def _copy_regular(source, destination):
+def _copy_regular(source, destination, limit=None):
+    if limit is None:
+        limit = MAX_SOURCE_BYTES
     descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(descriptor, "rb") as original:
-        if not stat.S_ISREG(os.fstat(original.fileno()).st_mode):
+        source_stat = os.fstat(original.fileno())
+        if not stat.S_ISREG(source_stat.st_mode):
             raise ValueError("source file is not regular")
+        if source_stat.st_size > limit:
+            raise ValueError("source file exceeds byte bound")
+        total = 0
         with Path(destination).open("wb") as frozen:
-            shutil.copyfileobj(original, frozen, 1024 * 1024)
+            while chunk := original.read(1024 * 1024):
+                total += len(chunk)
+                if total > limit:
+                    raise ValueError("source file exceeds byte bound while copied")
+                frozen.write(chunk)
 
 
 def _extract_transport(packed, fmt, destination):
@@ -486,13 +509,17 @@ def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_d
                 else:
                     if not source_path.is_file():
                         raise ValueError("source archive is missing")
-                    before = (source_path.stat().st_size, digest(source_path))
+                    if source_path.stat().st_size > MAX_SOURCE_BYTES:
+                        raise ValueError("source archive exceeds byte bound")
+                    before = (source_path.stat().st_size,
+                              digest(source_path, MAX_SOURCE_BYTES))
                     _copy_regular(source_path, frozen)
-                    after = (source_path.stat().st_size, digest(source_path))
+                    after = (source_path.stat().st_size,
+                             digest(source_path, MAX_SOURCE_BYTES))
                     if before != after:
                         raise ValueError("source archive changed while copied")
                 row["raw_size"] = frozen.stat().st_size
-                row["raw_sha256"] = digest(frozen)
+                row["raw_sha256"] = digest(frozen, MAX_SOURCE_BYTES)
                 if (row["raw_size"] != pin["size"]
                         or row["raw_sha256"] != pin["sha256"]):
                     raise ValueError("source archive bytes differ from exact pin")
@@ -521,7 +548,7 @@ def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_d
             partial = folder / "original"
             if partial.is_file():
                 row["raw_size"] = partial.stat().st_size
-                row["raw_sha256"] = digest(partial)
+                row["raw_sha256"] = digest(partial, MAX_SOURCE_BYTES)
             partial_dir = folder / "original-directory"
             if partial_dir.is_dir():
                 try:
@@ -561,23 +588,30 @@ def verify_source_snapshot(output, candidate_sha, tree):
         folder = output / "raw/sources" / source["id"]
         if folder.is_symlink() or not folder.is_dir():
             raise ValueError("frozen source folder is missing or symbolic")
-        if {path.name for path in folder.iterdir()} - {"original", "original-directory"}:
-            raise ValueError("frozen source has unrecorded files")
         pin = source["transport"]
         if pin["format"] == "directory":
             path = folder / "original-directory"
-            if path.is_dir() and _file_inventory(path) != row.get("raw_inventory"):
+            recorded = row.get("raw_inventory")
+            expected = {"original-directory"} if isinstance(recorded, dict) else set()
+            if {child.name for child in folder.iterdir()} != expected:
+                raise ValueError("frozen source has missing or unrecorded files")
+            if expected and _file_inventory(path) != recorded:
                 raise ValueError("frozen source directory bytes differ")
-            if row["status"] == "NOT_RUN" and _file_inventory(path) != pin["files"]:
+            if row["status"] == "NOT_RUN" and (not expected or recorded != pin["files"]):
                 raise ValueError("frozen source directory differs from pin")
         else:
             path = folder / "original"
-            if path.is_symlink():
-                raise ValueError("frozen source archive is symbolic")
-            if path.is_file() and (path.stat().st_size != row.get("raw_size")
-                                   or digest(path) != row.get("raw_sha256")):
+            recorded = "raw_size" in row and "raw_sha256" in row
+            if ("raw_size" in row) != ("raw_sha256" in row):
+                raise ValueError("frozen source archive ledger is incomplete")
+            expected = {"original"} if recorded else set()
+            if {child.name for child in folder.iterdir()} != expected:
+                raise ValueError("frozen source has missing or unrecorded files")
+            if recorded and (path.is_symlink() or not path.is_file()
+                             or path.stat().st_size != row["raw_size"]
+                             or digest(path, MAX_SOURCE_BYTES) != row["raw_sha256"]):
                 raise ValueError("frozen source archive bytes differ")
-            if row["status"] == "NOT_RUN" and (not path.is_file()
+            if row["status"] == "NOT_RUN" and (not recorded
                     or row["raw_size"] != pin["size"] or row["raw_sha256"] != pin["sha256"]):
                 raise ValueError("frozen source archive differs from pin")
             normalized = output / "normalized" / source["id"]
@@ -840,12 +874,13 @@ def _snapshot_external_references(archive_map, approved, stable):
                     identity = {"kind": "directory", "files": copied,
                                 "inventory_sha256": _inventory_digest(copied)}
                 elif source.is_file():
-                    before = (source.stat().st_size, digest(source))
-                    if before[0] > MAX_SOURCE_BYTES:
+                    if source.stat().st_size > MAX_SOURCE_BYTES:
                         raise ValueError("external archive exceeds byte bound")
+                    before = (source.stat().st_size, digest(source, MAX_SOURCE_BYTES))
                     _copy_regular(source, frozen)
-                    after = (source.stat().st_size, digest(source))
-                    if before != after or before != (frozen.stat().st_size, digest(frozen)):
+                    after = (source.stat().st_size, digest(source, MAX_SOURCE_BYTES))
+                    if before != after or before != (frozen.stat().st_size,
+                                                      digest(frozen, MAX_SOURCE_BYTES)):
                         raise ValueError("external archive changed while copied")
                     identity = {"kind": "file", "size": before[0],
                                 "sha256": before[1]}
