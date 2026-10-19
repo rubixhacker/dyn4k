@@ -57,6 +57,21 @@ class FullJvmConsumerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "independent.*executable"):
                     verify_archive(copied, REPOSITORY, forged["candidate_sha"],
                                    forged["artifact_hashes"], forged["runtime_identity"], digest)
+                command = [
+                    sys.executable, str(REPOSITORY / "tools/qualification/full_jvm_consumer.py"),
+                    "verify", "--repository", str(REPOSITORY), "--candidate-sha",
+                    forged["candidate_sha"], "--archive", str(copied),
+                    "--expected-core-sha256", forged["artifact_hashes"]["dyn4k-core"],
+                    "--expected-facade-sha256", forged["artifact_hashes"]["dyn4k"],
+                    "--runtime-identity", forged["runtime_identity"],
+                    "--expected-archive-digest", digest,
+                    "--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256,
+                    "--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256,
+                ]
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("independent Java or Gradle executable SHA-256 differs",
+                              result.stderr)
 
     @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
     def test_public_cli_requires_independent_executable_hashes(self):
