@@ -99,6 +99,54 @@ class FullKlibConsumerTests(unittest.TestCase):
                        selected)
 
     @unittest.skipUnless(ARCHIVE and TRUSTED, "requires retained real full KLIB archive")
+    def test_replay_rejects_unauthenticated_bundle_before_subprocess(self):
+        original = Path(ARCHIVE)
+        receipt = json.loads((original / "receipt.json").read_bytes())
+        if not receipt["lane"].startswith("js:"):
+            self.skipTest("requires retained Node bundle")
+        trusted = json.loads(Path(TRUSTED).read_bytes())
+        candidate = receipt["candidate_sha"]
+        lane = receipt["lane"]
+        hashes = receipt["artifact_hashes"]
+        identity = receipt["runtime_identity"]
+        original_digest = independent_gates.archive_digest(original)
+
+        def check(path, digest, reason):
+            actual_run = route.subprocess.run
+
+            def reject_replay(command, *args, **kwargs):
+                if "--test" in command:
+                    raise AssertionError("replay subprocess reached")
+                return actual_run(command, *args, **kwargs)
+
+            with patch.object(route.subprocess, "run",
+                              side_effect=reject_replay) as observed:
+                with self.assertRaisesRegex(ValueError, reason):
+                    route.verify(path, REPOSITORY, candidate, lane, hashes, identity,
+                                 digest, trusted, replay_node="/usr/local/bin/node")
+                self.assertFalse(any("--test" in call.args[0]
+                                     for call in observed.call_args_list))
+
+        check(original, "0" * 64, "independent archive provenance digest differs")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "archive"
+            shutil.copytree(original, path, copy_function=shutil.copy2)
+            program = path / "runtime/bundle/core" / Path(
+                json.loads((path / "runtime/core.json").read_bytes())["command"][-1]).name
+            program.write_bytes(program.read_bytes() + b"\nreplaced bundle\n")
+            check(path, independent_gates.archive_digest(path), "raw file hash differs")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "archive"
+            shutil.copytree(original, path, copy_function=shutil.copy2)
+            program = path / "runtime/bundle/core" / Path(
+                json.loads((path / "runtime/core.json").read_bytes())["command"][-1]).name
+            program.unlink()
+            program.symlink_to(original / program.relative_to(path))
+            check(path, original_digest, "symbolic archive path")
+
+    @unittest.skipUnless(ARCHIVE and TRUSTED, "requires retained real full KLIB archive")
     def test_public_replay_and_resealed_adverse_archive(self):
         original = Path(ARCHIVE)
         receipt = json.loads((original / "receipt.json").read_bytes())

@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -424,12 +425,26 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
     return receipt
 
 
+def _authenticate_archive(root, expected_digest):
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("full KLIB archive is absent or symbolic")
+    if not SHA256.fullmatch(str(expected_digest)):
+        raise ValueError("independent archive provenance digest is missing")
+    if independent_gates.archive_digest(root) != expected_digest:
+        raise ValueError("independent archive provenance digest differs")
+    receipt = json.loads((root / "receipt.json").read_bytes())
+    if not isinstance(receipt, dict):
+        raise ValueError("full KLIB receipt is not an object")
+    independent_gates._inventory(root, receipt)
+    return receipt
+
+
 def verify(root, repository, candidate, lane, hashes, runtime_identity,
            archive_digest, trusted_toolchain, replay_node=None):
     root, repository = Path(root), Path(repository).resolve()
-    if lane not in LOCAL_LANES or not root.is_dir() or root.is_symlink():
-        raise ValueError("full KLIB lane or archive is absent")
-    receipt = json.loads((root / "receipt.json").read_bytes())
+    if lane not in LOCAL_LANES:
+        raise ValueError("full KLIB lane is absent")
+    receipt = _authenticate_archive(root, archive_digest)
     manifest, selected = contract(repository, lane)
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(selected)
@@ -631,15 +646,25 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                     <= runtime.get("finished_ns", -1) <= process["finished_ns"]):
                 raise ValueError("Node runtime process differs from linked test program")
             if replay_node is not None:
+                _authenticate_archive(root, archive_digest)
                 node_file = Path(replay_node).resolve()
                 if sha(node_file.read_bytes()) != trusted_toolchain["node_sha256"]:
                     raise ValueError("replay Node binary differs from independent identity")
-                replay_command = [str(node_file), "--test", "--test-reporter=tap",
-                                  "--require", str(repository / CONSUMER / "node-test-preload.cjs"),
-                                  str(bundle_root / program_name)]
-                replay = subprocess.run(replay_command, cwd=bundle_root,
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        check=False)
+                with tempfile.TemporaryDirectory(prefix="dyn4k-klib-replay-") as scratch:
+                    snapshot = Path(scratch) / "bundle"
+                    shutil.copytree(bundle_root, snapshot)
+                    snapshot_hashes = {
+                        path.relative_to(snapshot).as_posix(): sha(path.read_bytes())
+                        for path in snapshot.rglob("*") if path.is_file() and not path.is_symlink()}
+                    if snapshot_hashes != bundle:
+                        raise ValueError("authenticated Node replay bundle differs")
+                    replay_command = [
+                        str(node_file), "--test", "--test-reporter=tap",
+                        "--require", str(repository / CONSUMER / "node-test-preload.cjs"),
+                        str(snapshot / program_name)]
+                    replay = subprocess.run(replay_command, cwd=snapshot,
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            check=False)
                 if replay.returncode:
                     raise ValueError("transported Node test bundle failed public replay")
                 selected_map = _selected_cases(root / "inputs" / f"{short}-cases.tsv")
