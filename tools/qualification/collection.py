@@ -355,7 +355,7 @@ def _github_artifact(origin, candidate_sha, token, destination, expected_size):
             "api_size_in_bytes": artifact["size_in_bytes"]}
 
 
-def _copy_regular(source, destination, limit=None):
+def _copy_regular(source, destination, limit=None, preflight=True):
     if limit is None:
         limit = MAX_SOURCE_BYTES
     descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
@@ -363,15 +363,59 @@ def _copy_regular(source, destination, limit=None):
         source_stat = os.fstat(original.fileno())
         if not stat.S_ISREG(source_stat.st_mode):
             raise ValueError("source file is not regular")
-        if source_stat.st_size > limit:
+        if preflight and source_stat.st_size > limit:
             raise ValueError("source file exceeds byte bound")
         total = 0
         with Path(destination).open("wb") as frozen:
-            while chunk := original.read(1024 * 1024):
-                total += len(chunk)
-                if total > limit:
+            while chunk := original.read(min(1024 * 1024, limit - total + 1)):
+                remaining = limit - total
+                if len(chunk) > remaining:
+                    frozen.write(chunk[:remaining])
                     raise ValueError("source file exceeds byte bound while copied")
                 frozen.write(chunk)
+                total += len(chunk)
+    return total
+
+
+def _copy_directory(source, destination):
+    source, destination = Path(source), Path(destination)
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError("source directory is missing or symbolic")
+    destination.mkdir(parents=True, exist_ok=False)
+    count = 0
+    total = 0
+    pending = [(source, destination)]
+    while pending:
+        current, frozen = pending.pop()
+        if current.is_symlink() or not current.is_dir():
+            raise ValueError("source directory member is symbolic or missing")
+        with os.scandir(current) as members:
+            for member in members:
+                path = Path(member.path)
+                relative = path.relative_to(source).as_posix()
+                independent_gates._file_path_name(relative)
+                count += 1
+                if count > MAX_MEMBERS:
+                    raise ValueError("source directory exceeds transport bounds")
+                target = frozen / member.name
+                if member.is_symlink():
+                    raise ValueError(f"symbolic source member: {relative}")
+                if member.is_dir(follow_symlinks=False):
+                    target.mkdir()
+                    pending.append((path, target))
+                elif member.is_file(follow_symlinks=False):
+                    try:
+                        total += _copy_regular(path, target,
+                                               limit=MAX_EXPANDED_BYTES - total,
+                                               preflight=False)
+                    except ValueError as error:
+                        if "exceeds byte bound" in str(error):
+                            raise ValueError(
+                                "source directory exceeds transport bounds while copied"
+                            ) from error
+                        raise
+                else:
+                    raise ValueError(f"nonregular source member: {relative}")
 
 
 def _extract_transport(packed, fmt, destination):
@@ -492,7 +536,7 @@ def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_d
                     raise ValueError("GitHub Actions source must be a ZIP")
                 before = _file_inventory(source_path)
                 frozen = folder / "original-directory"
-                shutil.copytree(source_path, frozen, symlinks=True)
+                _copy_directory(source_path, frozen)
                 after = _file_inventory(source_path)
                 copied = _file_inventory(frozen)
                 row["raw_inventory"] = copied
@@ -866,7 +910,7 @@ def _snapshot_external_references(archive_map, approved, stable):
                 frozen = references / str(len(snapshots))
                 if source.is_dir():
                     before = _file_inventory(source)
-                    shutil.copytree(source, frozen, symlinks=True)
+                    _copy_directory(source, frozen)
                     after = _file_inventory(source)
                     copied = _file_inventory(frozen)
                     if before != after or before != copied:

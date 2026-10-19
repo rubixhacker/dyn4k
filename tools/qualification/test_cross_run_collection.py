@@ -237,9 +237,118 @@ class CrossRunCollectionTests(unittest.TestCase):
             with mock.patch.object(collection.os, "fstat", return_value=reported):
                 with self.assertRaisesRegex(ValueError, "exceeds byte bound while copied"):
                     collection._copy_regular(source, frozen, limit=1024 * 1024 + 512)
-            self.assertEqual(1024 * 1024, frozen.stat().st_size)
+            self.assertEqual(1024 * 1024 + 512, frozen.stat().st_size)
+            smaller = root / "smaller.bin"
+            with mock.patch.object(collection.os, "fstat", return_value=reported):
+                with self.assertRaisesRegex(ValueError, "exceeds byte bound while copied"):
+                    collection._copy_regular(source, smaller, limit=512 * 1024,
+                                             preflight=False)
+            self.assertEqual(512 * 1024, smaller.stat().st_size)
             with self.assertRaisesRegex(ValueError, "source file exceeds byte bound"):
                 collection.digest(source, 1024 * 1024)
+
+    def test_directory_growth_after_inventory_keeps_bounded_raw_bytes(self):
+        limit = 1024 * 1024
+        manifest = independent_gates.load_approved_manifest(ROOT)
+        for route in ("local", "external"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / "source"
+                source.mkdir()
+                member = source / "receipt.bin"
+                member.write_bytes(b"x" * (limit // 2))
+                files = collection._file_inventory(source)
+                original_inventory = collection._file_inventory
+                grown = False
+
+                def grow_after_inventory(path):
+                    nonlocal grown
+                    inventory = original_inventory(path)
+                    if Path(path) == source and not grown:
+                        member.write_bytes(b"y" * (limit * 2 + limit // 2))
+                        grown = True
+                    return inventory
+
+                with mock.patch.object(collection, "MAX_EXPANDED_BYTES", limit), \
+                     mock.patch.object(collection, "_file_inventory",
+                                       side_effect=grow_after_inventory):
+                    if route == "local":
+                        index = {"schema": 1, "candidate_sha": HEAD,
+                                 "source_tree": TREE,
+                                 "sources": [{"id": "grown", "origin": {
+                                     "kind": "local", "path": str(source)},
+                                     "transport": {"format": "directory",
+                                                   "files": files,
+                                                   "inventory_sha256":
+                                                   collection._inventory_digest(files)}}],
+                                 "bindings": [{"source_id": "grown", "lane": LANE,
+                                               "gate": "staged-consumer"}]}
+                        index_path = root / "index.json"
+                        index_path.write_text(json.dumps(index))
+                        result = self.collect_fixture(root, index_path)
+                        row = result["cross_run"]["sources"][0]
+                        self.assertEqual("FAILED", row["status"])
+                        self.assertIn("transport bounds", row["reason"])
+                        frozen = root / "collection/raw/sources/grown/original-directory/receipt.bin"
+                    else:
+                        stable = root / "stable"
+                        stable.mkdir()
+                        lanes = {lane: {} for lane in manifest["lanes"]}
+                        lanes[LANE] = {"staged-consumer": str(source)}
+                        archive_map = {"schema": 1, "candidate_sha": HEAD,
+                                       "lanes": lanes}
+                        with self.assertRaisesRegex(ValueError, "transport bounds"):
+                            collection._snapshot_external_references(
+                                archive_map, manifest, stable)
+                        frozen = stable / "references/0/receipt.bin"
+                self.assertTrue(grown)
+                self.assertTrue(frozen.is_file())
+                self.assertGreater(frozen.stat().st_size, 0)
+                self.assertLessEqual(frozen.stat().st_size, limit)
+                if route == "local":
+                    self.assertEqual(frozen.stat().st_size,
+                                     row["raw_inventory"]["receipt.bin"]["size"])
+                    self.assertEqual(0, self.public_verify(root).returncode)
+
+    def test_directory_member_growth_keeps_bounded_raw_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            (source / "one.bin").write_bytes(b"one")
+            (source / "two.bin").write_bytes(b"two")
+            files = collection._file_inventory(source)
+            index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                     "sources": [{"id": "grown", "origin": {"kind": "local",
+                                  "path": str(source)}, "transport": {
+                                  "format": "directory", "files": files,
+                                  "inventory_sha256": collection._inventory_digest(files)}}],
+                     "bindings": [{"source_id": "grown", "lane": LANE,
+                                   "gate": "staged-consumer"}]}
+            index_path = root / "index.json"
+            index_path.write_text(json.dumps(index))
+            original_inventory = collection._file_inventory
+            grown = False
+
+            def grow_after_inventory(path):
+                nonlocal grown
+                inventory = original_inventory(path)
+                if Path(path) == source and not grown:
+                    (source / "three.bin").write_bytes(b"three")
+                    grown = True
+                return inventory
+
+            with mock.patch.object(collection, "MAX_MEMBERS", 2), \
+                 mock.patch.object(collection, "_file_inventory",
+                                   side_effect=grow_after_inventory):
+                result = self.collect_fixture(root, index_path)
+            row = result["cross_run"]["sources"][0]
+            self.assertEqual("FAILED", row["status"])
+            self.assertIn("transport bounds", row["reason"])
+            frozen = root / "collection/raw/sources/grown/original-directory"
+            self.assertLessEqual(len(list(frozen.iterdir())), 2)
+            self.assertEqual(len(list(frozen.iterdir())), len(row["raw_inventory"]))
+            self.assertEqual(0, self.public_verify(root).returncode)
 
     def test_wrong_candidate_target_and_duplicate_bindings_fail(self):
         for mutation, reason in ((lambda value: value.update(candidate_sha="0" * 40),
