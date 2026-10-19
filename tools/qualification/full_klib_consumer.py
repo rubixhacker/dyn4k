@@ -240,17 +240,19 @@ def capture(repository, project, archive, work_root, lane, node, inputs):
             command = [str(node), "--test", "--test-reporter=tap", "--require",
                        str(preload), str(scripts[0])]
             started = time.time_ns()
-            process = subprocess.run(command, cwd=project, stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE, check=False)
+            process = subprocess.Popen(command, cwd=project, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+            node_stdout, node_stderr = process.communicate()
             finished = time.time_ns()
-            (raw_root / "node.tap").write_bytes(process.stdout)
-            (raw_root / "node.stderr").write_bytes(process.stderr)
+            (raw_root / "node.tap").write_bytes(node_stdout)
+            (raw_root / "node.stderr").write_bytes(node_stderr)
             if process.returncode:
                 raise ValueError(f"Node original tests exited {process.returncode}")
-            ids, normal = _tap(process.stdout, selected)
+            ids, normal = _tap(node_stdout, selected)
             (normal_root / "TEST-Node.xml").write_bytes(normal)
             observed.extend(ids)
             runtime = {"module": short, "command": command, "exit_code": process.returncode,
+                       "pid": process.pid, "parent_pid": os.getpid(),
                        "started_ns": started, "finished_ns": finished,
                        "node_version": subprocess.check_output([str(node), "--version"], text=True).strip(),
                        "node_sha256": sha(Path(node).read_bytes()),
@@ -303,6 +305,19 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
         raise ValueError("producer requires pinned JDK 21 and Gradle 9.5.0")
     manifest, selected = contract(repository, lane)
     variant = LOCAL_LANES[lane][1]
+    native_identity = None
+    if variant == "linuxx64":
+        konan_root = Path(os.environ.get("KONAN_DATA_DIR", str(Path.home() / ".konan")))
+        native_home = konan_root / "kotlin-native-prebuilt-linux-x86_64-2.4.20"
+        native_executable = native_home / "bin/kotlinc-native"
+        native_compiler = native_home / "konan/lib/kotlin-native-compiler-embeddable.jar"
+        native_version = subprocess.check_output([str(native_executable), "-version"],
+                                                 stderr=subprocess.STDOUT, text=True).strip()
+        if "Kotlin/Native: 2.4.20" not in native_version:
+            raise ValueError("Kotlin/Native compiler version differs from pinned toolchain")
+        native_identity = {"home": str(native_home), "version": native_version,
+                           "executable_sha256": sha(native_executable.read_bytes()),
+                           "compiler_sha256": sha(native_compiler.read_bytes())}
     for module in MODULES:
         if sha(staged_binary(staging, module, variant).read_bytes()) != hashes[module]:
             raise ValueError(f"independently selected staged {module} KLIB differs")
@@ -329,13 +344,13 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
                f"-PqualificationNode={node}", "qualificationEvidence", lane]
     started = time.time_ns()
     with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
-        result = subprocess.run(command, cwd=inputs, stdout=stdout, stderr=stderr,
-                                check=False)
+        result = subprocess.Popen(command, cwd=inputs, stdout=stdout, stderr=stderr)
+        exit_code = result.wait()
     finished = time.time_ns()
     for log in ("stdout.txt", "stderr.txt"):
         os.utime(output / log, ns=(finished, finished))
-    if result.returncode:
-        raise ValueError(f"external full KLIB Gradle process exited {result.returncode}")
+    if exit_code:
+        raise ValueError(f"external full KLIB Gradle process exited {exit_code}")
     lane_info = manifest["lanes"][lane]
     runtime_identity = (f"{platform.system()} {platform.release()} {platform.machine()} | "
                         f"{java_version} | {subprocess.check_output([str(node), '--version'], text=True).strip()}")
@@ -361,8 +376,10 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
                              "gradle_sha256": sha(gradle.read_bytes()),
                              "node_version": subprocess.check_output([str(node), "--version"], text=True).strip(),
                              "node_sha256": sha(node.read_bytes()),
-                             "gradle_user_home": str(gradle_home), "kgp_version": "2.4.20"},
+                             "gradle_user_home": str(gradle_home), "kgp_version": "2.4.20",
+                             "kotlin_native": native_identity},
                "process": {"command": command, "cwd": str(inputs), "exit_code": 0,
+                           "pid": result.pid, "parent_pid": os.getpid(),
                            "started_ns": started, "finished_ns": finished,
                            "stdout": "stdout.txt", "stderr": "stderr.txt"},
                "provider_graph": "provider-graph.json",
@@ -376,7 +393,11 @@ def run(repository, candidate, lane, staging, output, gradle, node, hashes):
                                                       f"{CONSUMER}/settings.gradle.kts",
                                                       f"{CONSUMER}/core/build.gradle.kts",
                                                       f"{CONSUMER}/facade/build.gradle.kts",
-                                                      f"{CONSUMER}/node-test-preload.cjs")},
+                                                      f"{CONSUMER}/node-test-preload.cjs",
+                                                      f"{CONSUMER}/linuxX64/Linux x64/current/build.gradle.kts",
+                                                      f"{CONSUMER}/js/Node.js/current/build.gradle.kts")},
+               "producer_sha256": sha(git(repository, "show",
+                                           f"{candidate}:tools/qualification/full_klib_consumer.py")),
                "files": [{"path": path.relative_to(output).as_posix(),
                           "sha256": sha(path.read_bytes()), "mtime_ns": path.stat().st_mtime_ns}
                          for path in sorted(output.rglob("*")) if path.is_file()]}
@@ -399,12 +420,19 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
     for name, data in inputs.items():
         if (root / "inputs" / name).read_bytes() != data:
             raise ValueError(f"archived original input differs: {name}")
+    if receipt.get("source_inventory_sha256") != sha(inputs["source-inventory.tsv"]):
+        raise ValueError("receipt original source inventory differs")
     builds = (f"{CONSUMER}/build.gradle.kts", f"{CONSUMER}/settings.gradle.kts",
               f"{CONSUMER}/core/build.gradle.kts", f"{CONSUMER}/facade/build.gradle.kts",
-              f"{CONSUMER}/node-test-preload.cjs")
+              f"{CONSUMER}/node-test-preload.cjs",
+              f"{CONSUMER}/linuxX64/Linux x64/current/build.gradle.kts",
+              f"{CONSUMER}/js/Node.js/current/build.gradle.kts")
     if receipt.get("consumer_build_sha256") != {
             path: sha(git(repository, "show", f"{candidate}:{path}")) for path in builds}:
         raise ValueError("external consumer build differs from exact source")
+    if receipt.get("producer_sha256") != sha(git(
+            repository, "show", f"{candidate}:tools/qualification/full_klib_consumer.py")):
+        raise ValueError("external producer differs from exact source")
     if receipt.get("toolchain") != trusted_toolchain:
         raise ValueError("producer toolchain differs from independent runner identity")
     paths, process = receipt.get("producer_paths"), receipt.get("process")
@@ -435,6 +463,21 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                         f"-PqualificationNode={paths['node']}", "qualificationEvidence", lane]
     if process.get("command") != expected_command or process.get("cwd") != paths["inputs"]:
         raise ValueError("external process command differs from selected lane")
+    if (type(process.get("pid")) is not int or process["pid"] <= 0
+            or type(process.get("parent_pid")) is not int or process["parent_pid"] <= 0):
+        raise ValueError("external Gradle process identity is absent")
+    output_lines = (root / "stdout.txt").read_text().splitlines()
+    if ("QUALIFICATION_CASE_COUNT=2523" not in output_lines
+            or f"QUALIFICATION_LANE={lane}" not in output_lines
+            or f"QUALIFICATION_SOURCE_INVENTORY_TSV_SHA256={sha(inputs['source-inventory.tsv'])}"
+            not in output_lines):
+        raise ValueError("raw process output does not bind full original sources and methods")
+    tasks = ((":core:linuxX64Test", ":facade:linuxX64Test") if lane.startswith("linuxX64:")
+             else (":core:compileTestDevelopmentExecutableKotlinJs",
+                   ":facade:compileTestDevelopmentExecutableKotlinJs"))
+    if any(not any(line.startswith(f"> Task {task}") for line in output_lines)
+           for task in tasks):
+        raise ValueError("raw process output omits a required external runtime task")
     variant = LOCAL_LANES[lane][1]
     graph = json.loads((root / "provider-graph.json").read_bytes())
     if (set(graph) != {"compile", "runtime", "gradle_user_home"}
@@ -511,6 +554,8 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         ids, expected_normal = _report((root / raw).read_bytes(), "linuxX64", selected_map)
         if normal.read_bytes() != expected_normal or not ids:
             raise ValueError("normalized native XML is not derived from raw assertions")
+        if f"QUALIFICATION_RAW_XML_SHA256={sha((root / raw).read_bytes())}" not in output_lines:
+            raise ValueError("raw Native XML is not bound to the process output")
     for tap in tap_paths:
         parts = Path(tap).parts
         normal = root / "reports/normalized" / parts[2] / "TEST-Node.xml"
@@ -520,6 +565,8 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         ids, expected_normal = _tap((root / tap).read_bytes(), selected_map)
         if normal.read_bytes() != expected_normal or not ids:
             raise ValueError("normalized Node XML is not derived from raw TAP")
+        if f"QUALIFICATION_RAW_TAP_SHA256={sha((root / tap).read_bytes())}" not in output_lines:
+            raise ValueError("raw Node TAP is not bound to the process output")
     if not raw_paths and not receipt.get("raw_consumer_tap"):
         raise ValueError("original native XML or Node TAP is absent")
     for short in ("core", "facade"):
@@ -527,6 +574,11 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
         program = root / f"runtime/{short}.program"
         if runtime.get("module") != short:
             raise ValueError("external runtime module differs")
+        if (f"QUALIFICATION_RUNTIME_{short.upper()}_SHA256="
+                f"{sha((root / f'runtime/{short}.json').read_bytes())}" not in output_lines
+                or f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256="
+                f"{sha(program.read_bytes())}" not in output_lines):
+            raise ValueError("external runtime program is not bound to process output")
         if variant == "linuxx64":
             if (runtime.get("executable_sha256") != sha(program.read_bytes())
                     or runtime.get("command") != [
@@ -546,6 +598,8 @@ def verify(root, repository, candidate, lane, hashes, runtime_identity,
                     or runtime.get("program_sha256") != sha(program.read_bytes())
                     or runtime.get("preload_sha256") != receipt["consumer_build_sha256"][
                         f"{CONSUMER}/node-test-preload.cjs"]
+                    or type(runtime.get("pid")) is not int or runtime["pid"] <= 0
+                    or type(runtime.get("parent_pid")) is not int or runtime["parent_pid"] <= 0
                     or not process["started_ns"] <= runtime.get("started_ns", -1)
                     <= runtime.get("finished_ns", -1) <= process["finished_ns"]):
                 raise ValueError("Node runtime process differs from linked test program")

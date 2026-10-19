@@ -46,7 +46,7 @@ fun friend(configuration: String): File {
 tasks.named<KotlinCompilationTask<*>>("compileTestKotlinLinuxX64") {
     dependsOn(":qualificationValidateInputs")
     compilerOptions.freeCompilerArgs.addAll(providers.provider {
-        listOf("-friend-modules", friend("linuxX64TestCompileKlibraries").absolutePath)
+        listOf("-g", "-friend-modules", friend("linuxX64TestCompileKlibraries").absolutePath)
     })
 }
 tasks.named<KotlinCompilationTask<*>>("compileTestKotlinJs") {
