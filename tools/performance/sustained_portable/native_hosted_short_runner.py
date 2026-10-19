@@ -92,6 +92,14 @@ def sidecar_bytes(path):
     return snapshot
 
 def resident_probe_errors_complete(resident, capture, execution, selected_target):
+    samples = resident["samples"]
+    declared_samples = capture["rss_observation"].get("samples")
+    if (type(samples) is not list or not samples or
+            type(declared_samples) is not int or declared_samples != len(samples) or
+            any(type(sample) is not list or len(sample) != 2 or
+                type(sample[0]) is not int or type(sample[1]) is not int or
+                sample[1] <= 0 for sample in samples)):
+        return False
     errors = resident["errors"]
     if not isinstance(errors, list):
         return False
@@ -116,6 +124,7 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
             type(row.get("returncode_checked_monotonic_ns")) is not int or
             row.get("returncode_checked_monotonic_ns") !=
                 row.get("exit_observed_monotonic_ns") or
+            type(row.get("error")) is not str or
             "macOS process resident bytes unavailable" not in row.get("error", "")):
         return False
     stamps = (execution["started_monotonic_ns"], row["monotonic_ns"],
@@ -124,8 +133,7 @@ def resident_probe_errors_complete(resident, capture, execution, selected_target
     return (all(type(stamp) is int for stamp in stamps) and
             list(stamps) == sorted(stamps) and
             stamps[3] - stamps[2] <= 1_000_000 and
-            all(type(sample[0]) is int and sample[0] < row["monotonic_ns"]
-                for sample in resident["samples"]))
+            all(sample[0] < row["monotonic_ns"] for sample in samples))
 
 def execute(label, argv, timeout=300):
     output = evidence / label

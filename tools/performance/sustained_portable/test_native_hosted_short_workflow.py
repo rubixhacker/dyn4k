@@ -293,7 +293,7 @@ class HostedRawFileContract(unittest.TestCase):
                     "error": "[Errno 3] macOS process resident bytes unavailable"}
         resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
                     "errors": [terminal]}
-        capture = {"rss_observation": {"errors": 1}}
+        capture = {"rss_observation": {"samples": 1, "errors": 1}}
         execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
                      "termination": "natural", "exit_code": 0}
         return resident, capture, execution
@@ -321,6 +321,34 @@ class HostedRawFileContract(unittest.TestCase):
         self.assertFalse(self.scope["resident_probe_errors_complete"](
             resident, capture, execution, "macosArm64"))
 
+    def test_terminal_esrch_rejects_malformed_sample_bytes(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for value in (True, 4096.0, "4096", 0, -1):
+            with self.subTest(resident_bytes=value):
+                resident, capture, execution = self.terminal_receipt()
+                resident["samples"][0][1] = value
+                self.assertFalse(check(resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_requires_exact_sample_pairs(self):
+        check = self.scope["resident_probe_errors_complete"]
+        for sample in ([10], [10, 4096, 99], (10, 4096)):
+            with self.subTest(sample=sample):
+                resident, capture, execution = self.terminal_receipt()
+                resident["samples"] = [sample]
+                self.assertFalse(check(resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_requires_string_error(self):
+        resident, capture, execution = self.terminal_receipt()
+        resident["errors"][0]["error"] = ["macOS process resident bytes unavailable"]
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
+
+    def test_terminal_esrch_requires_integer_sample_count(self):
+        resident, capture, execution = self.terminal_receipt()
+        capture["rss_observation"]["samples"] = True
+        self.assertFalse(self.scope["resident_probe_errors_complete"](
+            resident, capture, execution, "macosArm64"))
+
     def test_later_zero_exit_does_not_prove_probe_time_exit(self):
         row = {"monotonic_ns": 10, "error_observed_monotonic_ns": 11,
                "exit_observed_monotonic_ns": 9_000_011, "exit_code": 0,
@@ -328,7 +356,7 @@ class HostedRawFileContract(unittest.TestCase):
                "error": "[Errno 3] macOS process resident bytes unavailable"}
         resident = {"method": "proc_pidinfo_task_resident", "samples": [[5, 4096]],
                     "errors": [row]}
-        capture_receipt = {"rss_observation": {"errors": 1}}
+        capture_receipt = {"rss_observation": {"samples": 1, "errors": 1}}
         execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 10_000_000,
                      "termination": "natural", "exit_code": 0}
         self.assertFalse(self.scope["resident_probe_errors_complete"](
@@ -349,7 +377,7 @@ class HostedRawFileContract(unittest.TestCase):
                     "error": "[Errno 3] macOS process resident bytes unavailable"}
         resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
                     "errors": [terminal]}
-        capture_receipt = {"rss_observation": {"errors": 1}}
+        capture_receipt = {"rss_observation": {"samples": 1, "errors": 1}}
         execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
                      "termination": "natural", "exit_code": 0}
         self.assertTrue(check(resident, capture_receipt, execution, "macosArm64"))
@@ -383,7 +411,7 @@ class HostedRawFileContract(unittest.TestCase):
                     "error": "[Errno 3] macOS process resident bytes unavailable"}
         resident = {"method": "proc_pidinfo_task_resident", "samples": [[10, 4096]],
                     "errors": [terminal]}
-        capture_receipt = {"rss_observation": {"errors": 1}}
+        capture_receipt = {"rss_observation": {"samples": 1, "errors": 1}}
         execution = {"started_monotonic_ns": 1, "ended_monotonic_ns": 40,
                      "termination": "natural", "exit_code": 0}
         self.assertTrue(check(resident, capture_receipt, execution, "macosArm64"))
@@ -396,7 +424,8 @@ class HostedRawFileContract(unittest.TestCase):
             self.assertFalse(check(resident, capture_receipt,
                                    {**execution, "exit_code": False}, "macosArm64"))
         with self.subTest(capture_field="errors"):
-            self.assertFalse(check(resident, {"rss_observation": {"errors": True}},
+            self.assertFalse(check(resident, {"rss_observation": {"samples": 1,
+                                                                  "errors": True}},
                                    execution, "macosArm64"))
         with self.subTest(execution_field="started_monotonic_ns"):
             self.assertFalse(check(resident, capture_receipt,
