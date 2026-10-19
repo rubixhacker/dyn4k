@@ -7,6 +7,8 @@ from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
+import full_browser_consumer
+import full_native_host_consumer
 import full_signed_routes
 import independent_gates
 
@@ -153,6 +155,70 @@ class SignedRouteTests(unittest.TestCase):
                 receipt["artifact_hashes"]["dyn4k"] = "0" * 64
                 (archive / "receipt.json").write_text(json.dumps(receipt))
                 with self.assertRaisesRegex(ValueError, "audited artifacts"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, HASHES, runtime, "c" * 64)
+
+    def test_windows_native_host_uses_signed_windows_toolchain_files(self):
+        lane = "mingwX64:Windows x64:current:debug-g"
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            binaries = {
+                "gradle": base / "gradle",
+                "python": base / "python",
+                "java": base / "jdk/bin/java.exe",
+                "native": base / "native/bin/kotlinc-native.bat",
+                "compiler": base / "native/konan/lib/kotlin-native-compiler-embeddable.jar",
+            }
+            for name, path in binaries.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(name.encode())
+            self.assertFalse((base / "jdk/bin/java").exists())
+            self.assertFalse((base / "native/bin/kotlinc-native").exists())
+            toolchain = {"gradle_executable": str(binaries["gradle"]),
+                         "gradle_sha256": hashlib.sha256(binaries["gradle"].read_bytes()).hexdigest(),
+                         "python_executable": str(binaries["python"]),
+                         "python_sha256": hashlib.sha256(binaries["python"].read_bytes()).hexdigest(),
+                         "java_home": str(base / "jdk"),
+                         "java_sha256": hashlib.sha256(binaries["java"].read_bytes()).hexdigest(),
+                         "native_home": str(base / "native"),
+                         "native_sha256": hashlib.sha256(binaries["native"].read_bytes()).hexdigest(),
+                         "native_compiler_sha256": hashlib.sha256(
+                             binaries["compiler"].read_bytes()).hexdigest()}
+            selection = {"lane": lane, "role": "current", "system": "Windows",
+                         "machine": "AMD64", "os_version": "10.0.26100",
+                         "windows_product_type": "client",
+                         "windows_product_name": "Windows 11 Pro"}
+            host = {key: value for key, value in selection.items()
+                    if key not in ("lane", "role")}
+            runtime = full_native_host_consumer.digest(
+                full_native_host_consumer.encoded(host))
+            receipt = self._receipt(lane, runtime)
+            receipt["host"] = host
+            archive = self._archive(base, receipt)
+            expected = {"expected_artifact_hashes": HASHES,
+                        "expected_runtime_identity": runtime,
+                        "expected_archive_digests": {"staged-consumer": "c" * 64},
+                        "expected_native_selection": selection,
+                        "expected_native_toolchain": toolchain,
+                        "expected_native_host": host}
+            products = {"core": {"sha256": "d" * 64},
+                        "facade": {"sha256": "e" * 64}}
+            (archive / "runtime").mkdir()
+            (archive / "runtime/products.json").write_text(json.dumps(products))
+            expected["expected_native_host_executables"] = {
+                name: product["sha256"] for name, product in products.items()}
+            self._witness(base, expected, lane, runtime, "debug-g",
+                          expected["expected_native_host_executables"],
+                          toolchain["gradle_sha256"])
+            public = {"status": "PASSED", "selected_cases": 2523,
+                      "archive_sha256": "c" * 64}
+            with patch.object(full_signed_routes, "_source"), patch.object(
+                    full_signed_routes, "_selected", return_value=[None] * 2523), patch(
+                    "full_native_host_consumer.verify", return_value=public):
+                self.assertEqual(full_signed_routes.verify(
+                    ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64), public)
+                toolchain["native_sha256"] = "0" * 64
+                with self.assertRaisesRegex(ValueError, "Kotlin Native compiler.*bytes differ"):
                     full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
                                               expected, HASHES, runtime, "c" * 64)
 
@@ -325,6 +391,93 @@ class SignedRouteTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "browser candidate, route"):
                     full_signed_routes.verify_browser(ROOT, CANDIDATE, lane, archive,
                                                       expected, HASHES, runtime, "c" * 64)
+
+    def test_safari_schema2_receipt_accepts_darwin_jdk_and_rejects_wrong_host(self):
+        lane = "js:Safari:current:development"
+        runtime = "Darwin 25.5.0 arm64"
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            browser = base / "Safari"
+            java = base / "jdk/bin/java"
+            gradle = base / "gradle"
+            for path in (browser, java, gradle):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(path.name.encode())
+            toolchain = {"browser": str(browser),
+                         "browser_sha256": hashlib.sha256(browser.read_bytes()).hexdigest(),
+                         "java_home": str(java.parent.parent),
+                         "java_sha256": full_browser_consumer.DARWIN_JAVA_SHA256,
+                         "gradle": str(gradle),
+                         "gradle_sha256": full_browser_consumer.GRADLE_SHA256,
+                         "kgp_version": "2.4.20", "gradle_version": "9.5.0"}
+            receipt = {"schema": 2, "status": "PASSED", "candidate_sha": CANDIDATE,
+                       "lane": lane, "consumer_contract_sha256": independent_gates.digest(
+                           independent_gates.consumer_contract(MANIFEST, lane)),
+                       "source_tree": "e" * 40,
+                       "source_inventory_sha256": "f" * 64,
+                       "consumer_build_sha256": {}, "producer_sha256": "f" * 64,
+                       "browser_support_sha256": {},
+                       "staged_hashes": dict(HASHES), "runtime_identity": runtime,
+                       "toolchain": toolchain, "paths": {}, "process": {},
+                       "modules": {}, "lock_observations": {},
+                       "row_order_sha256": {}, "files": []}
+            self.assertTrue({"target", "runtime", "version", "configuration"}.isdisjoint(receipt))
+            archive = self._archive(base, receipt)
+            bundles = {}
+            for short in ("core", "facade"):
+                folder = archive / short
+                folder.mkdir()
+                (folder / "karma-selected.js").write_bytes(short.encode())
+                (folder / "linked-executable.js").write_bytes(short.encode())
+                selected_sha = hashlib.sha256(short.encode()).hexdigest()
+                bundles[short] = {"karma_selected_js": selected_sha,
+                                  "linked_executable_js": selected_sha}
+            expected = {"expected_artifact_hashes": HASHES,
+                        "expected_runtime_identity": runtime,
+                        "expected_archive_digests": {"staged-consumer": "c" * 64},
+                        "expected_browser_toolchain": toolchain,
+                        "expected_browser_bundles": bundles}
+            public = {"status": "PASSED", "lane": lane, "selected_cases": 2523,
+                      "archive_sha256": "c" * 64, "candidate_sha": CANDIDATE}
+            self.assertEqual(full_browser_consumer.expected_java_sha256("Darwin", "Safari"),
+                             full_browser_consumer.DARWIN_JAVA_SHA256)
+            with self.assertRaisesRegex(ValueError, "JDK 21.*bytes differ"):
+                full_signed_routes._file(java, toolchain["java_sha256"], "JDK 21")
+            with patch.object(full_signed_routes, "_source"), patch.object(
+                    full_signed_routes, "_selected", return_value=[None] * 2523), patch.object(
+                    full_signed_routes, "_file", side_effect=lambda path, sha, label: Path(path)
+                    ) as file_check, patch(
+                    "independent_gates.archive_digest", return_value="c" * 64), patch(
+                    "full_browser_consumer.runtime_pin"), patch(
+                    "full_browser_consumer.verify", return_value=public) as producer_verify:
+                self.assertEqual(full_signed_routes.verify_browser(
+                    ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64),
+                    public)
+                file_check.assert_any_call(java, full_browser_consumer.DARWIN_JAVA_SHA256,
+                                           "JDK 21")
+                producer_verify.assert_called_once()
+                toolchain["java_sha256"] = full_browser_consumer.JAVA_SHA256
+                receipt["toolchain"] = toolchain
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, "browser JDK or Gradle"):
+                    full_signed_routes.verify_browser(ROOT, CANDIDATE, lane, archive,
+                                                      expected, HASHES, runtime, "c" * 64)
+                toolchain["java_sha256"] = full_browser_consumer.DARWIN_JAVA_SHA256
+                receipt["runtime_identity"] = "Linux 6.17.0 x86_64"
+                expected["expected_runtime_identity"] = receipt["runtime_identity"]
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, "selected browser host differs"):
+                    full_signed_routes.verify_browser(ROOT, CANDIDATE, lane, archive,
+                                                      expected, HASHES, receipt["runtime_identity"],
+                                                      "c" * 64)
+                receipt["runtime_identity"] = runtime
+                receipt["consumer_contract_sha256"] = "0" * 64
+                expected["expected_runtime_identity"] = runtime
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, "browser candidate, route"):
+                    full_signed_routes.verify_browser(ROOT, CANDIDATE, lane, archive,
+                                                      expected, HASHES, runtime, "c" * 64)
+                producer_verify.assert_called_once()
 
     def test_forged_unavailability_and_changed_member_fail_closed(self):
         lane = "iosArm64:iOS physical ARM64:minimum:debug-g"

@@ -261,21 +261,25 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(
                 independent_gates.consumer_contract(
                     independent_gates.load_approved_manifest(repository), lane))
-            or any(receipt.get(key) != selected_lane[key] for key in
+            or tuple(lane.split(":")) != tuple(selected_lane[key] for key in
                    ("target", "runtime", "version", "configuration"))):
         raise ValueError("browser candidate, route, or approved methods differ")
-    if receipt.get("runtime_identity") != runtime or receipt.get("toolchain") != toolchain:
+    if (receipt.get("runtime_identity") != runtime or receipt.get("toolchain") != toolchain
+            or type(runtime) is not str
+            or re.fullmatch(r"(Linux|Darwin) [^ ]+ [^ ]+", runtime) is None):
         raise ValueError("browser runtime or toolchain differs from signed lane")
     if toolchain.get("kgp_version") != "2.4.20" or toolchain.get("gradle_version") != "9.5.0":
         raise ValueError("browser toolchain differs from approved versions")
-    if (toolchain.get("java_sha256") != full_browser_consumer.JAVA_SHA256
+    family = selected_lane["runtime"]
+    if (toolchain.get("java_sha256") != full_browser_consumer.expected_java_sha256(
+            runtime.split(" ", 1)[0], family)
             or toolchain.get("gradle_sha256") != full_browser_consumer.GRADLE_SHA256):
         raise ValueError("browser JDK or Gradle differs from approved executable")
     browser = _file(toolchain.get("browser"), toolchain.get("browser_sha256"), "browser")
     _file(Path(toolchain.get("java_home", "")) / "bin/java",
           toolchain.get("java_sha256"), "JDK 21")
     _file(toolchain.get("gradle"), toolchain.get("gradle_sha256"), "Gradle")
-    family, role = lane.split(":")[1:3]
+    role = selected_lane["version"]
     full_browser_consumer.runtime_pin(family, role, browser,
                                       toolchain.get("browser_sha256"))
     executables = _browser_bundle_bytes(root, bundles, lane.startswith("wasmJs:"))
@@ -360,13 +364,17 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
                     full_native_host_consumer.encoded(host))):
             raise ValueError("signed Native host, simulator, or runtime selection differs")
         full_native_host_consumer.validate_host(lane, selection, host)
+        windows = host["system"] == "Windows"
         for key, sha_key in (("gradle_executable", "gradle_sha256"),
                              ("python_executable", "python_sha256")):
             _file(toolchain.get(key), toolchain.get(sha_key), key)
-        _file(Path(toolchain.get("java_home", "")) / "bin/java",
+        _file(Path(toolchain.get("java_home", "")) / "bin" /
+              ("java.exe" if windows else "java"),
               toolchain.get("java_sha256"), "JDK 21")
         native_home = Path(toolchain.get("native_home", ""))
-        _file(native_home / "bin/kotlinc-native", toolchain.get("native_sha256"),
+        _file(native_home / "bin" /
+              ("kotlinc-native.bat" if windows else "kotlinc-native"),
+              toolchain.get("native_sha256"),
               "Kotlin Native compiler")
         _file(native_home / "konan/lib/kotlin-native-compiler-embeddable.jar",
               toolchain.get("native_compiler_sha256"), "Kotlin Native compiler JAR")
