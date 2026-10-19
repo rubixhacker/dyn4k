@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import qualify
+import vector_subclass_dispatch
 
 
 BASELINE_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
@@ -64,6 +65,12 @@ def parse_aabb(raw, provider):
     return values
 
 
+def parse_vector(raw):
+    if raw != vector_subclass_dispatch.SUCCESS:
+        raise ValueError("vector fixture output is incomplete or differs")
+    return raw
+
+
 def execute(command, output, name, environment):
     try:
         result = subprocess.run(command, capture_output=True, timeout=120, env=environment)
@@ -103,6 +110,25 @@ def run_aabb(baseline, candidate, stdlib, java_home, output, environment):
     (output / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     if receipt["status"] != "PASSED":
         raise ValueError("AABB subclass observations differ from pinned baseline")
+    return receipt
+
+
+def run_vector_raw(baseline, candidate, stdlib, java_home, output, environment):
+    output.mkdir(exist_ok=True)
+    classes = output / "raw-classes"
+    classes.mkdir()
+    fixture = vector_subclass_dispatch.FIXTURE
+    execute([str(java_home / "bin/javac"), "-encoding", "UTF-8", "-source", "8",
+             "-target", "8", "-cp", str(baseline), "-d", str(classes), str(fixture)],
+            output, "raw-compile", environment)
+    for name, provider in (("raw-baseline", baseline), ("raw-candidate", candidate)):
+        parse_vector(execute([str(java_home / "bin/java"), "-cp",
+                              os.pathsep.join((str(classes), str(provider), str(stdlib))),
+                              vector_subclass_dispatch.MAIN], output, name, environment))
+    receipt = {"status": "PASSED", "fixture_sha256": sha256(fixture),
+               "class_sha256": sha256(classes / "qualification/VectorSubclassDispatch.class"),
+               "baseline_sha256": sha256(baseline), "candidate_sha256": sha256(candidate)}
+    (output / "raw-receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     return receipt
 
 
@@ -198,7 +224,13 @@ def main():
                     result = run_aabb(baseline, candidate, stdlib, args.java_home,
                                       directory, environment)
                 elif family == "vector" and args.diagnostic_jar:
-                    result = {"status": "UNQUALIFIED", "reason": "vector diagnostic requires the audited runner"}
+                    result = run_vector_raw(baseline, candidate, stdlib, args.java_home,
+                                            directory, environment)
+                elif family == "vector":
+                    result = run_script(family, family_command(family, args, candidate, directory),
+                                        directory, environment)
+                    run_vector_raw(baseline, candidate, stdlib, args.java_home,
+                                   directory, environment)
                 else:
                     result = run_script(family, family_command(family, args, candidate, directory),
                                         directory, environment)

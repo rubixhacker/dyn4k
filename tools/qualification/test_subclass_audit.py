@@ -6,9 +6,17 @@ from unittest.mock import patch
 
 import qualify
 import subclass_audit
+import vector_subclass_dispatch
 
 
 class SubclassAuditTest(unittest.TestCase):
+    def test_vector_output_requires_the_original_completion_line(self):
+        self.assertEqual(vector_subclass_dispatch.SUCCESS,
+                         subclass_audit.parse_vector(vector_subclass_dispatch.SUCCESS))
+        for incomplete in ("", "vector subclass dispatch passed", "other\n"):
+            with self.subTest(incomplete=incomplete), self.assertRaisesRegex(ValueError, "vector"):
+                subclass_audit.parse_vector(incomplete)
+
     def test_aabb_output_requires_all_five_cases_and_exact_provider(self):
         with tempfile.TemporaryDirectory() as directory:
             jar = Path(directory) / "candidate.jar"
