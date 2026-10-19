@@ -1,12 +1,19 @@
 import os
+import copy
+import json
+import shutil
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import full_klib_consumer as route
+import independent_gates
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+ARCHIVE = os.environ.get("DYN4K_FULL_KLIB_ARCHIVE")
+TRUSTED = os.environ.get("DYN4K_FULL_KLIB_TRUSTED_TOOLCHAIN")
 
 
 class FullKlibConsumerTests(unittest.TestCase):
@@ -56,6 +63,121 @@ class FullKlibConsumerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             route._tap(tap.replace(b"ok 1 - equalDistanceEdges", b"ok 1 - fakeMethod"),
                        selected)
+
+    @unittest.skipUnless(ARCHIVE and TRUSTED, "requires retained real full KLIB archive")
+    def test_public_replay_and_resealed_adverse_archive(self):
+        original = Path(ARCHIVE)
+        receipt = json.loads((original / "receipt.json").read_bytes())
+        trusted = json.loads(Path(TRUSTED).read_bytes())
+        candidate = receipt["candidate_sha"]
+        lane = receipt["lane"]
+        hashes = receipt["artifact_hashes"]
+        identity = receipt["runtime_identity"]
+
+        def check(path, current_receipt):
+            return route.verify(path, REPOSITORY, candidate, lane, hashes, identity,
+                                independent_gates.archive_digest(path), trusted)
+
+        self.assertEqual(check(original, receipt)["status"], "PASSED")
+
+        def copied(directory):
+            path = Path(directory) / "archive"
+            shutil.copytree(original, path, copy_function=shutil.copy2)
+            return path, copy.deepcopy(receipt)
+
+        def reseal(path, changed):
+            for item in changed["files"]:
+                file = path / item["path"]
+                os.utime(file, ns=(item["mtime_ns"], item["mtime_ns"]))
+                item["sha256"] = route.sha(file.read_bytes())
+            (path / "receipt.json").write_bytes(route.encoded(changed) + b"\n")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            changed["producer_paths"]["work_root"] = changed["producer_paths"]["checkout"]
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "aliases source checkout"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            changed["process"]["command"][-1] = "wrong:lane:task"
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "process command differs"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            changed["toolchain"]["java_sha256"] = "0" * 64
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "toolchain differs"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            changed["target"] = "wrong-target"
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "target differs"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            graph_path = path / "provider-graph.json"
+            graph = json.loads(graph_path.read_bytes())
+            provider = next(item for item in graph["compile"][0]["artifacts"]
+                            if item["component"].startswith("io.github.rubixhacker:"))
+            provider["file"] = str(REPOSITORY / "build/source-project-binary.klib")
+            graph_path.write_bytes(route.encoded(graph))
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "resolved external KLIB differs"):
+                check(path, changed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path, changed = copied(directory)
+            binary = path / changed["resolved_artifacts"]["dyn4k-core"]
+            binary.write_bytes(binary.read_bytes() + b"changed")
+            reseal(path, changed)
+            with self.assertRaisesRegex(ValueError, "resolved external KLIB differs"):
+                check(path, changed)
+
+        if lane.startswith("linuxX64:"):
+            raw = receipt["raw_consumer_xml"][0]
+            with tempfile.TemporaryDirectory() as directory:
+                path, changed = copied(directory)
+                xml_path = path / raw
+                suite = ET.fromstring(xml_path.read_bytes())
+                suite.remove(next(suite.iter("testcase")))
+                xml_path.write_bytes(ET.tostring(suite))
+                reseal(path, changed)
+                with self.assertRaisesRegex(ValueError, "native raw XML records missing"):
+                    check(path, changed)
+            with tempfile.TemporaryDirectory() as directory:
+                path, changed = copied(directory)
+                xml_path = path / raw
+                suite = ET.fromstring(xml_path.read_bytes())
+                next(suite.iter("testcase")).set("name", "fabricated[linuxX64]")
+                xml_path.write_bytes(ET.tostring(suite))
+                reseal(path, changed)
+                with self.assertRaisesRegex(ValueError, "native raw case is foreign"):
+                    check(path, changed)
+        else:
+            tap = receipt["raw_consumer_tap"][0]
+            with tempfile.TemporaryDirectory() as directory:
+                path, changed = copied(directory)
+                tap_path = path / tap
+                tap_path.write_bytes(tap_path.read_bytes().replace(b"# pass 2465", b"# pass 2464"))
+                reseal(path, changed)
+                with self.assertRaisesRegex(ValueError, "Node TAP summary differs"):
+                    check(path, changed)
+            with tempfile.TemporaryDirectory() as directory:
+                path, changed = copied(directory)
+                normal = path / "reports/normalized/core/TEST-Node.xml"
+                suite = ET.fromstring(normal.read_bytes())
+                next(suite.iter("testcase")).set("id", "fabricated:id")
+                normal.write_bytes(ET.tostring(suite))
+                reseal(path, changed)
+                with self.assertRaisesRegex(ValueError, "normalized full KLIB method IDs differ"):
+                    check(path, changed)
 
 
 if __name__ == "__main__":
