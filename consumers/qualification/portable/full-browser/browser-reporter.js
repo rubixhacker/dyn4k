@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const path = require('node:path');
 const producerKey = 'reporter:karma-kotlin-reporter';
 const plugin = config.plugins.find(candidate =>
     Object.prototype.hasOwnProperty.call(candidate, producerKey));
@@ -28,29 +29,63 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
     const selected = process.env.DYN4K_BROWSER_SELECTED_BUNDLE;
     const archive = process.env.DYN4K_BROWSER_SELECTED_ARCHIVE;
     const recordPath = process.env.DYN4K_BROWSER_SELECTED_ATTESTATION;
-    const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
-    if (files.filter(file => file === selected).length !== 1 ||
-            JSON.stringify(config.preprocessors[selected]) !== JSON.stringify(['webpack', 'sourcemap'])) {
-        throw new Error('Karma selected bundle path or preprocessor differs: ' +
-            JSON.stringify({files, selected, preprocessors: config.preprocessors}));
+    const work = process.env.DYN4K_BROWSER_WORK_ROOT;
+    const tmpdir = process.env.DYN4K_BROWSER_TMPDIR;
+    const root = path.join(work, 'root/js/node_modules');
+    const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');
+    const inputHashes = {
+        [path.join(root, 'mocha/mocha.js')]:
+            '8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6',
+        [path.join(root, 'karma-mocha/lib/adapter.js')]:
+            'd2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933',
+        [runner]: '15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18'
+    };
+    function runtimeSelection() {
+        const files = config.files.map(file => typeof file === 'string' ? file : file.pattern);
+        const webpack = path.dirname(files[0] || '');
+        if (!path.isAbsolute(tmpdir) || path.dirname(webpack) !== tmpdir ||
+                !/^_karma_webpack_[0-9]+$/.test(path.basename(webpack))) {
+            throw new Error('Karma generated webpack path differs');
+        }
+        const expected = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),
+            path.join(root, 'mocha/mocha.js'), path.join(root, 'karma-mocha/lib/adapter.js'),
+            runner, selected, path.join(webpack, '**/*')];
+        const preprocessors = config.preprocessors;
+        const expectedPreprocessors = {[runner]: ['webpack', 'sourcemap'],
+            [selected]: ['webpack', 'sourcemap']};
+        if (JSON.stringify(files) !== JSON.stringify(expected) ||
+                Object.keys(preprocessors).length !== 2 ||
+                Object.keys(expectedPreprocessors).some(key =>
+                    JSON.stringify(preprocessors[key]) !== JSON.stringify(expectedPreprocessors[key]))) {
+            throw new Error('Karma effective files or preprocessors differ');
+        }
+        for (const [name, digest] of Object.entries(inputHashes)) {
+            if (crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex') !== digest) {
+                throw new Error('Karma toolchain input differs');
+            }
+        }
+        return {effective_files: files, effective_preprocessors: expectedPreprocessors,
+            input_sha256: inputHashes, tmpdir};
     }
+    const runtime = runtimeSelection();
     let evidence = null;
     const originalBrowserStart = this.onBrowserStart;
     const originalRunComplete = this.onRunComplete;
     this.onBrowserStart = function(browser) {
         originalBrowserStart.call(this, browser);
-        if (evidence !== null) {
-            throw new Error('Karma started more than one selected browser');
+        if (evidence !== null || JSON.stringify(runtimeSelection()) !== JSON.stringify(runtime)) {
+            throw new Error('Karma runtime selection changed before browser start');
         }
         const bytes = fs.readFileSync(selected);
         fs.writeFileSync(archive, bytes, {flag: 'wx', mode: 0o600});
-        evidence = {source_path: selected, archive_path: archive,
+        evidence = {...runtime, source_path: selected, archive_path: archive,
             sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
             node_pid: process.pid, browser_id: browser.id, browser_name: browser.name,
             captured_ns: Date.now() * 1000000};
     };
     this.onRunComplete = function() {
-        if (evidence === null || crypto.createHash('sha256').update(fs.readFileSync(selected))
+        if (evidence === null || JSON.stringify(runtimeSelection()) !== JSON.stringify(runtime) ||
+                crypto.createHash('sha256').update(fs.readFileSync(selected))
                 .digest('hex') !== evidence.sha256) {
             throw new Error('Karma selected bundle changed during browser execution');
         }

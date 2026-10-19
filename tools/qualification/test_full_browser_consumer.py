@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 import json
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import full_browser_consumer as browser
 
@@ -103,38 +104,85 @@ class BrowserRowsTest(unittest.TestCase):
 
 
 class SelectedBundleTest(unittest.TestCase):
-    def test_configured_development_and_production_paths(self):
+    middle = b");\nconfig.set({webpack: createWebpackConfig()});\n\n"
+    reporter = b"const reviewedReporter = true;\n"
+    port = 34567
+
+    def settings(self, work, mode):
+        _, selected, runner = browser.bundle_paths(work, "core", mode)
+        paths = [str(runner), str(selected)]
+        return {"singleRun": True, "autoWatch": False,
+                "basePath": str(work / "root/js/packages" /
+                                "dyn4k-full-staged-browser-consumer-core-test"),
+                "files": paths, "frameworks": ["webpack-output", "mocha", "webpack"],
+                "client": {"args": []}, "browsers": ["ChromeHeadless"],
+                "customLaunchers": {}, "failOnFailingTestSuite": False,
+                "failOnEmptyTestSuite": False, "reporters": ["karma-kotlin-reporter"],
+                "preprocessors": {path: ["webpack", "sourcemap"] for path in paths},
+                "proxies": {}, "webpackCopy": []}
+
+    def config(self, settings):
+        return (browser.KARMA_HEADER + json.dumps(settings).encode() + self.middle
+                + browser.KARMA_REPORTER_MARKER + self.reporter
+                + f"\n\n// qualification-port.js\nconfig.set({{port: {self.port}}});\n\n\n\n\n}}\n".encode())
+
+    def test_configured_paths_and_later_overrides(self):
         work = Path("/evidence/build")
-        for mode in ("development", "production"):
-            with self.subTest(mode=mode):
-                linked, selected, runner = browser.bundle_paths(work, "core", mode)
-                config = {"basePath": str(work / "root/js/packages" /
-                                           "dyn4k-full-staged-browser-consumer-core-test"),
-                          "files": [str(runner), str(selected)],
-                          "preprocessors": {str(path): ["webpack", "sourcemap"]
-                                            for path in (runner, selected)},
-                          "browsers": ["ChromeHeadless"],
-                          "reporters": ["karma-kotlin-reporter"]}
-                raw = b"module.exports = function(config) {\nconfig.set(" + json.dumps(config).encode() + b");\n}"
-                self.assertEqual(browser.configured_bundle(raw, work, "core", mode),
-                                 (linked, selected))
-                config["files"][1] = str(linked if mode == "development" else runner)
-                with self.assertRaisesRegex(ValueError, "selected bundle path"):
-                    browser.configured_bundle(b"config.set(" + json.dumps(config).encode() + b");",
-                                              work, "core", mode)
+        with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256", browser.sha(self.middle)):
+            for mode in ("development", "production"):
+                with self.subTest(mode=mode):
+                    settings = self.settings(work, mode)
+                    raw = self.config(settings)
+                    self.assertEqual(browser.configured_bundle(raw, work, "core", mode,
+                                                               self.reporter, self.port),
+                                     browser.bundle_paths(work, "core", mode)[:2])
+                    for override in (b"config.set({files: [runner, selected, '/tmp/extra.js']});\n",
+                                     b"config.set({preprocessors: {'/tmp/extra.js': ['webpack']}});\n"):
+                        for marker in (browser.KARMA_REPORTER_MARKER,
+                                       b"// qualification-port.js"):
+                            changed = raw.replace(marker, override + marker)
+                            with self.subTest(override=override, marker=marker), self.assertRaisesRegex(
+                                    ValueError, "later override"):
+                                browser.configured_bundle(changed, work, "core", mode,
+                                                          self.reporter, self.port)
+                    settings["files"].append("/tmp/untracked-injection.js")
+                    with self.assertRaisesRegex(ValueError, "selected bundle path"):
+                        browser.configured_bundle(self.config(settings), work, "core", mode,
+                                                  self.reporter, self.port)
+
+    def test_effective_files_reject_extra_script_and_changed_preprocessor(self):
+        work = Path("/evidence/build")
+        tmpdir = "/evidence/tmp"
+        webpack = Path(tmpdir) / "_karma_webpack_123"
+        _, selected, runner = browser.bundle_paths(work, "core", "development")
+        root = work / "root/js/node_modules"
+        evidence = {"tmpdir": tmpdir,
+                    "effective_files": [str(webpack / "runtime.js"),
+                                        str(webpack / "commons.js"),
+                                        str(root / "mocha/mocha.js"),
+                                        str(root / "karma-mocha/lib/adapter.js"),
+                                        str(runner), str(selected), str(webpack / "**/*")],
+                    "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
+                                                for path in (runner, selected)},
+                    "input_sha256": {str(root / name): digest for name, digest
+                                     in browser.RUNTIME_INPUT_SHA256.items()}}
+        browser.effective_files(evidence, work, "core", "development")
+        evidence["effective_files"].insert(5, "/tmp/untracked-injection.js")
+        with self.assertRaisesRegex(ValueError, "effective file list"):
+            browser.effective_files(evidence, work, "core", "development")
+        evidence["effective_files"].pop(5)
+        evidence["effective_preprocessors"][str(selected)] = ["sourcemap"]
+        with self.assertRaisesRegex(ValueError, "preprocessors"):
+            browser.effective_files(evidence, work, "core", "development")
 
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             work = folder / "build"
             linked, selected, runner = browser.bundle_paths(work, "core", "development")
-            config = {"basePath": str(selected.parent.parent),
-                      "files": [str(runner), str(selected)],
-                      "preprocessors": {str(path): ["webpack", "sourcemap"]
-                                        for path in (runner, selected)},
-                      "browsers": ["ChromeHeadless"],
-                      "reporters": ["karma-kotlin-reporter"]}
-            (folder / "karma.conf.js").write_bytes(b"config.set(" + json.dumps(config).encode() + b");")
+            config = self.settings(work, "development")
+            (folder / "karma.conf.js").write_bytes(self.config(config))
+            (folder / "browser-reporter.js").write_bytes(self.reporter)
             (folder / "linked-executable.js").write_bytes(b"linked bytes")
             (folder / "karma-selected.js").write_bytes(b"different selected bytes")
             evidence = {"source_path": str(selected), "archive_path": str(folder / "karma-selected.js"),
@@ -143,9 +191,11 @@ class SelectedBundleTest(unittest.TestCase):
                         "captured_ns": 2, "complete_ns": 3}
             (folder / "selected-bundle.json").write_text(json.dumps(evidence))
             record = {"started_ns": 1, "finished_ns": 4,
-                      "linked_sha256": browser.sha(b"linked bytes")}
-            with self.assertRaisesRegex(ValueError, "selected bundle bytes"):
-                browser.selected_bundle(folder, work, "core", "development", record, 155)
+                      "linked_sha256": browser.sha(b"linked bytes"), "karma_port": self.port}
+            with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256",
+                                   browser.sha(self.middle)):
+                with self.assertRaisesRegex(ValueError, "selected bundle bytes"):
+                    browser.selected_bundle(folder, work, "core", "development", record, 155)
 
 
 if __name__ == "__main__":

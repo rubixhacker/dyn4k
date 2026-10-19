@@ -38,6 +38,16 @@ REPORTER = f"{CONSUMER}/browser-reporter.js"
 YARN_LOCK = f"{CONSUMER}/consumer-yarn.lock"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
+KARMA_GENERATED_MIDDLE_SHA256 = "35656914fc122e8c2ba55672df48b25940f625308f580e4b59a5bc8bacc580e6"
+LEGACY_CANDIDATE_SHA = "2e3665ba110e18d9669f847eb714e31befa391ce"
+LEGACY_REPORTER_SHA256 = "f2d7b210b5246339700370af19f595061ae908a9c7943371a36b75e7c2101f99"
+KARMA_HEADER = b"\nmodule.exports = function(config) {\n\nconfig.set("
+KARMA_REPORTER_MARKER = b"// qualification-browser-reporter.js\n"
+RUNTIME_INPUT_SHA256 = {
+    "mocha/mocha.js": "8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6",
+    "karma-mocha/lib/adapter.js": "d2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933",
+    "kotlin-web-helpers/dist/kotlin-test-karma-runner.js": "15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18",
+}
 
 
 def sha(data):
@@ -244,33 +254,82 @@ def bundle_paths(work, short, mode):
     return linked, selected, runner
 
 
-def configured_bundle(raw, work, short, mode):
-    match = re.search(rb"config\.set\(\s*", raw)
-    if match is None:
-        raise ValueError("archived Karma configuration has no base settings")
+def configured_bundle(raw, work, short, mode, reporter, port):
+    if not raw.startswith(KARMA_HEADER):
+        raise ValueError("archived Karma configuration header differs")
     try:
-        configuration, _ = json.JSONDecoder().raw_decode(raw[match.end():].decode())
+        decoded = raw[len(KARMA_HEADER):].decode()
+        configuration, end = json.JSONDecoder().raw_decode(decoded)
     except (UnicodeDecodeError, ValueError):
         raise ValueError("archived Karma base settings are invalid") from None
     linked, selected, runner = bundle_paths(work, short, mode)
     paths = [str(runner), str(selected)]
-    if (configuration.get("basePath") != str(work / "root/js/packages" /
-                                               f"dyn4k-full-staged-browser-consumer-{short}-test")
-            or configuration.get("files") != paths
-            or configuration.get("preprocessors") != {path: ["webpack", "sourcemap"] for path in paths}
-            or configuration.get("browsers") != ["ChromeHeadless"]
-            or configuration.get("reporters") != ["karma-kotlin-reporter"]):
+    expected = {
+        "singleRun": True, "autoWatch": False,
+        "basePath": str(work / "root/js/packages" /
+                        f"dyn4k-full-staged-browser-consumer-{short}-test"),
+        "files": paths, "frameworks": ["webpack-output", "mocha", "webpack"],
+        "client": {"args": []}, "browsers": ["ChromeHeadless"],
+        "customLaunchers": {}, "failOnFailingTestSuite": False,
+        "failOnEmptyTestSuite": False, "reporters": ["karma-kotlin-reporter"],
+        "preprocessors": {path: ["webpack", "sourcemap"] for path in paths},
+        "proxies": {}, "webpackCopy": [],
+    }
+    if configuration != expected:
         raise ValueError("archived Karma selected bundle path or preprocessor differs")
+    offset = len(KARMA_HEADER) + len(decoded[:end].encode())
+    marker = raw.find(KARMA_REPORTER_MARKER, offset)
+    if (marker < 0 or sha(raw[offset:marker]) != KARMA_GENERATED_MIDDLE_SHA256
+            or raw.count(KARMA_REPORTER_MARKER) != 1):
+        raise ValueError("archived Karma generated settings or later override differs")
+    suffix = raw[marker + len(KARMA_REPORTER_MARKER):]
+    if not suffix.startswith(reporter):
+        raise ValueError("archived Karma reporter script differs")
+    suffix = suffix[len(reporter):]
+    port_match = re.fullmatch(
+        rb"\n\n// qualification-port\.js\nconfig\.set\(\{port: ([1-9][0-9]{0,4})\}\);\n{5}\}\n",
+        suffix)
+    if port_match is None or int(port_match[1]) != port or not 1 <= port <= 65535:
+        raise ValueError("archived Karma port or later override differs")
     return linked, selected
 
 
-def selected_bundle(folder, work, short, mode, process_record, major):
-    linked, selected = configured_bundle((folder / "karma.conf.js").read_bytes(), work, short, mode)
+def effective_files(evidence, work, short, mode):
+    files = evidence.get("effective_files")
+    preprocessors = evidence.get("effective_preprocessors")
+    inputs = evidence.get("input_sha256")
+    tmpdir = evidence.get("tmpdir")
+    if (not isinstance(files, list) or len(files) != 7
+            or not all(isinstance(value, str) for value in files)
+            or not isinstance(tmpdir, str) or not Path(tmpdir).is_absolute()):
+        raise ValueError("Karma effective file list differs")
+    webpack = Path(files[0]).parent
+    if (webpack.parent != Path(tmpdir)
+            or not re.fullmatch(r"_karma_webpack_[0-9]+", webpack.name)):
+        raise ValueError("Karma generated webpack path differs")
+    _, selected, runner = bundle_paths(work, short, mode)
+    root = work / "root/js/node_modules"
+    expected = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+                str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+                str(runner), str(selected), str(webpack / "**/*")]
+    if (files != expected
+            or preprocessors != {str(runner): ["webpack", "sourcemap"],
+                                 str(selected): ["webpack", "sourcemap"]}
+            or inputs != {str(root / name): digest for name, digest in RUNTIME_INPUT_SHA256.items()}):
+        raise ValueError("Karma effective files, preprocessors, or toolchain inputs differ")
+
+
+def selected_bundle(folder, work, short, mode, process_record, major, require_effective=False):
+    linked, selected = configured_bundle(
+        (folder / "karma.conf.js").read_bytes(), work, short, mode,
+        (folder / "browser-reporter.js").read_bytes(), process_record["karma_port"])
     evidence = json.loads((folder / "selected-bundle.json").read_text())
     selected_bytes = (folder / "karma-selected.js").read_bytes()
     linked_bytes = (folder / "linked-executable.js").read_bytes()
-    if (set(evidence) != {"source_path", "archive_path", "sha256", "node_pid",
-                          "browser_id", "browser_name", "captured_ns", "complete_ns"}
+    base_keys = {"source_path", "archive_path", "sha256", "node_pid",
+                 "browser_id", "browser_name", "captured_ns", "complete_ns"}
+    effective_keys = {"effective_files", "effective_preprocessors", "input_sha256", "tmpdir"}
+    if (set(evidence) != base_keys | (effective_keys if require_effective else set())
             or evidence["source_path"] != str(selected)
             or evidence["archive_path"] != str(folder / "karma-selected.js")
             or evidence["sha256"] != sha(selected_bytes)
@@ -286,6 +345,8 @@ def selected_bundle(folder, work, short, mode, process_record, major):
             or not (process_record["started_ns"] <= evidence["captured_ns"]
                     <= evidence["complete_ns"] <= process_record["finished_ns"])):
         raise ValueError("Karma-selected bundle bytes or source-process binding differs")
+    if require_effective:
+        effective_files(evidence, work, short, mode)
     return linked, selected
 
 
@@ -417,7 +478,9 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                               DYN4K_BROWSER_REPORTER_SOURCE=str(reporter),
                               DYN4K_BROWSER_SELECTED_BUNDLE=str(configured),
                               DYN4K_BROWSER_SELECTED_ARCHIVE=str(destination / "karma-selected.js"),
-                              DYN4K_BROWSER_SELECTED_ATTESTATION=str(destination / "selected-bundle.json"))
+                              DYN4K_BROWSER_SELECTED_ATTESTATION=str(destination / "selected-bundle.json"),
+                              DYN4K_BROWSER_WORK_ROOT=str(work),
+                              DYN4K_BROWSER_TMPDIR=os.environ["TMPDIR"])
             command = base + [f":{short}:jsBrowserTest"]
             execution = process(command, inputs, module_env,
                                 destination / "gradle.stdout", destination / "gradle.stderr")
@@ -448,10 +511,11 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes):
                     or "DYN4K_BROWSER_RAW_KARMA" not in generated.read_text()):
                 raise ValueError("external browser Karma configuration lacks isolated port")
             copy(generated, destination / "karma.conf.js")
-            selected_bundle(destination, work, short, configuration, processes[short], major)
+            copy(reporter, destination / "browser-reporter.js")
+            selected_bundle(destination, work, short, configuration, processes[short], major,
+                            require_effective=True)
             if not launches.is_file() or not attestation.is_file() or not raw_karma.is_file():
                 raise ValueError("real browser process or reporter producer is absent")
-            copy(reporter, destination / "browser-reporter.js")
             if json.loads(attestation.read_text()) != {
                     "path": str(reporter), "sha256": file_hash(reporter),
                     "producer_path": str(work / "root/js/node_modules/kotlin-web-helpers/dist/karma-kotlin-reporter.js"),
@@ -610,7 +674,11 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes):
                 or record["started_ns"] > record["finished_ns"]
                 or file_hash(folder / "karma.conf.js") == sha(b"")):
             raise ValueError("original Gradle or Karma process differs")
-        selected_bundle(folder, Path(paths["work"]), short, mode, record, major)
+        selected_bundle(folder, Path(paths["work"]), short, mode, record, major,
+                        require_effective=not (
+                            candidate == LEGACY_CANDIDATE_SHA
+                            and receipt["browser_support_sha256"][REPORTER]
+                            == LEGACY_REPORTER_SHA256))
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = (f"{receipt['paths']['work']}/{short}/compileSync/js/test/"
