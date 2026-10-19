@@ -2,6 +2,8 @@ import copy
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -13,9 +15,83 @@ import independent_gates
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 ARCHIVE = os.environ.get("DYN4K_FULL_JVM_ARCHIVE")
+JAVA_EXECUTABLE_SHA256 = "2a207f5e7d075afa01d97f8048389a64432a44c4a5af0f5e77d6e286ec5f401d"
+GRADLE_EXECUTABLE_SHA256 = "b88b6fc9f41fba7bf456a3f8255ee5b7c6c379202ca13f68c3feecebcbc7bd8b"
+
+
+def verify_archive(root, repository, candidate, hashes, identity, digest):
+    return route.verify(root, repository, candidate, hashes, identity, digest,
+                        JAVA_EXECUTABLE_SHA256, GRADLE_EXECUTABLE_SHA256)
 
 
 class FullJvmConsumerTests(unittest.TestCase):
+    def test_independent_executable_hash_arguments_are_required(self):
+        for java_hash, gradle_hash in (
+                (None, GRADLE_EXECUTABLE_SHA256),
+                (JAVA_EXECUTABLE_SHA256, None),
+                ("x" * 64, GRADLE_EXECUTABLE_SHA256),
+                (JAVA_EXECUTABLE_SHA256, "x" * 64)):
+            with self.subTest(java_hash=java_hash, gradle_hash=gradle_hash):
+                with self.assertRaisesRegex(ValueError, "independent.*executable"):
+                    route.verify("missing-archive", REPOSITORY, "0" * 40, {}, "Java",
+                                 "0" * 64, java_hash, gradle_hash)
+
+    @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
+    def test_resealed_forged_toolchain_hashes_fail_public_verify(self):
+        root = Path(ARCHIVE)
+        receipt = json.loads((root / "receipt.json").read_bytes())
+        changes = (
+            {"java_executable_sha256": "0" * 64},
+            {"gradle_executable_sha256": "1" * 64},
+            {"java_executable_sha256": "0" * 64,
+             "gradle_executable_sha256": "1" * 64},
+        )
+        for changed in changes:
+            with self.subTest(fields=tuple(changed)), tempfile.TemporaryDirectory() as directory:
+                copied = Path(directory) / "forged"
+                shutil.copytree(root, copied, copy_function=shutil.copy2)
+                forged = copy.deepcopy(receipt)
+                forged["toolchain"].update(changed)
+                (copied / "receipt.json").write_bytes(route.encoded(forged) + b"\n")
+                digest = independent_gates.archive_digest(copied)
+                with self.assertRaisesRegex(ValueError, "independent.*executable"):
+                    verify_archive(copied, REPOSITORY, forged["candidate_sha"],
+                                   forged["artifact_hashes"], forged["runtime_identity"], digest)
+
+    @unittest.skipUnless(ARCHIVE, "requires retained real full JVM archive")
+    def test_public_cli_requires_independent_executable_hashes(self):
+        root = Path(ARCHIVE)
+        receipt = json.loads((root / "receipt.json").read_bytes())
+        base = [sys.executable, str(REPOSITORY / "tools/qualification/full_jvm_consumer.py"),
+                "verify", "--repository", str(REPOSITORY), "--candidate-sha",
+                receipt["candidate_sha"], "--archive", str(root),
+                "--expected-core-sha256", receipt["artifact_hashes"]["dyn4k-core"],
+                "--expected-facade-sha256", receipt["artifact_hashes"]["dyn4k"],
+                "--runtime-identity", receipt["runtime_identity"],
+                "--expected-archive-digest", independent_gates.archive_digest(root)]
+        java = ["--expected-java-executable-sha256", JAVA_EXECUTABLE_SHA256]
+        gradle = ["--expected-gradle-executable-sha256", GRADLE_EXECUTABLE_SHA256]
+        positive = subprocess.run(base + java + gradle, capture_output=True, text=True)
+        self.assertEqual(positive.returncode, 0, positive.stderr)
+        self.assertEqual(json.loads(positive.stdout)["selected_cases"], 2526)
+        adverse = (
+            (base + java, "required"),
+            (base + gradle, "required"),
+            (base + ["--expected-java-executable-sha256", "x" * 64] + gradle,
+             "independent Java and Gradle executable SHA-256 values are required"),
+            (base + java + ["--expected-gradle-executable-sha256", "x" * 64],
+             "independent Java and Gradle executable SHA-256 values are required"),
+            (base + ["--expected-java-executable-sha256", "0" * 64] + gradle,
+             "independent Java or Gradle executable SHA-256 differs from receipt"),
+            (base + java + ["--expected-gradle-executable-sha256", "1" * 64],
+             "independent Java or Gradle executable SHA-256 differs from receipt"),
+        )
+        for arguments, error in adverse:
+            with self.subTest(arguments=arguments[-2:]):
+                result = subprocess.run(arguments, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+
     def test_original_xml_maps_only_approved_identity(self):
         raw = (b'<testsuite tests="1" failures="0" errors="0" skipped="0" time="1">'
                b'<testcase classname="a.B" name="method" time="1"/></testsuite>')
@@ -48,7 +124,7 @@ class FullJvmConsumerTests(unittest.TestCase):
         hashes = receipt["artifact_hashes"]
         identity = receipt["runtime_identity"]
         digest = independent_gates.archive_digest(root)
-        positive = route.verify(root, REPOSITORY, candidate, hashes, identity, digest)
+        positive = verify_archive(root, REPOSITORY, candidate, hashes, identity, digest)
         self.assertEqual(positive["status"], "PASSED")
         self.assertEqual(positive["selected_cases"], 2526)
         lane = independent_gates.evaluate(
@@ -90,8 +166,8 @@ class FullJvmConsumerTests(unittest.TestCase):
             copied, altered = copied_archive(directory)
             (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
             copied_digest = independent_gates.archive_digest(copied)
-            self.assertEqual(route.verify(copied, REPOSITORY, candidate, hashes,
-                                          identity, copied_digest)["status"], "PASSED")
+            self.assertEqual(verify_archive(copied, REPOSITORY, candidate, hashes,
+                                            identity, copied_digest)["status"], "PASSED")
 
         for mutation in ("missing", "duplicate", "foreign", "skipped"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
@@ -119,7 +195,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                 digest = reseal(copied, altered, {raw_rel: "RAW_XML",
                                                   normal_rel: "CONSUMER_XML"})
                 with self.assertRaises(ValueError):
-                    route.verify(copied, REPOSITORY, candidate, hashes, identity, digest)
+                    verify_archive(copied, REPOSITORY, candidate, hashes, identity, digest)
 
         for mutation in ("source-inventory", "source-build", "binary-bytes"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
@@ -144,7 +220,7 @@ class FullJvmConsumerTests(unittest.TestCase):
                     path.write_bytes(data)
                 digest = reseal(copied, altered, {relative: marker})
                 with self.assertRaises(ValueError):
-                    route.verify(copied, REPOSITORY, candidate, hashes, identity, digest)
+                    verify_archive(copied, REPOSITORY, candidate, hashes, identity, digest)
 
         for mutation in ("different-input", "wrong-home", "missing-toolchain"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
@@ -159,11 +235,11 @@ class FullJvmConsumerTests(unittest.TestCase):
                     del altered["toolchain"]["java_executable_sha256"]
                 (copied / "receipt.json").write_bytes(route.encoded(altered) + b"\n")
                 with self.assertRaises(ValueError):
-                    route.verify(copied, REPOSITORY, candidate, hashes, identity,
-                                 independent_gates.archive_digest(copied))
+                    verify_archive(copied, REPOSITORY, candidate, hashes, identity,
+                                   independent_gates.archive_digest(copied))
 
         with self.assertRaises(ValueError):
-            route.verify(root, REPOSITORY, "0" * 40, hashes, identity, digest)
+            verify_archive(root, REPOSITORY, "0" * 40, hashes, identity, digest)
 
 
 if __name__ == "__main__":

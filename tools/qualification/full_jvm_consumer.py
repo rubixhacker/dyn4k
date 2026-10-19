@@ -204,7 +204,15 @@ def _same_report(raw, normalized, case_map):
 
 
 def verify(root, repository, candidate, expected_hashes, runtime_identity,
-           expected_archive_digest):
+           expected_archive_digest, expected_java_executable_sha256=None,
+           expected_gradle_executable_sha256=None):
+    expected_executables = {
+        "java_executable_sha256": expected_java_executable_sha256,
+        "gradle_executable_sha256": expected_gradle_executable_sha256,
+    }
+    if any(type(value) is not str or not SHA256.fullmatch(value)
+           for value in expected_executables.values()):
+        raise ValueError("independent Java and Gradle executable SHA-256 values are required")
     root, repository = Path(root), Path(repository).resolve()
     if not root.is_dir() or root.is_symlink():
         raise ValueError("full JVM archive is missing or symbolic")
@@ -250,6 +258,8 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
             or any(not Path(toolchain[key]).is_absolute()
                    for key in ("java_home", "gradle_user_home"))):
         raise ValueError("producer paths or pinned toolchain are incomplete")
+    if any(toolchain[key] != value for key, value in expected_executables.items()):
+        raise ValueError("independent Java or Gradle executable SHA-256 differs from receipt")
     inputs = Path(paths["inputs"])
     expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
                         "--offline", "--no-daemon", "--console=plain", "--rerun-tasks",
@@ -354,6 +364,8 @@ def main():
     replay.add_argument("--expected-facade-sha256", required=True)
     replay.add_argument("--runtime-identity", required=True)
     replay.add_argument("--expected-archive-digest", required=True)
+    replay.add_argument("--expected-java-executable-sha256", required=True)
+    replay.add_argument("--expected-gradle-executable-sha256", required=True)
     args = parser.parse_args()
     if args.action == "prepare":
         result = prepare(args.repository, args.candidate_sha, args.destination)
@@ -368,7 +380,9 @@ def main():
         hashes = {"dyn4k-core": args.expected_core_sha256,
                   "dyn4k": args.expected_facade_sha256}
         result = verify(args.archive, args.repository, args.candidate_sha,
-                        hashes, args.runtime_identity, args.expected_archive_digest)
+                        hashes, args.runtime_identity, args.expected_archive_digest,
+                        args.expected_java_executable_sha256,
+                        args.expected_gradle_executable_sha256)
     print(json.dumps(result, sort_keys=True))
 
 
