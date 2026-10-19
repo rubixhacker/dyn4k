@@ -23,13 +23,9 @@ VALID_HEAP_STDOUT = (b"DYN4K\tHEAP\tconstructed\t1024\t1\n"
 # This lock prevents unparsed YAML forms from bypassing the run-size scanner.
 # After a workflow edit, independently parse every run value before updating its digest.
 AUDITED_WORKFLOW_SHA256 = {
-    "full-hosted-mac-product-diagnostic.yml": "cef244e7f6ee8864313754dbd030e20fa34ec6d43dc3742b66b1b9f3a4191405",
-    "full-hosted-safari-product-diagnostic.yml": "217aa4242e7f2127d72b0829975862640879f6106d7d5342547b204fd4f557a8",
-    "performance-mobile-short.yml": "a9c54ce5a13750cbb89dc47bac1cdd7e4d348f7c09574e1b16cfa0ce7eca34cb",
-    "performance-host-capacity-control.yml": "1bf19a013aa4849e174e379d7bf808b419841fdfd0b670dcd34639ac080e22a6",
-    "performance-native-host-short.yml": "8734fe00cdd6bb55cc8df847979b6d3c55fe9fe54efe06930d61d17466d54654",
-    "qualification.yml": "f999ef07987d86706edb7af80aeb0856f87af716a67f0ecf98b03b007d05d34e",
-    "safari-yarn-lock-diagnostic.yml": "60789e5d019be7109d9d16c39d5803f2cf50c57d99ca2ddb69602803234a8401",
+    "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
+    "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
+    "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
@@ -182,7 +178,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertGreaterEqual(checked, 67)
+        self.assertEqual(checked, 49)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
@@ -214,7 +210,11 @@ class WorkflowExpressionLimit(unittest.TestCase):
             self.audit_workflow_sources(removed)
 
     def test_native_run_is_below_limit_and_all_workflows_are_audited(self):
-        self.audit_workflow_sources(self.workflow_sources())
+        sources = self.workflow_sources()
+        self.audit_workflow_sources(sources)
+        for name, source in sources.items():
+            with self.subTest(workflow=name):
+                self.assertNotRegex(source, r"(?m)^\s*runs-on:\s*.*\bmacos-[\w-]+")
 
 
 def workflow_nodes():
@@ -809,7 +809,12 @@ class HostedRawFileContract(unittest.TestCase):
         self.assertIn('run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"', source)
         self.assertNotIn("python -B - <<'PY'", source)
         self.assertIn('if Path(__file__).resolve() != selected_runner:', RUNNER.read_text())
-        self.assertIn("macos-26", source)
+        self.assertNotRegex(source, r"(?m)^\s*runs-on:\s*.*\bmacos-[\w-]+")
+        local_mac_route = re.sub(
+            r"\s+", " ", Path(__file__).with_name("native-hosted-short.md").read_text())
+        self.assertIn("Run `macosArm64` on the installed local Mac over SSH with Xcode 26.5",
+                      local_mac_route)
+        self.assertIn("Do not dispatch the GitHub-hosted macOS workflow.", local_mac_route)
         self.assertIn("windows-2025", source)
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)
