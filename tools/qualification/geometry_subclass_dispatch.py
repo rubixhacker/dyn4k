@@ -60,11 +60,12 @@ def main():
     parser.add_argument("--candidate-jar", required=True, type=Path)
     parser.add_argument("--kotlin-stdlib", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--java-home", type=Path, default=Path("/tmp/dyn4k-tools/jdk21"))
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     fixture = Path(__file__).with_name("fixtures") / "GeometrySubclassDispatch.java"
-    java_home = Path("/tmp/dyn4k-tools/jdk21")
+    java_home = args.java_home
     env = os.environ.copy()
     env.pop("OLLAMA_API_KEY", None)
     baseline_hash = sha256(args.baseline_jar)

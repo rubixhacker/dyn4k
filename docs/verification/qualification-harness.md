@@ -80,6 +80,8 @@ Statuses have distinct meanings: `PASSED` has complete evidence; `FAILED` has at
 
 ## Local commands
 
+The Ubuntu workflow runs `tools/qualification/subclass_audit.py` after the staged artifact audit. It replays that audit against the current checkout, selects the audited `dyn4k-core` JVM JAR, and runs the vector, AABB, geometry, and joint/AVL Java subclass fixtures on JDK 8 and JDK 21. Each run writes a receipt and separate process output under `subclass-dispatch/<jdk>/`. A historical JAR can be examined with `--diagnostic-jar`, but that mode reports `UNQUALIFIED` or `UNQUALIFIED_FAILED` and cannot accept candidate commit or audit arguments. A passing subclass control is scoped JVM evidence; it does not pass a full runtime lane.
+
 Set JDK 21 and the Android SDK paths for this pinned build. Stage the two module roots and the target publications you can build with Gradle. Then run:
 
 ```sh
