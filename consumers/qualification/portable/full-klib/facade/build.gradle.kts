@@ -55,3 +55,8 @@ tasks.named<KotlinCompilationTask<*>>("compileTestKotlinJs") {
         listOf("-Xfriend-modules=${friend("jsTestCompileClasspath").absolutePath}")
     })
 }
+tasks.named<KotlinCompilationTask<*>>("compileTestDevelopmentExecutableKotlinJs") {
+    compilerOptions.freeCompilerArgs.addAll(providers.provider {
+        listOf("-Xfriend-modules=${friend("jsTestCompileClasspath").absolutePath}")
+    })
+}
