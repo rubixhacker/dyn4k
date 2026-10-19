@@ -45,6 +45,8 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             'db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f',
         [path.join(root, 'karma/lib/file-list.js')]:
             'b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22',
+        [path.join(root, 'karma/lib/preprocessor.js')]:
+            '0ad9180342ad37e9a1782105a98df0b60225598fd5ccd66016fd90fbb49230f5',
         [path.join(root, 'karma-mocha/lib/index.js')]:
             '4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b',
         [path.join(root, 'karma-webpack/lib/karma-webpack/framework.js')]:
@@ -62,13 +64,16 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
         }
         const createPatternObject = require('karma/lib/config').createPatternObject;
         const files = config.files.map(file => {
+            if (file.isBinary !== undefined) {
+                throw new Error('Karma effective binary pattern differs');
+            }
             const pattern = createPatternObject(file);
             if (pattern.type !== undefined) {
                 throw new Error('Karma effective pattern type differs');
             }
             return {pattern: pattern.pattern, served: pattern.served,
                 included: pattern.included, watched: pattern.watched,
-                nocache: pattern.nocache, type: null};
+                nocache: pattern.nocache, type: null, isBinary: null};
         });
         const webpack = path.dirname((files[0] || {}).pattern || '');
         if (!path.isAbsolute(tmpdir) || path.dirname(webpack) !== tmpdir ||
@@ -80,7 +85,7 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
             runner, selected, path.join(webpack, '**/*')];
         const expected = expectedPaths.map((pattern, index) => ({pattern,
             served: true, included: index !== 6, watched: false,
-            nocache: false, type: null}));
+            nocache: false, type: null, isBinary: null}));
         const preprocessors = config.preprocessors;
         const expectedPreprocessors = {[runner]: ['webpack', 'sourcemap'],
             [selected]: ['webpack', 'sourcemap']};

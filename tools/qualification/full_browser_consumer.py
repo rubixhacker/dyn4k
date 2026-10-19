@@ -50,6 +50,7 @@ RUNTIME_INPUT_SHA256 = {
     "karma/lib/config.js": "fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42",
     "karma/lib/helper.js": "db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f",
     "karma/lib/file-list.js": "b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22",
+    "karma/lib/preprocessor.js": "0ad9180342ad37e9a1782105a98df0b60225598fd5ccd66016fd90fbb49230f5",
     "karma-mocha/lib/index.js": "4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b",
     "karma-webpack/lib/karma-webpack/framework.js": "705fc7f4d211eee26beb549758d8ea39f502a7385c2a43756bc71e3003c99ca9",
     "karma-webpack/lib/karma-webpack/preprocessor.js": "6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6",
@@ -308,7 +309,7 @@ def effective_files(evidence, work, short, mode):
     tmpdir = evidence.get("tmpdir")
     if (not isinstance(files, list) or len(files) != 7
             or not all(isinstance(value, dict) and set(value) == {
-                "pattern", "served", "included", "watched", "nocache", "type"}
+                "pattern", "served", "included", "watched", "nocache", "type", "isBinary"}
                        and isinstance(value["pattern"], str) for value in files)
             or not isinstance(tmpdir, str) or not Path(tmpdir).is_absolute()):
         raise ValueError("Karma effective file list differs")
@@ -323,11 +324,11 @@ def effective_files(evidence, work, short, mode):
              str(runner), str(selected), str(webpack / "**/*")]
     expected = [{"pattern": path, "served": True, "included": index != 6,
                  "watched": False, "nocache": False,
-                 "type": None} for index, path in enumerate(paths)]
+                 "type": None, "isBinary": None} for index, path in enumerate(paths)]
     if (files != expected or any(
             type(value[key]) is not type(reference[key])
             for value, reference in zip(files, expected)
-            for key in ("served", "included", "watched", "nocache", "type"))
+            for key in ("served", "included", "watched", "nocache", "type", "isBinary"))
             or preprocessors != {str(runner): ["webpack", "sourcemap"],
                                  str(selected): ["webpack", "sourcemap"]}
             or inputs != {str(root / name): digest for name, digest in RUNTIME_INPUT_SHA256.items()}):

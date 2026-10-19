@@ -161,7 +161,7 @@ class SelectedBundleTest(unittest.TestCase):
                     "effective_files": [{"pattern": path, "served": True,
                                          "included": index != 6, "watched": False,
                                          "nocache": False,
-                                         "type": None}
+                                         "type": None, "isBinary": None}
                                         for index, path in enumerate((
                                             str(webpack / "runtime.js"),
                                             str(webpack / "commons.js"),
@@ -195,7 +195,7 @@ class SelectedBundleTest(unittest.TestCase):
                     "effective_files": [{"pattern": path, "served": True,
                                          "included": index != 6, "watched": False,
                                          "nocache": False,
-                                         "type": None}
+                                         "type": None, "isBinary": None}
                                         for index, path in enumerate(paths)],
                     "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
                                                 for path in (runner, selected)},
@@ -204,13 +204,17 @@ class SelectedBundleTest(unittest.TestCase):
         browser.effective_files(evidence, work, "core", "development")
         for field, changed in (("included", False), ("served", False),
                                ("watched", True), ("nocache", None),
-                               ("type", "module"), ("included", 1)):
+                               ("type", "module"), ("isBinary", True),
+                               ("isBinary", False), ("included", 1)):
             with self.subTest(field=field, changed=changed):
                 original = evidence["effective_files"][5][field]
                 evidence["effective_files"][5][field] = changed
                 with self.assertRaisesRegex(ValueError, "effective files"):
                     browser.effective_files(evidence, work, "core", "development")
                 evidence["effective_files"][5][field] = original
+        del evidence["effective_files"][5]["isBinary"]
+        with self.assertRaisesRegex(ValueError, "effective file list"):
+            browser.effective_files(evidence, work, "core", "development")
 
     def test_reporter_node_vm_rejects_unserved_or_excluded_selected_script(self):
         script = "\n".join((
@@ -244,7 +248,9 @@ class SelectedBundleTest(unittest.TestCase):
             "const fakeFs = {readFileSync: name => Buffer.from(name), realpathSync: name => name,",
             "    writeFileSync: () => {}, openSync: () => 1};",
             "const fakeCrypto = {createHash: () => ({update(data) {this.name = data.toString(); return this;},",
-            "    digest() {return digests.get(path.basename(this.name)) || '0'.repeat(64);}})};",
+            "    digest() {return this.name.endsWith('/karma/lib/preprocessor.js')",
+            "        ? '0ad9180342ad37e9a1782105a98df0b60225598fd5ccd66016fd90fbb49230f5'",
+            "        : digests.get(path.basename(this.name)) || '0'.repeat(64);}})};",
             "function fakeRequire(name) {",
             "    if (name === 'node:fs') return fakeFs;",
             "    if (name === 'node:crypto') return fakeCrypto;",
@@ -289,6 +295,91 @@ class SelectedBundleTest(unittest.TestCase):
                                    check=False, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_reporter_real_karma_pattern_rejects_binary_selected_script(self):
+        cache = Path("/var/home/stewart/dyn4k-evidence/session-control/"
+                     "full-browser-f565-review-findings-sol-current-development-attempt3-build")
+        reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
+        script = "\n".join((
+            "const assert = require('node:assert/strict');",
+            "const crypto = require('node:crypto');",
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const vm = require('node:vm');",
+            "const {createRequire} = require('node:module');",
+            "const source = fs.readFileSync(process.argv[1], 'utf8');",
+            "const work = process.argv[2];",
+            "const root = path.join(work, 'root/js/node_modules');",
+            "const karma = createRequire(path.join(root, 'karma/package.json'))('karma/lib/config');",
+            "const tmpdir = process.env.TMPDIR;",
+            "const webpack = path.join(tmpdir, '_karma_webpack_123');",
+            "const name = 'dyn4k-full-staged-browser-consumer-core-test';",
+            "const selected = path.join(work, 'root/js/packages', name, 'kotlin', name + '.js');",
+            "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
+            "const paths = [path.join(webpack, 'runtime.js'), path.join(webpack, 'commons.js'),",
+            "    path.join(root, 'mocha/mocha.js'), path.join(root, 'karma-mocha/lib/adapter.js'),",
+            "    runner, selected, path.join(webpack, '**/*')];",
+            "const files = paths.map((pattern, index) => {",
+            "    if (index === 4 || index === 5) {",
+            "        const file = karma.createPatternObject(pattern);",
+            "        file.watched = false;",
+            "        return file;",
+            "    }",
+            "    return {pattern, served: true, included: index !== 6, watched: false};",
+            "});",
+            "function OriginalReporter() {",
+            "    this.write = () => {};",
+            "    this.onBrowserStart = () => {};",
+            "    this.onRunComplete = () => {};",
+            "}",
+            "OriginalReporter.$inject = [];",
+            "const key = 'reporter:karma-kotlin-reporter';",
+            "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files,",
+            "    preprocessors: {[runner]: ['webpack', 'sourcemap'],",
+            "        [selected]: ['webpack', 'sourcemap']}};",
+            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync,",
+            "    writeFileSync: () => {}, openSync: () => 1};",
+            "function injectedRequire(name) {",
+            "    if (name === 'node:fs') return interceptedFs;",
+            "    if (name === 'node:crypto') return crypto;",
+            "    if (name === 'node:path') return path;",
+            "    if (name === 'karma/lib/config') return karma;",
+            "    throw new Error(name);",
+            "}",
+            "injectedRequire.resolve = () => path.join(root,",
+            "    'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "const env = {DYN4K_BROWSER_REPORTER_SOURCE: process.argv[1],",
+            "    DYN4K_BROWSER_REPORTER_ATTESTATION: path.join(tmpdir, 'reporter.json'),",
+            "    DYN4K_BROWSER_RAW_KARMA: path.join(tmpdir, 'raw.jsonl'),",
+            "    DYN4K_BROWSER_SELECTED_BUNDLE: selected,",
+            "    DYN4K_BROWSER_SELECTED_ARCHIVE: path.join(tmpdir, 'selected.js'),",
+            "    DYN4K_BROWSER_SELECTED_ATTESTATION: path.join(tmpdir, 'selected.json'),",
+            "    DYN4K_BROWSER_WORK_ROOT: work, DYN4K_BROWSER_TMPDIR: tmpdir};",
+            "vm.runInNewContext(source, {config, require: injectedRequire,",
+            "    process: {env, pid: 123}, Buffer});",
+            "const Reporter = config.plugins[0][key][1];",
+            "assert.equal(config.files.length, 7);",
+            "assert.equal(Object.prototype.hasOwnProperty.call(files[0], 'isBinary'), false);",
+            "assert.equal(Object.prototype.hasOwnProperty.call(files[5], 'isBinary'), true);",
+            "assert.equal(files[5].isBinary, undefined);",
+            "assert.doesNotThrow(() => new Reporter(null, config, null));",
+            "for (let index = 0; index < files.length; index++) {",
+            "    const file = files[index];",
+            "    const owned = Object.prototype.hasOwnProperty.call(file, 'isBinary');",
+            "    const original = file.isBinary;",
+            "    file.isBinary = true;",
+            "    assert.throws(() => new Reporter(null, config, null), /binary pattern/);",
+            "    if (owned) file.isBinary = original;",
+            "    else delete file.isBinary;",
+            "}",
+            "files[5].isBinary = false;",
+            "assert.throws(() => new Reporter(null, config, null), /binary pattern/);",
+            "files[5].isBinary = undefined;",
+            "assert.doesNotThrow(() => new Reporter(null, config, null));",
+        ))
+        completed = subprocess.run(["node", "-e", script, str(reporter), str(cache)],
+                                   check=False, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -310,6 +401,49 @@ class SelectedBundleTest(unittest.TestCase):
                                    browser.sha(self.middle)):
                 with self.assertRaisesRegex(ValueError, "selected bundle bytes"):
                     browser.selected_bundle(folder, work, "core", "development", record, 155)
+
+    def test_archived_selected_record_requires_original_binary_flag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            work = folder / "build"
+            linked, selected, runner = browser.bundle_paths(work, "core", "development")
+            root = work / "root/js/node_modules"
+            webpack = folder / "tmp/_karma_webpack_123"
+            paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
+                     str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+                     str(runner), str(selected), str(webpack / "**/*")]
+            (folder / "karma.conf.js").write_bytes(self.config(self.settings(work, "development")))
+            (folder / "browser-reporter.js").write_bytes(self.reporter)
+            (folder / "linked-executable.js").write_bytes(b"same selected bytes")
+            (folder / "karma-selected.js").write_bytes(b"same selected bytes")
+            evidence = {"source_path": str(selected),
+                        "archive_path": str(folder / "karma-selected.js"),
+                        "sha256": browser.sha(b"same selected bytes"), "node_pid": 123,
+                        "browser_id": "browser-id",
+                        "browser_name": "Chrome Headless 155.0.0.0 (Linux 0.0.0)",
+                        "captured_ns": 2, "complete_ns": 3,
+                        "tmpdir": str(webpack.parent),
+                        "effective_files": [{"pattern": path, "served": True,
+                                             "included": index != 6, "watched": False,
+                                             "nocache": False, "type": None, "isBinary": None}
+                                            for index, path in enumerate(paths)],
+                        "effective_preprocessors": {str(path): ["webpack", "sourcemap"]
+                                                    for path in (runner, selected)},
+                        "input_sha256": {str(root / name): digest for name, digest
+                                         in browser.RUNTIME_INPUT_SHA256.items()}}
+            record = {"started_ns": 1, "finished_ns": 4,
+                      "linked_sha256": browser.sha(b"same selected bytes"),
+                      "karma_port": self.port}
+            with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256",
+                                   browser.sha(self.middle)):
+                (folder / "selected-bundle.json").write_text(json.dumps(evidence))
+                browser.selected_bundle(folder, work, "core", "development", record, 155,
+                                        require_effective=True)
+                evidence["effective_files"][5]["isBinary"] = True
+                (folder / "selected-bundle.json").write_text(json.dumps(evidence))
+                with self.assertRaisesRegex(ValueError, "effective files"):
+                    browser.selected_bundle(folder, work, "core", "development", record, 155,
+                                            require_effective=True)
 
 
 if __name__ == "__main__":
