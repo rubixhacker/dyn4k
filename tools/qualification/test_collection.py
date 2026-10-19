@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -157,8 +158,14 @@ class CollectionTests(unittest.TestCase):
 
     def test_workflow_runs_after_producers_and_retains_raw_results(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
-        self.assertIn("needs: [staged-jvm-and-linux, hosted-publications, hosted-native, safari-browser]",
-                      workflow)
+        central = workflow.split("  central-qualification-collection:\n", 1)[1]
+        dependencies = re.search(r"(?m)^    needs:\n((?:^      - [^\n]+\n)+)", central)
+        self.assertIsNotNone(dependencies, "central collection must declare producer dependencies")
+        self.assertEqual(
+            ["staged-jvm-and-linux", "hosted-publications", "hosted-native", "safari-browser"],
+            [line.removeprefix("      - ").rstrip("\n")
+             for line in dependencies.group(1).splitlines(keepends=True)],
+        )
         for command in ("actions/download-artifact@v4", "collection.py --verify",
                         "independent_gates.py", "qualify.py record",
                         "duplicate_provider.py", "qualification-central-${{ github.sha }}"):
