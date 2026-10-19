@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -9,19 +10,105 @@ from pathlib import Path
 
 import collection
 import independent_gates
-import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
 HEAD = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                text=True).strip()
 
+EXPECTED_CENTRAL_NEEDS = ["staged-jvm-and-linux", "hosted-publications",
+                          "hosted-native", "safari-browser"]
+EXPECTED_PUSH_BRANCHES = ["main", "codex/port-qualification-harness",
+                          "codex/dyn4k-port", "codex/port-publication-assembly"]
+
+
+def _mapping_block(lines, key, indentation, start=0, limit=None, required=True):
+    limit = len(lines) if limit is None else limit
+    header = " " * indentation + key
+    matches = [index for index in range(start, limit) if lines[index] == header]
+    if not matches:
+        if required:
+            raise AssertionError(f"missing workflow key: {key}")
+        return None
+    if len(matches) != 1:
+        raise AssertionError(f"duplicate workflow key: {key}")
+    header_index = matches[0]
+    for index in range(header_index + 1, limit):
+        line = lines[index]
+        if (line.strip() and not line.lstrip().startswith("#")
+                and line.startswith(" " * indentation)
+                and len(line) > indentation
+                and line[indentation] not in " \t"):
+            return header_index, index
+    return header_index, limit
+
+
+def _block_list_values(lines, start, end, indentation):
+    prefix = " " * indentation + "- "
+    values = []
+    for line in lines[start:end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(prefix):
+            raise AssertionError("unsupported workflow list syntax")
+        value = line[len(prefix):]
+        if not value or value != value.strip():
+            raise AssertionError("unsupported workflow list value")
+        if value.startswith("'"):
+            if len(value) < 2 or not value.endswith("'"):
+                raise AssertionError("unsupported quoted workflow list value")
+            quoted = value[1:-1]
+            decoded = []
+            index = 0
+            while index < len(quoted):
+                if quoted[index] == "'":
+                    if index + 1 >= len(quoted) or quoted[index + 1] != "'":
+                        raise AssertionError("unsupported quoted workflow list value")
+                    decoded.append("'")
+                    index += 2
+                else:
+                    decoded.append(quoted[index])
+                    index += 1
+            value = "".join(decoded)
+        elif value.startswith('"'):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError as error:
+                raise AssertionError("unsupported quoted workflow list value") from error
+            if not isinstance(value, str):
+                raise AssertionError("workflow list values must be strings")
+        elif (any(character.isspace() for character in value)
+              or "#" in value or value[0] in "!&*{}[]|>@`"):
+            raise AssertionError("unsupported plain workflow list value")
+        values.append(value)
+    return values
+
 
 def central_collection_needs(workflow):
-    document = yaml.load(workflow, Loader=yaml.BaseLoader)
-    jobs = document.get("jobs", {})
-    central = jobs.get("central-qualification-collection", {})
-    return central.get("needs")
+    lines = workflow.splitlines()
+    jobs_start, jobs_end = _mapping_block(lines, "jobs:", 0)
+    central = _mapping_block(lines, "central-qualification-collection:", 2,
+                             jobs_start + 1, jobs_end)
+    needs = _mapping_block(lines, "needs:", 4, central[0] + 1, central[1],
+                           required=False)
+    if needs is None:
+        return None
+    return _block_list_values(lines, needs[0] + 1, needs[1], 6)
+
+
+def workflow_push_branches(workflow):
+    lines = workflow.splitlines()
+    on_block = _mapping_block(lines, "on:", 0)
+    push_block = _mapping_block(lines, "push:", 2, on_block[0] + 1, on_block[1])
+    branches = _mapping_block(lines, "branches:", 4,
+                              push_block[0] + 1, push_block[1])
+    return _block_list_values(lines, branches[0] + 1, branches[1], 6)
+
+
+def assert_main_push_trigger(workflow):
+    branches = workflow_push_branches(workflow)
+    if branches != EXPECTED_PUSH_BRANCHES:
+        raise AssertionError("push branch patterns differ from the approved list")
 
 
 class CollectionTests(unittest.TestCase):
@@ -165,23 +252,34 @@ class CollectionTests(unittest.TestCase):
 
     def test_workflow_runs_after_producers_and_retains_raw_results(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
-        document = yaml.load(workflow, Loader=yaml.BaseLoader)
-        self.assertIn("on", document)
-        self.assertIn("main", document["on"]["push"]["branches"])
-        self.assertEqual(
-            ["staged-jvm-and-linux", "hosted-publications", "hosted-native", "safari-browser"],
-            central_collection_needs(workflow),
-        )
+        assert_main_push_trigger(workflow)
+        self.assertEqual(EXPECTED_CENTRAL_NEEDS, central_collection_needs(workflow))
         for command in ("actions/download-artifact@v4", "collection.py --verify",
                         "independent_gates.py", "qualify.py record",
                         "duplicate_provider.py", "qualification-central-${{ github.sha }}"):
             self.assertIn(command, workflow)
         self.assertIn("if: always()", workflow)
 
+    def test_main_push_trigger_rejects_later_negative_branch_pattern(self):
+        workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
+        branch_block = (
+            "    branches:\n"
+            "      - main\n"
+            "      - codex/port-qualification-harness\n"
+            "      - codex/dyn4k-port\n"
+            "      - codex/port-publication-assembly\n"
+        )
+        self.assertEqual(1, workflow.count(branch_block))
+        excluded_main = workflow.replace(
+            branch_block, branch_block + "      - '!main'\n", 1)
+        self.assertEqual(EXPECTED_PUSH_BRANCHES + ["!main"],
+                         workflow_push_branches(excluded_main))
+        with self.assertRaisesRegex(AssertionError, "approved list"):
+            assert_main_push_trigger(excluded_main)
+
     def test_central_workflow_dependencies_reject_invalid_and_later_job_lists(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
-        expected = ["staged-jvm-and-linux", "hosted-publications", "hosted-native",
-                    "safari-browser"]
+        expected = EXPECTED_CENTRAL_NEEDS
         approved_block = (
             "    needs:\n"
             "      - staged-jvm-and-linux\n"
@@ -206,8 +304,9 @@ class CollectionTests(unittest.TestCase):
 
         without_central_needs = workflow.replace(approved_block, "", 1)
         self.assertIsNone(central_collection_needs(without_central_needs))
-        for job_key in ('"spare-diagnostic":', "spare-diagnostic :",
-                        "spare-diagnostic: # diagnostic"):
+        job_keys = ('"spare-diagnostic":', "spare-diagnostic :",
+                    "spare-diagnostic: # diagnostic")
+        for job_key in job_keys:
             with self.subTest(job_key=job_key):
                 later_job_only = without_central_needs + (
                     f"\n  {job_key}\n"
@@ -220,10 +319,22 @@ class CollectionTests(unittest.TestCase):
                     "    steps:\n"
                     "      - run: true\n"
                 )
-                document = yaml.load(later_job_only, Loader=yaml.BaseLoader)
-                self.assertIn("on", document)
-                self.assertIn("main", document["on"]["push"]["branches"])
                 self.assertIsNone(central_collection_needs(later_job_only))
+                earlier_job_only = without_central_needs.replace(
+                    "  central-qualification-collection:\n",
+                    "\n  " + job_key + "\n"
+                    "    needs:\n"
+                    "      - staged-jvm-and-linux\n"
+                    "      - hosted-publications\n"
+                    "      - hosted-native\n"
+                    "      - safari-browser\n"
+                    "    runs-on: ubuntu-latest\n"
+                    "    steps:\n"
+                    "      - run: true\n"
+                    "  central-qualification-collection:\n",
+                    1,
+                )
+                self.assertIsNone(central_collection_needs(earlier_job_only))
 
     def test_workflow_download_survives_replay_setup_failure(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
