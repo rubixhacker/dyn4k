@@ -838,6 +838,136 @@ class DetachedNativeBundleTest(unittest.TestCase):
 
 
 class NodeStreamTest(unittest.TestCase):
+    def test_retained_node_inputs_replay_after_producer_files_are_removed(self):
+        method = "geometryCollisionBoundaryAndScale"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            producer = root / "producer"
+            bundle = producer / "build/kotlin/dyn4k-portable-numerical-consumer-test.js"
+            core = bundle.with_name("dyn4k-dyn4k-core.js")
+            artifact = producer / "build/staging/dyn4k-core-js.klib"
+            modules = producer / "cache/node_modules"
+            runner = {index: modules / name for index, name in
+                      ((2, "source-map-support/register.js"), (3, "mocha/bin/mocha.js"),
+                       (8, "kotlin-web-helpers/dist/mocha-kotlin-reporter.js"),
+                       (10, "kotlin-web-helpers/dist/kotlin-test-nodejs-runner.js"))}
+            for path in (bundle, core, artifact, *runner.values()):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(path.name.encode())
+            binary = root / "selected-node"
+            binary.write_bytes(b"selected Node binary")
+            command = [str(binary), "--require", str(runner[2]), str(runner[3]),
+                       str(bundle), "--include", f"portable.PortableMatrixTest.{method}",
+                       "--reporter", str(runner[8]), "--require", str(runner[10]),
+                       "--timeout", "90m"]
+            process = {"worker_command": command, "executable_sha256": run.digest(binary),
+                       "dependency": {"artifact": str(artifact),
+                                      "artifact_sha256": run.digest(artifact)},
+                       "bundle": {"command_bundle": str(bundle),
+                                  "payload_sha256": {str(bundle): run.digest(bundle),
+                                                     str(core): run.digest(core)}},
+                       "runner_module_sha256": {str(path): run.digest(path)
+                                                for path in runner.values()}}
+            lane = root / "archive/node-js"
+            lane.mkdir(parents=True)
+            manifest_sha = run.retain_node_bundle(lane, method, process)
+            selected = {"node": run.digest(binary), "artifact": run.digest(artifact),
+                        "bundle": run.digest(bundle), "core": run.digest(core)}
+            shutil.rmtree(producer)
+            frozen = run.load_node_bundle(lane, method, process, manifest_sha, binary, selected)
+            self.assertEqual(run.digest(frozen["artifact"]), selected["artifact"])
+            self.assertEqual(len(frozen["files"]), 7)
+            with self.assertRaisesRegex(run.Rejected, "externally selected Node core hash differs"):
+                run.load_node_bundle(lane, method, process, manifest_sha, binary,
+                                     {**selected, "core": "0" * 64})
+
+    def test_direct_stream_rejects_other_or_duplicate_method_events(self):
+        method = "geometryCollisionBoundaryAndScale"
+        start = "##teamcity[testStarted name='geometryCollisionBoundaryAndScale']\n"
+        finish = "##teamcity[testFinished name='geometryCollisionBoundaryAndScale']\n"
+        row = 'NUMERICAL_JSON {"kind":"inputs","id":"geometry-boundary-s0-o0-d0"}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "raw.log"
+            for index, events in enumerate((start + row + finish + "##teamcity[testStarted name='laterJob']\n",
+                           "##teamcity[testStarted name='otherMethod']\n" + start + row + finish,
+                           start + row + finish + "##teamcity[testFinished name='otherMethod']\n",
+                           start + start + row + finish,
+                           start + row + finish + finish,
+                           start + row + finish + "##teamcity[testFailed name='otherMethod']\n",
+                           start + row + finish + "##teamcity[testIgnored name='otherMethod']\n",
+                           start + row,
+                           row + finish)):
+                with self.subTest(events=events):
+                    source.write_text(events)
+                    with self.assertRaises(run.Rejected):
+                        run.node_stream_xml(method, source, Path(directory) / f"report-{index}.xml", create=True)
+
+    def test_full_execute_passes_direct_xml_even_when_gradle_xml_exists(self):
+        method = "geometryCollisionBoundaryAndScale"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lane = root / "capture/node-js"
+            direct = lane / "xml" / f"{method}.xml"
+            stale = root / "build/test-results/jsNodeTest/TEST-portable.PortableMatrixTest.xml"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("stale")
+            staged = root / "staged.klib"
+            staged.write_text("staged")
+            execution = lane / f"native-exec-{method}.log"
+            def direct_worker(*args):
+                direct.parent.mkdir(parents=True)
+                direct.write_text("direct")
+                execution.write_text("worker")
+                return execution
+            class ReachedDirectXml(Exception):
+                pass
+            def inspect_xml(host, output, selected, source):
+                self.assertEqual(source, direct)
+                raise ReachedDirectXml
+            with patch.multiple(run, PORTABLE=root, MATRIX_METHODS=(method,)), \
+                    patch.object(run, "artifacts", return_value={"target": staged}), \
+                    patch.object(run, "comparison_coverage", return_value={}), \
+                    patch.object(run, "declared_cases", return_value=[]), \
+                    patch.object(run, "method_command", return_value=(["true"], None)), \
+                    patch.object(run, "run_node_method", side_effect=direct_worker), \
+                    patch.object(run.time, "time_ns", return_value=0), \
+                    patch.object(run, "extract_xml", side_effect=inspect_xml):
+                with self.assertRaises(ReachedDirectXml):
+                    run.execute("node-js", root / "capture", "a" * 40, "b" * 64, [])
+
+    def test_focused_capture_rechecks_source_after_worker(self):
+        method = "geometryCollisionBoundaryAndScale"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged.klib"
+            staged.write_bytes(b"staged")
+            trace = root / "trace.jsonl"
+            trace.write_text("rows")
+            (root / "exec.log").write_text("worker")
+            counts = {"completed_cases": 1, "states": 1}
+            attributes = {"name": "portable.PortableMatrixTest", "tests": "1",
+                          "skipped": "0", "failures": "0", "errors": "0"}
+            def focused_extract(host, lane, selected, xml):
+                xml.parent.mkdir(parents=True)
+                xml.write_text("report")
+                (lane / f"native-output-{method}.log").write_text("output")
+                return trace, attributes, counts
+            with patch.object(run, "clean_identity", side_effect=[("a" * 40, "b" * 64),
+                                                                   ("a" * 40, "c" * 64)]), \
+                    patch.object(run, "artifacts", return_value={"target": staged}), \
+                    patch.object(run, "method_command", return_value=(["true"], None)), \
+                    patch.object(run, "run_node_method", return_value=root / "exec.log"), \
+                    patch.object(run, "method_xml_source", side_effect=lambda host, lane, selected,
+                                 started: lane / "xml" / f"{selected}.xml"), \
+                    patch.object(run, "extract_xml", side_effect=focused_extract), \
+                    patch.object(run, "runtime", return_value={}), \
+                    patch.object(run, "method_case_ids", return_value=["case"]), \
+                    patch("baseline_capture.verify_xml_trace"), \
+                    patch("baseline_capture.verify_case_slices", return_value={"case": "hash"}):
+                with self.assertRaisesRegex(run.Rejected, "source identity differs"):
+                    run.capture_node_method(root / "capture", method, root / "modules")
+            self.assertFalse((root / "capture/result.json").exists())
+
     def test_file_backed_node_stream_replays_and_rejects_failed_test(self):
         method = "defaultContactsFrictionSleepAndWake"
         with tempfile.TemporaryDirectory() as directory:

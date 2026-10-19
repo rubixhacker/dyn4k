@@ -372,7 +372,7 @@ def _compiled_dependency_proof(host, log_path, dependency, input_files=None,
             "tasks": found, "provenance_script_sha256": digest(PROVENANCE_SCRIPT)}
 
 
-def _executed_node_bundle(host, execution_log, executable):
+def _executed_node_bundle(host, execution_log, executable, payload_files=None):
     if execution_log is None or not Path(execution_log).is_file():
         raise Rejected("executed Node test process log is absent")
     marker = ("dyn4k-portable-numerical-consumer-test.js" if host == "node-js" else
@@ -396,12 +396,13 @@ def _executed_node_bundle(host, execution_log, executable):
     if len(executed) != 1:
         raise Rejected(f"expected one executed Node test worker, found {len(executed)}")
     bundle = executed[0]
-    if not bundle.is_file():
+    bundle_file = payload_files.get(str(bundle)) if payload_files is not None else bundle
+    if bundle_file is None or not bundle_file.is_file():
         raise Rejected("executed Node test bundle is absent")
     payloads = [bundle]
     if host == "node-js":
         core = bundle.with_name("dyn4k-dyn4k-core.js")
-        if "dyn4k-dyn4k-core.js" not in bundle.read_text():
+        if "dyn4k-dyn4k-core.js" not in bundle_file.read_text():
             raise Rejected("executed Node bundle omits linked core module")
         payloads.append(core)
     else:
@@ -416,10 +417,13 @@ def _executed_node_bundle(host, execution_log, executable):
         if module.name not in bundle.read_text() or wasm.name not in module.read_text():
             raise Rejected("executed Wasm bundle omits linked module")
         payloads.extend((module, wasm))
-    if any(not path.is_file() for path in payloads):
+    if any((payload_files.get(str(path)) if payload_files is not None else path) is None or
+           not (payload_files.get(str(path)) if payload_files is not None else path).is_file()
+           for path in payloads):
         raise Rejected("executed Node linked payload is absent")
     return {"command_bundle": str(bundle),
-            "payload_sha256": {str(path): digest(path) for path in payloads},
+            "payload_sha256": {str(path): digest(payload_files[str(path)] if
+                               payload_files is not None else path) for path in payloads},
             "process_executions": len(executed)}
 
 
@@ -460,7 +464,7 @@ def _java_version_line(probe):
 
 
 def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
-            require_loaded=False, native_bundle=None, node_modules=None):
+            require_loaded=False, native_bundle=None, node_modules=None, node_bundle=None):
     if host == "node-js" and node_modules is not None:
         method = Path(log_path).stem.removeprefix("gradle-")
         if method not in MATRIX_METHODS or execution_log is None:
@@ -475,29 +479,37 @@ def runtime(host, log_path, execution_log=None, dependency=None, proof_dir=None,
         if len(executed) != 1:
             raise Rejected(f"expected one direct Node worker, found {len(executed)}")
         executable, arguments = executed[0]
-        command = node_command(method, node_modules, executable)
-        if arguments != command or not executable.is_file():
+        retained = node_bundle["files"] if node_bundle is not None else None
+        command = node_command(method, node_modules, executable,
+                               node_bundle["original_bundle"] if node_bundle is not None else None)
+        binary = node_bundle["binary"] if node_bundle is not None else executable
+        if arguments != command or not binary.is_file():
             raise Rejected("direct Node worker command differs")
         stream = Path(log_path).parent / f"native-output-{method}.log"
         xml = Path(log_path).parent / "xml" / f"{method}.xml"
         node_stream_xml(method, stream, xml)
-        bundle = _executed_node_bundle(host, execution_log, executable)
-        probe = subprocess.run((str(executable), "--version"), capture_output=True,
+        bundle = _executed_node_bundle(host, execution_log, executable, retained)
+        probe = subprocess.run((str(binary), "--version"), capture_output=True,
                                text=True, check=False)
         if probe.returncode or not probe.stdout.strip():
             raise Rejected("direct Node version probe failed")
         return {"host": host, "os": platform.platform(), "machine": platform.machine(),
                 "device": False, "executable": str(executable),
-                "executable_sha256": digest(executable), "version": probe.stdout.strip(),
+                "executable_sha256": digest(binary), "version": probe.stdout.strip(),
                 "process_executions": 1, "worker_command": command,
                 "worker_command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
                 "build_log_sha256": digest(log_path),
                 "execution_log_sha256": digest(execution_log),
                 "native_output_sha256": digest(stream), "xml_sha256": digest(xml),
                 "bundle": bundle,
-                "runner_module_sha256": {command[index]: digest(Path(command[index]))
+                "runner_module_sha256": {command[index]: digest(retained[command[index]] if
+                                         retained is not None else Path(command[index]))
                                          for index in (2, 3, 8, 10)},
-                "dependency": _compiled_dependency_proof(host, log_path, Path(dependency))}
+                "dependency": _compiled_dependency_proof(host, log_path, Path(dependency),
+                    input_files={node_bundle["original_artifact"]: Path(dependency)}
+                    if node_bundle is not None else None,
+                    original_dependency=node_bundle["original_artifact"]
+                    if node_bundle is not None else None)}
     if host == "linux-x64":
         if native_bundle is None:
             binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
@@ -849,9 +861,10 @@ def method_command(host, method, lane):
     return command, execution_log
 
 
-def node_command(method, modules, executable):
+def node_command(method, modules, executable, bundle=None):
     modules = Path(modules).resolve()
-    bundle = (PORTABLE / "build/compileSync/js/test/testDevelopmentExecutable/kotlin" /
+    bundle = (Path(bundle) if bundle is not None else
+              PORTABLE / "build/compileSync/js/test/testDevelopmentExecutable/kotlin" /
               "dyn4k-portable-numerical-consumer-test.js")
     helpers = Path(modules) / "kotlin-web-helpers/dist"
     return [str(executable), "--require", str(Path(modules) / "source-map-support/register.js"),
@@ -886,6 +899,28 @@ def run_node_method(method, lane, env, modules):
     xml_dir.mkdir(exist_ok=True)
     node_stream_xml(method, stream, xml_dir / f"{method}.xml", create=True)
     return execution_log
+
+
+def build_node_method(method, lane, env):
+    started = time.time_ns()
+    command, _ = method_command("node-js", method, lane)
+    log = lane / f"gradle-{method}.log"
+    with log.open("x", encoding="utf-8") as stream:
+        completed = subprocess.run(command, cwd=ROOT, env=env, stdout=stream,
+                                   stderr=subprocess.STDOUT, check=False)
+    return started, log, completed.returncode
+
+
+def method_xml_source(host, lane, method, started):
+    if host in ("linux-x64", "node-js"):
+        reports = [lane / "xml" / f"{method}.xml"]
+    else:
+        reports = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
+            "TEST-*PortableMatrixTest*.xml"))
+    if len(reports) != 1 or not reports[0].is_file() or \
+            reports[0].stat().st_mtime_ns < started:
+        raise Rejected("matrix XML is missing or stale")
+    return reports[0]
 
 
 def native_command(method, binary):
@@ -969,12 +1004,12 @@ def node_stream_xml(method, source, xml, create=False):
         for line in raw:
             if not line.endswith(b"\n"):
                 raise Rejected("Node output is truncated")
-            if line.startswith(b"##teamcity[testStarted ") and b"name='" + name + b"'" in line:
-                if started or finished:
+            if line.startswith(b"##teamcity[testStarted "):
+                if b"name='" + name + b"'" not in line or started or finished:
                     raise Rejected("Node test start differs")
                 started += 1
-            elif line.startswith(b"##teamcity[testFinished ") and b"name='" + name + b"'" in line:
-                if started != 1 or finished:
+            elif line.startswith(b"##teamcity[testFinished "):
+                if b"name='" + name + b"'" not in line or started != 1 or finished:
                     raise Rejected("Node test finish differs")
                 finished += 1
             elif line.startswith((b"##teamcity[testFailed ", b"##teamcity[testIgnored ")):
@@ -1044,6 +1079,78 @@ def _copy_bundle_file(source, bundle, relative):
     with source.open("rb") as stream, target.open("xb") as output:
         shutil.copyfileobj(stream, output, 1024 * 1024)
     return target
+
+
+def node_bundle_paths(process):
+    command = process["worker_command"]
+    bundle = _recorded_absolute_path(process["bundle"]["command_bundle"])
+    artifact = _recorded_absolute_path(process["dependency"]["artifact"])
+    if command[4] != str(bundle):
+        raise Rejected("Node command bundle differs from process proof")
+    return {"artifact": artifact, "bundle": bundle,
+            "core": bundle.with_name("dyn4k-dyn4k-core.js"),
+            **{f"runner-{index}": _recorded_absolute_path(command[index])
+               for index in (2, 3, 8, 10)}}
+
+
+def retain_node_bundle(lane, method, process):
+    bundle = lane / "producer-bundle"
+    bundle.mkdir()
+    files = {}
+    expected = {"artifact": process["dependency"]["artifact_sha256"],
+                "bundle": process["bundle"]["payload_sha256"][process["bundle"]["command_bundle"]],
+                "core": process["bundle"]["payload_sha256"][str(
+                    Path(process["bundle"]["command_bundle"]).with_name("dyn4k-dyn4k-core.js"))],
+                **{f"runner-{index}": process["runner_module_sha256"][process["worker_command"][index]]
+                   for index in (2, 3, 8, 10)}}
+    for role, original in node_bundle_paths(process).items():
+        relative = f"files/{role}{original.suffix}"
+        archived = _copy_bundle_file(original, bundle, relative)
+        if digest(archived) != expected[role]:
+            raise Rejected("retained Node producer input differs")
+        files[role] = {"original_path": str(original), "bundle_path": relative,
+                       "sha256": expected[role], "bytes": archived.stat().st_size}
+    manifest = {"schema": "portable-node-producer-bundle/1", "method": method,
+                "node_modules": str(Path(process["worker_command"][3]).parents[2]),
+                "files": files}
+    path = bundle / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return digest(path)
+
+
+def load_node_bundle(lane, method, process, manifest_sha256, binary, selected):
+    bundle = lane / "producer-bundle"
+    manifest_path = _bundle_file(bundle, "manifest.json")
+    if manifest_path.stat().st_size > 100_000 or digest(manifest_path) != manifest_sha256:
+        raise Rejected("retained Node manifest differs")
+    manifest = json.loads(manifest_path.read_text())
+    paths = node_bundle_paths(process)
+    if set(manifest) != {"schema", "method", "node_modules", "files"} or \
+            manifest["schema"] != "portable-node-producer-bundle/1" or \
+            manifest["method"] != method or set(manifest["files"]) != set(paths):
+        raise Rejected("retained Node manifest identity differs")
+    files = {}
+    for role, original in paths.items():
+        item = manifest["files"][role]
+        if set(item) != {"original_path", "bundle_path", "sha256", "bytes"} or \
+                item["original_path"] != str(original):
+            raise Rejected("retained Node input identity differs")
+        archived = _bundle_file(bundle, item["bundle_path"])
+        if not archived.is_file() or archived.stat().st_size != item["bytes"] or \
+                digest(archived) != item["sha256"]:
+            raise Rejected("retained Node input bytes differ")
+        files[str(original)] = archived
+    for role in ("artifact", "bundle", "core"):
+        sha = selected[role]
+        if manifest["files"][role]["sha256"] != sha:
+            raise Rejected(f"externally selected Node {role} hash differs")
+    if digest(binary) != process["executable_sha256"] or digest(binary) != selected["node"]:
+        raise Rejected("selected Node binary differs from executed binary")
+    if manifest["node_modules"] != str(Path(process["worker_command"][3]).parents[2]):
+        raise Rejected("retained Node module root differs")
+    return {"files": files, "binary": binary, "original_artifact": str(paths["artifact"]),
+            "original_bundle": str(paths["bundle"]), "node_modules": manifest["node_modules"],
+            "artifact": files[str(paths["artifact"])]}
 
 
 def _publication_names():
@@ -1256,22 +1363,27 @@ def execute(host, output, commit, source_sha256, reference_dirs,
         methods = []
         runtimes = []
         for method in MATRIX_METHODS:
-            started = time.time_ns()
-            command, execution_log = method_command(host, method, lane)
-            log_path = lane / f"gradle-{method}.log"
-            with log_path.open("x", encoding="utf-8") as log:
-                if host == "linux-x64":
-                    log.write(f"NUMERICAL_BUILD_STARTED_NS {started}\n")
-                    log.flush()
-                completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
-                                           stderr=subprocess.STDOUT, check=False)
-            method_result = {"method": method, "gradle_exit": completed.returncode,
+            if host == "node-js":
+                started, log_path, gradle_exit = build_node_method(method, lane, env)
+                execution_log = None
+            else:
+                started = time.time_ns()
+                command, execution_log = method_command(host, method, lane)
+                log_path = lane / f"gradle-{method}.log"
+                with log_path.open("x", encoding="utf-8") as log:
+                    if host == "linux-x64":
+                        log.write(f"NUMERICAL_BUILD_STARTED_NS {started}\n")
+                        log.flush()
+                    completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
+                                               stderr=subprocess.STDOUT, check=False)
+                gradle_exit = completed.returncode
+            method_result = {"method": method, "gradle_exit": gradle_exit,
                              "log_sha256": digest(log_path)}
             methods.append(method_result)
-            if completed.returncode:
-                outcome["gradle_exit"] = completed.returncode
+            if gradle_exit:
+                outcome["gradle_exit"] = gradle_exit
                 outcome["status"] = "FAILED"
-            if host == "linux-x64" and not completed.returncode:
+            if host == "linux-x64" and not gradle_exit:
                 binaries = list((PORTABLE / "build/bin/linuxX64").rglob("*.kexe"))
                 if len(binaries) != 1 or binaries[0].stat().st_mtime_ns < started:
                     method_result["reason"] = "native test binary is absent or stale"
@@ -1283,7 +1395,7 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                     method_result["reason"] = str(error)
                     outcome["status"] = "FAILED"
                     continue
-            if host == "node-js" and not completed.returncode:
+            if host == "node-js" and not gradle_exit:
                 try:
                     execution_log = run_node_method(method, lane, env, node_modules or
                         PORTABLE / "build/js/node_modules")
@@ -1293,15 +1405,13 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                     continue
             if execution_log is not None and execution_log.is_file():
                 method_result["execution_log_sha256"] = digest(execution_log)
-            xml = sorted((PORTABLE / "build/test-results" / HOST_TASKS[host]).glob(
-                "TEST-*PortableMatrixTest*.xml")) if host not in ("linux-x64", "node-js") else [
-                    lane / "xml" / f"{method}.xml"]
-            if len(xml) != 1 or not xml[0].is_file() or xml[0].stat().st_mtime_ns < started:
-                method_result["reason"] = "matrix XML is missing or stale"
+            try:
+                xml = method_xml_source(host, lane, method, started)
+            except Rejected as error:
+                method_result["reason"] = str(error)
                 outcome["status"] = "FAILED"
                 continue
-            trace, row_attributes, row_counts = extract_xml(host, lane, method,
-                                                             xml[0] if host == "linux-x64" else None)
+            trace, row_attributes, row_counts = extract_xml(host, lane, method, xml)
             method_result["xml"] = row_attributes
             method_result["xml_sha256"] = digest(lane / "xml" / f"{method}.xml")
             method_result["cases"] = row_counts["completed_cases"]
@@ -1502,15 +1612,11 @@ def capture_node_method(output, method, modules):
     target = artifacts("node-js")["target"]
     env = os.environ.copy()
     env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
-    command, _ = method_command("node-js", method, lane)
-    log = lane / f"gradle-{method}.log"
-    with log.open("x", encoding="utf-8") as stream:
-        completed = subprocess.run(command, cwd=ROOT, env=env, stdout=stream,
-                                   stderr=subprocess.STDOUT, check=False)
-    if completed.returncode:
-        raise Rejected(f"Node compiler exited {completed.returncode}")
+    started, log, gradle_exit = build_node_method(method, lane, env)
+    if gradle_exit:
+        raise Rejected(f"Node compiler exited {gradle_exit}")
     execution = run_node_method(method, lane, env, modules)
-    xml = lane / "xml" / f"{method}.xml"
+    xml = method_xml_source("node-js", lane, method, started)
     trace, attributes, counts = extract_xml("node-js", lane, method, xml)
     counts["expected_cases"] = len(method_case_ids(method))
     process = runtime("node-js", log, execution, target, node_modules=modules)
@@ -1522,10 +1628,16 @@ def capture_node_method(output, method, modules):
                       "failures": "0", "errors": "0"} or \
             counts["completed_cases"] != len(method_case_ids(method)):
         raise Rejected("focused Node method did not complete")
+    if clean_identity() != (commit, source_sha256):
+        raise Rejected("focused Node source identity differs after execution")
+    bundle_sha256 = retain_node_bundle(lane, method, process)
+    if clean_identity() != (commit, source_sha256):
+        raise Rejected("focused Node source identity differs before sealing")
     result = {"status": "PASSED_PRODUCER", "qualification": "UNPASSED",
               "candidate_commit": commit, "source_sha256": source_sha256,
               "method": method, "node_modules": str(modules),
               "artifact_sha256": digest(target), "process": process,
+              "node_bundle_sha256": bundle_sha256,
               "xml": attributes, "raw_counts": counts,
               "log_sha256": digest(log), "execution_log_sha256": digest(execution),
               "native_output_sha256": digest(lane / f"native-output-{method}.log"),
@@ -1535,7 +1647,7 @@ def capture_node_method(output, method, modules):
     return result
 
 
-def verify_node_method_archive(output):
+def verify_node_method_archive(output, binary, selected):
     from baseline_capture import verify_case_slices, verify_xml_trace
 
     result = json.loads((output / "result.json").read_text())
@@ -1555,11 +1667,12 @@ def verify_node_method_archive(output):
                         (trace, "trace_sha256")):
         if digest(path) != result[field]:
             raise Rejected(f"focused Node archive file differs: {field}")
-    target = artifacts("node-js")["target"]
-    if digest(target) != result["artifact_sha256"]:
+    frozen = load_node_bundle(lane, method, result["process"],
+                              result["node_bundle_sha256"], binary, selected)
+    if digest(frozen["artifact"]) != result["artifact_sha256"]:
         raise Rejected("focused Node staged artifact differs")
-    process = runtime("node-js", log, execution, target,
-                      node_modules=Path(result["node_modules"]))
+    process = runtime("node-js", log, execution, frozen["artifact"],
+                      node_modules=Path(frozen["node_modules"]), node_bundle=frozen)
     if process != result["process"]:
         raise Rejected("focused Node process proof differs")
     counts = result["raw_counts"]
@@ -1579,6 +1692,11 @@ def main():
     parser.add_argument("--verify-linux-native-existing", action="store_true")
     parser.add_argument("--node-method", choices=MATRIX_METHODS)
     parser.add_argument("--verify-node-method-existing", action="store_true")
+    parser.add_argument("--node-executable", type=Path)
+    parser.add_argument("--expected-node-sha256")
+    parser.add_argument("--expected-artifact-sha256")
+    parser.add_argument("--expected-bundle-sha256")
+    parser.add_argument("--expected-core-sha256")
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
     parser.add_argument("--reference-dir", type=Path, action="append", default=[])
     parser.add_argument("--prospective-baseline", type=Path)
@@ -1598,11 +1716,21 @@ def main():
     output = Path(args.output).resolve()
     if args.node_method and args.verify_node_method_existing:
         parser.error("focused Node capture and replay are separate operations")
+    selected = {"node": args.expected_node_sha256,
+                "artifact": args.expected_artifact_sha256,
+                "bundle": args.expected_bundle_sha256,
+                "core": args.expected_core_sha256}
+    if args.verify_node_method_existing and (args.node_executable is None or
+            any(value is None for value in selected.values()) or
+            any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in
+                selected.values())):
+        parser.error("focused Node replay requires executable and four selected SHA-256 values")
     if args.node_method or args.verify_node_method_existing:
         try:
             result = (capture_node_method(output, args.node_method,
                       args.node_modules or PORTABLE / "build/js/node_modules")
-                      if args.node_method else verify_node_method_archive(output))
+                      if args.node_method else verify_node_method_archive(output,
+                          args.node_executable.resolve(), selected))
             print(json.dumps(result, sort_keys=True))
             return 0
         except (Rejected, OSError, ValueError, KeyError, TypeError) as error:
