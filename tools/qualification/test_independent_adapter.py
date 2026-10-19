@@ -335,9 +335,12 @@ class IndependentAdapterTests(unittest.TestCase):
             signed["lanes"][lane].update(
                 expected_mode_publication_path=publication_path,
                 expected_mode_publication_digest=publication_digest)
+            all_hashes = {target: (hashes if target == "jvm" else
+                                   {module: "f" * 64 for module in qualify.MODULES})
+                          for target in {row["target"] for row in qualify.matrix()}}
             staging = {"candidate_sha": candidate, "status": "PASSED", "artifacts": [
-                {"path": qualify.target_binary_path(module, "jvm"), "sha256": value}
-                for module, value in hashes.items()]}
+                {"path": qualify.target_binary_path(module, target), "sha256": value}
+                for target, pair in all_hashes.items() for module, value in pair.items()]}
             binding = {"candidate_sha": candidate, "lane": lane, "mode": "default",
                        "source": "compiler_modes.replay", "source_checkout": str(root),
                        "publication_archive": publication_path,
@@ -349,7 +352,8 @@ class IndependentAdapterTests(unittest.TestCase):
                                                    "artifact_hashes": hashes,
                                                    "jvm_mode_publication": binding}}}
             signed.update(candidate_manifest_sha256=qualify.manifest_digest(selected_candidate),
-                          staged_audit_sha256=qualify.manifest_digest(staging))
+                          staged_audit_sha256=qualify.manifest_digest(staging),
+                          expected_all_target_hashes=all_hashes)
             selection = {"case_ids": [item["id"] for item in cases],
                          "required_gates": ["staged-consumer"], "global_gates": []}
 
@@ -762,9 +766,11 @@ class IndependentAdapterTests(unittest.TestCase):
                 suite = {"lanes": {lane: {"target": "jvm", "configuration": mode,
                                             "required_gates": ["staged-consumer"]}},
                          "global_gates": []}
+                all_hashes = {target: {module: "f" * 64 for module in qualify.MODULES}
+                              for target in {row["target"] for row in qualify.matrix()}}
                 staged = {"candidate_sha": sha, "status": "PASSED", "artifacts": [
-                    {"path": qualify.target_binary_path(module, "jvm"),
-                     "sha256": "f" * 64} for module in qualify.MODULES]}
+                    {"path": qualify.target_binary_path(module, target), "sha256": value}
+                    for target, pair in all_hashes.items() for module, value in pair.items()]}
                 candidate = {"candidate_sha": sha,
                              "suite_manifest_sha256": qualify.manifest_digest(suite),
                              "audit_manifest_sha256": qualify.manifest_digest(staged),
@@ -775,6 +781,7 @@ class IndependentAdapterTests(unittest.TestCase):
                           "suite_manifest_sha256": qualify.manifest_digest(suite),
                           "candidate_manifest_sha256": qualify.manifest_digest(candidate),
                           "staged_audit_sha256": qualify.manifest_digest(staged),
+                          "expected_all_target_hashes": all_hashes,
                           "lanes": {lane: {"expected_artifact_hashes": hashes,
                                            "expected_runtime_identity": "audited JDK",
                                            "expected_archive_digests": {},
@@ -817,6 +824,14 @@ class IndependentAdapterTests(unittest.TestCase):
                 self.assertFalse(verify(bind=False)["identities_bound"])
                 self.assertNotEqual(hashes, qualify.target_binary_hashes(
                     staged["artifacts"])["jvm"])
+                missing_map = copy.deepcopy(signed)
+                missing_map.pop("expected_all_target_hashes")
+                with self.assertRaisesRegex(ValueError, "21-target artifact hash map is required"):
+                    verify(signed_input=missing_map)
+                wrong_map = copy.deepcopy(signed)
+                wrong_map["expected_all_target_hashes"]["jvm"] = hashes
+                with self.assertRaisesRegex(ValueError, "differ from staged audit"):
+                    verify(signed_input=wrong_map)
 
                 if mode != "default":
                     continue

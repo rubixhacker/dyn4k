@@ -1313,6 +1313,14 @@ def _validated_all_target_hashes(hashes):
     return hashes
 
 
+def _gate_artifact_hashes(gate, lane, lane_hashes, all_target_hashes):
+    if lane["target"] == "jvm" and gate in ("staged-artifacts", "publication-contract"):
+        if all_target_hashes is None:
+            raise ValueError("independently audited 21-target binary hash map is missing")
+        return _validated_all_target_hashes(all_target_hashes)["jvm"]
+    return lane_hashes
+
+
 def _staged_publication(root, candidate_sha, lane, expected_artifact_hashes,
                         repository, expected_all_target_hashes=None):
     staging = root / "staged"
@@ -2099,8 +2107,10 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             if archive_digest(root) != expected_archive_digest:
                 raise ValueError("independent archive provenance digest differs")
         archive_sha = _inventory(root, receipt)
+        gate_hashes = _gate_artifact_hashes(
+            gate, lane, expected_artifact_hashes, expected_all_target_hashes)
         process = _binding(root, receipt, candidate_sha, lane_id, lane,
-                           repository, expected_artifact_hashes,
+                           repository, gate_hashes,
                            expected_runtime_identity, gate, expected_producer_scopes)
         if receipt.get("status") not in ("PASSED", "FAILED", "NOT_RUN"):
             raise ValueError("reported gate status is invalid")
@@ -2126,7 +2136,7 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
             if gate == "publication-contract":
                 _validated_all_target_hashes(expected_all_target_hashes)
             reason = _staged_publication(root, candidate_sha, lane,
-                                         expected_artifact_hashes, repository,
+                                         gate_hashes, repository,
                                          expected_all_target_hashes if gate == "publication-contract" else None)
             return _result(gate, "PASSED", reason, archive_sha256=archive_sha)
         if gate == "staged-consumer":

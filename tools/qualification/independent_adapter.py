@@ -193,6 +193,8 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 mode_path = expected.get("expected_mode_publication_path")
                 mode_digest = expected.get("expected_mode_publication_digest")
                 if binding is not None:
+                    if all_hashes is None:
+                        raise ValueError(f"signed 21-target artifact hash map is required for JVM mode: {lane_id}")
                     if (not isinstance(binding, dict)
                             or hashes != lane.get("artifact_hashes")
                             or hashes != binding.get("artifact_hashes")

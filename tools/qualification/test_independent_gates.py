@@ -1507,6 +1507,122 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._staged_publication(
                         root, BASE, lane, hashes["jvm"], ROOT, hashes)
 
+    def test_jvm_mode_pairs_keep_canonical_publication_gates_separate(self):
+        archive_root = Path(
+            "/var/home/stewart/dyn4k-evidence/session-control/"
+            "full-jvm-d50-p1-p2-sol-work/archive")
+        source = Path(
+            "/var/home/stewart/dyn4k-evidence/session-control/"
+            "full-jvm-d50-p1-p2-sol-work/final-candidate")
+        modes = ("default", "no-optimize")
+        if not source.is_dir() or any(not (archive_root / f"jvm-{mode}-final").is_dir()
+                                      for mode in modes):
+            self.skipTest("retained exact10e JVM mode publications are unavailable")
+        candidate = "10e78648d4b63083e89f6543896dd07794be7b87"
+        lanes = {mode: f"jvm:Java:minimum:{mode}" for mode in modes}
+        measured = {}
+        for mode in modes:
+            publication = archive_root / f"jvm-{mode}-final"
+            pair = {module: hashlib.sha256((
+                publication / "staged" / qualify.target_binary_path(module, "jvm"))
+                .read_bytes()).hexdigest() for module in qualify.MODULES}
+            binding = {"candidate_sha": candidate, "lane": lanes[mode], "mode": mode,
+                       "source": "compiler_modes.replay", "source_checkout": str(source),
+                       "publication_archive": str(publication),
+                       "archive_digest": independent_gates.archive_digest(publication),
+                       "artifact_hashes": pair}
+            case = {"id": lanes[mode], "target": "jvm", "configuration": mode}
+            self.assertTrue(qualify.verify_jvm_mode_publication(
+                binding, case, candidate, pair))
+            measured[mode] = pair
+        self.assertNotEqual(measured["default"], measured["no-optimize"])
+        targets = {row["target"] for row in qualify.matrix()}
+        canonical_bytes = {target: {module: f"canonical:{target}:{module}".encode()
+                                    for module in qualify.MODULES} for target in targets}
+        canonical = {target: {module: hashlib.sha256(data).hexdigest()
+                              for module, data in modules.items()}
+                     for target, modules in canonical_bytes.items()}
+        tree = subprocess.check_output(
+            ["git", "rev-parse", f"{candidate}^{{tree}}"], cwd=ROOT, text=True).strip()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def archive(name, pair, lane_id=None, staged=False):
+                path = root / name
+                path.mkdir()
+                if staged:
+                    for target, modules in canonical_bytes.items():
+                        for module, data in modules.items():
+                            binary = path / "staged" / qualify.target_binary_path(module, target)
+                            binary.parent.mkdir(parents=True, exist_ok=True)
+                            binary.write_bytes(data)
+                markers = lanes.values() if lane_id is None else (lane_id,)
+                (path / "stdout.txt").write_text(
+                    "".join(f"QUALIFICATION_LANE={item}\n" for item in markers)
+                    + "> Task :publish\nBUILD SUCCESSFUL\n")
+                started = time.time_ns() - 10_000_000
+                mtime = started + 1_000_000
+                files = sorted(item for item in path.rglob("*") if item.is_file())
+                for item in files:
+                    os.utime(item, ns=(mtime, mtime))
+                receipt = {"schema": 1, "status": "PASSED" if staged else "NOT_RUN",
+                           "candidate_sha": candidate, "source_tree": tree,
+                           "artifact_hashes": pair,
+                           "process": {"command": ["./gradlew", ":publish"],
+                                       "exit_code": 0, "stdout": "stdout.txt",
+                                       "started_ns": started, "finished_ns": started + 2_000_000},
+                           "files": [{"path": item.relative_to(path).as_posix(),
+                                      "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                                      "mtime_ns": item.stat().st_mtime_ns} for item in files]}
+                if lane_id is not None:
+                    lane = self.manifest["lanes"][lane_id]
+                    receipt.update(lane=lane_id, runtime_identity="fixture runtime",
+                                   **{key: lane[key] for key in
+                                      ("target", "runtime", "version", "configuration")})
+                (path / "receipt.json").write_text(json.dumps(receipt))
+                return path
+
+            publication = archive("publication", canonical["jvm"], staged=True)
+            stages = {mode: archive(f"stage-{mode}", canonical["jvm"],
+                                    lanes[mode], staged=True) for mode in modes}
+            consumers = {mode: archive(f"consumer-{mode}", measured[mode], lanes[mode])
+                         for mode in modes}
+            audited_stage = {"status": "PASSED", "errors": [], "artifacts": []}
+
+            def gates(mode, lane_pair, all_targets=canonical):
+                paths = {"staged-artifacts": stages[mode],
+                         "publication-contract": publication,
+                         "staged-consumer": consumers[mode]}
+                digests = {gate: independent_gates.archive_digest(path)
+                           for gate, path in paths.items()}
+                with mock.patch.object(qualify, "audit_staging", return_value=audited_stage):
+                    return independent_gates.evaluate(
+                        self.manifest, candidate, lanes[mode], paths, ROOT,
+                        lane_pair, "fixture runtime", digests, all_targets)["gates"]
+
+            publication_archives = set()
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    result = gates(mode, measured[mode])
+                    self.assertEqual("PASSED", result["staged-artifacts"]["status"])
+                    self.assertEqual("PASSED", result["publication-contract"]["status"])
+                    publication_archives.add(result["publication-contract"]["archive_sha256"])
+                    self.assertEqual("NOT_RUN", result["staged-consumer"]["status"])
+                    other = "no-optimize" if mode == "default" else "default"
+                    swapped = gates(mode, measured[other])
+                    self.assertEqual("FAILED", swapped["staged-consumer"]["status"])
+                    canonical_swap = gates(mode, canonical["jvm"])
+                    self.assertEqual("FAILED", canonical_swap["staged-consumer"]["status"])
+            self.assertEqual(1, len(publication_archives))
+            wrong_map = {**canonical, "jvm": measured["default"]}
+            wrong = gates("default", measured["default"], wrong_map)
+            self.assertEqual("FAILED", wrong["staged-artifacts"]["status"])
+            self.assertEqual("FAILED", wrong["publication-contract"]["status"])
+            missing = gates("default", measured["default"], None)
+            self.assertEqual("FAILED", missing["staged-artifacts"]["status"])
+            self.assertEqual("FAILED", missing["publication-contract"]["status"])
+
     def test_duplicate_provider_requires_raw_graph_and_diagnostic(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
