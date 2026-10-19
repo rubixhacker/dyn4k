@@ -878,7 +878,11 @@ jobs:
 
   central-qualification-collection:
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true)
-    needs: [staged-jvm-and-linux, hosted-publications, hosted-native, safari-browser]
+    needs:
+      - staged-jvm-and-linux
+      - hosted-publications
+      - hosted-native
+      - safari-browser
     runs-on: ubuntu-latest
     env:
       PYTHONDONTWRITEBYTECODE: '1'
