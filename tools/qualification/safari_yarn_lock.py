@@ -30,7 +30,7 @@ HOSTED_SOURCE_INPUTS = (Path("tools/qualification/full_hosted.py"),
                         Path("dyn4k-core/build.gradle.kts"),
                         Path("dyn4k/build.gradle.kts"),
                         Path("tools/qualification/safari-launch.sh"),
-                        Path(".github/workflows/safari-yarn-lock-diagnostic.yml"),
+                        Path("docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml"),
                         Path("tools/qualification/safari_reporter.py"),
                         Path("tools/qualification/safari_windows_file.py"),
                         Path("tools/qualification/safari-karma-reporter.js"))

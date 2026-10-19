@@ -143,9 +143,10 @@ class SafariYarnLockTests(unittest.TestCase):
         for name in ("safari-karma-reporter.js", "safari-launch.sh", "safari_reporter.py",
                      "safari_windows_file.py"):
             shutil.copyfile(qualification / name, self.repository / "tools/qualification" / name)
-        (self.repository / ".github/workflows").mkdir(parents=True)
-        shutil.copyfile(qualification.parents[1] / ".github/workflows/safari-yarn-lock-diagnostic.yml",
-                        self.repository / ".github/workflows/safari-yarn-lock-diagnostic.yml")
+        archived_workflow = Path("docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml")
+        (self.repository / archived_workflow.parent).mkdir(parents=True)
+        shutil.copyfile(qualification.parents[1] / archived_workflow,
+                        self.repository / archived_workflow)
         for module in ("dyn4k-core", "dyn4k"):
             (self.repository / module).mkdir()
             (self.repository / module / "build.gradle.kts").write_text("plugins {}\n")
@@ -913,7 +914,7 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(),
                          (self.output / "inputs/tools/qualification/safari-karma-reporter.js").read_bytes())
         for relative in ("tools/qualification/safari-launch.sh",
-                         ".github/workflows/safari-yarn-lock-diagnostic.yml"):
+                         "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml"):
             data = (self.repository / relative).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(),
                              receipt["source_input_sha256"][relative])
@@ -1726,6 +1727,36 @@ class SafariYarnLockTests(unittest.TestCase):
                 (self.output / "receipt.json").write_bytes(saved)
                 raw.write_bytes(raw_saved)
 
+    def test_full_hosted_public_audit_rejects_legacy_workflow_path(self):
+        self.hosted_capture()
+        archived = "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml"
+        legacy = ".github/workflows/safari-yarn-lock-diagnostic.yml"
+        old_path = self.output / "inputs" / archived
+        new_path = self.output / "inputs" / legacy
+        new_path.parent.mkdir(parents=True)
+        old_path.rename(new_path)
+        receipt_path = self.output / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        member = next(item for item in receipt["files"] if item["path"] == f"inputs/{archived}")
+        member["path"] = f"inputs/{legacy}"
+        receipt_path.write_text(json.dumps(receipt) + "\n")
+        with self.assertRaisesRegex(ValueError, "file inventory differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
+    def test_full_hosted_public_audit_rejects_resealed_archived_workflow_bytes(self):
+        self.hosted_capture()
+        archived = "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml"
+        path = self.output / "inputs" / archived
+        path.write_bytes(path.read_bytes() + b"# changed after capture\n")
+        receipt_path = self.output / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        member = next(item for item in receipt["files"] if item["path"] == f"inputs/{archived}")
+        member["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        member["size"] = path.stat().st_size
+        receipt_path.write_text(json.dumps(receipt) + "\n")
+        with self.assertRaisesRegex(ValueError, "archived source differs"):
+            safari_yarn_lock.audit_capture(self.repository, self.candidate, self.output)
+
     def test_hosted_inventory_uses_archive_separators_for_windows_paths(self):
         expected = safari_yarn_lock.hosted_expected_files(
             "development", PureWindowsPath("kotlin-js-store/yarn.lock"),
@@ -1763,15 +1794,13 @@ class SafariYarnLockTests(unittest.TestCase):
             self.assertEqual(0, safari_yarn_lock.main())
         self.assertEqual("LOCK_MISMATCH_CAPTURED", json.loads(output.getvalue())["status"])
 
-    def test_manual_workflow_has_separate_mac_route_and_uploads_failed_capture(self):
+    def test_archived_workflow_records_historical_capture_route(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root /
-                    ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
-        qualification = (root / ".github/workflows/qualification.yml").read_text()
-        qualified_launcher = re.search(r"(?m)^      SAFARI_BIN: (.+)$", qualification)
-        self.assertIsNotNone(qualified_launcher)
-        self.assertIn("    env:\n      SAFARI_BIN: " + qualified_launcher.group(1) + "\n",
-                      workflow)
+                    "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml").read_text()
+        self.assertFalse((root / ".github/workflows/safari-yarn-lock-diagnostic.yml").exists())
+        self.assertIn("    env:\n      SAFARI_BIN: ${{ github.workspace }}/tools/qualification/"
+                      "safari-launch.sh\n", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("runs-on: macos-26", workflow)
         self.assertIn("java-version: '21'", workflow)
@@ -1784,10 +1813,10 @@ class SafariYarnLockTests(unittest.TestCase):
         self.assertNotIn("kotlinUpgradeYarnLock", workflow)
         self.assertNotIn("yarnLockMismatchReport", workflow)
 
-    def test_manual_workflow_retains_separate_safari_launch_context(self):
+    def test_archived_workflow_records_separate_safari_launch_context(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root /
-                    ".github/workflows/safari-yarn-lock-diagnostic.yml").read_text()
+                    "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml").read_text()
         self.assertIn("DYN4K_SAFARI_LAUNCH_CONTEXT: ${{ runner.temp }}/safari-launch-context-raw",
                       workflow)
         self.assertIn("- name: Capture source Kotlin/JS lock generation\n        env:\n"
