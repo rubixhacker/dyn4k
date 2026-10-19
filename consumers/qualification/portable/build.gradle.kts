@@ -1,6 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.security.MessageDigest
 
 plugins {
     kotlin("multiplatform") version "2.4.20"
@@ -54,6 +55,14 @@ kotlin {
             api("io.github.rubixhacker:dyn4k:0.1.0-alpha.1")
         }
         commonTest.dependencies { implementation(kotlin("test")) }
+        providers.gradleProperty("qualificationSuiteCheckout").orNull?.let { checkout ->
+            val source = providers.gradleProperty("qualificationSuiteSource").get()
+            require(source.startsWith("org/") && source.endsWith(".kt") && ".." !in source)
+            commonTest {
+                kotlin.setSrcDirs(listOf(file("$checkout/dyn4k-core/src/commonTest/kotlin")))
+                kotlin.include(source)
+            }
+        }
     }
 }
 
@@ -65,4 +74,32 @@ if (providers.gradleProperty("qualificationProduction").orNull == "true") {
         ))
         doFirst { logger.lifecycle("qualification test input: ${inputFileProperty.get().asFile}") }
     }
+}
+
+if (providers.gradleProperty("qualificationSuiteCheckout").isPresent) {
+    tasks.register("qualificationSuiteGraph") {
+        doLast {
+            val configuration = configurations.getByName("jvmTestRuntimeClasspath")
+            val components = configuration.incoming.resolutionResult.allComponents
+                .map { it.id.displayName }.sorted()
+            val artifacts = configuration.resolvedConfiguration.resolvedArtifacts.map { artifact ->
+                val bytes = artifact.file.readBytes()
+                mapOf(
+                    "component" to artifact.moduleVersion.id.toString(),
+                    "file" to artifact.file.absolutePath,
+                    "name" to artifact.file.name,
+                    "size" to bytes.size,
+                    "sha256" to MessageDigest.getInstance("SHA-256")
+                        .digest(bytes).joinToString("") { "%02x".format(it) },
+                )
+            }.sortedWith(compareBy({ it["component"].toString() }, { it["name"].toString() }))
+            println("DYN4K_FULL_SUITE_GRAPH=" + groovy.json.JsonOutput.toJson(mapOf(
+                "configuration" to configuration.name,
+                "gradle_user_home" to gradle.gradleUserHomeDir.absolutePath,
+                "components" to components,
+                "artifacts" to artifacts,
+            )))
+        }
+    }
+    tasks.named("jvmTest") { dependsOn("qualificationSuiteGraph") }
 }
