@@ -182,24 +182,34 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
         if not isinstance(expected, dict):
             raise ValueError(f"signed lane audit is invalid: {lane_id}")
         gate_names = set(selected["required_gates"] + selected["global_gates"])
-        mode_artifacts = False
+        target = suite_manifest["lanes"][lane_id]["target"]
+        mode_bound = False
         if identities_bound:
             lane = candidate_manifest["lanes"].get(lane_id)
-            target = suite_manifest["lanes"][lane_id]["target"]
             hashes = expected.get("expected_artifact_hashes")
             runtime = expected.get("expected_runtime_identity")
-            if (target == "jvm" and lane_id in full_jvm_consumer.LANES
-                    and hashes != audited_targets.get(target)):
-                mode_artifacts = True
+            if target == "jvm" and lane_id in full_jvm_consumer.LANES:
+                binding = lane.get("jvm_mode_publication") if isinstance(lane, dict) else None
                 mode_path = expected.get("expected_mode_publication_path")
                 mode_digest = expected.get("expected_mode_publication_digest")
-                if (type(mode_path) is not str or not Path(mode_path).is_absolute()
-                        or type(mode_digest) is not str
-                        or not SHA256.fullmatch(mode_digest)):
-                    raise ValueError(f"signed target artifacts require mode publication: {lane_id}")
+                if binding is not None:
+                    if (not isinstance(binding, dict)
+                            or hashes != lane.get("artifact_hashes")
+                            or hashes != binding.get("artifact_hashes")
+                            or mode_path != binding.get("publication_archive")
+                            or mode_digest != binding.get("archive_digest")):
+                        raise ValueError(f"signed JVM mode publication differs from candidate lane: {lane_id}")
+                    case = {"id": lane_id, "target": target,
+                            "configuration": suite_manifest["lanes"][lane_id]["configuration"]}
+                    if qualify.verify_jvm_mode_publication(
+                            binding, case, candidate_sha, hashes) is not True:
+                        raise ValueError(f"JVM mode publication is unverified: {lane_id}")
+                    mode_bound = True
+                elif hashes != audited_targets.get(target):
+                    raise ValueError(f"signed target artifacts require candidate mode publication: {lane_id}")
             if (not isinstance(lane, dict)
-                    or (not mode_artifacts and hashes != audited_targets.get(target))
-                    or (not mode_artifacts and hashes != lane.get("artifact_hashes"))
+                    or (target != "jvm" and hashes != audited_targets.get(target))
+                    or (target != "jvm" and hashes != lane.get("artifact_hashes"))
                     or not isinstance(runtime, str) or not runtime
                     or runtime != lane.get("runtime_identity")):
                 raise ValueError(f"signed target artifacts or runtime differ from staging: {lane_id}")
@@ -238,6 +248,8 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
         consumer_gate = result["gates"]["staged-consumer"]
         if (suite_manifest["lanes"][lane_id]["target"] == "jvm"
                 and consumer_gate["status"] == "PASSED"):
+            if not identities_bound or not mode_bound:
+                raise ValueError(f"signed JVM candidate mode publication is unbound: {lane_id}")
             _verify_full_jvm_staged_consumer(
                 repository, candidate_sha, lane_id, selected, paths, expected,
                 consumer_gate)
@@ -256,7 +268,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                     paths["staged-consumer"], expected, consumer_gate)
         results[lane_id] = {"verification": result,
                             "selected_case_ids": selected["case_ids"],
-                            "identities_bound": identities_bound and not mode_artifacts}
+                            "identities_bound": identities_bound and (target != "jvm" or mode_bound)}
     _check_global_consistency(results, suite_manifest)
     return results
 

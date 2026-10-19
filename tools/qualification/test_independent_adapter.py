@@ -224,7 +224,7 @@ class IndependentAdapterTests(unittest.TestCase):
                                      APPROVED_MANIFEST_SHA256=digest({"fixture": True}),
                                      evaluate=evaluate)
 
-    def test_signed_synthetic_complete_schema_reaches_pass(self):
+    def test_signed_synthetic_complete_schema_cannot_pass_without_mode_binding(self):
         sha = "a" * 40
         case = next(row for row in qualify.expand(qualify.matrix()) if row["id"] == LANE)
         areas = ("geometry", "collision", "dynamics", "joints", "compatibility")
@@ -279,20 +279,15 @@ class IndependentAdapterTests(unittest.TestCase):
                          "required_gates": ["staged-consumer"],
                          "global_gates": ["publication-contract"]}
             with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
-                    "full_suite_manifest.select_lane", return_value=selection) as selected, mock.patch(
+                    "full_suite_manifest.select_lane", return_value=selection), mock.patch(
                     "qualify.verify_audit_against_staging"), mock.patch.object(
-                    independent_adapter, "_verify_full_jvm_staged_consumer"):
-                verified = independent_adapter.verify_lanes(
-                    root, sha, suite, archives, audit_path, signature, public, fingerprint,
-                    candidate_manifest=candidate, artifact_audit=audit)
-            selected.assert_called_once_with(suite, LANE, root)
-            independent_adapter.apply(
-                [result], {LANE: evidence}, verified,
-                lambda lane_id, observed: qualify.evaluate(
-                    case, observed, sha, candidate, suite, audit))
-            self.assertEqual("PASSED", result["status"])
-            self.assertIn("signed raw gate archives", result["reason"])
-            self.assertEqual(5, len(verified[LANE]["selected_case_ids"]))
+                    independent_adapter, "_verify_full_jvm_staged_consumer") as replay:
+                with self.assertRaisesRegex(ValueError, "candidate mode publication is unbound"):
+                    independent_adapter.verify_lanes(
+                        root, sha, suite, archives, audit_path, signature, public,
+                        fingerprint, candidate_manifest=candidate, artifact_audit=audit)
+            replay.assert_not_called()
+            self.assertEqual("FAILED", result["status"])
 
     def test_signed_jvm_executable_hashes_control_public_replay(self):
         import full_jvm_consumer
@@ -303,7 +298,8 @@ class IndependentAdapterTests(unittest.TestCase):
                  {"id": "second", "scope": "portable"}]
         suite = {"cases": cases, "lanes": {lane: {
             "target": "jvm", "required_gates": ["staged-consumer"],
-            "case_scopes": ["portable"]}}, "global_gates": []}
+            "case_scopes": ["portable"], "configuration": "default"}},
+            "global_gates": []}
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         java_hash, gradle_hash, runtime_java_hash = "d" * 64, "e" * 64, "9" * 64
         publication_digest = "8" * 64
@@ -339,6 +335,21 @@ class IndependentAdapterTests(unittest.TestCase):
             signed["lanes"][lane].update(
                 expected_mode_publication_path=publication_path,
                 expected_mode_publication_digest=publication_digest)
+            staging = {"candidate_sha": candidate, "status": "PASSED", "artifacts": [
+                {"path": qualify.target_binary_path(module, "jvm"), "sha256": value}
+                for module, value in hashes.items()]}
+            binding = {"candidate_sha": candidate, "lane": lane, "mode": "default",
+                       "source": "compiler_modes.replay", "source_checkout": str(root),
+                       "publication_archive": publication_path,
+                       "archive_digest": publication_digest, "artifact_hashes": hashes}
+            selected_candidate = {"candidate_sha": candidate,
+                                  "suite_manifest_sha256": qualify.manifest_digest(suite),
+                                  "audit_manifest_sha256": qualify.manifest_digest(staging),
+                                  "lanes": {lane: {"runtime_identity": runtime,
+                                                   "artifact_hashes": hashes,
+                                                   "jvm_mode_publication": binding}}}
+            signed.update(candidate_manifest_sha256=qualify.manifest_digest(selected_candidate),
+                          staged_audit_sha256=qualify.manifest_digest(staging))
             selection = {"case_ids": [item["id"] for item in cases],
                          "required_gates": ["staged-consumer"], "global_gates": []}
 
@@ -347,10 +358,13 @@ class IndependentAdapterTests(unittest.TestCase):
                 with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
                         "full_suite_manifest.select_lane", return_value=selection), mock.patch(
                         "full_jvm_consumer.selected_contract", return_value=(suite, {"cases": cases})), mock.patch(
-                        "full_jvm_consumer.verify", return_value=public_result) as replay:
+                        "full_jvm_consumer.verify", return_value=public_result) as replay, mock.patch(
+                        "qualify.verify_audit_against_staging"), mock.patch(
+                        "qualify.verify_jvm_mode_publication", return_value=True):
                     result = independent_adapter.verify_lanes(
                         root, candidate, suite, archive_map, audit_path, signature,
-                        public, fingerprint)
+                        public, fingerprint, candidate_manifest=selected_candidate,
+                        artifact_audit=staging)
                 return result, replay
 
             result, replay = verify(signed)
@@ -381,12 +395,15 @@ class IndependentAdapterTests(unittest.TestCase):
             with mock.patch.dict(sys.modules, {"independent_gates": fake}), mock.patch(
                     "full_suite_manifest.select_lane", return_value=selection), mock.patch(
                     "full_jvm_consumer.selected_contract", return_value=(suite, {"cases": cases})), mock.patch(
+                    "qualify.verify_audit_against_staging"), mock.patch(
+                    "qualify.verify_jvm_mode_publication", return_value=True), mock.patch(
                     "full_jvm_consumer.verify", side_effect=ValueError(
                         "independent Java or Gradle executable SHA-256 differs from receipt")):
                 with self.assertRaisesRegex(ValueError, "differs from receipt"):
                     independent_adapter.verify_lanes(
                         root, candidate, suite, archive_map, audit_path, signature,
-                        public, fingerprint)
+                        public, fingerprint, candidate_manifest=selected_candidate,
+                        artifact_audit=staging)
 
     def test_signed_local_klib_and_android_dispatch_requires_staged_identity(self):
         import full_android_adapter
@@ -544,13 +561,8 @@ class IndependentAdapterTests(unittest.TestCase):
             forged_receipt["toolchain"]["java_executable_sha256"] = "0" * 64
             forged_receipt["toolchain"]["gradle_executable_sha256"] = "1" * 64
             (forged / "receipt.json").write_text(json.dumps(forged_receipt))
-            archive_map = root / "archive-map.json"
-
             def check(path):
                 digest = independent_gates.archive_digest(path)
-                archive_map.write_text(json.dumps({
-                    "schema": 1, "candidate_sha": candidate,
-                    "lanes": {lane: {"staged-consumer": str(path)}}}))
                 signed = {"schema": 1, "candidate_sha": candidate,
                           "suite_manifest_sha256": independent_gates.digest(suite),
                           "lanes": {lane: {
@@ -568,17 +580,20 @@ class IndependentAdapterTests(unittest.TestCase):
                     "staged-consumer", path, candidate, lane, suite["lanes"][lane],
                     ROOT, hashes, runtime, digest, manifest=suite)
                 self.assertEqual("PASSED", generic["status"])
-                return independent_adapter.verify_lanes(
-                    ROOT, candidate, suite, archive_map, audit_path, signature,
-                    public, fingerprint)
+                authenticated = independent_adapter._signed_audit(
+                    audit_path, signature, public, fingerprint)
+                cases = full_jvm_consumer.selected_contract(ROOT, lane)[1]["cases"]
+                independent_adapter._verify_full_jvm_staged_consumer(
+                    ROOT, candidate, lane,
+                    {"case_ids": [item["id"] for item in cases]},
+                    {"staged-consumer": str(path)}, authenticated["lanes"][lane], generic)
+                return generic
 
             verified = check(original)
-            self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
-                "staged-consumer"]["status"])
+            self.assertEqual("PASSED", verified["status"])
             with mock.patch.object(independent_adapter, "_verify_full_jvm_staged_consumer"):
                 unguarded = check(forged)
-            self.assertEqual("PASSED", unguarded[lane]["verification"]["gates"][
-                "staged-consumer"]["status"])
+            self.assertEqual("PASSED", unguarded["status"])
             with self.assertRaisesRegex(ValueError, "executable SHA-256 differs"):
                 check(forged)
 
@@ -662,7 +677,7 @@ class IndependentAdapterTests(unittest.TestCase):
                   "lanes": {LANE: {"expected_archive_digests": {},
                                    "expected_artifact_hashes": hashes,
                                    "expected_runtime_identity": "audited runner"}}}
-        fake = self.fake_verifier()
+        fake = self.fake_verifier(status="NOT_RUN")
         fake.APPROVED_MANIFEST_SHA256 = qualify.manifest_digest(suite)
         selection = {"case_ids": ["synthetic"],
                      "required_gates": ["staged-consumer"],
@@ -684,7 +699,7 @@ class IndependentAdapterTests(unittest.TestCase):
                         fingerprint, candidate_manifest=candidate_input,
                         artifact_audit=staging_input)
 
-            self.assertTrue(verify(signed)[LANE]["identities_bound"])
+            self.assertFalse(verify(signed)[LANE]["identities_bound"])
             changed = copy.deepcopy(signed)
             changed["lanes"][LANE]["expected_artifact_hashes"] = {
                 **hashes, "dyn4k-core": "c" * 64}
@@ -693,7 +708,8 @@ class IndependentAdapterTests(unittest.TestCase):
             changed["lanes"][LANE].update(
                 expected_mode_publication_path="/independent/mode-publication",
                 expected_mode_publication_digest="d" * 64)
-            self.assertFalse(verify(changed)[LANE]["identities_bound"])
+            with self.assertRaisesRegex(ValueError, "require candidate mode publication"):
+                verify(changed)
             changed = copy.deepcopy(signed)
             changed["lanes"][LANE]["expected_runtime_identity"] = "other runner"
             with self.assertRaisesRegex(ValueError, "runtime"):
@@ -717,6 +733,135 @@ class IndependentAdapterTests(unittest.TestCase):
                 **hashes, "dyn4k-core": "c" * 64}
             with self.assertRaisesRegex(ValueError, "signed audit differs"):
                 verify(signed, candidate_input=altered_candidate)
+
+    def test_real_jvm_modes_bind_signed_candidate_publications(self):
+        archive_root = Path(
+            "/var/home/stewart/dyn4k-evidence/session-control/"
+            "full-jvm-d50-p1-p2-sol-work/archive")
+        source = Path(
+            "/var/home/stewart/dyn4k-evidence/session-control/"
+            "full-jvm-d50-p1-p2-sol-work/final-candidate")
+        if not source.is_dir() or any(not (archive_root / f"jvm-{mode}-final").is_dir()
+                                      for mode in ("default", "no-optimize")):
+            self.skipTest("retained exact10e JVM mode publications are unavailable")
+        sha = "10e78648d4b63083e89f6543896dd07794be7b87"
+        for mode in ("default", "no-optimize"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                lane = f"jvm:Java:minimum:{mode}"
+                publication = archive_root / f"jvm-{mode}-final"
+                hashes = {module: hashlib.sha256(
+                    (publication / "staged" / qualify.target_binary_path(module, "jvm"))
+                    .read_bytes()).hexdigest() for module in qualify.MODULES}
+                digest = independent_gates.archive_digest(publication)
+                binding = {"candidate_sha": sha, "lane": lane, "mode": mode,
+                           "source": "compiler_modes.replay",
+                           "source_checkout": str(source),
+                           "publication_archive": str(publication),
+                           "archive_digest": digest, "artifact_hashes": hashes}
+                suite = {"lanes": {lane: {"target": "jvm", "configuration": mode,
+                                            "required_gates": ["staged-consumer"]}},
+                         "global_gates": []}
+                staged = {"candidate_sha": sha, "status": "PASSED", "artifacts": [
+                    {"path": qualify.target_binary_path(module, "jvm"),
+                     "sha256": "f" * 64} for module in qualify.MODULES]}
+                candidate = {"candidate_sha": sha,
+                             "suite_manifest_sha256": qualify.manifest_digest(suite),
+                             "audit_manifest_sha256": qualify.manifest_digest(staged),
+                             "lanes": {lane: {"runtime_identity": "audited JDK",
+                                              "artifact_hashes": hashes,
+                                              "jvm_mode_publication": binding}}}
+                signed = {"schema": 1, "candidate_sha": sha,
+                          "suite_manifest_sha256": qualify.manifest_digest(suite),
+                          "candidate_manifest_sha256": qualify.manifest_digest(candidate),
+                          "staged_audit_sha256": qualify.manifest_digest(staged),
+                          "lanes": {lane: {"expected_artifact_hashes": hashes,
+                                           "expected_runtime_identity": "audited JDK",
+                                           "expected_archive_digests": {},
+                                           "expected_mode_publication_path": str(publication),
+                                           "expected_mode_publication_digest": digest}}}
+                archives = root / "archives.json"
+                archives.write_text(json.dumps({"schema": 1, "candidate_sha": sha,
+                                                "lanes": {lane: {}}}))
+                gate = {"candidate_sha": sha, "lane": lane, "status": "NOT_RUN",
+                        "gates": {"staged-consumer": {"status": "NOT_RUN"}}}
+                gate["result_sha256"] = independent_gates.digest(gate)
+                selected = {"case_ids": ["synthetic"],
+                            "required_gates": ["staged-consumer"], "global_gates": []}
+
+                def verify(signed_input=signed, candidate_input=candidate, bind=True):
+                    audit_input = copy.deepcopy(signed_input)
+                    audit_input["candidate_manifest_sha256"] = qualify.manifest_digest(
+                        candidate_input)
+                    audit_path, signature, public, fingerprint = self.signed_inputs(
+                        root, audit_input)
+                    with mock.patch.object(independent_gates, "APPROVED_MANIFEST_SHA256",
+                                           qualify.manifest_digest(suite)), mock.patch.object(
+                        independent_gates, "evaluate", return_value=gate), mock.patch(
+                        "full_suite_manifest.select_lane", return_value=selected), mock.patch(
+                        "qualify.verify_audit_against_staging") as staging_check:
+                        result = independent_adapter.verify_lanes(
+                            ROOT, sha, suite, archives, audit_path, signature,
+                            public, fingerprint,
+                            candidate_manifest=candidate_input if bind else None,
+                            artifact_audit=staged if bind else None)
+                    if bind:
+                        staging_check.assert_called_once_with(staged, ROOT)
+                    else:
+                        staging_check.assert_not_called()
+                    return result[lane]
+
+                verified = verify()
+                self.assertTrue(verified["identities_bound"])
+                self.assertEqual("NOT_RUN", verified["verification"]["status"])
+                self.assertFalse(verify(bind=False)["identities_bound"])
+                self.assertNotEqual(hashes, qualify.target_binary_hashes(
+                    staged["artifacts"])["jvm"])
+
+                if mode != "default":
+                    continue
+                for field, value in (
+                    ("mode", "no-optimize"), ("lane", f"jvm:Java:current:{mode}"),
+                    ("candidate_sha", "0" * 40), ("source_checkout", str(ROOT)),
+                ):
+                    changed = copy.deepcopy(candidate)
+                    changed["lanes"][lane]["jvm_mode_publication"][field] = value
+                    with self.assertRaisesRegex(ValueError, "JVM mode publication"):
+                        verify(candidate_input=changed)
+                changed = copy.deepcopy(candidate)
+                changed["lanes"][lane].pop("jvm_mode_publication")
+                with self.assertRaisesRegex(ValueError, "require candidate mode publication"):
+                    verify(candidate_input=changed)
+                for field, value in (
+                    ("expected_mode_publication_path",
+                     str(archive_root / "jvm-no-optimize-final")),
+                    ("expected_mode_publication_digest", "0" * 64),
+                    ("expected_artifact_hashes", {**hashes, "dyn4k-core": "0" * 64}),
+                ):
+                    changed = copy.deepcopy(signed)
+                    changed["lanes"][lane][field] = value
+                    with self.assertRaisesRegex(ValueError, "differs from candidate lane"):
+                        verify(signed_input=changed)
+                other_publication = archive_root / "jvm-no-optimize-final"
+                alternate = copy.deepcopy(candidate)
+                alternate_binding = alternate["lanes"][lane]["jvm_mode_publication"]
+                alternate_binding["publication_archive"] = str(other_publication)
+                alternate_binding["archive_digest"] = independent_gates.archive_digest(
+                    other_publication)
+                alternate_signed = copy.deepcopy(signed)
+                alternate_signed["lanes"][lane].update(
+                    expected_mode_publication_path=str(other_publication),
+                    expected_mode_publication_digest=alternate_binding["archive_digest"])
+                with self.assertRaisesRegex(ValueError, "receipt identity differs"):
+                    verify(signed_input=alternate_signed, candidate_input=alternate)
+                forged = copy.deepcopy(candidate)
+                forged_pair = {**hashes, "dyn4k-core": "0" * 64}
+                forged["lanes"][lane]["artifact_hashes"] = forged_pair
+                forged["lanes"][lane]["jvm_mode_publication"]["artifact_hashes"] = forged_pair
+                forged_signed = copy.deepcopy(signed)
+                forged_signed["lanes"][lane]["expected_artifact_hashes"] = forged_pair
+                with self.assertRaisesRegex(ValueError, "JVM mode publication dyn4k-core JAR differs"):
+                    verify(signed_input=forged_signed, candidate_input=forged)
 
     def test_all_112_lanes_reject_distinct_global_archive_or_scope(self):
         lanes = [case["id"] for case in qualify.expand(qualify.matrix())]
