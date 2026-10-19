@@ -76,11 +76,26 @@ def _source(repository, candidate, name):
              "tools/qualification/independent_gates.py",
              "tools/qualification/independent_adapter.py")
     for path in paths:
-        committed = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate}:{path}"],
-            stderr=subprocess.PIPE)
+        try:
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(repository), "show",
+                 f"{candidate}:{path}"], stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError:
+            raise ValueError(f"public producer or central verifier absent from candidate: {path}") from None
         if (Path(repository) / path).read_bytes() != committed:
             raise ValueError(f"public producer or central verifier differs from candidate: {path}")
+
+
+def _browser_observer_source(repository, candidate):
+    path = "tools/qualification/independent_browser_observer.js"
+    try:
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate}:{path}"], stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError:
+        raise ValueError("independent browser observer is absent from candidate") from None
+    if (Path(repository) / path).read_bytes() != committed:
+        raise ValueError("independent browser observer differs from candidate")
 
 
 def execution_witness(expected, candidate, lane, digest, runtime, mode,
@@ -130,6 +145,43 @@ def execution_witness(expected, candidate, lane, digest, runtime, mode,
                 or process["started_ns"] <= 0
                 or process["finished_ns"] < process["started_ns"]):
             raise ValueError("independent process witness lacks observed execution")
+    return witness
+
+
+def browser_execution_witness(expected, candidate, lane, digest, runtime, hashes,
+                              toolchain, archive):
+    binding = expected.get("expected_execution_witness")
+    if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
+        raise ValueError("independently signed browser execution witness is missing")
+    path = Path(binding["path"])
+    if (not path.is_absolute() or not path.is_file() or path.is_symlink()
+            or path.resolve().is_relative_to(Path(archive).resolve())):
+        raise ValueError("independent browser execution witness file is absent or symbolic")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != _sha(binding["sha256"], "browser witness"):
+        raise ValueError("independent browser execution witness bytes differ")
+    witness = json.loads(raw, object_pairs_hook=independent_gates._strict_object,
+                         parse_constant=lambda value: (_ for _ in ()).throw(
+                             ValueError(f"non-finite browser witness value: {value}")))
+    observer = Path(__file__).with_name("independent_browser_observer.js")
+    source_sha = hashlib.sha256(observer.read_bytes()).hexdigest()
+    if (not isinstance(witness, dict)
+            or set(witness) != {"schema", "candidate_sha", "lane", "archive_sha256",
+                                "runtime_identity", "mode", "staged_artifacts",
+                                "browser_sha256", "observer_source_sha256", "auditor",
+                                "responses", "browser_consumption"}
+            or witness["schema"] != "independent-browser-execution-witness/1"
+            or witness["candidate_sha"] != candidate or witness["lane"] != lane
+            or witness["archive_sha256"] != digest
+            or witness["runtime_identity"] != runtime
+            or witness["mode"] != lane.rsplit(":", 1)[1]
+            or witness["staged_artifacts"] != hashes
+            or witness["browser_sha256"] != toolchain["browser_sha256"]
+            or witness["observer_source_sha256"] != source_sha
+            or witness["responses"] != expected.get("expected_browser_responses")
+            or not isinstance(witness["auditor"], str)
+            or not witness["auditor"].strip()):
+        raise ValueError("independent browser execution witness differs from signed lane")
     return witness
 
 
@@ -202,7 +254,7 @@ def _browser_bundle_bytes(root, bundles, wasm):
 def _browser_response_proof(root, responses, witness, receipt, wasm):
     if (not isinstance(responses, dict) or set(responses) != {"core", "facade"}
             or witness.get("responses") != responses
-            or receipt.get("schema") != 3
+            or receipt.get("schema") not in (3, 4)
             or not isinstance(receipt.get("modules"), dict)):
         raise ValueError("browser HTTP responses differ from signed witness or producer")
     for short in ("core", "facade"):
@@ -355,6 +407,8 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
     receipt = independent_gates._json(root / "receipt.json")
     _signed(expected, hashes, runtime, digest, receipt)
     _source(repository, candidate, "browser")
+    if receipt.get("schema") == 4:
+        _browser_observer_source(repository, candidate)
     selected_lane = independent_gates.load_approved_manifest(repository)["lanes"][lane]
     if (receipt.get("candidate_sha") != candidate or receipt.get("lane") != lane
             or receipt.get("consumer_contract_sha256") != independent_gates.digest(
@@ -387,13 +441,18 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
     if public != {"status": "PASSED", "lane": lane, "selected_cases": len(_selected(repository, lane)),
                   "archive_sha256": digest, "candidate_sha": candidate}:
         raise ValueError("browser public verifier differs from signed lane")
-    if receipt.get("schema") == 3 or lane.startswith("wasmJs:"):
+    if receipt.get("schema") in (3, 4) or lane.startswith("wasmJs:"):
         responses = expected.get("expected_browser_responses")
-        witness = execution_witness(expected, candidate, lane, digest, runtime,
-                                    lane.rsplit(":", 1)[1], executables, hashes,
-                                    toolchain["gradle_sha256"], root)
+        witness = (browser_execution_witness(expected, candidate, lane, digest, runtime,
+                                             hashes, toolchain, root)
+                   if receipt.get("schema") == 4 else
+                   execution_witness(expected, candidate, lane, digest, runtime,
+                                     lane.rsplit(":", 1)[1], executables, hashes,
+                                     toolchain["gradle_sha256"], root))
         _browser_response_proof(root, responses, witness, receipt,
                                 lane.startswith("wasmJs:"))
+        if receipt.get("schema") == 4:
+            independent_gates._browser_consumption_witness(root, receipt, expected)
     return public
 
 

@@ -2595,6 +2595,15 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                         "size": 12, "started_ns": 35, "finished_ns": 45}
             (folder / "http-responses.json").write_text(json.dumps({
                 "responses": [response]}))
+            if receipt["schema"] == 4:
+                (folder / "chromium-cdp.jsonl").write_text("\n".join(json.dumps(row) for row in (
+                    {"kind": "session", "browser_pid": pid, "cdp_browser_pid": pid,
+                     "target_id": short, "started_ns": 20},
+                    {"url": f"http://127.0.0.1:9876{response['url']}",
+                     "browser_pid": pid, "target_id": short, "request_ns": 30,
+                     "response_ns": 40, "finished_ns": 50,
+                     "body_sha256": response["sha256"], "body_size": response["size"]}
+                )) + "\n")
             consumption[short] = {"protocol": "cdp", "clock": "unix-epoch-ns",
                                   "browser_pid": pid,
                                   "browser_sha256": browser_sha,
@@ -2647,12 +2656,27 @@ class FullBrowserSignedGateTests(unittest.TestCase):
             witness_path.write_text(json.dumps(witness))
             expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
                 witness_path.read_bytes()).hexdigest()
+            if receipt["schema"] == 4:
+                cdp_path = folder / "chromium-cdp.jsonl"
+                rows = [json.loads(line) for line in cdp_path.read_text().splitlines()]
+                rows.append({"url": f"http://127.0.0.1:9876{commons['url']}",
+                             "browser_pid": rows[0]["browser_pid"],
+                             "target_id": rows[0]["target_id"],
+                             "request_ns": 25, "response_ns": 60, "finished_ns": 70,
+                             "body_sha256": commons["sha256"], "body_size": commons["size"]})
+                cdp_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        cdp_change = changes.pop("cdp_change", None)
+        if cdp_change is not None:
+            cdp_path = self.archive / "core/chromium-cdp.jsonl"
+            rows = [json.loads(line) for line in cdp_path.read_text().splitlines()]
+            field, value = cdp_change
+            rows[1][field] = value
+            cdp_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         if receipt["status"] == "NOT_RUN":
             expected["expected_not_run"] = receipt.copy()
         if changes.pop("missing_witness", False):
             expected.pop("expected_execution_witness")
-        if changes.pop("forged_witness", False):
-            expected["expected_execution_witness"]["sha256"] = "f" * 64
+        forged_witness = changes.pop("forged_witness", False)
         if changes.pop("stale_witness", False):
             witness = json.loads(witness_path.read_text())
             witness["browser_consumption"]["core"]["browser_pid"] = 999
@@ -2666,6 +2690,14 @@ class FullBrowserSignedGateTests(unittest.TestCase):
             witness_path.write_text(json.dumps(witness))
             expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
                 witness_path.read_bytes()).hexdigest()
+        if changes.pop("missing_response", False):
+            witness = json.loads(witness_path.read_text())
+            witness["browser_consumption"]["core"]["responses"] = []
+            witness_path.write_text(json.dumps(witness))
+        if changes.pop("missing_process", False):
+            witness = json.loads(witness_path.read_text())
+            witness["browser_consumption"].pop("facade")
+            witness_path.write_text(json.dumps(witness))
         if changes.pop("wrong_interval", False):
             witness = json.loads(witness_path.read_text())
             witness["browser_consumption"]["facade"]["responses"][0][
@@ -2689,6 +2721,22 @@ class FullBrowserSignedGateTests(unittest.TestCase):
         (self.archive / "receipt.json").write_text(json.dumps(receipt))
         digest = independent_gates.archive_digest(self.archive)
         expected["expected_archive_digests"]["staged-consumer"] = digest
+        if receipt["schema"] == 4 and "expected_execution_witness" in expected:
+            witness = json.loads(witness_path.read_text())
+            witness.update({
+                "schema": "independent-browser-execution-witness/1",
+                "candidate_sha": receipt["candidate_sha"], "lane": lane,
+                "archive_sha256": digest, "runtime_identity": receipt["runtime_identity"],
+                "mode": lane.rsplit(":", 1)[1], "staged_artifacts": self.HASHES,
+                "browser_sha256": receipt["toolchain"]["browser_sha256"],
+                "observer_source_sha256": hashlib.sha256((ROOT /
+                    "tools/qualification/independent_browser_observer.js").read_bytes()).hexdigest(),
+                "auditor": "independent test key", "responses": expected["expected_browser_responses"]})
+            witness_path.write_text(json.dumps(witness))
+            expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                witness_path.read_bytes()).hexdigest()
+        if forged_witness:
+            expected["expected_execution_witness"]["sha256"] = "f" * 64
         selected = {"gate": "staged-consumer", "archive": self.archive,
                     "candidate_sha": self.candidate, "lane_id": lane,
                     "lane": self.manifest["lanes"][lane], "repository": ROOT,
@@ -2699,11 +2747,14 @@ class FullBrowserSignedGateTests(unittest.TestCase):
         selected.update(changes)
         return independent_gates.evaluate_gate(**selected), digest
 
-    def test_schema3_all_browser_families_reach_signed_public_route(self):
+    def test_schema3_firefox_and_safari_reach_signed_public_route(self):
         import full_browser_consumer
 
         self.assertEqual(24, len(full_browser_consumer.LANES))
-        for lane in sorted(full_browser_consumer.LANES):
+        lanes = sorted(lane for lane in full_browser_consumer.LANES
+                       if ":Chromium:" not in lane)
+        self.assertEqual(16, len(lanes))
+        for lane in lanes:
             with self.subTest(lane=lane):
                 with mock.patch("full_signed_routes.verify_browser") as replay:
                     replay.side_effect = lambda *args: {
@@ -2714,6 +2765,76 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                 self.assertEqual(2523, result["selected_cases"])
                 replay.assert_called_once()
                 self.assertEqual(digest, replay.call_args.args[7])
+
+    def test_schema4_chromium_eight_lanes_reach_signed_public_route(self):
+        lanes = [f"{target}:Chromium:{role}:{mode}" for target in ("js", "wasmJs")
+                 for role in ("minimum", "current")
+                 for mode in ("development", "production")]
+        for lane in lanes:
+            with self.subTest(lane=lane), mock.patch(
+                    "full_signed_routes.verify_browser") as replay:
+                replay.side_effect = lambda *args: {
+                    "status": "PASSED", "lane": args[2], "selected_cases": 2523,
+                    "archive_sha256": args[7], "candidate_sha": args[1]}
+                result, _ = self.evaluate(lane, receipt={"schema": 4})
+                self.assertEqual("PASSED", result["status"], result)
+                replay.assert_called_once()
+                result, _ = self.evaluate(lane, receipt={"schema": 3})
+                self.assertEqual("FAILED", result["status"], result)
+
+    def test_schema4_re_signed_external_witness_must_match_cdp_body_and_pid(self):
+        lane = "js:Chromium:current:development"
+        for change in ("missing_witness", "forged_witness", "stale_witness",
+                       "missing_response", "missing_process", "wrong_body",
+                       "wrong_interval", "before_server",
+                       "wrong_clock"):
+            with self.subTest(change=change), mock.patch(
+                    "full_signed_routes.verify_browser") as replay:
+                replay.side_effect = lambda *args: {
+                    "status": "PASSED", "lane": args[2], "selected_cases": 2523,
+                    "archive_sha256": args[7], "candidate_sha": args[1]}
+                result, _ = self.evaluate(lane, receipt={"schema": 4}, **{change: True})
+                self.assertEqual("FAILED", result["status"], result)
+
+    def test_schema4_cdp_independent_binding_and_parallel_urls(self):
+        lane = "wasmJs:Chromium:current:development"
+        public = lambda *args: {"status": "PASSED", "lane": args[2],
+                                "selected_cases": 2523, "archive_sha256": args[7],
+                                "candidate_sha": args[1]}
+        with mock.patch("full_signed_routes.verify_browser", side_effect=public):
+            result, _ = self.evaluate(lane, receipt={"schema": 4}, parallel_order=True)
+            self.assertEqual("PASSED", result["status"], result)
+            for field, value in (("browser_pid", 999), ("body_sha256", "0" * 64),
+                                 ("body_size", 999), ("response_ns", 25),
+                                 ("finished_ns", 101)):
+                with self.subTest(field=field):
+                    result, _ = self.evaluate(lane, receipt={"schema": 4},
+                                              cdp_change=(field, value))
+                    self.assertEqual("FAILED", result["status"], result)
+
+    def test_retained_a14_schema4_without_independent_audit_rejected(self):
+        archive = Path("/var/home/stewart/dyn4k-evidence/root-browser-cdp-a14/js-relocated")
+        if not (archive / "receipt.json").is_file():
+            self.skipTest("retained a14 Chromium archive is absent")
+        receipt = json.loads((archive / "receipt.json").read_text())
+        result = independent_gates.evaluate_gate(
+            "staged-consumer", archive, receipt["candidate_sha"], receipt["lane"],
+            self.manifest["lanes"][receipt["lane"]], ROOT, receipt["staged_hashes"],
+            receipt["runtime_identity"], independent_gates.archive_digest(archive),
+            manifest=self.manifest, expected_signed_lane=None)
+        self.assertEqual("FAILED", result["status"], result)
+        self.assertIn("independently signed lane", result["reason"])
+
+    def test_schema4_archive_mutation_and_unexecuted_statuses(self):
+        lane = "js:Chromium:current:production"
+        with mock.patch("full_signed_routes.verify_browser") as replay:
+            result, _ = self.evaluate(lane, receipt={"schema": 4},
+                                      expected_archive_digest="0" * 64)
+            self.assertEqual("FAILED", result["status"])
+            replay.assert_not_called()
+            result, _ = self.evaluate(lane, receipt={"schema": 4, "status": "NOT_RUN"})
+            self.assertEqual("NOT_RUN", result["status"])
+            replay.assert_not_called()
 
     def test_schema2_browser_receipt_uses_signed_historical_route(self):
         lane = "js:Firefox:minimum:development"
@@ -2734,14 +2855,14 @@ class FullBrowserSignedGateTests(unittest.TestCase):
         replay.assert_not_called()
 
     def test_schema3_unsigned_browser_receipt_fails(self):
-        lane = "js:Chromium:current:development"
+        lane = "js:Firefox:current:development"
         with mock.patch("full_signed_routes.verify_browser") as replay:
             result, _ = self.evaluate(lane, signed=False)
             self.assertEqual("FAILED", result["status"])
             replay.assert_not_called()
 
     def test_schema3_missing_forged_or_stale_browser_process_witness_fails(self):
-        lane = "js:Chromium:current:development"
+        lane = "js:Firefox:current:development"
         for change in ("missing_witness", "forged_witness", "stale_witness",
                        "wrong_body", "wrong_interval"):
             with self.subTest(change=change), mock.patch(
@@ -2753,7 +2874,7 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                 self.assertEqual("FAILED", result["status"], result)
 
     def test_schema3_resigned_browser_response_before_server_start_fails(self):
-        lane = "js:Chromium:current:development"
+        lane = "js:Firefox:current:development"
         with mock.patch("full_signed_routes.verify_browser") as replay:
             replay.side_effect = lambda *args: {
                 "status": "PASSED", "lane": args[2], "selected_cases": 2523,
@@ -2763,7 +2884,7 @@ class FullBrowserSignedGateTests(unittest.TestCase):
         self.assertIn("response", result["reason"])
 
     def test_schema3_parallel_requests_can_invert_browser_and_server_order(self):
-        lane = "js:Chromium:current:development"
+        lane = "js:Firefox:current:development"
         with mock.patch("full_signed_routes.verify_browser") as replay:
             replay.side_effect = lambda *args: {
                 "status": "PASSED", "lane": args[2], "selected_cases": 2523,
@@ -2772,7 +2893,7 @@ class FullBrowserSignedGateTests(unittest.TestCase):
         self.assertEqual("PASSED", result["status"], result)
 
     def test_schema3_unmapped_clock_fails_with_resigned_witness(self):
-        lane = "wasmJs:Chromium:current:development"
+        lane = "wasmJs:Firefox:current:development"
         with mock.patch("full_signed_routes.verify_browser") as replay:
             replay.side_effect = lambda *args: {
                 "status": "PASSED", "lane": args[2], "selected_cases": 2523,

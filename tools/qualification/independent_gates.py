@@ -2139,13 +2139,19 @@ def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repositor
 
         has_http_producer = b"DYN4K_BROWSER_HTTP_ARCHIVE" in full_browser_consumer.original(
             repository, candidate_sha, full_browser_consumer.REPORTER)
-        if (receipt.get("schema") == 3 and not has_http_producer
-                or receipt.get("schema") == 2 and has_http_producer):
+        has_cdp_producer = b"DYN4K_BROWSER_CDP_ARCHIVE" in full_browser_consumer.original(
+            repository, candidate_sha, "tools/qualification/full_browser_consumer.py")
+        chromium = lane_id.split(":")[1] == "Chromium"
+        schema = receipt.get("schema")
+        if (type(schema) is not int or not (
+                schema == 4 and has_http_producer and has_cdp_producer and chromium
+                or schema == 3 and has_http_producer and not (chromium and has_cdp_producer)
+                or schema == 2 and not has_http_producer)):
             raise ValueError("browser receipt schema differs from exact producer source")
         public = full_signed_routes.verify_browser(
             repository, candidate_sha, lane_id, root, signed_lane,
             hashes, runtime, expected_digest)
-        if receipt.get("schema") == 3:
+        if schema in (3, 4):
             _browser_consumption_witness(root, receipt, signed_lane)
     else:
         public = full_signed_routes.verify(repository, candidate_sha, lane_id, root,
@@ -2172,6 +2178,14 @@ def _browser_consumption_witness(root, receipt, signed_lane):
     witness = json.loads(path.read_bytes(), object_pairs_hook=_strict_object,
                          parse_constant=lambda value: (_ for _ in ()).throw(
                              ValueError(f"non-finite browser witness value: {value}")))
+    if receipt.get("schema") == 4:
+        import full_signed_routes
+
+        full_signed_routes.browser_execution_witness(
+            signed_lane, receipt.get("candidate_sha"), receipt.get("lane"),
+            signed_lane.get("expected_archive_digests", {}).get("staged-consumer"),
+            receipt.get("runtime_identity"), receipt.get("staged_hashes"),
+            receipt.get("toolchain"), root)
     observed = witness.get("browser_consumption") if isinstance(witness, dict) else None
     if not isinstance(observed, dict) or set(observed) != {"core", "facade"}:
         raise ValueError("independent browser process consumption is missing")
@@ -2207,6 +2221,36 @@ def _browser_consumption_witness(root, receipt, signed_lane):
         server = {item["url"]: item for item in captured["responses"]}
         if len(server) != len(captured["responses"]):
             raise ValueError("browser server response URLs are duplicated")
+        cdp = None
+        if receipt.get("schema") == 4:
+            rows = [_strict_json_line(line) for line in
+                    _file_path(root, f"{short}/chromium-cdp.jsonl").read_bytes().splitlines()]
+            if not rows or not isinstance(rows[0], dict) or rows[0].get("kind") != "session":
+                raise ValueError("archived Chromium CDP session is missing")
+            if (rows[0].get("browser_pid") != browser["browser_pid"]
+                    or rows[0].get("cdp_browser_pid") != browser["browser_pid"]
+                    or type(rows[0].get("started_ns")) is not int
+                    or not process["started_ns"] <= rows[0]["started_ns"] <= browser["finished_ns"]):
+                raise ValueError("archived and independent Chromium process differ")
+            cdp = {}
+            for row in rows[1:]:
+                from urllib.parse import urlsplit
+                address = urlsplit(row.get("url", "")) if isinstance(row, dict) else None
+                url = (address.path + ("?" + address.query if address.query else "")
+                       if address else None)
+                if (url in cdp or url not in server
+                        or row.get("browser_pid") != browser["browser_pid"]
+                        or row.get("target_id") != rows[0].get("target_id")
+                        or any(type(row.get(key)) is not int for key in
+                               ("request_ns", "response_ns", "finished_ns"))
+                        or not browser["started_ns"] <= row["request_ns"] <= row["response_ns"]
+                            <= row["finished_ns"] <= browser["finished_ns"]
+                        or row.get("body_sha256") != server[url].get("sha256")
+                        or row.get("body_size") != server[url].get("size")):
+                    raise ValueError("archived Chromium CDP body or process differs")
+                cdp[url] = row
+            if set(cdp) != set(server):
+                raise ValueError("archived Chromium CDP response inventory differs")
         seen = set()
         for item in browser["responses"]:
             if (not isinstance(item, dict)
@@ -2228,6 +2272,15 @@ def _browser_consumption_witness(root, receipt, signed_lane):
                     or not server[item["url"]]["started_ns"]
                         <= server[item["url"]]["finished_ns"] <= item["finished_ns"]):
                 raise ValueError("independent browser response body or interval differs")
+            if cdp is not None:
+                row = cdp[item["url"]]
+                if (item["body_sha256"] != row["body_sha256"]
+                        or item["size"] != row["body_size"]
+                        or row["request_ns"] > item["finished_ns"]
+                        or item["request_ns"] > row["finished_ns"]
+                        or not server[item["url"]]["started_ns"] <= row["response_ns"]
+                        or not server[item["url"]]["finished_ns"] <= row["finished_ns"]):
+                    raise ValueError("independent and archived Chromium body intervals differ")
             seen.add(item["url"])
 
 
@@ -2267,7 +2320,7 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                     raise ValueError("approved full browser lane or suite differs")
             if (family in {"wasm-node", "native-host", "android-native", "apple-device"}
                     or family == "browser" and _json(_file_path(root, "receipt.json")).get(
-                        "schema") in (2, 3)):
+                        "schema") in (2, 3, 4)):
                 if expected_signed_lane is None:
                     if not (family == "android-native"
                             and full_signed_routes.PUBLIC_REPLAY_ACTIVE.get()):
