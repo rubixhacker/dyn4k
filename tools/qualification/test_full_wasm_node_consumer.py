@@ -76,6 +76,14 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
                         route.subprocess, "run", return_value=subprocess.CompletedProcess(
                             [str(executable), "--version"], 0, version)):
                     self.assertEqual(route.runtime_preflight(lane, executable)["status"], status)
+            changed = Path(directory) / "changed-runtime"
+            changed.write_bytes(b"different runtime bytes")
+            with patch.object(route.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [str(executable), "--version"], 0, "v26.12.0")):
+                first = route.runtime_preflight("wasmJs:Node.js:current:development", executable)
+                second = route.runtime_preflight("wasmJs:Node.js:current:development", changed)
+            self.assertEqual(first["version"], second["version"])
+            self.assertNotEqual(first["sha256"], second["sha256"])
 
     def test_public_archive_digest_rejects_changed_bytes_and_symbolic_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -85,6 +93,11 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
             original = route.archive_digest(archive)
             (archive / "raw.log").write_bytes(b"changed method events")
             self.assertNotEqual(route.archive_digest(archive), original)
+            (archive / "raw.log").write_bytes(b"original method events")
+            (archive / "bundle.mjs").write_bytes(b"original linked bundle")
+            with_bundle = route.archive_digest(archive)
+            (archive / "bundle.mjs").write_bytes(b"changed linked bundle")
+            self.assertNotEqual(route.archive_digest(archive), with_bundle)
             (archive / "raw.log").unlink()
             (archive / "raw.log").symlink_to(archive / "receipt.json")
             with self.assertRaisesRegex(ValueError, "symbolic"):
