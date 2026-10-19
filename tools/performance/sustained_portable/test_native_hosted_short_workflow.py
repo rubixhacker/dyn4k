@@ -30,7 +30,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
     "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
-    "windows-collision-focus.yml": "0d7ae31ec15e42211e26b41c8057da394f24557c13a0ba69fa133e2fe8288b68",
+    "windows-collision-focus.yml": "bde047932d73154009d0f4948ee24189f01f0e34113f8a147cc3aaea61036c31",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
@@ -274,6 +274,10 @@ class WorkflowExpressionLimit(unittest.TestCase):
         skip_output = run_unittest(skip_script)
         success_pattern = success_assignment.group(1)
         skip_pattern = assignment.group(1)
+        self.assertRegex(success_output.rstrip(b"\r\n").decode(), success_pattern)
+        arbitrary_outputs = (
+            "not OK\n", "OK extra\n", "OK (skipped=1)\n", "prefix OK\n",
+            "ok\n", "OK\nextra\n", "OK\n\nEXTRA\n")
         for ending in (b"\n", b"\r\n"):
             with self.subTest(line_ending=repr(ending)):
                 success = with_line_ending(success_output, ending).decode()
@@ -285,11 +289,10 @@ class WorkflowExpressionLimit(unittest.TestCase):
                 self.assertRegex(skipped, r"(?m)^OK \(skipped=1\)")
                 self.assertRegex(skipped, skip_pattern)
                 self.assertNotRegex(skipped, success_pattern)
-
-        for arbitrary in ("not OK\n", "OK extra\n", "OK (skipped=1)\n",
-                          "prefix OK\n", "ok\n", "OK\nextra\n"):
-            with self.subTest(arbitrary=arbitrary):
-                self.assertNotRegex(arbitrary, success_pattern)
+                for arbitrary in arbitrary_outputs:
+                    with self.subTest(arbitrary=arbitrary):
+                        output = with_line_ending(arbitrary.encode(), ending).decode()
+                        self.assertNotRegex(output, success_pattern)
 
 
 def workflow_nodes():

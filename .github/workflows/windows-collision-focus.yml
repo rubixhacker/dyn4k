@@ -74,7 +74,7 @@ jobs:
             (Get-Content -LiteralPath $stderrPath -Raw)
           $didSkip = $testOutput -match '(?m)^test_windows_handle_anchored_round_trip_and_links .* [.][.][.] skipped([ ]|$)'
           $ranOne = $testOutput -match '(?m)^Ran 1 test in '
-          $hasOkSummary = $testOutput -cmatch '(?m)^OK\r?\n$'
+          $hasOkSummary = $testOutput -cmatch '(?m)^OK(?:\r?\n)?\z'
           $metadata = [ordered]@{
             candidate_sha = $candidateSha
             os_product = $os.Caption
