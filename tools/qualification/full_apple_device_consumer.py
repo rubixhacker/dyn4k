@@ -352,6 +352,15 @@ def record_info_plist(bundle, bundle_id, family, os_version):
         plistlib.dump(info, stream)
 
 
+def require_pinned_xcode(result):
+    lines = result.stdout.splitlines()
+    if (result.returncode != 0 or len(lines) != 2 or lines[0] != "Xcode 26.5"
+            or not lines[1].startswith("Build version ")
+            or len(lines[1]) == len("Build version ")):
+        raise ValueError("Xcode differs from pinned 26.5")
+    return result.stdout.strip()
+
+
 def run(args):
     repository = Path(args.repository).resolve()
     archive = Path(args.output).resolve()
@@ -379,8 +388,7 @@ def run(args):
         return unavailable(archive, args.candidate, args.lane,
                            "Xcode device tools are unavailable; test execution NOT_RUN")
     xcode = subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True)
-    if xcode.returncode or not xcode.stdout.startswith("Xcode 26.4.1\n"):
-        raise ValueError("Xcode differs from pinned 26.4.1")
+    xcode_version = require_pinned_xcode(xcode)
     if not args.signing_identity or not args.provisioning_profile:
         return unavailable(archive, args.candidate, args.lane,
                            "device signing identity or provisioning profile is unavailable; test execution NOT_RUN")
@@ -566,7 +574,7 @@ def run(args):
                "consumer_build_sha256": {path: sha(git(repository, "show", f"{args.candidate}:{path}"))
                                           for path in BUILD_FILES},
                "producer_sha256": sha(git(repository, "show", f"{args.candidate}:{PRODUCER}")),
-               "toolchain": {"xcode": xcode.stdout.strip(), "jdk": java_version.stderr.strip(),
+               "toolchain": {"xcode": xcode_version, "jdk": java_version.stderr.strip(),
                              "gradle": "9.5.0", "kgp": "2.4.20",
                              "java_sha256": sha((java_home / "bin/java").read_bytes()),
                              "gradle_sha256": sha(gradle.read_bytes())},

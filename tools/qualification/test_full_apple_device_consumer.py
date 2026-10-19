@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,19 @@ OS_SELECTION = {"schema": 1, "roles": {
 
 
 class PhysicalAppleConsumerTest(unittest.TestCase):
+    def test_exact_xcode_26_5_pin(self):
+        accepted = subprocess.CompletedProcess(
+            ["xcodebuild", "-version"], 0,
+            stdout="Xcode 26.5\nBuild version 17F42\n", stderr="")
+        self.assertEqual("Xcode 26.5\nBuild version 17F42",
+                         apple.require_pinned_xcode(accepted))
+        for version in ("26.4.1", "26.5.1"):
+            rejected = subprocess.CompletedProcess(
+                ["xcodebuild", "-version"], 0,
+                stdout=f"Xcode {version}\nBuild version 17F42\n", stderr="")
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "26.5"):
+                apple.require_pinned_xcode(rejected)
+
     def test_approved_matrix_has_all_sixteen_physical_lanes(self):
         lanes = apple.matrix(ROOT)
         self.assertEqual(16, len(lanes))

@@ -29,7 +29,8 @@ foreign original methods reject replay.
 
 ## Run on a matching Mac and device
 
-Use a clean checkout at the candidate commit. Keep `TMPDIR` and the output
+Use the supplied local Mac mini, without GitHub-hosted macOS runners. Use a
+clean checkout at the candidate commit. Keep `TMPDIR` and the output
 outside the checkout and staging repository. Supply a provisioning profile
 that admits the selected device and a real development signing identity.
 An independent auditor selects exact OS versions in a JSON file and supplies
@@ -63,7 +64,7 @@ python3 tools/qualification/full_apple_device_consumer.py run \
 ```
 
 The pinned toolchain is JDK 21, Gradle 9.5.0, Kotlin plugin 2.4.20, and Xcode
-26.4.1. If no physical device UDID/model, matching ARM64 Mac, Xcode, or signing
+26.5. If no physical device UDID/model, matching ARM64 Mac, Xcode, or signing
 inputs are available, `run` writes an `UNAVAILABLE` receipt with
 `execution: NOT_RUN`. The public replay labels an unavailable receipt
 `UNAUTHENTICATED`, `observed: false`, because archive bytes and a self-reported
