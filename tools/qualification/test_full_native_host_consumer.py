@@ -9,7 +9,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import Mock, patch
 
 import full_native_host_consumer as route
@@ -24,7 +24,7 @@ MODULE_CASES = {
 
 
 def macos_startup(pid, gradle_home):
-    daemon_dir = f"{gradle_home}/daemon/9.5.0"
+    daemon_dir = str(PurePosixPath(gradle_home) / "daemon" / "9.5.0")
     return ("To honour the JVM settings for this build a single-use Daemon process "
             "will be forked.\n"
             f"Starting process 'Gradle build daemon'. Working directory: {daemon_dir} "
@@ -52,6 +52,27 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
+    def test_macos_startup_fixture_serializes_windows_path_as_posix(self):
+        mac_home = PurePosixPath("/Volumes/DevHome/task/gradle")
+        self.assertEqual(route.macos_host_launcher_pid(
+            macos_startup(67086, mac_home), mac_home), 67086)
+        gradle_home = PureWindowsPath(r"C:\task\gradle")
+        stdout = macos_startup(67086, gradle_home)
+        self.assertIn("C:/task/gradle/daemon/9.5.0/daemon-67086.out.log", stdout)
+        self.assertEqual(route.macos_host_launcher_pid(stdout, gradle_home), 67086)
+        java = PureWindowsPath(r"C:\task\jdk21\bin\java")
+        image = str(PurePosixPath(java))
+        daemon = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
+                  "gradle_client_pid": 67074, "image": image, "image_sha256": "a" * 64,
+                  "command": f"{image} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                  "observed_ns": 50}
+        self.assertEqual(route.macos_live_daemon_binding(
+            [daemon], 67086, 67074, java, "a" * 64, 1, 100), daemon)
+        with self.assertRaisesRegex(ValueError, "daemon"):
+            route.macos_live_daemon_binding(
+                [{**daemon, "image": "C:/other/java"}], 67086, 67074,
+                java, "a" * 64, 1, 100)
+
     def test_macos_host_rejects_spoofed_startup_without_live_daemon(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
             root = Path(temporary)
@@ -62,7 +83,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             work_root = root / "build"
             image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
             sample = {"module": "core", "pid": 67383, "parent_pid": 67086,
-                      "image": str(image), "command": str(image),
+                      "image": image.as_posix(), "command": image.as_posix(),
                       "image_sha256": "a" * 64, "observed_ns": 100,
                       "simulator_udid": None}
             (archive / "runtime/process-observations.jsonl").write_bytes(route.encoded(sample))
@@ -88,7 +109,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             work_root = root / "build"
             image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
             sample = {"module": "core", "pid": 67383, "parent_pid": 99999,
-                      "image": str(image), "command": str(image),
+                      "image": image.as_posix(), "command": image.as_posix(),
                       "image_sha256": "a" * 64, "observed_ns": 100,
                       "simulator_udid": None}
             (archive / "runtime/process-observations.jsonl").write_bytes(route.encoded(sample))
@@ -111,13 +132,13 @@ class NativeHostConsumerTests(unittest.TestCase):
             work_root = root / "build"
             image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
             sample = {"module": "core", "pid": 67383, "parent_pid": 99999,
-                      "image": str(image), "command": str(image),
+                      "image": image.as_posix(), "command": image.as_posix(),
                       "image_sha256": "a" * 64, "observed_ns": 100,
                       "simulator_udid": None}
             observations = archive / "runtime/process-observations.jsonl"
             daemon = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
-                      "gradle_client_pid": 67074, "image": str(java),
-                      "command": f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                      "gradle_client_pid": 67074, "image": java.as_posix(),
+                      "command": f"{java.as_posix()} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
                       "image_sha256": route.digest(java.read_bytes()), "observed_ns": 50,
                       "simulator_udid": None}
             observations.write_bytes(route.encoded(daemon) + route.encoded(sample))
@@ -175,14 +196,14 @@ class NativeHostConsumerTests(unittest.TestCase):
             java = Path(temporary) / "jdk21/bin/java"
             java.parent.mkdir(parents=True)
             java.write_bytes(b"pinned java")
-            command = f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0"
+            command = f"{java.as_posix()} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0"
 
             def pidpath(pid, buffer, size):
                 self.assertEqual(pid, 67086)
-                self.assertGreater(size, len(str(java)))
+                self.assertGreater(size, len(java.as_posix()))
                 import ctypes
-                ctypes.memmove(buffer, str(java).encode() + b"\0", len(str(java)) + 1)
-                return len(str(java))
+                ctypes.memmove(buffer, java.as_posix().encode() + b"\0", len(java.as_posix()) + 1)
+                return len(java.as_posix())
 
             with patch.object(route.platform, "system", return_value="Darwin"), \
                  patch.object(route.ctypes, "CDLL", return_value=SimpleNamespace(proc_pidpath=pidpath)), \
@@ -213,21 +234,21 @@ class NativeHostConsumerTests(unittest.TestCase):
             image.parent.mkdir(parents=True)
             image.write_bytes(b"real test image")
             daemon = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
-                      "gradle_client_pid": 67074, "image": str(java),
-                      "command": f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                      "gradle_client_pid": 67074, "image": java.as_posix(),
+                      "command": f"{java.as_posix()} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
                       "image_sha256": route.digest(java.read_bytes()), "observed_ns": 50}
             calls = []
 
             def listing(argv, **kwargs):
                 calls.append(argv[0])
                 parent = 67086 if argv[0] == "ps" else 99999
-                return f"67383 {parent} {image}\n"
+                return f"67383 {parent} {image.as_posix()}\n"
 
             def pidpath(pid, buffer, size):
                 self.assertEqual(pid, 67383)
                 import ctypes
-                ctypes.memmove(buffer, str(image).encode() + b"\0", len(str(image)) + 1)
-                return len(str(image))
+                ctypes.memmove(buffer, image.as_posix().encode() + b"\0", len(image.as_posix()) + 1)
+                return len(image.as_posix())
 
             with patch.dict(os.environ, {"PATH": str(root / "shadow"),
                                              "GRADLE_USER_HOME": str(gradle_home),
