@@ -36,12 +36,24 @@ server.listen(0, '127.0.0.1', () => {
     const middleware = config.plugins[0]['middleware:qualification-safari-observer'][1]();
     server.on('request', (request, response) => middleware(request, response, () => {
         const pathname = new URL(request.url, 'http://localhost:' + port).pathname;
+        if (pathname === '/control-done' && request.method === 'POST') {
+            const chunks = [];
+            request.on('data', chunk => chunks.push(chunk));
+            request.on('end', () => {
+                fs.writeFileSync(path.join(archive, 'browser-result.txt'),
+                    Buffer.concat(chunks), {flag: 'wx'});
+                response.writeHead(204);
+                response.end();
+            });
+            return;
+        }
         if (pathname === '/test.html') {
             response.writeHead(200, {'Content-Type': 'text/html'});
             response.end('<script src="/absolute/build/runtime.js"></script><script>' +
                 'fetch("/absolute/build/aaaaaaaaaaaaaaaaaaaa.wasm")' +
                 '.then(response => WebAssembly.compileStreaming(response))' +
-                '.then(() => document.body.textContent = "PASS:" + window.dyn4kExecuted)' +
+                '.then(() => { document.body.textContent = "PASS:" + window.dyn4kExecuted;' +
+                'return fetch("/control-done", {method:"POST",body:document.body.textContent}); })' +
                 '.catch(error => document.body.textContent = "FAIL:" + error)' +
                 '</script>');
             return;
