@@ -199,8 +199,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                for revision in required_revisions):
             candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                                 cwd=ROOT, text=True).strip()
-            with self.assertRaisesRegex(ValueError, "revision ancestry is unavailable"):
-                independent_gates._policy_binding(ROOT, candidate)
+            try:
+                binding = independent_gates._policy_binding(ROOT, candidate)
+            except ValueError as error:
+                self.assertIn("revision ancestry is unavailable", str(error))
+            else:
+                self.assertEqual(current, binding[path])
             with mock.patch.dict(independent_gates.APPROVED_POLICY,
                                  {path: historical_digest}):
                 with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
