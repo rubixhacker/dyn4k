@@ -1260,8 +1260,13 @@ class IndependentAdapterTests(unittest.TestCase):
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            archive = root / "schema1-browser-archive"
+            archive.mkdir()
+            (archive / "receipt.json").write_text(json.dumps({
+                "schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+                "lane": lane, "status": "PASSED"}))
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane], repository=ROOT)
+                root, [lane], archive_override=archive, repository=ROOT)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
             digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
             public_result = {"status": "PASSED", "candidate_sha": BROWSER_CANDIDATE,
@@ -1277,12 +1282,27 @@ class IndependentAdapterTests(unittest.TestCase):
             generic = {"candidate_sha": BROWSER_CANDIDATE, "lane": lane,
                        "status": "NOT_RUN", "gates": gates}
             generic["result_sha256"] = independent_gates.digest(generic)
+
+            def verify_pinned(repository, candidate_sha, actual_lane, selected,
+                              actual_archive, expected, gate_result, audited_hashes):
+                self.assertEqual(ROOT, repository)
+                self.assertEqual(BROWSER_CANDIDATE, candidate_sha)
+                self.assertEqual(lane, actual_lane)
+                self.assertEqual(str(archive), str(actual_archive))
+                self.assertEqual({"core", "facade"}, set(
+                    expected["expected_browser_bundles"]))
+                self.assertTrue(all(type(value) is str and len(value) == 64
+                                    for value in expected["expected_browser_bundles"].values()))
+                self.assertEqual(BROWSER_BUNDLES["development"],
+                                 expected["expected_browser_bundles"])
+                return public_result
+
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
                   mock.patch("full_suite_manifest.validate_manifest"),
                   mock.patch.object(independent_gates, "evaluate", return_value=generic),
                   mock.patch.object(full_browser_adapter,
                                     "verify_full_browser_staged_consumer",
-                                    return_value=public_result) as legacy,
+                                    side_effect=verify_pinned) as legacy,
                   mock.patch.object(full_signed_routes, "verify_browser") as signed_replay):
                 verified = independent_adapter.verify_lanes(
                     ROOT, BROWSER_CANDIDATE, suite, archive_map,
@@ -1291,6 +1311,25 @@ class IndependentAdapterTests(unittest.TestCase):
             self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
                 "staged-consumer"]["status"])
             legacy.assert_called_once()
+            signed_replay.assert_not_called()
+
+            changed = copy.deepcopy(signed)
+            changed["lanes"][lane]["expected_archive_digests"]["staged-consumer"] = "0" * 64
+            bad_audit, bad_signature, bad_public, bad_fingerprint = self.signed_inputs(
+                root, changed)
+            with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch("full_suite_manifest.validate_manifest"),
+                  mock.patch.object(independent_gates, "evaluate", return_value=generic),
+                  mock.patch.object(full_browser_adapter,
+                                    "verify_full_browser_staged_consumer") as rejected,
+                  mock.patch.object(full_signed_routes, "verify_browser") as signed_replay):
+                with self.assertRaisesRegex(
+                        ValueError, "public browser verifier differs from independent gate"):
+                    independent_adapter.verify_lanes(
+                        ROOT, BROWSER_CANDIDATE, suite, archive_map,
+                        bad_audit, bad_signature, bad_public, bad_fingerprint,
+                        candidate_manifest=candidate, artifact_audit=staged)
+            rejected.assert_called_once()
             signed_replay.assert_not_called()
 
 
