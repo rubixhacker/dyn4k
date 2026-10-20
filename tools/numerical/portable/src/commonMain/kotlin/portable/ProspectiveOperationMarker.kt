@@ -22,6 +22,7 @@ internal object ProspectiveOperationMarker {
             "\"case_id\":${name(call.caseId)},\"step\":${call.step}," +
             "\"body_id\":${name(call.bodyId)}," +
             "\"kind\":\"${call.kind}\",\"source\":\"${call.source}\"," +
+            "\"branch\":${name(call.branch)}," +
             "\"pre\":[\"${hex(call.preCost)}\",\"${hex(call.preSint)}\"]," +
             "\"trig\":[\"${hex(call.trigCost)}\",\"${hex(call.trigSint)}\"]," +
             "\"raw\":[${optional(call.rawCost)},${optional(call.rawSint)}]," +

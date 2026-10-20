@@ -207,37 +207,41 @@ class PortableMatrixTest {
         }
     }
 
+    internal fun captureJointCase(type: String, mode: String) {
+        val world = World<Body>()
+        world.setGravity(0.0, 0.0)
+        val ground = body(world, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true)
+        val moving = body(world, Geometry.createCircle(0.5), 0.0, 2.0, false)
+        val joint = joint(type, mode, ground, moving)
+        world.addJoint(joint)
+        recorder.capture(CaseSpec("joint-$type-$mode", "joints-limits-motors", "default",
+            60, 600, mapOf("jointType" to type, "mode" to mode, "durationSeconds" to 10)), world) { step, _ ->
+            if (mode != "active" || step != 201 && step != 401) null
+            else {
+                val reverse = step == 201
+                when (joint) {
+                    is AngleJoint<*> -> joint.setLimitsEnabled(!reverse)
+                    is DistanceJoint<*> -> joint.setLimitsEnabled(!reverse)
+                    is FrictionJoint<*> -> joint.setMaximumForce(if (reverse) 0.0 else 10.0)
+                    is PrismaticJoint<*> -> joint.setMotorSpeed(if (reverse) -1.0 else 1.0)
+                    is PulleyJoint<*> -> joint.setSlackEnabled(!reverse)
+                    is RevoluteJoint<*> -> joint.setMotorSpeed(if (reverse) -PI / 2 else PI / 2)
+                    is WeldJoint<*> -> joint.setLimitsEnabled(!reverse)
+                    is WheelJoint<*> -> joint.setMotorSpeed(if (reverse) -PI / 2 else PI / 2)
+                    is MotorJoint<*> -> joint.setLinearTarget(Vector2(if (reverse) -0.5 else 0.5, 0.5))
+                    is PinJoint<*> -> joint.setTarget(Vector2(if (reverse) -0.5 else 0.5, 2.0))
+                }
+                "mode-transition-$step"
+            }
+        }
+    }
+
     @Test
     fun everyJointWithInitialAndApplicableActiveModes() {
         for (type in listOf("Angle", "Distance", "Friction", "Motor", "Pin", "Prismatic",
             "Pulley", "Revolute", "Weld", "Wheel")) {
             for (mode in listOf("initial", "active")) {
-                val world = World<Body>()
-                world.setGravity(0.0, 0.0)
-                val ground = body(world, Geometry.createRectangle(10.0, 0.5), 0.0, 0.0, true)
-                val moving = body(world, Geometry.createCircle(0.5), 0.0, 2.0, false)
-                val joint = joint(type, mode, ground, moving)
-                world.addJoint(joint)
-                recorder.capture(CaseSpec("joint-$type-$mode", "joints-limits-motors", "default",
-                    60, 600, mapOf("jointType" to type, "mode" to mode, "durationSeconds" to 10)), world) { step, _ ->
-                    if (mode != "active" || step != 201 && step != 401) null
-                    else {
-                        val reverse = step == 201
-                        when (joint) {
-                            is AngleJoint<*> -> joint.setLimitsEnabled(!reverse)
-                            is DistanceJoint<*> -> joint.setLimitsEnabled(!reverse)
-                            is FrictionJoint<*> -> joint.setMaximumForce(if (reverse) 0.0 else 10.0)
-                            is PrismaticJoint<*> -> joint.setMotorSpeed(if (reverse) -1.0 else 1.0)
-                            is PulleyJoint<*> -> joint.setSlackEnabled(!reverse)
-                            is RevoluteJoint<*> -> joint.setMotorSpeed(if (reverse) -PI / 2 else PI / 2)
-                            is WeldJoint<*> -> joint.setLimitsEnabled(!reverse)
-                            is WheelJoint<*> -> joint.setMotorSpeed(if (reverse) -PI / 2 else PI / 2)
-                            is MotorJoint<*> -> joint.setLinearTarget(Vector2(if (reverse) -0.5 else 0.5, 0.5))
-                            is PinJoint<*> -> joint.setTarget(Vector2(if (reverse) -0.5 else 0.5, 2.0))
-                        }
-                        "mode-transition-$step"
-                    }
-                }
+                captureJointCase(type, mode)
             }
         }
         val weldWorld = World<Body>()

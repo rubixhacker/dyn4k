@@ -34,6 +34,7 @@ import org.dyn4j.dynamics.TimeStep
 import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.ValueOutOfRangeException
 import org.dyn4j.geometry.Interval
+import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Vector2
 
 open class WheelJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimitsJoint,
@@ -329,9 +330,13 @@ open class WheelJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimit
                 val amount = if (invMass > Epsilon.E) -c / invMass else 0.0
                 val p = worldAxis.product(amount)
                 body1.translate(p.product(-invM1))
-                body1.rotateAboutCenter(-amount * ax1 * invI1)
+                RotationOperationTap.withBranch("joint") {
+                    body1.rotateAboutCenter(-amount * ax1 * invI1)
+                }
                 body2.translate(p.product(invM2))
-                body2.rotateAboutCenter(amount * ax2 * invI2)
+                RotationOperationTap.withBranch("joint") {
+                    body2.rotateAboutCenter(amount * ax2 * invI2)
+                }
                 linearError = abs(c)
             }
         }
@@ -348,9 +353,13 @@ open class WheelJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimit
         val amount = if (invMass > Epsilon.E) -cx / invMass else 0.0
         val p = Vector2(ay.x * amount, ay.y * amount)
         body1.translate(p.product(-invM1))
-        body1.rotateAboutCenter(-sy1 * amount * invI1)
+        RotationOperationTap.withBranch("joint") {
+            body1.rotateAboutCenter(-sy1 * amount * invI1)
+        }
         body2.translate(p.product(invM2))
-        body2.rotateAboutCenter(sy2 * amount * invI2)
+        RotationOperationTap.withBranch("joint") {
+            body2.rotateAboutCenter(sy2 * amount * invI2)
+        }
         linearError = max(linearError, abs(cx))
         return linearError <= linearTolerance
     }

@@ -533,7 +533,7 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
 
 
 _MARKER_FIELDS = {"schema", "method", "sequence", "target_token", "kind",
-                  "source", "pre", "trig", "raw", "post", "angle_bits",
+                  "source", "branch", "pre", "trig", "raw", "post", "angle_bits",
                   "alpha_bits", "start_angle_bits", "end_angle_bits",
                   "diff_bits", "start", "end", "case_id", "step", "body_id"}
 
@@ -554,6 +554,8 @@ def verify_operation_marker(marker, allowed_evaluations=("strict",)):
                 (marker["body_id"] is not None and
                  (type(marker["body_id"]) is not str or not marker["body_id"])):
             raise ValueError("operation case binding shape differs")
+        if marker["branch"] not in (None, "integrate", "joint", "contact"):
+            raise ValueError("operation source branch differs")
         if type(allowed_evaluations) not in (tuple, list) or \
                 not allowed_evaluations or any(mode not in _EVALUATIONS
                                                 for mode in allowed_evaluations):

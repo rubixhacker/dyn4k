@@ -5,12 +5,15 @@ import re
 import struct
 import subprocess
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from xml.parsers import expat
 
 from cases import declared_cases
 from rotation_oracle import verify_operation_marker
+from orthogonality import source_rotation_cap, validate_rotation_audit
+from prospective_compare import compare_policy_case, load_policy_catalog
 
 
 class CaptureRejected(ValueError):
@@ -37,6 +40,7 @@ _WRAPPERS = {
     "captureConfigured120Repeat1": "configured120Repeat1",
     "captureConfigured120Repeat2": "configured120Repeat2",
     "captureJoints": "everyJointWithInitialAndApplicableActiveModes",
+    "captureWheelActive": "everyJointWithInitialAndApplicableActiveModes",
     "captureJointBooleanModes": "independentJointBooleanModes",
     "captureJointNumericModes": "independentJointNumericAndLimitModes",
     "captureAngleFailure": "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure",
@@ -76,9 +80,11 @@ def expected_case_ids():
         else:
             raise CaptureRejected(f"unmapped case: {case_id}")
         result[method].append(case_id)
-    inventory = [case_id for ids in result.values() for case_id in ids]
+    inventory = [case_id for method, ids in result.items()
+                 if method != "captureWheelActive" for case_id in ids]
     if len(inventory) != 332 or len(set(inventory)) != 332:
         raise CaptureRejected("prospective wrapper inventory differs")
+    result["captureWheelActive"] = ["joint-Wheel-active"]
     return result
 
 
@@ -322,6 +328,9 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
             raise CaptureRejected("operation case, step, or body binding differs")
         if step_receipted:
             step_receipted = False
+        if method == "captureWheelActive" and marker["body_id"] is not None and \
+                marker.get("branch") not in ("integrate", "joint", "contact"):
+            raise CaptureRejected("focused Wheel source branch is unbound")
         if marker["body_id"] is not None:
             body_bound_operations += 1
             token = marker["target_token"]
@@ -682,3 +691,82 @@ def verify_capture_receipt(receipt, files, method, commit, expected_ids,
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
     return expected["summary"]
+
+
+def focused_wheel_stream(xml):
+    try:
+        document = ET.fromstring(xml)
+        outputs = document.findall("system-out")
+        if len(outputs) != 1 or outputs[0].text is None:
+            raise CaptureRejected("focused Wheel output is missing")
+        lines = outputs[0].text.splitlines()
+        trace = b"".join((line.removeprefix("NUMERICAL_JSON ") + "\n").encode()
+                         for line in lines if line.startswith("NUMERICAL_JSON "))
+        markers = [json.loads(line.removeprefix("PROSPECTIVE_ROTATION_JSON "),
+                              object_pairs_hook=_unique_object)
+                   for line in lines if line.startswith("PROSPECTIVE_ROTATION_JSON ")]
+        return trace, markers
+    except (ET.ParseError, UnicodeError, TypeError, ValueError) as error:
+        raise CaptureRejected("focused Wheel stream is malformed") from error
+
+
+def _wheel_rotation_audit(markers):
+    calls = []
+    for marker in markers:
+        if marker["body_id"] is None:
+            continue
+        if marker["kind"] != "rotate":
+            raise CaptureRejected("focused Wheel reset needs a separate source audit")
+        raw = [struct.unpack(">d", bytes.fromhex(value))[0] for value in marker["raw"]]
+        call = {key: marker[key] for key in
+                ("step", "body_id", "kind", "branch", "pre", "trig", "raw", "post")}
+        call.update(sequence=len(calls),
+                    clamp=[value < -1.0 or value > 1.0 for value in raw])
+        if marker["angle_bits"] is None:
+            call.update(input_kind="pair", rotation_input=marker["trig"])
+        else:
+            call.update(input_kind="angle", angle_bits=marker["angle_bits"])
+        calls.append(call)
+    return {"schema": "portable-rotation-audit/2", "case_id": "joint-Wheel-active",
+            "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
+            "declared_calls": len(calls), "accepted_toi_resets": [], "calls": calls}
+
+
+def assess_focused_wheel(receipt, files, commit, runtime_executable,
+                         reference_case, candidate_case):
+    expected = ["joint-Wheel-active"]
+    summary = verify_capture_receipt(receipt, files, "captureWheelActive", commit,
+                                     expected, runtime_executable)
+    trace, markers = focused_wheel_stream(files["xml"])
+    if _sha(trace) != summary["trace_sha256"] or trace != Path(candidate_case).read_bytes():
+        raise CaptureRejected("focused Wheel trace differs from sealed output")
+    catalog = load_policy_catalog()
+    case = next(case for case in declared_cases() if case["id"] == expected[0])
+    if _sha(Path(reference_case).read_bytes()) != catalog["cases"][expected[0]]["sha256"]:
+        raise CaptureRejected("focused Wheel reference differs from adopted catalog")
+    fixed = compare_policy_case(reference_case, candidate_case, case, catalog)
+    conditional = compare_policy_case(reference_case, candidate_case, case, catalog,
+                                      conditional_diagnostic=True)
+    rows = [json.loads(line) for line in trace.splitlines()]
+    header = rows[0]
+    states = {row["step"]: row["state"] for row in rows if row["kind"] == "state"}
+    audit = _wheel_rotation_audit(markers)
+    try:
+        validate_rotation_audit(audit, case, header, states, source_rotation_cap(case))
+        structural = "STRUCTURE_PASSED"
+    except (ValueError, TypeError, KeyError, IndexError, OverflowError) as error:
+        structural = "UNPASSED_AUDIT: " + str(error)
+    return {"schema": "portable-focused-wheel-assessment/1",
+            "candidate_commit": commit, "case_id": expected[0],
+            "reference_case_sha256": catalog["cases"][expected[0]]["sha256"],
+            "candidate_case_sha256": _sha(trace),
+            "receipt_sha256": _sha(json.dumps(receipt, sort_keys=True, indent=2).encode() + b"\n"),
+            "operation_count": summary["operations_verified"],
+            "body_bound_operations": summary["body_bound_operations"],
+            "pair_inputs_unbound": summary["pair_inputs_unbound"],
+            "operation_oracle": summary["status"],
+            "rotation_audit": structural,
+            "fixed_status": fixed["status"], "fixed_failed_step": fixed.get("failed_step"),
+            "conditional_status": conditional["status"],
+            "external_xml_witness": "UNPASSED_NOT_OBTAINED",
+            "qualification": "UNPASSED"}
