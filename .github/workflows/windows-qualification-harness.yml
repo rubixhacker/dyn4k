@@ -164,15 +164,17 @@ jobs:
             & python -m unittest discover -s tools/qualification -p 'test_*.py' -v 1> $stdoutPath 2> $stderrPath
             $testExitCode = $LASTEXITCODE
             $testStderr = Get-Content -Raw $stderrPath
-            $summaries = [regex]::Matches($testStderr, '(?m)^Ran (?<count>[0-9]+) tests? in [^\r\n]+\r?$')
-            if ($summaries.Count -eq 0) {
-              $failure = 'Unittest did not emit a run-count summary.'
-              if ($testExitCode -eq 0) { $testExitCode = 1 }
+            $terminalResult = [regex]::Match($testStderr, '(?m)^Ran (?<count>[0-9]+) tests? in [^\r\n]+\r?\n\r?\nOK(?: \([^\r\n]*\))?\r?\n?\z')
+            if ($testExitCode -ne 0) {
+              $failure = "Unittest exited with code $testExitCode; see captured stderr."
+            } elseif (-not $terminalResult.Success) {
+              $failure = 'Unittest did not end with a complete successful terminal result block.'
+              $testExitCode = 1
             } else {
-              $summaryCount = [int]$summaries[$summaries.Count - 1].Groups['count'].Value
+              $summaryCount = [int]$terminalResult.Groups['count'].Value
               if ($summaryCount -le 0) {
-                $failure = 'The final unittest summary reported zero tests.'
-                if ($testExitCode -eq 0) { $testExitCode = 1 }
+                $failure = 'The terminal unittest summary reported zero tests.'
+                $testExitCode = 1
               }
             }
           } catch {
@@ -182,7 +184,13 @@ jobs:
           $testExitCode | Set-Content -Path $exitCodePath
           if ($failure) { $failure | Set-Content -Path $failurePath }
           Add-Content -Path $metadataPath -Value "end_utc=$([DateTime]::UtcNow.ToString('o'))"
-          if ($null -ne $failure) { throw $failure }
+          if ($null -ne $failure) {
+            if ($testExitCode -ne 0) {
+              Write-Host $failure
+              exit $testExitCode
+            }
+            throw $failure
+          }
           if ($testExitCode -ne 0) { exit $testExitCode }
       - name: Upload raw Windows unittest evidence
         if: always()
