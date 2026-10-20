@@ -355,11 +355,19 @@ class NativeHostConsumerTests(unittest.TestCase):
             transport = root / "raw.tar"
             sha = route.pack_archive(raw, transport)
             self.assertEqual(sha, route.digest(transport.read_bytes()))
+            with tarfile.open(transport, "r") as packed:
+                packed_mode = packed.getmember("raw/evidence.bin").mode
             relocated = root / "relocated"
             route.unpack_archive(transport, relocated)
             self.assertEqual((relocated / "evidence.bin").stat().st_mtime_ns, timestamp)
             self.assertEqual((relocated / "evidence.bin").read_bytes(), b"original")
-            self.assertEqual((relocated / "evidence.bin").stat().st_mode & 0o777, 0o700)
+            mode = (relocated / "evidence.bin").stat().st_mode & 0o777
+            if os.name == "nt":
+                self.assertEqual(packed_mode, 0o666)
+                self.assertEqual(mode, 0o666)
+            else:
+                self.assertEqual(packed_mode, 0o700)
+                self.assertEqual(mode, 0o700)
             outside = root / "outside"
             outside.write_bytes(b"original")
             (raw / "evidence.bin").unlink()
@@ -380,6 +388,38 @@ class NativeHostConsumerTests(unittest.TestCase):
                 transport.addfile(info, io.BytesIO(timestamps))
             with self.assertRaises(ValueError):
                 route.unpack_archive(malicious, root / "malicious-output")
+
+    def test_windows_transport_keeps_portable_writable_and_readonly_modes(self):
+        timestamp = 1_700_000_000_123_456_700
+        rows = [(('receipt.json',), b'{}', timestamp, 0o666),
+                (('writable.bin',), b'writable', timestamp, 0o666),
+                (('readonly.bin',), b'readonly', timestamp, 0o444)]
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            transport = root / "raw.tar"
+            written = {}
+
+            def write_absolute(_path, data):
+                written['transport'] = data
+
+            def write_tree(_path, members, *, create):
+                self.assertTrue(create)
+                written['members'] = members
+
+            api = SimpleNamespace(scan=lambda _root: rows, write_absolute=write_absolute,
+                                  read_absolute=lambda _path: written['transport'],
+                                  write_tree=write_tree)
+            with patch.object(route, "os", SimpleNamespace(name="nt")), \
+                 patch.object(route, "WindowsArchiveApi", return_value=api):
+                self.assertEqual(route.pack_archive(raw, transport),
+                                 route.digest(written['transport']))
+                with tarfile.open(fileobj=io.BytesIO(written['transport'])) as packed:
+                    self.assertEqual(packed.getmember('raw/writable.bin').mode, 0o666)
+                    self.assertEqual(packed.getmember('raw/readonly.bin').mode, 0o444)
+                route.unpack_archive(transport, root / "relocated")
+            self.assertEqual(written['members'], sorted(rows))
 
     def test_snapshot_rejects_path_swap_between_scan_and_open(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
