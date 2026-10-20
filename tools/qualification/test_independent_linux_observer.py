@@ -32,7 +32,7 @@ class ObserverPlatformImportTest(unittest.TestCase):
 @unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace and /proc process observation")
 class IndependentLinuxObserverTest(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(dir=Path.home().resolve())
+        self.temporary = tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.archive = self.root / "archive.bin"
