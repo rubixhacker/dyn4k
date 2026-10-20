@@ -56,6 +56,8 @@ In production mode, the test task copies optimized Wasm products into Karma's pa
 
 Replay accepts a metadata-preserving copy at a new canonical archive path. The receipt keeps the original capture path for process commands and selected-bundle observations. The verifier reads archived bytes at the supplied path. It rejects symbolic paths, hardlinked files, and aliases to the original directory.
 
+The central signed gate accepts schema 5 for current Firefox and Safari only after exact-source public replay and a detached audit. The audit binds independent browser process and response-body observations to both modules. Each observed body must exist outside the producer archive and equal the archived browser and Karma bytes. Source support and synthetic controls do not establish a signed runtime pass.
+
 The coordinator supplies reviewed source to the approved local Mac and serializes Safari execution. No Safari runtime result is inferred from Linux or a Gradle dry run.
 
 Run `python3 tools/qualification/full_browser_consumer.py --help` for command arguments. Keep failed attempts in distinct evidence directories. An unavailable Safari host remains `UNAVAILABLE` and its browser method gate remains `NOT_RUN`. A passing consumer receipt does not qualify numerical parity, physical behavior, performance, memory, publication, or the 112 lane release matrix.

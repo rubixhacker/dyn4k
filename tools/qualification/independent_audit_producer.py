@@ -217,10 +217,12 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                 required = set(route_fields)
                 if lane_id.startswith("linuxX64:"):
                     required |= {"expected_klib_native_executables", "expected_execution_witness"}
-                if routes[lane_id] == "browser" and (
-                        receipt.get("schema") == 3 or lane_id.startswith("wasmJs:")):
-                    required |= {"expected_browser_responses", "expected_execution_witness",
-                                 "expected_build_launcher_image"}
+                if routes[lane_id] == "browser":
+                    if receipt.get("schema") == 5 or lane_id.startswith("wasmJs:"):
+                        required |= {"expected_browser_responses", "expected_execution_witness"}
+                    if (receipt.get("schema") in (3, 4)
+                            and lane_id.startswith("wasmJs:")):
+                        required.add("expected_build_launcher_image")
                 if not required <= set(fields):
                     raise ValueError(f"signed route fields are incomplete: {lane_id}")
             if isinstance(receipt, dict) and receipt.get("status") == "UNAVAILABLE":

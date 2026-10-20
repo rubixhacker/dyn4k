@@ -2677,6 +2677,7 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                    "toolchain": {"browser": "/trusted/browser"},
                    "files": []}
         receipt.update(changes.pop("receipt", {}))
+        historical_source = changes.pop("historical_source", receipt["schema"] == 3)
         expected = {"expected_artifact_hashes": self.HASHES,
                     "expected_runtime_identity": self.RUNTIME,
                     "expected_archive_digests": {},
@@ -2793,7 +2794,15 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                     "expected_archive_digest": digest, "manifest": self.manifest,
                     "expected_signed_lane": expected if signed else None}
         selected.update(changes)
-        return independent_gates.evaluate_gate(**selected), digest
+        original = full_browser_consumer.original
+        def source(repository, candidate, path):
+            raw = original(repository, candidate, path)
+            if historical_source and path == "tools/qualification/full_browser_consumer.py":
+                return (raw.replace(b"DYN4K_BROWSER_BIDI_ARCHIVE", b"historical-bidi-marker")
+                           .replace(b"SAFARI_WORKER = ", b"historical-worker-marker"))
+            return raw
+        with mock.patch("full_browser_consumer.original", side_effect=source):
+            return independent_gates.evaluate_gate(**selected), digest
 
     def test_schema3_firefox_and_safari_reach_signed_public_route(self):
         import full_browser_consumer
@@ -2829,6 +2838,33 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                 replay.assert_called_once()
                 result, _ = self.evaluate(lane, receipt={"schema": 3})
                 self.assertEqual("FAILED", result["status"], result)
+
+    def test_schema5_family_source_and_signature_dispatch(self):
+        for family in ("Firefox", "Safari"):
+            for target in ("js", "wasmJs"):
+                lane = f"{target}:{family}:current:development"
+                with self.subTest(lane=lane), mock.patch(
+                        "full_signed_routes.verify_browser") as replay:
+                    replay.side_effect = lambda *args: {
+                        "status": "PASSED", "lane": args[2], "selected_cases": 2523,
+                        "archive_sha256": args[7], "candidate_sha": args[1]}
+                    result, _ = self.evaluate(lane, receipt={"schema": 5})
+                    self.assertEqual("PASSED", result["status"], result)
+                    replay.assert_called_once()
+                    replay.reset_mock()
+                    result, _ = self.evaluate(lane, receipt={"schema": 5}, signed=False)
+                    self.assertEqual("FAILED", result["status"])
+                    replay.assert_not_called()
+                    result, _ = self.evaluate(lane, receipt={"schema": 3},
+                                              historical_source=False)
+                    self.assertEqual("FAILED", result["status"])
+                    replay.assert_not_called()
+        for lane in ("js:Firefox:minimum:development",
+                     "wasmJs:Chromium:current:production"):
+            with self.subTest(lane=lane), mock.patch("full_signed_routes.verify_browser") as replay:
+                result, _ = self.evaluate(lane, receipt={"schema": 5})
+                self.assertEqual("FAILED", result["status"])
+                replay.assert_not_called()
 
     def test_schema4_re_signed_wrong_observer_protocol_fails(self):
         lane = "js:Chromium:current:development"

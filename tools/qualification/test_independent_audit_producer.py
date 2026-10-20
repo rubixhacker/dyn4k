@@ -239,6 +239,32 @@ class IndependentAuditProducerTests(unittest.TestCase):
         self.write_inputs()
         with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
             self.prepare(self.root / "unrelated-prepared")
+    def test_schema5_js_and_wasm_preparer_require_external_signed_evidence(self):
+        for target, family in (("js", "Firefox"), ("wasmJs", "Safari")):
+            lane = f"{target}:{family}:current:development"
+            archive = self.root / f"{target}-{family}"
+            archive.mkdir()
+            (archive / "receipt.json").write_text(json.dumps({
+                "schema": 5, "status": "PASSED", "candidate_sha": self.candidate,
+                "lane": lane}))
+            fields = self.observations["lanes"][lane]["signed_fields"]
+            self.observations["lanes"][lane]["archives"]["staged-consumer"] = str(archive)
+            fields.update({"expected_browser_toolchain": {},
+                           "expected_browser_bundles": {}})
+            self.write_inputs()
+            with self.subTest(lane=lane), self.assertRaisesRegex(
+                    ValueError, "signed route fields are incomplete"):
+                self.prepare(self.root / f"missing-{target}")
+            fields["expected_browser_responses"] = {}
+            fields["expected_execution_witness"] = {"path": str(self.root / "absent"),
+                                                    "sha256": "0" * 64}
+            self.write_inputs()
+            prepared = self.prepare(self.root / f"preflight-{target}")
+            audit = json.loads((prepared / "audit.json").read_bytes())
+            self.assertEqual("FAILED", audit["preflight_results"][lane]["gates"][
+                "staged-consumer"])
+            self.assertEqual(fields["expected_execution_witness"],
+                             audit["lanes"][lane]["expected_execution_witness"])
 
     def test_rejects_wrong_lane_identity_and_unsigned_replacement(self):
         lane = next(iter(self.suite["lanes"]))

@@ -28,7 +28,7 @@ also equal the candidate manifest's lane runtime string.
 
 | Route | Additional signed fields |
 | --- | --- |
-| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; Wasm browser also needs `expected_browser_responses`, `expected_execution_witness`, and `expected_build_launcher_image` |
+| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; schema-5 JS and Wasm routes also need `expected_browser_responses` and `expected_execution_witness`; schema-3 and schema-4 Wasm routes also need `expected_build_launcher_image` |
 | Nonbrowser Wasm | `expected_wasm_runtime`, `expected_wasm_runtime_binary` |
 | Native host and simulator | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_host_executables`, `expected_execution_witness`, `expected_build_launcher_image` |
 | Linux ARM64 Native cross runtime, schema 3 | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_build_archive_sha256`, `expected_native_build_host`, `expected_native_build_executables`, `expected_execution_witness`, `expected_build_launcher_image`, `expected_native_build_observer` |
@@ -86,6 +86,20 @@ selected suite. A compile-only build does not prove runtime execution.
 each module also has `linked_executable_wasm` and an `assets` map from every
 served asset name to its SHA-256. The gate checks each actual archive file.
 The selected Karma JS and linked executable JS can have different bytes.
+
+Current Firefox and Safari schema-5 receipts use an external
+`independent-browser-execution-witness/2` file. Its signed path and SHA-256
+come from `expected_execution_witness`. The witness binds candidate, lane,
+mode, runtime, staged hashes, archive digest, selected browser executable,
+family collector source hashes, and the complete signed HTTP response records.
+Firefox entries use `bidi`; Safari entries use `service-worker`. Each module
+records the observed browser PID and process interval. Each response records
+the exact selected URL, times, size, SHA-256, and an independently captured
+body file outside the producer archive. The central gate compares those bytes
+with both archived browser and Karma bodies after public replay. The auditor
+must capture the browser observations independently and sign the complete
+audit with the externally pinned key. Locally constructed witnesses and test
+keys verify rejection behavior only; they cannot qualify a live lane.
 
 For Wasm browser, the independent auditor must capture every delivered HTTP
 response body during the observed browser process. Each

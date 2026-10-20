@@ -2141,11 +2141,24 @@ def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repositor
             repository, candidate_sha, full_browser_consumer.REPORTER)
         has_cdp_producer = b"DYN4K_BROWSER_CDP_ARCHIVE" in full_browser_consumer.original(
             repository, candidate_sha, "tools/qualification/full_browser_consumer.py")
-        chromium = lane_id.split(":")[1] == "Chromium"
+        producer = full_browser_consumer.original(
+            repository, candidate_sha, "tools/qualification/full_browser_consumer.py")
+        has_bidi_producer = b"DYN4K_BROWSER_BIDI_ARCHIVE" in producer
+        has_safari_producer = b'SAFARI_WORKER = ' in producer
+        _, browser_family, browser_role, _ = lane_id.split(":")
+        chromium = browser_family == "Chromium"
+        firefox_current = browser_family == "Firefox" and browser_role == "current"
+        safari = browser_family == "Safari"
         schema = receipt.get("schema")
         if (type(schema) is not int or not (
-                schema == 4 and has_http_producer and has_cdp_producer and chromium
-                or schema == 3 and has_http_producer and not (chromium and has_cdp_producer)
+                schema == 5 and has_http_producer and (
+                    firefox_current and has_bidi_producer
+                    or safari and has_safari_producer)
+                or schema == 4 and has_http_producer and has_cdp_producer and chromium
+                or schema == 3 and has_http_producer
+                    and not (chromium and has_cdp_producer)
+                    and not (firefox_current and has_bidi_producer)
+                    and not (safari and has_safari_producer)
                 or schema == 2 and not has_http_producer)):
             raise ValueError("browser receipt schema differs from exact producer source")
         public = full_signed_routes.verify_browser(
@@ -2326,7 +2339,7 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                     raise ValueError("approved full browser lane or suite differs")
             if (family in {"wasm-node", "native-host", "android-native", "apple-device"}
                     or family == "browser" and _json(_file_path(root, "receipt.json")).get(
-                        "schema") in (2, 3, 4)):
+                        "schema") in (2, 3, 4, 5)):
                 if expected_signed_lane is None:
                     if not (family == "android-native"
                             and full_signed_routes.PUBLIC_REPLAY_ACTIVE.get()):

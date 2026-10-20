@@ -200,6 +200,7 @@ def browser_execution_witness(expected, candidate, lane, digest, runtime, hashes
         raise ValueError("independently signed browser execution witness is missing")
     path = Path(binding["path"])
     if (not path.is_absolute() or not path.is_file() or path.is_symlink()
+            or path.stat().st_nlink != 1
             or path.resolve().is_relative_to(Path(archive).resolve())):
         raise ValueError("independent browser execution witness file is absent or symbolic")
     raw = path.read_bytes()
@@ -348,6 +349,134 @@ def _cross_build_observer(repository, expected, archive, candidate, lane, build_
     return observed
 
 
+def schema5_browser_witness(repository, expected, candidate, lane, digest, runtime,
+                            hashes, toolchain, archive, receipt):
+    import full_browser_consumer
+
+    binding = expected.get("expected_execution_witness")
+    if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
+        raise ValueError("signed schema-5 browser witness is missing")
+    path = Path(binding["path"])
+    if (not path.is_absolute() or not path.is_file() or path.is_symlink()
+            or path.resolve().is_relative_to(Path(archive).resolve())):
+        raise ValueError("schema-5 browser witness is absent or inside producer archive")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != _sha(binding["sha256"], "browser witness"):
+        raise ValueError("schema-5 browser witness differs from signed bytes")
+    witness = json.loads(raw, object_pairs_hook=independent_gates._strict_object,
+                         parse_constant=lambda value: (_ for _ in ()).throw(
+                             ValueError(f"non-finite browser witness value: {value}")))
+    family = lane.split(":")[1]
+    sources = ((full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox" else
+               (full_browser_consumer.SAFARI_WITNESS, full_browser_consumer.SAFARI_WORKER,
+                full_browser_consumer.SAFARI_BOOTSTRAP, full_browser_consumer.SAFARI_OBSERVER))
+    source_hashes = {name: hashlib.sha256(full_browser_consumer.original(
+        repository, candidate, name)).hexdigest() for name in sources}
+    if (not isinstance(witness, dict)
+            or set(witness) != {"schema", "candidate_sha", "lane", "archive_sha256",
+                                "runtime_identity", "mode", "staged_artifacts",
+                                "browser_sha256", "family", "source_sha256", "auditor",
+                                "responses", "browser_consumption"}
+            or witness["schema"] != "independent-browser-execution-witness/2"
+            or witness["candidate_sha"] != candidate or witness["lane"] != lane
+            or witness["archive_sha256"] != digest
+            or witness["runtime_identity"] != runtime
+            or witness["mode"] != lane.rsplit(":", 1)[1]
+            or witness["staged_artifacts"] != hashes
+            or witness["browser_sha256"] != toolchain["browser_sha256"]
+            or witness["family"] != family or witness["source_sha256"] != source_hashes
+            or witness["responses"] != expected.get("expected_browser_responses")
+            or not isinstance(witness["auditor"], str) or not witness["auditor"].strip()):
+        raise ValueError("schema-5 independent execution witness differs from signed lane")
+    observed = witness["browser_consumption"]
+    modules = receipt.get("modules")
+    if (not isinstance(observed, dict) or set(observed) != {"core", "facade"}
+            or not isinstance(modules, dict) or set(modules) != {"core", "facade"}):
+        raise ValueError("schema-5 independent browser module observation is missing")
+    protocol = "bidi" if family == "Firefox" else "service-worker"
+    row_file = "firefox-bidi.jsonl" if family == "Firefox" else "safari-browser-responses.jsonl"
+    for short in ("core", "facade"):
+        folder = Path(archive) / short
+        process = modules[short]
+        browser = observed[short]
+        launches = [independent_gates._strict_json_line(line) for line in
+                    (folder / "browser-launches.jsonl").read_bytes().splitlines()]
+        server = independent_gates._json(folder / "http-responses.json")["responses"]
+        archived = [independent_gates._strict_json_line(line) for line in
+                    (folder / row_file).read_bytes().splitlines()]
+        if (not isinstance(process, dict) or not isinstance(browser, dict)
+                or set(browser) != {"protocol", "clock", "browser_pid", "browser_sha256",
+                                    "started_ns", "finished_ns", "responses"}
+                or browser["protocol"] != protocol or browser["clock"] != "unix-epoch-ns"
+                or len(launches) != 1 or not archived
+                or type(browser["browser_pid"]) is not int or browser["browser_pid"] <= 0
+                or browser["browser_pid"] != launches[0].get("pid")
+                or browser["browser_pid"] != archived[0].get("browser_pid")
+                or browser["browser_sha256"] != toolchain["browser_sha256"]
+                or browser["browser_sha256"] != launches[0].get("process_sha256")
+                or type(browser["started_ns"]) is not int
+                or type(browser["finished_ns"]) is not int
+                or not process.get("started_ns", 0) <= browser["started_ns"]
+                    <= browser["finished_ns"] <= process.get("finished_ns", 0)
+                or not isinstance(browser["responses"], list)
+                or not server or len(browser["responses"]) != len(server)
+                or len(archived) != len(server) + 1):
+            raise ValueError("schema-5 independent browser process differs")
+        served = {item["url"]: item for item in server}
+        from urllib.parse import urlsplit
+        captured = {}
+        for row in archived[1:]:
+            address = urlsplit(row.get("url", ""))
+            relative = address.path + ("?" + address.query if address.query else "")
+            if relative in captured:
+                raise ValueError("schema-5 archived browser response URL is duplicated")
+            captured[relative] = row
+        if len(served) != len(server) or len(captured) != len(server):
+            raise ValueError("schema-5 archived browser response inventory differs")
+        seen = set()
+        for item in browser["responses"]:
+            if not isinstance(item, dict) or set(item) != {
+                    "url", "body_sha256", "size", "body_path", "request_ns",
+                    "response_ns", "finished_ns"}:
+                raise ValueError("schema-5 independent browser response shape differs")
+            url = item["url"]
+            if type(url) is not str or url in seen or url not in served or url not in captured:
+                raise ValueError("schema-5 independent browser response URL differs")
+            source = served[url]
+            row = captured[url]
+            address = urlsplit(row.get("url", ""))
+            relative = address.path + ("?" + address.query if address.query else "")
+            body_path = item["body_path"]
+            if (relative != url or row.get("browser_pid") != browser["browser_pid"]
+                    or item["body_sha256"] != source.get("sha256")
+                    or item["body_sha256"] != row.get("body_sha256")
+                    or item["size"] != source.get("size")
+                    or item["size"] != row.get("body_size")
+                    or type(body_path) is not str or not Path(body_path).is_absolute()
+                    or not Path(body_path).is_file() or Path(body_path).is_symlink()
+                    or Path(body_path).resolve().is_relative_to(Path(archive).resolve())
+                    or Path(body_path).stat().st_nlink != 1
+                    or any(type(item.get(key)) is not int for key in
+                           ("request_ns", "response_ns", "finished_ns"))
+                    or not browser["started_ns"] <= item["request_ns"]
+                        <= item["response_ns"] <= item["finished_ns"]
+                        <= browser["finished_ns"]
+                    or not item["request_ns"] <= source["started_ns"]
+                        <= item["response_ns"]
+                    or not source["started_ns"] <= source["finished_ns"]
+                        <= item["finished_ns"]
+                    or item["request_ns"] > row["finished_ns"]
+                    or row["request_ns"] > item["finished_ns"]
+                    or Path(body_path).stat().st_size != item["size"]
+                    or Path(body_path).read_bytes() !=
+                       (folder / source["body_path"]).read_bytes()):
+                raise ValueError("schema-5 independent browser body or interval differs")
+            seen.add(url)
+        if seen != set(served):
+            raise ValueError("schema-5 independent browser responses are missing")
+    return witness
+
+
 def _signed(expected, hashes, runtime, digest, receipt):
     if (not isinstance(expected, dict) or expected.get("expected_artifact_hashes") != hashes
             or expected.get("expected_runtime_identity") != runtime
@@ -417,7 +546,7 @@ def _browser_bundle_bytes(root, bundles, wasm):
 def _browser_response_proof(root, responses, witness, receipt, wasm):
     if (not isinstance(responses, dict) or set(responses) != {"core", "facade"}
             or witness.get("responses") != responses
-            or receipt.get("schema") not in (3, 4)
+            or receipt.get("schema") not in (3, 4, 5)
             or not isinstance(receipt.get("modules"), dict)):
         raise ValueError("browser HTTP responses differ from signed witness or producer")
     for short in ("core", "facade"):
@@ -604,11 +733,14 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
     if public != {"status": "PASSED", "lane": lane, "selected_cases": len(_selected(repository, lane)),
                   "archive_sha256": digest, "candidate_sha": candidate}:
         raise ValueError("browser public verifier differs from signed lane")
-    if receipt.get("schema") in (3, 4) or lane.startswith("wasmJs:"):
+    if receipt.get("schema") in (3, 4, 5) or lane.startswith("wasmJs:"):
         responses = expected.get("expected_browser_responses")
         witness = (browser_execution_witness(expected, candidate, lane, digest, runtime,
                                              hashes, toolchain, root)
                    if receipt.get("schema") == 4 else
+                   schema5_browser_witness(repository, expected, candidate, lane, digest,
+                                           runtime, hashes, toolchain, root, receipt)
+                   if receipt.get("schema") == 5 else
                    execution_witness(expected, candidate, lane, digest, runtime,
                                      lane.rsplit(":", 1)[1], executables, hashes,
                                      toolchain["java_sha256"], root,

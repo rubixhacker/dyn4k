@@ -3,9 +3,9 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import py_compile
-import shutil
 import sys
 import tempfile
 import unittest
@@ -17,8 +17,10 @@ from unittest.mock import patch
 import full_browser_consumer
 import full_native_host_consumer
 import full_signed_routes
+import independent_audit_producer
 import independent_gates
 import independent_linux_observer
+import qualify
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1352,6 +1354,223 @@ class SignedRouteTests(unittest.TestCase):
                     selected.write_bytes(b"changed Wasm")
                     with self.assertRaisesRegex(ValueError, "selected Wasm.*bytes differ"):
                         check()
+
+    def test_schema5_signed_firefox_and_safari_body_execution_controls(self):
+        candidate = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        for family, runtime in (("Firefox", "Linux test x86_64"),
+                                ("Safari", "Darwin test arm64")):
+            for target in ("js", "wasmJs"):
+                with self.subTest(family=family, target=target), tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    archive = base / "archive"
+                    archive.mkdir()
+                    responses, receipt = self._http_fixture(archive, target == "wasmJs")
+                    lane = f"{target}:{family}:current:development"
+                    receipt.update({"schema": 5, "status": "PASSED", "candidate_sha": candidate,
+                                    "lane": lane, "runtime_identity": runtime,
+                                    "staged_hashes": HASHES,
+                                    "consumer_contract_sha256": independent_gates.digest(
+                                        independent_gates.consumer_contract(MANIFEST, lane))})
+                    toolchain = {"browser": str(base / "browser"),
+                                 "browser_sha256": "d" * 64,
+                                 "java_home": str(base),
+                                 "java_sha256": full_browser_consumer.expected_java_sha256(
+                                     runtime.split()[0], family),
+                                 "gradle": str(base / "gradle"),
+                                 "gradle_sha256": full_browser_consumer.GRADLE_SHA256,
+                                 "kgp_version": "2.4.20", "gradle_version": "9.5.0"}
+                    receipt["toolchain"] = toolchain
+                    bundles = {}
+                    consumption = {}
+                    external = base / "observed"
+                    external.mkdir()
+                    for index, short in enumerate(("core", "facade")):
+                        folder = archive / short
+                        receipt["modules"][short]["finished_ns"] = 100
+                        pid = 100 + index
+                        (folder / "browser-launches.jsonl").write_text(json.dumps({
+                            "pid": pid, "process_sha256": "d" * 64}) + "\n")
+                        selected = (short + " selected").encode()
+                        linked = (short + " linked").encode()
+                        (folder / "karma-selected.js").write_bytes(selected)
+                        (folder / "linked-executable.js").write_bytes(linked)
+                        bundles[short] = {"karma_selected_js": hashlib.sha256(selected).hexdigest(),
+                                          "linked_executable_js": hashlib.sha256(linked).hexdigest()}
+                        if target == "wasmJs":
+                            wasm = (folder / "linked-executable.wasm").read_bytes()
+                            bundles[short]["linked_executable_wasm"] = hashlib.sha256(wasm).hexdigest()
+                            selected_bundle = json.loads((folder / "selected-bundle.json").read_text())
+                            bundles[short]["assets"] = {item["name"]: item["sha256"]
+                                                      for item in selected_bundle["assets"]}
+                        rows = [{"kind": "session", "browser_pid": pid}]
+                        observed = []
+                        for item in responses[short]["responses"]:
+                            body = (folder / item["body_path"]).read_bytes()
+                            outside = external / f"{short}-{item['ordinal']}.body"
+                            outside.write_bytes(body)
+                            rows.append({"url": f"http://localhost:9876{item['url']}",
+                                         "browser_pid": pid, "request_ns": 11,
+                                         "response_ns": 16, "finished_ns": 17,
+                                         "body_size": item["size"],
+                                         "body_sha256": item["sha256"]})
+                            observed.append({"url": item["url"], "size": item["size"],
+                                             "body_sha256": item["sha256"],
+                                             "body_path": str(outside),
+                                             "request_ns": 11, "response_ns": 16,
+                                             "finished_ns": 17})
+                        name = ("firefox-bidi.jsonl" if family == "Firefox" else
+                                "safari-browser-responses.jsonl")
+                        (folder / name).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                        consumption[short] = {"protocol": "bidi" if family == "Firefox"
+                                              else "service-worker", "clock": "unix-epoch-ns",
+                                              "browser_pid": pid, "browser_sha256": "d" * 64,
+                                              "started_ns": 10, "finished_ns": 90,
+                                              "responses": observed}
+                    (archive / "receipt.json").write_text(json.dumps(receipt))
+                    digest = independent_gates.archive_digest(archive)
+                    sources = ((full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox"
+                               else (full_browser_consumer.SAFARI_WITNESS,
+                                     full_browser_consumer.SAFARI_WORKER,
+                                     full_browser_consumer.SAFARI_BOOTSTRAP,
+                                     full_browser_consumer.SAFARI_OBSERVER))
+                    witness = {"schema": "independent-browser-execution-witness/2",
+                               "candidate_sha": candidate, "lane": lane,
+                               "archive_sha256": digest, "runtime_identity": runtime,
+                               "mode": "development", "staged_artifacts": HASHES,
+                               "browser_sha256": "d" * 64, "family": family,
+                               "source_sha256": {name: hashlib.sha256(
+                                   full_browser_consumer.original(ROOT, candidate, name)
+                                   ).hexdigest() for name in sources},
+                               "auditor": "synthetic test key", "responses": responses,
+                               "browser_consumption": consumption}
+                    witness_path = base / "independent-witness.json"
+                    expected = {"expected_artifact_hashes": HASHES,
+                                "expected_runtime_identity": runtime,
+                                "expected_archive_digests": {"staged-consumer": digest},
+                                "expected_browser_toolchain": toolchain,
+                                "expected_browser_bundles": bundles,
+                                "expected_browser_responses": responses}
+                    def seal():
+                        witness_path.write_text(json.dumps(witness))
+                        expected["expected_execution_witness"] = {
+                            "path": str(witness_path),
+                            "sha256": hashlib.sha256(witness_path.read_bytes()).hexdigest()}
+                    seal()
+                    public = {"status": "PASSED", "lane": lane, "selected_cases": 2523,
+                              "archive_sha256": digest, "candidate_sha": candidate}
+                    actual_file = full_signed_routes._file
+                    with (patch.object(full_signed_routes, "_source"),
+                          patch.object(full_signed_routes, "_file", side_effect=lambda path, sha, label:
+                              Path(path) if label in ("browser", "JDK 21", "Gradle") else
+                              actual_file(path, sha, label)),
+                          patch("full_browser_consumer.runtime_pin"),
+                          patch("full_browser_consumer.verify", return_value=public) as public_verify):
+                        self.assertEqual(full_signed_routes.verify_browser(
+                            ROOT, candidate, lane, archive, expected, HASHES, runtime, digest), public)
+                        gate = independent_gates.evaluate_gate(
+                            "staged-consumer", archive, candidate, lane, MANIFEST["lanes"][lane],
+                            ROOT, HASHES, runtime, digest, manifest=MANIFEST,
+                            expected_signed_lane=expected)
+                        self.assertEqual(gate["status"], "PASSED", gate)
+                        relocated = base / "physically-copied-archive"
+                        shutil.copytree(archive, relocated, copy_function=shutil.copy2)
+                        self.assertEqual(independent_gates.archive_digest(relocated), digest)
+                        copied_gate = independent_gates.evaluate_gate(
+                            "staged-consumer", relocated, candidate, lane,
+                            MANIFEST["lanes"][lane], ROOT, HASHES, runtime, digest,
+                            manifest=MANIFEST, expected_signed_lane=expected)
+                        self.assertEqual(copied_gate["status"], "PASSED", copied_gate)
+                        self.assertEqual(public_verify.call_args.args[3], relocated)
+                        if target == "js":
+                            all_hashes = {name: (HASHES if name == "js" else {
+                                module: hashlib.sha256(f"synthetic:{name}:{module}".encode())
+                                    .hexdigest() for module in qualify.MODULES})
+                                for name in qualify.matrix_targets()}
+                            staged = {"candidate_sha": candidate, "status": "PASSED",
+                                      "artifacts": [{"path": qualify.target_binary_path(module, name),
+                                                     "sha256": value}
+                                                    for name, pair in all_hashes.items()
+                                                    for module, value in pair.items()]}
+                            candidate_manifest = {
+                                "candidate_sha": candidate,
+                                "suite_manifest_sha256": independent_gates.digest(MANIFEST),
+                                "audit_manifest_sha256": qualify.manifest_digest(staged),
+                                "lanes": {name: {"artifact_hashes": all_hashes[spec["target"]],
+                                                 "runtime_identity": runtime if name == lane else
+                                                 f"synthetic:{name}"}
+                                          for name, spec in MANIFEST["lanes"].items()}}
+                            observations = {"schema": 1, "candidate_sha": candidate,
+                                            "lanes": {name: {"archives": {}, "signed_fields": {}}
+                                                      for name in MANIFEST["lanes"]}}
+                            observations["lanes"][lane] = {
+                                "archives": {"staged-consumer": str(archive)},
+                                "signed_fields": {key: value for key, value in expected.items()
+                                                  if key.startswith("expected_browser_") or
+                                                  key == "expected_execution_witness"}}
+                            inputs = []
+                            for name, value in (("candidate", candidate_manifest),
+                                                ("staged", staged),
+                                                ("observations", observations)):
+                                path = base / f"{name}.json"
+                                path.write_text(json.dumps(value))
+                                inputs.append(path)
+                            with (patch("qualify.require_clean_checkout"),
+                                  patch("qualify.verify_audit_against_staging")):
+                                prepared = independent_audit_producer.prepare(
+                                    ROOT, candidate, *inputs, base / "prepared", "f" * 64)
+                            audit = json.loads((prepared / "audit.json").read_bytes())
+                            self.assertEqual(audit["preflight_results"][lane]["gates"][
+                                "staged-consumer"], "PASSED")
+                            self.assertEqual(audit["lanes"][lane]["expected_execution_witness"],
+                                             expected["expected_execution_witness"])
+                        for field, wrong in (("family", "Chromium"), ("lane", "wrong"),
+                                             ("source_sha256", {})):
+                            prior = witness[field]
+                            witness[field] = wrong
+                            seal()
+                            with self.assertRaisesRegex(ValueError, "execution witness differs"):
+                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    archive, expected, HASHES, runtime, digest)
+                            witness[field] = prior
+                        seal()
+                        prior = consumption["core"]["protocol"]
+                        consumption["core"]["protocol"] = "cdp"
+                        seal()
+                        with self.assertRaisesRegex(ValueError, "process differs"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        consumption["core"]["protocol"] = prior
+                        seal()
+                        prior_pid = consumption["core"]["browser_pid"]
+                        consumption["core"]["browser_pid"] = 999
+                        seal()
+                        with self.assertRaisesRegex(ValueError, "process differs"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        consumption["core"]["browser_pid"] = prior_pid
+                        removed = consumption["core"]["responses"].pop()
+                        seal()
+                        with self.assertRaisesRegex(ValueError, "process differs"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        consumption["core"]["responses"].append(removed)
+                        seal()
+                        signed_sha = expected["expected_execution_witness"]["sha256"]
+                        expected["expected_execution_witness"]["sha256"] = "0" * 64
+                        with self.assertRaisesRegex(ValueError, "signed bytes"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        expected["expected_execution_witness"]["sha256"] = signed_sha
+                        outside = Path(consumption["core"]["responses"][0]["body_path"])
+                        outside.write_bytes(b"wrong")
+                        with self.assertRaisesRegex(ValueError, "body or interval differs"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        outside.unlink()
+                        with self.assertRaisesRegex(ValueError, "body or interval differs"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
 
     def test_retained_a14_schema4_response_shape_is_historical_only(self):
         root = Path("/var/home/stewart/dyn4k-evidence/root-browser-cdp-a14")
