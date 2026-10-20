@@ -205,6 +205,12 @@ class SafariResponseWitnessTest(unittest.TestCase):
                 replay()
             raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
             changed_events = [dict(row) for row in events]
+            changed_events[1]["eligible_count"] = 2
+            raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
+            with self.assertRaisesRegex(ValueError, "identity or timing"):
+                replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            changed_events = [dict(row) for row in events]
             changed_events[1]["resulting_client_id"] = "other-page"
             raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
             with self.assertRaisesRegex(ValueError, "client lineage"):
