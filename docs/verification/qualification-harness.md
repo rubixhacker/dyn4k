@@ -4,9 +4,9 @@ This harness records what ran against one staged candidate. A build or a host pr
 
 ## Hosted runner cost guard
 
-Run `python3 -B tools/qualification/guard_hosted_runners.py` from the repository root before every source push or manual `gh workflow run`. The command checks every active `.github/workflows/*.yml` and `*.yaml` file. It rejects macOS hosted labels and runner expressions without an explicit Linux or Windows hosted label. The coordinator must rerun it after integrating workflow changes.
+Run `python3 -B tools/qualification/guard_hosted_runners.py` from the repository root before every source push or manual `gh workflow run`. The command checks every active `.github/workflows/*.yml` and `*.yaml` file. It allows explicit Linux or Windows hosted labels and the self-hosted `mac-mini` label. It rejects GitHub-hosted macOS labels and unrecognized runner expressions. The coordinator must rerun it after integrating workflow changes.
 
-The guard job in `qualification.yml` starts after dispatch. It cannot prevent the dispatch itself. Keep any workflow with a Mac-capable hosted runner disabled until separate review and authorization. For active workflows, source review and the hosted-runner guard must confirm explicitly labeled Linux or Windows hosted runners; the remote disabled-workflow total can change over time. Historical Mac-only definitions are in `docs/archive/hosted-macos-workflows/`. This source change does not qualify Apple targets or replace local Mac runtime evidence.
+The guard job in `qualification.yml` starts after dispatch. It cannot prevent the dispatch itself. Keep workflows with GitHub-hosted macOS runners disabled until separate review and authorization. Active workflows may use explicitly labeled Linux or Windows hosted runners or the self-hosted `mac-mini`. The remote disabled-workflow total can change over time. Historical Mac-only definitions are in `docs/archive/hosted-macos-workflows/`. This source change does not qualify Apple targets or replace local Mac runtime evidence.
 
 ## What the harness checks
 
