@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import types
 import zipfile
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 import xml.etree.ElementTree as ET
@@ -253,6 +254,69 @@ def _archive_identity(path):
             state.st_size, state.st_mtime_ns, state.st_ctime_ns, attributes)
 
 
+def _archive_stable_identity(identity):
+    return (*identity[:6], identity[7])
+
+
+def _archive_ancestor_identity(identity):
+    return (identity[0], identity[1], identity[2], identity[7])
+
+
+def _archive_ancestor_handle_identity(state):
+    return (state.st_dev, state.st_ino, state.st_mode,
+            getattr(state, "st_file_attributes", None))
+
+
+def _archive_handle_identity(state):
+    return (state.st_dev, state.st_ino, state.st_mode, state.st_nlink,
+            state.st_size, state.st_mtime_ns,
+            getattr(state, "st_file_attributes", None))
+
+
+@contextmanager
+def _archive_directory(path, parent=None, name=None, ancestors=None):
+    if os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        with (LockedDirectory(path, resolve_root=False) if parent is None
+              else parent.child(name)) as directory:
+            yield directory
+        return
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if nofollow is None or directory_flag is None:
+        raise ValueError("archive directory safe open is unavailable")
+    descriptors = []
+    try:
+        if parent is None:
+            current = Path(path.anchor)
+            parts = [(current, current)]
+            for part in path.parts[1:]:
+                current = current / part
+                parts.append((part, current))
+        else:
+            parts = [(name, path)]
+        for target, current in parts:
+            options = {"dir_fd": descriptors[-1]} if descriptors else (
+                {"dir_fd": parent} if parent is not None else {})
+            descriptor = os.open(target, os.O_RDONLY | directory_flag | nofollow,
+                                 **options)
+            descriptors.append(descriptor)
+            if ancestors is not None:
+                opened = os.fstat(descriptor)
+                expected = ancestors[current]
+                if current == path:
+                    valid = _archive_handle_identity(opened) == _archive_stable_identity(expected)
+                else:
+                    valid = (_archive_ancestor_handle_identity(opened)
+                             == _archive_ancestor_identity(expected))
+                if not valid:
+                    raise ValueError(f"archive ancestor changed during scan: {current}")
+        yield descriptors[-1]
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
 def _archive_scan(root):
     root = Path(root)
     if not root.is_absolute() or ".." in root.parts or not root.is_dir():
@@ -261,13 +325,15 @@ def _archive_scan(root):
     for path, identity in ancestors.items():
         if not stat.S_ISDIR(identity[2]):
             raise ValueError(f"archive ancestor is not a directory: {path}")
-    identities = {}
+    identities = {root: ancestors[root]}
     files = {}
     seen = set()
-    for base, directories, filenames in os.walk(root, followlinks=False):
-        base = Path(base)
-        identities.setdefault(base, _archive_identity(base))
-        for name in directories + filenames:
+
+    def visit(base, directory):
+        with os.scandir(directory.path if os.name == "nt" else directory) as entries:
+            members = list(entries)
+        for entry in members:
+            name = entry.name
             path = base / name
             relative = path.relative_to(root).as_posix()
             _file_path_name(relative)
@@ -278,18 +344,23 @@ def _archive_scan(root):
             before = _archive_identity(path)
             identities[path] = before
             if stat.S_ISDIR(before[2]):
-                if name in filenames:
-                    raise ValueError(f"archive entry type changed: {relative}")
+                with _archive_directory(path, directory, name) as child:
+                    if os.name == "nt":
+                        opened = _archive_identity(path)
+                        if opened != before:
+                            raise ValueError(f"archive directory identity changed: {relative}")
+                    elif _archive_handle_identity(os.fstat(child)) != _archive_stable_identity(before):
+                        raise ValueError(f"archive directory identity changed: {relative}")
+                    visit(path, child)
                 continue
-            if name in directories:
-                raise ValueError(f"archive entry type changed: {relative}")
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            handle = os.open(path, flags)
+            if os.name == "nt":
+                handle = directory.open_file(name)
+            else:
+                handle = os.open(name, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                                 | os.O_NOFOLLOW, dir_fd=directory)
             try:
                 opened = os.fstat(handle)
-                if (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_nlink,
-                        opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns,
-                        getattr(opened, "st_file_attributes", None)) != before:
+                if _archive_handle_identity(opened) != _archive_stable_identity(before):
                     raise ValueError(f"archive file identity changed: {relative}")
                 sha = hashlib.sha256()
                 while chunk := os.read(handle, 1024 * 1024):
@@ -301,9 +372,8 @@ def _archive_scan(root):
                 if repeat.digest() != sha.digest():
                     raise ValueError(f"archive file changed during read: {relative}")
                 closed = os.fstat(handle)
-                if (closed.st_dev, closed.st_ino, closed.st_mode, closed.st_nlink,
-                        closed.st_size, closed.st_mtime_ns, closed.st_ctime_ns,
-                        getattr(closed, "st_file_attributes", None)) != before:
+                if (_archive_handle_identity(closed) != _archive_handle_identity(opened)
+                        or closed.st_ctime_ns != opened.st_ctime_ns):
                     raise ValueError(f"archive file changed during read: {relative}")
             finally:
                 os.close(handle)
@@ -313,12 +383,24 @@ def _archive_scan(root):
                                "dev": before[0], "ino": before[1],
                                "nlink": before[3], "size": before[4],
                                "ctime_ns": before[6]}
-    for path, before in identities.items():
-        if _archive_identity(path) != before:
-            raise ValueError(f"archive entry changed during scan: {path}")
-    for path, before in ancestors.items():
-        if _archive_identity(path) != before:
-            raise ValueError(f"archive ancestor changed during scan: {path}")
+
+    with _archive_directory(root, ancestors=ancestors) as directory:
+        if os.name == "nt":
+            for path, before in ancestors.items():
+                if _archive_ancestor_identity(_archive_identity(path)) != _archive_ancestor_identity(before):
+                    raise ValueError(f"archive ancestor changed during scan: {path}")
+        elif _archive_handle_identity(os.fstat(directory)) != _archive_stable_identity(ancestors[root]):
+            raise ValueError(f"archive root identity changed during scan: {root}")
+        visit(root, directory)
+        for path, before in identities.items():
+            if _archive_identity(path) != before:
+                raise ValueError(f"archive entry changed during scan: {path}")
+        for path, before in ancestors.items():
+            current = _archive_identity(path)
+            expected = before if path == root else _archive_ancestor_identity(before)
+            actual = current if path == root else _archive_ancestor_identity(current)
+            if actual != expected:
+                raise ValueError(f"archive ancestor changed during scan: {path}")
     return files
 
 

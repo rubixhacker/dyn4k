@@ -5,6 +5,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -202,8 +203,28 @@ class IndependentAuditProducerTests(unittest.TestCase):
                     scan(archive)
         alias.unlink()
 
-        with mock.patch.object(independent_gates.os, "walk", return_value=[
-                (str(archive), [], ["receipt.json", "payload.bin", "payload.bin"])]):
+        original_scandir = os.scandir
+
+        class ListedEntries:
+            def __init__(self, entries):
+                self.entries = entries
+
+            def __enter__(self):
+                return iter(self.entries)
+
+            def __exit__(self, *_):
+                return False
+
+        def duplicate_scandir(path):
+            with original_scandir(path) as entries:
+                listed = list(entries)
+            is_root = (os.fstat(path).st_ino == archive.stat().st_ino
+                       if isinstance(path, int) else Path(path) == archive)
+            if is_root:
+                listed.append(next(entry for entry in listed if entry.name == "payload.bin"))
+            return ListedEntries(listed)
+
+        with mock.patch.object(independent_gates.os, "scandir", side_effect=duplicate_scandir):
             for scan in (producer._snapshot, independent_gates.archive_digest):
                 with self.subTest(scan=scan, alteration="duplicate"):
                     with self.assertRaisesRegex(ValueError, "duplicate archive path"):
@@ -222,6 +243,193 @@ class IndependentAuditProducerTests(unittest.TestCase):
                     independent_gates.os, "read", side_effect=mutate_during_read):
                 with self.assertRaisesRegex(ValueError, "archive file changed during read"):
                     scan(archive)
+
+    def test_archive_scan_rejects_failed_descendant_enumeration(self):
+        archive = self.root / "unreadable-archive"
+        hidden = archive / "hidden"
+        hidden.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        (hidden / "unlisted.bin").write_bytes(b"must be included")
+        original_scandir = os.scandir
+
+        def fail_hidden(path):
+            target = (os.fstat(path).st_ino == hidden.stat().st_ino
+                      if isinstance(path, int) else Path(path) == hidden)
+            if target:
+                raise PermissionError("fixture denies descendant enumeration")
+            return original_scandir(path)
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            with self.subTest(scan=scan), mock.patch.object(
+                    independent_gates.os, "scandir", side_effect=fail_hidden):
+                with self.assertRaisesRegex(PermissionError, "descendant enumeration"):
+                    scan(archive)
+
+    def test_archive_scan_accepts_path_and_handle_ctime_with_distinct_meanings(self):
+        archive = self.root / "ctime-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        payload = archive / "payload.bin"
+        payload.write_bytes(b"unchanged")
+        original_fstat = os.fstat
+
+        class HandleState:
+            def __init__(self, state):
+                self.state = state
+
+            def __getattr__(self, name):
+                if name == "st_ctime_ns":
+                    return self.state.st_ctime_ns + 1_000_000_000
+                return getattr(self.state, name)
+
+        def windows_handle_ctime(fd):
+            state = original_fstat(fd)
+            return HandleState(state) if state.st_ino == payload.stat().st_ino else state
+
+        with mock.patch.object(independent_gates.os, "fstat", side_effect=windows_handle_ctime):
+            self.assertIn("payload.bin", producer._snapshot(archive)["files"])
+            self.assertIsInstance(independent_gates.archive_digest(archive), str)
+
+    def test_archive_scan_accepts_unrelated_archive_ancestor_sibling(self):
+        archive = self.root / "sibling-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        (archive / "payload.bin").write_bytes(b"stable")
+        expected = independent_gates.archive_digest(archive)
+        original_open = os.open
+
+        for index, scan in enumerate((producer._snapshot, independent_gates.archive_digest)):
+            created = False
+
+            def add_sibling(path, flags, *args, **kwargs):
+                nonlocal created
+                fd = original_open(path, flags, *args, **kwargs)
+                if not created and Path(path).name == "payload.bin":
+                    created = True
+                    (self.root / f"unrelated-{index}.txt").write_text("sibling")
+                return fd
+
+            with self.subTest(scan=scan), mock.patch.object(
+                    independent_gates.os, "open", side_effect=add_sibling):
+                result = scan(archive)
+                self.assertTrue(created)
+                if scan is independent_gates.archive_digest:
+                    self.assertEqual(expected, result)
+                else:
+                    self.assertIn("payload.bin", result["files"])
+
+    def test_archive_scan_rejects_new_archive_member_during_read(self):
+        archive = self.root / "changed-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        (archive / "payload.bin").write_bytes(b"stable")
+        original_open = os.open
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            new_member = archive / f"new-{scan.__name__}.bin"
+            changed = False
+
+            def add_member(path, flags, *args, **kwargs):
+                nonlocal changed
+                fd = original_open(path, flags, *args, **kwargs)
+                if not changed and Path(path).name == "payload.bin":
+                    changed = True
+                    new_member.write_bytes(b"concurrent")
+                return fd
+
+            with self.subTest(scan=scan), mock.patch.object(
+                    independent_gates.os, "open", side_effect=add_member):
+                with self.assertRaisesRegex(ValueError, "archive entry changed during scan"):
+                    scan(archive)
+                self.assertTrue(changed)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX parent replacement")
+    def test_archive_scan_does_not_accept_transient_parent_swap(self):
+        visible = self.root / "visible"
+        archive = visible / "archive"
+        archive.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        (archive / "payload.bin").write_bytes(b"approved")
+        attacker = self.root / "attacker"
+        alternate = attacker / "archive"
+        alternate.mkdir(parents=True)
+        (alternate / "receipt.json").write_text("{}")
+        (alternate / "payload.bin").write_bytes(b"outside")
+        original_identity = independent_gates._archive_identity
+        parked = self.root / "parked-visible"
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            calls = 0
+            swapped = False
+
+            def transient_swap(path):
+                nonlocal calls, swapped
+                if Path(path) == archive / "payload.bin":
+                    calls += 1
+                    if calls == 1:
+                        visible.rename(parked)
+                        visible.symlink_to(attacker, target_is_directory=True)
+                        swapped = True
+                    result = original_identity(path)
+                    if calls == 3 and swapped:
+                        visible.unlink()
+                        parked.rename(visible)
+                        swapped = False
+                    return result
+                return original_identity(path)
+
+            try:
+                with self.subTest(scan=scan), mock.patch.object(
+                        independent_gates, "_archive_identity", side_effect=transient_swap):
+                    with self.assertRaisesRegex(ValueError, "archive file identity changed"):
+                        scan(archive)
+                self.assertGreater(calls, 0)
+            finally:
+                if swapped:
+                    visible.unlink()
+                    parked.rename(visible)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX ancestor symlink replacement")
+    def test_archive_scan_rejects_ancestor_alias_during_root_open(self):
+        visible = self.root / "visible"
+        archive = visible / "archive"
+        archive.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        parked = self.root / "parked-visible"
+        original_open = os.open
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            swapped = False
+
+            def alias_during_open(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if path == "visible" and "dir_fd" in kwargs and not swapped:
+                    visible.rename(parked)
+                    visible.symlink_to(parked, target_is_directory=True)
+                    swapped = True
+                return original_open(path, flags, *args, **kwargs)
+
+            try:
+                with self.subTest(scan=scan), mock.patch.object(
+                        independent_gates.os, "open", side_effect=alias_during_open):
+                    with self.assertRaises(OSError):
+                        scan(archive)
+                    self.assertTrue(swapped)
+            finally:
+                if swapped:
+                    visible.unlink()
+                    parked.rename(visible)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX descriptor traversal")
+    def test_archive_scan_rejects_missing_directory_nofollow_capability(self):
+        archive = self.root / "no-nofollow-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        with mock.patch.object(independent_gates.os, "O_NOFOLLOW", None):
+            for scan in (producer._snapshot, independent_gates.archive_digest):
+                with self.subTest(scan=scan):
+                    with self.assertRaisesRegex(ValueError, "safe open is unavailable"):
+                        scan(archive)
 
     def test_mocked_internal_junction_and_generic_reparse_are_rejected(self):
         archive = self.root / "mocked-reparse"
@@ -319,6 +527,56 @@ class IndependentAuditProducerTests(unittest.TestCase):
             with self.subTest(scan=scan, alteration="hardlink"):
                 with self.assertRaisesRegex(ValueError, "hardlinked archive file"):
                     scan(archive)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows directory share locks")
+    def test_windows_archive_parent_cannot_swap_while_scanning(self):
+        visible = self.root / "visible"
+        archive = visible / "archive"
+        archive.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        (archive / "payload.bin").write_bytes(b"stable")
+        parked = self.root / "parked-visible"
+        original_scandir = os.scandir
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            attempted = False
+            blocked = False
+
+            def attempt_parent_swap(path):
+                nonlocal attempted, blocked
+                if Path(path) == archive and not attempted:
+                    attempted = True
+                    try:
+                        visible.rename(parked)
+                    except OSError:
+                        blocked = True
+                    else:
+                        parked.rename(visible)
+                return original_scandir(path)
+
+            with self.subTest(scan=scan), mock.patch.object(
+                    independent_gates.os, "scandir", side_effect=attempt_parent_swap):
+                scan(archive)
+                self.assertTrue(attempted)
+                self.assertTrue(blocked)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows path and handle timestamps")
+    def test_windows_modified_file_with_creation_ctime_is_accepted(self):
+        archive = self.root / "windows-ctime-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        payload = archive / "payload.bin"
+        payload.write_bytes(b"original")
+        time.sleep(0.1)
+        payload.write_bytes(b"unchanged")
+        descriptor = os.open(payload, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            self.assertNotEqual(payload.lstat().st_ctime_ns,
+                                os.fstat(descriptor).st_ctime_ns)
+        finally:
+            os.close(descriptor)
+        self.assertIn("payload.bin", producer._snapshot(archive)["files"])
+        self.assertIsInstance(independent_gates.archive_digest(archive), str)
 
     def test_native_cross_preparation_binds_only_schema3_build_fields(self):
         lane = "linuxArm64:Linux ARM64:current:debug-g"
