@@ -19,6 +19,40 @@ import qualify
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _patch_archive_member_open(callback, windows_directory_type=None):
+    if windows_directory_type is None and os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        windows_directory_type = LockedDirectory
+    if windows_directory_type is not None:
+        original = windows_directory_type.open_file
+
+        def opened(directory, name):
+            handle = original(directory, name)
+            if name == "payload.bin":
+                try:
+                    callback()
+                except BaseException:
+                    os.close(handle)
+                    raise
+            return handle
+
+        return mock.patch.object(windows_directory_type, "open_file", opened)
+
+    original = independent_gates.os.open
+
+    def opened(path, flags, *args, **kwargs):
+        handle = original(path, flags, *args, **kwargs)
+        if Path(path).name == "payload.bin":
+            try:
+                callback()
+            except BaseException:
+                os.close(handle)
+                raise
+        return handle
+
+    return mock.patch.object(independent_gates.os, "open", opened)
+
+
 class IndependentAuditProducerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -296,21 +330,17 @@ class IndependentAuditProducerTests(unittest.TestCase):
         (archive / "receipt.json").write_text("{}")
         (archive / "payload.bin").write_bytes(b"stable")
         expected = independent_gates.archive_digest(archive)
-        original_open = os.open
 
         for index, scan in enumerate((producer._snapshot, independent_gates.archive_digest)):
             created = False
 
-            def add_sibling(path, flags, *args, **kwargs):
+            def add_sibling():
                 nonlocal created
-                fd = original_open(path, flags, *args, **kwargs)
-                if not created and Path(path).name == "payload.bin":
+                if not created:
                     created = True
                     (self.root / f"unrelated-{index}.txt").write_text("sibling")
-                return fd
 
-            with self.subTest(scan=scan), mock.patch.object(
-                    independent_gates.os, "open", side_effect=add_sibling):
+            with self.subTest(scan=scan), _patch_archive_member_open(add_sibling):
                 result = scan(archive)
                 self.assertTrue(created)
                 if scan is independent_gates.archive_digest:
@@ -323,25 +353,46 @@ class IndependentAuditProducerTests(unittest.TestCase):
         archive.mkdir()
         (archive / "receipt.json").write_text("{}")
         (archive / "payload.bin").write_bytes(b"stable")
-        original_open = os.open
 
         for scan in (producer._snapshot, independent_gates.archive_digest):
             new_member = archive / f"new-{scan.__name__}.bin"
             changed = False
 
-            def add_member(path, flags, *args, **kwargs):
+            def add_member():
                 nonlocal changed
-                fd = original_open(path, flags, *args, **kwargs)
-                if not changed and Path(path).name == "payload.bin":
+                if not changed:
                     changed = True
                     new_member.write_bytes(b"concurrent")
-                return fd
 
-            with self.subTest(scan=scan), mock.patch.object(
-                    independent_gates.os, "open", side_effect=add_member):
+            with self.subTest(scan=scan), _patch_archive_member_open(add_member):
                 with self.assertRaisesRegex(ValueError, "archive entry changed during scan"):
                     scan(archive)
                 self.assertTrue(changed)
+
+    def test_windows_modelled_member_open_injection_reaches_callback(self):
+        payload = self.root / "payload.bin"
+        payload.write_bytes(b"stable")
+        created = []
+
+        class WindowsHandleModel:
+            def open_file(self, name):
+                return os.open(self.path / name, os.O_RDONLY)
+
+        directory = WindowsHandleModel()
+        directory.path = self.root
+        with _patch_archive_member_open(lambda: created.append("opened"),
+                                        windows_directory_type=WindowsHandleModel):
+            other = self.root / "receipt.json"
+            other.write_bytes(b"{}")
+            handle = directory.open_file("receipt.json")
+            os.close(handle)
+            self.assertEqual([], created)
+            handle = directory.open_file("payload.bin")
+            try:
+                self.assertEqual(b"stable", os.read(handle, 6))
+            finally:
+                os.close(handle)
+        self.assertEqual(["opened"], created)
 
     @unittest.skipUnless(os.name == "posix", "requires POSIX parent replacement")
     def test_archive_scan_does_not_accept_transient_parent_swap(self):
