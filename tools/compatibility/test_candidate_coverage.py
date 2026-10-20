@@ -25,6 +25,47 @@ ANDROID_ORIGIN = ROOT
 ANDROID_JAR = ANDROID_ORIGIN / "dyn4k-core/build/intermediates/aar_main_jar/androidMain/syncAndroidMainLibJars/classes.jar"
 
 
+class JavaCorpusTemporaryDirectoryTests(unittest.TestCase):
+    def java_temp_directory(self, output):
+        return java_corpus.java_temp_directory(output)
+
+    def test_runtime_command_uses_created_output_owned_temp_directory(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as parent:
+            output = Path(parent) / "capture"
+            output.mkdir()
+            java_tmp = self.java_temp_directory(output)
+            command = java_corpus.runtime_command("/pinned/jdk/bin/java", "pinned-classpath",
+                                                  java_tmp, output / "lane.xml", ["p.Test"])
+
+            self.assertTrue(java_tmp.is_dir())
+            self.assertEqual(java_tmp.parent, output.resolve())
+            self.assertEqual(command[:2], ["/pinned/jdk/bin/java",
+                                           f"-Djava.io.tmpdir={java_tmp}"])
+            self.assertEqual(command[2:], ["-cp", "pinned-classpath", "LedgerCorpusReport",
+                                           str(output / "lane.xml"), "p.Test"])
+
+    def test_java_temp_directory_rejects_missing_output_and_symlink_escape(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as parent:
+            parent = Path(parent)
+            with self.assertRaises(ValueError):
+                self.java_temp_directory(parent / "missing")
+
+            output = parent / "capture"
+            output.mkdir()
+            outside = parent / "outside"
+            outside.mkdir()
+            (output / "java-tmp").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                self.java_temp_directory(output)
+
+    def test_replay_directory_is_created_under_the_worktree_and_cleaned(self):
+        with java_corpus.replay_temp_directory(ROOT) as directory:
+            replay = Path(directory)
+            self.assertTrue(replay.is_dir())
+            self.assertEqual(replay.parent, ROOT.resolve())
+        self.assertFalse(replay.exists())
+
+
 class BuildProvenanceArchiveTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home())))

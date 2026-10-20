@@ -89,6 +89,34 @@ def checked_inputs(ledger: dict, source: Path) -> dict[str, str]:
     return run_inputs
 
 
+def java_temp_directory(output: Path) -> Path:
+    output = output.resolve()
+    if not output.is_dir():
+        raise ValueError("Java corpus output directory is missing")
+    directory = output / "java-tmp"
+    try:
+        directory.mkdir()
+    except FileExistsError:
+        pass
+    resolved = directory.resolve()
+    if directory.is_symlink() or not resolved.is_dir() or resolved.parent != output:
+        raise ValueError("Java corpus temporary directory is outside its output")
+    return resolved
+
+
+def runtime_command(java: str, classpath: str, java_tmp: Path, xml: Path,
+                    classes: list[str]) -> list[str]:
+    java_tmp = java_tmp.resolve(strict=True)
+    if not java_tmp.is_dir():
+        raise ValueError("Java corpus temporary directory is missing")
+    return [java, f"-Djava.io.tmpdir={java_tmp}", "-cp", classpath,
+            "LedgerCorpusReport", str(xml), *classes]
+
+
+def replay_temp_directory(root: Path):
+    return tempfile.TemporaryDirectory(prefix="dyn4k-ledger-corpus-replay-", dir=root.resolve())
+
+
 def capture(ledger: dict, root: Path, source: Path, jar: Path, deps: dict[str, Path],
             jdks: dict[int, Path], output: Path,
             runtime_env: dict[str, str] | None = None) -> dict:
@@ -98,6 +126,7 @@ def capture(ledger: dict, root: Path, source: Path, jar: Path, deps: dict[str, P
     if output.exists():
         raise ValueError("corpus output directory already exists")
     output.mkdir(parents=True)
+    java_tmp = java_temp_directory(output)
     inputs = checked_inputs(ledger, source)
     source_binding = ledger["candidate_source"]
     if (jar != (root / source_binding["artifact"]).resolve()
@@ -142,9 +171,9 @@ def capture(ledger: dict, root: Path, source: Path, jar: Path, deps: dict[str, P
             for runtime in (8, 21):
                 lane = f"{provider}-javac{compiler}-java{runtime}"
                 xml = output / f"{lane}.xml"
-                run_command = [jdk_tools[str(runtime)]["java"]["path"], "-cp",
-                               os.pathsep.join((cp, str(directory))), "LedgerCorpusReport",
-                               str(xml), *classes]
+                run_command = runtime_command(jdk_tools[str(runtime)]["java"]["path"],
+                                              os.pathsep.join((cp, str(directory))),
+                                              java_tmp, xml, classes)
                 run = subprocess.run(run_command, capture_output=True, text=True, check=False,
                                      timeout=600,
                                      env={**os.environ, **runtime_env} if runtime_env else None)
@@ -245,7 +274,7 @@ def validate_report(report: dict, ledger: dict, root: Path, source: Path, jar: P
         build_error = build_provenance.verify(json.loads(receipt_path.read_text()), root, jar, binding)
         if build_error:
             return build_error
-        with tempfile.TemporaryDirectory(prefix="dyn4k-ledger-corpus-replay-") as directory:
+        with replay_temp_directory(root) as directory:
             observed = capture(ledger, root, source, jar, dep_paths, jdks, Path(directory) / "run")
         if (not observed["passed"] or observed["input_sha256"] != report["input_sha256"]
                 or observed["normalized_case_ids"] != report["normalized_case_ids"]
@@ -275,6 +304,8 @@ def main() -> None:
     root = args.root.resolve()
     ledger = json.loads(args.ledger.read_text())
     jar = root / ledger["candidate_source"]["artifact"]
+    if root not in args.output.resolve().parents or root not in args.build_receipt.resolve().parents:
+        parser.error("raw output and build receipt must be inside the worktree")
     if args.output.exists():
         parser.error("output directory already exists")
     report = capture(ledger, root, args.source, jar,
@@ -283,8 +314,6 @@ def main() -> None:
                       "hamcrest": args.hamcrest}, {8: args.jdk8, 21: args.jdk21}, args.output)
     shutil.rmtree(args.output / "classes")
     (args.output / "sources.args").unlink()
-    if root not in args.output.resolve().parents or root not in args.build_receipt.resolve().parents:
-        parser.error("raw output and build receipt must be inside the worktree")
     report["xml_root"] = args.output.resolve().relative_to(root).as_posix()
     report["build_receipt"] = args.build_receipt.resolve().relative_to(root).as_posix()
     report["build_receipt_sha256"] = digest(args.build_receipt)
