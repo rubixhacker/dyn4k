@@ -437,8 +437,10 @@ class SignedRouteTests(unittest.TestCase):
         if expected:
             self.assertNotEqual(build_executable, toolchain["gradle_sha256"])
         command = [script, "qualificationEvidence"]
+        launcher_image = str(Path(sys.executable).resolve())
+        launcher_sha = hashlib.sha256(Path(launcher_image).read_bytes()).hexdigest()
         expected["expected_build_launcher_image"] = {
-            "path": "/usr/bin/bash", "sha256": "f" * 64}
+            "path": launcher_image, "sha256": launcher_sha}
         witness = {"schema": "independent-execution-witness/1",
                    "candidate_sha": CANDIDATE, "lane": lane,
                    "archive_sha256": archive_digest, "runtime_identity": runtime,
@@ -449,8 +451,8 @@ class SignedRouteTests(unittest.TestCase):
                    "launcher": {"script_path": script,
                                 "script_sha256": toolchain["gradle_sha256"],
                                 "command": command, "pid": 10, "parent_pid": 9,
-                                "executable_path": "/usr/bin/bash",
-                                "executable_sha256": "f" * 64,
+                                "executable_path": launcher_image,
+                                "executable_sha256": launcher_sha,
                                 "started_ns": 1, "finished_ns": 2},
                    "processes": {name: {"executable_sha256": value, "pid": index + 1,
                                         "exit_code": 0, "started_ns": 1,
@@ -466,6 +468,7 @@ class SignedRouteTests(unittest.TestCase):
         responses, modules = {}, {}
         for short in ("core", "facade"):
             folder = archive / short
+            webpack = archive.parent / "webpack" / short
             (folder / "http-sources").mkdir(parents=True)
             (folder / "http-responses").mkdir()
             package = f"dyn4k-full-staged-browser-consumer-{short}-test"
@@ -479,7 +482,7 @@ class SignedRouteTests(unittest.TestCase):
                 data = (short + name).encode()
                 (folder / "http-sources" / name).write_bytes(data)
                 generated.append({"name": name,
-                                  "source_path": f"/tmp/webpack/{short}/{name}",
+                                  "source_path": str(webpack / name),
                                   "size": len(data),
                                   "sha256": hashlib.sha256(data).hexdigest()})
             assets = []
@@ -492,7 +495,7 @@ class SignedRouteTests(unittest.TestCase):
                 assets = [{"name": asset, "sha256": hashlib.sha256(data).hexdigest()}]
             selected = {"browser_id": short + "-browser", "browser_name": "Chromium",
                         "node_pid": 123, "captured_ns": 17, "complete_ns": 20,
-                        "effective_files": [{"pattern": f"/tmp/webpack/{short}/runtime.js"}],
+                        "effective_files": [{"pattern": str(webpack / "runtime.js")}],
                         "generated": generated}
             if wasm:
                 selected["assets"] = assets
@@ -1208,6 +1211,13 @@ class SignedRouteTests(unittest.TestCase):
             self.assertEqual(full_signed_routes.execution_witness(
                 expected, CANDIDATE, lane, "c" * 64, "Linux current", "debug-g",
                 executables, HASHES, java_sha, launcher=launcher)["build"]["pid"], 12)
+            selected_image = expected["expected_build_launcher_image"]["sha256"]
+            expected["expected_build_launcher_image"]["sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "launcher process witness"):
+                full_signed_routes.execution_witness(
+                    expected, CANDIDATE, lane, "c" * 64, "Linux current", "debug-g",
+                    executables, HASHES, java_sha, launcher=launcher)
+            expected["expected_build_launcher_image"]["sha256"] = selected_image
             witness["build_ancestry"][1]["parent_pid"] = 99
             path.write_text(json.dumps(witness))
             expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
@@ -1388,6 +1398,22 @@ class SignedRouteTests(unittest.TestCase):
                         if family == "Firefox" else None)
                     collector_sha = (hashlib.sha256(collector_bytes).hexdigest()
                                      if collector_bytes is not None else None)
+                    source_root = ROOT
+                    if collector_bytes is not None:
+                        source_root = base / "exact-candidate-source"
+                        live_sources = ((full_browser_consumer.FIREFOX_WITNESS,
+                                         full_browser_consumer.SAFARI_WITNESS,
+                                         full_browser_consumer.SAFARI_WORKER,
+                                         full_browser_consumer.SAFARI_BOOTSTRAP,
+                                         full_browser_consumer.SAFARI_OBSERVER)
+                                        if role == "minimum" else
+                                        (full_browser_consumer.FIREFOX_WITNESS,))
+                        for name in live_sources:
+                            source = source_root / name
+                            source.parent.mkdir(parents=True, exist_ok=True)
+                            committed = full_browser_consumer.original(ROOT, candidate, name)
+                            source.write_bytes(committed)
+                            self.assertEqual(source.read_bytes(), committed)
                     toolchain = {"browser": str(selected_browser),
                                  "browser_sha256": selected_sha,
                                  "java_home": str(base),
@@ -1426,7 +1452,7 @@ class SignedRouteTests(unittest.TestCase):
                                                       for item in selected_bundle["assets"]}
                         session = {"kind": "session", "browser_pid": pid}
                         if family == "Firefox":
-                            session.update({"source_path": str(ROOT / full_browser_consumer.FIREFOX_WITNESS),
+                            session.update({"source_path": str(source_root / full_browser_consumer.FIREFOX_WITNESS),
                                             "source_sha256": collector_sha})
                         rows = [session]
                         observed = []
@@ -1462,7 +1488,7 @@ class SignedRouteTests(unittest.TestCase):
                                     "bidi_browser_pid": pid,
                                     "browser_token": "synthetic-token",
                                     "redirect_sha256": "c" * 64,
-                                    "source_path": str(ROOT / full_browser_consumer.FIREFOX_WITNESS),
+                                    "source_path": str(source_root / full_browser_consumer.FIREFOX_WITNESS),
                                     "source_sha256": collector_sha, **navigation}
                             session.update({"target_url": navigation["target_url"],
                                             "browser_token": bidi["browser_token"],
@@ -1520,24 +1546,46 @@ class SignedRouteTests(unittest.TestCase):
                     public = {"status": "PASSED", "lane": lane, "selected_cases": 2523,
                               "archive_sha256": digest, "candidate_sha": candidate}
                     actual_file = full_signed_routes._file
+                    approved_manifest = independent_gates.load_approved_manifest
+                    exact_candidate_source = full_browser_consumer.original
+                    def original_from_candidate(repository, selected, name):
+                        self.assertEqual(selected, candidate)
+                        if repository == source_root:
+                            return exact_candidate_source(ROOT, selected, name)
+                        return exact_candidate_source(repository, selected, name)
                     with (patch.object(full_signed_routes, "_source"),
+                          patch.object(independent_gates, "load_approved_manifest",
+                                       side_effect=lambda repository: MANIFEST
+                                       if repository == source_root else
+                                       approved_manifest(repository)),
+                          patch.object(full_browser_consumer, "original",
+                                       side_effect=original_from_candidate),
                           patch.object(full_signed_routes, "_file", side_effect=lambda path, sha, label:
                               Path(path) if label in ("browser", "JDK 21", "Gradle") else
                               actual_file(path, sha, label)),
                           patch("full_browser_consumer.runtime_pin"),
                           patch("full_browser_consumer.verify", return_value=public) as public_verify):
                         self.assertEqual(full_signed_routes.verify_browser(
-                            ROOT, candidate, lane, archive, expected, HASHES, runtime, digest), public)
+                            source_root, candidate, lane, archive, expected, HASHES,
+                            runtime, digest), public)
+                        if family == "Firefox":
+                            live_collector = source_root / full_browser_consumer.FIREFOX_WITNESS
+                            live_collector.write_bytes(collector_bytes + b"\nchanged\n")
+                            with self.assertRaisesRegex(ValueError, "live Firefox collector"):
+                                full_signed_routes.verify_browser(
+                                    source_root, candidate, lane, archive, expected,
+                                    HASHES, runtime, digest)
+                            live_collector.write_bytes(collector_bytes)
                         expected["expected_build_launcher_image"] = {
                             "path": "/usr/bin/false", "sha256": "b" * 64}
                         with self.assertRaisesRegex(ValueError, "unused.*launcher"):
                             full_signed_routes.verify_browser(
-                                ROOT, candidate, lane, archive, expected, HASHES,
+                                source_root, candidate, lane, archive, expected, HASHES,
                                 runtime, digest)
                         del expected["expected_build_launcher_image"]
                         gate = independent_gates.evaluate_gate(
                             "staged-consumer", archive, candidate, lane, MANIFEST["lanes"][lane],
-                            ROOT, HASHES, runtime, digest, manifest=MANIFEST,
+                            source_root, HASHES, runtime, digest, manifest=MANIFEST,
                             expected_signed_lane=expected)
                         self.assertEqual(gate["status"], "PASSED", gate)
                         relocated = base / "physically-copied-archive"
@@ -1545,7 +1593,7 @@ class SignedRouteTests(unittest.TestCase):
                         self.assertEqual(independent_gates.archive_digest(relocated), digest)
                         copied_gate = independent_gates.evaluate_gate(
                             "staged-consumer", relocated, candidate, lane,
-                            MANIFEST["lanes"][lane], ROOT, HASHES, runtime, digest,
+                            MANIFEST["lanes"][lane], source_root, HASHES, runtime, digest,
                             manifest=MANIFEST, expected_signed_lane=expected)
                         self.assertEqual(copied_gate["status"], "PASSED", copied_gate)
                         self.assertEqual(public_verify.call_args.args[3], relocated)
@@ -1595,7 +1643,7 @@ class SignedRouteTests(unittest.TestCase):
                         os.link(witness_path, hardlink)
                         expected["expected_execution_witness"]["path"] = str(hardlink)
                         with self.assertRaisesRegex(ValueError, "witness is absent or inside"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         hardlink.unlink()
                         expected["expected_execution_witness"]["path"] = str(witness_path)
@@ -1606,14 +1654,14 @@ class SignedRouteTests(unittest.TestCase):
                             witness["browser_sha256"] = process_sha
                             seal()
                             with self.assertRaisesRegex(ValueError, "execution witness differs"):
-                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                full_signed_routes.verify_browser(source_root, candidate, lane,
                                     archive, expected, HASHES, runtime, digest)
                             witness["browser_sha256"] = selected_sha
                             seal()
                             consumption["core"]["browser_sha256"] = selected_sha
                             seal()
                             with self.assertRaisesRegex(ValueError, "process differs"):
-                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                full_signed_routes.verify_browser(source_root, candidate, lane,
                                     archive, expected, HASHES, runtime, digest)
                             consumption["core"]["browser_sha256"] = process_sha
                             seal()
@@ -1621,7 +1669,7 @@ class SignedRouteTests(unittest.TestCase):
                             consumption["core"]["process_executable"] = str(selected_browser)
                             seal()
                             with self.assertRaisesRegex(ValueError, "process differs"):
-                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                full_signed_routes.verify_browser(source_root, candidate, lane,
                                     archive, expected, HASHES, runtime, digest)
                             consumption["core"]["process_executable"] = process_path
                             seal()
@@ -1656,7 +1704,7 @@ class SignedRouteTests(unittest.TestCase):
                                 navigation[key] = wrong
                                 seal()
                                 with self.assertRaisesRegex(ValueError, "navigation differs"):
-                                    full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    full_signed_routes.verify_browser(source_root, candidate, lane,
                                         archive, expected, HASHES, runtime, digest)
                                 navigation[key] = prior
                             seal()
@@ -1664,7 +1712,7 @@ class SignedRouteTests(unittest.TestCase):
                             witness["source_sha256"][full_browser_consumer.SAFARI_WORKER] = "0" * 64
                             seal()
                             with self.assertRaisesRegex(ValueError, "execution witness differs"):
-                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                full_signed_routes.verify_browser(source_root, candidate, lane,
                                     archive, expected, HASHES, runtime, digest)
                             witness["source_sha256"][full_browser_consumer.SAFARI_WORKER] = prior
                             seal()
@@ -1690,7 +1738,7 @@ class SignedRouteTests(unittest.TestCase):
                             copied_body.write_bytes(b"changed service-worker body")
                             with self.assertRaisesRegex(ValueError, "body or interval differs"):
                                 full_signed_routes.schema5_browser_witness(
-                                    ROOT, expected, candidate, lane, digest,
+                                    source_root, expected, candidate, lane, digest,
                                     runtime, HASHES, toolchain, archive, receipt)
                             copied_body.write_bytes(original_body)
                             os.utime(copied_body, ns=(body_stat.st_atime_ns, body_stat.st_mtime_ns))
@@ -1702,7 +1750,7 @@ class SignedRouteTests(unittest.TestCase):
                             worker_rows.write_text("\n".join(json.dumps(row) for row in changed) + "\n")
                             with self.assertRaisesRegex(ValueError, "navigation differs"):
                                 full_signed_routes.schema5_browser_witness(
-                                    ROOT, expected, candidate, lane, digest,
+                                    source_root, expected, candidate, lane, digest,
                                     runtime, HASHES, toolchain, archive, receipt)
                             worker_rows.write_bytes(original_rows)
                             os.utime(worker_rows, ns=(worker_stat.st_atime_ns, worker_stat.st_mtime_ns))
@@ -1714,7 +1762,7 @@ class SignedRouteTests(unittest.TestCase):
                             bidi_rows.write_text(json.dumps(changed_bidi) + "\n")
                             with self.assertRaisesRegex(ValueError, "navigation differs"):
                                 full_signed_routes.schema5_browser_witness(
-                                    ROOT, expected, candidate, lane, digest,
+                                    source_root, expected, candidate, lane, digest,
                                     runtime, HASHES, toolchain, archive, receipt)
                             bidi_rows.write_bytes(original_bidi)
                             os.utime(bidi_rows, ns=(bidi_stat.st_atime_ns, bidi_stat.st_mtime_ns))
@@ -1724,7 +1772,7 @@ class SignedRouteTests(unittest.TestCase):
                             witness[field] = wrong
                             seal()
                             with self.assertRaisesRegex(ValueError, "execution witness differs"):
-                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                full_signed_routes.verify_browser(source_root, candidate, lane,
                                     archive, expected, HASHES, runtime, digest)
                             witness[field] = prior
                         seal()
@@ -1732,7 +1780,7 @@ class SignedRouteTests(unittest.TestCase):
                         consumption["core"]["protocol"] = "cdp"
                         seal()
                         with self.assertRaisesRegex(ValueError, "process differs"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         consumption["core"]["protocol"] = prior
                         seal()
@@ -1740,30 +1788,30 @@ class SignedRouteTests(unittest.TestCase):
                         consumption["core"]["browser_pid"] = 999
                         seal()
                         with self.assertRaisesRegex(ValueError, "process differs"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         consumption["core"]["browser_pid"] = prior_pid
                         removed = consumption["core"]["responses"].pop()
                         seal()
                         with self.assertRaisesRegex(ValueError, "process differs"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         consumption["core"]["responses"].append(removed)
                         seal()
                         signed_sha = expected["expected_execution_witness"]["sha256"]
                         expected["expected_execution_witness"]["sha256"] = "0" * 64
                         with self.assertRaisesRegex(ValueError, "signed bytes"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         expected["expected_execution_witness"]["sha256"] = signed_sha
                         outside = Path(consumption["core"]["responses"][0]["body_path"])
                         outside.write_bytes(b"wrong")
                         with self.assertRaisesRegex(ValueError, "body or interval differs"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
                         outside.unlink()
                         with self.assertRaisesRegex(ValueError, "body or interval differs"):
-                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                            full_signed_routes.verify_browser(source_root, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
 
     def test_schema5_rejects_hardlinked_external_witness_before_replay(self):
