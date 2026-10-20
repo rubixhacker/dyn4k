@@ -19,6 +19,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -42,16 +45,32 @@ jobs:
           if (Test-Path -LiteralPath $evidenceDir) {
             throw 'Could not allocate a new run-specific evidence directory.'
           }
+          $taskRoot = Join-Path $env:RUNNER_TEMP "$base-task"
+          $taskCollision = $false
+          if (Test-Path -LiteralPath $taskRoot) {
+            $taskCollision = $true
+            $taskRoot = Join-Path $env:RUNNER_TEMP "$base-task-collision-$([guid]::NewGuid().ToString('N'))"
+          }
+          if (Test-Path -LiteralPath $taskRoot) {
+            throw 'Could not allocate a new task-owned tooling directory.'
+          }
           New-Item -ItemType Directory -Path $evidenceDir | Out-Null
+          New-Item -ItemType Directory -Path $taskRoot | Out-Null
           Add-Content -Path $env:GITHUB_OUTPUT -Value "evidence_dir=$evidenceDir"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "task_root=$taskRoot"
 
           $stdoutPath = Join-Path $evidenceDir 'stdout.txt'
           $stderrPath = Join-Path $evidenceDir 'stderr.txt'
           $metadataPath = Join-Path $evidenceDir 'run-metadata.txt'
           $exitCodePath = Join-Path $evidenceDir 'unittest-exit-code.txt'
           $failurePath = Join-Path $evidenceDir 'fail-closed-reason.txt'
+          $provisionStdoutPath = Join-Path $evidenceDir 'provision.stdout.txt'
+          $provisionStderrPath = Join-Path $evidenceDir 'provision.stderr.txt'
           Set-Content -Path $stdoutPath -Value ''
           Set-Content -Path $stderrPath -Value ''
+          Set-Content -Path $provisionStdoutPath -Value ''
+          Set-Content -Path $provisionStderrPath -Value ''
+          Set-Content -Path $exitCodePath -Value '1'
           $actualSha = (& git rev-parse HEAD 2>$null | Out-String).Trim()
           $shaExitCode = $LASTEXITCODE
           $startTime = [DateTime]::UtcNow.ToString('o')
@@ -65,26 +84,87 @@ jobs:
             "python_version=$(& python --version 2>&1)"
             "test_command=python -m unittest discover -s tools/qualification -p test_*.py -v"
             "start_utc=$startTime"
-            "path_collision_detected=$collision"
+            "evidence_path_collision_detected=$collision"
+            "task_path_collision_detected=$taskCollision"
           ) | Set-Content -Path $metadataPath
 
           $testExitCode = 1
           $failure = $null
-          if ($collision) {
-            $failure = 'Run-specific evidence path already existed; tests were not started.'
-          } elseif ($shaExitCode -ne 0 -or $actualSha -ne $env:EXPECTED_SHA) {
-            $failure = 'Checked-out revision did not match the dispatched commit; tests were not started.'
-          } else {
+          try {
+            if ($collision) {
+              throw 'Run-specific evidence path already existed; the raw path was not reused.'
+            }
+            if ($shaExitCode -ne 0 -or $actualSha -ne $env:EXPECTED_SHA) {
+              throw 'Checked-out revision did not match the dispatched commit.'
+            }
+
             $env:TMPDIR = Join-Path $evidenceDir 'tmp'
             $env:TEMP = $env:TMPDIR
             $env:TMP = $env:TMPDIR
-            $env:HOME = Join-Path $evidenceDir 'home'
-            $env:USERPROFILE = $env:HOME
-            New-Item -ItemType Directory -Path $env:TMPDIR, $env:HOME | Out-Null
+            $env:COREPACK_HOME = Join-Path $taskRoot 'corepack'
+            $yarnCache = Join-Path $taskRoot 'yarn-cache'
+            $env:YARN_CACHE_FOLDER = $yarnCache
+            $upstreamSource = Join-Path $taskRoot 'dyn4j-source'
+            $selectedBrowserBuild = Join-Path $taskRoot 'selected-browser-build'
+            $modules = Join-Path $selectedBrowserBuild 'root/js/node_modules'
+            New-Item -ItemType Directory -Path $env:TMPDIR, $env:COREPACK_HOME, $yarnCache, $modules | Out-Null
+
+            function Invoke-CheckedNative {
+              param([string]$Program, [string[]]$Arguments)
+              & $Program @Arguments 1>> $provisionStdoutPath 2>> $provisionStderrPath
+              if ($LASTEXITCODE -ne 0) {
+                throw "$Program failed with exit code $LASTEXITCODE."
+              }
+            }
+
+            Invoke-CheckedNative -Program 'git' -Arguments @('init', $upstreamSource)
+            Invoke-CheckedNative -Program 'git' -Arguments @('-C', $upstreamSource, 'remote', 'add', 'origin', 'https://github.com/dyn4j/dyn4j.git')
+            Invoke-CheckedNative -Program 'git' -Arguments @('-C', $upstreamSource, 'fetch', '--depth=1', 'origin', '058bf6d982a0fb89b54050f929f6ea9dae53b714')
+            Invoke-CheckedNative -Program 'git' -Arguments @('-C', $upstreamSource, 'checkout', '--detach', 'FETCH_HEAD')
+            $upstreamSha = (& git -C $upstreamSource rev-parse HEAD 2>> $provisionStderrPath | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $upstreamSha -ne '058bf6d982a0fb89b54050f929f6ea9dae53b714') {
+              throw "Pinned upstream revision mismatch: $upstreamSha"
+            }
+            $env:DYN4K_UPSTREAM_SOURCE = $upstreamSource
+
+            $lockPath = Join-Path $env:GITHUB_WORKSPACE 'consumers/qualification/portable/full-browser/consumer-yarn.lock'
+            $lockText = Get-Content -Raw -LiteralPath $lockPath
+            $pinnedEntry = [regex]::IsMatch($lockText, '(?m)^"karma@github:Kotlin/karma#6\.4\.5":\r?\n  version "6\.4\.4"\r?\n  resolved "https://codeload\.github\.com/Kotlin/karma/tar\.gz/239a8fc984584f0d96b1dd750e7a5e2c79da93a6"\r?$')
+            if (-not $pinnedEntry) {
+              throw 'The existing Yarn lock no longer pins the expected Kotlin Karma revision.'
+            }
+            $installer = Join-Path $taskRoot 'karma-installer'
+            New-Item -ItemType Directory -Path $installer | Out-Null
+            @{ name = 'dyn4k-windows-qualification-karma'; version = '1.0.0'; private = $true; dependencies = @{ karma = 'github:Kotlin/karma#6.4.5' } } |
+              ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $installer 'package.json')
+            Copy-Item -LiteralPath $lockPath -Destination (Join-Path $installer 'yarn.lock')
+            $lockSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $lockPath).Hash.ToLowerInvariant()
+            Push-Location $installer
+            try {
+              Invoke-CheckedNative -Program 'corepack' -Arguments @('yarn@1.22.22', 'install', '--frozen-lockfile', '--non-interactive', '--no-default-rc', '--cache-folder', $yarnCache, '--modules-folder', $modules)
+            } finally {
+              Pop-Location
+            }
+
+            $karmaConfig = Join-Path $modules 'karma/lib/config.js'
+            if (-not (Test-Path -LiteralPath $karmaConfig -PathType Leaf)) {
+              throw 'The pinned Yarn install did not provide karma/lib/config.js.'
+            }
+            $karmaConfigSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $karmaConfig).Hash.ToLowerInvariant()
+            if ($karmaConfigSha -ne 'fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42') {
+              throw "Pinned Karma config digest mismatch: $karmaConfigSha"
+            }
+            $env:DYN4K_TEST_BROWSER_BUILD = $selectedBrowserBuild
+            Add-Content -Path $metadataPath -Value "upstream_sha=$upstreamSha"
+            Add-Content -Path $metadataPath -Value "upstream_path=$upstreamSource"
+            Add-Content -Path $metadataPath -Value "browser_build_path=$selectedBrowserBuild"
+            Add-Content -Path $metadataPath -Value "consumer_yarn_lock_sha256=$lockSha"
+            Add-Content -Path $metadataPath -Value "karma_config_sha256=$karmaConfigSha"
+
             & python -m unittest discover -s tools/qualification -p 'test_*.py' -v 1> $stdoutPath 2> $stderrPath
             $testExitCode = $LASTEXITCODE
             $testStderr = Get-Content -Raw $stderrPath
-            $summaries = [regex]::Matches($testStderr, '(?m)^Ran (?<count>[0-9]+) tests? in [^\r\n]+$')
+            $summaries = [regex]::Matches($testStderr, '(?m)^Ran (?<count>[0-9]+) tests? in [^\r\n]+\r?$')
             if ($summaries.Count -eq 0) {
               $failure = 'Unittest did not emit a run-count summary.'
               if ($testExitCode -eq 0) { $testExitCode = 1 }
@@ -95,6 +175,8 @@ jobs:
                 if ($testExitCode -eq 0) { $testExitCode = 1 }
               }
             }
+          } catch {
+            $failure = $_.Exception.Message
           }
 
           $testExitCode | Set-Content -Path $exitCodePath
