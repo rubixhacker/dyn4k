@@ -1,4 +1,7 @@
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -24,13 +27,85 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertIn("          - target: jsSafari\n", mac_mini)
         self.assertNotIn("actions/setup-python@v5", mac_mini)
         self.assertIn("Use pre-installed Python 3.12.15", mac_mini)
-        self.assertIn(
-            "python_dir=/Users/stew/.cache/dyn4k-codex/tools/python-3.12.15/python/bin",
+        step = re.search(
+            r"(?m)^      - name: Use pre-installed Python 3\.12\.15\n"
+            r"        run: \|\n((?:          .*\n)+)",
             mac_mini,
         )
-        self.assertIn("[[ ! -x \"$python_dir/python\" ]]", mac_mini)
-        self.assertIn("sys.version_info[:3] == (3, 12, 15)", mac_mini)
-        self.assertIn('echo "$python_dir" >> "$GITHUB_PATH"', mac_mini)
+        self.assertIsNotNone(step)
+        script = textwrap.dedent(step.group(1))
+        pinned_dir = "/Users/stew/.cache/dyn4k-codex/tools/python-3.12.15/python/bin"
+        self.assertEqual(1, script.count(pinned_dir))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for case, version, optimize in (
+                ("absent", None, False),
+                ("wrong-optimized", "3.12.14", True),
+                ("correct", "3.12.15", False),
+            ):
+                with self.subTest(case=case):
+                    python_dir = root / case / "bin"
+                    github_path = root / f"{case}-github-path"
+                    github_path.write_text("", encoding="utf-8")
+                    if version is not None:
+                        python_dir.mkdir(parents=True)
+                        python = python_dir / "python"
+                        python.write_text(
+                            "#!/bin/sh\n"
+                            "case \"${1-}\" in\n"
+                            "  -c)\n"
+                            "    if [ -n \"${PYTHONOPTIMIZE:-}\" ] || "
+                            "[ \"${FAKE_VERSION:-}\" = 3.12.15 ]; then exit 0; fi\n"
+                            "    exit 1 ;;\n"
+                            "  --version) printf 'Python %s\\n' \"$FAKE_VERSION\" ;;\n"
+                            "  *) exit 2 ;;\n"
+                            "esac\n",
+                            encoding="utf-8",
+                        )
+                        python.chmod(0o755)
+
+                    case_script = script.replace(pinned_dir, str(python_dir))
+                    self.assertEqual(1, case_script.count(str(python_dir)))
+                    environment = {
+                        "PATH": "/usr/bin:/bin",
+                        "GITHUB_PATH": str(github_path),
+                        "FAKE_VERSION": version or "",
+                    }
+                    if optimize:
+                        environment["PYTHONOPTIMIZE"] = "1"
+                    else:
+                        environment.pop("PYTHONOPTIMIZE", None)
+                    result = subprocess.run(
+                        ["/bin/bash", "-e", "-c", case_script],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if case == "absent":
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn("Required pre-installed Python is missing", result.stderr)
+                        self.assertEqual("", github_path.read_text(encoding="utf-8"))
+                    elif case == "wrong-optimized":
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn("Required Python 3.12.15", result.stderr)
+                        self.assertIn("Python 3.12.14", result.stderr)
+                        self.assertEqual("", github_path.read_text(encoding="utf-8"))
+                    else:
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        self.assertEqual(
+                            f"{python_dir}\n", github_path.read_text(encoding="utf-8")
+                        )
+                        next_step = subprocess.run(
+                            ["/bin/bash", "-e", "-c", "command -v python"],
+                            env={"PATH": f"{python_dir}:/usr/bin:/bin"},
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        self.assertEqual(0, next_step.returncode, next_step.stderr)
+                        self.assertEqual(str(python), next_step.stdout.strip())
 
     def test_native_monitor_probe_runs_on_windows_publication_runner(self):
         publications = workflow_jobs(WORKFLOW.read_text())["hosted-publications"]

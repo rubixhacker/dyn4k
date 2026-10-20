@@ -861,8 +861,15 @@ jobs:
             echo "Required pre-installed Python is missing: $python_dir/python" >&2
             exit 1
           fi
-          "$python_dir/python" -c 'import sys; assert sys.version_info[:3] == (3, 12, 15), sys.version'
-          "$python_dir/python" --version
+          if ! python_version=$("$python_dir/python" --version 2>&1); then
+            echo "Could not run required pre-installed Python 3.12.15: $python_dir/python" >&2
+            exit 1
+          fi
+          if [[ "$python_version" != "Python 3.12.15" ]]; then
+            echo "Required Python 3.12.15 at $python_dir/python; found: $python_version" >&2
+            exit 1
+          fi
+          printf '%s\n' "$python_version"
           echo "$python_dir" >> "$GITHUB_PATH"
       - uses: android-actions/setup-android@v3
         with:
