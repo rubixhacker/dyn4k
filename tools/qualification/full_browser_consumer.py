@@ -804,7 +804,8 @@ def toolchain(gradle, browser, family="Chromium"):
 def process(command, cwd, env, stdout, stderr):
     started = time.time_ns()
     with stdout.open("wb") as out, stderr.open("wb") as err:
-        child = subprocess.Popen(command, cwd=cwd, env=env, stdout=out, stderr=err)
+        child_env = {key: value for key, value in env.items() if key != "OLLAMA_API_KEY"}
+        child = subprocess.Popen(command, cwd=cwd, env=child_env, stdout=out, stderr=err)
         code = child.wait()
     finished = time.time_ns()
     return {"command": command, "cwd": str(cwd), "pid": child.pid,
@@ -1371,6 +1372,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
 
 
 def main():
+    os.environ.pop("OLLAMA_API_KEY", None)
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("run", "verify"):

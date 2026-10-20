@@ -61,6 +61,17 @@ class SafariLauncherTest(unittest.TestCase):
 
 
 class SafariResponseWitnessTest(unittest.TestCase):
+    def test_child_process_does_not_inherit_ollama_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            output = folder / "stdout"
+            result = browser.process(
+                [sys.executable, "-c", "import os; print('OLLAMA_API_KEY' in os.environ)"],
+                folder, dict(os.environ, OLLAMA_API_KEY="test-value"),
+                output, folder / "stderr")
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(output.read_text().strip(), "False")
+
     def test_replay_rejects_missing_or_changed_browser_bodies(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
