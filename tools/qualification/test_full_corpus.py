@@ -407,14 +407,19 @@ class FullCorpusGateTest(unittest.TestCase):
         revision = subprocess.check_output(["git", "-C", str(upstream), "rev-parse", "HEAD"],
                                            text=True).strip()
         self.assertEqual(full_corpus.ORIGINAL_REVISION, revision)
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(prefix="fc-", dir=repository.parent) as directory:
+            clone = Path(directory) / "candidate"
+            if os.name == "nt":
+                longest_case = ("consumers/qualification/portable/full-android/app/src/"
+                                "androidTest/java/io/github/rubixhacker/dyn4k/qualification/"
+                                "fullandroid/FullJourneyTest.java")
+                self.assertLess(len(str(clone / longest_case)), 260)
             upstream_fixture = Path(directory) / "upstream"
             subprocess.run(["git", "clone", "--quiet", "--depth=1", "-c", "core.autocrlf=false",
                             upstream.resolve().as_uri(), str(upstream_fixture)], check=True)
             cloned_revision = subprocess.check_output(
                 ["git", "-C", str(upstream_fixture), "rev-parse", "HEAD"], text=True).strip()
             self.assertEqual(full_corpus.ORIGINAL_REVISION, cloned_revision)
-            clone = Path(directory) / "candidate"
             subprocess.run(["git", "clone", "--quiet", "--depth=1", "-c", "core.autocrlf=false",
                             repository.as_uri(),
                             str(clone)], check=True)

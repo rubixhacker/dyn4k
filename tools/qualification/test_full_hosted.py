@@ -1444,16 +1444,16 @@ class FullHostedTests(unittest.TestCase):
             self.assertNotIn("staged_gav", wrong)
 
     def test_synthetic_joined_run_replays_complete_apple_receipt(self):
+        actual_repository = Path(__file__).resolve().parents[2]
         evidence_parent = os.environ.get("DYN4K_HOSTED_JOINED_EVIDENCE_DIR")
         if evidence_parent:
             parent = Path(evidence_parent)
             parent.mkdir(parents=True, exist_ok=True)
             evidence = Path(tempfile.mkdtemp(prefix="synthetic-joined-", dir=parent))
         else:
-            evidence = self.root / "synthetic-joined"
-            evidence.mkdir()
+            evidence = Path(tempfile.mkdtemp(prefix="hj-", dir=actual_repository.parent))
+            self.addCleanup(shutil.rmtree, evidence)
         evidence = evidence.resolve()
-        actual_repository = Path(__file__).resolve().parents[2]
         repository = evidence / "checkout"
         cache_home = evidence / "gradle-home"
         repository.mkdir()
@@ -1471,6 +1471,9 @@ class FullHostedTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             source.write_bytes(b"// Fixture notice\npackage api\nclass Type\n")
         manifest = json.loads((actual_repository / full_hosted.MANIFEST).read_text())
+        if os.name == "nt":
+            self.assertLess(max(len(str(repository / item["path"]))
+                                for item in manifest["source_files"]), 260)
         for item in manifest["source_files"]:
             destination = repository / item["path"]
             destination.parent.mkdir(parents=True, exist_ok=True)
