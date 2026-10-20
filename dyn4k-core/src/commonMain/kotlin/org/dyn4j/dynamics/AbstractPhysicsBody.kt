@@ -35,6 +35,7 @@ import org.dyn4j.geometry.Interval
 import org.dyn4j.geometry.Mass
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Transform
+import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Vector2
 import kotlin.math.PI
 import kotlin.math.abs
@@ -256,7 +257,7 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
             rotation *= ratio
         }
         translate(translationX, translationY)
-        rotateAboutCenter(rotation)
+        RotationOperationTap.withBranch("integrate") { rotateAboutCenter(rotation) }
     }
     override fun updateAtRestTime(timestep: TimeStep?, settings: Settings?): Double {
         if (atRestDetectionEnabled) {

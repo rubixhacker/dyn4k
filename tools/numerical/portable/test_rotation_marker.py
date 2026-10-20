@@ -14,6 +14,7 @@ def marker():
     return {
         "schema": "portable-rotation-op/2", "method": "observedProbe",
         "sequence": 0, "target_token": 0, "kind": "rotate", "source": "origin",
+        "branch": None,
         "pre": [bits(1.0), bits(0.0)], "trig": [bits(1.0), bits(-0.0)],
         "raw": [bits(1.0), bits(0.0)], "post": [bits(1.0), bits(0.0)],
         "angle_bits": bits(-0.0), "alpha_bits": None,
@@ -39,7 +40,7 @@ class OperationMarkerTest(unittest.TestCase):
 
     def test_schema_and_nonfinite_fail_closed(self):
         original = marker()
-        for key in ("method", "target_token", "source", "angle_bits", "raw"):
+        for key in ("method", "target_token", "source", "branch", "angle_bits", "raw"):
             changed = copy.deepcopy(original)
             changed.pop(key)
             with self.subTest(key=key):

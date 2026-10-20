@@ -257,13 +257,16 @@ class ActualArithmeticTest(unittest.TestCase):
 
     def test_case_inventory_is_complete(self):
         mapping = expected_case_ids()
-        self.assertEqual(len(mapping), 15)
-        self.assertEqual(sum(map(len, mapping.values())), 332)
+        self.assertEqual(mapping["captureWheelActive"], ["joint-Wheel-active"])
+        full = {name: ids for name, ids in mapping.items()
+                if name != "captureWheelActive"}
+        self.assertEqual(len(full), 15)
+        self.assertEqual(sum(map(len, full.values())), 332)
         self.assertEqual(len(mapping["captureJoints"]), 24)
         self.assertEqual(len(mapping["captureCcd"]), 12)
-        self.assertEqual(len(set().union(*(set(ids) for ids in mapping.values()))), 332)
-        self.assertEqual(len(set().union(*(set(ids) for ids in mapping.values())) -
-                             {case for ids in mapping.values() for case in ids
+        self.assertEqual(len(set().union(*(set(ids) for ids in full.values()))), 332)
+        self.assertEqual(len(set().union(*(set(ids) for ids in full.values())) -
+                             {case for ids in full.values() for case in ids
                               if case.startswith("contacts-") or case == "long-free-60" or
                               case.startswith("P-JINT-")}), 318)
 
@@ -275,6 +278,56 @@ class ActualArithmeticTest(unittest.TestCase):
         self.assertEqual(result["cases"], 1)
         self.assertEqual(result["operations_verified"], 1)
         self.assertEqual(result["steps"], 1)
+
+    def test_focused_wheel_route_rejects_missing_changed_and_reordered_calls(self):
+        case_id = "joint-Wheel-active"
+        rows = fixture()
+        for index in (0, 2, 4):
+            row = json.loads(rows[index].split(" ", 1)[1])
+            row["id"] = case_id
+            rows[index] = "NUMERICAL_JSON " + json.dumps(row)
+        operation = json.loads(rows[1].split(" ", 1)[1])
+        operation.update(method="everyJointWithInitialAndApplicableActiveModes",
+                         case_id=case_id, branch="joint")
+        rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+        receipt = json.loads(rows[3].split(" ", 1)[1])
+        receipt["case_id"] = case_id
+        rows[3] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+
+        def check(candidate):
+            return verify_capture(xml_for(candidate, "captureWheelActive"),
+                                  "captureWheelActive", [case_id])
+
+        self.assertEqual(check(rows)["qualification"], "UNPASSED")
+        with self.assertRaises(CaptureRejected):
+            check([rows[0], *rows[2:]])
+        for field, value in (("raw", [bits(0.5), bits(0.0)]),
+                             ("sequence", 1), ("method", "captureJoints"),
+                             ("branch", None)):
+            changed = copy.deepcopy(rows)
+            marker = json.loads(changed[1].split(" ", 1)[1])
+            marker[field] = value
+            changed[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(marker)
+            with self.subTest(field=field), self.assertRaises(CaptureRejected):
+                check(changed)
+        with self.assertRaises(CaptureRejected):
+            check([rows[0], rows[2], rows[1], *rows[3:]])
+
+    def test_focused_wheel_adapter_keeps_synthetic_output_unpassed(self):
+        rows = fixture()
+        xml = xml_for(rows, "captureWheelActive")
+        trace, markers = actual_arithmetic.focused_wheel_stream(xml)
+        self.assertEqual(len(trace.splitlines()), 3)
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0]["raw"], marker()["raw"])
+        with self.assertRaisesRegex(CaptureRejected, "target receipt or process exit"):
+            actual_arithmetic.assess_focused_wheel(
+                {"exit_code": 1}, {"xml": xml}, "a" * 40,
+                "/tmp/dyn4k-tools/jdk21/bin/java", "unused", "unused")
+        changed = copy.deepcopy(markers)
+        changed[0].update(body_id="b0", kind="lerp-reset")
+        with self.assertRaisesRegex(CaptureRejected, "reset needs a separate source audit"):
+            actual_arithmetic._wheel_rotation_audit(changed)
 
     def test_missing_extra_reordered_and_wrong_method_fail(self):
         original = fixture()

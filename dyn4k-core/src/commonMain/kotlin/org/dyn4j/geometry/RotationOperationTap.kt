@@ -15,6 +15,17 @@ object RotationOperationTap {
         private var worldDepth = 0
         private var worldSteps = 0
         private var failed = false
+        private var branch: String? = null
+
+        internal fun <T> withBranch(value: String, block: () -> T): T {
+            val previous = branch
+            branch = value
+            try {
+                return block()
+            } finally {
+                branch = previous
+            }
+        }
 
         fun drain(): List<Observation> {
             if (worldDepth != 0) {
@@ -63,7 +74,9 @@ object RotationOperationTap {
             if (expectedWorld != null && worldDepth != 1) {
                 failed = true
             } else {
-                observations.add(observation)
+                observations.add(if (observation is Observation.Rotation)
+                    observation.copy(call = observation.call.copy(branch = branch))
+                    else observation)
             }
         }
 
@@ -98,9 +111,15 @@ object RotationOperationTap {
         val caseId: String? = null,
         val step: Int? = null,
         val bodyId: String? = null,
+        val branch: String? = null,
     )
 
     fun currentCapture(): Capture? = RotationCaptureSlot.current
+
+    internal fun <T> withBranch(value: String, block: () -> T): T {
+        val capture = currentCapture() ?: return block()
+        return capture.withBranch(value, block)
+    }
 
     fun <T> capture(method: String, block: (Capture) -> T): T {
         val previous = RotationCaptureSlot.current

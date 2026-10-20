@@ -8,7 +8,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from actual_arithmetic import (CaptureRejected, expected_case_ids,
+from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
+                               expected_case_ids, focused_wheel_stream,
                                make_capture_receipt, verify_capture_receipt,
                                _portable_classes_archive)
 
@@ -66,9 +67,11 @@ def clean_source():
     return git("--no-replace-objects", "rev-parse", "HEAD").decode().strip()
 
 
-def run_capture(method, output):
+def run_capture(method, output, reference_case=None):
     if method not in expected_case_ids():
         raise CaptureRejected("unknown arithmetic producer method")
+    if method == "captureWheelActive" and reference_case is None:
+        raise CaptureRejected("focused Wheel reference is required")
     output = Path(output).resolve()
     if output.exists():
         raise CaptureRejected("capture output already exists")
@@ -77,6 +80,7 @@ def run_capture(method, output):
     temporary = output / "tmp"
     temporary.mkdir()
     environment = os.environ.copy()
+    environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(JDK21)
     environment["TMPDIR"] = str(temporary)
     environment["JAVA_TOOL_OPTIONS"] = f"-Djava.io.tmpdir={temporary}"
@@ -90,7 +94,8 @@ def run_capture(method, output):
     stage_command = [str(ROOT / "gradlew"),
                      ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                      ":dyn4k-core:publishJvmPublicationToStagingRepository",
-                     "--rerun-tasks", "--no-daemon", "--console=plain", "--offline"]
+                     "--rerun-tasks", "--no-daemon", "--console=plain", "--offline",
+                     "-Pkotlin.compiler.execution.strategy=in-process"]
     with (output / "stage.log").open("xb") as log:
         stage = subprocess.run(stage_command, cwd=ROOT, env=environment,
                                stdout=log, stderr=subprocess.STDOUT, check=False)
@@ -103,7 +108,8 @@ def run_capture(method, output):
                "jvmTest", "--tests", f"portable.ProspectiveArithmeticTest.{method}",
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                f"-PportableWorkerClassLoadLog={class_load_pattern}",
-               "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info"]
+               "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info",
+               "-Pkotlin.compiler.execution.strategy=in-process"]
     worker_arguments = output / "worker-classpath.txt"
     with (output / "gradle.log").open("xb") as log:
         target = subprocess.Popen(command, cwd=PORTABLE, env=environment,
@@ -155,6 +161,14 @@ def run_capture(method, output):
                            expected_case_ids()[method], str(runtime_path))
     (output / "receipt.json").write_text(json.dumps(receipt, sort_keys=True,
                                                      indent=2) + "\n")
+    if method == "captureWheelActive":
+        trace, _ = focused_wheel_stream(files["xml"])
+        case_path = output / "joint-Wheel-active.jsonl"
+        case_path.write_bytes(trace)
+        assessment = assess_focused_wheel(receipt, files, commit, str(runtime_path),
+                                          reference_case, case_path)
+        (output / "focused-assessment.json").write_text(
+            json.dumps(assessment, sort_keys=True, indent=2) + "\n")
     return receipt
 
 
@@ -162,7 +176,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", choices=tuple(expected_case_ids()), required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reference-case", type=Path)
     arguments = parser.parse_args()
-    result = run_capture(arguments.method, arguments.output)
+    result = run_capture(arguments.method, arguments.output, arguments.reference_case)
     print(json.dumps({"candidate_commit": result["candidate_commit"],
                       **result["summary"]}, sort_keys=True))
