@@ -58,6 +58,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         jobs = workflow_jobs(workflow)
         guard = "if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true"
         self.assertIn(guard, jobs["staged-jvm-and-linux"])
+        mac = jobs["hosted-mac"]
+        self.assertIn(guard, mac)
+        self.assertEqual(
+            ["macosArm64", "iosSimulatorArm64", "tvosSimulatorArm64",
+             "watchosSimulatorArm64", "iosX64", "jsSafari"],
+            re.findall(r"(?m)^          - target: ([A-Za-z0-9]+)$", mac),
+        )
         self.assertNotIn("safari-browser", jobs)
         self.assertIn("hosted-runner-guard", jobs)
         for name, entry in (("hosted-publications", "host"), ("hosted-native", "target")):
