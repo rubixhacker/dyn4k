@@ -41,6 +41,7 @@ object RotationOperationTap {
         val caseId: String? = null,
         val step: Int? = null,
         val bodyId: String? = null,
+        val branch: String? = null,
     )
 
     fun currentCapture(): Capture? = null
