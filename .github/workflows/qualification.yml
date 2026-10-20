@@ -828,3 +828,102 @@ jobs:
           name: windows-failure-raw-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ matrix.target }}
           path: ${{ runner.temp }}/windows-native-diagnostics/
           if-no-files-found: warn
+
+  hosted-mac:
+    needs: hosted-runner-guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macosArm64
+          - target: iosSimulatorArm64
+          - target: tvosSimulatorArm64
+          - target: watchosSimulatorArm64
+          - target: iosX64
+          - target: jsSafari
+    runs-on: mac-mini
+    timeout-minutes: 180
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set JAVA_HOME to pre-installed JDK 21
+        run: |
+          export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          java -version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Execute staged Apple host probe
+        run: >-
+          python tools/qualification/hosted.py run
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/hosted-${{ matrix.target }}.json"
+      - name: Verify and package Apple raw evidence
+        if: always()
+        run: >-
+          python tools/qualification/artifact.py hosted
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --probe "${{ runner.temp }}/hosted-${{ matrix.target }}.json"
+          --output "${{ runner.temp }}/apple-raw-bundle"
+      - name: Record bounded observation and all full lanes
+        if: always()
+        run: >-
+          python tools/qualification/qualify.py record
+          --candidate-sha "${{ github.sha }}"
+          --hosted-probe "${{ runner.temp }}/apple-raw-bundle/json/hosted-${{ matrix.target }}.json"
+          --raw-bundle "${{ runner.temp }}/apple-raw-bundle"
+          --output "${{ runner.temp }}/apple-raw-bundle/json/matrix-${{ matrix.target }}.json"
+      - name: Execute full hosted common corpus and staged consumer
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+      - name: Independently verify full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+      - name: Package full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --package
+          --output "${{ runner.temp }}/full-hosted-${{ matrix.target }}"
+          --archive "${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar"
+      - name: Verify transportable full native archive
+        if: always()
+        run: >-
+          python tools/qualification/full_hosted.py --verify-tar
+          --candidate-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}"
+          --archive "${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar"
+      - name: Upload Apple evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ github.sha }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/apple-raw-bundle/
+          if-no-files-found: error
+      - name: Upload full Apple common corpus evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-full-${{ github.sha }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/full-hosted-${{ matrix.target }}.tar
+          if-no-files-found: error

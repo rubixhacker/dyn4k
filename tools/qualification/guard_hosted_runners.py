@@ -9,6 +9,9 @@ HOSTED_LABEL = re.compile(
     r"(?:ubuntu-(?:latest|22\.04|24\.04|26\.04)|"
     r"ubuntu-24\.04-arm|windows-(?:latest|2022|2025))\Z"
 )
+# Self-hosted runner on the installed local Mac. It is not a GitHub-hosted
+# macOS runner, so it is allowed. See docs/verification/qualification-harness.md.
+SELF_HOSTED_MAC_LABEL = re.compile(r"mac-mini\Z")
 MAC_LABEL = re.compile(r"(?i)\bmacos-[a-z0-9][a-z0-9_-]*\b")
 JOB_HEADER = re.compile(r"  ([A-Za-z_][A-Za-z0-9_-]*):(?:\s*#.*)?\Z")
 RUNNER_LINE = re.compile(r"    runs-on: (\S+)(?:\s*#.*)?\Z")
@@ -73,10 +76,10 @@ def check_workflow(path: Path) -> list[str]:
                 continue
             runner_count[current_job] += 1
             label = match.group(1).strip("'\"")
-            if not HOSTED_LABEL.fullmatch(label) or match.group(1) not in (
+            if not (HOSTED_LABEL.fullmatch(label) or SELF_HOSTED_MAC_LABEL.fullmatch(label)) or match.group(1) not in (
                 label, f"'{label}'", f'"{label}"'
             ):
-                errors.append(f"{path}:{number}: runner must be an explicit Linux/Windows hosted label")
+                errors.append(f"{path}:{number}: runner must be an explicit Linux/Windows hosted label or the mac-mini self-hosted runner")
     if not job_names:
         errors.append(f"{path}: no jobs found")
     for job in job_names:
