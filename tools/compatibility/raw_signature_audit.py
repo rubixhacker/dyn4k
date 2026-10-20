@@ -41,6 +41,8 @@ def canonical(value: object) -> str:
 
 def checked_common_gate(ledger: dict, root: Path) -> dict:
     record = ledger["review_receipts"]["common_corpus"]
+    if not isinstance(record, dict):
+        raise ValueError("common behavior gate record is invalid")
     name = record.get("path")
     if (not isinstance(name, str) or not name or Path(name).is_absolute()
             or ".." in Path(name).parts):

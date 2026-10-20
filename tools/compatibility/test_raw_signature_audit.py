@@ -17,6 +17,24 @@ UPSTREAM = Path("/tmp/dyn4k-baseline-cache/dyn4j-source")
 
 
 class RawSignatureGateBindingTests(unittest.TestCase):
+    def test_malformed_common_record_is_rejected(self):
+        ledger = {"review_receipts": {"common_corpus": []}}
+        with self.assertRaisesRegex(ValueError, "common behavior gate record is invalid"):
+            raw_signature_audit.checked_common_gate(ledger, ROOT)
+
+    def test_check_reports_malformed_common_record(self):
+        ledger = json.loads((ROOT / "tools/compatibility/declaration-ledger.json").read_text())
+        ledger["review_receipts"]["common_corpus"] = []
+        signature = json.loads(gzip.decompress(
+            (ROOT / "tools/compatibility/receipts/jvm-signatures-0681a8cd.json.gz").read_bytes()))
+        strict = json.loads((ROOT / "tools/compatibility/receipts/strict-jvm-0681a8cd.json").read_text())
+        with (patch.object(raw_signature_audit, "checked_original_sources"),
+              patch.object(raw_signature_audit.candidate_coverage, "digest",
+                           return_value=ledger["candidate_source"]["artifact_sha256"])):
+            result = raw_signature_audit.check({}, ledger, signature, strict, ROOT, UPSTREAM)
+        self.assertEqual(result, "raw difference audit replay failed: "
+                         "common behavior gate record is invalid")
+
     def test_ledger_selected_receipt_is_verified(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
