@@ -1,6 +1,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 import importlib.util
+import hashlib
 import json
 import runpy
 import os
@@ -14,6 +15,20 @@ from pathlib import Path
 from unittest import mock
 
 import full_browser_consumer as browser
+
+
+def real_karma_root():
+    selected = os.environ.get("DYN4K_TEST_BROWSER_BUILD")
+    root = (Path(selected) / "root/js/node_modules" if selected else
+            Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
+            "9c7852378f220e63c4f92e7d93026c2f/node_modules")
+    config = root / "karma/lib/config.js"
+    if not config.is_file():
+        raise AssertionError(f"real Karma control requires pinned module: {config}")
+    digest = hashlib.sha256(config.read_bytes()).hexdigest()
+    if digest != browser.RUNTIME_INPUT_SHA256["karma/lib/config.js"]:
+        raise AssertionError(f"real Karma control module hash differs: {config}")
+    return root
 
 
 class SchemaFiveDispatchTest(unittest.TestCase):
@@ -336,7 +351,18 @@ class SafariResponseWitnessTest(unittest.TestCase):
 
 
 class SafariControlServerTest(unittest.TestCase):
-    @unittest.skipIf(os.name == "nt", "Safari dual-loopback control requires macOS sockets")
+    def test_control_bind_failure_reports_child_stderr(self):
+        launch = subprocess.Popen
+
+        def failed_control(_command, **options):
+            return launch(["node", "-e", "console.error('fixture bind failed'); process.exit(7)"],
+                          **options)
+
+        with mock.patch.object(subprocess, "Popen", side_effect=failed_control):
+            with self.assertRaisesRegex(AssertionError,
+                                        "stderr=b'fixture bind failed"):
+                self.test_control_accepts_only_ipv4_and_ipv6_loopback()
+
     def test_control_accepts_only_ipv4_and_ipv6_loopback(self):
         root = Path(__file__).resolve().parents[2]
         fixture = root / "tools/qualification/safari_worker_control.js"
@@ -345,34 +371,42 @@ class SafariControlServerTest(unittest.TestCase):
             port_file = folder / "port"
             child_env = {key: value for key, value in os.environ.items()
                          if key != "OLLAMA_API_KEY"}
-            process = subprocess.Popen(
-                ["node", str(fixture), str(root), str(folder), str(port_file)],
-                env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try:
-                deadline = time.monotonic() + 5
-                while not port_file.exists() and process.poll() is None and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                self.assertTrue(port_file.exists(), "control server did not bind")
-                port = int(port_file.read_text())
-                for address in ("127.0.0.1", "::1"):
-                    with self.subTest(loopback=address), socket.create_connection(
-                            (address, port), timeout=2) as connection:
-                        connection.sendall(
-                            b"GET /test.html HTTP/1.1\r\nHost: localhost\r\n"
-                            b"Connection: close\r\n\r\n")
-                        self.assertIn(b"HTTP/1.1 200", connection.recv(256))
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
-                    route.connect(("192.0.2.1", 9))
-                    non_loopback = route.getsockname()[0]
-                self.assertFalse(non_loopback.startswith("127."))
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
-                    connection.settimeout(2)
-                    with self.assertRaises(OSError):
-                        connection.connect((non_loopback, port))
-                self.assertFalse((folder / "browser-result.txt").exists())
-            finally:
-                process.terminate()
-                process.wait(timeout=5)
+            stdout_path = folder / "control.stdout"
+            stderr_path = folder / "control.stderr"
+            with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+                process = subprocess.Popen(
+                    ["node", str(fixture), str(root), str(folder), str(port_file)],
+                    env=child_env, stdout=stdout, stderr=stderr)
+                try:
+                    deadline = time.monotonic() + 5
+                    while (not port_file.exists() and process.poll() is None
+                           and time.monotonic() < deadline):
+                        time.sleep(0.05)
+                    self.assertTrue(port_file.exists(),
+                        f"control server did not bind (exit={process.poll()}, "
+                        f"stdout={stdout_path.read_bytes()[:4096]!r}, "
+                        f"stderr={stderr_path.read_bytes()[:4096]!r})")
+                    port = int(port_file.read_text())
+                    for address in ("127.0.0.1", "::1"):
+                        with self.subTest(loopback=address), socket.create_connection(
+                                (address, port), timeout=2) as connection:
+                            connection.sendall(
+                                b"GET /test.html HTTP/1.1\r\nHost: localhost\r\n"
+                                b"Connection: close\r\n\r\n")
+                            self.assertIn(b"HTTP/1.1 200", connection.recv(256))
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                        route.connect(("192.0.2.1", 9))
+                        non_loopback = route.getsockname()[0]
+                    self.assertFalse(non_loopback.startswith("127."))
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                        connection.settimeout(2)
+                        with self.assertRaises(OSError):
+                            connection.connect((non_loopback, port))
+                    self.assertFalse((folder / "browser-result.txt").exists())
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=5)
 
 
 class ToolchainPinTest(unittest.TestCase):
@@ -1092,10 +1126,7 @@ class SelectedBundleTest(unittest.TestCase):
 
     def test_reporter_wasm_pattern_rejects_unserved_loader(self):
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
-        root = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
-                "9c7852378f220e63c4f92e7d93026c2f/node_modules")
-        if not (root / "karma/lib/config.js").is_file():
-            self.skipTest("selected real Karma package fixture is absent")
+        root = real_karma_root()
         script = "\n".join((
             "const assert = require('node:assert/strict');",
             "const fs = require('node:fs');",
@@ -1153,6 +1184,20 @@ class SelectedBundleTest(unittest.TestCase):
         completed = subprocess.run(["node", "-e", script, str(reporter), str(root)],
                                    check=False, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_real_karma_control_reports_missing_or_wrong_pinned_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            with mock.patch.dict(os.environ, {"DYN4K_TEST_BROWSER_BUILD": str(build)}):
+                with self.assertRaisesRegex(AssertionError,
+                                            "real Karma control requires pinned module"):
+                    real_karma_root()
+                config = build / "root/js/node_modules/karma/lib/config.js"
+                config.parent.mkdir(parents=True)
+                config.write_bytes(b"unapproved Karma config")
+                with self.assertRaisesRegex(AssertionError,
+                                            "real Karma control module hash differs"):
+                    real_karma_root()
 
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
