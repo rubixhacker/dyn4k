@@ -327,6 +327,9 @@ def _derive(rows):
             for row, following in zip(rows, rows[1:])):
         raise ObservationError("event time or archive seal order differs")
     run, end = rows[0], rows[-1]
+    if (type(run.get("build_only", False)) is not bool
+            or bool(run["expected_processes"]) == run.get("build_only", False)):
+        raise ObservationError("build-only process selection differs")
     limits = _limits(run)
     if len(rows) > limits["events"]:
         raise ObservationError("observer event limit exceeded")
@@ -387,6 +390,10 @@ def _derive(rows):
         raise ObservationError("observed root process image is missing")
     if archive is None:
         raise ObservationError("archive digest is missing")
+    if run.get("launcher_seal_required", False):
+        if (not isinstance(run.get("launcher"), dict)
+                or archive.get("launcher_after_sha256") != run["launcher"].get("sha256")):
+            raise ObservationError("launcher changed across observed execution")
     build_images = [(pid, image) for pid, process_images in images.items()
                     for image in process_images if image["origin"] == "exec" and
                     _matching_image(image, run["build"])]
@@ -479,7 +486,7 @@ def _checked_files(root):
         os.close(directory)
 
 
-def verify(root):
+def verify(root, include_events=False):
     files = _checked_files(root)
     raw = files["events.jsonl"]
     if not raw.endswith(b"\n"):
@@ -513,7 +520,7 @@ def verify(root):
         raise ObservationError(f"incomplete event structure: {error}") from error
     if witness != reconstructed:
         raise ObservationError("witness differs from observed event log")
-    return witness
+    return (witness, rows) if include_events else witness
 
 
 def _launch(argv, pipe):
@@ -554,8 +561,14 @@ def _capture(args, deadline):
         raise ObservationError("command or expected process limit exceeded")
     expected = _expected(args.expect, deadline)
     expected.update(_generated_expected(generated, expected))
-    if not expected:
+    build_only = getattr(args, "build_only", False)
+    if type(build_only) is not bool or bool(expected) == build_only:
         raise ObservationError("at least one child executable is required")
+    launcher_script = getattr(args, "launcher_script", None)
+    launcher = None
+    if launcher_script is not None:
+        path = _safe_input(launcher_script)
+        launcher = {"path": str(path), "sha256": _sha_file(path, deadline)}
     build_path = Path(args.build_executable or args.argv[0]).resolve(strict=True)
     build = {"path": str(build_path), "sha256": _sha_file(build_path, deadline),
              "argv_contains": markers}
@@ -596,7 +609,8 @@ def _capture(args, deadline):
                 runtime_identity=args.runtime_identity, mode=args.mode,
                 archive_path=str(Path(args.archive).absolute()), staged_artifacts=artifacts,
                 build=build, expected_processes=expected, requested_argv=args.argv,
-                limits=limits)
+                launcher=launcher, launcher_seal_required=launcher is not None,
+                build_only=build_only, limits=limits)
         while live:
             if log.count >= limits["events"] - 2:
                 raise ObservationError("event limit exceeded")
@@ -708,7 +722,9 @@ def _capture(args, deadline):
         if early_stops or initial_stop:
             raise ObservationError("unmatched child stop or missing process image")
         log.add("archive", archive_path=str(Path(args.archive).absolute()),
-                archive_sha256=_archive_digest(args.archive, deadline))
+                archive_sha256=_archive_digest(args.archive, deadline),
+                launcher_after_sha256=_sha_file(_safe_input(launcher_script), deadline)
+                if launcher is not None else None)
     except BaseException as exc:
         error = exc
         lost_events = int(bool(live))
@@ -786,6 +802,8 @@ def main(argv=None):
     run.add_argument("--mode", required=True)
     run.add_argument("--archive", required=True)
     run.add_argument("--build-executable")
+    run.add_argument("--launcher-script")
+    run.add_argument("--build-only", action="store_true")
     run.add_argument("--build-argv-contains", action="append", default=[])
     run.add_argument("--artifact", action="append", default=[])
     run.add_argument("--expect", action="append", default=[])

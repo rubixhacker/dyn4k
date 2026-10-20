@@ -104,6 +104,20 @@ class IndependentLinuxObserverTest(unittest.TestCase):
                             for process in witness["processes"].values()))
         self.assertEqual(witness, observer.verify(args.output))
 
+    def test_build_only_launcher_change_fails_after_live_execution(self):
+        launcher = self.root / "changing-launcher.sh"
+        launcher.write_text('#!/bin/sh\nprintf x >> "$0"\nexit 0\n')
+        launcher.chmod(0o700)
+        args = self.args("changed-launcher", expect=[])
+        args.argv = [str(launcher)]
+        args.build_executable = "/bin/sh"
+        args.launcher_script = str(launcher)
+        args.build_only = True
+        with self.assertRaisesRegex(observer.ObservationError,
+                                    "launcher changed across observed execution"):
+            observer.capture(args)
+        self.assertFalse((Path(args.output) / "witness.json").exists())
+
     def test_generated_child_image_is_selected_from_stopped_exec(self):
         generated = self.root / "generated-true"
         script = (f'import os,shutil,subprocess; p={str(generated)!r}; '

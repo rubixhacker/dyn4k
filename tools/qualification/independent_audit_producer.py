@@ -26,17 +26,18 @@ ROUTE_FIELDS = {
     "wasm-node": {"expected_wasm_runtime", "expected_wasm_runtime_binary"},
     "native-host": {"expected_native_selection", "expected_native_host",
                     "expected_native_toolchain", "expected_native_host_executables",
-                    "expected_execution_witness"},
+                    "expected_execution_witness", "expected_build_launcher_image"},
     "android-native": {"expected_android_native_guest", "expected_android_native_toolchain",
                        "expected_android_native_executables", "expected_android_native_adb",
                        "expected_android_native_serial", "expected_android_native_replay_output",
-                       "expected_android_native_executable_paths", "expected_execution_witness"},
+                       "expected_android_native_executable_paths", "expected_execution_witness",
+                       "expected_build_launcher_image"},
     "apple-device": {"expected_apple_device", "expected_apple_device_toolchain",
                      "expected_apple_device_executable_paths",
                      "expected_apple_device_executable_hashes", "expected_apple_os_roles"},
 }
 CROSS_FIELDS = {"expected_native_build_archive_sha256", "expected_native_build_host",
-                "expected_native_build_executables"}
+                "expected_native_build_executables", "expected_native_build_observer"}
 OPTIONAL_FIELDS = {"expected_producer_scopes", "expected_unavailability", "expected_not_run",
                    "expected_execution_witness", "expected_klib_native_executables",
                    "expected_browser_responses"}
@@ -180,6 +181,15 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
         if cross:
             route_fields.remove("expected_native_host_executables")
             route_fields |= CROSS_FIELDS
+        if routes[lane_id] == "browser" and "staged-consumer" in paths:
+            try:
+                browser_receipt = _load(Path(paths["staged-consumer"]) / "receipt.json")
+            except (OSError, ValueError, TypeError):
+                browser_receipt = None
+            if ((isinstance(browser_receipt, dict)
+                    and browser_receipt.get("schema") == 3)
+                    or lane_id.startswith("wasmJs:")):
+                route_fields.add("expected_build_launcher_image")
         allowed = OPTIONAL_FIELDS | route_fields
         if set(fields) - allowed:
             raise ValueError(f"unrecognized signed route field: {lane_id}")
@@ -207,8 +217,10 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                 required = set(route_fields)
                 if lane_id.startswith("linuxX64:"):
                     required |= {"expected_klib_native_executables", "expected_execution_witness"}
-                if lane_id.startswith("wasmJs:"):
-                    required |= {"expected_browser_responses", "expected_execution_witness"}
+                if routes[lane_id] == "browser" and (
+                        receipt.get("schema") == 3 or lane_id.startswith("wasmJs:")):
+                    required |= {"expected_browser_responses", "expected_execution_witness",
+                                 "expected_build_launcher_image"}
                 if not required <= set(fields):
                     raise ValueError(f"signed route fields are incomplete: {lane_id}")
             if isinstance(receipt, dict) and receipt.get("status") == "UNAVAILABLE":

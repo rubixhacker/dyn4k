@@ -1,7 +1,10 @@
+import argparse
 import hashlib
 import json
 import os
 import subprocess
+import shutil
+import sys
 import tempfile
 import unittest
 from collections import Counter
@@ -12,6 +15,7 @@ import full_browser_consumer
 import full_native_host_consumer
 import full_signed_routes
 import independent_gates
+import independent_linux_observer
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +25,230 @@ CANDIDATE = "9cd6868512836a3eb8192d9abc387427705e94b4"
 
 
 class SignedRouteTests(unittest.TestCase):
+    def test_native_cross_real_launcher_observation_and_relocated_replay(self):
+        lane = "linuxArm64:Linux ARM64:current:debug-g"
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            archive = base / "archive"
+            build = archive / "build"
+            (build / "runtime").mkdir(parents=True)
+            staged = {name: base / (name + ".klib") for name in ("dyn4k-core", "dyn4k")}
+            for name, path in staged.items():
+                path.write_bytes(name.encode())
+            hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+                      for name, path in staged.items()}
+            products, executables = {}, {}
+            for short in ("core", "facade"):
+                product = build / "runtime" / (short + ".program")
+                product.write_bytes(short.encode())
+                sha = hashlib.sha256(product.read_bytes()).hexdigest()
+                products[short] = {"archive": "runtime/" + short + ".program",
+                                   "sha256": sha}
+                executables[short] = sha
+            java_home = Path("/home/linuxbrew/.linuxbrew/opt/openjdk@21")
+            java = java_home / "bin/java"
+            self.assertTrue(java.is_file())
+            gradle = base / "gradlew"
+            gradle.write_text("#!/bin/sh\nexec " + str(java) + " -version \"$@\"\n")
+            gradle.chmod(0o700)
+            toolchain = {"gradle_executable": str(gradle),
+                         "gradle_sha256": hashlib.sha256(gradle.read_bytes()).hexdigest(),
+                         "java_home": str(java_home),
+                         "java_sha256": hashlib.sha256(java.read_bytes()).hexdigest(),
+                         "java_version": 'openjdk version "21.0.12"',
+                         "gradle_version": "Gradle 9.5.0", "kgp_version": "2.4.20",
+                         "native_version": "Kotlin/Native: 2.4.20",
+                         "python_executable": str(Path(sys.executable).resolve()),
+                         "python_sha256": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
+                         "native_home": str(base / "native"),
+                         "native_sha256": "a" * 64,
+                         "native_compiler_sha256": "b" * 64}
+            build_host = {"system": "Linux", "machine": "x86_64"}
+            selection = {"lane": lane, "role": "current", "system": "Linux",
+                         "machine": "aarch64", "os_version": "6.17.0", "libc": "2.39"}
+            host = {key: value for key, value in selection.items()
+                    if key not in ("lane", "role")}
+            runtime = full_native_host_consumer.digest(
+                full_native_host_consumer.encoded(host))
+            contract_sha = independent_gates.digest(
+                independent_gates.consumer_contract(MANIFEST, lane))
+            build_receipt = {"schema": 2, "status": "COMPILED_ONLY",
+                             "phase": "linux-x64-cross-build", "candidate_sha": CANDIDATE,
+                             "lane": lane, "source_tree": "e" * 40,
+                             "consumer_contract_sha256": contract_sha,
+                             "artifact_hashes": hashes,
+                             "artifact_hash_provenance": "audited",
+                             "build_host": build_host, "toolchain": toolchain,
+                             "products": products, "selected_cases": 2523}
+            config = base / "producer-config.json"
+            config.write_text(json.dumps({"receipt": build_receipt,
+                                          "build": str(build), "gradle": str(gradle)}))
+            producer = base / "small-producer.py"
+            producer.write_text(
+                "import json, os, pathlib, subprocess, sys, time\n"
+                "data = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
+                "command = [data['gradle'], 'qualificationEvidence']\n"
+                "started = time.time_ns()\n"
+                "with open(os.devnull, 'wb') as output:\n"
+                "    child = subprocess.Popen(command, stdout=output, stderr=output)\n"
+                "    result = child.wait()\n"
+                "finished = time.time_ns()\n"
+                "if result: raise SystemExit(result)\n"
+                "receipt = data['receipt']\n"
+                "receipt['process'] = {'command': command, 'pid': child.pid,\n"
+                "    'parent_pid': os.getpid(), 'started_ns': started,\n"
+                "    'finished_ns': finished}\n"
+                "(pathlib.Path(data['build']) / 'receipt.json').write_text(json.dumps(receipt))\n")
+            observed_root = base / "observer"
+            args = argparse.Namespace(candidate_sha=CANDIDATE, lane=lane,
+                runtime_identity=runtime, mode="debug-g", archive=str(build),
+                build_executable=str(java), launcher_script=str(gradle),
+                build_only=True, build_argv_contains=[], artifact=[
+                    name + "=" + str(path) for name, path in staged.items()],
+                expect=[], generated_expect=[], timeout=20, output=str(observed_root),
+                max_processes=256, max_events=4096, max_log_bytes=8 * 1024 * 1024,
+                argv=[sys.executable, str(producer), str(config)])
+            observed = independent_linux_observer.capture(args)
+            self.assertNotEqual(toolchain["gradle_sha256"],
+                                observed["build"]["executable_sha256"])
+            observed, rows = independent_linux_observer.verify(observed_root,
+                                                                 include_events=True)
+            build_receipt = json.loads((build / "receipt.json").read_text())
+            build_digest = independent_gates.archive_digest(build)
+            methods = [case["id"] for case in
+                       independent_gates.consumer_contract(MANIFEST, lane)["cases"]]
+            processes = {short: {"exit_code": 0, "pid": index + 1,
+                                 "started_ns": 1, "finished_ns": 2,
+                                 "observed_process": {"pid": index + 1}}
+                         for index, short in enumerate(("core", "facade"))}
+            receipt = {"schema": 3, "status": "PASSED", "candidate_sha": CANDIDATE,
+                       "lane": lane, "source_tree": "e" * 40,
+                       "artifact_hashes": hashes, "artifact_hash_provenance": "audited",
+                       "build_archive_sha256": build_digest, "build_host": build_host,
+                       "runtime_host": host, "runtime_host_after": host,
+                       "selection": selection, "selected_cases": 2523,
+                       "method_order": methods, "processes": processes}
+            (archive / "receipt.json").write_text(json.dumps(receipt))
+            digest = independent_gates.archive_digest(archive)
+            shell = next(row for row in rows if row["kind"] == "image"
+                         and row.get("origin") == "exec"
+                         and row.get("pid") == build_receipt["process"]["pid"]
+                         and row["executable_sha256"] != toolchain["java_sha256"])
+            shell_exit = next(row for row in rows if row["kind"] == "exit"
+                              and row.get("pid") == shell["pid"])
+            signed_witness = {**observed, "archive_sha256": digest,
+                "executables": executables,
+                "launcher": {"script_path": str(gradle),
+                             "script_sha256": toolchain["gradle_sha256"],
+                             "command": build_receipt["process"]["command"],
+                             "pid": shell["pid"],
+                             "parent_pid": build_receipt["process"]["parent_pid"],
+                             "executable_path": shell["executable_path"],
+                             "executable_sha256": shell["executable_sha256"],
+                             "started_ns": shell["observed_at_ns"],
+                             "finished_ns": shell_exit["observed_at_ns"]},
+                "processes": {short: {"pid": index + 1,
+                    "executable_sha256": executables[short], "exit_code": 0,
+                    "started_ns": 1, "finished_ns": 2,
+                    "started_wall_ns": 1, "finished_wall_ns": 2}
+                    for index, short in enumerate(("core", "facade"))}}
+            witness_file = base / "signed-witness.json"
+            witness_file.write_text(json.dumps(signed_witness))
+            expected = {"expected_artifact_hashes": hashes,
+                "expected_runtime_identity": runtime,
+                "expected_archive_digests": {"staged-consumer": digest},
+                "expected_native_selection": selection, "expected_native_host": host,
+                "expected_native_build_host": build_host,
+                "expected_native_toolchain": toolchain,
+                "expected_native_build_archive_sha256": build_digest,
+                "expected_native_build_executables": executables,
+                "expected_build_launcher_image": {
+                    "path": shell["executable_path"],
+                    "sha256": shell["executable_sha256"]},
+                "expected_native_build_observer": {"path": str(observed_root),
+                    "events_sha256": hashlib.sha256((observed_root / "events.jsonl").read_bytes()).hexdigest(),
+                    "witness_sha256": hashlib.sha256((observed_root / "witness.json").read_bytes()).hexdigest()},
+                "expected_execution_witness": {"path": str(witness_file),
+                    "sha256": hashlib.sha256(witness_file.read_bytes()).hexdigest()}}
+            public = {"status": "PASSED", "lane": lane, "candidate_sha": CANDIDATE,
+                      "archive_sha256": digest, "selected_cases": 2523,
+                      "artifact_hash_provenance": "audited",
+                      "complete_selected_suite": True}
+            gradle.unlink()
+            with patch.object(full_signed_routes, "_source"), patch(
+                    "full_native_host_consumer.verify_cross_run", return_value=public):
+                self.assertEqual(full_signed_routes.verify(
+                    ROOT, CANDIDATE, lane, archive, expected, hashes, runtime, digest), public)
+                original_witness = witness_file.read_bytes()
+                for section, key, value in (
+                        ("build", "pid", 99),
+                        ("build", "executable_sha256", toolchain["gradle_sha256"]),
+                        ("launcher", "script_sha256", "0" * 64),
+                        ("launcher", "command", [str(gradle), "wrong-task"]),
+                        ("launcher", "parent_pid", 99),
+                        ("core", "finished_wall_ns", 3)):
+                    changed = json.loads(original_witness)
+                    record = (changed["processes"][section] if section == "core"
+                              else changed[section])
+                    record[key] = value
+                    witness_file.write_text(json.dumps(changed))
+                    expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                        witness_file.read_bytes()).hexdigest()
+                    with self.assertRaises(ValueError):
+                        full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                                  expected, hashes, runtime, digest)
+                changed = json.loads(original_witness)
+                del changed["processes"]["core"]
+                witness_file.write_text(json.dumps(changed))
+                expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                    witness_file.read_bytes()).hexdigest()
+                with self.assertRaises(ValueError):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, hashes, runtime, digest)
+                witness_file.write_bytes(original_witness)
+                expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                    original_witness).hexdigest()
+                for key, value in (("gradle_sha256", "0" * 64),
+                                   ("java_sha256", "0" * 64)):
+                    changed = expected["expected_native_toolchain"]
+                    expected["expected_native_toolchain"] = {**changed, key: value}
+                    with self.assertRaises(ValueError):
+                        full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                                  expected, hashes, runtime, digest)
+                    expected["expected_native_toolchain"] = changed
+                binding = expected.pop("expected_native_build_observer")
+                with self.assertRaisesRegex(ValueError, "observer is missing"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, hashes, runtime, digest)
+                expected["expected_native_build_observer"] = binding
+                expected["expected_native_build_observer"] = {
+                    **binding, "events_sha256": "0" * 64}
+                with self.assertRaisesRegex(ValueError, "observer.*bytes differ"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, hashes, runtime, digest)
+                expected["expected_native_build_observer"] = binding
+                expected["expected_build_launcher_image"] = {
+                    **expected["expected_build_launcher_image"], "sha256": "0" * 64}
+                with self.assertRaisesRegex(ValueError, "launcher process witness"):
+                    full_signed_routes.verify(ROOT, CANDIDATE, lane, archive,
+                                              expected, hashes, runtime, digest)
+                expected["expected_build_launcher_image"]["sha256"] = shell["executable_sha256"]
+                relocated = base / "relocated"
+                shutil.copytree(archive, relocated)
+                relocated_observer = base / "relocated-observer"
+                shutil.copytree(observed_root, relocated_observer)
+                relocated_witness = base / "relocated-witness.json"
+                shutil.copy2(witness_file, relocated_witness)
+                expected["expected_native_build_observer"] = {
+                    **binding, "path": str(relocated_observer)}
+                expected["expected_execution_witness"] = {
+                    **expected["expected_execution_witness"],
+                    "path": str(relocated_witness)}
+                self.assertEqual(independent_gates.archive_digest(relocated), digest)
+                expected["expected_archive_digests"]["staged-consumer"] = digest
+                self.assertEqual(full_signed_routes.verify(
+                    ROOT, CANDIDATE, lane, relocated, expected, hashes, runtime, digest), public)
+
     def test_approved_matrix_has_one_dedicated_route_per_lane(self):
         table = full_signed_routes.route_table(ROOT)
         self.assertEqual(set(table), set(MANIFEST["lanes"]))
@@ -43,6 +271,23 @@ class SignedRouteTests(unittest.TestCase):
 
     def _witness(self, base, expected, lane, runtime, mode, executables,
                  build_executable, archive_digest="c" * 64):
+        if not expected:
+            toolchain = {"gradle_sha256": "f" * 64}
+            script = str(base / "gradle")
+        elif "expected_native_toolchain" in expected:
+            toolchain = expected["expected_native_toolchain"]
+            script = toolchain["gradle_executable"]
+        elif "expected_android_native_toolchain" in expected:
+            toolchain = expected["expected_android_native_toolchain"]
+            script = expected["expected_android_native_executable_paths"]["gradle"]
+        else:
+            toolchain = expected["expected_browser_toolchain"]
+            script = toolchain["gradle"]
+        if expected:
+            self.assertNotEqual(build_executable, toolchain["gradle_sha256"])
+        command = [script, "qualificationEvidence"]
+        expected["expected_build_launcher_image"] = {
+            "path": "/usr/bin/bash", "sha256": "f" * 64}
         witness = {"schema": "independent-execution-witness/1",
                    "candidate_sha": CANDIDATE, "lane": lane,
                    "archive_sha256": archive_digest, "runtime_identity": runtime,
@@ -50,9 +295,16 @@ class SignedRouteTests(unittest.TestCase):
                    "staged_artifacts": HASHES, "auditor": "independent test",
                    "build": {"executable_sha256": build_executable, "pid": 10,
                              "exit_code": 0, "started_ns": 1, "finished_ns": 2},
+                   "launcher": {"script_path": script,
+                                "script_sha256": toolchain["gradle_sha256"],
+                                "command": command, "pid": 10, "parent_pid": 9,
+                                "executable_path": "/usr/bin/bash",
+                                "executable_sha256": "f" * 64,
+                                "started_ns": 1, "finished_ns": 2},
                    "processes": {name: {"executable_sha256": value, "pid": index + 1,
                                         "exit_code": 0, "started_ns": 1,
-                                        "finished_ns": 2}
+                                        "finished_ns": 2, "started_wall_ns": 1,
+                                        "finished_wall_ns": 2}
                                  for index, (name, value) in enumerate(executables.items())}}
         path = base / "witness.json"
         path.write_text(json.dumps(witness))
@@ -178,6 +430,7 @@ class SignedRouteTests(unittest.TestCase):
             runtime = "d" * 64
             receipt = self._receipt(lane, runtime)
             receipt["host"] = host
+            receipt["process"] = {"command": [str(gradle), "qualificationEvidence"]}
             archive = self._archive(base, receipt)
             expected = {"expected_artifact_hashes": HASHES,
                         "expected_runtime_identity": runtime,
@@ -193,7 +446,7 @@ class SignedRouteTests(unittest.TestCase):
                 name: product["sha256"] for name, product in products.items()}
             self._witness(base, expected, lane, runtime, "debug-g",
                           expected["expected_native_host_executables"],
-                          toolchain["gradle_sha256"])
+                          toolchain["java_sha256"])
             public = {"status": "PASSED", "selected_cases": 2523,
                       "archive_sha256": "c" * 64}
             with patch.object(full_signed_routes, "_source"), patch.object(
@@ -270,7 +523,10 @@ class SignedRouteTests(unittest.TestCase):
                              "artifact_hashes": HASHES,
                              "artifact_hash_provenance": "audited",
                              "build_host": build_host, "toolchain": toolchain,
-                             "process": {"pid": 10, "started_ns": 1, "finished_ns": 2},
+                             "process": {"pid": 10, "parent_pid": 9,
+                                         "command": [str(paths["gradle"]),
+                                                     "qualificationEvidence"],
+                                         "started_ns": 1, "finished_ns": 2},
                              "products": products, "selected_cases": 2523}
             (build / "receipt.json").write_text(json.dumps(build_receipt))
             build_digest = independent_gates.archive_digest(build)
@@ -297,16 +553,19 @@ class SignedRouteTests(unittest.TestCase):
                         "expected_native_build_host": build_host,
                         "expected_native_toolchain": toolchain,
                         "expected_native_build_archive_sha256": build_digest,
+                        "expected_native_build_observer": {"path": str(base / "observer"),
+                            "events_sha256": "f" * 64, "witness_sha256": "f" * 64},
                         "expected_native_build_executables": executables}
             self._witness(base, expected, lane, runtime, "debug-g", executables,
-                          toolchain["gradle_sha256"], digest)
+                          toolchain["java_sha256"], digest)
             public = {"status": "PASSED", "lane": lane, "candidate_sha": CANDIDATE,
                       "archive_sha256": digest, "selected_cases": 2523,
                       "artifact_hash_provenance": "audited",
                       "complete_selected_suite": True}
             for path in paths.values():
                 path.unlink()
-            with patch.object(full_signed_routes, "_source"), patch(
+            with patch.object(full_signed_routes, "_source"), patch.object(
+                    full_signed_routes, "_cross_build_observer"), patch(
                     "full_native_host_consumer.verify", side_effect=AssertionError(
                         "cross route used ordinary verifier")), patch(
                     "full_native_host_consumer.verify_cross_run", return_value=public) as cross_verify:
@@ -337,9 +596,7 @@ class SignedRouteTests(unittest.TestCase):
                 witness_path.write_bytes(original_witness)
                 signed_witness["sha256"] = hashlib.sha256(original_witness).hexdigest()
                 for section, field, value, reason in (
-                        ("build", "pid", 99, "cross.*process witness"),
-                        ("build", "finished_ns", 3, "cross.*process witness"),
-                        ("core", "finished_ns", 3, "cross.*process witness"),
+                        ("core", "finished_wall_ns", 3, "cross.*process witness"),
                         ("core", "executable_sha256", "0" * 64,
                          "process witness lacks observed execution")):
                     changed_witness = json.loads(original_witness)
@@ -447,6 +704,8 @@ class SignedRouteTests(unittest.TestCase):
                 full_native_host_consumer.encoded(host))
             receipt = self._receipt(lane, runtime)
             receipt["host"] = host
+            receipt["process"] = {"command": [str(binaries["gradle"]),
+                                               "qualificationEvidence"]}
             archive = self._archive(base, receipt)
             expected = {"expected_artifact_hashes": HASHES,
                         "expected_runtime_identity": runtime,
@@ -462,7 +721,7 @@ class SignedRouteTests(unittest.TestCase):
                 name: product["sha256"] for name, product in products.items()}
             self._witness(base, expected, lane, runtime, "debug-g",
                           expected["expected_native_host_executables"],
-                          toolchain["gradle_sha256"])
+                          toolchain["java_sha256"])
             public = {"status": "PASSED", "selected_cases": 2523,
                       "archive_sha256": "c" * 64}
             with patch.object(full_signed_routes, "_source"), patch.object(
@@ -507,7 +766,9 @@ class SignedRouteTests(unittest.TestCase):
                         "expected_android_native_replay_output": str(base / "replay")}
             self._witness(base, expected, lane, runtime, "debug-g",
                           expected["expected_android_native_executables"],
-                          expected["expected_android_native_toolchain"]["gradle_sha256"])
+                          expected["expected_android_native_toolchain"]["java_sha256"])
+            (archive / "build.json").write_text(json.dumps({"process": {
+                "command": [str(gradle), "qualificationEvidence"]}}))
             public = {"status": "PASSED", "selected_cases": 2523,
                       "archive_sha256": "c" * 64}
             with patch.object(full_signed_routes, "_source"), patch.object(
@@ -614,6 +875,8 @@ class SignedRouteTests(unittest.TestCase):
                     "full_browser_consumer").GRADLE_SHA256,
                 "kgp_version": "2.4.20", "gradle_version": "9.5.0"}
             receipt["toolchain"] = toolchain
+            receipt["process"] = {"graph": {"command": [toolchain["gradle"],
+                                                        "qualificationEvidence"]}}
             archive = self._archive(base, receipt)
             bundles = {}
             for short in ("core", "facade"):
@@ -769,6 +1032,39 @@ class SignedRouteTests(unittest.TestCase):
                     expected, CANDIDATE, lane, "c" * 64, "Linux current",
                     "optimized-opt", {"core": "0" * 64, "facade": "e" * 64},
                     HASHES, "f" * 64)
+
+    def test_signed_launcher_grandchild_requires_complete_ancestry(self):
+        lane = "linuxX64:Linux x64:current:debug-g"
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            script = str(base / "gradlew")
+            java_sha = "a" * 64
+            expected = {"expected_native_toolchain": {
+                "gradle_executable": script, "gradle_sha256": "b" * 64}}
+            executables = {"core": "c" * 64, "facade": "d" * 64}
+            self._witness(base, expected, lane, "Linux current", "debug-g",
+                          executables, java_sha)
+            path = Path(expected["expected_execution_witness"]["path"])
+            witness = json.loads(path.read_text())
+            witness["build"].update({"pid": 12, "parent_pid": 11})
+            witness["build_ancestry"] = [
+                {"pid": 12, "parent_pid": 11}, {"pid": 11, "parent_pid": 10}]
+            path.write_text(json.dumps(witness))
+            expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                path.read_bytes()).hexdigest()
+            launcher = full_signed_routes._launcher(script, "b" * 64,
+                                                      [script, "qualificationEvidence"])
+            self.assertEqual(full_signed_routes.execution_witness(
+                expected, CANDIDATE, lane, "c" * 64, "Linux current", "debug-g",
+                executables, HASHES, java_sha, launcher=launcher)["build"]["pid"], 12)
+            witness["build_ancestry"][1]["parent_pid"] = 99
+            path.write_text(json.dumps(witness))
+            expected["expected_execution_witness"]["sha256"] = hashlib.sha256(
+                path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError, "ancestry"):
+                full_signed_routes.execution_witness(
+                    expected, CANDIDATE, lane, "c" * 64, "Linux current", "debug-g",
+                    executables, HASHES, java_sha, launcher=launcher)
 
     def test_signed_not_run_stays_not_run_and_hardlink_fails(self):
         lane = "iosArm64:iOS physical ARM64:minimum:debug-g"
@@ -1091,6 +1387,8 @@ class SignedRouteTests(unittest.TestCase):
                          "gradle_sha256": full_browser_consumer.GRADLE_SHA256,
                          "kgp_version": "2.4.20", "gradle_version": "9.5.0"}
             receipt["toolchain"] = toolchain
+            receipt["process"] = {"graph": {"command": [toolchain["gradle"],
+                                                        "qualificationEvidence"]}}
             archive = self._archive(base, receipt)
             responses, http_receipt = self._http_fixture(archive, True)
             receipt["modules"] = http_receipt["modules"]
@@ -1120,7 +1418,7 @@ class SignedRouteTests(unittest.TestCase):
                         "expected_browser_bundles": bundles,
                         "expected_browser_responses": responses}
             self._witness(base, expected, lane, runtime, "development", executables,
-                          toolchain["gradle_sha256"])
+                          toolchain["java_sha256"])
             witness_path = Path(expected["expected_execution_witness"]["path"])
             witness = json.loads(witness_path.read_bytes())
             witness["responses"] = responses

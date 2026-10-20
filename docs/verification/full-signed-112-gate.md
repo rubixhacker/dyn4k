@@ -28,11 +28,11 @@ also equal the candidate manifest's lane runtime string.
 
 | Route | Additional signed fields |
 | --- | --- |
-| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; Wasm browser also needs `expected_browser_responses` and `expected_execution_witness` |
+| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; Wasm browser also needs `expected_browser_responses`, `expected_execution_witness`, and `expected_build_launcher_image` |
 | Nonbrowser Wasm | `expected_wasm_runtime`, `expected_wasm_runtime_binary` |
-| Native host and simulator | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_host_executables`, `expected_execution_witness` |
-| Linux ARM64 Native cross runtime, schema 3 | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_build_archive_sha256`, `expected_native_build_host`, `expected_native_build_executables`, `expected_execution_witness` |
-| Android Native | `expected_android_native_guest`, `expected_android_native_toolchain`, `expected_android_native_executables`, `expected_android_native_adb`, `expected_android_native_serial`, `expected_android_native_replay_output`, `expected_android_native_executable_paths`, `expected_execution_witness` |
+| Native host and simulator | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_host_executables`, `expected_execution_witness`, `expected_build_launcher_image` |
+| Linux ARM64 Native cross runtime, schema 3 | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_build_archive_sha256`, `expected_native_build_host`, `expected_native_build_executables`, `expected_execution_witness`, `expected_build_launcher_image`, `expected_native_build_observer` |
+| Android Native | `expected_android_native_guest`, `expected_android_native_toolchain`, `expected_android_native_executables`, `expected_android_native_adb`, `expected_android_native_serial`, `expected_android_native_replay_output`, `expected_android_native_executable_paths`, `expected_execution_witness`, `expected_build_launcher_image` |
 | Physical Apple | `expected_apple_device`, `expected_apple_device_toolchain`, `expected_apple_device_executable_paths`, `expected_apple_device_executable_hashes`, `expected_apple_os_roles` (signed path and digest of an external OS role selection) |
 | Native KLIB | `expected_klib_native_executables`, `expected_execution_witness` |
 
@@ -52,7 +52,11 @@ lane, staged archive digest, runtime string, mode, both staged artifact hashes,
 executable hashes, an independent auditor name, a build process observation,
 and `core` and `facade` runtime process observations. Each
 process records its executable hash, positive PID, zero exit code, and a valid
-start and finish time. The auditor must obtain these observations independently
+start and finish time. The build record hashes the live Java image, not the
+Gradle launcher script. The separate launcher record binds script path, SHA-256,
+archived command argv, observed interpreter image, PID, parent PID, and interval.
+`expected_build_launcher_image` independently signs the interpreter path and
+SHA-256. The auditor must obtain these observations independently
 from actual runtime execution. A signed declaration copied from the producer
 is not an independent process observation. Native host and KLIB Native routes
 need this witness because their current receipts do not bind the retained
@@ -60,9 +64,13 @@ executable to an observed child process. Android Native needs it for the
 original guest process and build provenance.
 
 For a Linux ARM64 Native cross run, the signed witness binds the x64 build
-process and both ARM64 runtime processes. The verifier checks each process PID
-and observation interval against its archived record. It checks the signed
-Gradle and executable hashes. Build and runtime clocks are checked separately.
+process and both ARM64 runtime processes. `expected_native_build_observer`
+signs the external Linux observer directory path and exact event and witness
+file hashes. The verifier reconstructs its event chain, checks the archived
+Gradle PID and argv against the observed shell, and follows PID ancestry to
+the pinned Java image. It checks the signed Gradle script, interpreter, Java,
+and runtime executable hashes separately. Build and runtime clocks are checked
+in their recorded domains.
 The schema-3 public result must report audited artifact hashes and a complete
 selected suite. A compile-only build does not prove runtime execution.
 

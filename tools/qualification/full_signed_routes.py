@@ -99,7 +99,8 @@ def _browser_observer_source(repository, candidate):
 
 
 def execution_witness(expected, candidate, lane, digest, runtime, mode,
-                      executables, artifacts, build_executable, archive=None):
+                      executables, artifacts, build_executable, archive=None,
+                      launcher=None):
     binding = expected.get("expected_execution_witness")
     if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
         raise ValueError("independently signed process witness is missing")
@@ -136,6 +137,36 @@ def execution_witness(expected, candidate, lane, digest, runtime, mode,
             or type(build.get("finished_ns")) is not int
             or build["started_ns"] <= 0 or build["finished_ns"] < build["started_ns"]):
         raise ValueError("independent build process witness is incomplete")
+    if launcher is not None:
+        observed = witness.get("launcher")
+        image = expected.get("expected_build_launcher_image")
+        if (not isinstance(image, dict) or set(image) != {"path", "sha256"}
+                or type(image["path"]) is not str
+                or not Path(image["path"]).is_absolute()
+                or SHA.fullmatch(str(image["sha256"])) is None):
+            raise ValueError("signed launcher process image is missing")
+        if (not isinstance(observed, dict)
+                or observed.get("script_path") != launcher["path"]
+                or observed.get("script_sha256") != _sha(launcher["sha256"], "launcher")
+                or observed.get("command") != launcher["command"]
+                or type(observed.get("pid")) is not int or observed["pid"] <= 0
+                or type(observed.get("parent_pid")) is not int or observed["parent_pid"] <= 0
+                or type(observed.get("started_ns")) is not int
+                or type(observed.get("finished_ns")) is not int
+                or observed["started_ns"] <= 0
+                or observed["finished_ns"] < observed["started_ns"]
+                or observed.get("executable_path") != image["path"]
+                or observed.get("executable_sha256") != image["sha256"]):
+            raise ValueError("independent launcher process witness is incomplete")
+        if ("expected_native_build_observer" not in expected
+                and observed["pid"] != build["pid"]
+                and build.get("parent_pid") != observed["pid"]
+                and not _witness_ancestry(witness.get("build_ancestry"),
+                                          build, observed)):
+            raise ValueError("independent build image ancestry differs from launcher")
+        if not (observed["started_ns"] <= build["started_ns"]
+                <= build["finished_ns"] <= observed["finished_ns"]):
+            raise ValueError("independent build image interval differs from launcher")
     for name, process in witness["processes"].items():
         if (not isinstance(process, dict) or process.get("executable_sha256") != executables[name]
                 or type(process.get("pid")) is not int or process["pid"] <= 0
@@ -183,6 +214,116 @@ def browser_execution_witness(expected, candidate, lane, digest, runtime, hashes
             or not witness["auditor"].strip()):
         raise ValueError("independent browser execution witness differs from signed lane")
     return witness
+def _witness_ancestry(rows, build, launcher):
+    if not isinstance(rows, list) or not rows:
+        return False
+    pid = build["pid"]
+    seen = set()
+    for index, row in enumerate(rows):
+        if (not isinstance(row, dict) or set(row) != {"pid", "parent_pid"}
+                or type(row["pid"]) is not int or row["pid"] != pid
+                or type(row["parent_pid"]) is not int or row["parent_pid"] <= 0
+                or pid in seen):
+            return False
+        seen.add(pid)
+        pid = row["parent_pid"]
+        if pid == launcher["pid"]:
+            return index == len(rows) - 1 and rows[0]["parent_pid"] == build.get("parent_pid")
+    return False
+
+
+def _launcher(path, sha, command):
+    if (type(path) is not str or not Path(path).is_absolute()
+            or type(command) is not list or not command or command[0] != path
+            or any(type(arg) is not str for arg in command)):
+        raise ValueError("archived Gradle launcher command differs")
+    return {"path": path, "sha256": _sha(sha, "Gradle launcher"),
+            "command": command}
+
+
+def _cross_build_observer(expected, archive, candidate, lane, build_digest,
+                          hashes, toolchain, process, signed_witness):
+    import independent_linux_observer
+
+    binding = expected.get("expected_native_build_observer")
+    if (not isinstance(binding, dict)
+            or set(binding) != {"path", "events_sha256", "witness_sha256"}
+            or type(binding["path"]) is not str):
+        raise ValueError("signed Native cross build observer is missing")
+    root = Path(binding["path"])
+    if (not root.is_absolute() or root.is_symlink() or not root.is_dir()
+            or root.is_relative_to(archive)):
+        raise ValueError("signed Native cross build observer path differs")
+    for name, key in (("events.jsonl", "events_sha256"),
+                      ("witness.json", "witness_sha256")):
+        _file(root / name, binding[key], "Native cross observer " + name)
+    observed, rows = independent_linux_observer.verify(root, include_events=True)
+    run = rows[0]
+    launcher = _launcher(toolchain["gradle_executable"],
+                         toolchain["gradle_sha256"], process.get("command"))
+    if (observed.get("candidate_sha") != candidate or observed.get("lane") != lane
+            or observed.get("archive_sha256") != build_digest
+            or observed.get("mode") != lane.rsplit(":", 1)[1]
+            or observed.get("staged_artifacts") != hashes
+            or observed.get("build") != signed_witness["build"]
+            or run.get("build_only") is not True
+            or run.get("launcher_seal_required") is not True
+            or run.get("expected_processes") != {}
+            or run.get("launcher") != {"path": launcher["path"],
+                                       "sha256": launcher["sha256"]}
+            or observed["build"].get("executable_sha256") != toolchain["java_sha256"]):
+        raise ValueError("Native cross build observer differs from signed build")
+    shell = [row for row in rows if row["kind"] == "image"
+             and row.get("origin") == "exec" and row.get("pid") == process.get("pid")
+             and row.get("argv", [None])[1:] == launcher["command"]]
+    if len(shell) != 1:
+        raise ValueError("Native cross Gradle script argv or PID was not observed")
+    shell = shell[0]
+    recorded_launcher = signed_witness.get("launcher")
+    spawns = [row for row in rows if row["kind"] == "spawn"
+              and row.get("pid") == shell["pid"]]
+    exits = [row for row in rows if row["kind"] == "exit"
+             and row.get("pid") == shell["pid"]]
+    if (len(spawns) != 1 or spawns[0].get("parent_pid") != process.get("parent_pid")
+            or len(exits) != 1 or not isinstance(recorded_launcher, dict)
+            or recorded_launcher.get("pid") != shell["pid"]
+            or recorded_launcher.get("parent_pid") != process.get("parent_pid")
+            or recorded_launcher.get("script_path") != launcher["path"]
+            or recorded_launcher.get("script_sha256") != launcher["sha256"]
+            or recorded_launcher.get("command") != launcher["command"]
+            or recorded_launcher.get("executable_path") != shell["executable_path"]
+            or recorded_launcher.get("executable_sha256") != shell["executable_sha256"]
+            or recorded_launcher.get("started_ns") != shell["observed_at_ns"]
+            or recorded_launcher.get("finished_ns") != exits[0]["observed_at_ns"]):
+        raise ValueError("Native cross launcher differs from observed interpreter")
+    image = [row for row in rows if row["kind"] == "image"
+             and row.get("origin") == "exec"
+             and row.get("pid") == observed["build"]["pid"]
+             and row.get("executable_sha256") == toolchain["java_sha256"]
+             and row.get("observed_at_ns") == observed["build"]["started_ns"]]
+    java = str(Path(toolchain["java_home"]) / "bin/java")
+    if (len(image) != 1 or image[0].get("argv", [None])[0] != java
+            or image[0]["argv"][-len(launcher["command"][1:]):]
+            != launcher["command"][1:]):
+        raise ValueError("Native cross pinned Java process image differs")
+    parents = {row["pid"]: row["parent_pid"] for row in rows
+               if row["kind"] == "spawn"}
+    pid = observed["build"]["pid"]
+    while pid != shell["pid"] and pid in parents:
+        pid = parents[pid]
+    if pid != shell["pid"] or image[0]["seq"] <= shell["seq"]:
+        raise ValueError("Native cross Java image does not descend from Gradle launcher")
+    java_exits = [row for row in rows if row["kind"] == "exit"
+                  and row.get("pid") == observed["build"]["pid"]]
+    if (type(process.get("started_ns")) is not int
+            or type(process.get("finished_ns")) is not int
+            or len(java_exits) != 1
+            or not process["started_ns"] <= shell["observed_wall_ns"]
+            <= image[0]["observed_wall_ns"] <= java_exits[0]["observed_wall_ns"]
+            <= process["finished_ns"]
+            or exits[0]["observed_wall_ns"] > process["finished_ns"]):
+        raise ValueError("Native cross build observer is outside archived interval")
+    return observed
 
 
 def _signed(expected, hashes, runtime, digest, receipt):
@@ -448,7 +589,10 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
                    if receipt.get("schema") == 4 else
                    execution_witness(expected, candidate, lane, digest, runtime,
                                      lane.rsplit(":", 1)[1], executables, hashes,
-                                     toolchain["gradle_sha256"], root))
+                                     toolchain["java_sha256"], root,
+                                     _launcher(toolchain["gradle"],
+                                               toolchain["gradle_sha256"],
+                                               receipt["process"]["graph"]["command"])))
         _browser_response_proof(root, responses, witness, receipt,
                                 lane.startswith("wasmJs:"))
         if receipt.get("schema") == 4:
@@ -551,19 +695,25 @@ def _verify_native_cross(repository, candidate, lane, root, receipt, expected,
         raise ValueError("signed Native cross runtime execution is incomplete")
     witness = execution_witness(expected, candidate, lane, digest, runtime,
                                 selected_lane["configuration"], executables, hashes,
-                                toolchain["gradle_sha256"], root)
-    recorded_processes = {"build": build.get("process"), **processes}
-    witnessed_processes = {"build": witness["build"], **witness["processes"]}
-    for name in ("build", "core", "facade"):
-        recorded = recorded_processes[name]
-        observed = witnessed_processes[name]
+                                toolchain["java_sha256"], root,
+                                _launcher(toolchain["gradle_executable"],
+                                          toolchain["gradle_sha256"],
+                                          build.get("process", {}).get("command")))
+    _cross_build_observer(expected, root, candidate, lane,
+                          build_digest, hashes, toolchain,
+                          build.get("process", {}), witness)
+    for name in ("core", "facade"):
+        recorded = processes[name]
+        observed = witness["processes"][name]
         if (not isinstance(recorded, dict)
                 or type(recorded.get("pid")) is not int
                 or observed["pid"] != recorded["pid"]
                 or type(recorded.get("started_ns")) is not int
                 or type(recorded.get("finished_ns")) is not int
-                or not recorded["started_ns"] <= observed["started_ns"]
-                    <= observed["finished_ns"] <= recorded["finished_ns"]):
+                or type(observed.get("started_wall_ns")) is not int
+                or type(observed.get("finished_wall_ns")) is not int
+                or not recorded["started_ns"] <= observed["started_wall_ns"]
+                    <= observed["finished_wall_ns"] <= recorded["finished_ns"]):
             raise ValueError("signed Native cross process witness differs from producer")
     if any(witness["processes"][name]["pid"] !=
            processes[name]["observed_process"]["pid"]
@@ -673,7 +823,10 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
             raise ValueError("Native host executable bytes differ from signed audit")
         execution_witness(expected, candidate, lane, digest, runtime,
                           selected_lane["configuration"], executable_hashes,
-                          hashes, toolchain["gradle_sha256"], root)
+                          hashes, toolchain["java_sha256"], root,
+                          _launcher(toolchain["gradle_executable"],
+                                    toolchain["gradle_sha256"],
+                                    receipt["process"]["command"]))
     elif family == "android-native":
         guest = expected.get("expected_android_native_guest")
         toolchain = expected.get("expected_android_native_toolchain")
@@ -709,9 +862,12 @@ def verify(repository, candidate, lane, root, expected, hashes, runtime, digest)
         if (public.get("status") != "PASSED" or public.get("selected_cases") != len(selected)
                 or public.get("archive_sha256") != digest):
             raise ValueError("Android Native device replay differs")
+        build_record = independent_gates._json(root / "build.json")
         execution_witness(expected, candidate, lane, digest, runtime,
                           selected_lane["configuration"], binaries, hashes,
-                          toolchain["gradle_sha256"], root)
+                          toolchain["java_sha256"], root,
+                          _launcher(paths["gradle"], toolchain["gradle_sha256"],
+                                    build_record["process"]["command"]))
     else:
         toolchain = expected.get("expected_apple_device_toolchain")
         device = expected.get("expected_apple_device")

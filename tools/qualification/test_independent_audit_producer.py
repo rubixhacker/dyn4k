@@ -168,6 +168,10 @@ class IndependentAuditProducerTests(unittest.TestCase):
                   producer.ROUTE_FIELDS["native-host"] -
                   {"expected_native_host_executables"}}
         fields.update({"expected_native_build_archive_sha256": "a" * 64,
+                       "expected_native_build_observer": {
+                           "path": str(self.root / "observer"),
+                           "events_sha256": "d" * 64,
+                           "witness_sha256": "e" * 64},
                        "expected_native_build_host": {"system": "Linux",
                                                        "machine": "x86_64"},
                        "expected_native_build_executables": {
@@ -205,6 +209,36 @@ class IndependentAuditProducerTests(unittest.TestCase):
         preflight = json.loads((prepared / "audit.json").read_bytes())[
             "preflight_results"][lane]["gates"]["staged-consumer"]
         self.assertEqual("NOT_RUN", preflight)
+
+    def test_browser_schema3_requires_separate_signed_launcher_image(self):
+        lane = "wasmJs:Chromium:current:development"
+        archive = self.root / "browser-attempt"
+        archive.mkdir()
+        (archive / "receipt.json").write_text(json.dumps({"schema": 3,
+                                                           "status": "PASSED"}))
+        observation = self.observations["lanes"][lane]
+        observation["archives"]["staged-consumer"] = str(archive)
+        fields = {key: key for key in producer.ROUTE_FIELDS["browser"]}
+        fields.update({"expected_browser_responses": {},
+                       "expected_execution_witness": {"path": str(self.root / "witness"),
+                                                      "sha256": "a" * 64}})
+        observation["signed_fields"] = fields
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, "signed route fields are incomplete"):
+            self.prepare()
+        fields["expected_build_launcher_image"] = {
+            "path": "/usr/bin/bash", "sha256": "b" * 64}
+        self.write_inputs()
+        prepared = self.prepare(self.root / "browser-prepared")
+        signed = json.loads((prepared / "audit.json").read_bytes())["lanes"][lane]
+        self.assertEqual(signed["expected_build_launcher_image"],
+                         fields["expected_build_launcher_image"])
+        unrelated = next(name for name in self.suite["lanes"] if name.startswith("jvm:"))
+        self.observations["lanes"][unrelated]["signed_fields"] = {
+            "expected_build_launcher_image": fields["expected_build_launcher_image"]}
+        self.write_inputs()
+        with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
+            self.prepare(self.root / "unrelated-prepared")
 
     def test_rejects_wrong_lane_identity_and_unsigned_replacement(self):
         lane = next(iter(self.suite["lanes"]))
