@@ -349,6 +349,56 @@ class ComparatorSeamTest(unittest.TestCase):
                 self.assertEqual("FAILED", result["status"])
                 self.assertIn("fixed callback body velocity", result["reason"])
 
+    def test_nominal_moving_b0_uses_approved_rotation_limit(self):
+        self.fixture = load_fixture("nominal-free-motion")
+        self.fixture["counts"] = {"inputs": 1, "event": 1, "state": 1}
+        self.fixture["reference"] = {"file": "reference.jsonl.gz"}
+        rows = [
+            {"kind": "inputs", "id": self.fixture["id"]},
+            {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin", "payload": []},
+            {"kind": "state", "step": 1, "state": {"bodies": [
+                {"id": "b0", "velocity": [0.25, -0.125], "angularVelocity": 0.5,
+                 "rotationIncrementSum": 0.008333333333327246}
+            ]}},
+        ]
+        self.write_reference(rows)
+        candidate = json.loads(json.dumps(rows))
+        candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] = 0.008333333333327244
+        self.write_candidate(candidate)
+        result = self.result()
+        self.assertEqual("PASSED", result["status"], result)
+        candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] += 2e-7
+        self.write_candidate(candidate)
+        result = self.result()
+        self.assertEqual("FAILED", result["status"], result)
+        self.assertIn("numeric limit exceeded", result["reason"])
+
+    def test_sleep_wake_fixed_floor_b0_remains_exact(self):
+        for key in ("configured-30-r1", "default-sleep-30"):
+            with self.subTest(fixture=key):
+                self.fixture = load_fixture(key)
+                self.fixture["counts"] = {"inputs": 1, "event": 1, "state": 1}
+                self.fixture["reference"] = {"file": "reference.jsonl.gz"}
+                rows = [
+                    {"kind": "inputs", "id": self.fixture["id"]},
+                    {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin", "payload": []},
+                    {"kind": "state", "step": 1, "state": {"bodies": [
+                        {"id": "b0", "rotationIncrementSum": 0.0}
+                    ]}},
+                ]
+                self.write_reference(rows)
+                candidate = json.loads(json.dumps(rows))
+                candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] = 1e-5
+                self.write_candidate(candidate)
+                result = self.result()
+                self.assertEqual("FAILED", result["status"], result)
+                self.assertIn("fixed floor differs", result["reason"])
+                if key == "configured-30-r1":
+                    self.fixture.pop("callback_fixed_body_id")
+                    result = self.result()
+                    self.assertEqual("FAILED", result["status"], result)
+                    self.assertIn("fixed floor role is missing", result["reason"])
+
     def test_outer_endpoint_uses_inner_state_budget(self):
         rows = json.loads(json.dumps(self.rows))
         rows[2]["state"] = {"position": [2.0, 3.0]}
