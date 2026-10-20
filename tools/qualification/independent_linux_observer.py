@@ -130,44 +130,136 @@ def _safe_input(path):
 
 def _archive_digest(path, deadline=None):
     path = Path(path).absolute()
-    if ".." in path.parts or path.is_symlink():
-        raise ObservationError("archive path is symbolic or uses traversal")
-    if path.is_file():
-        archive = _safe_input(path)
-        return _sha_file(archive, deadline, MAX_ARCHIVE_BYTES, "archive")
-    if not path.is_dir():
-        raise ObservationError(f"archive is absent: {path}")
-    files = []
-    total_bytes = 0
-    for base, directories, names in os.walk(path, followlinks=False):
-        for name in directories + names:
-            if deadline is not None and time.monotonic() > deadline:
-                raise ObservationError("archive seal exceeded trace timeout")
-            member = Path(base) / name
-            relative = member.relative_to(path).as_posix()
-            if (member.is_symlink() or "\\" in relative or "\n" in relative or
-                    "\r" in relative or any(part in ("", ".", "..")
-                                            for part in relative.split("/"))):
-                raise ObservationError(f"unsafe archive member: {relative}")
-            info = member.lstat()
-            if stat.S_ISDIR(info.st_mode):
-                continue
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise ObservationError(f"nonregular or hardlinked archive member: {relative}")
-            remaining = MAX_ARCHIVE_BYTES - total_bytes
-            if len(files) >= MAX_ARCHIVE_FILES or info.st_size > remaining:
-                raise ObservationError("archive file or byte limit exceeded")
-            digest = _sha_file(member, deadline, remaining, "archive")
-            total_bytes += info.st_size
-            after = member.lstat()
-            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
-                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+    if ".." in path.parts or path == Path(path.anchor):
+        raise ObservationError("archive path uses traversal or has no parent")
+
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def check_time():
+        if deadline is not None and time.monotonic() > deadline:
+            raise ObservationError("archive seal exceeded trace timeout")
+
+    def hash_file(parent, name, before, relative, remaining):
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ObservationError(f"nonregular or hardlinked archive member: {relative}")
+        if before.st_size > remaining:
+            raise ObservationError("archive byte limit exceeded")
+        fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW |
+                     os.O_NONBLOCK, dir_fd=parent)
+        try:
+            if identity(os.fstat(fd)) != identity(before):
+                raise ObservationError(f"archive member changed during open: {relative}")
+            digest = hashlib.sha256()
+            size = 0
+            while block := os.read(fd, 1024 * 1024):
+                check_time()
+                size += len(block)
+                if size > remaining:
+                    raise ObservationError("archive byte limit exceeded")
+                digest.update(block)
+            if size != before.st_size or identity(os.fstat(fd)) != identity(before):
                 raise ObservationError(f"archive member changed during hashing: {relative}")
-            files.append({"path": relative, "sha256": digest,
-                          "mtime_ns": info.st_mtime_ns})
-    if not any(item["path"] == "receipt.json" for item in files):
-        raise ObservationError("archive receipt.json is absent")
-    return hashlib.sha256(_json_bytes(sorted(files, key=lambda item: item["path"]))).hexdigest()
+        finally:
+            os.close(fd)
+        if identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(before):
+            raise ObservationError(f"archive member changed during hashing: {relative}")
+        return digest.hexdigest()
+
+    handles = []
+    ancestors = []
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        handles.append(os.open(path.anchor, flags))
+        for name in path.parts[1:-1]:
+            before = os.stat(name, dir_fd=handles[-1], follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise ObservationError(f"archive ancestor is not a directory: {name}")
+            parent_fd = handles[-1]
+            fd = os.open(name, flags, dir_fd=parent_fd)
+            handles.append(fd)
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                raise ObservationError(f"archive ancestor changed during open: {name}")
+            ancestors.append((parent_fd, name, before.st_dev, before.st_ino))
+
+        parent = handles[-1]
+        name = path.name
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISREG(before.st_mode):
+            result = hash_file(parent, name, before, name, MAX_ARCHIVE_BYTES)
+        elif stat.S_ISDIR(before.st_mode):
+            root = os.open(name, flags, dir_fd=parent)
+            handles.append(root)
+            if identity(os.fstat(root)) != identity(before):
+                raise ObservationError("archive root changed during open")
+            files = []
+            total_bytes = 0
+            members = 0
+            seen = set()
+
+            def visit(directory, prefix):
+                nonlocal total_bytes, members
+                check_time()
+                with os.scandir(directory) as listing:
+                    entries = []
+                    for entry in listing:
+                        check_time()
+                        members += 1
+                        if members > 2 * MAX_ARCHIVE_FILES:
+                            raise ObservationError("archive member limit exceeded")
+                        entries.append(entry)
+                for entry in entries:
+                    check_time()
+                    relative = f"{prefix}/{entry.name}" if prefix else entry.name
+                    if ("\\" in relative or "\n" in relative or "\r" in relative or
+                            any(part in ("", ".", "..") for part in relative.split("/"))):
+                        raise ObservationError(f"unsafe archive member: {relative}")
+                    if relative in seen:
+                        raise ObservationError(f"duplicate archive member: {relative}")
+                    seen.add(relative)
+                    member = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
+                    if stat.S_ISDIR(member.st_mode):
+                        child = os.open(entry.name, flags, dir_fd=directory)
+                        try:
+                            if identity(os.fstat(child)) != identity(member):
+                                raise ObservationError(f"archive directory changed: {relative}")
+                            visit(child, relative)
+                            if (identity(os.fstat(child)) != identity(member) or
+                                    identity(os.stat(entry.name, dir_fd=directory,
+                                                     follow_symlinks=False)) != identity(member)):
+                                raise ObservationError(f"archive directory changed: {relative}")
+                        finally:
+                            os.close(child)
+                    else:
+                        if len(files) >= MAX_ARCHIVE_FILES:
+                            raise ObservationError("archive file limit exceeded")
+                        remaining = MAX_ARCHIVE_BYTES - total_bytes
+                        digest = hash_file(directory, entry.name, member, relative, remaining)
+                        total_bytes += member.st_size
+                        files.append({"path": relative, "sha256": digest,
+                                      "mtime_ns": member.st_mtime_ns})
+
+            visit(root, "")
+            if (identity(os.fstat(root)) != identity(before) or
+                    identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(before)):
+                raise ObservationError("archive root changed during scan")
+            if not any(item["path"] == "receipt.json" for item in files):
+                raise ObservationError("archive receipt.json is absent")
+            result = hashlib.sha256(_json_bytes(sorted(files, key=lambda item: item["path"]))).hexdigest()
+        else:
+            raise ObservationError(f"archive is not a regular file or directory: {path}")
+        for ancestor, component, device, inode in ancestors:
+            current = os.stat(component, dir_fd=ancestor, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (device, inode):
+                raise ObservationError(f"archive ancestor changed during scan: {component}")
+        return result
+    except OSError as error:
+        raise ObservationError(f"archive scan failed: {error}") from error
+    finally:
+        for fd in reversed(handles):
+            os.close(fd)
 
 
 def _stat(pid):

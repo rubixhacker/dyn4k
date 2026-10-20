@@ -297,6 +297,82 @@ class IndependentLinuxObserverTest(unittest.TestCase):
         self.assertEqual(independent_gates.archive_digest(archive), witness["archive_sha256"])
         self.assertEqual(witness, observer.verify(args.output))
 
+    def test_unreadable_archive_descendant_fails_capture_closed(self):
+        archive = self.root / "unreadable-archive"
+        child = archive / "child"
+        child.mkdir(parents=True)
+        (archive / "receipt.json").write_bytes(b"{}")
+        (child / "payload.bin").write_bytes(b"payload")
+        original_scandir = os.scandir
+
+        def deny_child(path):
+            location = (Path(os.readlink(f"/proc/self/fd/{path}"))
+                        if isinstance(path, int) else Path(path))
+            if location == child:
+                raise PermissionError(errno.EACCES, "denied archive descendant", str(child))
+            return original_scandir(path)
+
+        args = self.args("unreadable-capture")
+        args.archive = str(archive)
+        with mock.patch.object(os, "scandir", side_effect=deny_child):
+            with self.assertRaisesRegex(observer.ObservationError, "archive.*denied|denied archive"):
+                observer._archive_digest(archive)
+            with self.assertRaisesRegex(observer.ObservationError, "capture failed"):
+                observer.capture(args)
+        rows = self.rows(Path(args.output))
+        self.assertEqual(["error", "end"], [row["kind"] for row in rows[-2:]])
+        self.assertFalse((Path(args.output) / "witness.json").exists())
+
+    def test_archive_parent_swap_fails_capture_closed(self):
+        def swapped_scan(archive):
+            child = archive / "child"
+            moved = self.root / f"{archive.name}-original"
+            child.mkdir(parents=True)
+            (archive / "receipt.json").write_bytes(b"{}")
+            (child / "payload.bin").write_bytes(b"original")
+            original_scandir = os.scandir
+            swapped = False
+
+            def scan(path):
+                nonlocal swapped
+                location = (Path(os.readlink(f"/proc/self/fd/{path}"))
+                            if isinstance(path, int) else Path(path))
+                listing = original_scandir(path)
+                if location != child or swapped:
+                    return listing
+
+                class SwapAfterEnumeration:
+                    def __enter__(self):
+                        nonlocal swapped
+                        entries = list(listing.__enter__())
+                        child.rename(moved)
+                        child.mkdir()
+                        (child / "payload.bin").write_bytes(b"replacement")
+                        swapped = True
+                        return iter(entries)
+
+                    def __exit__(self, *args):
+                        return listing.__exit__(*args)
+
+                return SwapAfterEnumeration()
+
+            return scan
+
+        direct_archive = self.root / "direct-swap"
+        with mock.patch.object(os, "scandir", side_effect=swapped_scan(direct_archive)):
+            with self.assertRaisesRegex(observer.ObservationError, "archive.*changed"):
+                observer._archive_digest(direct_archive)
+
+        capture_archive = self.root / "capture-swap"
+        args = self.args("swap-capture")
+        args.archive = str(capture_archive)
+        with mock.patch.object(os, "scandir", side_effect=swapped_scan(capture_archive)):
+            with self.assertRaisesRegex(observer.ObservationError, "capture failed"):
+                observer.capture(args)
+        rows = self.rows(Path(args.output))
+        self.assertEqual(["error", "end"], [row["kind"] for row in rows[-2:]])
+        self.assertFalse((Path(args.output) / "witness.json").exists())
+
     def test_regular_file_archive_over_byte_limit_is_rejected(self):
         archive = self.root / "large-regular-archive"
         archive.write_bytes(b"ab")
@@ -306,6 +382,52 @@ class IndependentLinuxObserverTest(unittest.TestCase):
         with mock.patch.object(observer, "MAX_ARCHIVE_BYTES", 2):
             self.assertEqual(hashlib.sha256(b"ab").hexdigest(),
                              observer._archive_digest(archive))
+
+    def test_directory_archive_preserves_member_byte_and_link_guards(self):
+        archive = self.root / "guarded-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_bytes(b"{}")
+        payload = archive / "payload.bin"
+        payload.write_bytes(b"payload")
+        with mock.patch.object(observer, "MAX_ARCHIVE_FILES", 1):
+            with self.assertRaisesRegex(observer.ObservationError, "file limit"):
+                observer._archive_digest(archive)
+        with mock.patch.object(observer, "MAX_ARCHIVE_BYTES", 2):
+            with self.assertRaisesRegex(observer.ObservationError, "byte limit"):
+                observer._archive_digest(archive)
+        linked = self.root / "payload-hardlink"
+        os.link(payload, linked)
+        with self.assertRaisesRegex(observer.ObservationError, "hardlinked"):
+            observer._archive_digest(archive)
+        linked.unlink()
+        shortcut = archive / "payload-link"
+        shortcut.symlink_to(payload)
+        with self.assertRaisesRegex(observer.ObservationError, "nonregular"):
+            observer._archive_digest(archive)
+        shortcut.unlink()
+
+        original_scandir = os.scandir
+
+        class RepeatedEntries:
+            def __init__(self, entries):
+                self.entries = entries
+
+            def __enter__(self):
+                return iter(self.entries)
+
+            def __exit__(self, *_):
+                return False
+
+        def duplicate_member(path):
+            with original_scandir(path) as listing:
+                entries = list(listing)
+            if isinstance(path, int) and os.fstat(path).st_ino == archive.stat().st_ino:
+                entries.append(entries[0])
+            return RepeatedEntries(entries)
+
+        with mock.patch.object(os, "scandir", side_effect=duplicate_member):
+            with self.assertRaisesRegex(observer.ObservationError, "duplicate archive member"):
+                observer._archive_digest(archive)
 
     def test_preflight_input_over_byte_limit_is_rejected(self):
         args = self.args("large-preflight")
