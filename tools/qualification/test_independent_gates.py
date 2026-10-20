@@ -197,7 +197,15 @@ class IndependentGateSeamTests(unittest.TestCase):
                               cwd=ROOT, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode
                for revision in required_revisions):
-            self.skipTest("historical comparator commits are absent from shallow checkout")
+            candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                                cwd=ROOT, text=True).strip()
+            with self.assertRaisesRegex(ValueError, "revision ancestry is unavailable"):
+                independent_gates._policy_binding(ROOT, candidate)
+            with mock.patch.dict(independent_gates.APPROVED_POLICY,
+                                 {path: historical_digest}):
+                with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
+                    independent_gates._policy_binding(ROOT, candidate)
+            return
         for revision in (*reviewed_revisions,
                          "f0349a0d29f91879fc52286899f39e042c8523f6",
                          "168fbfcdabd68cfb9317310958d6be7f52b38f05"):
