@@ -68,8 +68,10 @@ process and both ARM64 runtime processes. `expected_native_build_observer`
 signs the external Linux observer directory path and exact event and witness
 file hashes. The verifier reconstructs its event chain, checks the archived
 Gradle PID and argv against the observed shell, and follows PID ancestry to
-the pinned Java image. It pins the loaded observer verifier source to the
-candidate before using that reconstruction. The observer records both the
+the pinned Java image. Central replay compares the observer source file with
+the candidate, compiles those candidate bytes in a fresh namespace, and calls
+that verifier for event reconstruction. It does not use imported observer
+bytecode or an imported `verify` function. The observer records both the
 requested signed JDK `bin/java` path and the resolved executable path; the
 central route checks the latter against the observed Java image, allowing a
 genuine JDK symlink while rejecting a byte-identical executable elsewhere.

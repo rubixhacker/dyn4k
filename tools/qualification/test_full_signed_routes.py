@@ -1,8 +1,10 @@
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
+import py_compile
 import shutil
 import sys
 import tempfile
@@ -26,28 +28,84 @@ CANDIDATE = "9cd6868512836a3eb8192d9abc387427705e94b4"
 
 
 class SignedRouteTests(unittest.TestCase):
-    def test_native_cross_observer_source_is_exact_candidate_module(self):
+    def _small_observer_capture(self, base):
+        archive = base / "observer-archive.bin"
+        archive.write_bytes(b"source control")
+        output = base / "observer-capture"
+        args = argparse.Namespace(candidate_sha=CANDIDATE, lane="local:source:control",
+            runtime_identity="local", mode="debug", archive=str(archive),
+            build_executable="/usr/bin/true", launcher_script=None,
+            build_only=True, build_argv_contains=[], artifact=[], expect=[],
+            generated_expect=[], timeout=20, output=str(output),
+            max_processes=256, max_events=4096, max_log_bytes=8 * 1024 * 1024,
+            argv=["/usr/bin/true"])
+        independent_linux_observer.capture(args)
+        return output
+
+    def test_native_cross_executes_exact_candidate_observer_source(self):
         path = Path(independent_linux_observer.__file__).resolve()
         current = path.read_bytes()
         with patch.object(full_signed_routes.subprocess, "check_output",
                           return_value=current):
-            full_signed_routes._observer_source(ROOT, CANDIDATE,
-                                                independent_linux_observer)
+            verifier = full_signed_routes._observer_source(ROOT, CANDIDATE)
+        self.assertIsNot(verifier, independent_linux_observer.verify)
+        self.assertEqual(Path(verifier.__code__.co_filename).resolve(), path)
+        with tempfile.TemporaryDirectory() as temporary:
+            capture = self._small_observer_capture(Path(temporary))
+            self.assertEqual(verifier(capture)["status"], "OBSERVED_UNSIGNED")
+            alternate = {}
+            exec(compile("def verify(*args, **kwargs): return {'status': 'FORGED'}",
+                         str(path), "exec"), alternate)
+            with patch.object(independent_linux_observer, "verify", alternate["verify"]):
+                with patch.object(full_signed_routes.subprocess, "check_output",
+                                  return_value=current):
+                    verifier = full_signed_routes._observer_source(ROOT, CANDIDATE)
+                self.assertEqual(verifier(capture)["status"], "OBSERVED_UNSIGNED")
+                self.assertEqual(independent_linux_observer.verify(capture)["status"],
+                                 "FORGED")
+            shadow = SimpleNamespace(__file__=str(Path(temporary) / path.name),
+                __spec__=SimpleNamespace(origin=str(Path(temporary) / path.name)),
+                verify=alternate["verify"])
+            with patch.dict(sys.modules, {"independent_linux_observer": shadow}), patch.object(
+                    full_signed_routes.subprocess, "check_output", return_value=current):
+                verifier = full_signed_routes._observer_source(ROOT, CANDIDATE)
+                self.assertEqual(verifier(capture)["status"], "OBSERVED_UNSIGNED")
         with patch.object(full_signed_routes.subprocess, "check_output",
                           return_value=current + b"\n"):
             with self.assertRaisesRegex(ValueError, "observer source differs"):
-                full_signed_routes._observer_source(ROOT, CANDIDATE,
-                                                    independent_linux_observer)
+                full_signed_routes._observer_source(ROOT, CANDIDATE)
+
+    def test_native_cross_ignores_altered_timestamp_observer_cache(self):
+        current = Path(independent_linux_observer.__file__).read_bytes()
+        altered = current.replace(b"if witness != reconstructed:",
+                                  b"if witness == reconstructed:", 1)
+        self.assertNotEqual(altered, current)
+        self.assertEqual(len(altered), len(current))
         with tempfile.TemporaryDirectory() as temporary:
-            shadow = Path(temporary) / path.name
-            shadow.write_bytes(current)
-            module = SimpleNamespace(__file__=str(shadow),
-                __spec__=SimpleNamespace(origin=str(shadow)),
-                verify=independent_linux_observer.verify)
+            repository = Path(temporary)
+            source = repository / "tools/qualification/independent_linux_observer.py"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(altered)
+            original = source.stat()
+            py_compile.compile(str(source), doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+            source.write_bytes(current)
+            os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+            spec = importlib.util.spec_from_file_location("cached_observer_control", source)
+            cached = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cached)
+            self.assertEqual(source.read_bytes(), current)
+            self.assertEqual(Path(cached.__file__).resolve(), source)
+            self.assertEqual(Path(cached.verify.__code__.co_filename).resolve(), source)
             with patch.object(full_signed_routes.subprocess, "check_output",
                               return_value=current):
-                with self.assertRaisesRegex(ValueError, "observer source differs"):
-                    full_signed_routes._observer_source(ROOT, CANDIDATE, module)
+                verifier = full_signed_routes._observer_source(repository, CANDIDATE)
+            self.assertNotEqual(cached.verify.__code__.co_code,
+                                verifier.__code__.co_code)
+            retained = self._small_observer_capture(repository)
+            with self.assertRaisesRegex(ValueError, "witness differs"):
+                cached.verify(retained)
+            self.assertEqual(verifier(retained)["status"], "OBSERVED_UNSIGNED")
 
     def test_native_cross_rejects_observed_alternate_java_with_forged_argv(self):
         java = Path("/home/linuxbrew/.linuxbrew/opt/openjdk@21/bin/java")
@@ -248,8 +306,16 @@ class SignedRouteTests(unittest.TestCase):
                       "artifact_hash_provenance": "audited",
                       "complete_selected_suite": True}
             gradle.unlink()
+            check_output = full_signed_routes.subprocess.check_output
+            observer_source = Path(independent_linux_observer.__file__).read_bytes()
+            def candidate_source(command, **kwargs):
+                if command[-1] == (CANDIDATE + ":tools/qualification/"
+                                   "independent_linux_observer.py"):
+                    return observer_source
+                return check_output(command, **kwargs)
             with patch.object(full_signed_routes, "_source"), patch.object(
-                    full_signed_routes, "_observer_source"), patch(
+                    full_signed_routes.subprocess, "check_output",
+                    side_effect=candidate_source), patch(
                     "full_native_host_consumer.verify_cross_run", return_value=public):
                 self.assertEqual(full_signed_routes.verify(
                     ROOT, CANDIDATE, lane, archive, expected, hashes, runtime, digest), public)
@@ -322,6 +388,11 @@ class SignedRouteTests(unittest.TestCase):
                 expected["expected_archive_digests"]["staged-consumer"] = digest
                 self.assertEqual(full_signed_routes.verify(
                     ROOT, CANDIDATE, lane, relocated, expected, hashes, runtime, digest), public)
+                with patch.object(independent_linux_observer, "verify",
+                                  side_effect=AssertionError("imported verifier used")):
+                    self.assertEqual(full_signed_routes.verify(
+                        ROOT, CANDIDATE, lane, relocated, expected, hashes, runtime, digest),
+                        public)
 
     def test_approved_matrix_has_one_dedicated_route_per_lane(self):
         table = full_signed_routes.route_table(ROOT)

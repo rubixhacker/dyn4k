@@ -96,18 +96,20 @@ def _browser_observer_source(repository, candidate):
         raise ValueError("independent browser observer is absent from candidate") from None
     if (Path(repository) / path).read_bytes() != committed:
         raise ValueError("independent browser observer differs from candidate")
-def _observer_source(repository, candidate, module):
+
+
+def _observer_source(repository, candidate):
     path = "tools/qualification/independent_linux_observer.py"
     selected = (Path(repository) / path).resolve(strict=True)
-    loaded = Path(module.__file__).resolve(strict=True)
-    origin = Path(module.__spec__.origin).resolve(strict=True)
-    verifier = Path(module.verify.__code__.co_filename).resolve(strict=True)
     committed = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate}:{path}"],
         stderr=subprocess.PIPE)
-    if (loaded != selected or origin != selected or verifier != selected
-            or selected.read_bytes() != committed):
+    if selected.read_bytes() != committed:
         raise ValueError("independent Linux observer source differs from candidate")
+    namespace = {"__name__": "_candidate_independent_linux_observer",
+                 "__file__": str(selected), "__package__": None}
+    exec(compile(committed, str(selected), "exec", dont_inherit=True), namespace)
+    return namespace["verify"]
 
 
 def execution_witness(expected, candidate, lane, digest, runtime, mode,
@@ -263,9 +265,7 @@ def _cross_java_path(run, observed, image, java):
 
 def _cross_build_observer(repository, expected, archive, candidate, lane, build_digest,
                           hashes, toolchain, process, signed_witness):
-    import independent_linux_observer
-
-    _observer_source(repository, candidate, independent_linux_observer)
+    verifier = _observer_source(repository, candidate)
 
     binding = expected.get("expected_native_build_observer")
     if (not isinstance(binding, dict)
@@ -279,7 +279,7 @@ def _cross_build_observer(repository, expected, archive, candidate, lane, build_
     for name, key in (("events.jsonl", "events_sha256"),
                       ("witness.json", "witness_sha256")):
         _file(root / name, binding[key], "Native cross observer " + name)
-    observed, rows = independent_linux_observer.verify(root, include_events=True)
+    observed, rows = verifier(root, include_events=True)
     run = rows[0]
     launcher = _launcher(toolchain["gradle_executable"],
                          toolchain["gradle_sha256"], process.get("command"))
