@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -28,6 +29,158 @@ LANE = "tvosSimulatorArm64:tvOS simulator ARM64:current:debug-g"
 
 
 class CrossRunCollectionTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def regular_directory_swap(self, source, alternate):
+        original_names = collection._directory_names
+        source_id = source.stat().st_ino
+        swaps = []
+
+        @contextlib.contextmanager
+        def swapped_names(anchor):
+            with original_names(anchor) as names:
+                listed = list(names)
+                if os.fstat(anchor).st_ino != source_id:
+                    yield listed
+                    return
+                parked = source.with_name(source.name + "-parked")
+                source.rename(parked)
+                alternate.rename(source)
+                swaps.append(True)
+                try:
+                    yield listed
+                finally:
+                    source.rename(alternate)
+                    parked.rename(source)
+
+        with mock.patch.object(collection, "_directory_names", side_effect=swapped_names):
+            yield swaps
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_inventory_uses_enumerated_parent_for_nested_regular_member(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, alternate = root / "source", root / "alternate"
+            (source / "sub").mkdir(parents=True)
+            (alternate / "sub").mkdir(parents=True)
+            (source / "sub/receipt.bin").write_bytes(b"approved")
+            (alternate / "sub/receipt.bin").write_bytes(b"outside")
+            with self.regular_directory_swap(source, alternate) as swaps:
+                files = collection._file_inventory(source)
+            self.assertEqual(1, len(swaps))
+            self.assertEqual(hashlib.sha256(b"approved").hexdigest(),
+                             files["sub/receipt.bin"]["sha256"])
+            self.assertEqual(b"approved", (source / "sub/receipt.bin").read_bytes())
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_copy_uses_enumerated_parent_for_nested_regular_member(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, alternate = root / "source", root / "alternate"
+            (source / "sub").mkdir(parents=True)
+            (alternate / "sub").mkdir(parents=True)
+            (source / "sub/receipt.bin").write_bytes(b"approved")
+            (alternate / "sub/receipt.bin").write_bytes(b"outside")
+            with self.regular_directory_swap(source, alternate) as swaps:
+                collection._copy_directory(source, root / "frozen")
+            self.assertEqual(1, len(swaps))
+            self.assertEqual(b"approved", (root / "frozen/sub/receipt.bin").read_bytes())
+            self.assertEqual(b"approved", (source / "sub/receipt.bin").read_bytes())
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_public_collect_binds_regular_directory_swaps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, alternate = root / "source", root / "alternate"
+            source.mkdir()
+            alternate.mkdir()
+            (source / "receipt.bin").write_bytes(b"approved")
+            (alternate / "receipt.bin").write_bytes(b"outside")
+            files = collection._file_inventory(source)
+            index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                     "sources": [{"id": "rawdir", "origin": {"kind": "local",
+                                                          "path": str(source)},
+                                  "transport": {"format": "directory", "files": files,
+                                                "inventory_sha256":
+                                                collection._inventory_digest(files)}}],
+                     "bindings": [{"source_id": "rawdir", "lane": LANE,
+                                   "gate": "staged-consumer"}]}
+            index_path = root / "index.json"
+            index_path.write_text(json.dumps(index))
+            with self.regular_directory_swap(source, alternate) as swaps:
+                result = self.collect_fixture(root, index_path)
+            self.assertEqual(3, len(swaps))
+            row = result["cross_run"]["sources"][0]
+            self.assertEqual("NOT_RUN", row["status"])
+            self.assertEqual(b"approved", (root / "collection/raw/sources/rawdir/"
+                                           "original-directory/receipt.bin").read_bytes())
+            self.assertEqual(b"approved", (source / "receipt.bin").read_bytes())
+            self.assertEqual(0, self.public_verify(root).returncode)
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_public_collect_rejects_alternate_directory_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, alternate = root / "source", root / "alternate"
+            source.mkdir()
+            alternate.mkdir()
+            (source / "receipt.bin").write_bytes(b"approved")
+            (alternate / "receipt.bin").write_bytes(b"outside")
+            files = collection._file_inventory(alternate)
+            index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                     "sources": [{"id": "rawdir", "origin": {"kind": "local",
+                                                          "path": str(source)},
+                                  "transport": {"format": "directory", "files": files,
+                                                "inventory_sha256":
+                                                collection._inventory_digest(files)}}],
+                     "bindings": [{"source_id": "rawdir", "lane": LANE,
+                                   "gate": "staged-consumer"}]}
+            index_path = root / "index.json"
+            index_path.write_text(json.dumps(index))
+            with self.regular_directory_swap(source, alternate) as swaps:
+                result = self.collect_fixture(root, index_path)
+            self.assertEqual(3, len(swaps))
+            row = result["cross_run"]["sources"][0]
+            self.assertEqual("FAILED", row["status"])
+            self.assertIn("source directory byte inventory differs", row["reason"])
+            self.assertEqual(b"approved", (root / "collection/raw/sources/rawdir/"
+                                           "original-directory/receipt.bin").read_bytes())
+            self.assertEqual(0, self.public_verify(root).returncode)
+
+    @unittest.skipUnless(os.name == "posix", "requires descriptor-relative open")
+    def test_public_index_read_binds_ordinary_parent_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, index_path, _ = self.fixture(root)
+            holder, alternate = root / "holder", root / "alternate"
+            holder.mkdir()
+            alternate.mkdir()
+            index_path = index_path.rename(holder / index_path.name)
+            (alternate / "index.json").write_text('{"schema":0}')
+            real_open = os.open
+            swaps = 0
+
+            def swap_index(path, flags, *args, **kwargs):
+                nonlocal swaps
+                if path == "index.json" and kwargs.get("dir_fd") is not None:
+                    parked = root / "parked"
+                    holder.rename(parked)
+                    alternate.rename(holder)
+                    swaps += 1
+                    try:
+                        return real_open(path, flags, *args, **kwargs)
+                    finally:
+                        holder.rename(alternate)
+                        parked.rename(holder)
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch.object(collection.os, "open", side_effect=swap_index):
+                result = self.collect_fixture(root, index_path)
+            self.assertEqual(1, swaps)
+            self.assertEqual("NOT_RUN", result["cross_run"]["sources"][0]["status"])
+            self.assertEqual(index_path.read_bytes(),
+                             (root / "collection/source-index.json").read_bytes())
+            self.assertEqual(0, self.public_verify(root).returncode)
+
     def public_verify(self, root):
         return subprocess.run(
             ["python3", "-B", str(ROOT / "tools/qualification/collection.py"),
@@ -257,6 +410,7 @@ class CrossRunCollectionTests(unittest.TestCase):
                 archive, index_path, _ = self.fixture(root)
                 windows_os = types.SimpleNamespace(**vars(os))
                 windows_os.name = "nt"
+                windows_os.O_BINARY = 0
                 replaced = False
 
                 def lstat_source(path):
@@ -290,6 +444,12 @@ class CrossRunCollectionTests(unittest.TestCase):
                      mock.patch.object(collection, "_windows_handle_identity",
                                        side_effect=lambda handle:
                                        os.lstat(handle).st_ino), \
+                     mock.patch.object(collection, "_windows_handle_directory",
+                                       side_effect=lambda handle:
+                                       Path(handle).is_dir()), \
+                     mock.patch.dict(sys.modules, {"msvcrt": types.SimpleNamespace(
+                         open_osfhandle=lambda handle, flags:
+                         os.open(handle, os.O_RDONLY))}), \
                      mock.patch.object(collection, "_windows_close"), \
                      mock.patch.object(collection, "_open_windows_no_reparse",
                                        side_effect=open_source) as opened:
@@ -349,7 +509,7 @@ class CrossRunCollectionTests(unittest.TestCase):
             self.assertEqual(0, self.public_verify(root).returncode)
 
     @unittest.skipUnless(os.name == "posix", "requires descriptor-relative scan")
-    def test_public_directory_snapshot_rejects_transient_parent_swap(self):
+    def test_public_directory_snapshot_binds_transient_parent_swap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             holder = root / "holder"
@@ -394,12 +554,12 @@ class CrossRunCollectionTests(unittest.TestCase):
 
             with mock.patch.object(collection.os, "scandir", side_effect=swap_scan):
                 result = self.collect_fixture(root, index_path)
-            self.assertEqual(2, scans)
+            self.assertEqual(3, scans)
             row = result["cross_run"]["sources"][0]
-            self.assertEqual("FAILED", row["status"])
-            self.assertIn("symbolic source path", row["reason"])
-            self.assertFalse((root / "collection/raw/sources/rawdir/original-directory"
-                              / "receipt.json").exists())
+            self.assertEqual("NOT_RUN", row["status"])
+            self.assertEqual(b"bound source",
+                             (root / "collection/raw/sources/rawdir/original-directory"
+                              / "receipt.json").read_bytes())
             self.assertEqual(0, self.public_verify(root).returncode)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows directory handles")
@@ -438,6 +598,8 @@ class CrossRunCollectionTests(unittest.TestCase):
             self.assertTrue(attempted)
             self.assertTrue(blocked)
             self.assertEqual("NOT_RUN", result["cross_run"]["sources"][0]["status"])
+            holder.rename(moved)
+            moved.rename(holder)
 
             outside = root / "outside"
             outside.mkdir()

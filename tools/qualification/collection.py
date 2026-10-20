@@ -190,18 +190,29 @@ def _path_identity(path):
     return info.st_dev, info.st_ino
 
 
-def _windows_open(path, directory=False):
+def _windows_handle_directory(handle):
     class AttributeTag(ctypes.Structure):
         _fields_ = [("attributes", ctypes.c_ulong), ("tag", ctypes.c_ulong)]
 
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetFileInformationByHandleEx.argtypes = (
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
+    kernel.GetFileInformationByHandleEx.restype = ctypes.c_int
+    info = AttributeTag()
+    if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info),
+                                               ctypes.sizeof(info)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if info.attributes & WINDOWS_REPARSE_ATTRIBUTE:
+        raise ValueError("symbolic source path is forbidden")
+    return bool(info.attributes & WINDOWS_DIRECTORY_ATTRIBUTE)
+
+
+def _windows_open(path, directory=False):
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = (ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong,
                                    ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
                                    ctypes.c_void_p)
     kernel.CreateFileW.restype = ctypes.c_void_p
-    kernel.GetFileInformationByHandleEx.argtypes = (
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
-    kernel.GetFileInformationByHandleEx.restype = ctypes.c_int
     kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
     kernel.CloseHandle.restype = ctypes.c_int
     flags = WINDOWS_OPEN_REPARSE_POINT | (0x02000000 if directory else 0)
@@ -211,13 +222,7 @@ def _windows_open(path, directory=False):
     if handle == ctypes.c_void_p(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
-        info = AttributeTag()
-        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info),
-                                                   ctypes.sizeof(info)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        if info.attributes & WINDOWS_REPARSE_ATTRIBUTE:
-            raise ValueError("symbolic source path is forbidden")
-        if bool(info.attributes & WINDOWS_DIRECTORY_ATTRIBUTE) != directory:
+        if _windows_handle_directory(handle) != directory:
             raise ValueError("source path has wrong file type")
         return handle
     except BaseException:
@@ -287,27 +292,17 @@ def _windows_relative_open(parent, name, directory):
     ntdll.NtCreateFile.restype = ctypes.c_long
     handle = ctypes.c_void_p()
     result = IoStatus()
-    access = (0x1000a1 if directory else 0x80100080)
+    access = (0x1000a1 if directory else
+              0x80100080 if directory is False else 0x80100081)
     status = ntdll.NtCreateFile(ctypes.byref(handle), access,
                                 ctypes.byref(attributes), ctypes.byref(result),
-                                None, 0, 3 if directory else 1, 1,
+                                None, 0, 3 if directory is not False else 1, 1,
                                 WINDOWS_OPEN_REPARSE_POINT | 0x20, None, 0)
     if status != 0:
         raise OSError(f"anchored source open failed: NTSTATUS 0x{status & 0xffffffff:08x}")
     try:
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        class AttributeTag(ctypes.Structure):
-            _fields_ = [("attributes", ctypes.c_ulong), ("tag", ctypes.c_ulong)]
-        kernel.GetFileInformationByHandleEx.argtypes = (
-            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
-        kernel.GetFileInformationByHandleEx.restype = ctypes.c_int
-        info = AttributeTag()
-        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info),
-                                                   ctypes.sizeof(info)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        if info.attributes & WINDOWS_REPARSE_ATTRIBUTE:
-            raise ValueError("symbolic source path is forbidden")
-        if bool(info.attributes & WINDOWS_DIRECTORY_ATTRIBUTE) != directory:
+        actual_directory = _windows_handle_directory(handle)
+        if directory is not None and actual_directory != directory:
             raise ValueError("source path has wrong file type")
         return handle.value
     except BaseException:
@@ -454,6 +449,74 @@ def _directory_names(anchor):
             yield (member.name for member in members)
 
 
+@contextlib.contextmanager
+def _directory_child(parent, name, path):
+    if name in ("", ".", "..") or "/" in name or "\\" in name:
+        raise ValueError("unsafe source path component")
+    with contextlib.ExitStack() as stack:
+        if os.name == "nt":
+            import msvcrt
+
+            handle = _windows_relative_open(parent, name, directory=None)
+            try:
+                directory = _windows_handle_directory(handle)
+            except BaseException:
+                _windows_close(handle)
+                raise
+            if directory:
+                stack.callback(_windows_close, handle)
+                opened = handle
+                before = os.lstat(path)
+                if (_is_reparse(before) or not stat.S_ISDIR(before.st_mode)
+                        or before.st_ino != _windows_handle_identity(handle)):
+                    raise ValueError("source directory changed while opened")
+            else:
+                try:
+                    descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+                except BaseException:
+                    _windows_close(handle)
+                    raise
+                opened = stack.enter_context(os.fdopen(descriptor, "rb"))
+                before = os.fstat(opened.fileno())
+                if not before.st_ino:
+                    raise ValueError("source file identity is unavailable")
+        else:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            directory = stat.S_ISDIR(before.st_mode)
+            if _is_reparse(before):
+                raise ValueError("symbolic source member")
+            if not directory and not stat.S_ISREG(before.st_mode):
+                raise ValueError("nonregular source member")
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if directory:
+                flags |= os.O_DIRECTORY
+            descriptor = os.open(name, flags, dir_fd=parent)
+            stack.callback(os.close, descriptor)
+            opened = (descriptor if directory else
+                      stack.enter_context(os.fdopen(os.dup(descriptor), "rb")))
+        actual = (_windows_handle_identity(opened) if os.name == "nt" and directory
+                  else os.fstat(opened if directory else opened.fileno()))
+        if os.name == "nt" and directory:
+            if before.st_ino != actual:
+                raise ValueError("source directory changed while opened")
+        elif (not (stat.S_ISDIR(actual.st_mode) if directory else
+                   stat.S_ISREG(actual.st_mode))
+              or (before.st_dev, before.st_ino) != (actual.st_dev, actual.st_ino)):
+            raise ValueError("source member changed while opened")
+        yield opened, before, directory
+        after = (os.lstat(path) if os.name == "nt" else
+                 os.stat(name, dir_fd=parent, follow_symlinks=False))
+        if (_is_reparse(after)
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or (not directory and before.st_size != after.st_size)):
+            raise ValueError("source member changed while read")
+        if not directory:
+            finished = os.fstat(opened.fileno())
+            if ((before.st_dev, before.st_ino, before.st_size) !=
+                    (finished.st_dev, finished.st_ino, finished.st_size)):
+                raise ValueError("source member changed while read")
+
+
 def _file_inventory(root):
     root = Path(root)
     root_info = os.lstat(root)
@@ -463,36 +526,41 @@ def _file_inventory(root):
     count = 0
     total = 0
 
-    def visit(current, expected):
+    def visit(anchor, prefix):
         nonlocal count, total
-        with _anchored_open(current, directory=True, expected=expected) as anchor:
-            with _directory_names(anchor) as names:
-                for name in names:
-                    path = current / name
-                    relative = path.relative_to(root).as_posix()
-                    independent_gates._file_path_name(relative)
-                    info = os.lstat(path)
-                    if _is_reparse(info):
-                        raise ValueError(f"symbolic source member: {relative}")
-                    identity = info.st_dev, info.st_ino
-                    count += 1
-                    if count > MAX_MEMBERS:
-                        raise ValueError("source directory exceeds transport bounds")
-                    if stat.S_ISDIR(info.st_mode):
-                        visit(path, identity)
-                    elif stat.S_ISREG(info.st_mode):
+        with _directory_names(anchor) as names:
+            seen = set()
+            for name in names:
+                relative = f"{prefix}/{name}" if prefix else name
+                independent_gates._file_path_name(relative)
+                if name in seen:
+                    raise ValueError("duplicate source directory member")
+                seen.add(name)
+                count += 1
+                if count > MAX_MEMBERS:
+                    raise ValueError("source directory exceeds transport bounds")
+                with _directory_child(anchor, name, root / relative) as (child, info, directory):
+                    if directory:
+                        visit(child, relative)
+                    else:
                         total += info.st_size
                         if total > MAX_EXPANDED_BYTES:
                             raise ValueError("source directory exceeds transport bounds")
-                        hashed = digest(path, expected=identity)
-                        if (_path_identity(path) != identity
-                                or os.lstat(path).st_size != info.st_size):
+                        hashed = hashlib.sha256()
+                        read = 0
+                        while chunk := child.read(1024 * 1024):
+                            read += len(chunk)
+                            if read > info.st_size or read > MAX_EXPANDED_BYTES:
+                                raise ValueError("source directory changed while inventoried")
+                            hashed.update(chunk)
+                        if read != info.st_size:
                             raise ValueError("source directory changed while inventoried")
-                        files[relative] = {"size": info.st_size, "sha256": hashed}
-                    else:
-                        raise ValueError(f"nonregular source member: {relative}")
+                        files[relative] = {"size": info.st_size,
+                                           "sha256": hashed.hexdigest()}
 
-    visit(root, (root_info.st_dev, root_info.st_ino))
+    with _anchored_open(root, directory=True,
+                        expected=(root_info.st_dev, root_info.st_ino)) as anchor:
+        visit(anchor, "")
     return dict(sorted(files.items()))
 
 
@@ -681,27 +749,33 @@ def _copy_regular(source, destination, limit=None, preflight=True, expected=None
     if limit is None:
         limit = MAX_SOURCE_BYTES
     with _anchored_open(source, expected=expected) as original:
-        source_stat = os.fstat(original.fileno())
-        if not stat.S_ISREG(source_stat.st_mode):
-            raise ValueError("source file is not regular")
-        if preflight and source_stat.st_size > limit:
-            raise ValueError("source file exceeds byte bound")
-        total = 0
-        with Path(destination).open("wb") as frozen:
-            while chunk := original.read(min(1024 * 1024, limit - total + 1)):
-                remaining = limit - total
-                if len(chunk) > remaining:
-                    frozen.write(chunk[:remaining])
-                    raise ValueError("source file exceeds byte bound while copied")
-                frozen.write(chunk)
-                total += len(chunk)
-        if total != source_stat.st_size:
-            raise ValueError("source file changed size while copied")
+        total = _copy_open_regular(original, destination, limit, preflight)
         _safe_source_path(Path(source).absolute())
         after = os.lstat(source)
+        source_stat = os.fstat(original.fileno())
         if (_is_reparse(after) or (after.st_dev, after.st_ino) !=
                 (source_stat.st_dev, source_stat.st_ino)):
             raise ValueError("source file changed or became symbolic while copied")
+    return total
+
+
+def _copy_open_regular(original, destination, limit, preflight):
+    source_stat = os.fstat(original.fileno())
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise ValueError("source file is not regular")
+    if preflight and source_stat.st_size > limit:
+        raise ValueError("source file exceeds byte bound")
+    total = 0
+    with Path(destination).open("wb") as frozen:
+        while chunk := original.read(min(1024 * 1024, limit - total + 1)):
+            remaining = limit - total
+            if len(chunk) > remaining:
+                frozen.write(chunk[:remaining])
+                raise ValueError("source file exceeds byte bound while copied")
+            frozen.write(chunk)
+            total += len(chunk)
+    if total != source_stat.st_size:
+        raise ValueError("source file changed size while copied")
     return total
 
 
@@ -714,40 +788,38 @@ def _copy_directory(source, destination):
     count = 0
     total = 0
 
-    def visit(current, frozen, expected):
+    def visit(anchor, frozen, prefix):
         nonlocal count, total
-        with _anchored_open(current, directory=True, expected=expected) as anchor:
-            with _directory_names(anchor) as names:
-                for name in names:
-                    path = current / name
-                    relative = path.relative_to(source).as_posix()
-                    independent_gates._file_path_name(relative)
-                    count += 1
-                    if count > MAX_MEMBERS:
-                        raise ValueError("source directory exceeds transport bounds")
-                    target = frozen / name
-                    info = os.lstat(path)
-                    if _is_reparse(info):
-                        raise ValueError(f"symbolic source member: {relative}")
-                    identity = info.st_dev, info.st_ino
-                    if stat.S_ISDIR(info.st_mode):
+        with _directory_names(anchor) as names:
+            seen = set()
+            for name in names:
+                relative = f"{prefix}/{name}" if prefix else name
+                independent_gates._file_path_name(relative)
+                if name in seen:
+                    raise ValueError("duplicate source directory member")
+                seen.add(name)
+                count += 1
+                if count > MAX_MEMBERS:
+                    raise ValueError("source directory exceeds transport bounds")
+                target = frozen / name
+                with _directory_child(anchor, name, source / relative) as (child, info, directory):
+                    if directory:
                         target.mkdir()
-                        visit(path, target, identity)
-                    elif stat.S_ISREG(info.st_mode):
+                        visit(child, target, relative)
+                    else:
                         try:
-                            total += _copy_regular(path, target,
-                                                   limit=MAX_EXPANDED_BYTES - total,
-                                                   preflight=False, expected=identity)
+                            total += _copy_open_regular(
+                                child, target, MAX_EXPANDED_BYTES - total, False)
                         except ValueError as error:
                             if "exceeds byte bound" in str(error):
                                 raise ValueError(
                                     "source directory exceeds transport bounds while copied"
                                 ) from error
                             raise
-                    else:
-                        raise ValueError(f"nonregular source member: {relative}")
 
-    visit(source, destination, (root_info.st_dev, root_info.st_ino))
+    with _anchored_open(source, directory=True,
+                        expected=(root_info.st_dev, root_info.st_ino)) as anchor:
+        visit(anchor, destination, "")
 
 
 def _extract_transport(packed, fmt, destination):
