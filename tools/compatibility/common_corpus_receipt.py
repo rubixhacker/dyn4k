@@ -96,8 +96,15 @@ def verify(receipt: dict, ledger: dict, root: Path) -> str | None:
             return "full common report differs from replay or has missing host report"
         groups = [{"id": row["id"], "expected": row["expected"],
                    "reported": row["reported"]} for row in observed["groups"]]
-        if (receipt.get("total_cases") != 15075 or len(groups) != 12
+        required_group_ids = [group["id"] for group in full_corpus.GROUPS]
+        if ([group["id"] for group in groups] != required_group_ids
+                or len(groups) != len(required_group_ids)
                 or receipt.get("groups") != groups):
+            return "full common host counts or source case identities differ"
+        required_total = sum(len(full_corpus.expected_cases(manifest, group))
+                             for group in full_corpus.GROUPS)
+        if (sum(group["expected"] for group in groups) != required_total
+                or receipt.get("total_cases") != required_total):
             return "full common host counts or source case identities differ"
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         return f"full common receipt replay failed: {error}"
