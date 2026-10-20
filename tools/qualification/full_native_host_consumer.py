@@ -407,7 +407,7 @@ def macos_gradle_daemon_snapshot(client_pid, java):
     if platform.system() != "Darwin" or not client_pid:
         return
     libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-    listing = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
+    listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,command="], text=True)
     for line in listing.splitlines():
         match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
         if not match or int(match[2]) != client_pid:
