@@ -399,6 +399,37 @@ class ComparatorSeamTest(unittest.TestCase):
                     self.assertEqual("FAILED", result["status"], result)
                     self.assertIn("fixed floor role is missing", result["reason"])
 
+    def test_configured_floor_uses_declared_b1_role(self):
+        self.fixture = load_fixture("configured-30-r1")
+        self.fixture["callback_fixed_body_id"] = "b1"
+        self.fixture["counts"] = {"inputs": 1, "event": 1, "state": 1}
+        self.fixture["reference"] = {"file": "reference.jsonl.gz"}
+        rows = [
+            {"kind": "inputs", "id": self.fixture["id"]},
+            {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin", "payload": []},
+            {"kind": "state", "step": 1, "state": {"bodies": [
+                {"id": "b0", "rotationIncrementSum": 0.0},
+                {"id": "b1", "rotationIncrementSum": 0.0},
+            ]}},
+        ]
+        self.write_reference(rows)
+        candidate = json.loads(json.dumps(rows))
+        candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] = 1e-5
+        self.write_candidate(candidate)
+        result = self.result()
+        self.assertEqual("PASSED", result["status"], result)
+        candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] = 1.1e-4
+        self.write_candidate(candidate)
+        result = self.result()
+        self.assertEqual("FAILED", result["status"], result)
+        self.assertIn("numeric limit exceeded", result["reason"])
+        candidate[2]["state"]["bodies"][0]["rotationIncrementSum"] = 1e-5
+        candidate[2]["state"]["bodies"][1]["rotationIncrementSum"] = 1e-18
+        self.write_candidate(candidate)
+        result = self.result()
+        self.assertEqual("FAILED", result["status"], result)
+        self.assertIn("fixed floor differs", result["reason"])
+
     def test_outer_endpoint_uses_inner_state_budget(self):
         rows = json.loads(json.dumps(self.rows))
         rows[2]["state"] = {"position": [2.0, 3.0]}
