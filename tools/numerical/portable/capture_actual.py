@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -68,6 +69,41 @@ def clean_source():
     return git("--no-replace-objects", "rev-parse", "HEAD").decode().strip()
 
 
+def archive_file_names(method, worker_log):
+    names = {
+        "source.tar", "stage.log", "artifact.jar", "gradle.log",
+        "worker-classpath.txt", "execve.log", "capture.xml",
+        "portable-classes.zip", "runtime-java", "receipt.json",
+        Path(worker_log).name,
+    }
+    if method == "captureWheelActive":
+        names.update(("worker-write-traces.zip", "joint-Wheel-active.jsonl",
+                      "focused-assessment.json"))
+    return names
+
+
+def verify_archive_inventory(output, method, worker_log):
+    output = Path(output)
+    expected = archive_file_names(method, worker_log)
+    actual = {path.name for path in output.iterdir()}
+    if actual != expected or any(not path.is_file() or path.is_symlink()
+                                 for path in output.iterdir()):
+        raise CaptureRejected("archive inventory differs")
+    for name in expected - {"source.tar", "worker-write-traces.zip"}:
+        raw = (output / name).read_bytes()
+        if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+            raise CaptureRejected("archive exposed the environment")
+    if method == "captureWheelActive":
+        try:
+            with zipfile.ZipFile(output / "worker-write-traces.zip") as archive:
+                for name in archive.namelist():
+                    raw = archive.read(name)
+                    if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+                        raise CaptureRejected("archive exposed the environment")
+        except (OSError, zipfile.BadZipFile, RuntimeError, KeyError) as error:
+            raise CaptureRejected("worker write archive could not be scanned") from error
+
+
 def run_capture(method, output, reference_case=None):
     if method not in expected_case_ids(include_focused=True):
         raise CaptureRejected("unknown arithmetic producer method")
@@ -77,9 +113,16 @@ def run_capture(method, output, reference_case=None):
     if output.exists():
         raise CaptureRejected("capture output already exists")
     commit = clean_source()
+    temporary_root = Path(os.environ.get("TMPDIR", Path.home() / ".cache/dyn4k-capture")).resolve()
+    if not temporary_root.is_relative_to(Path.home().resolve()):
+        raise CaptureRejected("capture temporary root is not home-backed")
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="dyn4k-actual-", dir=temporary_root) as scratch:
+        return _run_capture(method, output, reference_case, commit, Path(scratch))
+
+
+def _run_capture(method, output, reference_case, commit, temporary):
     output.mkdir(parents=True)
-    temporary = output / "tmp"
-    temporary.mkdir()
     environment = os.environ.copy()
     environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(JDK21)
@@ -105,7 +148,7 @@ def run_capture(method, output, reference_case=None):
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
     class_load_pattern = output / "worker-class-load-%p.log"
     if method == "captureWheelActive":
-        trace_prefix = output / "worker-write-trace"
+        trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
                   "trace=execve,clone,clone3,write,writev,sendto,sendmsg",
                   "-o", str(trace_prefix)]
@@ -131,7 +174,7 @@ def run_capture(method, output, reference_case=None):
                     shutil.copyfile(matches[-1], worker_arguments)
             time.sleep(0.02)
     if method == "captureWheelActive":
-        trace_files = sorted(output.glob("worker-write-trace.*"))
+        trace_files = sorted(temporary.glob("worker-write-trace.*"))
         if not trace_files:
             raise CaptureRejected("worker write trace is missing")
         raw_traces = {}
@@ -221,6 +264,7 @@ def run_capture(method, output, reference_case=None):
                                           reference_case, case_path)
         (output / "focused-assessment.json").write_text(
             json.dumps(assessment, sort_keys=True, indent=2) + "\n")
+    verify_archive_inventory(output, method, worker_log)
     return receipt
 
 
