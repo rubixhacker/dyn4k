@@ -39,6 +39,28 @@ def canonical(value: object) -> str:
     return digest(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
 
 
+def checked_common_gate(ledger: dict, root: Path) -> dict:
+    record = ledger["review_receipts"]["common_corpus"]
+    name = record.get("path")
+    if (not isinstance(name, str) or not name or Path(name).is_absolute()
+            or ".." in Path(name).parts):
+        raise ValueError("common behavior gate path is missing or unsafe")
+    base = root.resolve()
+    path = (base / name).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        raise ValueError("common behavior gate path is missing or unsafe")
+    data = path.read_bytes()
+    if digest(data) != record.get("sha256"):
+        raise ValueError("common behavior gate hash differs")
+    gate = json.loads(data)
+    if not isinstance(gate, dict):
+        raise ValueError("common behavior gate is invalid")
+    gate_error = common_corpus_receipt.verify(gate, ledger, root)
+    if gate_error:
+        raise ValueError(f"common behavior gate differs: {gate_error}")
+    return gate
+
+
 def checked_original_sources(ledger: dict, source: Path) -> None:
     if candidate_coverage.git(source, "rev-parse", "HEAD") != ledger["baseline"]["commit"]:
         raise ValueError("pinned source revision differs")
@@ -113,10 +135,7 @@ def classify(ledger: dict, signature: dict, strict: dict, root: Path,
     visible = set(strict["compared_api_types"])
     compatible = strict["compatible_differences"]
     audited = []
-    gate = json.loads((root / "tools/compatibility/receipts/full-common-0681a8cd.json").read_text())
-    gate_error = common_corpus_receipt.verify(gate, ledger, root)
-    if gate_error:
-        raise ValueError(f"common behavior gate differs: {gate_error}")
+    gate = checked_common_gate(ledger, root)
     for identity in sorted(by_id):
         if outcomes[identity]["passed"]:
             continue

@@ -3,15 +3,103 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 import raw_signature_audit
 
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM = Path("/tmp/dyn4k-baseline-cache/dyn4j-source")
+
+
+class RawSignatureGateBindingTests(unittest.TestCase):
+    def test_ledger_selected_receipt_is_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "receipts" / "new-candidate.json"
+            path.parent.mkdir()
+            receipt = {"candidate_revision": "new-candidate"}
+            path.write_text(json.dumps(receipt))
+            ledger = {"review_receipts": {"common_corpus": {
+                "path": "receipts/new-candidate.json",
+                "sha256": raw_signature_audit.digest(path.read_bytes()),
+            }}}
+            with patch.object(raw_signature_audit.common_corpus_receipt, "verify",
+                              return_value=None) as verify:
+                self.assertEqual(raw_signature_audit.checked_common_gate(ledger, root), receipt)
+            verify.assert_called_once_with(receipt, ledger, root)
+
+    def test_changed_hash_and_unsafe_path_are_rejected_before_replay(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory)
+            path = root / "receipt.json"
+            path.write_text("not-json")
+            other_path = root / "other-receipt.json"
+            other_path.write_text("{}")
+            outside_path = Path(outside) / "receipt.json"
+            outside_path.write_text("{}")
+            (root / "linked-receipt.json").symlink_to(outside_path)
+            ledger = {"review_receipts": {"common_corpus": {
+                "path": "receipt.json", "sha256": "0" * 64,
+            }}}
+            with patch.object(raw_signature_audit.common_corpus_receipt, "verify") as verify:
+                with self.assertRaisesRegex(ValueError, "hash"):
+                    raw_signature_audit.checked_common_gate(ledger, root)
+                ledger["review_receipts"]["common_corpus"]["sha256"] = (
+                    raw_signature_audit.digest(path.read_bytes()))
+                ledger["review_receipts"]["common_corpus"]["path"] = "other-receipt.json"
+                with self.assertRaisesRegex(ValueError, "hash"):
+                    raw_signature_audit.checked_common_gate(ledger, root)
+                for unsafe in ("../receipt.json", str(path)):
+                    ledger["review_receipts"]["common_corpus"]["path"] = unsafe
+                    with self.subTest(path=unsafe), self.assertRaisesRegex(ValueError, "path"):
+                        raw_signature_audit.checked_common_gate(ledger, root)
+                ledger["review_receipts"]["common_corpus"]["path"] = "linked-receipt.json"
+                with self.assertRaisesRegex(ValueError, "path"):
+                    raw_signature_audit.checked_common_gate(ledger, root)
+            verify.assert_not_called()
+
+    def test_full_receipt_replay_failure_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "receipt.json"
+            path.write_text("{}")
+            ledger = {"review_receipts": {"common_corpus": {
+                "path": "receipt.json",
+                "sha256": raw_signature_audit.digest(path.read_bytes()),
+            }}}
+            with patch.object(raw_signature_audit.common_corpus_receipt, "verify",
+                              return_value="candidate source differs"):
+                with self.assertRaisesRegex(ValueError, "candidate source differs"):
+                    raw_signature_audit.checked_common_gate(ledger, root)
+
+    def test_historical_receipt_binding_still_passes(self):
+        ledger = json.loads((ROOT / "tools/compatibility/declaration-ledger.json").read_text())
+        receipt_path = ROOT / ledger["review_receipts"]["common_corpus"]["path"]
+        receipt = json.loads(receipt_path.read_text())
+        with patch.object(raw_signature_audit.common_corpus_receipt, "verify",
+                          return_value=None) as verify:
+            self.assertEqual(raw_signature_audit.checked_common_gate(ledger, ROOT), receipt)
+        verify.assert_called_once_with(receipt, ledger, ROOT)
+
+    def test_classify_uses_the_ledger_gate(self):
+        ledger = json.loads((ROOT / "tools/compatibility/declaration-ledger.json").read_text())
+        ledger["review_receipts"]["common_corpus"]["path"] = "receipts/new-candidate.json"
+        signature = json.loads(gzip.decompress(
+            (ROOT / "tools/compatibility/receipts/jvm-signatures-0681a8cd.json.gz").read_bytes()))
+        strict = json.loads((ROOT / "tools/compatibility/receipts/strict-jvm-0681a8cd.json").read_text())
+        with (patch.object(raw_signature_audit, "checked_original_sources"),
+              patch.object(raw_signature_audit.candidate_coverage, "digest",
+                           return_value=ledger["candidate_source"]["artifact_sha256"]),
+              patch.object(raw_signature_audit, "checked_common_gate",
+                           side_effect=ValueError("selected gate reached")) as gate):
+            with self.assertRaisesRegex(ValueError, "selected gate reached"):
+                raw_signature_audit.classify(ledger, signature, strict, ROOT, UPSTREAM)
+        gate.assert_called_once_with(ledger, ROOT)
 
 
 @unittest.skipUnless(UPSTREAM.is_dir(), "pinned source checkout unavailable")
