@@ -29,7 +29,7 @@ AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
-    "qualification.yml": "8bc7bce8bb15136c3de0dbbf9a3f18b37fedcbd69e48bb650ac5cb9cd70d62f5",
+    "qualification.yml": "f9e93932734cb8dc9a039826314804a2d3a86f9399eeb31bc3b807bafa96be1a",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
 def verify_sustained_workflow_contract(source):

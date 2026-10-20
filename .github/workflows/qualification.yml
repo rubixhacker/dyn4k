@@ -510,6 +510,7 @@ jobs:
             ${{ runner.temp }}/hosted-publication/
             ${{ runner.temp }}/artifact-audit.json
             build/staging-repository/.qualification/${{ matrix.host }}/
+          include-hidden-files: true
           if-no-files-found: error
       - name: Collect Windows publication logs
         if: always() && matrix.host == 'windows'
