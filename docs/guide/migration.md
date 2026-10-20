@@ -146,7 +146,11 @@ fun main() {
 }
 ```
 
-The complete block is compiled from this page by [check_examples.py](check_examples.py) against a staged `dyn4k` GAV. Run `python3 docs/guide/check_examples.py <staging-repository>` against a repository produced from API revision `0a141816`. Add `--run` to execute it. The guide-base staged artifact predates the approved operator policy and fails to compile the `+=` line because both `plus` and `plusAssign` are available. The staged artifact from API revision `0a141816` compiles and runs this block. That branch-scoped result does not prove the combined head; verification remains pending. The exact assignment assertions are in [IdiomaticApiTest at API revision `0a141816`](https://github.com/rubixhacker/dyn4k/blob/0a141816d77dbb4db08fbac429a1c3e5ed24a41d/dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt). That revision verifies all four operators and named methods. Its six-host and staged-consumer results are branch-scoped. The source is not in this guide branch's history.
+The complete block is compiled from this page by [check_examples.py](check_examples.py) against a staged `dyn4k` GAV. Run `python3 docs/guide/check_examples.py <staging-repository>` against a repository produced from API revision `0a141816`. Add `--run` to execute it. The guide-base staged artifact predates the approved operator policy and fails to compile the `+=` line because both `plus` and `plusAssign` are available.
+
+The staged artifact from API revision `0a141816` compiles and runs this block. That result is tied to its historical branch. It does not prove this tree's staged example. The exact assertions are in [IdiomaticApiTest at API revision `0a141816`](https://github.com/rubixhacker/dyn4k/blob/0a141816d77dbb4db08fbac429a1c3e5ed24a41d/dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt). That revision verifies all four operators and named methods. Its six-host and staged-consumer results remain branch-scoped.
+
+The approved operator policy is integrated in current history at `f84b2bcd`. The current tree includes [GeometryConveniences](../../dyn4k/src/commonMain/kotlin/io/github/rubixhacker/dyn4k/GeometryConveniences.kt) and its [IdiomaticApiTest](../../dyn4k/src/commonTest/kotlin/io/github/rubixhacker/dyn4k/IdiomaticApiTest.kt). The fenced example has not been run against an artifact staged from this tree.
 
 ## Migration examples
 
