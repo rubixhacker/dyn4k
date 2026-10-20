@@ -208,7 +208,8 @@ function BrowserReporter(baseReporterDecorator, karmaConfig, emitter) {
                 !names.includes('runtime.js') ||
                 !names.some(name => /^kotlin-test-karma-runner\.[0-9]+\.js$/.test(name)) ||
                 !names.some(name => new RegExp('^' +
-                    (target === 'js' ? packageName : 'load') + '\\.[0-9]+\\.js$').test(name)) ||
+                    (target === 'js' ? path.parse(selectedName).name : 'load') +
+                    '\\.[0-9]+\\.js$').test(name)) ||
                 (target === 'wasmJs' &&
                     !names.some(name => /^[0-9a-f]{20}\.wasm$/.test(name)))) {
             throw new Error('Karma generated executable inventory differs');
