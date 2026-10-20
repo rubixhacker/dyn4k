@@ -2,6 +2,7 @@ import copy
 import io
 import hashlib
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -232,7 +233,9 @@ class CrossRunCollectionTests(unittest.TestCase):
             source = root / "growing.bin"
             frozen = root / "frozen.bin"
             source.write_bytes(b"x" * (2 * 1024 * 1024))
-            reported = types.SimpleNamespace(st_mode=stat.S_IFREG, st_size=1024 * 1024)
+            actual = source.stat()
+            reported = types.SimpleNamespace(st_mode=stat.S_IFREG, st_size=1024 * 1024,
+                                             st_dev=actual.st_dev, st_ino=actual.st_ino)
             with mock.patch.object(collection.os, "fstat", return_value=reported):
                 with self.assertRaisesRegex(ValueError, "exceeds byte bound while copied"):
                     collection._copy_regular(source, frozen, limit=1024 * 1024 + 512)
@@ -245,6 +248,50 @@ class CrossRunCollectionTests(unittest.TestCase):
             self.assertEqual(512 * 1024, smaller.stat().st_size)
             with self.assertRaisesRegex(ValueError, "source file exceeds byte bound"):
                 collection.digest(source, 1024 * 1024)
+
+    def test_windows_open_route_keeps_bound_archive_and_rejects_replacement(self):
+        for behavior in ("regular", "reparse", "replacement"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive, index_path, _ = self.fixture(root)
+                windows_os = types.SimpleNamespace(**vars(os))
+                windows_os.name = "nt"
+                replaced = False
+
+                def lstat_source(path):
+                    info = os.lstat(path)
+                    if behavior == "replacement" and replaced and Path(path) == archive:
+                        return types.SimpleNamespace(
+                            st_mode=info.st_mode, st_dev=info.st_dev,
+                            st_ino=info.st_ino + 1)
+                    return info
+
+                windows_os.lstat = lstat_source
+
+                def open_source(path):
+                    nonlocal replaced
+                    if behavior == "reparse":
+                        raise ValueError("symbolic source path is forbidden")
+                    descriptor = os.open(path, os.O_RDONLY)
+                    if behavior == "replacement" and Path(path) == archive:
+                        replaced = True
+                    return descriptor
+
+                with mock.patch.object(collection, "os", windows_os), \
+                     mock.patch.object(collection, "_open_windows_no_reparse",
+                                       side_effect=open_source) as opened:
+                    result = self.collect_fixture(root, index_path)
+                self.assertGreater(opened.call_count, 0)
+                row = result["cross_run"]["sources"][0]
+                if behavior == "regular":
+                    self.assertEqual("NOT_RUN", row["status"])
+                    self.assertTrue(collection.verify_collection(
+                        ROOT, HEAD, [], root / "collection"))
+                else:
+                    self.assertEqual("FAILED", row["status"])
+                    self.assertIn("symbolic" if behavior == "reparse" else "changed",
+                                  row["reason"])
+                    self.assertEqual(0, self.public_verify(root).returncode)
 
     def test_directory_growth_after_inventory_keeps_bounded_raw_bytes(self):
         limit = 1024 * 1024
@@ -441,16 +488,16 @@ class CrossRunCollectionTests(unittest.TestCase):
                 collection._validate_index(index, HEAD, TREE,
                     independent_gates.load_approved_manifest(ROOT),
                     "rubixhacker/dyn4k", None, None, allow_local=False)
-        for mutation, reason in ((lambda value: value["sources"][0]["origin"].update(
-                                      path="/no/such/retained/archive.zip"),
+        for mutation, reason in ((lambda value, root: value["sources"][0]["origin"].update(
+                                      path=str(root / "missing/archive.zip")),
                                   "source archive is missing"),
-                                 (lambda value: value["sources"][0]["transport"].update(
+                                 (lambda value, root: value["sources"][0]["transport"].update(
                                       sha256="0" * 64),
                                   "source archive bytes differ from exact pin")):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 _, index_path, index = self.fixture(root)
-                mutation(index)
+                mutation(index, root)
                 index_path.write_text(json.dumps(index))
                 result = self.collect_fixture(root, index_path)
                 self.assertEqual("FAILED", result["cross_run"]["status"])

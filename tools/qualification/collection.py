@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -32,7 +33,7 @@ MAX_MEMBERS = 200_000
 def digest(path, limit=None):
     hashed = hashlib.sha256()
     total = 0
-    with Path(path).open("rb") as source:
+    with os.fdopen(_open_regular(path), "rb") as source:
         while chunk := source.read(1024 * 1024):
             total += len(chunk)
             if limit is not None and total > limit:
@@ -144,13 +145,89 @@ def _safe_source_path(path):
     if not path.is_absolute():
         raise ValueError("local source path must be absolute")
     for part in (path, *path.parents):
-        if part.is_symlink():
+        try:
+            mode = os.lstat(part)
+        except FileNotFoundError:
+            continue
+        if _is_reparse(mode):
             raise ValueError("symbolic source path is forbidden")
     return path
 
 
+def _is_reparse(info):
+    return (stat.S_ISLNK(info.st_mode)
+            or bool(getattr(info, "st_file_attributes", 0) & 0x400))
+
+
+def _path_identity(path):
+    _safe_source_path(Path(path).absolute())
+    info = os.lstat(path)
+    if _is_reparse(info):
+        raise ValueError("symbolic source path is forbidden")
+    if os.name == "nt" and not info.st_ino:
+        raise ValueError("source file identity is unavailable")
+    return info.st_dev, info.st_ino
+
+
+def _open_windows_no_reparse(path):
+    import msvcrt
+
+    class AttributeTag(ctypes.Structure):
+        _fields_ = [("attributes", ctypes.c_ulong), ("tag", ctypes.c_ulong)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = (ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong,
+                                   ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                                   ctypes.c_void_p)
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.GetFileInformationByHandleEx.argtypes = (
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong)
+    kernel.GetFileInformationByHandleEx.restype = ctypes.c_int
+    kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel.CloseHandle.restype = ctypes.c_int
+    handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = AttributeTag()
+        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info),
+                                                   ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if info.attributes & 0x400:
+            raise ValueError("symbolic source path is forbidden")
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        handle = None
+        return descriptor
+    finally:
+        if handle is not None:
+            kernel.CloseHandle(handle)
+
+
+def _open_regular(path):
+    path = _safe_source_path(Path(path).absolute())
+    before = os.lstat(path)
+    if _is_reparse(before) or not stat.S_ISREG(before.st_mode):
+        raise ValueError("source file is not regular")
+    descriptor = (_open_windows_no_reparse(path) if os.name == "nt" else
+                  os.open(path, os.O_RDONLY | os.O_NOFOLLOW))
+    try:
+        opened = os.fstat(descriptor)
+        _safe_source_path(path)
+        after = os.lstat(path)
+        if (_is_reparse(after) or not stat.S_ISREG(opened.st_mode)
+                or (os.name == "nt" and not opened.st_ino)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+                or (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino)):
+            raise ValueError("source file changed or became symbolic while opened")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _file_inventory(root):
-    if root.is_symlink() or not root.is_dir():
+    _safe_source_path(Path(root).absolute())
+    if _is_reparse(os.lstat(root)) or not root.is_dir():
         raise ValueError("source directory is missing or symbolic")
     files = {}
     count = 0
@@ -160,7 +237,7 @@ def _file_inventory(root):
             path = Path(base) / name
             relative = path.relative_to(root).as_posix()
             independent_gates._file_path_name(relative)
-            if path.is_symlink():
+            if _is_reparse(os.lstat(path)):
                 raise ValueError(f"symbolic source member: {relative}")
             if path.is_file():
                 size = path.stat().st_size
@@ -358,7 +435,7 @@ def _github_artifact(origin, candidate_sha, token, destination, expected_size):
 def _copy_regular(source, destination, limit=None, preflight=True):
     if limit is None:
         limit = MAX_SOURCE_BYTES
-    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    descriptor = _open_regular(source)
     with os.fdopen(descriptor, "rb") as original:
         source_stat = os.fstat(original.fileno())
         if not stat.S_ISREG(source_stat.st_mode):
@@ -374,12 +451,20 @@ def _copy_regular(source, destination, limit=None, preflight=True):
                     raise ValueError("source file exceeds byte bound while copied")
                 frozen.write(chunk)
                 total += len(chunk)
+        if total != source_stat.st_size:
+            raise ValueError("source file changed size while copied")
+        _safe_source_path(Path(source).absolute())
+        after = os.lstat(source)
+        if (_is_reparse(after) or (after.st_dev, after.st_ino) !=
+                (source_stat.st_dev, source_stat.st_ino)):
+            raise ValueError("source file changed or became symbolic while copied")
     return total
 
 
 def _copy_directory(source, destination):
     source, destination = Path(source), Path(destination)
-    if source.is_symlink() or not source.is_dir():
+    _safe_source_path(source.absolute())
+    if _is_reparse(os.lstat(source)) or not source.is_dir():
         raise ValueError("source directory is missing or symbolic")
     destination.mkdir(parents=True, exist_ok=False)
     count = 0
@@ -387,7 +472,7 @@ def _copy_directory(source, destination):
     pending = [(source, destination)]
     while pending:
         current, frozen = pending.pop()
-        if current.is_symlink() or not current.is_dir():
+        if _is_reparse(os.lstat(current)) or not current.is_dir():
             raise ValueError("source directory member is symbolic or missing")
         with os.scandir(current) as members:
             for member in members:
@@ -398,7 +483,7 @@ def _copy_directory(source, destination):
                 if count > MAX_MEMBERS:
                     raise ValueError("source directory exceeds transport bounds")
                 target = frozen / member.name
-                if member.is_symlink():
+                if _is_reparse(member.stat(follow_symlinks=False)):
                     raise ValueError(f"symbolic source member: {relative}")
                 if member.is_dir(follow_symlinks=False):
                     target.mkdir()
@@ -534,13 +619,15 @@ def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_d
             if pin["format"] == "directory":
                 if source_path is None:
                     raise ValueError("GitHub Actions source must be a ZIP")
+                identity = _path_identity(source_path)
                 before = _file_inventory(source_path)
                 frozen = folder / "original-directory"
                 _copy_directory(source_path, frozen)
                 after = _file_inventory(source_path)
                 copied = _file_inventory(frozen)
                 row["raw_inventory"] = copied
-                if before != after or before != copied:
+                if (identity != _path_identity(source_path)
+                        or before != after or before != copied):
                     raise ValueError("source directory changed while copied")
                 if copied != pin["files"] or _inventory_digest(copied) != pin["inventory_sha256"]:
                     raise ValueError("source directory byte inventory differs")
@@ -555,10 +642,10 @@ def snapshot_source_index(index_path, candidate_sha, tree, manifest, artifacts_d
                         raise ValueError("source archive is missing")
                     if source_path.stat().st_size > MAX_SOURCE_BYTES:
                         raise ValueError("source archive exceeds byte bound")
-                    before = (source_path.stat().st_size,
+                    before = (_path_identity(source_path), source_path.stat().st_size,
                               digest(source_path, MAX_SOURCE_BYTES))
                     _copy_regular(source_path, frozen)
-                    after = (source_path.stat().st_size,
+                    after = (_path_identity(source_path), source_path.stat().st_size,
                              digest(source_path, MAX_SOURCE_BYTES))
                     if before != after:
                         raise ValueError("source archive changed while copied")
@@ -920,25 +1007,29 @@ def _snapshot_external_references(archive_map, approved, stable):
             if resolved not in snapshots:
                 frozen = references / str(len(snapshots))
                 if source.is_dir():
+                    identity_before = _path_identity(source)
                     before = _file_inventory(source)
                     _copy_directory(source, frozen)
                     after = _file_inventory(source)
                     copied = _file_inventory(frozen)
-                    if before != after or before != copied:
+                    if (identity_before != _path_identity(source)
+                            or before != after or before != copied):
                         raise ValueError("external archive directory changed while copied")
                     identity = {"kind": "directory", "files": copied,
                                 "inventory_sha256": _inventory_digest(copied)}
                 elif source.is_file():
                     if source.stat().st_size > MAX_SOURCE_BYTES:
                         raise ValueError("external archive exceeds byte bound")
-                    before = (source.stat().st_size, digest(source, MAX_SOURCE_BYTES))
+                    before = (_path_identity(source), source.stat().st_size,
+                              digest(source, MAX_SOURCE_BYTES))
                     _copy_regular(source, frozen)
-                    after = (source.stat().st_size, digest(source, MAX_SOURCE_BYTES))
-                    if before != after or before != (frozen.stat().st_size,
-                                                      digest(frozen, MAX_SOURCE_BYTES)):
+                    after = (_path_identity(source), source.stat().st_size,
+                             digest(source, MAX_SOURCE_BYTES))
+                    if before != after or before[1:] != (frozen.stat().st_size,
+                                                         digest(frozen, MAX_SOURCE_BYTES)):
                         raise ValueError("external archive changed while copied")
-                    identity = {"kind": "file", "size": before[0],
-                                "sha256": before[1]}
+                    identity = {"kind": "file", "size": before[1],
+                                "sha256": before[2]}
                 else:
                     raise ValueError("external archive is nonregular")
                 snapshots[resolved] = {"frozen": str(frozen), "identity": identity}
