@@ -153,6 +153,27 @@ class Api21DeviceTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 subject.api21_pid_from_ps(raw)
 
+    def test_runtime_identity_accepts_selected_api21_x86_and_rejects_wrong_abi(self):
+        properties = {
+            "ro.build.version.sdk": "21",
+            "ro.build.fingerprint": subject.API21_FINGERPRINTS["x86"],
+            "ro.product.cpu.abi": "x86",
+            "ro.product.cpu.abilist": "x86",
+            "ro.product.model": "Android SDK built for x86",
+            "sys.boot_completed": "1",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            def capture(arguments, destination, **_kwargs):
+                Path(destination).write_text(properties[arguments[-1]] + "\n")
+
+            with mock.patch.object(subject, "adb_capture", side_effect=capture):
+                archive = Path(temporary)
+                self.assertEqual(subject.runtime_identity(archive, 21, "x86"), properties)
+                with self.assertRaisesRegex(ValueError, "installed ABI differs"):
+                    subject.runtime_identity(archive, 21, "x86_64")
+                with self.assertRaisesRegex(ValueError, "approved guest"):
+                    subject.runtime_identity(archive, 37, "x86")
+
 
 if __name__ == "__main__":
     unittest.main()

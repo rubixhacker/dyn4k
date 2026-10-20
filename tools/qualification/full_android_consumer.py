@@ -293,7 +293,9 @@ def installed_apk(package, archive, prefix):
     return {"package_path": paths[0], "sha256": sha256(target)}
 
 
-def runtime_identity(archive, expected_api):
+def runtime_identity(archive, expected_api, expected_abi):
+    if expected_abi not in (("x86_64", "x86") if expected_api == 21 else ("x86_64",)):
+        raise ValueError("selected API and ABI are not an approved guest")
     keys = ("ro.build.version.sdk", "ro.build.fingerprint", "ro.product.cpu.abi",
             "ro.product.cpu.abilist", "ro.product.model", "sys.boot_completed")
     props = {}
@@ -303,7 +305,7 @@ def runtime_identity(archive, expected_api):
         props[key] = path.read_text().strip()
     if props["ro.build.version.sdk"] != str(expected_api) or props["sys.boot_completed"] != "1":
         raise ValueError("installed API or boot status differs")
-    if props["ro.product.cpu.abi"] != "x86_64":
+    if props["ro.product.cpu.abi"] != expected_abi:
         raise ValueError("installed ABI differs from approved guest")
     return props
 
@@ -507,8 +509,12 @@ def verify_archive(checkout, archive, expected_digest, expected_core_aar,
         if (archive / (key.replace(".", "-") + ".txt")).read_text().strip() != value:
             raise ValueError(f"raw runtime property differs: {key}")
     if props["ro.build.version.sdk"] == "21":
+        abi = props["ro.product.cpu.abi"]
+        if (abi not in API21_FINGERPRINTS
+                or props["ro.build.fingerprint"] != API21_FINGERPRINTS[abi]):
+            raise ValueError("archived API 21 ABI or fingerprint differs from approved guest")
         selected_pid = validate_api21_process_log(
-            (archive / "logcat.txt").read_text(), PACKAGE, "x86_64", runtime["before_pid"])
+            (archive / "logcat.txt").read_text(), PACKAGE, abi, runtime["before_pid"])
         if (api21_pid_from_ps((archive / "ps-before.txt").read_text()) != runtime["before_pid"]
                 or api21_pid_from_ps((archive / "ps-after.txt").read_text(),
                                      required=False) is not None
@@ -543,7 +549,7 @@ def verify_archive(checkout, archive, expected_digest, expected_core_aar,
             "candidate_sha": candidate, "archive_digest": expected_digest}
 
 
-def execute_lane(checkout, staging, output, archive, variant, expected_api):
+def execute_lane(checkout, staging, output, archive, variant, expected_api, expected_abi):
     manifest, cases = approved_cases(checkout)
     prepared = json.loads((output / "compile-result.json").read_text())
     builds = json.loads((output / "build-result.json").read_text())
@@ -588,11 +594,11 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
         dex_dir.mkdir()
         descriptors, _ = dex_evidence(archive / "app.apk", dex_dir, SDK)
         transformation = {"debug_classes": len(descriptors)}
-    identity = runtime_identity(archive, expected_api)
+    identity = runtime_identity(archive, expected_api, expected_abi)
     if expected_api == 37 and identity["ro.build.fingerprint"] != (
             "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.019/15611780:user/release-keys"):
         raise ValueError("API 37 fingerprint differs from pinned guest")
-    if expected_api == 21 and identity["ro.build.fingerprint"] != API21_FINGERPRINTS["x86_64"]:
+    if expected_api == 21 and identity["ro.build.fingerprint"] != API21_FINGERPRINTS[expected_abi]:
         raise ValueError("API 21 fingerprint differs from pinned guest")
     adb_capture(["shell", "ps"] if expected_api == 21 else ["shell", "ps", "-A"],
                 archive / "guest-processes-before.txt")
@@ -636,7 +642,7 @@ def execute_lane(checkout, staging, output, archive, variant, expected_api):
     adb_capture(["logcat", "-d"], archive / "logcat.txt")
     logcat = (archive / "logcat.txt").read_text()
     if expected_api == 21:
-        selected_pid = validate_api21_process_log(logcat, PACKAGE, "x86_64", before_pid)
+        selected_pid = validate_api21_process_log(logcat, PACKAGE, expected_abi, before_pid)
     else:
         selected_pid = validate_full_process_log(logcat, PACKAGE)
     if expected_api == 21:
@@ -707,6 +713,7 @@ def main(argv=None):
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--variant", choices=("debug", "release"))
     parser.add_argument("--expected-api", type=int, choices=(21, 37))
+    parser.add_argument("--expected-abi", choices=("x86_64", "x86"), default="x86_64")
     parser.add_argument("--expected-archive-digest")
     parser.add_argument("--expected-core-aar-sha256")
     parser.add_argument("--expected-facade-aar-sha256")
@@ -740,7 +747,7 @@ def main(argv=None):
         archive = args.archive.resolve()
         try:
             result = execute_lane(checkout, staging, output, archive, args.variant,
-                                  args.expected_api)
+                                  args.expected_api, args.expected_abi)
         except Exception as error:
             if archive.is_dir():
                 write(archive / "attempt-failure.json", json.dumps(
