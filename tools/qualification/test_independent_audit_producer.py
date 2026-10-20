@@ -1,6 +1,8 @@
 import copy
 import hashlib
 import json
+import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -179,8 +181,144 @@ class IndependentAuditProducerTests(unittest.TestCase):
         except OSError:
             pass
         else:
-            with self.assertRaisesRegex(ValueError, "symbolic or escaping member"):
+            with self.assertRaisesRegex(ValueError, "symbolic or reparse archive path"):
                 producer._snapshot(archive)
+
+    def test_archive_scan_rejects_hardlinks_duplicate_entries_and_mutation(self):
+        archive = self.root / "strict-archive"
+        archive.mkdir()
+        receipt = archive / "receipt.json"
+        receipt.write_text("{}")
+        payload = archive / "payload.bin"
+        payload.write_bytes(b"original")
+        self.assertIn("payload.bin", producer._snapshot(archive)["files"])
+        self.assertIsInstance(independent_gates.archive_digest(archive), str)
+
+        alias = archive / "hardlink.bin"
+        os.link(payload, alias)
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            with self.subTest(scan=scan, alteration="hardlink"):
+                with self.assertRaisesRegex(ValueError, "hardlinked archive file"):
+                    scan(archive)
+        alias.unlink()
+
+        with mock.patch.object(independent_gates.os, "walk", return_value=[
+                (str(archive), [], ["receipt.json", "payload.bin", "payload.bin"])]):
+            for scan in (producer._snapshot, independent_gates.archive_digest):
+                with self.subTest(scan=scan, alteration="duplicate"):
+                    with self.assertRaisesRegex(ValueError, "duplicate archive path"):
+                        scan(archive)
+
+        original_read = independent_gates.os.read
+        def mutate_during_read(handle, size):
+            chunk = original_read(handle, size)
+            if chunk and os.fstat(handle).st_ino == payload.stat().st_ino:
+                payload.write_bytes(b"changed")
+            return chunk
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            payload.write_bytes(b"original")
+            with self.subTest(scan=scan, alteration="mutation"), mock.patch.object(
+                    independent_gates.os, "read", side_effect=mutate_during_read):
+                with self.assertRaisesRegex(ValueError, "archive file changed during read"):
+                    scan(archive)
+
+    def test_mocked_internal_junction_and_generic_reparse_are_rejected(self):
+        archive = self.root / "mocked-reparse"
+        member = archive / "inside"
+        member.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        original_junction = Path.is_junction
+        with mock.patch.object(Path, "is_junction", lambda path: (
+                path == member or original_junction(path))):
+            for scan in (producer._snapshot, independent_gates.archive_digest):
+                with self.subTest(scan=scan, alteration="junction"):
+                    with self.assertRaisesRegex(ValueError, "reparse archive path"):
+                        scan(archive)
+
+        original_lstat = Path.lstat
+        class ReparseState:
+            st_file_attributes = stat.FILE_ATTRIBUTE_REPARSE_POINT
+
+            def __init__(self, state):
+                self.state = state
+
+            def __getattr__(self, name):
+                return getattr(self.state, name)
+
+        def reparse_lstat(path):
+            state = original_lstat(path)
+            return ReparseState(state) if path == member else state
+
+        with mock.patch.object(Path, "lstat", reparse_lstat):
+            for scan in (producer._snapshot, independent_gates.archive_digest):
+                with self.subTest(scan=scan, alteration="generic-reparse"):
+                    with self.assertRaisesRegex(ValueError, "reparse archive path"):
+                        scan(archive)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX replacement of an open file")
+    def test_archive_scan_rejects_same_bytes_replaced_during_read(self):
+        archive = self.root / "replacement-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        payload = archive / "payload.bin"
+        original_read = independent_gates.os.read
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            payload.write_bytes(b"same bytes")
+            mtime = payload.stat().st_mtime_ns
+            replaced = False
+
+            def replace_during_read(handle, size):
+                nonlocal replaced
+                chunk = original_read(handle, size)
+                if (chunk and not replaced
+                        and os.fstat(handle).st_ino == payload.stat().st_ino):
+                    replacement = archive / "replacement.tmp"
+                    replacement.write_bytes(b"same bytes")
+                    os.utime(replacement, ns=(mtime, mtime))
+                    os.replace(replacement, payload)
+                    replaced = True
+                return chunk
+
+            with self.subTest(scan=scan), mock.patch.object(
+                    independent_gates.os, "read", side_effect=replace_during_read):
+                with self.assertRaisesRegex(ValueError, "archive file (identity changed|changed during read)"):
+                    scan(archive)
+            self.assertTrue(replaced)
+
+    @unittest.skipUnless(os.name == "nt", "requires actual Windows reparse and hardlink support")
+    def test_windows_junction_reparse_and_hardlink_fail_closed(self):
+        archive = self.root / "windows-archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        target = archive / "target"
+        target.mkdir()
+        junction = archive / "junction"
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(target)],
+                       check=True, capture_output=True)
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            with self.subTest(scan=scan, alteration="junction"):
+                with self.assertRaisesRegex(ValueError, "reparse archive path"):
+                    scan(archive)
+        junction.rmdir()
+
+        payload = archive / "payload.bin"
+        payload.write_bytes(b"payload")
+        link = archive / "symbolic.bin"
+        link.symlink_to(payload)
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            with self.subTest(scan=scan, alteration="file-reparse"):
+                with self.assertRaisesRegex(ValueError, "reparse archive path"):
+                    scan(archive)
+        link.unlink()
+
+        hardlink = archive / "hardlink.bin"
+        os.link(payload, hardlink)
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            with self.subTest(scan=scan, alteration="hardlink"):
+                with self.assertRaisesRegex(ValueError, "hardlinked archive file"):
+                    scan(archive)
 
     def test_native_cross_preparation_binds_only_schema3_build_fields(self):
         lane = "linuxArm64:Linux ARM64:current:debug-g"

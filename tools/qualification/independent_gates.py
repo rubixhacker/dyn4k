@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -230,21 +231,95 @@ def _file_path(root, relative):
 
 
 def _archive_paths(root):
-    actual = set()
+    return set(_archive_scan(root))
+
+
+def _archive_identity(path):
+    path = Path(path)
+    state = path.lstat()
+    attributes = getattr(state, "st_file_attributes", None)
+    if (path.is_symlink() or path.is_junction()
+            or (attributes is not None and attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)):
+        raise ValueError(f"symbolic or reparse archive path: {path}")
+    if os.name == "nt" and attributes is None:
+        raise ValueError(f"Windows archive reparse status is unavailable: {path}")
+    if type(state.st_ino) is not int or state.st_ino <= 0 or state.st_dev is None:
+        raise ValueError(f"archive file identity is unavailable: {path}")
+    if stat.S_ISREG(state.st_mode) and state.st_nlink != 1:
+        raise ValueError(f"hardlinked archive file: {path}")
+    if not stat.S_ISREG(state.st_mode) and not stat.S_ISDIR(state.st_mode):
+        raise ValueError(f"nonregular archive path: {path}")
+    return (state.st_dev, state.st_ino, state.st_mode, state.st_nlink,
+            state.st_size, state.st_mtime_ns, state.st_ctime_ns, attributes)
+
+
+def _archive_scan(root):
+    root = Path(root)
+    if not root.is_absolute() or ".." in root.parts or not root.is_dir():
+        raise ValueError(f"archive path is absent or relative: {root}")
+    ancestors = {path: _archive_identity(path) for path in (root, *root.parents)}
+    for path, identity in ancestors.items():
+        if not stat.S_ISDIR(identity[2]):
+            raise ValueError(f"archive ancestor is not a directory: {path}")
+    identities = {}
+    files = {}
+    seen = set()
     for base, directories, filenames in os.walk(root, followlinks=False):
+        base = Path(base)
+        identities.setdefault(base, _archive_identity(base))
         for name in directories + filenames:
-            path = Path(base) / name
-            if path.is_symlink():
-                raise ValueError(f"symbolic archive path: {path.relative_to(root)}")
+            path = base / name
             relative = path.relative_to(root).as_posix()
             _file_path_name(relative)
-            if path.is_file():
-                if path.stat().st_nlink != 1:
-                    raise ValueError(f"hardlinked archive file: {relative}")
-                actual.add(relative)
-            elif not path.is_dir():
-                raise ValueError(f"nonregular archive path: {relative}")
-    return actual
+            key = os.path.normcase(relative)
+            if key in seen:
+                raise ValueError(f"duplicate archive path: {relative}")
+            seen.add(key)
+            before = _archive_identity(path)
+            identities[path] = before
+            if stat.S_ISDIR(before[2]):
+                if name in filenames:
+                    raise ValueError(f"archive entry type changed: {relative}")
+                continue
+            if name in directories:
+                raise ValueError(f"archive entry type changed: {relative}")
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            handle = os.open(path, flags)
+            try:
+                opened = os.fstat(handle)
+                if (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_nlink,
+                        opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns,
+                        getattr(opened, "st_file_attributes", None)) != before:
+                    raise ValueError(f"archive file identity changed: {relative}")
+                sha = hashlib.sha256()
+                while chunk := os.read(handle, 1024 * 1024):
+                    sha.update(chunk)
+                os.lseek(handle, 0, os.SEEK_SET)
+                repeat = hashlib.sha256()
+                while chunk := os.read(handle, 1024 * 1024):
+                    repeat.update(chunk)
+                if repeat.digest() != sha.digest():
+                    raise ValueError(f"archive file changed during read: {relative}")
+                closed = os.fstat(handle)
+                if (closed.st_dev, closed.st_ino, closed.st_mode, closed.st_nlink,
+                        closed.st_size, closed.st_mtime_ns, closed.st_ctime_ns,
+                        getattr(closed, "st_file_attributes", None)) != before:
+                    raise ValueError(f"archive file changed during read: {relative}")
+            finally:
+                os.close(handle)
+            if _archive_identity(path) != before:
+                raise ValueError(f"archive file identity changed: {relative}")
+            files[relative] = {"sha256": sha.hexdigest(), "mtime_ns": before[5],
+                               "dev": before[0], "ino": before[1],
+                               "nlink": before[3], "size": before[4],
+                               "ctime_ns": before[6]}
+    for path, before in identities.items():
+        if _archive_identity(path) != before:
+            raise ValueError(f"archive entry changed during scan: {path}")
+    for path, before in ancestors.items():
+        if _archive_identity(path) != before:
+            raise ValueError(f"archive ancestor changed during scan: {path}")
+    return files
 
 
 def _file_path_name(relative):
@@ -293,11 +368,11 @@ def _inventory(root, receipt):
 
 def archive_digest(root):
     root = Path(root)
-    paths = _archive_paths(root)
+    paths = _archive_scan(root)
     if "receipt.json" not in paths:
         raise ValueError("raw receipt is absent")
-    return digest([{"path": name, "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest(),
-                    "mtime_ns": (root / name).stat().st_mtime_ns}
+    return digest([{"path": name, "sha256": paths[name]["sha256"],
+                    "mtime_ns": paths[name]["mtime_ns"]}
                    for name in sorted(paths)])
 
 
@@ -310,6 +385,35 @@ def consumer_contract(manifest, lane_id):
     return {"target": lane["target"], "runtime": lane["runtime"],
             "version": lane["version"], "configuration": lane["configuration"],
             "cases": cases}
+
+
+def _proven_ancestor(repository, revision, candidate_sha, label):
+    prefix = ["git", "--no-replace-objects", "-C", str(repository)]
+    shallow = subprocess.run(prefix + ["rev-parse", "--is-shallow-repository"],
+                             capture_output=True, text=True, check=False)
+    if shallow.returncode or shallow.stderr.strip() or shallow.stdout.strip() != "false":
+        raise ValueError(f"{label} revision ancestry is unavailable")
+    graft_path = subprocess.run(prefix + ["rev-parse", "--git-path", "info/grafts"],
+                                capture_output=True, text=True, check=False)
+    if graft_path.returncode or graft_path.stderr.strip() or not graft_path.stdout.strip():
+        raise ValueError(f"{label} revision ancestry is unavailable")
+    grafts = Path(graft_path.stdout.strip())
+    if not grafts.is_absolute():
+        grafts = Path(repository) / grafts
+    if grafts.is_file() and grafts.stat().st_size:
+        raise ValueError(f"{label} revision ancestry is unavailable")
+    history = subprocess.run(prefix + ["rev-list", "--missing=print", candidate_sha],
+                             capture_output=True, text=True, check=False)
+    if (history.returncode or history.stderr.strip()
+            or any(line.startswith("?") for line in history.stdout.splitlines())):
+        raise ValueError(f"{label} revision ancestry is unavailable")
+    checked = subprocess.run(prefix + ["merge-base", "--is-ancestor", revision,
+                                       candidate_sha],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                             check=False)
+    if checked.returncode not in (0, 1) or checked.stderr:
+        raise ValueError(f"{label} revision ancestry is unavailable")
+    return checked.returncode == 0
 
 
 def _policy_binding(repository, candidate_sha):
@@ -325,14 +429,10 @@ def _policy_binding(repository, candidate_sha):
     committed_checker = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:{checker}"], stderr=subprocess.PIPE)
-    lineage = [subprocess.run(
-        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
-         "--is-ancestor", revision, candidate_sha],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False).returncode
-        for revision in APPROVED_COMPARATOR_REVISIONS]
-    if any(code not in (0, 1) for code in lineage):
-        raise ValueError("numerical comparator revision ancestry is unavailable")
-    expected_checker = (APPROVED_POLICY[checker] if 0 in lineage
+    lineage = [_proven_ancestor(repository, revision, candidate_sha,
+                                "numerical comparator")
+               for revision in APPROVED_COMPARATOR_REVISIONS]
+    expected_checker = (APPROVED_POLICY[checker] if any(lineage)
                         else HISTORICAL_COMPARATOR_SHA256)
     checker_digest = hashlib.sha256(committed_checker).hexdigest()
     if checker_digest != expected_checker:
@@ -342,13 +442,9 @@ def _policy_binding(repository, candidate_sha):
         ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:{fixture}"], stderr=subprocess.PIPE)
     candidate_digest = hashlib.sha256(committed).hexdigest()
-    changed = subprocess.run(
-        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
-         "--is-ancestor", CURRENT_FIXTURE_REVISION, candidate_sha],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
-    if changed.returncode not in (0, 1):
-        raise ValueError("numerical fixture revision ancestry is unavailable")
-    expected_digest = (APPROVED_POLICY[fixture] if changed.returncode == 0
+    changed = _proven_ancestor(repository, CURRENT_FIXTURE_REVISION, candidate_sha,
+                               "numerical fixture")
+    expected_digest = (APPROVED_POLICY[fixture] if changed
                        else HISTORICAL_FIXTURE_SHA256)
     if (hashlib.sha256(local.read_bytes()).hexdigest() != APPROVED_POLICY[fixture]
             or candidate_digest != expected_digest):

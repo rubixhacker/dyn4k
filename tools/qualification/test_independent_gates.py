@@ -305,6 +305,44 @@ class IndependentGateSeamTests(unittest.TestCase):
                                         "approved policy/checker blob differs: tools/numerical/compare.py"):
                 independent_gates._policy_binding(ROOT, candidate)
 
+    def test_shallow_history_cannot_select_historical_comparator_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            def git(repository, *args):
+                return subprocess.run(["git", "-C", str(repository), *args],
+                                      check=True, capture_output=True, text=True).stdout.strip()
+
+            git(source, "init", "-q")
+            tracked = source / "history.txt"
+            tracked.write_text("approved\n")
+            git(source, "add", "history.txt")
+            git(source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "-qm", "approved")
+            approved = git(source, "rev-parse", "HEAD")
+            git(source, "tag", "approved")
+            tracked.write_text("candidate\n")
+            git(source, "add", "history.txt")
+            git(source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "-qm", "candidate")
+            candidate = git(source, "rev-parse", "HEAD")
+            self.assertTrue(independent_gates._proven_ancestor(
+                source, approved, candidate, "numerical comparator"))
+
+            shallow = Path(temporary) / "shallow"
+            subprocess.run(["git", "clone", "-q", "--depth=1", source.as_uri(),
+                            str(shallow)], check=True, capture_output=True)
+            git(shallow, "fetch", "-q", "--depth=1", "origin",
+                "refs/tags/approved:refs/tags/approved")
+            self.assertEqual("true", git(shallow, "rev-parse", "--is-shallow-repository"))
+            ambiguous = subprocess.run(["git", "-C", str(shallow), "merge-base",
+                                        "--is-ancestor", approved, candidate],
+                                       capture_output=True)
+            self.assertEqual(1, ambiguous.returncode)
+            with self.assertRaisesRegex(ValueError, "revision ancestry is unavailable"):
+                independent_gates._proven_ancestor(
+                    shallow, approved, candidate, "numerical comparator")
+
     def test_prospective_and_joint_obligations_are_separate_when_unexecuted(self):
         gates = independent_gates.evaluate(self.manifest, BASE, LANE, {}, ROOT)["gates"]
         self.assertEqual(318, gates["numerical-parity"]["subgates"]["prospective-rule-arithmetic"]["required_cases"])

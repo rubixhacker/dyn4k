@@ -58,19 +58,7 @@ def _sha(path):
 
 def _snapshot(path):
     root = Path(path)
-    if (not root.is_absolute() or ".." in root.parts or not root.is_dir()
-            or any(parent.is_symlink() or parent.is_junction()
-                   for parent in (root, *root.parents))):
-        raise ValueError(f"archive path is absent, relative, or symbolic: {root}")
-    files = {}
-    for item in root.rglob("*"):
-        if item.is_symlink() or not item.resolve().is_relative_to(root.resolve()):
-            raise ValueError(f"archive has a symbolic or escaping member: {item}")
-        if item.is_file():
-            relative = item.relative_to(root).as_posix()
-            files[relative] = {"sha256": _sha(item), "mtime_ns": item.stat().st_mtime_ns}
-        elif not item.is_dir():
-            raise ValueError(f"archive has a nonregular member: {item}")
+    files = independent_gates._archive_scan(root)
     return {"path": str(root), "files": files,
             "snapshot_sha256": independent_gates.digest(files)}
 
