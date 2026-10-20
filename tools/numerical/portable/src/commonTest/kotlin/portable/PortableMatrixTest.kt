@@ -33,6 +33,7 @@ import org.dyn4j.world.PhysicsBodySweptAABBProducer
 import org.dyn4j.dynamics.BodyFixture
 import kotlin.math.PI
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 class PortableMatrixTest {
     private val recorder = NumericalRecorder { println("NUMERICAL_JSON $it") }
@@ -421,6 +422,142 @@ class PortableMatrixTest {
             "MotorSpeed" to listOf(-PI / 2, 0.0, PI / 2)),
     )
 
+    private fun numericJointCaseId(type: String, field: String, value: Double) =
+        "joint-$type-$field-${numericJointCaseLabel(value)}"
+
+    private fun numericJointCaseLabel(value: Double) = when (value) {
+        0.0 -> "0.0"
+        0.2 -> "0.2"
+        0.25 -> "0.25"
+        0.3 -> "0.3"
+        0.5 -> "0.5"
+        1.0 -> "1.0"
+        2.0 -> "2.0"
+        8.0 -> "8.0"
+        10.0 -> "10.0"
+        1000.0 -> "1000.0"
+        -1.0 -> "-1.0"
+        -PI / 2 -> "-1.5707963267948966"
+        PI / 2 -> "1.5707963267948966"
+        else -> error("unsupported numeric joint case value: $value")
+    }
+
+    @Test
+    fun numericAndLimitJointCaseIdsMatchPinnedBaseline() {
+        val numericIds = numericJointFields.flatMap { (type, fields) ->
+            fields.flatMap { (field, values) ->
+                values.map { value -> numericJointCaseId(type, field, value) }
+            }
+        }
+        val limitIds = listOf("Angle", "Distance", "Prismatic", "Revolute", "Weld", "Wheel")
+            .flatMap { type -> listOf("range", "equal").map { variant ->
+                "joint-$type-limits-$variant"
+            } }
+
+        assertEquals(pinnedNumericAndLimitCaseIds, numericIds + limitIds)
+    }
+
+    private val pinnedNumericAndLimitCaseIds = """
+        joint-Angle-Ratio-0.5
+        joint-Angle-Ratio-1.0
+        joint-Angle-Ratio-2.0
+        joint-Angle-Ratio--1.0
+        joint-Distance-SpringDampingRatio-0.0
+        joint-Distance-SpringDampingRatio-0.2
+        joint-Distance-SpringDampingRatio-1.0
+        joint-Distance-SpringFrequency-2.0
+        joint-Distance-SpringFrequency-8.0
+        joint-Distance-MaximumSpringForce-0.0
+        joint-Distance-MaximumSpringForce-10.0
+        joint-Distance-MaximumSpringForce-1000.0
+        joint-Friction-MaximumForce-0.0
+        joint-Friction-MaximumForce-10.0
+        joint-Friction-MaximumForce-1000.0
+        joint-Friction-MaximumTorque-0.0
+        joint-Friction-MaximumTorque-0.25
+        joint-Friction-MaximumTorque-10.0
+        joint-Motor-CorrectionFactor-0.0
+        joint-Motor-CorrectionFactor-0.3
+        joint-Motor-CorrectionFactor-1.0
+        joint-Motor-MaximumForce-0.0
+        joint-Motor-MaximumForce-10.0
+        joint-Motor-MaximumForce-1000.0
+        joint-Motor-MaximumTorque-0.0
+        joint-Motor-MaximumTorque-0.25
+        joint-Motor-MaximumTorque-10.0
+        joint-Pin-SpringDampingRatio-0.0
+        joint-Pin-SpringDampingRatio-0.2
+        joint-Pin-SpringDampingRatio-1.0
+        joint-Pin-SpringFrequency-2.0
+        joint-Pin-SpringFrequency-8.0
+        joint-Pin-CorrectionFactor-0.0
+        joint-Pin-CorrectionFactor-0.3
+        joint-Pin-CorrectionFactor-1.0
+        joint-Pin-MaximumSpringForce-0.0
+        joint-Pin-MaximumSpringForce-10.0
+        joint-Pin-MaximumSpringForce-1000.0
+        joint-Pin-MaximumCorrectionForce-0.0
+        joint-Pin-MaximumCorrectionForce-10.0
+        joint-Pin-MaximumCorrectionForce-1000.0
+        joint-Prismatic-SpringDampingRatio-0.0
+        joint-Prismatic-SpringDampingRatio-0.2
+        joint-Prismatic-SpringDampingRatio-1.0
+        joint-Prismatic-SpringFrequency-2.0
+        joint-Prismatic-SpringFrequency-8.0
+        joint-Prismatic-MaximumSpringForce-0.0
+        joint-Prismatic-MaximumSpringForce-10.0
+        joint-Prismatic-MaximumSpringForce-1000.0
+        joint-Prismatic-MaximumMotorForce-0.0
+        joint-Prismatic-MaximumMotorForce-10.0
+        joint-Prismatic-MaximumMotorForce-1000.0
+        joint-Prismatic-MotorSpeed--1.0
+        joint-Prismatic-MotorSpeed-0.0
+        joint-Prismatic-MotorSpeed-1.0
+        joint-Pulley-Ratio-0.5
+        joint-Pulley-Ratio-1.0
+        joint-Pulley-Ratio-2.0
+        joint-Revolute-MaximumMotorTorque-0.0
+        joint-Revolute-MaximumMotorTorque-0.25
+        joint-Revolute-MaximumMotorTorque-10.0
+        joint-Revolute-MotorSpeed--1.5707963267948966
+        joint-Revolute-MotorSpeed-0.0
+        joint-Revolute-MotorSpeed-1.5707963267948966
+        joint-Weld-SpringDampingRatio-0.0
+        joint-Weld-SpringDampingRatio-0.2
+        joint-Weld-SpringDampingRatio-1.0
+        joint-Weld-SpringFrequency-2.0
+        joint-Weld-SpringFrequency-8.0
+        joint-Weld-MaximumSpringTorque-0.0
+        joint-Weld-MaximumSpringTorque-0.25
+        joint-Weld-MaximumSpringTorque-10.0
+        joint-Wheel-SpringDampingRatio-0.0
+        joint-Wheel-SpringDampingRatio-0.2
+        joint-Wheel-SpringDampingRatio-1.0
+        joint-Wheel-SpringFrequency-2.0
+        joint-Wheel-SpringFrequency-8.0
+        joint-Wheel-MaximumSpringForce-0.0
+        joint-Wheel-MaximumSpringForce-10.0
+        joint-Wheel-MaximumSpringForce-1000.0
+        joint-Wheel-MaximumMotorTorque-0.0
+        joint-Wheel-MaximumMotorTorque-0.25
+        joint-Wheel-MaximumMotorTorque-10.0
+        joint-Wheel-MotorSpeed--1.5707963267948966
+        joint-Wheel-MotorSpeed-0.0
+        joint-Wheel-MotorSpeed-1.5707963267948966
+        joint-Angle-limits-range
+        joint-Angle-limits-equal
+        joint-Distance-limits-range
+        joint-Distance-limits-equal
+        joint-Prismatic-limits-range
+        joint-Prismatic-limits-equal
+        joint-Revolute-limits-range
+        joint-Revolute-limits-equal
+        joint-Weld-limits-range
+        joint-Weld-limits-equal
+        joint-Wheel-limits-range
+        joint-Wheel-limits-equal
+    """.trimIndent().lines()
+
     private fun setNumericMode(joint: Joint<Body>, field: String, value: Double) {
         when (field) {
             "Ratio" -> when (joint) {
@@ -501,7 +638,7 @@ class PortableMatrixTest {
                 if (type == "Pin" && field in listOf("CorrectionFactor", "MaximumCorrectionForce"))
                     (selected as PinJoint<*>).setSpringEnabled(false)
                 setNumericMode(selected, field, value)
-                recorder.capture(CaseSpec("joint-$type-$field-$value", "joints-limits-motors",
+                recorder.capture(CaseSpec(numericJointCaseId(type, field, value), "joints-limits-motors",
                     "default", 60, 600, mapOf("jointType" to type, "field" to field,
                         "initialValue" to value)), world)
             }
