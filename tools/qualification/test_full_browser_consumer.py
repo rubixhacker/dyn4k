@@ -31,6 +31,22 @@ def real_karma_root():
     return root
 
 
+def pinned_reporter_fixture(fixture=None, lock=None):
+    consumer = Path(__file__).resolve().parents[2] / browser.CONSUMER
+    fixture = fixture or consumer / "fixtures/karma-kotlin-reporter-3.3.0.js"
+    lock = lock or consumer / "consumer-yarn.lock"
+    entry = ('kotlin-web-helpers@3.3.0:\n'
+             '  version "3.3.0"\n'
+             '  resolved "https://registry.yarnpkg.com/kotlin-web-helpers/-/'
+             'kotlin-web-helpers-3.3.0.tgz#4c0bf6bcfa64752f6f1531e4c84583943bc7e9d6"')
+    if entry not in lock.read_text():
+        raise AssertionError("browser reporter fixture lock pin differs")
+    if not fixture.is_file() or hashlib.sha256(fixture.read_bytes()).hexdigest() != (
+            "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"):
+        raise AssertionError("browser reporter fixture source hash differs")
+    return fixture
+
+
 class SchemaFiveDispatchTest(unittest.TestCase):
     def test_minimum_firefox_uses_worker_and_process_witness(self):
         repository = Path("/selected/source")
@@ -1043,6 +1059,7 @@ class SelectedBundleTest(unittest.TestCase):
         if not (cache / "root/js/node_modules/karma/package.json").is_file():
             self.skipTest("selected real Karma package fixture is absent")
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
+        producer_fixture = pinned_reporter_fixture()
         script = "\n".join((
             "const assert = require('node:assert/strict');",
             "const crypto = require('node:crypto');",
@@ -1080,17 +1097,31 @@ class SelectedBundleTest(unittest.TestCase):
             "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files, set: () => {},",
             "    preprocessors: {[runner]: ['webpack', 'sourcemap'],",
             "        [selected]: ['webpack', 'sourcemap']}};",
-            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync, mkdirSync: () => {},",
+            "const producer = path.join(root, 'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "const pinned = fs.readFileSync(process.argv[3]);",
+            "const synthetic = new Map(Object.entries(JSON.parse(process.argv[4]))",
+            "    .map(([name, digest]) => [path.join(root, name), digest]));",
+            "const marker = 'qualification-pinned-input:';",
+            "const interceptedFs = {readFileSync: name => path.resolve(name) === producer && !fs.existsSync(name) ? pinned :",
+            "    fs.existsSync(name) ? fs.readFileSync(name) :",
+            "    synthetic.has(name) ? Buffer.from(marker + name) : fs.readFileSync(name),",
+            "    realpathSync: fs.realpathSync, mkdirSync: () => {},",
             "    writeFileSync: () => {}, openSync: () => 1};",
+            "const pinnedCrypto = {createHash: algorithm => {",
+            "    const actual = crypto.createHash(algorithm); let selected;",
+            "    return {update(bytes) {const value = bytes.toString();",
+            "        if (value.startsWith(marker) && synthetic.has(value.slice(marker.length)))",
+            "            selected = synthetic.get(value.slice(marker.length));",
+            "        else actual.update(bytes); return this;},",
+            "        digest(format) {return selected || actual.digest(format);}};}};",
             "function injectedRequire(name) {",
             "    if (name === 'node:fs') return interceptedFs;",
-            "    if (name === 'node:crypto') return crypto;",
+            "    if (name === 'node:crypto') return pinnedCrypto;",
             "    if (name === 'node:path') return path;",
             "    if (name === 'karma/lib/config') return karma;",
             "    throw new Error(name);",
             "}",
-            "injectedRequire.resolve = () => path.join(root,",
-            "    'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "injectedRequire.resolve = () => producer;",
             "const env = {DYN4K_BROWSER_REPORTER_SOURCE: process.argv[1],",
             "    DYN4K_BROWSER_REPORTER_ATTESTATION: path.join(tmpdir, 'reporter.json'),",
             "    DYN4K_BROWSER_RAW_KARMA: path.join(tmpdir, 'raw.jsonl'),",
@@ -1120,13 +1151,16 @@ class SelectedBundleTest(unittest.TestCase):
             "files[5].isBinary = undefined;",
             "assert.doesNotThrow(() => new Reporter(null, config, null));",
         ))
-        completed = subprocess.run(["node", "-e", script, str(reporter), str(cache)],
+        completed = subprocess.run(["node", "-e", script, str(reporter), str(cache),
+                                    str(producer_fixture),
+                                    json.dumps(browser.RUNTIME_INPUT_SHA256)],
                                    check=False, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_reporter_wasm_pattern_rejects_unserved_loader(self):
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
         root = real_karma_root()
+        producer_fixture = pinned_reporter_fixture()
         script = "\n".join((
             "const assert = require('node:assert/strict');",
             "const fs = require('node:fs');",
@@ -1154,16 +1188,30 @@ class SelectedBundleTest(unittest.TestCase):
             "const config = {plugins: [{[key]: ['type', OriginalReporter]}], files, set: () => {},",
             "  preprocessors: {[runner]: ['webpack', 'sourcemap'],",
             "    [selected]: ['webpack', 'sourcemap']}};",
-            "const interceptedFs = {readFileSync: fs.readFileSync, realpathSync: fs.realpathSync, mkdirSync: () => {},",
+            "const producer = path.join(root, 'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "const pinned = fs.readFileSync(process.argv[3]);",
+            "const synthetic = new Map(Object.entries(JSON.parse(process.argv[4]))",
+            "  .map(([name, digest]) => [path.join(root, name), digest]));",
+            "const marker = 'qualification-pinned-input:';",
+            "const interceptedFs = {readFileSync: name => path.resolve(name) === producer && !fs.existsSync(name) ? pinned :",
+            "  fs.existsSync(name) ? fs.readFileSync(name) :",
+            "  synthetic.has(name) ? Buffer.from(marker + name) : fs.readFileSync(name),",
+            "  realpathSync: fs.realpathSync, mkdirSync: () => {},",
             "  writeFileSync: () => {}, openSync: () => 1};",
+            "const pinnedCrypto = {createHash: algorithm => {",
+            "  const actual = require('node:crypto').createHash(algorithm); let selected;",
+            "  return {update(bytes) {const value = bytes.toString();",
+            "    if (value.startsWith(marker) && synthetic.has(value.slice(marker.length)))",
+            "      selected = synthetic.get(value.slice(marker.length));",
+            "    else actual.update(bytes); return this;},",
+            "    digest(format) {return selected || actual.digest(format);}};}};",
             "function injectedRequire(name) {",
             "  if (name === 'node:fs') return interceptedFs;",
-            "  if (name === 'node:crypto') return require('node:crypto');",
+            "  if (name === 'node:crypto') return pinnedCrypto;",
             "  if (name === 'node:path') return path;",
             "  if (name === 'karma/lib/config') return karma;",
             "  throw Error(name);}",
-            "injectedRequire.resolve = () => path.join(root,",
-            "  'kotlin-web-helpers/dist/karma-kotlin-reporter.js');",
+            "injectedRequire.resolve = () => producer;",
             "const env = {DYN4K_BROWSER_TARGET: 'wasmJs',",
             "  DYN4K_BROWSER_REPORTER_SOURCE: process.argv[1],",
             "  DYN4K_BROWSER_REPORTER_ATTESTATION: '/evidence/reporter.json',",
@@ -1181,7 +1229,9 @@ class SelectedBundleTest(unittest.TestCase):
             "files[5].served = true; files[5].isBinary = true;",
             "assert.throws(() => new Reporter(null, config, null), /binary pattern/);",
         ))
-        completed = subprocess.run(["node", "-e", script, str(reporter), str(root)],
+        completed = subprocess.run(["node", "-e", script, str(reporter), str(root),
+                                    str(producer_fixture),
+                                    json.dumps(browser.WASM_INPUT_SHA256)],
                                    check=False, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
@@ -1198,6 +1248,24 @@ class SelectedBundleTest(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError,
                                             "real Karma control module hash differs"):
                     real_karma_root()
+
+    def test_pinned_reporter_fixture_rejects_missing_changed_source_and_lock(self):
+        source = pinned_reporter_fixture().read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "karma-kotlin-reporter.js"
+            lock = root / "consumer-yarn.lock"
+            lock.write_bytes((Path(__file__).resolve().parents[2] / browser.YARN_LOCK).read_bytes())
+            with self.assertRaisesRegex(AssertionError, "fixture source hash differs"):
+                pinned_reporter_fixture(fixture, lock)
+            fixture.write_bytes(source + b" ")
+            with self.assertRaisesRegex(AssertionError, "fixture source hash differs"):
+                pinned_reporter_fixture(fixture, lock)
+            fixture.write_bytes(source)
+            self.assertEqual(pinned_reporter_fixture(fixture, lock), fixture)
+            lock.write_text("kotlin-web-helpers@3.2.0:\n")
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
 
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
