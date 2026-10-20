@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import types
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -37,6 +38,38 @@ def checkout_matches_commit(paths):
     return all((ROOT / path).read_bytes() == subprocess.check_output(
         ["git", "--no-replace-objects", "show", f"HEAD:{path}"], cwd=ROOT)
         for path in paths)
+
+
+def reviewed_arithmetic_at(revision):
+    approved = {
+        "6040b40265975b9091db430d79269cb5ea3d9868":
+            independent_gates.APPROVED_P2_HISTORICAL_PRODUCERS["actual_arithmetic.py"],
+        "ffdc8ba9b600732e6927e38e7d3da43a519994a4":
+            independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"],
+    }
+    if revision not in approved:
+        raise AssertionError("historical P2 revision is not approved for this replay")
+    bound = {"actual_arithmetic.py": approved[revision],
+             "rotation_oracle.py": independent_gates.APPROVED_P2_PRODUCERS[
+                 "rotation_oracle.py"]}
+    sources = {}
+    for name in ("rotation_oracle.py", "actual_arithmetic.py"):
+        path = f"tools/numerical/portable/{name}"
+        raw = subprocess.check_output(["git", "--no-replace-objects", "show",
+                                       f"{revision}:{path}"], cwd=ROOT)
+        if hashlib.sha256(raw).hexdigest() != bound[name]:
+            raise AssertionError(f"reviewed historical P2 producer differs: {path}")
+        sources[name] = raw
+    rotation = types.ModuleType("rotation_oracle")
+    rotation.__file__ = str(ROOT / "tools/numerical/portable/rotation_oracle.py")
+    exec(compile(sources["rotation_oracle.py"], "rotation_oracle.py", "exec"),
+         rotation.__dict__)
+    arithmetic = types.ModuleType("actual_arithmetic")
+    arithmetic.__file__ = str(ROOT / "tools/numerical/portable/actual_arithmetic.py")
+    with mock.patch.dict(sys.modules, {"rotation_oracle": rotation}):
+        exec(compile(sources["actual_arithmetic.py"], "actual_arithmetic.py", "exec"),
+             arithmetic.__dict__)
+    return arithmetic
 
 
 class IndependentGateSeamTests(unittest.TestCase):
@@ -1072,6 +1105,58 @@ class IndependentGateSeamTests(unittest.TestCase):
         with mock.patch.object(subprocess, "check_output", tampered_committed):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, assembly)
+    def test_p2_operation_assembly_pins_three_changed_producers(self):
+        approved_revision = "0a8c7d74a2194c3e3b7428dddc273376dc854a0d"
+        previous = "5a333f6cca2b774b42f53c1241a5e135fa29ecea"
+        expected_changes = {
+            "actual_arithmetic.py": "d4ea004cd0056b85845b1a281e9caf386536c3707aa6a702258c720080656d5a",
+            "capture_actual.py": "d27b6d615ab8425aa050933ea57b46cd6ff7b8e489f9ccbf2fa064cd7e6717f8",
+            "rotation_oracle.py": "a765c8ab4ffda48df651ec0df923f3cfeff9de7a734c78155963ea851d489a3e",
+        }
+        self.assertEqual(approved_revision, independent_gates.P2_OPERATION_ASSEMBLY_REVISION)
+        self.assertEqual(expected_changes, {
+            name: independent_gates.APPROVED_P2_OPERATION_PRODUCERS[name]
+            for name in expected_changes})
+        self.assertEqual(independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, previous))
+        self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, approved_revision))
+        for name, digest in independent_gates.APPROVED_P2_OPERATION_PRODUCERS.items():
+            path = f"tools/numerical/portable/{name}"
+            self.assertEqual(digest, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{approved_revision}:{path}"], cwd=ROOT)).hexdigest())
+        for revision in ("00af7a10", "2acec83c", "03125a11", "15184cbf"):
+            with self.subTest(unreviewed=revision), self.assertRaisesRegex(
+                    ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        for name in expected_changes:
+            with self.subTest(stale=name), mock.patch.dict(
+                    independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
+                    {name: independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS[name]}):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, approved_revision)
+            path = ROOT / "tools/numerical/portable" / name
+            original = Path.read_bytes
+
+            def altered(file_path):
+                raw = original(file_path)
+                return raw + b"\n# altered\n" if file_path == path else raw
+
+            with mock.patch.object(Path, "read_bytes", altered):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, approved_revision)
+        original_show = subprocess.check_output
+        changed_path = "tools/numerical/portable/capture_actual.py"
+
+        def altered_committed(command, *args, **kwargs):
+            raw = original_show(command, *args, **kwargs)
+            if "show" in command and f"{approved_revision}:{changed_path}" in command:
+                return raw + b"\n# altered committed producer\n"
+            return raw
+
+        with mock.patch.object(subprocess, "check_output", altered_committed):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, approved_revision)
 
     def test_p2_canonical_archive_source_keeps_exact_revision_windows(self):
         source = "tools/numerical/portable/actual_arithmetic.py"
@@ -1090,7 +1175,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                    (f"{independent_gates.P2_CLASS_LOAD_REVISION}^", historical),
                    (independent_gates.P2_CLASS_LOAD_REVISION, class_load),
                    (f"{owner}^", class_load), (f"{assembled}^", class_load),
-                   (owner, canonical), (assembled, canonical), (current, canonical))
+                   (owner, canonical), (assembled, canonical),
+                   (independent_gates.P2_NATIVE_02C_ASSEMBLY_REVISION, canonical),
+                   (current, independent_gates.APPROVED_P2_OPERATION_PRODUCERS[
+                       "actual_arithmetic.py"]))
         for revision, expected in windows:
             with self.subTest(revision=revision):
                 committed = subprocess.check_output(["git", "--no-replace-objects", "show",
@@ -1316,7 +1404,10 @@ class IndependentGateSeamTests(unittest.TestCase):
         source = Path("/var/home/stewart/dyn4k-evidence/portable-p2-bridge-6040b402-free-motion-check")
         sys.path.insert(0, str(ROOT / "tools/numerical/portable"))
         try:
-            from actual_arithmetic import CaptureRejected, expected_case_ids, verify_capture
+            arithmetic = reviewed_arithmetic_at("6040b40265975b9091db430d79269cb5ea3d9868")
+            CaptureRejected = arithmetic.CaptureRejected
+            expected_case_ids = arithmetic.expected_case_ids
+            verify_capture = arithmetic.verify_capture
             raw = (source / "capture.xml").read_bytes()
             summary = verify_capture(raw, "captureFreeMotion",
                                      expected_case_ids()["captureFreeMotion"])
@@ -1354,9 +1445,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                      "portable_classes": "portable-classes.zip"}
         sys.path.insert(0, str(ROOT / "tools/numerical/portable"))
         try:
-            import actual_arithmetic as arithmetic
-            self.assertEqual(independent_gates.APPROVED_P2_PRODUCERS["actual_arithmetic.py"],
-                             hashlib.sha256(Path(arithmetic.__file__).read_bytes()).hexdigest())
+            arithmetic = reviewed_arithmetic_at("ffdc8ba9b600732e6927e38e7d3da43a519994a4")
             with (mock.patch.object(arithmetic, "_ROOT", producer_root),
                   mock.patch.object(arithmetic, "_STAGED_JAR", staged_jar)):
                 for name, count, resets in (("ffdc8ba-hooks-order-geometry", 75, 0),
