@@ -1414,6 +1414,11 @@ class SignedRouteTests(unittest.TestCase):
                             committed = full_browser_consumer.original(ROOT, candidate, name)
                             source.write_bytes(committed)
                             self.assertEqual(source.read_bytes(), committed)
+                        git_dir = subprocess.check_output(
+                            ["git", "rev-parse", "--absolute-git-dir"], cwd=ROOT,
+                            text=True).strip()
+                        (source_root / ".git").write_text(
+                            f"gitdir: {Path(git_dir).as_posix()}\n")
                     toolchain = {"browser": str(selected_browser),
                                  "browser_sha256": selected_sha,
                                  "java_home": str(base),
@@ -1575,6 +1580,13 @@ class SignedRouteTests(unittest.TestCase):
                                 full_signed_routes.verify_browser(
                                     source_root, candidate, lane, archive, expected,
                                     HASHES, runtime, digest)
+                            rejected = independent_gates.evaluate_gate(
+                                "staged-consumer", archive, candidate, lane,
+                                MANIFEST["lanes"][lane], source_root, HASHES, runtime,
+                                digest, manifest=MANIFEST, expected_signed_lane=expected)
+                            self.assertEqual(rejected["status"], "FAILED", rejected)
+                            self.assertEqual(rejected["reason"],
+                                             "live Firefox collector differs from exact candidate source")
                             live_collector.write_bytes(collector_bytes)
                         expected["expected_build_launcher_image"] = {
                             "path": "/usr/bin/false", "sha256": "b" * 64}
@@ -1631,9 +1643,12 @@ class SignedRouteTests(unittest.TestCase):
                                 path.write_text(json.dumps(value))
                                 inputs.append(path)
                             with (patch("qualify.require_clean_checkout"),
-                                  patch("qualify.verify_audit_against_staging")):
+                                  patch("qualify.verify_audit_against_staging"),
+                                  patch.object(full_signed_routes, "verify_browser",
+                                      wraps=full_signed_routes.verify_browser) as replay):
                                 prepared = independent_audit_producer.prepare(
-                                    ROOT, candidate, *inputs, base / "prepared", "f" * 64)
+                                    source_root, candidate, *inputs, base / "prepared", "f" * 64)
+                            self.assertEqual(replay.call_args.args[0], source_root)
                             audit = json.loads((prepared / "audit.json").read_bytes())
                             self.assertEqual(audit["preflight_results"][lane]["gates"][
                                 "staged-consumer"], "PASSED")
