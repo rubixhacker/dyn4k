@@ -632,15 +632,18 @@ class PortableMatrixTest {
             world.addJoint(selected)
             return world to selected
         }
+        val capturedCaseIds = mutableListOf<String>()
         for ((type, fields) in numericJointFields) for ((field, values) in fields)
             for (value in values) {
                 val (world, selected) = seed(type)
                 if (type == "Pin" && field in listOf("CorrectionFactor", "MaximumCorrectionForce"))
                     (selected as PinJoint<*>).setSpringEnabled(false)
                 setNumericMode(selected, field, value)
-                recorder.capture(CaseSpec(numericJointCaseId(type, field, value), "joints-limits-motors",
+                val spec = CaseSpec(numericJointCaseId(type, field, value), "joints-limits-motors",
                     "default", 60, 600, mapOf("jointType" to type, "field" to field,
-                        "initialValue" to value)), world)
+                        "initialValue" to value))
+                capturedCaseIds.add(spec.id)
+                recorder.capture(spec, world)
             }
         for (type in listOf("Angle", "Distance", "Prismatic", "Revolute", "Weld", "Wheel"))
             for (variant in listOf("range", "equal")) {
@@ -657,10 +660,13 @@ class PortableMatrixTest {
                     is WheelJoint<*> -> selected.setLimitsEnabled(lower, upper)
                     else -> error("unsupported joint limits")
                 }
-                recorder.capture(CaseSpec("joint-$type-limits-$variant", "joints-limits-motors",
+                val spec = CaseSpec("joint-$type-limits-$variant", "joints-limits-motors",
                     "default", 60, 600, mapOf("jointType" to type, "limits" to variant,
-                        "lowerLimit" to lower, "upperLimit" to upper)), world)
+                        "lowerLimit" to lower, "upperLimit" to upper))
+                capturedCaseIds.add(spec.id)
+                recorder.capture(spec, world)
             }
+        assertEquals(pinnedNumericAndLimitCaseIds, capturedCaseIds)
     }
 
     @Test
