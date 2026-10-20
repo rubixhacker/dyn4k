@@ -5,13 +5,16 @@ import json
 import os
 import struct
 import subprocess
+import tempfile
 import unittest
 import zipfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest.mock import patch
 from xml.sax.saxutils import escape
 
 import actual_arithmetic
+import capture_actual
 from actual_arithmetic import CaptureRejected, expected_case_ids, verify_capture
 from test_rotation_marker import bits, marker
 
@@ -146,6 +149,42 @@ class SourceArchiveTest(unittest.TestCase):
                 with self.subTest(pin=pin), self.assertRaises(CaptureRejected):
                     actual_arithmetic._source_archive(pin)
             run.assert_not_called()
+
+
+class CaptureArchiveTest(unittest.TestCase):
+    def test_success_archive_rejects_nonworker_trace_and_environment_text(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as scratch:
+            output = Path(scratch)
+            worker_log = output / "worker-class-load-42.log"
+            for name in capture_actual.archive_file_names("captureWheelActive", worker_log):
+                if name != "worker-write-traces.zip":
+                    (output / name).write_bytes(b"safe")
+            with zipfile.ZipFile(output / "worker-write-traces.zip", "w") as archive:
+                archive.writestr("trace.42", b"safe")
+            capture_actual.verify_archive_inventory(output, "captureWheelActive", worker_log)
+
+            trace = output / "worker-write-trace.41"
+            trace.write_bytes(b'write(2, "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check", 53) = 53\n')
+            with self.assertRaisesRegex(CaptureRejected, "archive inventory differs"):
+                capture_actual.verify_archive_inventory(output, "captureWheelActive", worker_log)
+            trace.unlink()
+
+            log = output / "gradle.log"
+            log.write_bytes(b"DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check")
+            with self.assertRaisesRegex(CaptureRejected, "archive exposed the environment"):
+                capture_actual.verify_archive_inventory(output, "captureWheelActive", worker_log)
+            log.write_bytes(b"safe")
+
+            with zipfile.ZipFile(output / "worker-write-traces.zip", "w") as archive:
+                archive.writestr("trace.42", b"OLLAMA_API_KEY=redacted")
+            with self.assertRaisesRegex(CaptureRejected, "archive exposed the environment"):
+                capture_actual.verify_archive_inventory(output, "captureWheelActive", worker_log)
+            with zipfile.ZipFile(output / "worker-write-traces.zip", "w") as archive:
+                archive.writestr("trace.42", b"safe")
+
+            (output / "unexpected").mkdir()
+            with self.assertRaisesRegex(CaptureRejected, "archive inventory differs"):
+                capture_actual.verify_archive_inventory(output, "captureWheelActive", worker_log)
 
 
 class ActualArithmeticTest(unittest.TestCase):
