@@ -302,7 +302,7 @@ def verify_lanes(repository, candidate_sha, suite_manifest, archive_map_path,
                 public = full_browser_adapter.verify_full_browser_staged_consumer(
                     repository, candidate_sha, lane_id, selected, browser_archive,
                     expected, consumer_gate, audited_targets["js"])
-            elif browser_receipt.get("schema") in (2, 3):
+            elif browser_receipt.get("schema") in (2, 3, 4):
                 public = full_signed_routes.verify_browser(
                     repository, candidate_sha, lane_id, browser_archive, expected,
                     expected["expected_artifact_hashes"],

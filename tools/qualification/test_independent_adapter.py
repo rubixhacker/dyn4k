@@ -1232,6 +1232,24 @@ class IndependentAdapterTests(unittest.TestCase):
             wrong_public.add(lanes[0])
             with self.assertRaisesRegex(ValueError, "signed browser public result differs"):
                 verify(signed)
+            wrong_public.clear()
+            for index, lane in enumerate(lanes):
+                archive = root / f"browser-{index}"
+                receipt = json.loads((archive / "receipt.json").read_text())
+                receipt["schema"] = 4
+                (archive / "receipt.json").write_text(json.dumps(receipt))
+                signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"] = (
+                    independent_gates.archive_digest(archive))
+            verified, calls = verify(signed)
+            self.assertEqual(lanes, sorted(call.args[2] for call in calls))
+            for lane in lanes:
+                self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
+                    "staged-consumer"]["status"])
+            changed = copy.deepcopy(signed)
+            changed["lanes"][lanes[0]]["expected_browser_bundles"]["core"][
+                "linked_executable_js"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "signed browser module bundle map differs"):
+                verify(changed)
 
     def test_pinned_schema1_chromium_keeps_scalar_bundle_handoff(self):
         import full_browser_adapter
