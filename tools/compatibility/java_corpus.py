@@ -114,7 +114,25 @@ def runtime_command(java: str, classpath: str, java_tmp: Path, xml: Path,
 
 
 def replay_temp_directory(root: Path):
-    return tempfile.TemporaryDirectory(prefix="dyn4k-ledger-corpus-replay-", dir=root.resolve())
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError("Java corpus replay root is missing or unsafe") from error
+    if not root.is_dir():
+        raise ValueError("Java corpus replay root is not a directory")
+    build = root / "build"
+    if build.is_symlink():
+        raise ValueError("Java corpus replay build directory is a symlink")
+    try:
+        build.mkdir(exist_ok=True)
+    except FileExistsError as error:
+        raise ValueError("Java corpus replay build path is not a directory") from error
+    resolved_build = build.resolve(strict=True)
+    if (build.is_symlink() or not resolved_build.is_dir()
+            or resolved_build.parent != root):
+        raise ValueError("Java corpus replay directory is outside its worktree build output")
+    return tempfile.TemporaryDirectory(prefix="dyn4k-ledger-corpus-replay-",
+                                       dir=resolved_build)
 
 
 def capture(ledger: dict, root: Path, source: Path, jar: Path, deps: dict[str, Path],

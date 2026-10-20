@@ -9,7 +9,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import candidate_coverage
@@ -23,14 +25,44 @@ ROOT = Path(__file__).resolve().parents[2]
 JAR = ROOT / "dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar"
 ANDROID_ORIGIN = ROOT
 ANDROID_JAR = ANDROID_ORIGIN / "dyn4k-core/build/intermediates/aar_main_jar/androidMain/syncAndroidMainLibJars/classes.jar"
+sys.path.insert(0, str(ROOT / "tools/qualification"))
+import qualify
 
 
 class JavaCorpusTemporaryDirectoryTests(unittest.TestCase):
     def java_temp_directory(self, output):
         return java_corpus.java_temp_directory(output)
 
+    def parameter_case_inventory(self):
+        identities = []
+        for owner, method_count in java_corpus.PARAMETER_CLASSES.items():
+            for parameter_index in range(5):
+                for method_index in range(method_count):
+                    name = (f"method{method_index:02d}[Type{parameter_index}@"
+                            f"{parameter_index + 1:08x}]")
+                    identities.append((owner, name))
+        rows = "".join(f'<testcase classname="{owner}" name="{name}"/>'
+                       for owner, name in identities)
+        xml_body = (f'<testsuite tests="{len(identities)}" failures="0" errors="0" skipped="0">'
+                    + rows + "</testsuite>")
+        normalized = sorted([list(item) for item in java_corpus.normalized_cases(identities)])
+        return identities, xml_body, normalized
+
+    def clean_repository(self, parent):
+        repository = Path(parent) / "repository"
+        repository.mkdir()
+        shutil.copy2(ROOT / ".gitignore", repository / ".gitignore")
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        subprocess.run(["git", "-C", str(repository), "add", ".gitignore"], check=True)
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=Corpus Test",
+                        "-c", "user.email=corpus-test@example.invalid", "commit", "-qm",
+                        "clean checkout fixture"], check=True)
+        candidate_sha = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+        return repository, candidate_sha
+
     def test_runtime_command_uses_created_output_owned_temp_directory(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as parent:
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as parent:
             output = Path(parent) / "capture"
             output.mkdir()
             java_tmp = self.java_temp_directory(output)
@@ -45,7 +77,7 @@ class JavaCorpusTemporaryDirectoryTests(unittest.TestCase):
                                            str(output / "lane.xml"), "p.Test"])
 
     def test_java_temp_directory_rejects_missing_output_and_symlink_escape(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as parent:
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as parent:
             parent = Path(parent)
             with self.assertRaises(ValueError):
                 self.java_temp_directory(parent / "missing")
@@ -58,12 +90,178 @@ class JavaCorpusTemporaryDirectoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.java_temp_directory(output)
 
-    def test_replay_directory_is_created_under_the_worktree_and_cleaned(self):
-        with java_corpus.replay_temp_directory(ROOT) as directory:
-            replay = Path(directory)
-            self.assertTrue(replay.is_dir())
-            self.assertEqual(replay.parent, ROOT.resolve())
-        self.assertFalse(replay.exists())
+    def test_capture_subprocesses_use_output_owned_tmpdir_for_jdk8_and_21(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as parent:
+            root = Path(parent)
+            source = root / "upstream"
+            test_root = source / "src/test/java/p"
+            test_root.mkdir(parents=True)
+            tests = []
+            for index in range(199):
+                path = test_root / f"Case{index:03d}.java"
+                path.write_text("@Test" if index < 190 else "class Helper {}")
+                tests.append({"id": path.relative_to(source).as_posix(), "sha256": "0" * 64})
+
+            deps = {}
+            for key in ("baseline", "stdlib", "annotations", "junit", "hamcrest"):
+                path = root / f"{key}.jar"
+                path.write_bytes(key.encode())
+                deps[key] = path
+            candidate = root / "candidate.jar"
+            candidate.write_bytes(b"candidate")
+            case_identities, xml_body, _normalized = self.parameter_case_inventory()
+            ledger = {
+                "baseline": {"binary_sha256": java_corpus.digest(deps["baseline"])},
+                "baseline_test_counts": {"actual_executed_cases": len(case_identities)},
+                "tests": tests,
+                "candidate_source": {"artifact": "candidate.jar",
+                                     "artifact_sha256": java_corpus.digest(candidate),
+                                     "revision": "1" * 40, "tree": "2" * 40},
+            }
+            jdks = {major: root / f"jdk{major}" for major in (8, 21)}
+            input_hashes = {"src/test/java/p/Case000.java": "a" * 64}
+            runtime_commands = []
+
+            def fake_tool(jdk, name, major):
+                return {"path": str(jdk / "bin" / name), "sha256": "b" * 64,
+                        "version": f"JDK {major} {name}"}
+
+            def fake_run(command, **_kwargs):
+                if "LedgerCorpusReport" in command:
+                    runtime_commands.append(command)
+                    xml = Path(command[command.index("LedgerCorpusReport") + 1])
+                    xml.write_text(xml_body)
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(java_corpus, "checked_inputs", return_value=input_hashes), \
+                    patch.object(java_corpus, "tool", side_effect=fake_tool), \
+                    patch.object(java_corpus.subprocess, "run", side_effect=fake_run):
+                report = java_corpus.capture(ledger, root, source, candidate, deps, jdks,
+                                             root / "capture")
+
+            expected_tmp = f"-Djava.io.tmpdir={(root / 'capture/java-tmp').resolve()}"
+            self.assertTrue(report["passed"])
+            self.assertEqual(len(runtime_commands), 8)
+            self.assertTrue(all(command[1] == expected_tmp for command in runtime_commands))
+            for major in (8, 21):
+                java_path = str(jdks[major] / "bin" / "java")
+                self.assertEqual(sum(command[0] == java_path for command in runtime_commands), 4)
+            self.assertTrue((root / "capture/java-tmp").is_dir())
+
+    def test_validate_report_replay_stays_ignored_during_clean_checkout_gate(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as parent:
+            repository, candidate_sha = self.clean_repository(parent)
+            build = repository / "build"
+            fixture = build / "java-corpus-fixture"
+            fixture.mkdir(parents=True)
+            source = fixture / "upstream"
+            source.mkdir()
+            candidate = fixture / "candidate.jar"
+            candidate.write_bytes(b"candidate")
+            dep_paths = {}
+            dependencies = {}
+            for key in ("baseline", "stdlib", "annotations", "junit", "hamcrest"):
+                path = fixture / f"{key}.jar"
+                path.write_bytes(key.encode())
+                dep_paths[key] = path
+                dependencies[key] = {"path": str(path), "sha256": java_corpus.digest(path)}
+            baseline_sha = dependencies["baseline"]["sha256"]
+            binding = {"revision": "3" * 40, "tree": "4" * 40,
+                       "artifact": "build/java-corpus-fixture/candidate.jar",
+                       "artifact_sha256": java_corpus.digest(candidate)}
+            normalized_case_ids = [["p.ATest", "runs"]]
+            ledger = {"baseline": {"binary_sha256": baseline_sha},
+                      "baseline_test_counts": {"actual_executed_cases": 1},
+                      "tests": [{"id": "src/test/java/p/ATest.java", "sha256": "5" * 64}],
+                      "candidate_source": binding}
+            input_hashes = {"src/test/java/p/ATest.java": "5" * 64}
+            receipt = build / "java-corpus-receipt.json"
+            receipt.write_text("{}\n")
+            report_xml_root = build / "java-corpus-xml"
+            report_xml_root.mkdir()
+            lane_records = {}
+            xml_body = ('<testsuite tests="1" failures="0" errors="0" skipped="0">'
+                        '<testcase classname="p.ATest" name="runs"/></testsuite>')
+            for provider in ("baseline", "candidate"):
+                for compiler in (8, 21):
+                    for runtime in (8, 21):
+                        lane = f"{provider}-javac{compiler}-java{runtime}"
+                        xml = report_xml_root / f"{lane}.xml"
+                        xml.write_text(xml_body)
+                        lane_records[lane] = {"status": "passed",
+                                              "xml_sha256": java_corpus.digest(xml)}
+
+            tool_records = {}
+            jdks = {}
+            for major in (8, 21):
+                jdk = build / f"jdk{major}"
+                (jdk / "bin").mkdir(parents=True)
+                entries = {}
+                for name in ("javac", "java"):
+                    path = jdk / "bin" / name
+                    path.write_text("fixture tool")
+                    entries[name] = {"path": str(path), "sha256": "6" * 64,
+                                     "version": f"JDK {major} {name}"}
+                tool_records[str(major)] = entries
+                jdks[major] = jdk
+            report = {
+                "schema_version": 3, "kind": "java-test", "target": "jvm",
+                "probe": "unchanged-junit-xml-v1", "baseline": ledger["baseline"],
+                "candidate_commit": binding["revision"], "source_tree": binding["tree"],
+                "artifact_sha256": binding["artifact_sha256"],
+                "harness_sha256": java_corpus.digest(java_corpus.HARNESS),
+                "passed": True, "input_sha256": input_hashes,
+                "build_receipt": "build/java-corpus-receipt.json",
+                "build_receipt_sha256": java_corpus.digest(receipt),
+                "dependencies": dependencies, "tools": tool_records,
+                "xml_root": "build/java-corpus-xml",
+                "normalized_case_ids": normalized_case_ids,
+                "actual_executed_cases_per_lane": 1, "lanes": lane_records,
+            }
+            replay_outputs = []
+            receipt_before = receipt.read_bytes()
+
+            def replay_capture(_ledger, root, _source, _jar, _deps, _jdks, output):
+                output = Path(output)
+                replay_dir = output.parent
+                replay_outputs.append(output)
+                output.mkdir(parents=True)
+                (output / "sources.args").write_text("representative replay input\n")
+                (output / "java-tmp").mkdir()
+                qualify.require_clean_checkout(root, candidate_sha)
+                self.assertEqual(replay_dir.parent, root / "build")
+                return {"passed": True, "input_sha256": input_hashes,
+                        "normalized_case_ids": report["normalized_case_ids"],
+                        "actual_executed_cases_per_lane": 1}
+
+            qualify.require_clean_checkout(repository, candidate_sha)
+            with patch.object(java_corpus, "checked_inputs", return_value=input_hashes), \
+                    patch.object(java_corpus, "tool",
+                                 side_effect=lambda jdk, name, major: tool_records[str(major)][name]), \
+                    patch.object(java_corpus, "normalized_cases",
+                                 side_effect=lambda identities: Counter(identities)), \
+                    patch.object(java_corpus.build_provenance, "verify", return_value=None), \
+                    patch.object(java_corpus, "capture", side_effect=replay_capture):
+                error = java_corpus.validate_report(report, ledger, repository, source, candidate)
+
+            self.assertIsNone(error)
+            self.assertEqual(len(replay_outputs), 1)
+            self.assertFalse(replay_outputs[0].exists())
+            self.assertEqual(receipt.read_bytes(), receipt_before)
+            qualify.require_clean_checkout(repository, candidate_sha)
+
+    def test_replay_temp_directory_rejects_symlinked_build_parent(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as parent:
+            root = Path(parent) / "repository"
+            root.mkdir()
+            with self.assertRaises(ValueError):
+                java_corpus.replay_temp_directory(root / "missing")
+
+            outside = Path(parent) / "outside"
+            outside.mkdir()
+            (root / "build").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                java_corpus.replay_temp_directory(root)
 
 
 class BuildProvenanceArchiveTests(unittest.TestCase):
