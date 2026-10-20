@@ -23,12 +23,12 @@ MODULE_CASES = {
 }
 
 
-def macos_startup(pid, gradle_home):
+def macos_startup(pid, gradle_home, java="/task/jdk21/bin/java"):
     daemon_dir = str(PurePosixPath(gradle_home) / "daemon" / "9.5.0")
     return ("To honour the JVM settings for this build a single-use Daemon process "
             "will be forked.\n"
             f"Starting process 'Gradle build daemon'. Working directory: {daemon_dir} "
-            "Command: /task/jdk21/bin/java -cp /task/gradle/lib/gradle-daemon-main-9.5.0.jar "
+            f"Command: {java} -cp /task/gradle/lib/gradle-daemon-main-9.5.0.jar "
             "org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0\n"
             "Successfully started process 'Gradle build daemon'\n"
             "An attempt to start the daemon took 0.314 secs.\n"
@@ -52,6 +52,87 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
+    def test_macos_posix_process_binding_journey_and_spoofs(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            mac_gradle = PurePosixPath("/Volumes/DevHome/task/gradle")
+            mac_jdk = PurePosixPath("/Volumes/DevHome/task/jdk21")
+            mac_work = PurePosixPath("/Volumes/DevHome/task/build")
+            mac_java = mac_jdk / "bin/java"
+            mac_image = mac_work / "core/bin/macosArm64/debugTest/test.kexe"
+            for path in (mac_gradle, mac_jdk, mac_java, mac_work, mac_image):
+                self.assertTrue(path.is_absolute(), path)
+            java_backing = root / "java"
+            java_backing.write_bytes(b"pinned java")
+            image_backing = root / "test.kexe"
+            image_backing.write_bytes(b"selected test image")
+            image_sha = route.digest(image_backing.read_bytes())
+            (archive / "stdout.txt").write_text(
+                macos_startup(67086, mac_gradle, mac_java))
+            (archive / "runtime/gradle-client.json").write_bytes(
+                route.encoded({"pid": 67074}))
+            daemon = {"module": "gradle-daemon", "pid": 67086,
+                      "parent_pid": 67074, "gradle_client_pid": 67074,
+                      "image": str(mac_java), "image_sha256": route.digest(java_backing.read_bytes()),
+                      "command": f"{mac_java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                      "observed_ns": 50}
+            test_image = {"module": "core", "pid": 67383, "parent_pid": 67086,
+                          "image": str(mac_image), "command": str(mac_image),
+                          "image_sha256": image_sha, "observed_ns": 100}
+            observations = archive / "runtime/process-observations.jsonl"
+
+            class BackedMacPath:
+                def __init__(self, value):
+                    self.path = PurePosixPath(value)
+
+                def __fspath__(self):
+                    return str(self.path)
+
+                def resolve(self):
+                    return self
+
+                def __truediv__(self, part):
+                    return BackedMacPath(self.path / part)
+
+                @property
+                def parent(self):
+                    return self.path.parent
+
+                def read_bytes(self):
+                    if self.path != mac_java:
+                        raise AssertionError(f"unexpected backing read: {self.path}")
+                    return java_backing.read_bytes()
+
+            with patch.dict(os.environ, {"GRADLE_USER_HOME": str(mac_gradle),
+                                             "JAVA_HOME": str(mac_jdk)}), \
+                 patch.object(route, "Path", side_effect=BackedMacPath):
+                observations.write_bytes(route.encoded(daemon) + route.encoded(test_image))
+                self.assertEqual(route.process_binding(
+                    archive, mac_work, "macosArm64", "debug-g", None, "core", image_sha),
+                    test_image)
+                for changed in ({"parent_pid": 99999},
+                                {"image": str(mac_work / "other/test.kexe")},
+                                {"image_sha256": "b" * 64}):
+                    observations.write_bytes(route.encoded(daemon) +
+                                             route.encoded({**test_image, **changed}))
+                    with self.subTest(changed=changed), self.assertRaisesRegex(
+                            ValueError, "launcher|executable"):
+                        route.process_binding(
+                            archive, mac_work, "macosArm64", "debug-g", None,
+                            "core", image_sha)
+                for changed in ({"parent_pid": 99999},
+                                {"image": "/Volumes/DevHome/task/other/java"},
+                                {"image_sha256": "b" * 64}):
+                    observations.write_bytes(route.encoded({**daemon, **changed}) +
+                                             route.encoded(test_image))
+                    with self.subTest(daemon=changed), self.assertRaisesRegex(
+                            ValueError, "daemon"):
+                        route.process_binding(
+                            archive, mac_work, "macosArm64", "debug-g", None,
+                            "core", image_sha)
+
     def test_macos_startup_fixture_serializes_windows_path_as_posix(self):
         mac_home = PurePosixPath("/Volumes/DevHome/task/gradle")
         self.assertEqual(route.macos_host_launcher_pid(
