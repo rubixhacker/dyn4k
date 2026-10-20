@@ -30,18 +30,34 @@ LANE = "tvosSimulatorArm64:tvOS simulator ARM64:current:debug-g"
 
 class CrossRunCollectionTests(unittest.TestCase):
     @contextlib.contextmanager
-    def unreadable_descendant(self, hidden):
-        real_scandir = os.scandir
+    def unreadable_descendant(self, hidden, backend=None):
         hidden_id = hidden.stat().st_ino
+        hits = []
+
+        if (backend or os.name) == "nt":
+            real_names = collection._windows_names
+
+            def deny(handle):
+                if collection._windows_handle_identity(handle) == hidden_id:
+                    hits.append(True)
+                    raise PermissionError("unreadable artifact descendant")
+                return real_names(handle)
+
+            with mock.patch.object(collection, "_windows_names", side_effect=deny):
+                yield hits
+            return
+
+        real_scandir = os.scandir
 
         def deny(anchor):
             if ((isinstance(anchor, int) and os.fstat(anchor).st_ino == hidden_id)
                     or (not isinstance(anchor, int) and Path(anchor) == hidden)):
+                hits.append(True)
                 raise PermissionError("unreadable artifact descendant")
             return real_scandir(anchor)
 
         with mock.patch.object(collection.os, "scandir", side_effect=deny):
-            yield
+            yield hits
 
     @contextlib.contextmanager
     def ordinary_artifact_swap(self, source, alternate, member):
@@ -91,9 +107,10 @@ class CrossRunCollectionTests(unittest.TestCase):
             hidden.mkdir(parents=True)
             (artifact / "visible.bin").write_bytes(b"visible")
             (hidden / "unlisted.bin").write_bytes(b"hidden")
-            with self.unreadable_descendant(hidden):
+            with self.unreadable_descendant(hidden) as hits:
                 with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
                     collection.files_in(artifact)
+            self.assertEqual(1, len(hits))
             self.assertEqual({"hidden/unlisted.bin": hashlib.sha256(b"hidden").hexdigest(),
                               "visible.bin": hashlib.sha256(b"visible").hexdigest()},
                              collection.files_in(artifact))
@@ -107,19 +124,81 @@ class CrossRunCollectionTests(unittest.TestCase):
             (artifact / "visible.bin").write_bytes(b"visible")
             (hidden / "unlisted.bin").write_bytes(b"hidden")
             name = f"windows-failure-raw-{HEAD}-unreadable"
-            with self.unreadable_descendant(hidden):
+            with self.unreadable_descendant(hidden) as hits:
                 rejected = collection.collect(ROOT, HEAD, [(name, artifact)],
                                               root / "rejected")
+            self.assertEqual(1, len(hits))
             self.assertEqual("FAILED", rejected["artifacts"][0]["status"])
             self.assertIn("unreadable artifact", rejected["artifacts"][0]["reason"])
             recorded = collection.collect(ROOT, HEAD, [(name, artifact)], root / "recorded")
             self.assertEqual("RETAINED_UNVERIFIED", recorded["artifacts"][0]["status"])
             self.assertTrue(collection.verify_collection(
                 ROOT, HEAD, [(name, artifact)], root / "recorded"))
-            with self.unreadable_descendant(hidden):
+            with self.unreadable_descendant(hidden) as hits:
                 with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
                     collection.verify_collection(
                         ROOT, HEAD, [(name, artifact)], root / "recorded")
+            self.assertEqual(1, len(hits))
+
+    @unittest.skipUnless(os.name == "posix", "models Windows enumeration on POSIX")
+    def test_windows_directory_backend_model_rejects_unreadable_descendant(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "artifact"
+            hidden = artifact / "hidden"
+            hidden.mkdir(parents=True)
+            (artifact / "visible.bin").write_bytes(b"visible")
+            (hidden / "unlisted.bin").write_bytes(b"hidden")
+            real_scandir = os.scandir
+            real_directory_names = collection._directory_names
+            queried = []
+            denied = []
+
+            def modeled_windows_names(handle):
+                queried.append(os.fstat(handle).st_ino)
+                with real_scandir(handle) as entries:
+                    return [entry.name for entry in entries]
+
+            @contextlib.contextmanager
+            def modeled_directory_names(handle):
+                windows_os = types.SimpleNamespace(**vars(os))
+                windows_os.name = "nt"
+                with mock.patch.object(collection, "os", windows_os):
+                    with real_directory_names(handle) as names:
+                        listed = list(names)
+                yield listed
+
+            @contextlib.contextmanager
+            def modeled_backend():
+                with mock.patch.object(collection, "_windows_names",
+                                       side_effect=modeled_windows_names), \
+                     mock.patch.object(collection, "_windows_handle_identity",
+                                       side_effect=lambda handle: os.fstat(handle).st_ino), \
+                     self.unreadable_descendant(hidden, backend="nt") as hits, \
+                     mock.patch.object(collection, "_directory_names",
+                                       side_effect=modeled_directory_names):
+                    yield
+                denied.extend(hits)
+
+            with modeled_backend():
+                with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
+                    collection.files_in(artifact)
+            name = f"windows-failure-raw-{HEAD}-modeled"
+            with modeled_backend():
+                rejected = collection.collect(ROOT, HEAD, [(name, artifact)],
+                                              root / "rejected")
+            self.assertEqual("FAILED", rejected["artifacts"][0]["status"])
+            recorded = collection.collect(ROOT, HEAD, [(name, artifact)],
+                                          root / "recorded")
+            with modeled_backend():
+                with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
+                    collection.verify_collection(ROOT, HEAD, [(name, artifact)],
+                                                 root / "recorded")
+            self.assertEqual(3, len(denied))
+            self.assertGreaterEqual(len(queried), 3)
+            self.assertEqual({"hidden/unlisted.bin": hashlib.sha256(b"hidden").hexdigest(),
+                              "visible.bin": hashlib.sha256(b"visible").hexdigest()},
+                             collection.files_in(artifact))
 
     @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
     def test_files_in_binds_ordinary_directory_swap(self):
