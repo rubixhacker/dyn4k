@@ -53,6 +53,13 @@ WHOLE_HOSTED_EXACT_SOURCE_INPUTS = {
     "LICENSE.md",
 }
 
+BROWSER_FIXTURE_INPUTS = {
+    "consumers/qualification/portable/full-browser/consumer-yarn.lock",
+    "consumers/qualification/portable/full-browser/fixtures/karma-kotlin-reporter-3.3.0.js",
+    "consumers/qualification/portable/full-browser/fixtures/LICENSE",
+    "consumers/qualification/portable/full-browser/fixtures/NOTICE",
+}
+
 
 def hash_guarded_source_paths():
     corpus = json.loads((REPOSITORY / full_hosted.MANIFEST).read_bytes())
@@ -73,6 +80,7 @@ def hash_guarded_source_paths():
     paths.update(SUSTAINED_VERIFIER_INPUTS)
     paths.update(COMPATIBILITY_VERIFIER_INPUTS)
     paths.update(WHOLE_HOSTED_EXACT_SOURCE_INPUTS)
+    paths.update(BROWSER_FIXTURE_INPUTS)
     paths.update(verify_candidate_archive.SOURCE_FILES)
 
     tracked = subprocess.check_output(

@@ -6,6 +6,9 @@ build.gradle.kts -text
 consumers/qualification/portable/build.gradle.kts -text
 consumers/qualification/portable/settings.gradle.kts -text
 consumers/qualification/portable/full-browser/consumer-yarn.lock -text
+consumers/qualification/portable/full-browser/fixtures/karma-kotlin-reporter-3.3.0.js -text
+consumers/qualification/portable/full-browser/fixtures/LICENSE -text
+consumers/qualification/portable/full-browser/fixtures/NOTICE -text
 /LICENSE.md -text
 
 # Preserve numerical verifier sources and approved inputs.
