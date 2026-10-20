@@ -16,7 +16,42 @@ ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM = Path("/tmp/dyn4k-baseline-cache/dyn4j-source")
 
 
+def historical_replay_prerequisite(ledger: dict, root: Path) -> str | None:
+    candidate = ledger["candidate_source"]
+    jar = root / candidate["artifact"]
+    if not jar.is_file():
+        return "historical candidate JAR missing"
+    if raw_signature_audit.candidate_coverage.digest(jar) != candidate["artifact_sha256"]:
+        return "historical candidate JAR hash differs"
+    if raw_signature_audit.candidate_coverage.git(root, "rev-parse", "HEAD") != candidate["revision"]:
+        return "historical candidate source revision differs"
+    return None
+
+
 class RawSignatureGateBindingTests(unittest.TestCase):
+    def test_historical_replay_needs_exact_candidate_fixture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "candidate.jar"
+            ledger = {"candidate_source": {
+                "artifact": "candidate.jar",
+                "artifact_sha256": raw_signature_audit.digest(b"pinned artifact"),
+                "revision": "pinned revision",
+            }}
+            with patch.object(raw_signature_audit.candidate_coverage, "git",
+                              return_value="pinned revision"):
+                self.assertEqual(historical_replay_prerequisite(ledger, root),
+                                 "historical candidate JAR missing")
+                jar.write_bytes(b"different artifact")
+                self.assertEqual(historical_replay_prerequisite(ledger, root),
+                                 "historical candidate JAR hash differs")
+                jar.write_bytes(b"pinned artifact")
+                self.assertIsNone(historical_replay_prerequisite(ledger, root))
+            with patch.object(raw_signature_audit.candidate_coverage, "git",
+                              return_value="other revision"):
+                self.assertEqual(historical_replay_prerequisite(ledger, root),
+                                 "historical candidate source revision differs")
+
     def test_malformed_common_record_is_rejected(self):
         ledger = {"review_receipts": {"common_corpus": []}}
         with self.assertRaisesRegex(ValueError, "common behavior gate record is invalid"):
@@ -125,6 +160,9 @@ class RawSignatureAuditTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.ledger = json.loads((ROOT / "tools/compatibility/declaration-ledger.json").read_text())
+        missing = historical_replay_prerequisite(cls.ledger, ROOT)
+        if missing:
+            raise unittest.SkipTest(missing)
         cls.signature = json.loads(gzip.decompress((ROOT / "tools/compatibility/receipts/jvm-signatures-0681a8cd.json.gz").read_bytes()))
         cls.strict = json.loads((ROOT / "tools/compatibility/receipts/strict-jvm-0681a8cd.json").read_text())
 
