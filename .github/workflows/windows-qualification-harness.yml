@@ -1,0 +1,103 @@
+name: Windows qualification harness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-qualification-unittest:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run complete qualification unittest discovery
+        id: capture
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          Remove-Item Env:OLLAMA_API_KEY -ErrorAction SilentlyContinue
+
+          $base = "windows-qualification-harness-$env:EXPECTED_SHA-$env:RUN_ID-$env:RUN_ATTEMPT"
+          $evidenceDir = Join-Path $env:RUNNER_TEMP $base
+          $collision = $false
+          if (Test-Path -LiteralPath $evidenceDir) {
+            $collision = $true
+            $evidenceDir = Join-Path $env:RUNNER_TEMP "$base-collision-$([guid]::NewGuid().ToString('N'))"
+          }
+          if (Test-Path -LiteralPath $evidenceDir) {
+            throw 'Could not allocate a new run-specific evidence directory.'
+          }
+          New-Item -ItemType Directory -Path $evidenceDir | Out-Null
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "evidence_dir=$evidenceDir"
+
+          $stdoutPath = Join-Path $evidenceDir 'stdout.txt'
+          $stderrPath = Join-Path $evidenceDir 'stderr.txt'
+          $metadataPath = Join-Path $evidenceDir 'run-metadata.txt'
+          $exitCodePath = Join-Path $evidenceDir 'unittest-exit-code.txt'
+          $failurePath = Join-Path $evidenceDir 'fail-closed-reason.txt'
+          Set-Content -Path $stdoutPath -Value ''
+          Set-Content -Path $stderrPath -Value ''
+          $actualSha = (& git rev-parse HEAD 2>$null | Out-String).Trim()
+          $shaExitCode = $LASTEXITCODE
+          $startTime = [DateTime]::UtcNow.ToString('o')
+          @(
+            "expected_sha=$env:EXPECTED_SHA"
+            "actual_sha=$actualSha"
+            "run_id=$env:RUN_ID"
+            "run_attempt=$env:RUN_ATTEMPT"
+            "runner_os=$env:RUNNER_OS"
+            "runner_name=$env:RUNNER_NAME"
+            "python_version=$(& python --version 2>&1)"
+            "test_command=python -m unittest discover -s tools/qualification -p test_*.py -v"
+            "start_utc=$startTime"
+            "path_collision_detected=$collision"
+          ) | Set-Content -Path $metadataPath
+
+          $testExitCode = 1
+          $failure = $null
+          if ($collision) {
+            $failure = 'Run-specific evidence path already existed; tests were not started.'
+          } elseif ($shaExitCode -ne 0 -or $actualSha -ne $env:EXPECTED_SHA) {
+            $failure = 'Checked-out revision did not match the dispatched commit; tests were not started.'
+          } else {
+            $env:TMPDIR = Join-Path $evidenceDir 'tmp'
+            $env:TEMP = $env:TMPDIR
+            $env:TMP = $env:TMPDIR
+            $env:HOME = Join-Path $evidenceDir 'home'
+            $env:USERPROFILE = $env:HOME
+            New-Item -ItemType Directory -Path $env:TMPDIR, $env:HOME | Out-Null
+            & python -m unittest discover -s tools/qualification -p 'test_*.py' -v 1> $stdoutPath 2> $stderrPath
+            $testExitCode = $LASTEXITCODE
+            $testOutput = (Get-Content -Raw $stdoutPath) + "`n" + (Get-Content -Raw $stderrPath)
+            if ($testOutput -notmatch '(?m)^Ran [1-9][0-9]* tests? in ') {
+              $failure = 'Unittest discovery reported no tests or no completed test count.'
+              if ($testExitCode -eq 0) { $testExitCode = 1 }
+            }
+          }
+
+          $testExitCode | Set-Content -Path $exitCodePath
+          if ($failure) { $failure | Set-Content -Path $failurePath }
+          Add-Content -Path $metadataPath -Value "end_utc=$([DateTime]::UtcNow.ToString('o'))"
+          if ($null -ne $failure) { throw $failure }
+          if ($testExitCode -ne 0) { exit $testExitCode }
+      - name: Upload raw Windows unittest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-qualification-harness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.capture.outputs.evidence_dir }}
+          if-no-files-found: error
