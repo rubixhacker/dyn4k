@@ -431,6 +431,14 @@ def observe_test_processes(work_root, target, mode, simulator_udid, stop, destin
             stop.wait(0.02 if platform.system() == "Linux" else 0.1)
 
 
+def macos_host_launcher_pid(stdout):
+    matches = re.findall(r"(?m)^The client will now receive all logging from the daemon "
+                         r"\(pid: ([1-9][0-9]*)\)\.", stdout)
+    if len(matches) != 1:
+        raise ValueError("selected macOS Native Gradle launcher is absent or ambiguous")
+    return int(matches[0])
+
+
 def process_binding(archive, work_root, target, mode, simulator_udid, short, binary_sha):
     samples = [json.loads(line) for line in (archive / "runtime/process-observations.jsonl").read_bytes().splitlines()]
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
@@ -439,8 +447,11 @@ def process_binding(archive, work_root, target, mode, simulator_udid, short, bin
                and Path(sample["image"]).parent == folder
                and sample.get("image_sha256") == binary_sha
                and sample.get("pid", 0) > 0 and sample.get("parent_pid", 0) > 0]
+    if target == "macosArm64":
+        launcher_pid = macos_host_launcher_pid((archive / "stdout.txt").read_text())
+        matches = [sample for sample in matches if sample["parent_pid"] == launcher_pid]
     if not matches:
-        raise ValueError(f"selected {short} Native test process and executable bytes were not observed")
+        raise ValueError(f"selected {short} Native test launcher and executable bytes were not observed")
     if simulator_udid and not any(sample.get("simulator_udid") == simulator_udid
                                   and str(folder) in sample.get("command", "")
                                   for sample in samples):
@@ -1871,6 +1882,7 @@ def verify_snapshot(root, repository, candidate, lane, hashes, selection, archiv
     stdout = (root / "stdout.txt").read_text()
     if "BUILD SUCCESSFUL" not in stdout or f"QUALIFICATION_LANE={lane}" not in stdout:
         raise ValueError("original Gradle run or lane marker differs")
+    launcher_pid = macos_host_launcher_pid(stdout) if target == "macosArm64" else None
     compiler_flags = {}
     for short in ("core", "facade"):
         if f"> Task :{short}:{target}Test" not in stdout:
@@ -1980,6 +1992,7 @@ def verify_snapshot(root, repository, candidate, lane, hashes, selection, archiv
                 or binding.get("image_sha256") != product["sha256"]
                 or path_type(binding.get("image", "")) != path_type(product["path"])
                 or binding.get("pid", 0) <= 0 or binding.get("parent_pid", 0) <= 0
+                or launcher_pid is not None and binding.get("parent_pid") != launcher_pid
                 or not process["started_ns"] <= binding.get("observed_ns", -1)
                 <= process["finished_ns"]):
             raise ValueError("selected Native test process is not bound to executable bytes")

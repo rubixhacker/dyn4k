@@ -38,6 +38,35 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
+    def test_macos_host_image_requires_recorded_gradle_launcher_parent(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            (archive / "stdout.txt").write_text(
+                "The client will now receive all logging from the daemon (pid: 67086).\n")
+            work_root = root / "build"
+            image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
+            sample = {"module": "core", "pid": 67383, "parent_pid": 99999,
+                      "image": str(image), "command": str(image),
+                      "image_sha256": "a" * 64, "observed_ns": 100,
+                      "simulator_udid": None}
+            observations = archive / "runtime/process-observations.jsonl"
+            observations.write_bytes(route.encoded(sample))
+            with self.assertRaisesRegex(ValueError, "launcher"):
+                route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                      None, "core", "a" * 64)
+            sample["parent_pid"] = 67086
+            observations.write_bytes(route.encoded(sample))
+            self.assertEqual(route.process_binding(
+                archive, work_root, "macosArm64", "debug-g", None, "core", "a" * 64),
+                sample)
+            for stdout in ("", (archive / "stdout.txt").read_text() * 2):
+                (archive / "stdout.txt").write_text(stdout)
+                with self.assertRaisesRegex(ValueError, "launcher"):
+                    route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                          None, "core", "a" * 64)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires the local /proc process view")
     def test_process_sampler_observes_live_executable_bytes(self):
         image = Path(sys.executable).resolve()
