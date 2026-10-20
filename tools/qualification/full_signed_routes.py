@@ -358,6 +358,7 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
         raise ValueError("signed schema-5 browser witness is missing")
     path = Path(binding["path"])
     if (not path.is_absolute() or not path.is_file() or path.is_symlink()
+            or path.stat().st_nlink != 1
             or path.resolve().is_relative_to(Path(archive).resolve())):
         raise ValueError("schema-5 browser witness is absent or inside producer archive")
     raw = path.read_bytes()
@@ -372,6 +373,12 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
                 full_browser_consumer.SAFARI_BOOTSTRAP, full_browser_consumer.SAFARI_OBSERVER))
     source_hashes = {name: hashlib.sha256(full_browser_consumer.original(
         repository, candidate, name)).hexdigest() for name in sources}
+    if family == "Firefox":
+        collector = Path(repository) / full_browser_consumer.FIREFOX_WITNESS
+        if (not collector.is_file() or collector.is_symlink()
+                or hashlib.sha256(collector.read_bytes()).hexdigest()
+                != source_hashes[full_browser_consumer.FIREFOX_WITNESS]):
+            raise ValueError("live Firefox collector differs from exact candidate source")
     if (not isinstance(witness, dict)
             or set(witness) != {"schema", "candidate_sha", "lane", "archive_sha256",
                                 "runtime_identity", "mode", "staged_artifacts",
@@ -404,16 +411,28 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
         server = independent_gates._json(folder / "http-responses.json")["responses"]
         archived = [independent_gates._strict_json_line(line) for line in
                     (folder / row_file).read_bytes().splitlines()]
+        selected = Path(toolchain["browser"])
+        launch = launches[0] if len(launches) == 1 else {}
+        image_path = browser.get("process_executable") if isinstance(browser, dict) else None
+        image = Path(image_path) if isinstance(image_path, str) else None
+        allowed_images = {selected}
+        if family == "Firefox":
+            allowed_images.add(selected.with_name("firefox-bin"))
         if (not isinstance(process, dict) or not isinstance(browser, dict)
                 or set(browser) != {"protocol", "clock", "browser_pid", "browser_sha256",
-                                    "started_ns", "finished_ns", "responses"}
+                                    "process_executable", "started_ns", "finished_ns",
+                                    "responses"}
                 or browser["protocol"] != protocol or browser["clock"] != "unix-epoch-ns"
                 or len(launches) != 1 or not archived
                 or type(browser["browser_pid"]) is not int or browser["browser_pid"] <= 0
                 or browser["browser_pid"] != launches[0].get("pid")
                 or browser["browser_pid"] != archived[0].get("browser_pid")
-                or browser["browser_sha256"] != toolchain["browser_sha256"]
-                or browser["browser_sha256"] != launches[0].get("process_sha256")
+                or launch.get("selected_binary") != str(selected)
+                or launch.get("selected_sha256") != toolchain["browser_sha256"]
+                or browser["process_executable"] != launch.get("process_executable")
+                or image not in allowed_images or not image.is_file()
+                or browser["browser_sha256"] != launch.get("process_sha256")
+                or browser["browser_sha256"] != full_browser_consumer.file_hash(image)
                 or type(browser["started_ns"]) is not int
                 or type(browser["finished_ns"]) is not int
                 or not process.get("started_ns", 0) <= browser["started_ns"]

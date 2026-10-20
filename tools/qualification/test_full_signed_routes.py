@@ -1372,8 +1372,19 @@ class SignedRouteTests(unittest.TestCase):
                                     "staged_hashes": HASHES,
                                     "consumer_contract_sha256": independent_gates.digest(
                                         independent_gates.consumer_contract(MANIFEST, lane))})
-                    toolchain = {"browser": str(base / "browser"),
-                                 "browser_sha256": "d" * 64,
+                    selected_browser = base / ("firefox" if family == "Firefox" else "Safari")
+                    selected_browser.write_bytes(b"synthetic selected browser")
+                    selected_sha = hashlib.sha256(selected_browser.read_bytes()).hexdigest()
+                    firefox_image = base / "firefox-bin"
+                    if family == "Firefox":
+                        firefox_image.write_bytes(b"synthetic distinct firefox-bin image")
+                    collector_bytes = (full_browser_consumer.original(
+                        ROOT, candidate, full_browser_consumer.FIREFOX_WITNESS)
+                        if family == "Firefox" else None)
+                    collector_sha = (hashlib.sha256(collector_bytes).hexdigest()
+                                     if collector_bytes is not None else None)
+                    toolchain = {"browser": str(selected_browser),
+                                 "browser_sha256": selected_sha,
                                  "java_home": str(base),
                                  "java_sha256": full_browser_consumer.expected_java_sha256(
                                      runtime.split()[0], family),
@@ -1389,8 +1400,13 @@ class SignedRouteTests(unittest.TestCase):
                         folder = archive / short
                         receipt["modules"][short]["finished_ns"] = 100
                         pid = 100 + index
+                        image = firefox_image if family == "Firefox" and short == "core" else selected_browser
+                        image_sha = hashlib.sha256(image.read_bytes()).hexdigest()
                         (folder / "browser-launches.jsonl").write_text(json.dumps({
-                            "pid": pid, "process_sha256": "d" * 64}) + "\n")
+                            "pid": pid, "process_executable": str(image),
+                            "process_sha256": image_sha,
+                            "selected_binary": str(selected_browser),
+                            "selected_sha256": selected_sha}) + "\n")
                         selected = (short + " selected").encode()
                         linked = (short + " linked").encode()
                         (folder / "karma-selected.js").write_bytes(selected)
@@ -1403,7 +1419,11 @@ class SignedRouteTests(unittest.TestCase):
                             selected_bundle = json.loads((folder / "selected-bundle.json").read_text())
                             bundles[short]["assets"] = {item["name"]: item["sha256"]
                                                       for item in selected_bundle["assets"]}
-                        rows = [{"kind": "session", "browser_pid": pid}]
+                        session = {"kind": "session", "browser_pid": pid}
+                        if family == "Firefox":
+                            session.update({"source_path": str(ROOT / full_browser_consumer.FIREFOX_WITNESS),
+                                            "source_sha256": collector_sha})
+                        rows = [session]
                         observed = []
                         for item in responses[short]["responses"]:
                             body = (folder / item["body_path"]).read_bytes()
@@ -1424,7 +1444,8 @@ class SignedRouteTests(unittest.TestCase):
                         (folder / name).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
                         consumption[short] = {"protocol": "bidi" if family == "Firefox"
                                               else "service-worker", "clock": "unix-epoch-ns",
-                                              "browser_pid": pid, "browser_sha256": "d" * 64,
+                                              "browser_pid": pid, "browser_sha256": image_sha,
+                                              "process_executable": str(image),
                                               "started_ns": 10, "finished_ns": 90,
                                               "responses": observed}
                     (archive / "receipt.json").write_text(json.dumps(receipt))
@@ -1438,7 +1459,7 @@ class SignedRouteTests(unittest.TestCase):
                                "candidate_sha": candidate, "lane": lane,
                                "archive_sha256": digest, "runtime_identity": runtime,
                                "mode": "development", "staged_artifacts": HASHES,
-                               "browser_sha256": "d" * 64, "family": family,
+                               "browser_sha256": selected_sha, "family": family,
                                "source_sha256": {name: hashlib.sha256(
                                    full_browser_consumer.original(ROOT, candidate, name)
                                    ).hexdigest() for name in sources},
@@ -1524,6 +1545,62 @@ class SignedRouteTests(unittest.TestCase):
                                 "staged-consumer"], "PASSED")
                             self.assertEqual(audit["lanes"][lane]["expected_execution_witness"],
                                              expected["expected_execution_witness"])
+                        hardlink = base / "hardlinked-witness.json"
+                        os.link(witness_path, hardlink)
+                        expected["expected_execution_witness"]["path"] = str(hardlink)
+                        with self.assertRaisesRegex(ValueError, "witness is absent or inside"):
+                            full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                archive, expected, HASHES, runtime, digest)
+                        hardlink.unlink()
+                        expected["expected_execution_witness"]["path"] = str(witness_path)
+                        if family == "Firefox":
+                            self.assertNotEqual(consumption["core"]["browser_sha256"], selected_sha)
+                            self.assertEqual(consumption["facade"]["browser_sha256"], selected_sha)
+                            process_sha = consumption["core"]["browser_sha256"]
+                            witness["browser_sha256"] = process_sha
+                            seal()
+                            with self.assertRaisesRegex(ValueError, "execution witness differs"):
+                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    archive, expected, HASHES, runtime, digest)
+                            witness["browser_sha256"] = selected_sha
+                            seal()
+                            consumption["core"]["browser_sha256"] = selected_sha
+                            seal()
+                            with self.assertRaisesRegex(ValueError, "process differs"):
+                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    archive, expected, HASHES, runtime, digest)
+                            consumption["core"]["browser_sha256"] = process_sha
+                            seal()
+                            process_path = consumption["core"]["process_executable"]
+                            consumption["core"]["process_executable"] = str(selected_browser)
+                            seal()
+                            with self.assertRaisesRegex(ValueError, "process differs"):
+                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    archive, expected, HASHES, runtime, digest)
+                            consumption["core"]["process_executable"] = process_path
+                            seal()
+                            source_repo = base / "tampered-source"
+                            live_collector = source_repo / full_browser_consumer.FIREFOX_WITNESS
+                            live_collector.parent.mkdir(parents=True)
+                            live_collector.write_bytes(collector_bytes + b"\ntampered\n")
+                            tampered_archive = base / "tampered-collector-archive"
+                            shutil.copytree(archive, tampered_archive, copy_function=shutil.copy2)
+                            for module in ("core", "facade"):
+                                record = tampered_archive / module / "firefox-bidi.jsonl"
+                                lines = record.read_text().splitlines()
+                                declaration = json.loads(lines[0])
+                                declaration["source_path"] = str(live_collector)
+                                declaration["source_sha256"] = collector_sha
+                                record.write_text("\n".join([json.dumps(declaration), *lines[1:]]) + "\n")
+                            self.assertEqual(json.loads((tampered_archive /
+                                "core/firefox-bidi.jsonl").read_text().splitlines()[0])[
+                                    "source_sha256"], collector_sha)
+                            with patch.object(full_browser_consumer, "original",
+                                              return_value=collector_bytes):
+                                with self.assertRaisesRegex(ValueError, "live Firefox collector"):
+                                    full_signed_routes.schema5_browser_witness(
+                                        source_repo, expected, candidate, lane, digest,
+                                        runtime, HASHES, toolchain, tampered_archive, receipt)
                         for field, wrong in (("family", "Chromium"), ("lane", "wrong"),
                                              ("source_sha256", {})):
                             prior = witness[field]
@@ -1571,6 +1648,52 @@ class SignedRouteTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "body or interval differs"):
                             full_signed_routes.verify_browser(ROOT, candidate, lane,
                                 archive, expected, HASHES, runtime, digest)
+
+    def test_schema5_rejects_hardlinked_external_witness_before_replay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive = base / "archive"
+            archive.mkdir()
+            witness = base / "witness.json"
+            witness.write_text("{}")
+            linked = base / "linked-witness.json"
+            os.link(witness, linked)
+            expected = {"expected_execution_witness": {
+                "path": str(linked), "sha256": hashlib.sha256(linked.read_bytes()).hexdigest()}}
+            candidate = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            with self.assertRaisesRegex(ValueError, "witness is absent or inside"):
+                full_signed_routes.schema5_browser_witness(
+                    ROOT, expected, candidate, "js:Safari:current:development", "b" * 64,
+                    "Darwin test arm64", HASHES, {}, archive, {})
+
+    def test_schema5_pins_live_firefox_collector_before_archived_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repository = base / "repository"
+            archive = base / "archive"
+            folder = archive / "core"
+            folder.mkdir(parents=True)
+            committed = (ROOT / full_browser_consumer.FIREFOX_WITNESS).read_bytes()
+            declared = hashlib.sha256(committed).hexdigest()
+            collector = repository / full_browser_consumer.FIREFOX_WITNESS
+            collector.parent.mkdir(parents=True)
+            collector.write_bytes(committed + b"\ntampered\n")
+            (folder / "firefox-bidi.jsonl").write_text(json.dumps({
+                "kind": "session", "source_path": str(collector),
+                "source_sha256": declared}) + "\n")
+            self.assertEqual(json.loads((folder / "firefox-bidi.jsonl").read_text())[
+                "source_sha256"], declared)
+            witness = base / "witness.json"
+            witness.write_text("{}")
+            expected = {"expected_execution_witness": {
+                "path": str(witness), "sha256": hashlib.sha256(witness.read_bytes()).hexdigest()}}
+            with patch.object(full_browser_consumer, "original", return_value=committed):
+                with self.assertRaisesRegex(ValueError, "live Firefox collector"):
+                    full_signed_routes.schema5_browser_witness(
+                        repository, expected, "a" * 40,
+                        "js:Firefox:current:development", "b" * 64,
+                        "Linux test x86_64", HASHES, {}, archive, {})
 
     def test_retained_a14_schema4_response_shape_is_historical_only(self):
         root = Path("/var/home/stewart/dyn4k-evidence/root-browser-cdp-a14")

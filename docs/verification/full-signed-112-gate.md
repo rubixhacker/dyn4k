@@ -92,10 +92,16 @@ Current Firefox and Safari schema-5 receipts use an external
 come from `expected_execution_witness`. The witness binds candidate, lane,
 mode, runtime, staged hashes, archive digest, selected browser executable,
 family collector source hashes, and the complete signed HTTP response records.
-Firefox entries use `bidi`; Safari entries use `service-worker`. Each module
-records the observed browser PID and process interval. Each response records
+Firefox entries use `bidi`; Safari entries use `service-worker`. The central
+gate reads the live Firefox collector and rejects bytes that differ from the
+candidate source. Each module records the observed browser PID, process-image
+path and hash, and process interval. A Firefox `firefox-bin` image can differ
+from the selected `firefox` executable; the module path and hash must match
+the allowed image's bytes and archived launch. The selected executable
+remains bound by the top-level witness and toolchain. Each response records
 the exact selected URL, times, size, SHA-256, and an independently captured
-body file outside the producer archive. The central gate compares those bytes
+body file outside the producer archive. The external witness and body files
+must each have one filesystem link. The central gate compares those bytes
 with both archived browser and Karma bodies after public replay. The auditor
 must capture the browser observations independently and sign the complete
 audit with the externally pinned key. Locally constructed witnesses and test

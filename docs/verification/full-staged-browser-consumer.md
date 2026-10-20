@@ -56,7 +56,7 @@ In production mode, the test task copies optimized Wasm products into Karma's pa
 
 Replay accepts a metadata-preserving copy at a new canonical archive path. The receipt keeps the original capture path for process commands and selected-bundle observations. The verifier reads archived bytes at the supplied path. It rejects symbolic paths, hardlinked files, and aliases to the original directory.
 
-The central signed gate accepts schema 5 for current Firefox and Safari only after exact-source public replay and a detached audit. The audit binds independent browser process and response-body observations to both modules. Each observed body must exist outside the producer archive and equal the archived browser and Karma bytes. Source support and synthetic controls do not establish a signed runtime pass.
+The central signed gate accepts schema 5 for current Firefox and Safari only after exact-source public replay and a detached audit. It checks the live Firefox collector bytes against the candidate source. The audit binds independent browser process and response-body observations to both modules. Firefox may use `firefox-bin` as its process image while the selected executable is `firefox`; both identities are checked separately. Each observed body must exist outside the producer archive and equal the archived browser and Karma bytes. Source support and synthetic controls do not establish a signed runtime pass.
 
 The coordinator supplies reviewed source to the approved local Mac and serializes Safari execution. No Safari runtime result is inferred from Linux or a Gradle dry run.
 
