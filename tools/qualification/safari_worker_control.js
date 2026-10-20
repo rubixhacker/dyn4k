@@ -27,7 +27,7 @@ const selected = new Map([
     ['/absolute/build/aaaaaaaaaaaaaaaaaaaa.wasm', wasm]
 ]);
 const server = http.createServer();
-server.listen(0, '127.0.0.1', () => {
+server.listen(0, () => {
     const port = server.address().port;
     environment.DYN4K_BROWSER_KARMA_PORT = String(port);
     vm.runInNewContext(fs.readFileSync(observer, 'utf8'), {
