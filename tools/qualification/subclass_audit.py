@@ -8,11 +8,11 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import qualify
 import geometry_subclass_dispatch
 import joint_subclass_dispatch
+import subclass_provider
 import vector_subclass_dispatch
 
 
@@ -66,8 +66,7 @@ def parse_aabb(raw, provider):
         values[key] = value
     if set(values) != set(AABB_EXPECTED) | {"provider"}:
         raise ValueError("AABB fixture has missing or extra observations")
-    url = urlparse(values.pop("provider"))
-    if url.scheme != "file" or Path(unquote(url.path)).resolve() != provider.resolve():
+    if not subclass_provider.matches_provider(values.pop("provider"), provider):
         raise ValueError("AABB class provider differs from selected JAR")
     return values
 

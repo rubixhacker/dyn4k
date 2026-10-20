@@ -8,6 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import qualify
+import geometry_subclass_dispatch
+import joint_subclass_dispatch
 import subclass_audit
 import vector_subclass_dispatch
 
@@ -28,15 +30,24 @@ class SubclassAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             command = [sys.executable, "-c", "import sys; print('observed'); print('error', file=sys.stderr)"]
-            self.assertEqual("observed\n", subclass_audit.execute(command, output, "probe", os.environ.copy()))
+            environment = os.environ.copy()
+            environment.pop("OLLAMA_API_KEY", None)
+            expected_stdout = b"observed" + os.linesep.encode()
+            self.assertEqual(expected_stdout.decode(),
+                             subclass_audit.execute(command, output, "probe", environment))
             subclass_audit.verify_process(output, "probe", command)
             stdout = output / "probe.stdout"
+            original_stdout = stdout.read_bytes()
+            self.assertEqual(expected_stdout, original_stdout)
+            recorded = json.loads((output / "probe.process.json").read_text())
+            self.assertEqual(hashlib.sha256(original_stdout).hexdigest(), recorded["stdout_sha256"])
             stdout.write_text("changed\n")
             with self.assertRaisesRegex(ValueError, "stdout"):
                 subclass_audit.verify_process(output, "probe", command)
-            stdout.write_text("observed\n")
+            stdout.write_bytes(original_stdout)
             stderr = output / "probe.stderr"
             original_stderr = stderr.read_bytes()
+            self.assertEqual(hashlib.sha256(original_stderr).hexdigest(), recorded["stderr_sha256"])
             stderr.write_text("changed error\n")
             with self.assertRaisesRegex(ValueError, "stderr"):
                 subclass_audit.verify_process(output, "probe", command)
@@ -107,6 +118,68 @@ class SubclassAuditTest(unittest.TestCase):
                 subclass_audit.parse_aabb("\n".join(lines[:-1]) + "\n", jar)
             with self.assertRaisesRegex(ValueError, "provider"):
                 subclass_audit.parse_aabb("\n".join(["provider=file:///wrong.jar"] + lines[1:]) + "\n", jar)
+
+    def test_windows_drive_file_uri_uses_windows_path_rules(self):
+        from pathlib import PureWindowsPath
+        from subclass_provider import local_file_uri_path
+
+        # The retained Windows run used a D: checkout and Path.as_uri() in this fixture.
+        uri = "file:///D:/a/dyn4k/dyn4k/candidate%20jar.jar"
+        expected = PureWindowsPath("D:/a/dyn4k/dyn4k/candidate jar.jar")
+        self.assertEqual(expected, local_file_uri_path(uri, windows=True))
+        self.assertEqual(expected, local_file_uri_path(uri.replace("file:///", "file:/"),
+                                                       windows=True))
+        for invalid in ("file://remote.invalid/D:/a/candidate.jar", "file:///D:/bad%ZZ.jar",
+                        "file:///D:/bad%2Fname.jar", "file:///D:/candidate.jar#fragment"):
+            with self.subTest(uri=invalid), self.assertRaisesRegex(ValueError, "provider URI"):
+                local_file_uri_path(invalid, windows=True)
+
+    def test_process_replay_preserves_crlf_stream_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            command = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'windows\\r\\n')"]
+            environment = os.environ.copy()
+            environment.pop("OLLAMA_API_KEY", None)
+            self.assertEqual("windows\r\n", subclass_audit.execute(command, output, "probe", environment))
+            stream = output / "probe.stdout"
+            original = stream.read_bytes()
+            self.assertEqual(b"windows\r\n", original)
+            metadata = subclass_audit.verify_process(output, "probe", command)
+            self.assertEqual(hashlib.sha256(original).hexdigest(), metadata["stdout_sha256"])
+            stream.write_bytes(original.replace(b"\r\n", b"\n"))
+            with self.assertRaisesRegex(ValueError, "stdout"):
+                subclass_audit.verify_process(output, "probe", command)
+
+    def test_all_subclass_parsers_require_local_exact_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            jar = Path(directory) / "candidate jar.jar"
+            jar.write_bytes(b"candidate")
+            aabb = {**subclass_audit.AABB_EXPECTED, "provider": jar.as_uri()}
+            geometry = {**dict.fromkeys(geometry_subclass_dispatch.CASES, "value"),
+                        **{f"provider.{name}": jar.as_uri()
+                           for name in geometry_subclass_dispatch.PROVIDERS}}
+            joint = {**joint_subclass_dispatch.EXPECTED,
+                     **dict.fromkeys(joint_subclass_dispatch.STATE_KEYS, "0"),
+                     **{f"provider_{name}": jar.as_uri()
+                        for name in joint_subclass_dispatch.PROVIDERS}}
+
+            def lines(values):
+                return "".join(f"{key}={value}\n" for key, value in values.items())
+
+            parsers = (
+                (subclass_audit.parse_aabb, aabb, "provider"),
+                (geometry_subclass_dispatch.parse, geometry, "provider.Transform"),
+                (lambda raw, provider: joint_subclass_dispatch.observations(raw.encode(), provider),
+                 joint, "provider_AngleJoint"),
+            )
+            for parser, values, key in parsers:
+                with self.subTest(parser=parser.__module__):
+                    parser(lines(values), jar)
+                    for invalid in ("file:///wrong.jar", "file://remote.invalid/share/candidate.jar",
+                                    "file:///bad%ZZ.jar", "https:///candidate.jar",
+                                    jar.as_uri() + "?query=1"):
+                        with self.subTest(uri=invalid), self.assertRaisesRegex(ValueError, "provider"):
+                            parser(lines({**values, key: invalid}), jar)
 
     def test_candidate_is_selected_only_from_replayed_current_audit(self):
         with tempfile.TemporaryDirectory() as directory:
