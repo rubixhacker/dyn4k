@@ -1,7 +1,9 @@
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -11,14 +13,14 @@ import linux_observed_klib as route
 
 class LinuxObservedKlibTest(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(dir=Path.home())
+        temporary = tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.launcher = self.root / "gradle"
         self.launcher.write_bytes(b"#!/bin/sh\nexec \"$JAVA_HOME/bin/java\" \"$@\"\n")
         self.selection = {"gradle": str(self.launcher), "lane":
                           "linuxX64:Linux x64:current:debug-g",
-                          "launcher_sha256": route._sha(self.launcher),
+                          "launcher_sha256": hashlib.sha256(self.launcher.read_bytes()).hexdigest(),
                           "toolchain": {"java_sha256": "a" * 64}}
         self.build = {"pid": 31, "executable_path": "/jdk/bin/java",
                       "executable_sha256": "a" * 64,
@@ -36,21 +38,44 @@ class LinuxObservedKlibTest(unittest.TestCase):
              "executable_sha256": "a" * 64},
         ]
 
+    def bind_fixture_launcher(self, rows, build):
+        if sys.platform == "linux":
+            return route._launcher_binding(rows, build, self.selection)
+        with mock.patch.object(route, "_sha", side_effect=lambda path: hashlib.sha256(
+                Path(path).read_bytes()).hexdigest()):
+            return route._launcher_binding(rows, build, self.selection)
+
+    def test_portable_source_manifest_inventory(self):
+        builds = route.klib.consumer_builds(2)
+        repository = Path(__file__).resolve().parents[2]
+        self.assertEqual(9, len(builds))
+        self.assertTrue(all((repository / path).is_file() for path in builds))
+        self.assertEqual({"linuxX64:Linux x64:current:debug-g",
+                          "linuxX64:Linux x64:current:optimized-opt"}, route.LANES)
+
+    def test_linux_fd_seal_rejects_symbolic_launcher(self):
+        if sys.platform != "linux":
+            self.skipTest("Linux O_CLOEXEC and O_NOFOLLOW file sealing unavailable")
+        self.assertEqual(self.selection["launcher_sha256"], route._sha(self.launcher))
+        shortcut = self.root / "launcher-link"
+        shortcut.symlink_to(self.launcher)
+        with self.assertRaises(OSError):
+            route._sha(shortcut)
+
     def test_launcher_requires_same_pid_shell_then_selected_java(self):
-        script, image = route._launcher_binding(self.rows, self.build, self.selection)
+        script, image = self.bind_fixture_launcher(self.rows, self.build)
         self.assertEqual(31, script["pid"])
         self.assertEqual(3, image["seq"])
         with self.assertRaisesRegex(ValueError, "script-to-Java"):
-            route._launcher_binding([self.rows[0], self.rows[2]], self.build,
-                                    self.selection)
+            self.bind_fixture_launcher([self.rows[0], self.rows[2]], self.build)
 
     def test_launcher_rejects_wrong_task_and_changed_script(self):
         changed = dict(self.build, argv=["/jdk/bin/java", "--version"])
         with self.assertRaisesRegex(ValueError, "task argv"):
-            route._launcher_binding(self.rows, changed, self.selection)
+            self.bind_fixture_launcher(self.rows, changed)
         self.launcher.write_bytes(b"#!/bin/sh\nexec /usr/bin/false\n")
         with self.assertRaisesRegex(ValueError, "script-to-Java"):
-            route._launcher_binding(self.rows, self.build, self.selection)
+            self.bind_fixture_launcher(self.rows, self.build)
 
     def test_record_rejects_changed_bytes_and_hardlinks(self):
         record = self.root / "record.json"
@@ -71,12 +96,15 @@ class LinuxObservedKlibTest(unittest.TestCase):
             "java_home": "/jdk", "gradle_user_home": "/gradle-cache",
             "konan_data_dir": "/konan"}))
         (self.root / "record.json").write_bytes(route._json({"status": "OBSERVED_UNSIGNED"}))
-        with mock.patch.object(route, "_selection", return_value={"different": True}), \
+        with mock.patch.object(route, "_selection", return_value={"different": True}) as selected, \
                 mock.patch.object(route, "_derive", side_effect=AssertionError("reached archive")):
             with self.assertRaisesRegex(ValueError, "selection differs"):
                 route.verify(self.root, self.root)
+        selected.assert_called_once_with(self.root, "a" * 40, self.selection["lane"],
+                                         "/stage", str(self.launcher), "/node", "/jdk",
+                                         "/gradle-cache", "/konan")
 
-    def test_capture_fixture_runs_reviewed_source_producer_under_observer(self):
+    def test_capture_command_wires_reviewed_source_producer_to_observer(self):
         candidate = "a" * 40
         staging = self.root / "stage"
         staging.mkdir()
