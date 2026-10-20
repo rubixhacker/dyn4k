@@ -76,6 +76,7 @@ def safari_records(folder, process, launches, candidate, module, target,
         if (set(item) != event_keys or item["token"] != token
                 or not isinstance(item["request_id"], str)
                 or not item["request_id"] or item["request_id"] in ids
+                or type(item["eligible_count"]) is not int
                 or not ((item["client_id_source"] == "fetch-event"
                          and item["fetch_client_id"] == item["client_id"]
                          and item["eligible_count"] == 0)

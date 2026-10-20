@@ -26,15 +26,15 @@ const selected = new Map([
     ['/absolute/build/runtime.js', javascript],
     ['/absolute/build/aaaaaaaaaaaaaaaaaaaa.wasm', wasm]
 ]);
-const server = http.createServer();
-server.listen(0, () => {
-    const port = server.address().port;
+const ipv4 = http.createServer();
+const ipv6 = http.createServer();
+function start(port) {
     environment.DYN4K_BROWSER_KARMA_PORT = String(port);
     vm.runInNewContext(fs.readFileSync(observer, 'utf8'), {
         config, process: {env: environment, pid: process.pid}, require, Buffer, URL
     });
     const middleware = config.plugins[0]['middleware:qualification-safari-observer'][1]();
-    server.on('request', (request, response) => middleware(request, response, () => {
+    const handle = (request, response) => middleware(request, response, () => {
         const pathname = new URL(request.url, 'http://localhost:' + port).pathname;
         if (pathname === '/control-done' && request.method === 'POST') {
             const chunks = [];
@@ -67,7 +67,17 @@ server.listen(0, () => {
         response.writeHead(200, {'Content-Type': pathname.endsWith('.wasm')
             ? 'application/wasm' : 'text/javascript'});
         response.end(bytes);
-    }));
+    });
+    ipv4.on('request', handle);
+    ipv6.on('request', handle);
     fs.writeFileSync(portFile, String(port), {flag: 'wx'});
+}
+ipv4.listen(0, '127.0.0.1', () => {
+    const port = ipv4.address().port;
+    ipv6.listen(port, '::1', () => start(port));
 });
-process.on('SIGTERM', () => server.close());
+process.on('SIGTERM', () => {
+    for (const server of [ipv4, ipv6]) {
+        if (server.listening) server.close();
+    }
+});

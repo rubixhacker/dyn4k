@@ -5,6 +5,7 @@ import json
 import runpy
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,15 @@ class SafariResponseWitnessTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "identity or timing"):
                 replay()
             raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            for index, value in ((1, True), (2, False)):
+                with self.subTest(index=index, eligible_count=value):
+                    changed_events = [dict(row) for row in events]
+                    changed_events[index]["eligible_count"] = value
+                    raw.write_text("\n".join(json.dumps(row) for row in
+                                             changed_events) + "\n")
+                    with self.assertRaisesRegex(ValueError, "identity or timing"):
+                        replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
             changed_events = [dict(row) for row in events]
             changed_events[1]["resulting_client_id"] = "other-page"
             raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
@@ -225,6 +235,45 @@ class SafariResponseWitnessTest(unittest.TestCase):
                 browser.verify_safari_response_witness(
                     folder, process, launches, server[:-1], "core", "wasmJs",
                     "a" * 40, str(source), *hashes)
+
+
+class SafariControlServerTest(unittest.TestCase):
+    def test_control_accepts_only_ipv4_and_ipv6_loopback(self):
+        root = Path(__file__).resolve().parents[2]
+        fixture = root / "tools/qualification/safari_worker_control.js"
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            port_file = folder / "port"
+            child_env = {key: value for key, value in os.environ.items()
+                         if key != "OLLAMA_API_KEY"}
+            process = subprocess.Popen(
+                ["node", str(fixture), str(root), str(folder), str(port_file)],
+                env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 5
+                while not port_file.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(port_file.exists(), "control server did not bind")
+                port = int(port_file.read_text())
+                for address in ("127.0.0.1", "::1"):
+                    with self.subTest(loopback=address), socket.create_connection(
+                            (address, port), timeout=2) as connection:
+                        connection.sendall(
+                            b"GET /test.html HTTP/1.1\r\nHost: localhost\r\n"
+                            b"Connection: close\r\n\r\n")
+                        self.assertIn(b"HTTP/1.1 200", connection.recv(256))
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                    route.connect(("192.0.2.1", 9))
+                    non_loopback = route.getsockname()[0]
+                self.assertFalse(non_loopback.startswith("127."))
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                    connection.settimeout(2)
+                    with self.assertRaises(OSError):
+                        connection.connect((non_loopback, port))
+                self.assertFalse((folder / "browser-result.txt").exists())
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
 
 
 class ToolchainPinTest(unittest.TestCase):
