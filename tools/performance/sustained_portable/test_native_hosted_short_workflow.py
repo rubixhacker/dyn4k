@@ -58,7 +58,8 @@ def verify_sustained_workflow_contract(source):
     target_guard = next((step for step in validate_steps or ()
                          if isinstance(step, dict)
                          and step.get("name") == "Require the Windows target"), None)
-    if (validate.get("runs-on") != "ubuntu-latest"
+    if ("if" in validate
+            or validate.get("runs-on") != "ubuntu-latest"
             or validate.get("env", {}).get("TARGET") != "${{ inputs.target }}"
             or not isinstance(target_guard, dict)
             or "if" in target_guard
@@ -100,6 +101,14 @@ def verify_sustained_workflow_contract(source):
     if len(capture_steps) != 1:
         raise AssertionError("sustained capture step is missing or duplicated")
     capture_step = capture_steps[0]
+    workflow_env = document.get("env", {})
+    step_env = capture_step.get("env", {})
+    if not isinstance(workflow_env, dict) or not isinstance(step_env, dict):
+        raise AssertionError("sustained capture environment must be mappings")
+    effective_capture_env = {**workflow_env, **capture_env, **step_env}
+    if (effective_capture_env.get("TARGET") != "${{ inputs.target }}"
+            or effective_capture_env.get("BUILD") != "${{ inputs.build }}"):
+        raise AssertionError("effective sustained capture dispatch bindings changed")
     if ("if" in capture_step or "if" in capture
             or capture_step.get("shell") != "bash"
             or capture_step.get("run") !=
@@ -328,8 +337,18 @@ class WorkflowExpressionLimit(unittest.TestCase):
             document["jobs"]["validate-target"]["steps"].append(step)
 
         mutations = (
+            ("validation conditional excludes optimized dispatch",
+             lambda doc: doc["jobs"]["validate-target"].__setitem__(
+                 "if", "${{ inputs.build == 'development' }}"),
+             "Windows target validation route changed"),
             ("disabled capture", lambda doc: capture_step(doc).__setitem__("if", False),
              "sustained capture step is conditional or altered"),
+            ("step overrides target binding",
+             lambda doc: capture_step(doc).__setitem__("env", {"TARGET": "jvm"}),
+             "effective sustained capture dispatch bindings changed"),
+            ("step overrides build binding",
+             lambda doc: capture_step(doc).__setitem__("env", {"BUILD": "development"}),
+             "effective sustained capture dispatch bindings changed"),
             ("wrong target binding", lambda doc: doc["jobs"]["capture"]["env"].__setitem__("TARGET", "jvm"),
              "sustained capture job route or dispatch bindings changed"),
             ("wrong build binding", lambda doc: doc["jobs"]["capture"]["env"].__setitem__("BUILD", "development"),
