@@ -49,7 +49,7 @@ _WRAPPERS = {
 }
 
 
-def expected_case_ids():
+def expected_case_ids(include_focused=False):
     result = {method: [] for method in _WRAPPERS}
     for case in declared_cases():
         case_id = case["id"]
@@ -84,7 +84,10 @@ def expected_case_ids():
                  if method != "captureWheelActive" for case_id in ids]
     if len(inventory) != 332 or len(set(inventory)) != 332:
         raise CaptureRejected("prospective wrapper inventory differs")
-    result["captureWheelActive"] = ["joint-Wheel-active"]
+    if include_focused:
+        result["captureWheelActive"] = ["joint-Wheel-active"]
+    else:
+        del result["captureWheelActive"]
     return result
 
 
@@ -94,7 +97,7 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
     if reset_order not in {"pre", "post", "either"}:
         raise CaptureRejected("unknown accepted reset order")
     if expected_ids is None:
-        expected_ids = expected_case_ids()[method]
+        expected_ids = expected_case_ids(method == "captureWheelActive")[method]
     if not isinstance(expected_ids, list) or len(set(expected_ids)) != len(expected_ids):
         raise CaptureRejected("expected case inventory differs")
     expected_method = _WRAPPERS[method]
