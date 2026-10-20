@@ -974,6 +974,7 @@ jobs:
           if-no-files-found: error
 
   hosted-mac:
+    if: github.event_name != 'workflow_dispatch' || inputs.windows_diagnostics != true
     needs: hosted-runner-guard
     strategy:
       fail-fast: false

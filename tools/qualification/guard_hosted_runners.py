@@ -106,7 +106,7 @@ def main() -> int:
         print(error, file=sys.stderr)
     if errors:
         return 1
-    print(f"Checked {count} active workflows: Linux/Windows hosted runners only")
+    print(f"Checked {count} active workflows: no hosted macOS labels; mac-mini self-hosted allowed")
     return 0
 
 
