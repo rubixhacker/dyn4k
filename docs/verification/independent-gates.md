@@ -73,7 +73,7 @@ No archive yields `NOT_RUN`. A complete external unavailability observation yiel
 | --- | --- |
 | staged-artifacts | `qualify.audit_staging` verifies the full repository; both selected target binaries match the independent audit. |
 | staged-consumer | The approved full-suite contract checks every selected case ID, XML, provider graph, resolved binary, lane, and process output. A valid foundation-only group remains `NOT_RUN`. |
-| numerical-parity | `compare.compare` replays all 14 frozen traces. The source adapter computes SHA-256 of `git archive --format=tar <candidate>`, matching actual producer receipts. The 318 adopted prospective case identities are separate rule and arithmetic subgates. A 14-trace receipt without those raw cases fails. The approved JVM comparator blob is SHA-256 `6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f` from reviewed revision `8a5c4681838aa1eb1f08ebfb7aa54d6616bb3977`. The historical frozen fixture is pinned to `658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c`. The assembled fixture with the adopted Weld/Pulley declaration is pinned to `3086e982d8a4915634bd62d50dbfa0bf4f6e8cc0070a7a16d1f4bede9764d48a`. Any other fixture or mutated checker fails the policy binding. |
+| numerical-parity | `compare.compare` replays 14 frozen traces. The source adapter hashes the candidate Git archive. The 318 prospective cases remain separate rule and arithmetic obligations. Missing raw cases fail. |
 | physical-correctness | Default, configured, Weld/Pulley, and nominal profiles are separate. Each must pass for the gate to pass. The default baseline still records `125,847/126,000` failures. Weld/Pulley requires 36,000 states per case. Nominal requires 36,000 states, 108,001 callbacks, signed-zero checks, and approved analytical comparison. |
 | unchanged-java-corpus | The reviewed `full_ci.py` archive verifier checks 2,385 original Java cases across 12 compile/runtime routes, pinned sources, case identities, logs, provider binaries, and raw archive seals. |
 | java-source-compatibility | The same reviewed archive verifier runs the strict 216-type, 3,078-declaration comparison and Java source projection checks against staged JVM and Android class archives. |
@@ -82,6 +82,16 @@ No archive yields `NOT_RUN`. A complete external unavailability observation yiel
 | performance-resource | The pilot archive remains unpassed. The sustained route runs the separately reviewed raw verifier with an external trusted key, pinned producer source, and approved policy. |
 | publication-contract | `qualify.audit_staging` checks publication metadata and files. Every binary in all 21 targets must match the separately audited all-target hash map. |
 | independent-review | Two distinct raw Sol sessions must contain exact-final-head standards and spec review outputs. Their actionable findings and resolutions must match the reports and committed evidence. |
+
+The approved comparator SHA-256 is `4a6b4646683389aca643551b5672ca94d2f1e6dd49adad1c4684472b2b97348d`.
+Independent f034 and 168 reviews checked this exact blob and its role-based floor behavior.
+The approved ancestry windows begin at the reviewed `f0349a0d` and `168fbfcd` commits.
+The earlier `6f993d9f` assembly has the same source bytes but predates approval; its policy binding stays closed.
+The pre-approval `cd21a4bd` candidate retains the historical comparator SHA-256 `6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f`.
+The verifier checks both candidate ancestry and exact source bytes. A changed working checker or an unapproved candidate blob fails.
+The historical fixture SHA-256 remains `658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c`.
+The assembled fixture SHA-256 remains `3086e982d8a4915634bd62d50dbfa0bf4f6e8cc0070a7a16d1f4bede9764d48a`.
+This source pin does not establish numerical, physical, target, or full-suite qualification.
 
 The full staged consumer route applies to every approved lane, including devices, browsers, and Wasmtime. Call `consumer_contract(manifest, lane_id)` for its case set and digest. A full receipt uses `consumer_group: full-suite` and includes `consumer_contract_sha256`. Its command names the lane. Its XML has one `testcase id` for every selected case. Foundation groups keep their original classname and method identities, but cannot pass the complete selected-suite gate. Neither route supplies absent device or browser execution.
 

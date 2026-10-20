@@ -141,20 +141,45 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertTrue(contract["cases"])
 
     def test_approved_comparator_accepts_reviewed_blob_and_rejects_stale_pin(self):
-        current = "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f"
+        current = "4a6b4646683389aca643551b5672ca94d2f1e6dd49adad1c4684472b2b97348d"
+        historical_digest = "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f"
         path = "tools/numerical/compare.py"
         self.assertEqual(current, independent_gates.APPROVED_POLICY[path])
+        self.assertEqual(historical_digest, independent_gates.HISTORICAL_COMPARATOR_SHA256)
         self.assertEqual(current, hashlib.sha256(subprocess.check_output(
             ["git", "show", f"HEAD:{path}"], cwd=ROOT)).hexdigest())
-        self.assertEqual(current, hashlib.sha256(subprocess.check_output(
-            ["git", "show", f"8a5c4681838aa1eb1f08ebfb7aa54d6616bb3977:{path}"],
-            cwd=ROOT)).hexdigest())
+        self.assertEqual(current, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+        reviewed_revisions = (
+            "f6fefba4f55267f40cc1e3a5844bd67f1e163139",
+            "243dc33145f263b5a2918e25c588442b5df75430",
+            "e7e22cde3094095e1ac2e4aee988a97ff2053ae8")
+        approved_revisions = (
+            "f0349a0d29f91879fc52286899f39e042c8523f6",
+            "168fbfcdabd68cfb9317310958d6be7f52b38f05")
+        self.assertEqual(approved_revisions, independent_gates.APPROVED_COMPARATOR_REVISIONS)
+        for revision in (*reviewed_revisions,
+                         "f0349a0d29f91879fc52286899f39e042c8523f6",
+                         "168fbfcdabd68cfb9317310958d6be7f52b38f05"):
+            self.assertEqual(current, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{revision}:{path}"], cwd=ROOT)).hexdigest())
         historical = "cd21a4bd7d6731a096597f97966db9e02b9de448"
+        self.assertEqual(historical_digest, hashlib.sha256(subprocess.check_output(
+            ["git", "show", f"{historical}:{path}"], cwd=ROOT)).hexdigest())
         current_source = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                                  cwd=ROOT, text=True).strip()
         if checkout_matches_commit(independent_gates.APPROVED_POLICY):
-            self.assertEqual(current, independent_gates._policy_binding(ROOT, historical)[path])
+            self.assertEqual(historical_digest,
+                             independent_gates._policy_binding(ROOT, historical)[path])
+            self.assertEqual(current, independent_gates._policy_binding(
+                ROOT, "f0349a0d29f91879fc52286899f39e042c8523f6")[path])
+            self.assertEqual(current, independent_gates._policy_binding(
+                ROOT, "168fbfcdabd68cfb9317310958d6be7f52b38f05")[path])
             self.assertEqual(current, independent_gates._policy_binding(ROOT, current_source)[path])
+            unapproved = "6f993d9f96ac3e5a722ed82eb85bc0b2394d98cd"
+            self.assertEqual(current, hashlib.sha256(subprocess.check_output(
+                ["git", "show", f"{unapproved}:{path}"], cwd=ROOT)).hexdigest())
+            with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
+                independent_gates._policy_binding(ROOT, unapproved)
         else:
             with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
                 independent_gates._policy_binding(ROOT, current_source)
@@ -171,9 +196,9 @@ class IndependentGateSeamTests(unittest.TestCase):
             independent_gates._policy_binding(ROOT, BASE)
         with mock.patch.dict(independent_gates.APPROVED_POLICY,
                              {"tools/numerical/compare.py":
-                              "4310fe9ddad700bd591b7708cc1a61e9b307029ca97f5240b608a61fe0430fa3"}):
+                              historical_digest}):
             with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
-                independent_gates._policy_binding(ROOT, historical)
+                independent_gates._policy_binding(ROOT, current_source)
         with mock.patch.dict(independent_gates.APPROVED_POLICY,
                              {"tools/numerical/fixtures.json": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "approved policy/checker blob differs"):
