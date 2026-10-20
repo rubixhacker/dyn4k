@@ -682,7 +682,7 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
         witnessed_execve = sorted(f"{pid} {line}" for pid, content in decoded.items()
                                   for line in content.splitlines()
                                   if line.startswith("execve("))
-        if witnessed_execve != sorted(execve_log.decode("utf-8").splitlines()):
+        if not set(witnessed_execve) <= set(execve_log.decode("utf-8").splitlines()):
             raise CaptureRejected("worker write process trace differs")
         worker_calls = [line for line in decoded[worker_pid].splitlines()
                         if line.startswith("execve(") and "GradleWorkerMain" in line and

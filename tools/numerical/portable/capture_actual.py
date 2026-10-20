@@ -134,18 +134,43 @@ def run_capture(method, output, reference_case=None):
         trace_files = sorted(output.glob("worker-write-trace.*"))
         if not trace_files:
             raise CaptureRejected("worker write trace is missing")
+        raw_traces = {}
         executions = []
+        workers = []
+        for path in trace_files:
+            raw = path.read_bytes()
+            pid = path.name.removeprefix("worker-write-trace.")
+            if not pid.isdecimal():
+                raise CaptureRejected("worker write trace PID differs")
+            raw_traces[pid] = raw
+            executions.extend(f"{pid} {line}" for line in raw.decode().splitlines()
+                              if line.startswith("execve("))
+            if any(line.startswith("execve(") and "GradleWorkerMain" in line and
+                   line.endswith(" = 0") for line in raw.decode().splitlines()):
+                workers.append(pid)
+        if len(workers) != 1:
+            raise CaptureRejected("worker write trace process differs")
+        descendants = {workers[0]}
+        pending = workers[:]
+        while pending:
+            for line in raw_traces[pending.pop()].decode().splitlines():
+                if not line.startswith(("clone(", "clone3(")):
+                    continue
+                child = re.search(r"\)\s+= ([1-9][0-9]*)$", line)
+                if child is None:
+                    continue
+                pid = child.group(1)
+                if pid not in raw_traces:
+                    raise CaptureRejected("worker write child trace is missing")
+                if pid not in descendants:
+                    descendants.add(pid)
+                    pending.append(pid)
         with zipfile.ZipFile(output / "worker-write-traces.zip", "x") as archive:
-            for path in trace_files:
-                raw = path.read_bytes()
+            for pid in sorted(descendants, key=int):
+                raw = raw_traces[pid]
                 if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
                     raise CaptureRejected("worker write trace exposed the environment")
-                pid = path.name.removeprefix("worker-write-trace.")
-                if not pid.isdecimal():
-                    raise CaptureRejected("worker write trace PID differs")
                 archive.writestr("trace." + pid, raw)
-                executions.extend(f"{pid} {line}" for line in raw.decode().splitlines()
-                                  if line.startswith("execve("))
         (output / "execve.log").write_text("\n".join(sorted(executions)) + "\n")
     reject_environment_trace(output / "execve.log")
     if target.returncode or not XML.is_file() or not worker_arguments.is_file():
