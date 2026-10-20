@@ -403,7 +403,34 @@ def process_snapshot(expected_folders, simulator_udid):
                    "image_sha256": sha}
 
 
-def observe_test_processes(work_root, target, mode, simulator_udid, stop, destination):
+def macos_gradle_daemon_snapshot(client_pid, java):
+    if platform.system() != "Darwin" or not client_pid:
+        return
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    listing = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
+    for line in listing.splitlines():
+        match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
+        if not match or int(match[2]) != client_pid:
+            continue
+        pid, command = int(match[1]), match[3]
+        if not command.endswith(" org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0"):
+            continue
+        buffer = ctypes.create_string_buffer(4096)
+        if libproc.proc_pidpath(pid, buffer, len(buffer)) <= 0:
+            continue
+        image = buffer.value.decode(errors="replace")
+        if Path(image) != java:
+            continue
+        try:
+            sha = digest(Path(image).read_bytes())
+        except OSError:
+            continue
+        yield {"pid": pid, "parent_pid": client_pid, "gradle_client_pid": client_pid,
+               "image": image, "command": command, "image_sha256": sha}
+
+
+def observe_test_processes(work_root, target, mode, simulator_udid, stop, destination,
+                           gradle_client=None, java=None):
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
     expected = {short: (work_root / short / "bin" / target / binary_mode).resolve()
                 for short in ("core", "facade")}
@@ -411,6 +438,15 @@ def observe_test_processes(work_root, target, mode, simulator_udid, stop, destin
     with destination.open("wb") as output:
         while not stop.is_set():
             try:
+                if target == "macosArm64" and gradle_client and gradle_client.get("pid"):
+                    for sample in macos_gradle_daemon_snapshot(gradle_client["pid"], java):
+                        sample.update({"observed_ns": time.time_ns(),
+                                       "module": "gradle-daemon", "simulator_udid": None})
+                        key = (sample["pid"], sample["image_sha256"], "gradle-daemon")
+                        if key not in seen:
+                            output.write(encoded(sample))
+                            output.flush()
+                            seen.add(key)
                 for sample in process_snapshot(expected.values(), simulator_udid):
                     image = Path(sample["image"])
                     short = next((key for key, folder in expected.items()
@@ -431,12 +467,69 @@ def observe_test_processes(work_root, target, mode, simulator_udid, stop, destin
             stop.wait(0.02 if platform.system() == "Linux" else 0.1)
 
 
-def macos_host_launcher_pid(stdout):
-    matches = re.findall(r"(?m)^The client will now receive all logging from the daemon "
-                         r"\(pid: ([1-9][0-9]*)\)\.", stdout)
-    if len(matches) != 1:
+def macos_host_launcher_pid(stdout, gradle_home):
+    lines = stdout.splitlines()
+    prefixes = ("Starting process 'Gradle build daemon'.",
+                "Successfully started process 'Gradle build daemon'",
+                "An attempt to start the daemon took ",
+                "The client will now receive all logging from the daemon ")
+    positions = [[index for index, line in enumerate(lines) if line.startswith(prefix)]
+                 for prefix in prefixes]
+    builds = [index for index, line in enumerate(lines) if line == "Starting Build"]
+    if (any(len(found) != 1 for found in positions) or len(builds) != 1
+            or positions[0][0] + 1 != positions[1][0]
+            or positions[1][0] + 1 != positions[2][0]
+            or positions[2][0] + 1 != positions[3][0]
+            or positions[3][0] >= builds[0]
+            or any(line.startswith("> Task ") for line in lines[:builds[0]])):
         raise ValueError("selected macOS Native Gradle launcher is absent or ambiguous")
-    return int(matches[0])
+    daemon_dir = str(PurePosixPath(gradle_home) / "daemon" / "9.5.0")
+    start = lines[positions[0][0]]
+    if (not start.startswith("Starting process 'Gradle build daemon'. Working directory: "
+                             f"{daemon_dir} Command: ")
+            or not start.endswith(" org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0")
+            or not re.fullmatch(r"An attempt to start the daemon took [0-9]+(?:\.[0-9]+)? secs\.",
+                                lines[positions[2][0]])):
+        raise ValueError("selected macOS Native Gradle launcher startup differs")
+    match = re.fullmatch(
+        r"The client will now receive all logging from the daemon "
+        r"\(pid: ([1-9][0-9]*)\)\. The daemon log file: "
+        + re.escape(daemon_dir) + r"/daemon-([1-9][0-9]*)\.out\.log",
+        lines[positions[3][0]])
+    if not match or match[1] != match[2]:
+        raise ValueError("selected macOS Native Gradle launcher log identity differs")
+    return int(match[1])
+
+
+def macos_live_daemon_binding(samples, launcher_pid, client_pid, java, java_sha,
+                              started_ns=None, finished_ns=None):
+    daemons = [sample for sample in samples if sample.get("module") == "gradle-daemon"]
+    if len(daemons) != 1:
+        raise ValueError("selected macOS Gradle daemon live observation is absent or ambiguous")
+    sample = daemons[0]
+    if (sample.get("pid") != launcher_pid
+            or sample.get("parent_pid") != client_pid
+            or sample.get("gradle_client_pid") != client_pid
+            or PurePosixPath(sample.get("image", "")) != PurePosixPath(java)
+            or sample.get("image_sha256") != java_sha
+            or not sample.get("command", "").endswith(
+                " org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0")
+            or sample.get("observed_ns", 0) <= 0
+            or started_ns is not None and sample["observed_ns"] < started_ns
+            or finished_ns is not None and sample["observed_ns"] > finished_ns):
+        raise ValueError("selected macOS Gradle daemon is not bound to the live client")
+    return sample
+
+
+def macos_gradle_client_pid(archive):
+    path = archive / "runtime/gradle-client.json"
+    if not path.is_file():
+        raise ValueError("selected macOS Gradle client live identity is absent")
+    client = json.loads(path.read_bytes())
+    if (not isinstance(client, dict) or set(client) != {"pid"}
+            or type(client["pid"]) is not int or client["pid"] <= 0):
+        raise ValueError("selected macOS Gradle client live identity differs")
+    return client["pid"]
 
 
 def process_binding(archive, work_root, target, mode, simulator_udid, short, binary_sha):
@@ -448,7 +541,11 @@ def process_binding(archive, work_root, target, mode, simulator_udid, short, bin
                and sample.get("image_sha256") == binary_sha
                and sample.get("pid", 0) > 0 and sample.get("parent_pid", 0) > 0]
     if target == "macosArm64":
-        launcher_pid = macos_host_launcher_pid((archive / "stdout.txt").read_text())
+        launcher_pid = macos_host_launcher_pid(
+            (archive / "stdout.txt").read_text(), Path(os.environ["GRADLE_USER_HOME"]).resolve())
+        java = Path(os.environ["JAVA_HOME"]).resolve() / "bin/java"
+        macos_live_daemon_binding(samples, launcher_pid, macos_gradle_client_pid(archive), java,
+                                  digest(java.read_bytes()))
         matches = [sample for sample in matches if sample["parent_pid"] == launcher_pid]
     if not matches:
         raise ValueError(f"selected {short} Native test launcher and executable bytes were not observed")
@@ -1224,14 +1321,18 @@ def run(repository, candidate, lane, staging, output, gradle, native_home, selec
                       "python": str(Path(sys.executable).resolve())}
     command = gradle_command(producer_paths, lane, mode, hashes)
     stop = threading.Event()
+    gradle_client = {"pid": None}
     monitor = threading.Thread(target=observe_test_processes, args=(work_root, target,
         mode, selection.get("simulator_udid") if family else None, stop,
-        output / "runtime/process-observations.jsonl"), daemon=True)
+        output / "runtime/process-observations.jsonl", gradle_client, java), daemon=True)
     (output / "runtime").mkdir(exist_ok=True)
     monitor.start()
     try:
         with (output / "stdout.txt").open("wb") as stdout, (output / "stderr.txt").open("wb") as stderr:
             process = subprocess.Popen(command, cwd=output, stdout=stdout, stderr=stderr)
+            if target == "macosArm64":
+                gradle_client["pid"] = process.pid
+                (output / "runtime/gradle-client.json").write_bytes(encoded({"pid": process.pid}))
             exit_code = process.wait()
     finally:
         stop.set()
@@ -1882,7 +1983,8 @@ def verify_snapshot(root, repository, candidate, lane, hashes, selection, archiv
     stdout = (root / "stdout.txt").read_text()
     if "BUILD SUCCESSFUL" not in stdout or f"QUALIFICATION_LANE={lane}" not in stdout:
         raise ValueError("original Gradle run or lane marker differs")
-    launcher_pid = macos_host_launcher_pid(stdout) if target == "macosArm64" else None
+    launcher_pid = (macos_host_launcher_pid(stdout, trusted_toolchain["gradle_user_home"])
+                    if target == "macosArm64" else None)
     compiler_flags = {}
     for short in ("core", "facade"):
         if f"> Task :{short}:{target}Test" not in stdout:
@@ -1977,6 +2079,13 @@ def verify_snapshot(root, repository, candidate, lane, hashes, selection, archiv
         raise ValueError("selected Native executable inventory differs")
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
     samples = [json.loads(line) for line in (root / "runtime/process-observations.jsonl").read_bytes().splitlines()]
+    if target == "macosArm64":
+        if macos_gradle_client_pid(root) != process["pid"]:
+            raise ValueError("selected macOS Gradle client differs from the pinned invocation")
+        macos_live_daemon_binding(
+            samples, launcher_pid, process["pid"],
+            PurePosixPath(trusted_toolchain["java_home"]) / "bin/java",
+            trusted_toolchain["java_sha256"], process["started_ns"], process["finished_ns"])
     for short, product in products.items():
         copy = independent_gates._file_path(root, product["archive"])
         expected_path = path_type(paths["work_root"]) / short / "bin" / target / binary_mode

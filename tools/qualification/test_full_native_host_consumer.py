@@ -23,6 +23,20 @@ MODULE_CASES = {
 }
 
 
+def macos_startup(pid, gradle_home):
+    daemon_dir = f"{gradle_home}/daemon/9.5.0"
+    return ("To honour the JVM settings for this build a single-use Daemon process "
+            "will be forked.\n"
+            f"Starting process 'Gradle build daemon'. Working directory: {daemon_dir} "
+            "Command: /task/jdk21/bin/java -cp /task/gradle/lib/gradle-daemon-main-9.5.0.jar "
+            "org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0\n"
+            "Successfully started process 'Gradle build daemon'\n"
+            "An attempt to start the daemon took 0.314 secs.\n"
+            f"The client will now receive all logging from the daemon (pid: {pid}). "
+            f"The daemon log file: {daemon_dir}/daemon-{pid}.out.log\n"
+            "Starting Build\n> Task :core:macosArm64Test\n")
+
+
 def report(short, name=None, outcome=None, duplicate=False):
     _, classname, method = MODULE_CASES[short]
     method = name or method
@@ -38,13 +52,62 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
-    def test_macos_host_image_requires_recorded_gradle_launcher_parent(self):
+    def test_macos_host_rejects_spoofed_startup_without_live_daemon(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            gradle_home = root / "gradle"
+            (archive / "stdout.txt").write_text(macos_startup(67086, gradle_home))
+            work_root = root / "build"
+            image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
+            sample = {"module": "core", "pid": 67383, "parent_pid": 67086,
+                      "image": str(image), "command": str(image),
+                      "image_sha256": "a" * 64, "observed_ns": 100,
+                      "simulator_udid": None}
+            (archive / "runtime/process-observations.jsonl").write_bytes(route.encoded(sample))
+            (archive / "runtime/gradle-client.json").write_bytes(route.encoded({"pid": 67074}))
+            java = root / "jdk21/bin/java"
+            java.parent.mkdir(parents=True)
+            java.write_bytes(b"pinned java")
+            with patch.dict(os.environ, {"GRADLE_USER_HOME": str(gradle_home),
+                                             "JAVA_HOME": str(root / "jdk21")}):
+                with self.assertRaisesRegex(ValueError, "daemon|launcher"):
+                    route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                          None, "core", "a" * 64)
+
+    def test_macos_host_rejects_task_stdout_daemon_spoof(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
             root = Path(temporary)
             archive = root / "archive"
             (archive / "runtime").mkdir(parents=True)
             (archive / "stdout.txt").write_text(
-                "The client will now receive all logging from the daemon (pid: 67086).\n")
+                "> Task :core:macosArm64Test\n"
+                "The client will now receive all logging from the daemon "
+                "(pid: 99999). unrelated task output\n")
+            work_root = root / "build"
+            image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
+            sample = {"module": "core", "pid": 67383, "parent_pid": 99999,
+                      "image": str(image), "command": str(image),
+                      "image_sha256": "a" * 64, "observed_ns": 100,
+                      "simulator_udid": None}
+            (archive / "runtime/process-observations.jsonl").write_bytes(route.encoded(sample))
+            with patch.dict(os.environ, {"GRADLE_USER_HOME": str(root / "gradle")}):
+                with self.assertRaisesRegex(ValueError, "launcher"):
+                    route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                          None, "core", "a" * 64)
+
+    def test_macos_host_image_requires_recorded_gradle_launcher_parent(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            gradle_home = root / "gradle"
+            (archive / "stdout.txt").write_text(macos_startup(67086, gradle_home))
+            java = root / "jdk21/bin/java"
+            java.parent.mkdir(parents=True)
+            java.write_bytes(b"pinned java")
+            (archive / "runtime/gradle-client.json").write_bytes(route.encoded({"pid": 67074}))
             work_root = root / "build"
             image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
             sample = {"module": "core", "pid": 67383, "parent_pid": 99999,
@@ -52,20 +115,87 @@ class NativeHostConsumerTests(unittest.TestCase):
                       "image_sha256": "a" * 64, "observed_ns": 100,
                       "simulator_udid": None}
             observations = archive / "runtime/process-observations.jsonl"
-            observations.write_bytes(route.encoded(sample))
-            with self.assertRaisesRegex(ValueError, "launcher"):
-                route.process_binding(archive, work_root, "macosArm64", "debug-g",
-                                      None, "core", "a" * 64)
-            sample["parent_pid"] = 67086
-            observations.write_bytes(route.encoded(sample))
-            self.assertEqual(route.process_binding(
-                archive, work_root, "macosArm64", "debug-g", None, "core", "a" * 64),
-                sample)
-            for stdout in ("", (archive / "stdout.txt").read_text() * 2):
-                (archive / "stdout.txt").write_text(stdout)
+            daemon = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
+                      "gradle_client_pid": 67074, "image": str(java),
+                      "command": f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                      "image_sha256": route.digest(java.read_bytes()), "observed_ns": 50,
+                      "simulator_udid": None}
+            observations.write_bytes(route.encoded(daemon) + route.encoded(sample))
+            with patch.dict(os.environ, {"GRADLE_USER_HOME": str(gradle_home),
+                                             "JAVA_HOME": str(java.parent.parent)}):
                 with self.assertRaisesRegex(ValueError, "launcher"):
                     route.process_binding(archive, work_root, "macosArm64", "debug-g",
                                           None, "core", "a" * 64)
+                sample["parent_pid"] = 67086
+                observations.write_bytes(route.encoded(daemon) + route.encoded(sample))
+                original = (archive / "stdout.txt").read_text()
+                self.assertEqual(route.process_binding(
+                    archive, work_root, "macosArm64", "debug-g", None, "core", "a" * 64),
+                    sample)
+                for stdout in ("", original * 2,
+                               original.replace("daemon-67086.out.log", "daemon-99999.out.log"),
+                               original.replace("daemon-67086.out.log",
+                                                "daemon-67086.out.log unrelated text"),
+                               original.replace("Successfully started process 'Gradle build daemon'\n", ""),
+                               original + "The client will now receive all logging from the daemon "
+                               "(pid: 99999). unrelated task output\n"):
+                    (archive / "stdout.txt").write_text(stdout)
+                    with self.assertRaisesRegex(ValueError, "launcher"):
+                        route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                              None, "core", "a" * 64)
+                (archive / "stdout.txt").write_text(original)
+                with patch.dict(os.environ, {"GRADLE_USER_HOME": str(root / "other-gradle")}):
+                    with self.assertRaisesRegex(ValueError, "launcher"):
+                        route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                              None, "core", "a" * 64)
+
+    def test_macos_live_daemon_replay_requires_pinned_client_and_observation_window(self):
+        java = "/task/jdk21/bin/java"
+        sample = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
+                  "gradle_client_pid": 67074, "image": java, "image_sha256": "a" * 64,
+                  "command": f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                  "observed_ns": 50}
+        self.assertEqual(route.macos_live_daemon_binding(
+            [sample], 67086, 67074, java, "a" * 64, 1, 100), sample)
+        for changed in ({"pid": 99999}, {"parent_pid": 99999},
+                        {"gradle_client_pid": 99999}, {"image": "/other/java"},
+                        {"image_sha256": "b" * 64}, {"observed_ns": 0},
+                        {"observed_ns": 101},
+                        {"command": f"{java} unrelated"}):
+            with self.assertRaisesRegex(ValueError, "daemon"):
+                route.macos_live_daemon_binding(
+                    [{**sample, **changed}], 67086, 67074, java, "a" * 64, 1, 100)
+        for samples in ([], [sample, sample]):
+            with self.assertRaisesRegex(ValueError, "daemon"):
+                route.macos_live_daemon_binding(
+                    samples, 67086, 67074, java, "a" * 64, 1, 100)
+
+    def test_macos_daemon_sampler_reads_live_parent_and_java_image(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            java = Path(temporary) / "jdk21/bin/java"
+            java.parent.mkdir(parents=True)
+            java.write_bytes(b"pinned java")
+            command = f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0"
+
+            def pidpath(pid, buffer, size):
+                self.assertEqual(pid, 67086)
+                self.assertGreater(size, len(str(java)))
+                import ctypes
+                ctypes.memmove(buffer, str(java).encode() + b"\0", len(str(java)) + 1)
+                return len(str(java))
+
+            with patch.object(route.platform, "system", return_value="Darwin"), \
+                 patch.object(route.ctypes, "CDLL", return_value=SimpleNamespace(proc_pidpath=pidpath)), \
+                 patch.object(route.subprocess, "check_output",
+                              return_value=f"67086 67074 {command}\n"):
+                samples = list(route.macos_gradle_daemon_snapshot(67074, java))
+                self.assertEqual(len(samples), 1)
+                self.assertEqual(samples[0]["pid"], 67086)
+                self.assertEqual(samples[0]["parent_pid"], 67074)
+                self.assertEqual(samples[0]["image_sha256"], route.digest(java.read_bytes()))
+                self.assertEqual(list(route.macos_gradle_daemon_snapshot(99999, java)), [])
+                self.assertEqual(list(route.macos_gradle_daemon_snapshot(
+                    67074, java.with_name("other-java"))), [])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires the local /proc process view")
     def test_process_sampler_observes_live_executable_bytes(self):
