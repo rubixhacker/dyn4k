@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -29,6 +30,36 @@ class FullHostedTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.path = self.root / "TEST-one.xml"
         self.expected = {("org.dyn4j.geometry.ExampleTest", "works")}
+
+    def short_joined_evidence(self, parent):
+        temporary = tempfile.TemporaryDirectory(prefix="hj-", dir=parent)
+        self.addCleanup(temporary.cleanup)
+        return Path(temporary.name)
+
+    def test_short_joined_evidence_removes_readonly_git_object(self):
+        evidence = None
+        loose = None
+        remove = shutil.rmtree
+
+        def windows_readonly_removal(path, *args, **kwargs):
+            if Path(path) != evidence:
+                return remove(path, *args, **kwargs)
+            onexc = kwargs.get("onexc")
+            if onexc is None:
+                raise PermissionError(5, "Access is denied", str(loose))
+            onexc(os.unlink, str(loose), PermissionError(5, "Access is denied", str(loose)))
+            remove(path)
+
+        with mock.patch.object(shutil, "rmtree", side_effect=windows_readonly_removal):
+            evidence = self.short_joined_evidence(self.root)
+            loose = evidence / "checkout/.git/objects/01/66a9a0a8e551139104edcdbe2f75a6bfdc236c"
+            loose.parent.mkdir(parents=True)
+            loose.write_bytes(b"fixture Git object")
+            loose.chmod(stat.S_IREAD)
+            self.assertEqual(loose.stat().st_nlink, 1)
+            self.assertFalse(stat.S_IMODE(loose.stat().st_mode) & stat.S_IWUSR)
+            self.assertTrue(self.doCleanups())
+        self.assertFalse(evidence.exists())
 
     def align_synthetic_docs(self, repository, target):
         staging = repository / "build/staging-repository" / qualify.GROUP.replace(".", "/")
@@ -1451,8 +1482,7 @@ class FullHostedTests(unittest.TestCase):
             parent.mkdir(parents=True, exist_ok=True)
             evidence = Path(tempfile.mkdtemp(prefix="synthetic-joined-", dir=parent))
         else:
-            evidence = Path(tempfile.mkdtemp(prefix="hj-", dir=actual_repository.parent))
-            self.addCleanup(shutil.rmtree, evidence)
+            evidence = self.short_joined_evidence(actual_repository.parent)
         evidence = evidence.resolve()
         repository = evidence / "checkout"
         cache_home = evidence / "gradle-home"
