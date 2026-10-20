@@ -19,12 +19,16 @@ UPSTREAM = Path("/tmp/dyn4k-baseline-cache/dyn4j-source")
 def historical_replay_prerequisite(ledger: dict, root: Path) -> str | None:
     candidate = ledger["candidate_source"]
     jar = root / candidate["artifact"]
-    if not jar.is_file():
+    try:
+        jar.lstat()
+    except FileNotFoundError:
         return "historical candidate JAR missing"
+    if not jar.is_file():
+        raise ValueError("historical candidate JAR is not a file")
     if raw_signature_audit.candidate_coverage.digest(jar) != candidate["artifact_sha256"]:
-        return "historical candidate JAR hash differs"
+        raise ValueError("historical candidate JAR hash differs")
     if raw_signature_audit.candidate_coverage.git(root, "rev-parse", "HEAD") != candidate["revision"]:
-        return "historical candidate source revision differs"
+        raise ValueError("historical candidate source revision differs")
     return None
 
 
@@ -42,15 +46,19 @@ class RawSignatureGateBindingTests(unittest.TestCase):
                               return_value="pinned revision"):
                 self.assertEqual(historical_replay_prerequisite(ledger, root),
                                  "historical candidate JAR missing")
+                jar.mkdir()
+                with self.assertRaisesRegex(ValueError, "historical candidate JAR is not a file"):
+                    historical_replay_prerequisite(ledger, root)
+                jar.rmdir()
                 jar.write_bytes(b"different artifact")
-                self.assertEqual(historical_replay_prerequisite(ledger, root),
-                                 "historical candidate JAR hash differs")
+                with self.assertRaisesRegex(ValueError, "historical candidate JAR hash differs"):
+                    historical_replay_prerequisite(ledger, root)
                 jar.write_bytes(b"pinned artifact")
                 self.assertIsNone(historical_replay_prerequisite(ledger, root))
             with patch.object(raw_signature_audit.candidate_coverage, "git",
                               return_value="other revision"):
-                self.assertEqual(historical_replay_prerequisite(ledger, root),
-                                 "historical candidate source revision differs")
+                with self.assertRaisesRegex(ValueError, "historical candidate source revision differs"):
+                    historical_replay_prerequisite(ledger, root)
 
     def test_malformed_common_record_is_rejected(self):
         ledger = {"review_receipts": {"common_corpus": []}}
