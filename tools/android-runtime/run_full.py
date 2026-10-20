@@ -13,7 +13,7 @@ from android_corpus import (FINGERPRINTS, REFLECTIVE_FILTER_TYPES, load_suite,
                             verify_full_inputs, verify_xml_pins)
 from full_evidence import validate_full_installed, validate_full_process_log, validate_full_r8
 from prepare import verify_consumer_sources, verify_full_consumer_sources
-from run import command, sha256, verify_installed_apk
+from run import adb_for_serial, command, selected_emulator_serial, sha256, verify_installed_apk
 from run_optimized import dex_evidence, snapshot_artifact
 
 
@@ -273,7 +273,7 @@ def run(args):
     if any(path.stat().st_mtime_ns < args.prepared.stat().st_mtime_ns for path in (apk, test_apk)):
         raise ValueError("full app APK predates prepared candidate")
     sdk = Path(os.environ.get("ANDROID_HOME", "/var/home/stewart/Android/Sdk"))
-    adb = [str(sdk / "platform-tools/adb"), "-P", "5038", "-s", "emulator-5558"]
+    adb = adb_for_serial(sdk, args.emulator_serial)
     identity = {key: command(adb + ["shell", "getprop", key]).strip() for key in
                 ("ro.build.fingerprint", "ro.build.version.sdk", "ro.product.cpu.abi",
                  "ro.product.cpu.abilist", "ro.product.model")}
@@ -286,6 +286,7 @@ def run(args):
     graph_copy = snapshot_artifact(args.provider_artifacts, output / "provider-artifacts.txt",
                                    sha256(args.provider_artifacts))
     result = {"status": "FAILED", "candidate_commit": commit,
+              "emulator_serial": args.emulator_serial,
               "source_tree": command(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip(),
               "runtime": identity, "build_type": args.build_type,
               "prepared_manifest": {"path": str(args.prepared), "sha256": prepared_sha},
@@ -409,6 +410,7 @@ def main():
     parser.add_argument("--expected-api", choices=("21", "36", "37"))
     parser.add_argument("--expected-abi", choices=("x86_64", "x86", "arm64-v8a", "armeabi-v7a"),
                         default="x86_64")
+    parser.add_argument("--emulator-serial", type=selected_emulator_serial, default="emulator-5558")
     args = parser.parse_args()
     if args.seal_build:
         if not args.debug_build_log or not args.release_build_log:

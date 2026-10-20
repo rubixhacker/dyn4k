@@ -14,6 +14,20 @@ from evidence import parse_instrumentation, validate_lane
 from prepare import verify_consumer_sources
 
 
+EMULATOR_SERIALS = ("emulator-5558", "emulator-5562")
+
+
+def selected_emulator_serial(serial):
+    if not re.fullmatch(r"emulator-[0-9]{4}", serial) or serial not in EMULATOR_SERIALS:
+        raise argparse.ArgumentTypeError("Android emulator serial must be emulator-5558 or emulator-5562")
+    return serial
+
+
+def adb_for_serial(sdk, serial):
+    return [str(sdk / "platform-tools/adb"), "-P", "5038", "-s",
+            selected_emulator_serial(serial)]
+
+
 CONSUMER_CASES = {"io.github.rubixhacker.dyn4k.runtime." + name for name in (
     "ConsumerJourneyTest#geometryAndIdentity",
     "ConsumerJourneyTest#collisionAndExtension",
@@ -93,6 +107,7 @@ def run_lane(root, prepared, portable, flavor, build_type, expected_api, evidenc
     shutil.copyfile(apk, app_copy)
     shutil.copyfile(test_apk, test_copy)
     result = {"flavor": flavor, "build_type": build_type, "package": package,
+              "emulator_serial": selected_emulator_serial(adb[4]),
               "app_apk": {"path": str(app_copy), "sha256": sha256(app_copy)},
               "test_apk": {"path": str(test_copy), "sha256": sha256(test_copy)},
               "candidate_commit": prepared["candidate_commit"],
@@ -196,6 +211,7 @@ def main():
     parser.add_argument("--build-type", choices=("debug", "release"), required=True)
     parser.add_argument("--expected-api", choices=("21", "36", "37"), default="36")
     parser.add_argument("--expected-abi", choices=("x86_64", "x86", "arm64-v8a", "armeabi-v7a"), default="x86_64")
+    parser.add_argument("--emulator-serial", type=selected_emulator_serial, default="emulator-5558")
     args = parser.parse_args()
     root = args.repo.resolve()
     prepared_bytes = args.prepared.read_bytes()
@@ -221,7 +237,7 @@ def main():
             raise ValueError(f"input checksum changed: {item['path']}")
     portable = expected_portable(root, prepared)
     sdk = Path(os.environ.get("ANDROID_HOME", "/var/home/stewart/Android/Sdk"))
-    adb = [str(sdk / "platform-tools/adb"), "-P", "5038", "-s", "emulator-5558"]
+    adb = adb_for_serial(sdk, args.emulator_serial)
     identity = {name: command(adb + ["shell", "getprop", name]).strip() for name in
                 ("ro.build.fingerprint", "ro.build.version.sdk", "ro.product.cpu.abi",
                  "ro.product.cpu.abilist", "ro.product.model")}
@@ -236,7 +252,8 @@ def main():
                       args.prepared, prepared_checksum)
              for flavor in ("baseline", "candidate")]
     tree = command(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip()
-    summary = {"candidate_commit": commit, "source_tree": tree, "runtime": identity, "portable_expected": len(portable),
+    summary = {"candidate_commit": commit, "source_tree": tree, "runtime": identity,
+               "emulator_serial": args.emulator_serial, "portable_expected": len(portable),
                "build_jdk": prepared["build_jdk"], "root_build": prepared["root_build"],
                "prepared_manifest": {"path": str(args.prepared), "sha256": prepared_checksum},
                "staged": prepared["staged"], "baseline_jar": prepared["baseline_jar"],

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from optimized_evidence import validate_installed_case, validate_provider, validate_r8
 from prepare import verify_consumer_sources
-from run import command, sha256
+from run import adb_for_serial, command, selected_emulator_serial, sha256
 
 
 def snapshot_artifact(source, destination, expected_sha):
@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--build-type", choices=("debug", "release"), required=True)
     parser.add_argument("--expected-api", choices=("21", "36", "37"), required=True)
     parser.add_argument("--expected-abi", choices=("x86_64", "x86", "arm64-v8a", "armeabi-v7a"), default="x86_64")
+    parser.add_argument("--emulator-serial", type=selected_emulator_serial, default="emulator-5558")
     args = parser.parse_args()
     root = args.repo.resolve()
     prepared_bytes = args.prepared.read_bytes()
@@ -84,7 +85,7 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     sdk = Path(os.environ.get("ANDROID_HOME", "/var/home/stewart/Android/Sdk"))
-    adb = [str(sdk / "platform-tools/adb"), "-P", "5038", "-s", "emulator-5558"]
+    adb = adb_for_serial(sdk, args.emulator_serial)
     identity = {name: command(adb + ["shell", "getprop", name]).strip() for name in
                 ("ro.build.fingerprint", "ro.build.version.sdk", "ro.product.cpu.abi",
                  "ro.product.cpu.abilist", "ro.product.model")}
@@ -94,6 +95,7 @@ def main():
     test_snapshot = snapshot_artifact(test_apk, output / "instrumentation.apk", sha256(test_apk))
     graph_snapshot = snapshot_artifact(args.provider_graph, output / "provider-graph.txt", sha256(args.provider_graph))
     result = {"status": "FAILED", "candidate_commit": commit,
+              "emulator_serial": args.emulator_serial,
               "source_tree": command(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip(),
               "runtime": identity, "build_type": build_type,
               "prepared_manifest": {"path": str(args.prepared), "sha256": prepared_checksum},
