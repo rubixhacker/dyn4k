@@ -197,6 +197,54 @@ class NativeHostConsumerTests(unittest.TestCase):
                 self.assertEqual(list(route.macos_gradle_daemon_snapshot(
                     67074, java.with_name("other-java"))), [])
 
+    def test_macos_test_image_parent_rejects_path_shadow(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            gradle_home = root / "gradle"
+            (archive / "stdout.txt").write_text(macos_startup(67086, gradle_home))
+            (archive / "runtime/gradle-client.json").write_bytes(route.encoded({"pid": 67074}))
+            java = root / "jdk21/bin/java"
+            java.parent.mkdir(parents=True)
+            java.write_bytes(b"pinned java")
+            work_root = root / "build"
+            image = work_root / "core/bin/macosArm64/debugTest/test.kexe"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"real test image")
+            daemon = {"module": "gradle-daemon", "pid": 67086, "parent_pid": 67074,
+                      "gradle_client_pid": 67074, "image": str(java),
+                      "command": f"{java} org.gradle.launcher.daemon.bootstrap.GradleDaemon 9.5.0",
+                      "image_sha256": route.digest(java.read_bytes()), "observed_ns": 50}
+            calls = []
+
+            def listing(argv, **kwargs):
+                calls.append(argv[0])
+                parent = 67086 if argv[0] == "ps" else 99999
+                return f"67383 {parent} {image}\n"
+
+            def pidpath(pid, buffer, size):
+                self.assertEqual(pid, 67383)
+                import ctypes
+                ctypes.memmove(buffer, str(image).encode() + b"\0", len(str(image)) + 1)
+                return len(str(image))
+
+            with patch.dict(os.environ, {"PATH": str(root / "shadow"),
+                                             "GRADLE_USER_HOME": str(gradle_home),
+                                             "JAVA_HOME": str(java.parent.parent)}), \
+                 patch.object(route.platform, "system", return_value="Darwin"), \
+                 patch.object(route.ctypes, "CDLL", return_value=SimpleNamespace(proc_pidpath=pidpath)), \
+                 patch.object(route.subprocess, "check_output", side_effect=listing):
+                sampled = list(route.process_snapshot([image.parent], None))
+                self.assertEqual(calls, ["/bin/ps"])
+                self.assertEqual(sampled[0]["parent_pid"], 99999)
+                sampled[0].update({"module": "core", "observed_ns": 100})
+                (archive / "runtime/process-observations.jsonl").write_bytes(
+                    route.encoded(daemon) + route.encoded(sampled[0]))
+                with self.assertRaisesRegex(ValueError, "launcher"):
+                    route.process_binding(archive, work_root, "macosArm64", "debug-g",
+                                          None, "core", route.digest(image.read_bytes()))
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires the local /proc process view")
     def test_process_sampler_observes_live_executable_bytes(self):
         image = Path(sys.executable).resolve()

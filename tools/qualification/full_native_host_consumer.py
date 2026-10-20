@@ -367,7 +367,7 @@ def process_snapshot(expected_folders, simulator_udid):
                 continue
     elif system == "Darwin":
         libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-        listing = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
+        listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,command="], text=True)
         for line in listing.splitlines():
             match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
             if not match:
