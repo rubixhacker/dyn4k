@@ -19,6 +19,7 @@ SOURCE_ROOTS = (
     "dyn4k/src/commonTest/kotlin", "dyn4k/src/jvmTest/kotlin", "dyn4k/src/jvmTest/java",
 )
 CONSUMER = "consumers/qualification/portable/full-jvm"
+LANE_SCRIPT = "lane-script"
 LANES = tuple(f"jvm:Java:{version}:{configuration}"
               for version in ("minimum", "current")
               for configuration in ("no-optimize", "default"))
@@ -78,7 +79,7 @@ def input_bytes(cases, sources, lane=LANE):
         "facade-cases.tsv": "".join(
             f"{item['id']}\t{item['classname']}\t{item['method']}\n"
             for item in by_module["dyn4k"]).encode(),
-        lane: ("gradle.settingsEvaluated { settings ->\n"
+        LANE_SCRIPT: ("gradle.settingsEvaluated { settings ->\n"
                "  if (settings.rootProject.name != 'dyn4k-full-staged-jvm-consumer') {\n"
                "    throw new GradleException('qualification project differs')\n"
                "  }\n"
@@ -196,7 +197,7 @@ def run(repository, candidate, staging, output, gradle, expected_hashes,
     prepared = prepare(repository, candidate, inputs, lane)
     output.mkdir(parents=True, exist_ok=True)
     command = [str(gradle), "-p", str(repository / CONSUMER), "--offline", "--no-daemon",
-               "--console=plain", "--info", "--rerun-tasks", "--init-script", str(inputs / lane),
+               "--console=plain", "--info", "--rerun-tasks", "--init-script", str(inputs / LANE_SCRIPT),
                f"-PqualificationCheckout={repository}",
                f"-PqualificationRepository={staging}",
                f"-PqualificationArchiveRoot={output}",
@@ -206,7 +207,7 @@ def run(repository, candidate, staging, output, gradle, expected_hashes,
                f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}",
                f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}",
                f"-PqualificationLaneId={lane}",
-               f"-PqualificationLaneScript={inputs / lane}",
+               f"-PqualificationLaneScript={inputs / LANE_SCRIPT}",
                f"-PqualificationRuntimeJavaHome={runtime_java_home}",
                f"-PqualificationRuntimeJavaSha256={sha((runtime_java_home / 'bin/java').read_bytes())}",
                f"-PqualificationBuildConfiguration={configuration}",
@@ -330,7 +331,6 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     sources = source_inventory(repository, candidate, cases)
     expected_inputs = input_bytes(cases, sources, lane)
     expected_files = {f"inputs/{name}": data for name, data in expected_inputs.items()}
-    expected_files["inputs/lane-script"] = expected_files.pop(f"inputs/{lane}")
     if receipt.get("source_inventory_sha256") != sha(expected_inputs["source-inventory.tsv"]):
         raise ValueError("receipt source inventory differs from exact candidate")
     for relative, data in expected_files.items():
@@ -373,7 +373,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
     inputs = Path(paths["inputs"])
     expected_command = [paths["gradle"], "-p", f"{paths['checkout']}/{CONSUMER}",
                         "--offline", "--no-daemon", "--console=plain", "--info", "--rerun-tasks",
-                        "--init-script", str(inputs / lane),
+                        "--init-script", str(inputs / LANE_SCRIPT),
                         f"-PqualificationCheckout={paths['checkout']}",
                         f"-PqualificationRepository={paths['staging']}",
                         f"-PqualificationArchiveRoot={paths['archive_root']}",
@@ -383,7 +383,7 @@ def verify(root, repository, candidate, expected_hashes, runtime_identity,
                         f"-PqualificationCoreSha256={expected_hashes['dyn4k-core']}",
                         f"-PqualificationFacadeSha256={expected_hashes['dyn4k']}",
                         f"-PqualificationLaneId={lane}",
-                        f"-PqualificationLaneScript={inputs / lane}",
+                        f"-PqualificationLaneScript={inputs / LANE_SCRIPT}",
                         f"-PqualificationRuntimeJavaHome={toolchain['runtime_java_home']}",
                         f"-PqualificationRuntimeJavaSha256={expected_runtime_java_executable_sha256}",
                         f"-PqualificationBuildConfiguration={configuration}",
