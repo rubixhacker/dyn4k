@@ -19,7 +19,7 @@ RUN_EXPRESSION_LIMIT = 21000
 AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
-    "qualification.yml": "93c8f846c0eb57de9beeafbd35a7e44c33f80a5d11dfb7a9a2c4dfcb26736d3e",
+    "qualification.yml": "ba3fccadc246fb4a5613cccf8edbaa727f79a6f36c446b647109ea3d0967ad71",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
@@ -172,7 +172,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertEqual(checked, 46)
+        self.assertEqual(checked, 56)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
