@@ -83,10 +83,17 @@ jobs:
             New-Item -ItemType Directory -Path $env:TMPDIR, $env:HOME | Out-Null
             & python -m unittest discover -s tools/qualification -p 'test_*.py' -v 1> $stdoutPath 2> $stderrPath
             $testExitCode = $LASTEXITCODE
-            $testOutput = (Get-Content -Raw $stdoutPath) + "`n" + (Get-Content -Raw $stderrPath)
-            if ($testOutput -notmatch '(?m)^Ran [1-9][0-9]* tests? in ') {
-              $failure = 'Unittest discovery reported no tests or no completed test count.'
+            $testStderr = Get-Content -Raw $stderrPath
+            $summaries = [regex]::Matches($testStderr, '(?m)^Ran (?<count>[0-9]+) tests? in [^\r\n]+$')
+            if ($summaries.Count -eq 0) {
+              $failure = 'Unittest did not emit a run-count summary.'
               if ($testExitCode -eq 0) { $testExitCode = 1 }
+            } else {
+              $summaryCount = [int]$summaries[$summaries.Count - 1].Groups['count'].Value
+              if ($summaryCount -le 0) {
+                $failure = 'The final unittest summary reported zero tests.'
+                if ($testExitCode -eq 0) { $testExitCode = 1 }
+              }
             }
           }
 
