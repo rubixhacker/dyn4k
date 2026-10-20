@@ -569,8 +569,10 @@ def _capture(args, deadline):
     if launcher_script is not None:
         path = _safe_input(launcher_script)
         launcher = {"path": str(path), "sha256": _sha_file(path, deadline)}
-    build_path = Path(args.build_executable or args.argv[0]).resolve(strict=True)
-    build = {"path": str(build_path), "sha256": _sha_file(build_path, deadline),
+    requested_build_path = args.build_executable or args.argv[0]
+    build_path = Path(requested_build_path).resolve(strict=True)
+    build = {"requested_path": requested_build_path,
+             "path": str(build_path), "sha256": _sha_file(build_path, deadline),
              "argv_contains": markers}
     artifacts = {}
     for item in args.artifact:

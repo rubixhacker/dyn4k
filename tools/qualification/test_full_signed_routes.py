@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import full_browser_consumer
@@ -25,6 +26,68 @@ CANDIDATE = "9cd6868512836a3eb8192d9abc387427705e94b4"
 
 
 class SignedRouteTests(unittest.TestCase):
+    def test_native_cross_observer_source_is_exact_candidate_module(self):
+        path = Path(independent_linux_observer.__file__).resolve()
+        current = path.read_bytes()
+        with patch.object(full_signed_routes.subprocess, "check_output",
+                          return_value=current):
+            full_signed_routes._observer_source(ROOT, CANDIDATE,
+                                                independent_linux_observer)
+        with patch.object(full_signed_routes.subprocess, "check_output",
+                          return_value=current + b"\n"):
+            with self.assertRaisesRegex(ValueError, "observer source differs"):
+                full_signed_routes._observer_source(ROOT, CANDIDATE,
+                                                    independent_linux_observer)
+        with tempfile.TemporaryDirectory() as temporary:
+            shadow = Path(temporary) / path.name
+            shadow.write_bytes(current)
+            module = SimpleNamespace(__file__=str(shadow),
+                __spec__=SimpleNamespace(origin=str(shadow)),
+                verify=independent_linux_observer.verify)
+            with patch.object(full_signed_routes.subprocess, "check_output",
+                              return_value=current):
+                with self.assertRaisesRegex(ValueError, "observer source differs"):
+                    full_signed_routes._observer_source(ROOT, CANDIDATE, module)
+
+    def test_native_cross_rejects_observed_alternate_java_with_forged_argv(self):
+        java = Path("/home/linuxbrew/.linuxbrew/opt/openjdk@21/bin/java")
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            alternate = base / "alternate-jdk/bin/java"
+            alternate.parent.mkdir(parents=True)
+            shutil.copy2(java, alternate)
+            (alternate.parent.parent / "lib").symlink_to(java.parent.parent.resolve() / "lib",
+                                                         target_is_directory=True)
+            self.assertEqual(hashlib.sha256(java.read_bytes()).digest(),
+                             hashlib.sha256(alternate.read_bytes()).digest())
+            archive = base / "archive.bin"
+            archive.write_bytes(b"observer path control")
+            output = base / "observer"
+            script = ("import os,sys; null=os.open(os.devnull,os.O_WRONLY); "
+                      "os.dup2(null,1); os.dup2(null,2); environment=os.environ.copy(); "
+                      "environment['LD_LIBRARY_PATH']=sys.argv[3]; "
+                      "os.execve(sys.argv[1],[sys.argv[2],'-version'],environment)")
+            args = argparse.Namespace(candidate_sha=CANDIDATE, lane="local:path:control",
+                runtime_identity="local", mode="debug", archive=str(archive),
+                build_executable=str(alternate), launcher_script=None,
+                build_only=True, build_argv_contains=[], artifact=[], expect=[],
+                generated_expect=[], timeout=20, output=str(output),
+                max_processes=256, max_events=4096, max_log_bytes=8 * 1024 * 1024,
+                argv=[sys.executable, "-c", script, str(alternate), str(java),
+                      str(java.resolve().parent.parent / "lib")])
+            independent_linux_observer.capture(args)
+            observed, rows = independent_linux_observer.verify(output,
+                                                                 include_events=True)
+            run = rows[0]
+            image = next(row for row in rows if row["kind"] == "image"
+                         and row.get("origin") == "exec"
+                         and row.get("pid") == observed["build"]["pid"]
+                         and row["executable_path"] == str(alternate))
+            self.assertEqual(image["argv"][0], str(java))
+            self.assertEqual(run["build"]["path"], str(alternate))
+            with self.assertRaisesRegex(ValueError, "pinned Java process image"):
+                full_signed_routes._cross_java_path(run, observed, image, str(java))
+
     def test_native_cross_real_launcher_observation_and_relocated_replay(self):
         lane = "linuxArm64:Linux ARM64:current:debug-g"
         with tempfile.TemporaryDirectory() as temporary:
@@ -113,6 +176,16 @@ class SignedRouteTests(unittest.TestCase):
                                 observed["build"]["executable_sha256"])
             observed, rows = independent_linux_observer.verify(observed_root,
                                                                  include_events=True)
+            self.assertEqual(rows[0]["build"]["requested_path"], str(java))
+            self.assertEqual(rows[0]["build"]["path"], str(java.resolve()))
+            self.assertEqual(rows[0]["build"]["path"],
+                             observed["build"]["executable_path"])
+            full_signed_routes._cross_java_path(rows[0], observed,
+                next(row for row in rows if row["kind"] == "image"
+                     and row.get("origin") == "exec"
+                     and row.get("pid") == observed["build"]["pid"]
+                     and row["executable_path"] == rows[0]["build"]["path"]),
+                str(java))
             build_receipt = json.loads((build / "receipt.json").read_text())
             build_digest = independent_gates.archive_digest(build)
             methods = [case["id"] for case in
@@ -175,7 +248,8 @@ class SignedRouteTests(unittest.TestCase):
                       "artifact_hash_provenance": "audited",
                       "complete_selected_suite": True}
             gradle.unlink()
-            with patch.object(full_signed_routes, "_source"), patch(
+            with patch.object(full_signed_routes, "_source"), patch.object(
+                    full_signed_routes, "_observer_source"), patch(
                     "full_native_host_consumer.verify_cross_run", return_value=public):
                 self.assertEqual(full_signed_routes.verify(
                     ROOT, CANDIDATE, lane, archive, expected, hashes, runtime, digest), public)

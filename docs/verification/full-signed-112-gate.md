@@ -68,7 +68,12 @@ process and both ARM64 runtime processes. `expected_native_build_observer`
 signs the external Linux observer directory path and exact event and witness
 file hashes. The verifier reconstructs its event chain, checks the archived
 Gradle PID and argv against the observed shell, and follows PID ancestry to
-the pinned Java image. It checks the signed Gradle script, interpreter, Java,
+the pinned Java image. It pins the loaded observer verifier source to the
+candidate before using that reconstruction. The observer records both the
+requested signed JDK `bin/java` path and the resolved executable path; the
+central route checks the latter against the observed Java image, allowing a
+genuine JDK symlink while rejecting a byte-identical executable elsewhere.
+It checks the signed Gradle script, interpreter, Java,
 and runtime executable hashes separately. Build and runtime clocks are checked
 in their recorded domains.
 The schema-3 public result must report audited artifact hashes and a complete

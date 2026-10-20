@@ -96,6 +96,18 @@ def _browser_observer_source(repository, candidate):
         raise ValueError("independent browser observer is absent from candidate") from None
     if (Path(repository) / path).read_bytes() != committed:
         raise ValueError("independent browser observer differs from candidate")
+def _observer_source(repository, candidate, module):
+    path = "tools/qualification/independent_linux_observer.py"
+    selected = (Path(repository) / path).resolve(strict=True)
+    loaded = Path(module.__file__).resolve(strict=True)
+    origin = Path(module.__spec__.origin).resolve(strict=True)
+    verifier = Path(module.verify.__code__.co_filename).resolve(strict=True)
+    committed = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate}:{path}"],
+        stderr=subprocess.PIPE)
+    if (loaded != selected or origin != selected or verifier != selected
+            or selected.read_bytes() != committed):
+        raise ValueError("independent Linux observer source differs from candidate")
 
 
 def execution_witness(expected, candidate, lane, digest, runtime, mode,
@@ -241,9 +253,19 @@ def _launcher(path, sha, command):
             "command": command}
 
 
-def _cross_build_observer(expected, archive, candidate, lane, build_digest,
+def _cross_java_path(run, observed, image, java):
+    if (run.get("build", {}).get("requested_path") != java
+            or run["build"].get("path") != image.get("executable_path")
+            or observed.get("build", {}).get("executable_path") != image.get("executable_path")
+            or image.get("argv", [None])[0] != java):
+        raise ValueError("Native cross pinned Java process image differs")
+
+
+def _cross_build_observer(repository, expected, archive, candidate, lane, build_digest,
                           hashes, toolchain, process, signed_witness):
     import independent_linux_observer
+
+    _observer_source(repository, candidate, independent_linux_observer)
 
     binding = expected.get("expected_native_build_observer")
     if (not isinstance(binding, dict)
@@ -302,10 +324,10 @@ def _cross_build_observer(expected, archive, candidate, lane, build_digest,
              and row.get("executable_sha256") == toolchain["java_sha256"]
              and row.get("observed_at_ns") == observed["build"]["started_ns"]]
     java = str(Path(toolchain["java_home"]) / "bin/java")
-    if (len(image) != 1 or image[0].get("argv", [None])[0] != java
-            or image[0]["argv"][-len(launcher["command"][1:]):]
+    if (len(image) != 1 or image[0]["argv"][-len(launcher["command"][1:]):]
             != launcher["command"][1:]):
         raise ValueError("Native cross pinned Java process image differs")
+    _cross_java_path(run, observed, image[0], java)
     parents = {row["pid"]: row["parent_pid"] for row in rows
                if row["kind"] == "spawn"}
     pid = observed["build"]["pid"]
@@ -699,7 +721,7 @@ def _verify_native_cross(repository, candidate, lane, root, receipt, expected,
                                 _launcher(toolchain["gradle_executable"],
                                           toolchain["gradle_sha256"],
                                           build.get("process", {}).get("command")))
-    _cross_build_observer(expected, root, candidate, lane,
+    _cross_build_observer(repository, expected, root, candidate, lane,
                           build_digest, hashes, toolchain,
                           build.get("process", {}), witness)
     for name in ("core", "facade"):
