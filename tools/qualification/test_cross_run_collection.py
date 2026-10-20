@@ -1,4 +1,5 @@
 import copy
+import contextlib
 import io
 import hashlib
 import json
@@ -268,9 +269,9 @@ class CrossRunCollectionTests(unittest.TestCase):
 
                 windows_os.lstat = lstat_source
 
-                def open_source(path):
+                def open_source(path, parent):
                     nonlocal replaced
-                    if behavior == "reparse":
+                    if behavior == "reparse" and Path(path) == archive:
                         raise ValueError("symbolic source path is forbidden")
                     descriptor = os.open(path, os.O_RDONLY)
                     if behavior == "replacement" and Path(path) == archive:
@@ -278,6 +279,18 @@ class CrossRunCollectionTests(unittest.TestCase):
                     return descriptor
 
                 with mock.patch.object(collection, "os", windows_os), \
+                     mock.patch.object(collection, "_windows_open",
+                                       side_effect=lambda path, directory: str(path)), \
+                     mock.patch.object(collection, "_windows_relative_open",
+                                       side_effect=lambda parent, name, directory:
+                                       str(Path(parent) / name)), \
+                     mock.patch.object(collection, "_windows_names",
+                                       side_effect=lambda handle:
+                                       [path.name for path in Path(handle).iterdir()]), \
+                     mock.patch.object(collection, "_windows_handle_identity",
+                                       side_effect=lambda handle:
+                                       os.lstat(handle).st_ino), \
+                     mock.patch.object(collection, "_windows_close"), \
                      mock.patch.object(collection, "_open_windows_no_reparse",
                                        side_effect=open_source) as opened:
                     result = self.collect_fixture(root, index_path)
@@ -292,6 +305,155 @@ class CrossRunCollectionTests(unittest.TestCase):
                     self.assertIn("symbolic" if behavior == "reparse" else "changed",
                                   row["reason"])
                     self.assertEqual(0, self.public_verify(root).returncode)
+
+    @unittest.skipUnless(os.name == "posix", "requires descriptor-relative open")
+    def test_public_index_and_archive_reads_resist_transient_parent_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive, index_path, index = self.fixture(root)
+            holder = root / "holder"
+            holder.mkdir()
+            archive = archive.rename(holder / archive.name)
+            index_path = index_path.rename(holder / index_path.name)
+            index["sources"][0]["origin"]["path"] = str(archive)
+            index_path.write_text(json.dumps(index))
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "index.json").write_text('{"schema":0}')
+            (outside / "mobile.zip").write_bytes(b"outside")
+            real_open = os.open
+            swapped = set()
+
+            def swap_parent(path, flags, *args, **kwargs):
+                if (path in ("index.json", "mobile.zip")
+                        and kwargs.get("dir_fd") is not None and path not in swapped):
+                    swapped.add(path)
+                    moved = root / "moved"
+                    holder.rename(moved)
+                    holder.symlink_to(outside, target_is_directory=True)
+                    try:
+                        return real_open(path, flags, *args, **kwargs)
+                    finally:
+                        holder.unlink()
+                        moved.rename(holder)
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch.object(collection.os, "open", side_effect=swap_parent):
+                result = self.collect_fixture(root, index_path)
+            self.assertEqual({"index.json", "mobile.zip"}, swapped)
+            self.assertEqual("NOT_RUN", result["cross_run"]["sources"][0]["status"])
+            self.assertEqual(index_path.read_bytes(),
+                             (root / "collection/source-index.json").read_bytes())
+            self.assertEqual(archive.read_bytes(),
+                             (root / "collection/raw/sources/mobile/original").read_bytes())
+            self.assertEqual(0, self.public_verify(root).returncode)
+
+    @unittest.skipUnless(os.name == "posix", "requires descriptor-relative scan")
+    def test_public_directory_snapshot_rejects_transient_parent_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            holder = root / "holder"
+            source = holder / "raw"
+            source.mkdir(parents=True)
+            (source / "receipt.json").write_bytes(b"bound source")
+            outside = root / "outside"
+            (outside / "raw").mkdir(parents=True)
+            (outside / "raw/receipt.json").write_bytes(b"outside source")
+            files = collection._file_inventory(source)
+            index = {"schema": 1, "candidate_sha": HEAD, "source_tree": TREE,
+                     "sources": [{"id": "rawdir", "origin": {"kind": "local",
+                                                          "path": str(source)},
+                                  "transport": {"format": "directory", "files": files,
+                                                "inventory_sha256":
+                                                collection._inventory_digest(files)}}],
+                     "bindings": [{"source_id": "rawdir", "lane": LANE,
+                                   "gate": "staged-consumer"}]}
+            index_path = root / "index.json"
+            index_path.write_text(json.dumps(index))
+            real_scandir = os.scandir
+            scans = 0
+
+            def swap_scan(anchor):
+                nonlocal scans
+                if isinstance(anchor, int) and os.fstat(anchor).st_ino == source.stat().st_ino:
+                    scans += 1
+                    if scans == 2:
+                        @contextlib.contextmanager
+                        def swapped():
+                            with real_scandir(anchor) as members:
+                                moved = root / "moved"
+                                holder.rename(moved)
+                                holder.symlink_to(outside, target_is_directory=True)
+                                try:
+                                    yield members
+                                finally:
+                                    holder.unlink()
+                                    moved.rename(holder)
+                        return swapped()
+                return real_scandir(anchor)
+
+            with mock.patch.object(collection.os, "scandir", side_effect=swap_scan):
+                result = self.collect_fixture(root, index_path)
+            self.assertEqual(2, scans)
+            row = result["cross_run"]["sources"][0]
+            self.assertEqual("FAILED", row["status"])
+            self.assertIn("symbolic source path", row["reason"])
+            self.assertFalse((root / "collection/raw/sources/rawdir/original-directory"
+                              / "receipt.json").exists())
+            self.assertEqual(0, self.public_verify(root).returncode)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows directory handles")
+    def test_windows_parent_handle_blocks_rename_and_junction_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive, index_path, index = self.fixture(root)
+            holder = root / "holder"
+            holder.mkdir()
+            archive = archive.rename(holder / archive.name)
+            moved = root / "moved"
+            holder.rename(moved)
+            moved.rename(holder)
+            index["sources"][0]["origin"]["path"] = str(archive)
+            index_path.write_text(json.dumps(index))
+            real_open = collection._windows_relative_open
+            attempted = False
+            blocked = False
+
+            def open_and_try_rename(parent, name, directory=False):
+                nonlocal attempted, blocked
+                handle = real_open(parent, name, directory=directory)
+                if directory and name == holder.name and not attempted:
+                    attempted = True
+                    try:
+                        holder.rename(moved)
+                    except OSError:
+                        blocked = True
+                    else:
+                        moved.rename(holder)
+                return handle
+
+            with mock.patch.object(collection, "_windows_relative_open",
+                                   side_effect=open_and_try_rename):
+                result = self.collect_fixture(root, index_path)
+            self.assertTrue(attempted)
+            self.assertTrue(blocked)
+            self.assertEqual("NOT_RUN", result["cross_run"]["sources"][0]["status"])
+
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "mobile.zip").write_bytes(archive.read_bytes())
+            junction = root / "junction"
+            created = subprocess.run(["cmd", "/c", "mklink", "/J",
+                                      str(junction), str(outside)],
+                                     capture_output=True, text=True)
+            self.assertEqual(0, created.returncode, created.stderr)
+            index["sources"][0]["origin"]["path"] = str(junction / "mobile.zip")
+            index_path.write_text(json.dumps(index))
+            result = collection.collect(ROOT, HEAD, [], root / "junction-collection",
+                                        source_index=index_path,
+                                        artifacts_dir=root / "artifacts")
+            self.assertEqual("FAILED", result["cross_run"]["status"])
+            self.assertIn("symbolic source path", result["cross_run"]["reason"])
 
     def test_directory_growth_after_inventory_keeps_bounded_raw_bytes(self):
         limit = 1024 * 1024
