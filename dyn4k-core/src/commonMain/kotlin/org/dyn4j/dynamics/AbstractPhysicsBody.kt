@@ -257,7 +257,12 @@ abstract class AbstractPhysicsBody : AbstractCollisionBody<BodyFixture>, Physics
             rotation *= ratio
         }
         translate(translationX, translationY)
-        RotationOperationTap.withBranch("integrate") { rotateAboutCenter(rotation) }
+        val finalRotation = rotation
+        if (RotationOperationTap.currentCapture() == null) {
+            rotateAboutCenter(finalRotation)
+        } else {
+            RotationOperationTap.withBranch("integrate") { rotateAboutCenter(finalRotation) }
+        }
     }
     override fun updateAtRestTime(timestep: TimeStep?, settings: Settings?): Double {
         if (atRestDetectionEnabled) {

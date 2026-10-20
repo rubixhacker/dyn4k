@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+import zipfile
 from pathlib import Path
 
 from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
@@ -103,8 +104,15 @@ def run_capture(method, output, reference_case=None):
         raise CaptureRejected("pinned source publication failed")
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
     class_load_pattern = output / "worker-class-load-%p.log"
-    command = ["strace", "-f", "-s", "16384", "-e", "trace=execve",
-               "-o", str(output / "execve.log"), str(ROOT / "gradlew"),
+    if method == "captureWheelActive":
+        trace_prefix = output / "worker-write-trace"
+        tracer = ["strace", "-ff", "-s", "65536", "-e",
+                  "trace=execve,clone,clone3,write,writev,sendto,sendmsg",
+                  "-o", str(trace_prefix)]
+    else:
+        tracer = ["strace", "-f", "-s", "16384", "-e", "trace=execve",
+                  "-o", str(output / "execve.log")]
+    command = [*tracer, str(ROOT / "gradlew"),
                "jvmTest", "--tests", f"portable.ProspectiveArithmeticTest.{method}",
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                f"-PportableWorkerClassLoadLog={class_load_pattern}",
@@ -122,6 +130,23 @@ def run_capture(method, output, reference_case=None):
                 if matches and Path(matches[-1]).is_file():
                     shutil.copyfile(matches[-1], worker_arguments)
             time.sleep(0.02)
+    if method == "captureWheelActive":
+        trace_files = sorted(output.glob("worker-write-trace.*"))
+        if not trace_files:
+            raise CaptureRejected("worker write trace is missing")
+        executions = []
+        with zipfile.ZipFile(output / "worker-write-traces.zip", "x") as archive:
+            for path in trace_files:
+                raw = path.read_bytes()
+                if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+                    raise CaptureRejected("worker write trace exposed the environment")
+                pid = path.name.removeprefix("worker-write-trace.")
+                if not pid.isdecimal():
+                    raise CaptureRejected("worker write trace PID differs")
+                archive.writestr("trace." + pid, raw)
+                executions.extend(f"{pid} {line}" for line in raw.decode().splitlines()
+                                  if line.startswith("execve("))
+        (output / "execve.log").write_text("\n".join(sorted(executions)) + "\n")
     reject_environment_trace(output / "execve.log")
     if target.returncode or not XML.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
@@ -150,6 +175,8 @@ def run_capture(method, output, reference_case=None):
         "worker_classpath": "worker-classpath.txt",
         "portable_classes": "portable-classes.zip"}.items()}
     files["worker_class_load"] = worker_log.read_bytes()
+    if method == "captureWheelActive":
+        files["worker_write_traces"] = (output / "worker-write-traces.zip").read_bytes()
     if hashlib.sha256(files["artifact"]).hexdigest() != hashlib.sha256(
             STAGED_JAR.read_bytes()).hexdigest() or \
             hashlib.sha256(files["runtime"]).hexdigest() != hashlib.sha256(

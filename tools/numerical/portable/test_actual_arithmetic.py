@@ -1,10 +1,13 @@
 import copy
 import hashlib
+import io
 import json
 import os
 import struct
 import subprocess
 import unittest
+import zipfile
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 from xml.sax.saxutils import escape
 
@@ -44,6 +47,44 @@ def fixture():
         "NUMERICAL_JSON " + json.dumps({"kind": "case-end", "id": case_id,
                                         "steps": 1}),
     ]
+    return rows
+
+
+def focused_wheel_fixture():
+    case_id = "joint-Wheel-active"
+    rows = fixture()
+    for index in (0, 2, 4):
+        row = json.loads(rows[index].split(" ", 1)[1])
+        row["id"] = case_id
+        if index == 0:
+            row["setup"]["bodies"].append({"id": "b1"})
+            second = copy.deepcopy(row["initial"]["bodies"][0])
+            second["id"] = "b1"
+            row["initial"]["bodies"].append(second)
+        elif index == 2:
+            second = copy.deepcopy(row["state"]["bodies"][0])
+            second["id"] = "b1"
+            row["state"]["bodies"].append(second)
+        rows[index] = "NUMERICAL_JSON " + json.dumps(row)
+    original = json.loads(rows[1].split(" ", 1)[1])
+    calls = []
+    for sequence, (body_id, branch, token) in enumerate((
+            ("b1", "integrate", 1), ("b0", "joint", 0),
+            ("b1", "joint", 1))):
+        call = copy.deepcopy(original)
+        call.update(method="everyJointWithInitialAndApplicableActiveModes",
+                    case_id=case_id, body_id=body_id, branch=branch,
+                    sequence=sequence, target_token=token,
+                    angle_bits=bits(0.0), trig=[bits(1.0), bits(0.0)])
+        calls.append("PROSPECTIVE_ROTATION_JSON " + json.dumps(call))
+    rows[1:2] = calls
+    binding = json.loads(rows[5].split(" ", 1)[1])
+    binding["case_id"] = case_id
+    binding["bodies"][0]["calls"] = 1
+    binding["bodies"].append({"body_id": "b1", "calls": 2,
+                              "pre": [bits(1.0), bits(0.0)],
+                              "post": [bits(1.0), bits(0.0)]})
+    rows[5] = "PROSPECTIVE_BINDING_JSON " + json.dumps(binding)
     return rows
 
 
@@ -282,18 +323,7 @@ class ActualArithmeticTest(unittest.TestCase):
 
     def test_focused_wheel_route_rejects_missing_changed_and_reordered_calls(self):
         case_id = "joint-Wheel-active"
-        rows = fixture()
-        for index in (0, 2, 4):
-            row = json.loads(rows[index].split(" ", 1)[1])
-            row["id"] = case_id
-            rows[index] = "NUMERICAL_JSON " + json.dumps(row)
-        operation = json.loads(rows[1].split(" ", 1)[1])
-        operation.update(method="everyJointWithInitialAndApplicableActiveModes",
-                         case_id=case_id, branch="joint")
-        rows[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
-        receipt = json.loads(rows[3].split(" ", 1)[1])
-        receipt["case_id"] = case_id
-        rows[3] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        rows = focused_wheel_fixture()
 
         def check(candidate):
             return verify_capture(xml_for(candidate, "captureWheelActive"),
@@ -312,7 +342,7 @@ class ActualArithmeticTest(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(CaptureRejected):
                 check(changed)
         with self.assertRaises(CaptureRejected):
-            check([rows[0], rows[2], rows[1], *rows[3:]])
+            check([rows[0], rows[4], *rows[1:4], *rows[5:]])
 
     def test_focused_wheel_adapter_keeps_synthetic_output_unpassed(self):
         rows = fixture()
@@ -329,6 +359,64 @@ class ActualArithmeticTest(unittest.TestCase):
         changed[0].update(body_id="b0", kind="lerp-reset")
         with self.assertRaisesRegex(CaptureRejected, "reset needs a separate source audit"):
             actual_arithmetic._wheel_rotation_audit(changed)
+
+    def test_focused_wheel_requires_zero_call_and_source_branch_order(self):
+        case_id = "joint-Wheel-active"
+        rows = focused_wheel_fixture()
+
+        def check(candidate):
+            return verify_capture(xml_for(candidate, "captureWheelActive"),
+                                  "captureWheelActive", [case_id])
+
+        self.assertEqual(check(rows)["operations_verified"], 3)
+        omitted = copy.deepcopy(rows)
+        omitted.pop(2)
+        last = json.loads(omitted[2].split(" ", 1)[1])
+        last["sequence"] = 1
+        omitted[2] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(last)
+        receipt = json.loads(omitted[4].split(" ", 1)[1])
+        receipt["bodies"][0]["calls"] = 0
+        omitted[4] = "PROSPECTIVE_BINDING_JSON " + json.dumps(receipt)
+        with self.assertRaisesRegex(CaptureRejected, "source call schedule differs"):
+            check(omitted)
+        wrong_branch = copy.deepcopy(rows)
+        first = json.loads(wrong_branch[1].split(" ", 1)[1])
+        first["branch"] = "contact"
+        wrong_branch[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(first)
+        with self.assertRaisesRegex(CaptureRejected, "source call schedule differs"):
+            check(wrong_branch)
+
+    def test_worker_write_witness_requires_actual_worker_stream(self):
+        xml = xml_for(focused_wheel_fixture(), "captureWheelActive")
+        output = ET.fromstring(xml).find("system-out").text.encode()
+        worker = ('execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+                  '["GradleWorkerMain"], 0x0) = 0\nclone(0) = 43\n').encode()
+        execution = b'42 ' + worker.splitlines()[0] + b'\n'
+
+        def archive(stream=output, source=worker, child="43"):
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, "w") as traces:
+                traces.writestr("trace.42", source)
+                traces.writestr("trace." + child,
+                                f'write(51, {json.dumps(stream.decode())}, '
+                                f'{len(stream)}) = {len(stream)}\n')
+            return payload.getvalue()
+
+        result = actual_arithmetic.verify_worker_write_witness(
+            archive(), xml, "42", execution)
+        self.assertEqual(result["status"], "PASSED_KERNEL_WORKER_WRITES")
+        self.assertEqual(result["operation_lines"], 3)
+        for changed, source, child, payload, pid in (
+                (output.replace(b"PROSPECTIVE_ROTATION_JSON ", b"REMOVED_", 1), worker,
+                 "43", xml, "42"),
+                (output, worker.replace(b"clone(0) = 43", b"clone(0) = 44"),
+                 "43", xml, "42"),
+                (output, worker, "43", xml.replace(b"NUMERICAL_JSON ",
+                                                    b"NUMERIC_CHANGED ", 1), "42"),
+                (output, worker, "43", xml, "99")):
+            with self.assertRaises(CaptureRejected):
+                actual_arithmetic.verify_worker_write_witness(
+                    archive(changed, source, child), payload, pid, execution)
 
     def test_missing_extra_reordered_and_wrong_method_fail(self):
         original = fixture()

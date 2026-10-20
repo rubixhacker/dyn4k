@@ -570,7 +570,8 @@ def verify_operation_marker(marker, allowed_evaluations=("strict",)):
             raw = _pair(marker["raw"])
             angle = marker["angle_bits"]
             call = {"sequence": marker["sequence"], "step": 1, "body_id": "b0",
-                    "kind": "rotate", "branch": "integrate", "pre": marker["pre"],
+                    "kind": "rotate", "branch": marker["branch"] or "integrate",
+                    "pre": marker["pre"],
                     "trig": marker["trig"], "raw": marker["raw"],
                     "post": marker["post"],
                     "clamp": [value < -1.0 or value > 1.0 for value in raw]}
