@@ -85,6 +85,11 @@ class ProspectiveArithmeticTest {
     @Test fun captureWheelActive() = observe("everyJointWithInitialAndApplicableActiveModes") {
         PortableMatrixTest().captureJointCase("Wheel", "active")
     }
+    @Test fun wheelCaseWithoutOperationCapture() {
+        assertEquals(null, RotationOperationTap.currentCapture())
+        PortableMatrixTest().captureJointCase("Wheel", "active")
+        assertEquals(null, RotationOperationTap.currentCapture())
+    }
     @Test fun captureJointBooleanModes() = observe("independentJointBooleanModes") {
         PortableMatrixTest().independentJointBooleanModes()
     }

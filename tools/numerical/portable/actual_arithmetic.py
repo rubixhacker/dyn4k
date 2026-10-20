@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import io
 import json
@@ -47,6 +48,21 @@ _WRAPPERS = {
     "captureCcd": "continuousCollisionCasesAtFrozenRates",
     "captureLongMotion": "longRunningFreeMotionInvariantScene",
 }
+
+_FOCUSED_WHEEL_STEP_CALLS = (("b1", "integrate"), ("b0", "joint"),
+                             ("b1", "joint"))
+_WITNESS_PREFIXES = (b"NUMERICAL_JSON ", b"PROSPECTIVE_ROTATION_JSON ",
+                     b"PROSPECTIVE_BINDING_JSON ")
+_WITNESS_WRITE = re.compile(r'^write\((\d+), ("(?:\\.|[^"\\])*"), (\d+)\)\s+= (\d+)$')
+
+
+def _require_focused_wheel_step_calls(markers, step):
+    expected = [(step, (step - 1) * 3 + index, body_id, branch, "rotate")
+                for index, (body_id, branch) in enumerate(_FOCUSED_WHEEL_STEP_CALLS)]
+    observed = [(marker.get("step"), marker.get("sequence"), marker.get("body_id"),
+                 marker.get("branch"), marker.get("kind")) for marker in markers]
+    if observed != expected:
+        raise CaptureRejected("focused Wheel source call schedule differs")
 
 
 def expected_case_ids(include_focused=False):
@@ -284,6 +300,8 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
                 names = body_ids()
                 if type(receipts) is not list or len(receipts) != len(names):
                     raise CaptureRejected("body-step inventory differs")
+                if method == "captureWheelActive":
+                    _require_focused_wheel_step_calls(step_operations, binding["step"])
                 for index, receipt in enumerate(receipts):
                     calls = [call for call in step_operations
                              if call["body_id"] == names[index]]
@@ -649,8 +667,105 @@ def _check_process(files, runtime_executable, method):
     return classpath_evidence, worker_pid, log_paths[0]
 
 
+def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as traces:
+            names = traces.namelist()
+            if not names or len(names) > 1024 or len(names) != len(set(names)) or any(
+                    re.fullmatch(r"trace\.[1-9][0-9]*", name) is None for name in names):
+                raise CaptureRejected("worker write trace inventory differs")
+            records = {name.removeprefix("trace."): traces.read(name) for name in names}
+        if sum(map(len, records.values())) > 128 * 1024 * 1024 or \
+                worker_pid not in records:
+            raise CaptureRejected("worker write trace identity differs")
+        decoded = {pid: raw.decode("utf-8") for pid, raw in records.items()}
+        witnessed_execve = sorted(f"{pid} {line}" for pid, content in decoded.items()
+                                  for line in content.splitlines()
+                                  if line.startswith("execve("))
+        if witnessed_execve != sorted(execve_log.decode("utf-8").splitlines()):
+            raise CaptureRejected("worker write process trace differs")
+        worker_calls = [line for line in decoded[worker_pid].splitlines()
+                        if line.startswith("execve(") and "GradleWorkerMain" in line and
+                        line.endswith(" = 0")]
+        if len(worker_calls) != 1:
+            raise CaptureRejected("worker write process identity differs")
+        descendants = {worker_pid}
+        pending = [worker_pid]
+        while pending:
+            parent = pending.pop()
+            for line in decoded[parent].splitlines():
+                if not line.startswith(("clone(", "clone3(")):
+                    continue
+                child = re.search(r"\)\s+= ([1-9][0-9]*)$", line)
+                if child is None:
+                    continue
+                pid = child.group(1)
+                if pid not in decoded:
+                    raise CaptureRejected("worker write child trace is missing")
+                if pid not in descendants:
+                    descendants.add(pid)
+                    pending.append(pid)
+        document = ET.fromstring(xml)
+        outputs = document.findall("system-out")
+        if len(outputs) != 1 or outputs[0].text is None:
+            raise CaptureRejected("worker write XML output differs")
+        expected = [line.encode() for line in outputs[0].text.splitlines() if line]
+        if not expected or any(not line.startswith(_WITNESS_PREFIXES)
+                               for line in expected):
+            raise CaptureRejected("worker write XML lines differ")
+        streams = []
+        for pid in descendants:
+            per_fd = {}
+            bad_write = False
+            for line in decoded[pid].splitlines():
+                if line.startswith("write("):
+                    match = _WITNESS_WRITE.fullmatch(line)
+                    if match is None:
+                        bad_write = True
+                        continue
+                    fd, literal, requested, written = match.groups()
+                    payload = ast.literal_eval("b" + literal)
+                    if len(payload) != int(requested) or int(requested) != int(written):
+                        bad_write = True
+                    per_fd.setdefault(fd, []).append(payload)
+                elif any(prefix.decode() in line for prefix in _WITNESS_PREFIXES):
+                    raise CaptureRejected("worker wrote an unparsed operation record")
+            for fd, writes in per_fd.items():
+                stream = b"".join(writes)
+                if any(prefix in stream for prefix in _WITNESS_PREFIXES):
+                    if bad_write:
+                        raise CaptureRejected("worker write call is incomplete")
+                    streams.append((pid, fd, stream))
+        if len(streams) != 1:
+            raise CaptureRejected("worker operation writer is ambiguous")
+        thread_pid, fd, stream = streams[0]
+        observed = []
+        for line in stream.split(b"\n"):
+            positions = [line.find(prefix) for prefix in _WITNESS_PREFIXES
+                         if prefix in line]
+            if len(positions) > 1:
+                raise CaptureRejected("worker write line contains multiple records")
+            if positions:
+                observed.append(line[positions[0]:])
+        if observed != expected:
+            raise CaptureRejected("worker write stream differs from XML")
+        return {"status": "PASSED_KERNEL_WORKER_WRITES", "worker_pid": worker_pid,
+                "writer_thread_pid": thread_pid, "writer_fd": fd,
+                "lines": len(observed),
+                "operation_lines": sum(line.startswith(_WITNESS_PREFIXES[1])
+                                       for line in observed),
+                "stream_sha256": _sha(b"\n".join(observed) + b"\n")}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            zipfile.BadZipFile, SyntaxError) as error:
+        if isinstance(error, CaptureRejected):
+            raise
+        raise CaptureRejected("worker write witness is malformed") from error
+
+
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
-    if type(files) is not dict or set(files) != _RECEIPT_FILES or \
+    required_files = _RECEIPT_FILES | ({"worker_write_traces"}
+                                     if method == "captureWheelActive" else set())
+    if type(files) is not dict or set(files) != required_files or \
             any(type(value) is not bytes or not value for value in files.values()) or \
             type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("receipt input identity differs")
@@ -664,7 +779,7 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     summary = verify_capture(files["xml"], method, expected_ids, reset_order)
     worker_sources = _verify_worker_class_load(
         files["worker_class_load"], worker_pid, summary["selected_resets"] > 0)
-    return {"schema": "portable-arithmetic-capture-receipt/3",
+    receipt = {"schema": "portable-arithmetic-capture-receipt/3",
             "candidate_commit": commit, "method": method, "exit_code": 0,
             "runtime_executable": runtime_executable,
             "source_archive_sha256": _sha(files["source"]),
@@ -682,6 +797,14 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             "worker_class_load_pattern": log_path,
             "worker_class_load_sources": worker_sources,
             "summary": summary}
+    if method == "captureWheelActive":
+        witness = verify_worker_write_witness(files["worker_write_traces"],
+                                              files["xml"], worker_pid,
+                                              files["execve_log"])
+        receipt["worker_write_traces_sha256"] = _sha(files["worker_write_traces"])
+        receipt["external_xml_witness"] = witness
+        summary["external_xml_witness"] = witness["status"]
+    return receipt
 
 
 def verify_capture_receipt(receipt, files, method, commit, expected_ids,
@@ -730,6 +853,12 @@ def _wheel_rotation_audit(markers):
         else:
             call.update(input_kind="angle", angle_bits=marker["angle_bits"])
         calls.append(call)
+    if len(markers) != 600 * len(_FOCUSED_WHEEL_STEP_CALLS):
+        raise CaptureRejected("focused Wheel source call schedule differs")
+    for step in range(1, 601):
+        start = (step - 1) * len(_FOCUSED_WHEEL_STEP_CALLS)
+        _require_focused_wheel_step_calls(
+            markers[start:start + len(_FOCUSED_WHEEL_STEP_CALLS)], step)
     return {"schema": "portable-rotation-audit/2", "case_id": "joint-Wheel-active",
             "operation_model_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
             "declared_calls": len(calls), "accepted_toi_resets": [], "calls": calls}
@@ -771,5 +900,5 @@ def assess_focused_wheel(receipt, files, commit, runtime_executable,
             "rotation_audit": structural,
             "fixed_status": fixed["status"], "fixed_failed_step": fixed.get("failed_step"),
             "conditional_status": conditional["status"],
-            "external_xml_witness": "UNPASSED_NOT_OBTAINED",
+            "external_xml_witness": receipt["external_xml_witness"]["status"],
             "qualification": "UNPASSED"}

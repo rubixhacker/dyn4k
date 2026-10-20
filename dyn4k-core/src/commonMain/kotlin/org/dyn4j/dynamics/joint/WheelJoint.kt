@@ -330,12 +330,22 @@ open class WheelJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimit
                 val amount = if (invMass > Epsilon.E) -c / invMass else 0.0
                 val p = worldAxis.product(amount)
                 body1.translate(p.product(-invM1))
-                RotationOperationTap.withBranch("joint") {
-                    body1.rotateAboutCenter(-amount * ax1 * invI1)
+                val firstRotation = -amount * ax1 * invI1
+                if (RotationOperationTap.currentCapture() == null) {
+                    body1.rotateAboutCenter(firstRotation)
+                } else {
+                    RotationOperationTap.withBranch("joint") {
+                        body1.rotateAboutCenter(firstRotation)
+                    }
                 }
                 body2.translate(p.product(invM2))
-                RotationOperationTap.withBranch("joint") {
-                    body2.rotateAboutCenter(amount * ax2 * invI2)
+                val secondRotation = amount * ax2 * invI2
+                if (RotationOperationTap.currentCapture() == null) {
+                    body2.rotateAboutCenter(secondRotation)
+                } else {
+                    RotationOperationTap.withBranch("joint") {
+                        body2.rotateAboutCenter(secondRotation)
+                    }
                 }
                 linearError = abs(c)
             }
@@ -353,12 +363,22 @@ open class WheelJoint<T : PhysicsBody> : AbstractPairedBodyJoint<T>, LinearLimit
         val amount = if (invMass > Epsilon.E) -cx / invMass else 0.0
         val p = Vector2(ay.x * amount, ay.y * amount)
         body1.translate(p.product(-invM1))
-        RotationOperationTap.withBranch("joint") {
-            body1.rotateAboutCenter(-sy1 * amount * invI1)
+        val firstRotation = -sy1 * amount * invI1
+        if (RotationOperationTap.currentCapture() == null) {
+            body1.rotateAboutCenter(firstRotation)
+        } else {
+            RotationOperationTap.withBranch("joint") {
+                body1.rotateAboutCenter(firstRotation)
+            }
         }
         body2.translate(p.product(invM2))
-        RotationOperationTap.withBranch("joint") {
-            body2.rotateAboutCenter(sy2 * amount * invI2)
+        val secondRotation = sy2 * amount * invI2
+        if (RotationOperationTap.currentCapture() == null) {
+            body2.rotateAboutCenter(secondRotation)
+        } else {
+            RotationOperationTap.withBranch("joint") {
+                body2.rotateAboutCenter(secondRotation)
+            }
         }
         linearError = max(linearError, abs(cx))
         return linearError <= linearTolerance
