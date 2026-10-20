@@ -1335,6 +1335,25 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     return receipt
 
 
+def verify_schema5_process_witness(family, repository, candidate, folder, record,
+                                   launches, served, short, target):
+    if family == "Firefox":
+        verify_firefox_process_witness(
+            folder, record, launches, served, short, target, candidate,
+            str(repository / FIREFOX_WITNESS),
+            sha(original(repository, candidate, FIREFOX_WITNESS)))
+    elif family == "Safari":
+        verify_safari_response_witness(
+            folder, record, launches, served, short, target, candidate,
+            str(repository / SAFARI_WITNESS),
+            sha(original(repository, candidate, SAFARI_WITNESS)),
+            sha(original(repository, candidate, SAFARI_WORKER)),
+            sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
+            sha(original(repository, candidate, SAFARI_OBSERVER)))
+    else:
+        raise ValueError("schema-5 browser family differs")
+
+
 def verify(repository, candidate, lane, archive, digest, binary, hashes,
            browser_sha256=None):
     repository, archive, binary = map(Path, (repository, archive, binary))
@@ -1488,16 +1507,8 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                                                 if has_live_source else None,
                                                 sha(witness_source) if has_live_source else None)
             if schema == 5:
-                verify_firefox_process_witness(
-                    folder, record, launches, served, short, target, candidate,
-                    str(repository / FIREFOX_WITNESS),
-                    sha(original(repository, candidate, FIREFOX_WITNESS)))
-                verify_safari_response_witness(folder, record, launches, served,
-                    short, target, candidate, str(repository / SAFARI_WITNESS),
-                    sha(original(repository, candidate, SAFARI_WITNESS)),
-                    sha(original(repository, candidate, SAFARI_WORKER)),
-                    sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
-                    sha(original(repository, candidate, SAFARI_OBSERVER)))
+                verify_schema5_process_witness(family, repository, candidate,
+                    folder, record, launches, served, short, target)
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = bundle_paths(Path(paths["work"]), short, mode, target)[0]

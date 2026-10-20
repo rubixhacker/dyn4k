@@ -16,6 +16,27 @@ from unittest import mock
 import full_browser_consumer as browser
 
 
+class SchemaFiveDispatchTest(unittest.TestCase):
+    def test_replay_uses_only_the_selected_family_witness(self):
+        repository = Path("/selected/source")
+        args = (repository, "a" * 40, Path("/archive/core"), {}, [], {}, "core", "js")
+        for family, selected_paths in (
+                ("Firefox", [browser.FIREFOX_WITNESS]),
+                ("Safari", [browser.SAFARI_WITNESS, browser.SAFARI_WORKER,
+                            browser.SAFARI_BOOTSTRAP, browser.SAFARI_OBSERVER])):
+            with self.subTest(family=family), \
+                    mock.patch.object(browser, "original", return_value=b"selected source") as source, \
+                    mock.patch.object(browser, "verify_firefox_process_witness") as firefox, \
+                    mock.patch.object(browser, "verify_safari_response_witness") as safari:
+                browser.verify_schema5_process_witness(family, *args)
+                self.assertEqual(firefox.call_count, int(family == "Firefox"))
+                self.assertEqual(safari.call_count, int(family == "Safari"))
+                self.assertEqual([call.args[2] for call in source.call_args_list],
+                                 selected_paths)
+        with self.assertRaisesRegex(ValueError, "schema-5 browser family"):
+            browser.verify_schema5_process_witness("Chromium", *args)
+
+
 class SafariLauncherTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
