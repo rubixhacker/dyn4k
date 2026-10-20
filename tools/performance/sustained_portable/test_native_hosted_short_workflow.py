@@ -1,6 +1,7 @@
 import ast
 import base64
 import errno
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -9,6 +10,8 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+
+import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/performance-native-host-short.yml"
@@ -29,38 +32,97 @@ AUDITED_WORKFLOW_SHA256 = {
     "qualification.yml": "8bc7bce8bb15136c3de0dbbf9a3f18b37fedcbd69e48bb650ac5cb9cd70d62f5",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
-SUSTAINED_WORKFLOW_REQUIRED_FRAGMENTS = (
-    "  validate-target:\n    runs-on: ubuntu-latest\n    env:\n      TARGET: ${{ inputs.target }}\n"
-    "    steps:\n      - name: Require the Windows target\n"
-    '        run: test "$TARGET" = mingwX64',
-    "  capture:\n    needs: validate-target\n    runs-on: windows-2025\n"
-    "    timeout-minutes: 150\n",
-    "      - uses: actions/checkout@v4\n"
-    "      - uses: actions/setup-java@v4\n        with:\n"
-    "          distribution: temurin\n          java-version: '21'\n"
-    "      - uses: actions/setup-python@v5\n        with:\n"
-    "          python-version: '3.12'\n"
-    "      - uses: gradle/actions/setup-gradle@v4\n",
-    "      - name: Stage and capture on selected host\n"
-    "        shell: bash\n"
-    '        run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"',
-    "      - name: Upload raw Native host evidence\n"
-    "        if: always()\n"
-    "        uses: actions/upload-artifact@v4\n"
-    "        with:\n"
-    "          name: performance-native-host-short-${{ github.sha }}-${{ inputs.target }}-${{ inputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}\n"
-    "          path: |\n"
-    "            ${{ runner.temp }}/performance-native-host-short/\n"
-    "            ${{ github.workspace }}/build/staging-repository/\n"
-    "          include-hidden-files: true\n"
-    "          if-no-files-found: warn",
-)
-
-
 def verify_sustained_workflow_contract(source):
-    for fragment in SUSTAINED_WORKFLOW_REQUIRED_FRAGMENTS:
-        if fragment not in source:
-            raise AssertionError("required sustained workflow step is missing or altered")
+    document = yaml.safe_load(source)
+    if not isinstance(document, dict):
+        raise AssertionError("workflow root must be a mapping")
+    triggers = document.get("on", document.get(True))
+    dispatch = triggers.get("workflow_dispatch") if isinstance(triggers, dict) else None
+    inputs = dispatch.get("inputs") if isinstance(dispatch, dict) else None
+    expected_inputs = {
+        "target": ["mingwX64"],
+        "build": ["development", "optimized"],
+    }
+    for name, options in expected_inputs.items():
+        value = inputs.get(name) if isinstance(inputs, dict) else None
+        if (not isinstance(value, dict) or value.get("type") != "choice"
+                or value.get("required") is not True or value.get("options") != options):
+            raise AssertionError(f"workflow_dispatch {name} input changed")
+
+    jobs = document.get("jobs")
+    validate = jobs.get("validate-target") if isinstance(jobs, dict) else None
+    capture = jobs.get("capture") if isinstance(jobs, dict) else None
+    if not isinstance(validate, dict) or not isinstance(capture, dict):
+        raise AssertionError("required workflow jobs are missing")
+    validate_steps = validate.get("steps")
+    target_guard = next((step for step in validate_steps or ()
+                         if isinstance(step, dict)
+                         and step.get("name") == "Require the Windows target"), None)
+    if (validate.get("runs-on") != "ubuntu-latest"
+            or validate.get("env", {}).get("TARGET") != "${{ inputs.target }}"
+            or not isinstance(target_guard, dict)
+            or "if" in target_guard
+            or target_guard.get("run") != 'test "$TARGET" = mingwX64'):
+        raise AssertionError("Windows target validation route changed")
+
+    capture_env = capture.get("env")
+    if (capture.get("needs") != "validate-target"
+            or capture.get("runs-on") != "windows-2025"
+            or capture.get("timeout-minutes") != 150
+            or not isinstance(capture_env, dict)
+            or capture_env.get("TARGET") != "${{ inputs.target }}"
+            or capture_env.get("BUILD") != "${{ inputs.build }}"):
+        raise AssertionError("sustained capture job route or dispatch bindings changed")
+
+    steps = capture.get("steps")
+    if not isinstance(steps, list):
+        raise AssertionError("sustained capture steps are missing")
+    setup = [
+        {"uses": "actions/checkout@v4"},
+        {"uses": "actions/setup-java@v4",
+         "with": {"distribution": "temurin", "java-version": "21"}},
+        {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+        {"uses": "gradle/actions/setup-gradle@v4"},
+    ]
+    cursor = 0
+    setup_indices = []
+    for index, step in enumerate(steps):
+        if (cursor < len(setup) and isinstance(step, dict)
+                and all(step.get(key) == value
+                        for key, value in setup[cursor].items())):
+            setup_indices.append(index)
+            cursor += 1
+    if cursor != len(setup):
+        raise AssertionError("sustained capture setup steps changed")
+
+    capture_steps = [step for step in steps if isinstance(step, dict)
+                     and step.get("name") == "Stage and capture on selected host"]
+    if len(capture_steps) != 1:
+        raise AssertionError("sustained capture step is missing or duplicated")
+    capture_step = capture_steps[0]
+    if ("if" in capture_step or "if" in capture
+            or capture_step.get("shell") != "bash"
+            or capture_step.get("run") !=
+            'python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"'):
+        raise AssertionError("sustained capture step is conditional or altered")
+    capture_index = steps.index(capture_step)
+    if any(index >= capture_index for index in setup_indices):
+        raise AssertionError("sustained capture must follow its setup steps")
+
+    uploads = [step for step in steps if isinstance(step, dict)
+               and step.get("name") == "Upload raw Native host evidence"]
+    upload = uploads[0] if len(uploads) == 1 else None
+    upload_with = upload.get("with") if isinstance(upload, dict) else None
+    if (not isinstance(upload, dict) or upload.get("if") != "always()"
+            or upload.get("uses") != "actions/upload-artifact@v4"
+            or not isinstance(upload_with, dict)
+            or upload_with.get("name") != "performance-native-host-short-${{ github.sha }}-${{ inputs.target }}-${{ inputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}"
+            or upload_with.get("path") != "${{ runner.temp }}/performance-native-host-short/\n${{ github.workspace }}/build/staging-repository/\n"
+            or upload_with.get("include-hidden-files") is not True
+            or upload_with.get("if-no-files-found") != "warn"):
+        raise AssertionError("raw sustained evidence upload changed")
+    if steps.index(upload) <= capture_index:
+        raise AssertionError("raw evidence upload must follow sustained capture")
 
 
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
@@ -254,19 +316,35 @@ class WorkflowExpressionLimit(unittest.TestCase):
     def test_sustained_workflow_rejects_missing_or_altered_key_steps(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         verify_sustained_workflow_contract(source)
-        adverse_sources = (
-            source.replace("    runs-on: windows-2025", "    runs-on: ubuntu-latest", 1),
-            source.replace("          java-version: '21'", "          java-version: '17'", 1),
-            source.replace(
-                '        run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"',
-                "        run: echo skipped",
-                1),
-            source.replace("        if: always()", "        if: success()", 1),
+        baseline = yaml.safe_load(source)
+
+        def capture_step(document):
+            return next(step for step in document["jobs"]["capture"]["steps"]
+                        if step.get("name") == "Stage and capture on selected host")
+
+        def move_capture_to_validation(document):
+            step = capture_step(document)
+            document["jobs"]["capture"]["steps"].remove(step)
+            document["jobs"]["validate-target"]["steps"].append(step)
+
+        mutations = (
+            ("disabled capture", lambda doc: capture_step(doc).__setitem__("if", False),
+             "sustained capture step is conditional or altered"),
+            ("wrong target binding", lambda doc: doc["jobs"]["capture"]["env"].__setitem__("TARGET", "jvm"),
+             "sustained capture job route or dispatch bindings changed"),
+            ("wrong build binding", lambda doc: doc["jobs"]["capture"]["env"].__setitem__("BUILD", "development"),
+             "sustained capture job route or dispatch bindings changed"),
+            ("capture outside selected host job", move_capture_to_validation,
+             "sustained capture step is missing or duplicated"),
+            ("wrong dispatched target choices", lambda doc: doc[True]["workflow_dispatch"]["inputs"]["target"].__setitem__("options", ["jvm"]),
+             "workflow_dispatch target input changed"),
         )
-        for adverse in adverse_sources:
-            with self.subTest(source_changed=adverse != source):
-                with self.assertRaisesRegex(AssertionError, "required sustained workflow step"):
-                    verify_sustained_workflow_contract(adverse)
+        for label, mutate, error in mutations:
+            with self.subTest(change=label):
+                adverse = copy.deepcopy(baseline)
+                mutate(adverse)
+                with self.assertRaisesRegex(AssertionError, error):
+                    verify_sustained_workflow_contract(yaml.safe_dump(adverse, sort_keys=False))
 
 
 def workflow_nodes():
