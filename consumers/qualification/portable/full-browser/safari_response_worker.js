@@ -28,13 +28,34 @@ self.addEventListener('fetch', event => {
             if (response.status !== 200 || response.type !== 'basic') {
                 throw new Error('Safari witness received a non-network response');
             }
-            const client = await self.clients.get(event.clientId);
-            if (!client || !client.url) throw new Error('Safari witness client is absent');
+            let client = event.clientId ? await self.clients.get(event.clientId) : null;
+            let client_id_source = 'fetch-event';
+            let eligible_count = 0;
+            if (!client && navigation && !event.clientId) {
+                const candidates = await self.clients.matchAll({type: 'window',
+                    includeUncontrolled: false});
+                const eligible = candidates.filter(candidate => {
+                    const url = new URL(candidate.url);
+                    return url.origin === self.location.origin &&
+                        (url.pathname !== '/__dyn4k_bootstrap' ||
+                         (url.searchParams.get('token') === token &&
+                          url.searchParams.get('target') === event.request.url));
+                });
+                eligible_count = eligible.length;
+                if (eligible.length === 1) {
+                    client = eligible[0];
+                    client_id_source = 'single-controlled-client';
+                }
+            }
+            if (!client || !client.url) {
+                throw new Error('Safari witness client is absent; eligible=' + eligible_count);
+            }
             const body = selected ? await response.clone().arrayBuffer() : new ArrayBuffer(0);
             const request_id = self.crypto.randomUUID();
             const metadata = {
                 token, kind: selected ? 'response' : 'navigation', request_id,
-                url: event.request.url, client_id: event.clientId,
+                url: event.request.url, client_id: client.id,
+                fetch_client_id: event.clientId, client_id_source, eligible_count,
                 client_url: client.url, resulting_client_id: event.resultingClientId || '',
                 status: response.status, request_ns, response_ns,
                 finished_ns: Date.now() * 1000000
@@ -53,6 +74,7 @@ self.addEventListener('fetch', event => {
                     headers: {'content-type': 'application/json'},
                     body: JSON.stringify({token, url: event.request.url,
                         client_id: event.clientId, mode: event.request.mode,
+                        resulting_client_id: event.resultingClientId,
                         error: String(error)})});
             } catch (_) {}
             throw error;

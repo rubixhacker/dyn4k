@@ -97,6 +97,8 @@ class SafariResponseWitnessTest(unittest.TestCase):
                       {"kind": "navigation", "token": process["browser_token"],
                        "request_id": "nav", "url": target_url,
                        "client_id": "bootstrap", "client_url": bootstrap_url,
+                       "fetch_client_id": "", "client_id_source": "single-controlled-client",
+                       "eligible_count": 1,
                        "resulting_client_id": "page", "status": 200,
                        "request_ns": 160, "response_ns": 170,
                        "finished_ns": 180, "observed_ns": 190,
@@ -118,6 +120,8 @@ class SafariResponseWitnessTest(unittest.TestCase):
                                "request_id": f"r-{index}",
                                "url": f"http://localhost:12345{relative}",
                                "client_id": "page", "client_url": target_url,
+                               "fetch_client_id": "page", "client_id_source": "fetch-event",
+                               "eligible_count": 0,
                                "resulting_client_id": "", "status": 200,
                                "request_ns": 200 + index * 100,
                                "response_ns": 210 + index * 100,
@@ -146,6 +150,8 @@ class SafariResponseWitnessTest(unittest.TestCase):
             nested.insert(3, {"kind": "navigation", "token": process["browser_token"],
                               "request_id": "iframe-nav", "url": iframe_url,
                               "client_id": "page", "client_url": target_url,
+                              "fetch_client_id": "page", "client_id_source": "fetch-event",
+                              "eligible_count": 0,
                               "resulting_client_id": "iframe", "status": 200,
                               "request_ns": 231, "response_ns": 232,
                               "finished_ns": 233, "observed_ns": 240,
@@ -153,6 +159,7 @@ class SafariResponseWitnessTest(unittest.TestCase):
                               "body_sha256": browser.sha(b"")})
             for event in nested[4:]:
                 event["client_id"] = "iframe"
+                event["fetch_client_id"] = "iframe"
                 event["client_url"] = iframe_url
             raw.write_text("\n".join(json.dumps(row) for row in nested) + "\n")
             chained = runpy.run_path(str(source))["safari_records"](
@@ -181,6 +188,7 @@ class SafariResponseWitnessTest(unittest.TestCase):
             witness.write_text("\n".join(json.dumps(row) for row in records) + "\n")
             changed_events = [dict(row) for row in events]
             changed_events[-1]["client_id"] = "unrelated-process"
+            changed_events[-1]["fetch_client_id"] = "unrelated-process"
             raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
             with self.assertRaisesRegex(ValueError, "client lineage"):
                 replay()

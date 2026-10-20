@@ -53,6 +53,7 @@ def safari_records(folder, process, launches, candidate, module, target,
             or not isinstance(control["client_id"], str) or not control["client_id"]):
         raise ValueError("Safari worker first-load control differs")
     event_keys = {"token", "kind", "request_id", "url", "client_id",
+                  "fetch_client_id", "client_id_source", "eligible_count",
                   "client_url", "resulting_client_id", "status", "request_ns",
                   "response_ns", "finished_ns", "body_path", "body_size",
                   "body_sha256", "observed_ns"}
@@ -75,6 +76,13 @@ def safari_records(folder, process, launches, candidate, module, target,
         if (set(item) != event_keys or item["token"] != token
                 or not isinstance(item["request_id"], str)
                 or not item["request_id"] or item["request_id"] in ids
+                or not ((item["client_id_source"] == "fetch-event"
+                         and item["fetch_client_id"] == item["client_id"]
+                         and item["eligible_count"] == 0)
+                        or (item["client_id_source"] == "single-controlled-client"
+                            and item["kind"] == "navigation"
+                            and item["fetch_client_id"] == ""
+                            and item["eligible_count"] == 1))
                 or item["status"] != 200
                 or any(type(item[key]) is not int for key in
                        ("request_ns", "response_ns", "finished_ns", "observed_ns"))
