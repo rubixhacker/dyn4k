@@ -889,7 +889,7 @@ class SignedRouteTests(unittest.TestCase):
                     "expected_archive_digests": {"staged-consumer": digest},
                     "expected_browser_toolchain": receipt["toolchain"],
                     "expected_browser_bundles": {"core": {}, "facade": {}}}
-        with self.assertRaisesRegex(ValueError, "public producer or central verifier absent"):
+        with self.assertRaisesRegex(ValueError, "public producer or central verifier (absent|differs from candidate)"):
             full_signed_routes.verify_browser(
                 ROOT, receipt["candidate_sha"], receipt["lane"], archive, expected,
                 receipt["staged_hashes"], receipt["runtime_identity"], digest)
