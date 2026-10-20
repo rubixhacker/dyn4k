@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -101,7 +102,27 @@ def changed_paths(candidate, checkout, relative_paths):
     return changed
 
 
+def checkout_fixture_parent(repository, platform_name):
+    if platform_name == "nt":
+        return repository.parent
+    return None
+
+
 class CheckoutBytePolicyTests(unittest.TestCase):
+    def test_windows_checkout_fixture_uses_a_short_task_temp_root(self):
+        repository = Path("D:/a/dyn4k/dyn4k")
+        temporary_parent = checkout_fixture_parent(repository, "nt")
+        self.assertEqual(Path("D:/a/dyn4k"), temporary_parent)
+        tracked = subprocess.check_output(
+            ["git", "-C", str(REPOSITORY), "ls-files", "-z"]
+        ).split(b"\0")
+        longest_relative_path = max(len(path) for path in tracked if path)
+        fixture_checkout = temporary_parent / "d4k-12345678" / "checkout"
+        self.assertLess(
+            len(str(fixture_checkout)) + 1 + longest_relative_path,
+            240,
+        )
+
     def test_license_byte_policy_is_root_anchored(self):
         paths = ["LICENSE.md", "docs/LICENSE.md", "tools/LICENSE.md", "foo/bar/LICENSE.md"]
         output = subprocess.check_output(
@@ -123,15 +144,41 @@ class CheckoutBytePolicyTests(unittest.TestCase):
             ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"], text=True
         ).strip()
         relative_paths = sorted(hash_guarded_source_paths())
-        with tempfile.TemporaryDirectory(prefix="dyn4k-autocrlf-") as temporary:
+        temporary_parent = checkout_fixture_parent(REPOSITORY, os.name)
+        with tempfile.TemporaryDirectory(
+            prefix="d4k-", dir=temporary_parent
+        ) as temporary:
             checkout = Path(temporary) / "checkout"
-            subprocess.run(
+            if os.name == "nt":
+                longest_relative_path = max(
+                    len(path) for path in relative_paths
+                )
+                self.assertLess(
+                    len(str(checkout)) + 1 + longest_relative_path,
+                    240,
+                    "Windows worktree root leaves too little path budget for "
+                    "hash-guarded source paths",
+                )
+            setup = subprocess.run(
                 ["git", "-C", str(REPOSITORY), "-c", "core.autocrlf=true",
                  "worktree", "add", "--detach", "--force", str(checkout), candidate],
-                check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                text=True,
             )
+            if setup.returncode != 0:
+                subprocess.run(
+                    ["git", "-C", str(REPOSITORY), "worktree", "remove", "--force",
+                     str(checkout)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.fail(
+                    "Git worktree add failed with "
+                    f"exit {setup.returncode}; command: {setup.args!r}\n"
+                    f"stdout:\n{setup.stdout}\nstderr:\n{setup.stderr}"
+                )
             try:
                 changed = changed_paths(candidate, checkout, relative_paths)
                 diagnostic_paths = [
