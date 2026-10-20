@@ -62,7 +62,7 @@ class FirefoxMinimumWitnessTest(unittest.TestCase):
             target = "http://localhost:9876/?id=one"
             redirect = ("<!doctype html><meta charset=\"utf-8\"><script>" +
                         f"location.replace({json.dumps(bootstrap)})</script>\n")
-            (folder / "safari-redirect.html").write_text(redirect)
+            (folder / "safari-redirect.html").write_bytes(redirect.encode())
             record = {"started_ns": 100, "finished_ns": 500,
                       "browser_token": "abc", "karma_port": 9876}
             session = {"kind": "session", "protocol": 2, "module": "core",
@@ -113,6 +113,7 @@ class FirefoxMinimumWitnessTest(unittest.TestCase):
                 check(session, dict(sealed, started_ns=139))
 
 
+@unittest.skipIf(os.name == "nt", "Safari launcher imports POSIX fcntl and fork")
 class SafariLauncherTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -335,6 +336,7 @@ class SafariResponseWitnessTest(unittest.TestCase):
 
 
 class SafariControlServerTest(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Safari dual-loopback control requires macOS sockets")
     def test_control_accepts_only_ipv4_and_ipv6_loopback(self):
         root = Path(__file__).resolve().parents[2]
         fixture = root / "tools/qualification/safari_worker_control.js"
@@ -736,8 +738,8 @@ class SelectedBundleTest(unittest.TestCase):
                                               observer + b"extra")
 
     def test_effective_files_reject_extra_script_and_changed_preprocessor(self):
-        work = Path("/evidence/build")
-        tmpdir = "/evidence/tmp"
+        work = Path(tempfile.gettempdir()) / "evidence/build"
+        tmpdir = str(Path(tempfile.gettempdir()) / "evidence/tmp")
         webpack = Path(tmpdir) / "_karma_webpack_123"
         _, selected, runner = browser.bundle_paths(work, "core", "development")
         root = work / "root/js/node_modules"
@@ -768,8 +770,8 @@ class SelectedBundleTest(unittest.TestCase):
             browser.effective_files(evidence, work, "core", "development")
 
     def test_effective_pattern_flags_reject_changed_selected_script(self):
-        work = Path("/evidence/build")
-        webpack = Path("/evidence/tmp/_karma_webpack_123")
+        work = Path(tempfile.gettempdir()) / "evidence/build"
+        webpack = Path(tempfile.gettempdir()) / "evidence/tmp/_karma_webpack_123"
         _, selected, runner = browser.bundle_paths(work, "core", "development")
         root = work / "root/js/node_modules"
         paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
@@ -802,8 +804,8 @@ class SelectedBundleTest(unittest.TestCase):
             browser.effective_files(evidence, work, "core", "development")
 
     def test_wasm_effective_patterns_pin_loader_and_tooling(self):
-        work = Path("/evidence/build")
-        tmpdir = Path("/evidence/tmp")
+        work = Path(tempfile.gettempdir()) / "evidence/build"
+        tmpdir = Path(tempfile.gettempdir()) / "evidence/tmp"
         runner = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
                   "9c7852378f220e63c4f92e7d93026c2f/node_modules/"
                   "kotlin-web-helpers/dist/kotlin-test-karma-runner.js")
@@ -841,9 +843,9 @@ class SelectedBundleTest(unittest.TestCase):
             "const path = require('node:path');",
             "const vm = require('node:vm');",
             "const source = fs.readFileSync(process.argv[1], 'utf8');",
-            "const work = '/evidence/build';",
+            "const work = path.resolve('/evidence/build');",
             "const root = path.join(work, 'root/js/node_modules');",
-            "const tmpdir = '/evidence/tmp';",
+            "const tmpdir = path.resolve('/evidence/tmp');",
             "const webpack = path.join(tmpdir, '_karma_webpack_123');",
             "const selected = path.join(work, 'root/js/packages/test/kotlin/test.js');",
             "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
@@ -866,7 +868,7 @@ class SelectedBundleTest(unittest.TestCase):
             "const fakeFs = {readFileSync: name => Buffer.from(name), realpathSync: name => name, mkdirSync: () => {},",
             "    writeFileSync: () => {}, openSync: () => 1};",
             "const fakeCrypto = {createHash: () => ({update(data) {this.name = data.toString(); return this;},",
-            "    digest() {return this.name.endsWith('/karma/lib/preprocessor.js')",
+            "    digest() {return this.name.endsWith(path.join('karma', 'lib', 'preprocessor.js'))",
             "        ? '0ad9180342ad37e9a1782105a98df0b60225598fd5ccd66016fd90fbb49230f5'",
             "        : digests.get(path.basename(this.name)) || '0'.repeat(64);}})};",
             "function fakeRequire(name) {",
@@ -923,9 +925,9 @@ class SelectedBundleTest(unittest.TestCase):
             "const vm = require('node:vm');",
             "const source = fs.readFileSync(process.argv[1], 'utf8');",
             "const digests = JSON.parse(process.argv[2]);",
-            "const work = '/evidence/build';",
+            "const work = path.resolve('/evidence/build');",
             "const root = path.join(work, 'root/js/node_modules');",
-            "const tmpdir = '/evidence/tmp';",
+            "const tmpdir = path.resolve('/evidence/tmp');",
             "const webpack = path.join(tmpdir, '_karma_webpack_123');",
             "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
             "const pack = 'dyn4k-full-staged-browser-consumer-core-test';",
@@ -936,11 +938,11 @@ class SelectedBundleTest(unittest.TestCase):
             "  const fakeFs = {readFileSync: name => Buffer.from(name),",
             "    realpathSync: name => name, mkdirSync: () => {}, openSync: () => 1,",
             "    readdirSync: () => names, lstatSync: () => ({isSymbolicLink: () => false}),",
-            "    writeFileSync: name => {if (name.startsWith('/evidence/sources/')) copies.push(path.basename(name));}};",
+            "    writeFileSync: name => {if (name.startsWith(path.resolve('/evidence/sources') + path.sep)) copies.push(path.basename(name));}};",
             "  const fakeCrypto = {createHash: () => ({update(data) {this.name = data.toString(); return this;},",
-            "    digest() {if (this.name.endsWith('/karma-kotlin-reporter.js'))",
+            "    digest() {if (this.name.endsWith(path.sep + 'karma-kotlin-reporter.js'))",
             "      return '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347';",
-            "      const item = Object.entries(digests).find(([suffix]) => this.name.endsWith('/' + suffix));",
+            "      const item = Object.entries(digests).find(([suffix]) => this.name.endsWith(path.sep + suffix.split('/').join(path.sep)));",
             "      return item ? item[1] : '0'.repeat(64);}})};",
             "  function injectedRequire(name) {",
             "    if (name === 'node:fs') return fakeFs;",
@@ -966,8 +968,8 @@ class SelectedBundleTest(unittest.TestCase):
             "  const env = {DYN4K_BROWSER_REPORTER_SOURCE: process.argv[1],",
             "    DYN4K_BROWSER_REPORTER_ATTESTATION: '/evidence/reporter.json',",
             "    DYN4K_BROWSER_RAW_KARMA: '/evidence/raw.jsonl',",
-            "    DYN4K_BROWSER_HTTP_ARCHIVE: '/evidence/responses',",
-            "    DYN4K_BROWSER_HTTP_SOURCES: '/evidence/sources',",
+            "    DYN4K_BROWSER_HTTP_ARCHIVE: path.resolve('/evidence/responses'),",
+            "    DYN4K_BROWSER_HTTP_SOURCES: path.resolve('/evidence/sources'),",
             "    DYN4K_BROWSER_SELECTED_BUNDLE: selected,",
             "    DYN4K_BROWSER_SELECTED_ARCHIVE: '/evidence/selected.js',",
             "    DYN4K_BROWSER_SELECTED_ATTESTATION: '/evidence/selected.json',",
@@ -1092,6 +1094,8 @@ class SelectedBundleTest(unittest.TestCase):
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
         root = (Path.home() / ".kotlin/kotlin-npm-tooling/yarn/"
                 "9c7852378f220e63c4f92e7d93026c2f/node_modules")
+        if not (root / "karma/lib/config.js").is_file():
+            self.skipTest("selected real Karma package fixture is absent")
         script = "\n".join((
             "const assert = require('node:assert/strict');",
             "const fs = require('node:fs');",
@@ -1101,8 +1105,8 @@ class SelectedBundleTest(unittest.TestCase):
             "const source = fs.readFileSync(process.argv[1], 'utf8');",
             "const root = process.argv[2];",
             "const karma = createRequire(path.join(root, 'karma/package.json'))('karma/lib/config');",
-            "const work = '/evidence/build';",
-            "const tmpdir = '/evidence/tmp';",
+            "const work = path.resolve('/evidence/build');",
+            "const tmpdir = path.resolve('/evidence/tmp');",
             "const webpack = path.join(tmpdir, '_karma_webpack_123');",
             "const runner = path.join(root, 'kotlin-web-helpers/dist/kotlin-test-karma-runner.js');",
             "const selected = path.join(work, 'root/wasm/packages/test/static/load.mjs');",
@@ -1180,7 +1184,8 @@ class SelectedBundleTest(unittest.TestCase):
             root = work / "root/js/node_modules"
             webpack = folder / "tmp/_karma_webpack_123"
             paths = [str(webpack / "runtime.js"), str(webpack / "commons.js"),
-                     str(root / "mocha/mocha.js"), str(root / "karma-mocha/lib/adapter.js"),
+                     str(root.resolve() / "mocha/mocha.js"),
+                     str(root.resolve() / "karma-mocha/lib/adapter.js"),
                      str(runner), str(selected), str(webpack / "**/*")]
             (folder / "karma.conf.js").write_bytes(self.config(self.settings(work, "development")))
             (folder / "browser-reporter.js").write_bytes(self.reporter)

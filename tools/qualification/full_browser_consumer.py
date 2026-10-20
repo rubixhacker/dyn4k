@@ -980,7 +980,12 @@ def capture_live_lock(lock, expected, archive, stage, execution):
         raise ValueError("live Yarn lock path differs")
     if any(parent.is_symlink() for parent in lock.parents):
         raise ValueError("live Yarn lock parent is symbolic")
-    descriptor = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
+    if os.name == "nt":
+        from safari_windows_file import LockedDirectory
+        with LockedDirectory(lock.parent, resolve_root=False) as directory:
+            descriptor = directory.open_file(lock.name)
+    else:
+        descriptor = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(descriptor, "rb") as stream:
         before = os.fstat(stream.fileno())
         raw = stream.read()
@@ -1048,9 +1053,16 @@ def capture_archive_root(paths, archive, repository):
             or Path(paths["staging"]).is_relative_to(repository)):
         raise ValueError("external browser provider or archive path differs")
     captured = Path(paths["archive"])
+    if os.name == "nt":
+        reparse = any(
+            part.exists() and part.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            for part in (archive, *archive.parents))
+        aliased = reparse or os.path.normpath(str(archive)) != str(archive)
+    else:
+        aliased = archive.exists() and archive.resolve(strict=True) != archive
     if (not archive.is_absolute() or not archive.is_dir()
             or archive.is_relative_to(repository)
-            or archive.resolve(strict=True) != archive
+            or aliased
             or captured.exists() and captured != archive and archive.samefile(captured)):
         raise ValueError("selected browser archive path aliases another location")
     for relative in independent_gates._archive_paths(archive):

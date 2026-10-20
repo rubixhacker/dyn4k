@@ -30,13 +30,13 @@ class BrowserAdapterTests(unittest.TestCase):
                 (folder / name).write_bytes(raw)
         self.hashes = {"dyn4k-core": CORE_HASH, "dyn4k": FACADE_HASH}
         self.toolchain = {
-            "java_home": "/trusted/jdk21", "java_version": 'openjdk version "21.0.12"',
+            "java_home": str(self.archive / "jdk21"), "java_version": 'openjdk version "21.0.12"',
             "java_sha256": adapter.full_browser_consumer.JAVA_SHA256,
-            "gradle": "/trusted/gradle", "gradle_sha256": adapter.full_browser_consumer.GRADLE_SHA256,
+            "gradle": str(self.archive / "gradle"), "gradle_sha256": adapter.full_browser_consumer.GRADLE_SHA256,
             "gradle_version": "9.5.0", "kgp_version": "2.4.20",
-            "browser": "/trusted/chrome", "browser_sha256": adapter.full_browser_consumer.CHROMIUM["current"][1],
+            "browser": str(self.archive / "chrome"), "browser_sha256": adapter.full_browser_consumer.CHROMIUM["current"][1],
             "browser_version": "Google Chrome for Testing 155.0.1.0",
-            "gradle_user_home": "/trusted/gradle-home",
+            "gradle_user_home": str(self.archive / "gradle-home"),
         }
         self.expected = {
             "expected_artifact_hashes": self.hashes,
