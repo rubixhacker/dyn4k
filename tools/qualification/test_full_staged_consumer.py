@@ -51,7 +51,7 @@ class FullStagedConsumerTests(unittest.TestCase):
             suite.class_contract(manifest, "jvm:Java:current:default", CLASS)
 
     def test_graph_rejects_source_build_substitution_and_provider_changes(self):
-        stage = Path("/staging")
+        stage = Path(tempfile.gettempdir()).resolve() / "staging"
         hashes = {"dyn4k-core": "a" * 64, "dyn4k": "b" * 64}
         artifacts = []
         for module in suite.MODULES:
@@ -64,7 +64,7 @@ class FullStagedConsumerTests(unittest.TestCase):
                  [f"{suite.GROUP}:{module}:{suite.VERSION}" for module in suite.MODULES]}
         self.assertEqual(set(suite.graph_artifacts(graph, stage, hashes)), set(suite.MODULES))
         changes = (
-            ("file", "/checkout/dyn4k-core/build/libs/dyn4k-core-jvm.jar"),
+            ("file", str(stage / "checkout/dyn4k-core/build/libs/dyn4k-core-jvm.jar")),
             ("component", "org.dyn4j:dyn4j:6.0.0"),
             ("sha256", "c" * 64),
         )

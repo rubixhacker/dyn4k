@@ -9,7 +9,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import Mock, patch
 
 import full_native_host_consumer as route
@@ -142,7 +142,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             (raw / "receipt.json").write_bytes(b"{}")
             (raw / "evidence.bin").write_bytes(b"original")
             (raw / "evidence.bin").chmod(0o700)
-            timestamp = 1_700_000_000_123_456_789
+            timestamp = 1_700_000_000_123_456_700
             for path in raw.iterdir():
                 os.utime(path, ns=(timestamp, timestamp))
             transport = root / "raw.tar"
@@ -203,7 +203,8 @@ class NativeHostConsumerTests(unittest.TestCase):
             linked = root / "linked"
             linked.symlink_to(outside, target_is_directory=True)
             for destination in (linked, outside):
-                with self.subTest(destination=destination), self.assertRaises(ValueError):
+                error = "already exists" if os.name == "nt" else "new, unlinked"
+                with self.subTest(destination=destination), self.assertRaisesRegex(ValueError, error):
                     route.unpack_archive(transport, destination)
             self.assertEqual(list(outside.iterdir()), [])
             parent_link = root / "parent-link"
@@ -680,7 +681,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             artifacts = [{"component": components[index + 2], "size": len(b"core-klib")
                           if module == "dyn4k-core" else len(b"facade-klib"),
                           "sha256": hashes[module],
-                          "file": str(route.staged_path(Path("/staging"), module, "linuxArm64"))}
+                          "file": str(route.staged_path(PurePosixPath("/staging"), module, "linuxArm64"))}
                          for index, module in enumerate(route.MODULES)]
             graph = {"compile": [], "runtime_resolution":
                      "native-test-executable; no separate KLIB runtime resolution",
@@ -705,7 +706,7 @@ class NativeHostConsumerTests(unittest.TestCase):
                 output += [f"> Task :{short}:linuxArm64Test",
                            f"QUALIFICATION_COMPILER_FLAGS_{short.upper()}=" + json.dumps(
                                ["-g", "-friend-modules", str(route.staged_path(
-                                   Path('/staging'), friend_module, 'linuxArm64'))])]
+                                   PurePosixPath('/staging'), friend_module, 'linuxArm64'))])]
                 binary = f"binary-{short}".encode()
                 write(f"runtime/{short}.program", binary)
                 sample = {"pid": 200 if short == "core" else 201,

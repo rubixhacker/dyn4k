@@ -58,7 +58,7 @@ class FullWasmNodeConsumerTests(unittest.TestCase):
         self.assertEqual(result["status"], "NOT_RUN")
         self.assertEqual(result["reason"], "selected runtime executable is absent")
         self.assertEqual(result["expected_version"], "37.0.3")
-        self.assertEqual(result["selected_path"], "/missing/wasmtime")
+        self.assertEqual(result["selected_path"], str(Path("/missing/wasmtime")))
 
     def test_runtime_roles_require_candidate_patch_not_only_major(self):
         versions = (

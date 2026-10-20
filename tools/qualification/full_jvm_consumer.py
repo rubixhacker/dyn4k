@@ -47,7 +47,7 @@ def source_inventory(repository, candidate, cases):
         ["git", "--no-replace-objects", "-C", str(repository), "ls-tree", "-r",
          "--name-only", candidate, "--", *SOURCE_ROOTS], text=True).splitlines()
     tracked = sorted(path for path in tracked if path.endswith((".kt", ".java")))
-    live = sorted(str(path.relative_to(repository)) for root in SOURCE_ROOTS
+    live = sorted(path.relative_to(repository).as_posix() for root in SOURCE_ROOTS
                   for path in (repository / root).rglob("*")
                   if path.is_file() and path.suffix in (".kt", ".java"))
     if tracked != live or len(tracked) != len(set(tracked)):

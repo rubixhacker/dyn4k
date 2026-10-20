@@ -695,6 +695,8 @@ class WindowsArchiveApi:
         result = self.nt.NtCreateFile(ctypes.byref(value), access, ctypes.byref(attributes),
             ctypes.byref(status), None, 0x80, 3 if writable else 1,
             disposition, options, None, 0)
+        if create and result & 0xffffffff == 0xc0000035:
+            raise ValueError("Windows archive output already exists")
         if result < 0:
             raise OSError(f"NtCreateFile rejected anchored archive member: 0x{result & 0xffffffff:08x}")
         try:
