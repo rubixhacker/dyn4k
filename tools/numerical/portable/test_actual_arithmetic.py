@@ -256,8 +256,9 @@ class ActualArithmeticTest(unittest.TestCase):
                 verify_capture(xml_for(rows), "captureGeometry", expected)
 
     def test_case_inventory_is_complete(self):
-        mapping = expected_case_ids()
+        mapping = expected_case_ids(include_focused=True)
         self.assertEqual(mapping["captureWheelActive"], ["joint-Wheel-active"])
+        self.assertNotIn("captureWheelActive", expected_case_ids())
         full = {name: ids for name, ids in mapping.items()
                 if name != "captureWheelActive"}
         self.assertEqual(len(full), 15)

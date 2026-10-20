@@ -68,7 +68,7 @@ def clean_source():
 
 
 def run_capture(method, output, reference_case=None):
-    if method not in expected_case_ids():
+    if method not in expected_case_ids(include_focused=True):
         raise CaptureRejected("unknown arithmetic producer method")
     if method == "captureWheelActive" and reference_case is None:
         raise CaptureRejected("focused Wheel reference is required")
@@ -156,9 +156,9 @@ def run_capture(method, output, reference_case=None):
                 runtime_path.read_bytes()).hexdigest():
         raise CaptureRejected("copied producer artifact differs")
     receipt = make_capture_receipt(files, method, commit,
-                                   expected_case_ids()[method], str(runtime_path))
+                                   expected_case_ids(include_focused=True)[method], str(runtime_path))
     verify_capture_receipt(receipt, files, method, commit,
-                           expected_case_ids()[method], str(runtime_path))
+                           expected_case_ids(include_focused=True)[method], str(runtime_path))
     (output / "receipt.json").write_text(json.dumps(receipt, sort_keys=True,
                                                      indent=2) + "\n")
     if method == "captureWheelActive":
@@ -174,7 +174,8 @@ def run_capture(method, output, reference_case=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", choices=tuple(expected_case_ids()), required=True)
+    parser.add_argument("--method", choices=tuple(expected_case_ids(include_focused=True)),
+                        required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--reference-case", type=Path)
     arguments = parser.parse_args()
