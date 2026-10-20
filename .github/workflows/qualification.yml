@@ -997,9 +997,16 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
           echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
           java -version
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Use pre-installed Python 3.12.15
+        run: |
+          python_dir=/Users/stew/.cache/dyn4k-codex/tools/python-3.12.15/python/bin
+          if [[ ! -x "$python_dir/python" ]]; then
+            echo "Required pre-installed Python is missing: $python_dir/python" >&2
+            exit 1
+          fi
+          "$python_dir/python" -c 'import sys; assert sys.version_info[:3] == (3, 12, 15), sys.version'
+          "$python_dir/python" --version
+          echo "$python_dir" >> "$GITHUB_PATH"
       - uses: android-actions/setup-android@v3
         with:
           packages: >-
