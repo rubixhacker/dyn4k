@@ -133,12 +133,22 @@ jobs:
             if (-not $pinnedEntry) {
               throw 'The existing Yarn lock no longer pins the expected Kotlin Karma revision.'
             }
+            $expectedLockSha = '1a6ebc514e450fdce256614521850be09ac47d383c78ec7d8815f6f8b0d2884a'
+            $lockSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $lockPath).Hash.ToLowerInvariant()
+            if ($lockSha -ne $expectedLockSha) {
+              throw "The full-browser Yarn lock SHA-256 changed: $lockSha"
+            }
             $installer = Join-Path $taskRoot 'karma-installer'
             New-Item -ItemType Directory -Path $installer | Out-Null
-            @{ name = 'dyn4k-windows-qualification-karma'; version = '1.0.0'; private = $true; dependencies = @{ karma = 'github:Kotlin/karma#6.4.5' } } |
+            @{ name = 'dyn4k-windows-qualification-browser-runtime'; version = '1.0.0'; private = $true; dependencies = @{
+                karma = 'github:Kotlin/karma#6.4.5'
+                mocha = '11.7.6'
+                'karma-mocha' = '2.0.1'
+                'karma-webpack' = '5.0.1'
+                'kotlin-web-helpers' = '3.3.0'
+              } } |
               ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $installer 'package.json')
             Copy-Item -LiteralPath $lockPath -Destination (Join-Path $installer 'yarn.lock')
-            $lockSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $lockPath).Hash.ToLowerInvariant()
             Push-Location $installer
             try {
               Invoke-CheckedNative -Program 'corepack' -Arguments @('yarn@1.22.22', 'install', '--frozen-lockfile', '--non-interactive', '--no-default-rc', '--cache-folder', $yarnCache, '--modules-folder', $modules)
@@ -154,12 +164,50 @@ jobs:
             if ($karmaConfigSha -ne 'fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42') {
               throw "Pinned Karma config digest mismatch: $karmaConfigSha"
             }
+            $runtimeInputs = [ordered]@{
+              'mocha/mocha.js' = '8f46c07ab4422da71bdb27e8f54d0a9ba59b736face2c9f5534c414623c55ef6'
+              'karma-mocha/lib/adapter.js' = 'd2ecb1de057231e7c5efe6b7a5b36e163c85f49834814ab8fc3a893a3a404933'
+              'kotlin-web-helpers/dist/kotlin-test-karma-runner.js' = '15261c8d909c161dfc3004934d1f2542f96abcb78071b6f3663aa927773aba18'
+              'karma/lib/config.js' = 'fadd8d4cef5e4d62dcd9a5ccd63295ceb028925a5d2f8b7edfb1d47a09fb7e42'
+              'karma/lib/helper.js' = 'db2c4942bde7e0d696a40d1a1a7b58ba18b9acc3843c53a8a336c86645d5de6f'
+              'karma/lib/file-list.js' = 'b91c1f294a2f1fbd886a8d3b991c8066c70037319a8e71d97a549b0928eefc22'
+              'karma/lib/preprocessor.js' = '0ad9180342ad37e9a1782105a98df0b60225598fd5ccd66016fd90fbb49230f5'
+              'karma-mocha/lib/index.js' = '4e9a83d5ff0504ad8d2ea42ee535d5e05324b2e4e8f1796b809c8314b1cc524b'
+              'karma-webpack/lib/karma-webpack/framework.js' = '705fc7f4d211eee26beb549758d8ea39f502a7385c2a43756bc71e3003c99ca9'
+              'karma-webpack/lib/karma-webpack/preprocessor.js' = '6af7525c470abcc69165a9732bf492b4524201525183eeef55998940f3f802c6'
+              'kotlin-web-helpers/dist/karma-webpack-output.js' = '7accb6fbba4ce0082f6e8ae2ca165eb9dd3c6dcfed0dfb2a8ba2e9aaa43061c7'
+              'kotlin-web-helpers/dist/static/context.html' = '0451957d938729d37d045f2eb855ea0b2afa50815ff2ed9488dd18e7135fc69d'
+              'kotlin-web-helpers/dist/static/debug.html' = '695977572217887870de5bf75b6c4ba3be2b6780e20a0f2dd83af1c8660ce03e'
+            }
+            foreach ($runtimeInput in $runtimeInputs.GetEnumerator()) {
+              $relativePath = $runtimeInput.Key.Replace('/', [IO.Path]::DirectorySeparatorChar)
+              $runtimePath = Join-Path $modules $relativePath
+              if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+                throw "Pinned browser runtime input is missing: $($runtimeInput.Key)"
+              }
+              $runtimeSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $runtimePath).Hash.ToLowerInvariant()
+              if ($runtimeSha -ne $runtimeInput.Value) {
+                throw "Pinned browser runtime input SHA-256 mismatch: $($runtimeInput.Key) ($runtimeSha)"
+              }
+              $metadataKey = $runtimeInput.Key.Replace('/', '.')
+              Add-Content -Path $metadataPath -Value "browser_input_sha256.$metadataKey=$runtimeSha"
+            }
+            $reporterPath = Join-Path $modules 'kotlin-web-helpers/dist/karma-kotlin-reporter.js'
+            if (-not (Test-Path -LiteralPath $reporterPath -PathType Leaf)) {
+              throw 'Pinned Kotlin Karma reporter source is missing.'
+            }
+            $reporterSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $reporterPath).Hash.ToLowerInvariant()
+            if ($reporterSha -ne '7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347') {
+              throw "Pinned Kotlin Karma reporter SHA-256 mismatch: $reporterSha"
+            }
             $env:DYN4K_TEST_BROWSER_BUILD = $selectedBrowserBuild
             Add-Content -Path $metadataPath -Value "upstream_sha=$upstreamSha"
             Add-Content -Path $metadataPath -Value "upstream_path=$upstreamSource"
             Add-Content -Path $metadataPath -Value "browser_build_path=$selectedBrowserBuild"
             Add-Content -Path $metadataPath -Value "consumer_yarn_lock_sha256=$lockSha"
             Add-Content -Path $metadataPath -Value "karma_config_sha256=$karmaConfigSha"
+            Add-Content -Path $metadataPath -Value "browser_input_count=$($runtimeInputs.Count)"
+            Add-Content -Path $metadataPath -Value "karma_reporter_sha256=$reporterSha"
 
             & python -m unittest discover -s tools/qualification -p 'test_*.py' -v 1> $stdoutPath 2> $stderrPath
             $testExitCode = $LASTEXITCODE
