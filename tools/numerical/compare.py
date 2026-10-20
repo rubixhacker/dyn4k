@@ -220,6 +220,19 @@ def check_fixed_body_callback_velocities(event, fixture):
                 raise Rejected(f"fixed callback body velocity is not zero: {name}")
 
 
+def fixed_floor_id(fixture):
+    if fixture.get("family") != "contacts-friction-sleep-wake":
+        return None
+    if fixture.get("profile") == "default-sleep-wake":
+        return "b0"
+    if fixture.get("profile") == "configured-sleep-wake":
+        fixed_id = fixture.get("callback_fixed_body_id")
+        if fixed_id is None:
+            raise Rejected("configured fixed floor role is missing")
+        return fixed_id
+    return None
+
+
 def endpoint_index_matches(row, fixture, state_count, endpoint_count):
     group = fixture.get("inner_per_outer")
     start_step = fixture.get("start_step", 0)
@@ -633,8 +646,9 @@ def compare_value(fixture, reference, candidate, path, result):
         if len(reference) != len(candidate):
             raise Rejected(f"length differs: {path}")
         if path == "state.state.bodies":
+            fixed_id = fixed_floor_id(fixture)
             for left, right in zip(reference, candidate):
-                if left.get("id") == "b0" and left != right:
+                if fixed_id is not None and left.get("id") == fixed_id and left != right:
                     raise Rejected("fixed floor differs")
         rule = rule_for(fixture, path, result)
         if rule and rule["metric"] == "direction":
