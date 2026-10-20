@@ -190,6 +190,14 @@ class IndependentGateSeamTests(unittest.TestCase):
             "f0349a0d29f91879fc52286899f39e042c8523f6",
             "168fbfcdabd68cfb9317310958d6be7f52b38f05")
         self.assertEqual(approved_revisions, independent_gates.APPROVED_COMPARATOR_REVISIONS)
+        required_revisions = (*reviewed_revisions, *approved_revisions,
+                              "cd21a4bd7d6731a096597f97966db9e02b9de448",
+                              "6f993d9f96ac3e5a722ed82eb85bc0b2394d98cd")
+        if any(subprocess.run(["git", "cat-file", "-e", f"{revision}:{path}"],
+                              cwd=ROOT, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode
+               for revision in required_revisions):
+            self.skipTest("historical comparator commits are absent from shallow checkout")
         for revision in (*reviewed_revisions,
                          "f0349a0d29f91879fc52286899f39e042c8523f6",
                          "168fbfcdabd68cfb9317310958d6be7f52b38f05"):
@@ -2682,7 +2690,7 @@ class FullBrowserGenericGateTests(unittest.TestCase):
                         "candidate_sha": self.CANDIDATE,
                         "runtime_identity": self.RUNTIME,
                         "consumer_contract_sha256": "browser archive marker",
-                        "toolchain": {"browser": "/trusted/chrome"}}
+                        "toolchain": {"browser": str(Path(self.temporary.name) / "chrome")}}
         self.write_receipt()
 
     def write_receipt(self):
@@ -2705,11 +2713,19 @@ class FullBrowserGenericGateTests(unittest.TestCase):
         self.assertEqual("FAILED", result["status"])
         replay.assert_not_called()
 
+    def test_current_source_rejects_posix_only_browser_path(self):
+        self.receipt["toolchain"]["browser"] = "/trusted/chrome"
+        self.write_receipt()
+        with mock.patch("full_browser_consumer.verify") as replay:
+            self.assertEqual("FAILED", self.evaluate()["status"])
+        replay.assert_not_called()
+
     def test_pinned_historical_chromium_receipt_keeps_legacy_route(self):
         import full_browser_consumer
 
         candidate = full_browser_consumer.LEGACY_CANDIDATE_SHA
         self.receipt["candidate_sha"] = candidate
+        self.receipt["toolchain"]["browser"] = "/trusted/chrome"
         self.write_receipt()
         digest = independent_gates.archive_digest(self.archive)
         public = {"status": "PASSED", "lane": self.LANE,

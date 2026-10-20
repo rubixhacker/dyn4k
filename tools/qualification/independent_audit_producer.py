@@ -58,8 +58,9 @@ def _sha(path):
 
 def _snapshot(path):
     root = Path(path)
-    if (not root.is_absolute() or not root.is_dir() or root.is_symlink()
-            or root.resolve() != root):
+    if (not root.is_absolute() or ".." in root.parts or not root.is_dir()
+            or any(parent.is_symlink() or parent.is_junction()
+                   for parent in (root, *root.parents))):
         raise ValueError(f"archive path is absent, relative, or symbolic: {root}")
     files = {}
     for item in root.rglob("*"):

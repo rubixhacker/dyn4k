@@ -14,7 +14,7 @@ import tempfile
 import types
 import zipfile
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import xml.etree.ElementTree as ET
 
 import qualify
@@ -320,6 +320,8 @@ def _policy_binding(repository, candidate_sha):
                                 if path not in (fixture, checker)},
                                "numerical approved policy/checker")
     local_checker = Path(__file__).resolve().parents[2] / checker
+    if hashlib.sha256(local_checker.read_bytes()).hexdigest() != APPROVED_POLICY[checker]:
+        raise ValueError(f"numerical approved policy/checker blob differs: {checker}")
     committed_checker = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:{checker}"], stderr=subprocess.PIPE)
@@ -333,8 +335,7 @@ def _policy_binding(repository, candidate_sha):
     expected_checker = (APPROVED_POLICY[checker] if 0 in lineage
                         else HISTORICAL_COMPARATOR_SHA256)
     checker_digest = hashlib.sha256(committed_checker).hexdigest()
-    if (hashlib.sha256(local_checker.read_bytes()).hexdigest() != APPROVED_POLICY[checker]
-            or checker_digest != expected_checker):
+    if checker_digest != expected_checker:
         raise ValueError(f"numerical approved policy/checker blob differs: {checker}")
     local = Path(__file__).resolve().parents[2] / fixture
     committed = subprocess.check_output(
@@ -2456,7 +2457,10 @@ def evaluate_gate(gate, archive, candidate_sha, lane_id, lane, repository,
                 raise ValueError("public Chromium verifier differs from exact candidate")
             toolchain = receipt.get("toolchain")
             browser_path = toolchain.get("browser") if isinstance(toolchain, dict) else None
-            if type(browser_path) is not str or not Path(browser_path).is_absolute():
+            if (type(browser_path) is not str or not
+                    (Path(browser_path).is_absolute()
+                     or (candidate_sha == full_browser_consumer.LEGACY_CANDIDATE_SHA
+                         and PurePosixPath(browser_path).is_absolute()))):
                 raise ValueError("selected live Chromium executable path is invalid")
             public = full_browser_consumer.verify(
                 repository, candidate_sha, lane_id, root, expected_archive_digest,

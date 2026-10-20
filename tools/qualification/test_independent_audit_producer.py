@@ -158,6 +158,30 @@ class IndependentAuditProducerTests(unittest.TestCase):
                               self.stage_path, signature, public, fingerprint,
                               self.observations_path)
 
+    def test_snapshot_rejects_archive_alias_and_symbolic_member(self):
+        archive = self.root / "archive"
+        archive.mkdir()
+        (archive / "receipt.json").write_text("{}")
+        self.assertIn("receipt.json", producer._snapshot(archive)["files"])
+        with self.assertRaisesRegex(ValueError, "archive path"):
+            producer._snapshot(archive / ".." / "archive")
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(archive, target_is_directory=True)
+        except OSError:
+            pass
+        else:
+            with self.assertRaisesRegex(ValueError, "archive path"):
+                producer._snapshot(alias)
+        member = archive / "linked-receipt"
+        try:
+            member.symlink_to(archive / "receipt.json")
+        except OSError:
+            pass
+        else:
+            with self.assertRaisesRegex(ValueError, "symbolic or escaping member"):
+                producer._snapshot(archive)
+
     def test_native_cross_preparation_binds_only_schema3_build_fields(self):
         lane = "linuxArm64:Linux ARM64:current:debug-g"
         archive = self.root / "cross-attempt"

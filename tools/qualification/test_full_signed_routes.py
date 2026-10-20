@@ -44,6 +44,7 @@ class SignedRouteTests(unittest.TestCase):
         independent_linux_observer.capture(args)
         return output
 
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace process observation")
     def test_native_cross_executes_exact_candidate_observer_source(self):
         path = Path(independent_linux_observer.__file__).resolve()
         current = path.read_bytes()
@@ -77,6 +78,7 @@ class SignedRouteTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "observer source differs"):
                 full_signed_routes._observer_source(ROOT, CANDIDATE)
 
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace process observation")
     def test_native_cross_ignores_altered_timestamp_observer_cache(self):
         current = Path(independent_linux_observer.__file__).read_bytes()
         altered = current.replace(b"if witness != reconstructed:",
@@ -109,6 +111,7 @@ class SignedRouteTests(unittest.TestCase):
                 cached.verify(retained)
             self.assertEqual(verifier(retained)["status"], "OBSERVED_UNSIGNED")
 
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace process observation")
     def test_native_cross_rejects_observed_alternate_java_with_forged_argv(self):
         java = Path("/home/linuxbrew/.linuxbrew/opt/openjdk@21/bin/java")
         with tempfile.TemporaryDirectory() as temporary:
@@ -148,6 +151,7 @@ class SignedRouteTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "pinned Java process image"):
                 full_signed_routes._cross_java_path(run, observed, image, str(java))
 
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace process observation")
     def test_native_cross_real_launcher_observation_and_relocated_replay(self):
         lane = "linuxArm64:Linux ARM64:current:debug-g"
         with tempfile.TemporaryDirectory() as temporary:

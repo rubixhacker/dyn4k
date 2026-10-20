@@ -47,10 +47,12 @@ MAX_IMAGE_BYTES = MAX_ARCHIVE_BYTES
 MAX_LOG_BYTES = 16 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
-libc = ctypes.CDLL(None, use_errno=True)
-libc.ptrace.restype = ctypes.c_long
-libc.ptrace.argtypes = (ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p,
-                        ctypes.c_void_p)
+libc = None
+if sys.platform == "linux":
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.ptrace.restype = ctypes.c_long
+    libc.ptrace.argtypes = (ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p,
+                            ctypes.c_void_p)
 
 
 class ObservationError(ValueError):

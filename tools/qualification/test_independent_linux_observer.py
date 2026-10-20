@@ -2,6 +2,7 @@ import argparse
 import ctypes
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,19 @@ from unittest import mock
 import independent_linux_observer as observer
 
 
+class ObserverPlatformImportTest(unittest.TestCase):
+    def test_non_linux_import_keeps_capture_unsupported(self):
+        spec = importlib.util.spec_from_file_location(
+            "independent_linux_observer_non_linux", observer.__file__)
+        loaded = importlib.util.module_from_spec(spec)
+        with mock.patch.object(sys, "platform", "win32"):
+            spec.loader.exec_module(loaded)
+            self.assertIsNone(loaded.libc)
+            with self.assertRaisesRegex(loaded.ObservationError, "requires Linux"):
+                loaded.capture(None)
+
+
+@unittest.skipUnless(sys.platform == "linux", "requires Linux ptrace and /proc process observation")
 class IndependentLinuxObserverTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=Path.home())

@@ -319,7 +319,7 @@ class IndependentAdapterTests(unittest.TestCase):
         hashes = {"dyn4k-core": "b" * 64, "dyn4k": "c" * 64}
         java_hash, gradle_hash, runtime_java_hash = "d" * 64, "e" * 64, "9" * 64
         publication_digest = "8" * 64
-        publication_path = "/independent/jvm-mode-publication"
+        publication_path = str(Path(tempfile.gettempdir()) / "jvm-mode-publication")
         archive_digest = "f" * 64
         runtime = "audited Java 21 runtime"
         fake = self.fake_verifier()
@@ -522,7 +522,9 @@ class IndependentAdapterTests(unittest.TestCase):
                     "expected_java_executable_sha256": "d" * 64,
                     "expected_gradle_executable_sha256": "e" * 64,
                     "expected_runtime_java_executable_sha256": "f" * 64}
-        expected.update(expected_mode_publication_path="/independent/mode-publication",
+        publication_path = str(Path(tempfile.gettempdir()) / "mode-publication")
+        archive_path = str(Path(tempfile.gettempdir()) / "independent-archive")
+        expected.update(expected_mode_publication_path=publication_path,
                         expected_mode_publication_digest="1" * 64)
         cases = [{"id": "selected"}]
         selected = {"case_ids": ["selected"]}
@@ -534,16 +536,16 @@ class IndependentAdapterTests(unittest.TestCase):
                     "full_jvm_consumer.verify", return_value=gate) as replay:
                 independent_adapter._verify_full_jvm_staged_consumer(
                     ROOT, "0" * 40, lane, selected,
-                    {"staged-consumer": "/independent/archive"}, expected, gate)
+                    {"staged-consumer": archive_path}, expected, gate)
                 contract.assert_called_once_with(ROOT, lane)
                 replay.assert_called_once_with(
-                    "/independent/archive", ROOT, "0" * 40, hashes, "audited runtime",
+                    archive_path, ROOT, "0" * 40, hashes, "audited runtime",
                     "c" * 64, "d" * 64, "e" * 64, "f" * 64, lane,
-                    "/independent/mode-publication", "1" * 64)
+                    publication_path, "1" * 64)
         with self.assertRaisesRegex(ValueError, "does not cover lane"):
             independent_adapter._verify_full_jvm_staged_consumer(
                 ROOT, "0" * 40, "jvm:Java:minimum:equivalent", selected,
-                {"staged-consumer": "/independent/archive"}, expected, gate)
+                {"staged-consumer": archive_path}, expected, gate)
 
     def test_retained_full_jvm_archive_requires_signed_executable_hashes(self):
         import full_jvm_consumer
@@ -1259,7 +1261,7 @@ class IndependentAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane])
+                root, [lane], repository=ROOT)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
             digest = signed["lanes"][lane]["expected_archive_digests"]["staged-consumer"]
             public_result = {"status": "PASSED", "candidate_sha": BROWSER_CANDIDATE,
@@ -1283,7 +1285,7 @@ class IndependentAdapterTests(unittest.TestCase):
                                     return_value=public_result) as legacy,
                   mock.patch.object(full_signed_routes, "verify_browser") as signed_replay):
                 verified = independent_adapter.verify_lanes(
-                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    ROOT, BROWSER_CANDIDATE, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
             self.assertEqual("PASSED", verified[lane]["verification"]["gates"][
