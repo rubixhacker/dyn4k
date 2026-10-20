@@ -31,16 +31,50 @@ def real_karma_root():
     return root
 
 
+def assert_selected_runtime_inputs(root, expected=None):
+    expected = browser.WASM_INPUT_SHA256 if expected is None else expected
+    for relative, digest in expected.items():
+        source = root / relative
+        if not source.is_file():
+            raise AssertionError(f"selected runtime input missing: {relative}")
+        if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+            raise AssertionError(f"selected runtime input hash differs: {relative}")
+
+
 def pinned_reporter_fixture(fixture=None, lock=None):
     consumer = Path(__file__).resolve().parents[2] / browser.CONSUMER
     fixture = fixture or consumer / "fixtures/karma-kotlin-reporter-3.3.0.js"
     lock = lock or consumer / "consumer-yarn.lock"
-    entry = ('kotlin-web-helpers@3.3.0:\n'
-             '  version "3.3.0"\n'
-             '  resolved "https://registry.yarnpkg.com/kotlin-web-helpers/-/'
-             'kotlin-web-helpers-3.3.0.tgz#4c0bf6bcfa64752f6f1531e4c84583943bc7e9d6"')
-    if entry not in lock.read_text():
+    stanzas = []
+    current = None
+    for line in lock.read_text(encoding="utf-8").splitlines():
+        if line and not line[0].isspace() and not line.startswith("#") and line.endswith(":"):
+            if current is not None:
+                stanzas.append(current)
+            current = [line]
+        elif current is not None:
+            current.append(line)
+    if current is not None:
+        stanzas.append(current)
+    selected = []
+    for lines in stanzas:
+        keys = [key.strip().strip('"') for key in lines[0][:-1].split(", ")]
+        if "kotlin-web-helpers@3.3.0" in keys:
+            selected.append(lines[1:])
+    if len(selected) != 1:
         raise AssertionError("browser reporter fixture lock pin differs")
+    expected = {
+        "version": '"3.3.0"',
+        "resolved": ('"https://registry.yarnpkg.com/kotlin-web-helpers/-/'
+                     'kotlin-web-helpers-3.3.0.tgz#4c0bf6bcfa64752f6f1531e4c84583943bc7e9d6"'),
+        "integrity": ('sha512-sXnwHZ2YGMtIia+NQlf/c0UDtwVNHhXsIH+uHkTv87AvvZQJjJ+'
+                      'XbdkvUUuomPWgBC5TgcQLDEGLcjL48QkFkQ=='),
+    }
+    for name, value in expected.items():
+        actual = [line.removeprefix(f"  {name} ") for line in selected[0]
+                  if line.startswith(f"  {name} ")]
+        if actual != [value]:
+            raise AssertionError("browser reporter fixture lock pin differs")
     if not fixture.is_file() or hashlib.sha256(fixture.read_bytes()).hexdigest() != (
             "7c3232f60952aff254847ae62a866385735e3094197454d755100e962c2f2347"):
         raise AssertionError("browser reporter fixture source hash differs")
@@ -1051,7 +1085,7 @@ class SelectedBundleTest(unittest.TestCase):
             env={key: value for key, value in os.environ.items() if key != "OLLAMA_API_KEY"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_reporter_real_karma_pattern_rejects_binary_selected_script(self):
+    def test_reporter_real_karma_pattern_with_simulated_inputs_rejects_binary_selected_script(self):
         cache_path = os.environ.get("DYN4K_TEST_BROWSER_BUILD")
         if not cache_path:
             self.skipTest("real Karma package fixture was not selected")
@@ -1154,10 +1188,12 @@ class SelectedBundleTest(unittest.TestCase):
         completed = subprocess.run(["node", "-e", script, str(reporter), str(cache),
                                     str(producer_fixture),
                                     json.dumps(browser.RUNTIME_INPUT_SHA256)],
-                                   check=False, capture_output=True, text=True)
+                                   check=False, capture_output=True, text=True,
+                                   env={key: value for key, value in os.environ.items()
+                                        if key != "OLLAMA_API_KEY"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_reporter_wasm_pattern_rejects_unserved_loader(self):
+    def test_reporter_wasm_pattern_with_simulated_inputs_rejects_unserved_loader(self):
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
         root = real_karma_root()
         producer_fixture = pinned_reporter_fixture()
@@ -1232,7 +1268,9 @@ class SelectedBundleTest(unittest.TestCase):
         completed = subprocess.run(["node", "-e", script, str(reporter), str(root),
                                     str(producer_fixture),
                                     json.dumps(browser.WASM_INPUT_SHA256)],
-                                   check=False, capture_output=True, text=True)
+                                   check=False, capture_output=True, text=True,
+                                   env={key: value for key, value in os.environ.items()
+                                        if key != "OLLAMA_API_KEY"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_real_karma_control_reports_missing_or_wrong_pinned_module(self):
@@ -1249,6 +1287,21 @@ class SelectedBundleTest(unittest.TestCase):
                                             "real Karma control module hash differs"):
                     real_karma_root()
 
+    def test_selected_build_runtime_inputs_match_pins(self):
+        assert_selected_runtime_inputs(real_karma_root())
+
+    def test_selected_build_runtime_inputs_reject_missing_or_changed_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expected = {"runner.js": hashlib.sha256(b"pinned runner").hexdigest()}
+            with self.assertRaisesRegex(AssertionError, "selected runtime input missing"):
+                assert_selected_runtime_inputs(root, expected)
+            (root / "runner.js").write_bytes(b"pinned runner")
+            assert_selected_runtime_inputs(root, expected)
+            (root / "runner.js").write_bytes(b"changed runner")
+            with self.assertRaisesRegex(AssertionError, "selected runtime input hash differs"):
+                assert_selected_runtime_inputs(root, expected)
+
     def test_pinned_reporter_fixture_rejects_missing_changed_source_and_lock(self):
         source = pinned_reporter_fixture().read_bytes()
         with tempfile.TemporaryDirectory() as directory:
@@ -1263,9 +1316,46 @@ class SelectedBundleTest(unittest.TestCase):
                 pinned_reporter_fixture(fixture, lock)
             fixture.write_bytes(source)
             self.assertEqual(pinned_reporter_fixture(fixture, lock), fixture)
+            original_lock = lock.read_text()
+            altered = original_lock.replace(
+                "integrity sha512-sXnwHZ2YGMtIia+NQlf/c0UDtwVNHhXsIH+uHkTv87AvvZQJjJ+XbdkvUUuomPWgBC5TgcQLDEGLcjL48QkFkQ==",
+                "integrity sha512-changed", 1)
+            self.assertNotEqual(altered, original_lock)
+            lock.write_text(altered)
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
+            altered = original_lock.replace(
+                "kotlin-web-helpers-3.3.0.tgz#4c0bf6bcfa64752f6f1531e4c84583943bc7e9d6",
+                "kotlin-web-helpers-3.3.0.tgz#changed", 1)
+            self.assertNotEqual(altered, original_lock)
+            lock.write_text(altered)
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
+            stanza = next(part for part in original_lock.split("\n\n")
+                          if part.startswith("kotlin-web-helpers@3.3.0:\n"))
+            lock.write_text(original_lock + "\n" + stanza + "\n")
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
+            lock.write_text(original_lock.rstrip() + "\n" + stanza + "\n")
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
+            quoted = stanza.replace("kotlin-web-helpers@3.3.0:",
+                                    '"kotlin-web-helpers@3.3.0":', 1)
+            lock.write_text(original_lock + "\n" + quoted + "\n")
+            with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
+                pinned_reporter_fixture(fixture, lock)
             lock.write_text("kotlin-web-helpers@3.2.0:\n")
             with self.assertRaisesRegex(AssertionError, "fixture lock pin differs"):
                 pinned_reporter_fixture(fixture, lock)
+
+    def test_pinned_reporter_fixture_preserves_package_license_and_notice(self):
+        fixture = pinned_reporter_fixture()
+        for name, digest in (
+                ("LICENSE", "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"),
+                ("NOTICE", "78e12b5a0bb67794aafae404cbc8654cea086e4414d18d4b68e5027a959b5f6d")):
+            with self.subTest(name=name):
+                self.assertEqual(hashlib.sha256((fixture.parent / name).read_bytes()).hexdigest(),
+                                 digest)
 
     def test_resealed_selected_copy_must_match_linked_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
