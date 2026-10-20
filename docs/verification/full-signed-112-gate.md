@@ -28,7 +28,7 @@ also equal the candidate manifest's lane runtime string.
 
 | Route | Additional signed fields |
 | --- | --- |
-| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; schema-5 JS and Wasm routes also need `expected_browser_responses` and `expected_execution_witness`; schema-3 and schema-4 Wasm routes also need `expected_build_launcher_image` |
+| Browser beyond the original four Chromium routes | `expected_browser_toolchain`, `expected_browser_bundles`; schema-4 and schema-5 JS and Wasm routes also need `expected_browser_responses` and `expected_execution_witness`; pinned schema-3 receipts also need `expected_build_launcher_image` |
 | Nonbrowser Wasm | `expected_wasm_runtime`, `expected_wasm_runtime_binary` |
 | Native host and simulator | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_host_executables`, `expected_execution_witness`, `expected_build_launcher_image` |
 | Linux ARM64 Native cross runtime, schema 3 | `expected_native_selection`, `expected_native_host`, `expected_native_toolchain`, `expected_native_build_archive_sha256`, `expected_native_build_host`, `expected_native_build_executables`, `expected_execution_witness`, `expected_build_launcher_image`, `expected_native_build_observer` |
@@ -56,8 +56,11 @@ start and finish time. The build record hashes the live Java image, not the
 Gradle launcher script. The separate launcher record binds script path, SHA-256,
 archived command argv, observed interpreter image, PID, parent PID, and interval.
 `expected_build_launcher_image` independently signs the interpreter path and
-SHA-256. The auditor must obtain these observations independently
-from actual runtime execution. A signed declaration copied from the producer
+SHA-256 for Native routes and pinned schema-3 browser receipts. Schema-4 and
+schema-5 browser receipts use their external browser execution witness.
+The audit rejects an unused launcher claim in those routes. The auditor must
+obtain these observations independently from actual runtime execution.
+A signed declaration copied from the producer
 is not an independent process observation. Native host and KLIB Native routes
 need this witness because their current receipts do not bind the retained
 executable to an observed child process. Android Native needs it for the

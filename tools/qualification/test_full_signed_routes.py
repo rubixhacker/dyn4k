@@ -1489,6 +1489,13 @@ class SignedRouteTests(unittest.TestCase):
                           patch("full_browser_consumer.verify", return_value=public) as public_verify):
                         self.assertEqual(full_signed_routes.verify_browser(
                             ROOT, candidate, lane, archive, expected, HASHES, runtime, digest), public)
+                        expected["expected_build_launcher_image"] = {
+                            "path": "/usr/bin/false", "sha256": "b" * 64}
+                        with self.assertRaisesRegex(ValueError, "unused.*launcher"):
+                            full_signed_routes.verify_browser(
+                                ROOT, candidate, lane, archive, expected, HASHES,
+                                runtime, digest)
+                        del expected["expected_build_launcher_image"]
                         gate = independent_gates.evaluate_gate(
                             "staged-consumer", archive, candidate, lane, MANIFEST["lanes"][lane],
                             ROOT, HASHES, runtime, digest, manifest=MANIFEST,
@@ -1831,6 +1838,13 @@ class SignedRouteTests(unittest.TestCase):
                     self.assertEqual(full_signed_routes.verify_browser(
                         ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime,
                         "c" * 64), public)
+                    expected["expected_build_launcher_image"] = {
+                        "path": "/usr/bin/false", "sha256": "b" * 64}
+                    with self.assertRaisesRegex(ValueError, "unused.*launcher"):
+                        full_signed_routes.verify_browser(
+                            ROOT, CANDIDATE, lane, archive, expected, HASHES,
+                            runtime, "c" * 64)
+                    del expected["expected_build_launcher_image"]
                     for field, changed in (("candidate_sha", "0" * 40),
                                            ("lane", "wrong-lane"),
                                            ("archive_sha256", "0" * 64),
@@ -1927,6 +1941,12 @@ class SignedRouteTests(unittest.TestCase):
                     ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime, "c" * 64),
                     public)
                 source_check.assert_called_once_with(ROOT, CANDIDATE, "browser")
+                launcher_image = expected.pop("expected_build_launcher_image")
+                with self.assertRaisesRegex(ValueError, "signed launcher process image"):
+                    full_signed_routes.verify_browser(
+                        ROOT, CANDIDATE, lane, archive, expected, HASHES, runtime,
+                        "c" * 64)
+                expected["expected_build_launcher_image"] = launcher_image
                 signed_witness = expected.pop("expected_execution_witness")
                 with self.assertRaisesRegex(ValueError, "witness"):
                     full_signed_routes.verify_browser(

@@ -716,6 +716,9 @@ def verify_browser(repository, candidate, lane, root, expected, hashes, runtime,
     if root.is_symlink() or independent_gates.archive_digest(root) != digest:
         raise ValueError("signed browser archive digest differs")
     receipt = independent_gates._json(root / "receipt.json")
+    if (receipt.get("schema") != 3
+            and "expected_build_launcher_image" in expected):
+        raise ValueError("unused signed browser launcher image")
     _signed(expected, hashes, runtime, digest, receipt)
     _source(repository, candidate, "browser")
     if receipt.get("schema") == 4:

@@ -239,6 +239,41 @@ class IndependentAuditProducerTests(unittest.TestCase):
         self.write_inputs()
         with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
             self.prepare(self.root / "unrelated-prepared")
+
+    def test_schema4_chromium_uses_browser_witness_without_launcher_claim(self):
+        for target in ("js", "wasmJs"):
+            with self.subTest(target=target):
+                lane = f"{target}:Chromium:current:development"
+                archive = self.root / f"chromium-schema4-{target}"
+                archive.mkdir()
+                (archive / "receipt.json").write_text(json.dumps({
+                    "schema": 4, "status": "PASSED", "candidate_sha": self.candidate,
+                    "lane": lane}))
+                observation = self.observations["lanes"][lane]
+                observation["archives"]["staged-consumer"] = str(archive)
+                fields = observation["signed_fields"]
+                fields.update({"expected_browser_toolchain": {},
+                               "expected_browser_bundles": {}})
+                self.write_inputs()
+                with self.assertRaisesRegex(ValueError, "signed route fields are incomplete"):
+                    self.prepare(self.root / f"missing-schema4-witness-{target}")
+                fields["expected_browser_responses"] = {}
+                fields["expected_execution_witness"] = {
+                    "path": str(self.root / f"absent-browser-witness-{target}"),
+                    "sha256": "a" * 64}
+                self.write_inputs()
+                prepared = self.prepare(self.root / f"schema4-browser-only-{target}")
+                audit = json.loads((prepared / "audit.json").read_bytes())
+                self.assertNotEqual("PASSED", audit["preflight_results"][lane]["gates"][
+                    "staged-consumer"])
+                self.assertNotIn("expected_build_launcher_image", audit["lanes"][lane])
+                fields["expected_build_launcher_image"] = {
+                    "path": "/usr/bin/false", "sha256": "b" * 64}
+                self.write_inputs()
+                with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
+                    self.prepare(self.root / f"unused-schema4-launcher-{target}")
+                del fields["expected_build_launcher_image"]
+
     def test_schema5_js_and_wasm_preparer_require_external_signed_evidence(self):
         for target, family in (("js", "Firefox"), ("wasmJs", "Safari")):
             lane = f"{target}:{family}:current:development"
@@ -265,6 +300,12 @@ class IndependentAuditProducerTests(unittest.TestCase):
                 "staged-consumer"])
             self.assertEqual(fields["expected_execution_witness"],
                              audit["lanes"][lane]["expected_execution_witness"])
+            fields["expected_build_launcher_image"] = {
+                "path": "/usr/bin/false", "sha256": "b" * 64}
+            self.write_inputs()
+            with self.assertRaisesRegex(ValueError, "unrecognized signed route field"):
+                self.prepare(self.root / f"unused-schema5-launcher-{target}")
+            del fields["expected_build_launcher_image"]
 
     def test_rejects_wrong_lane_identity_and_unsigned_replacement(self):
         lane = next(iter(self.suite["lanes"]))
