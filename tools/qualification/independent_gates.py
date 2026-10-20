@@ -75,9 +75,11 @@ JOINT_PHYSICAL_CASES = ("weld-spring-equal", "pulley-taut")
 JOINT_PHYSICAL_STEPS = 36000
 PROSPECTIVE_HISTORICAL_POLICY_REVISION = "7213238591db1611da86cdec075978190ca6d52f"
 PROSPECTIVE_HISTORICAL_POLICY_SHA256 = "5c8e2ca48a2128b99b2f52188f0f556c3dad3030bde00975bc80d2a25b0c74bb"
-PROSPECTIVE_POLICY_REVISION = "e038c334caa07a1547b86839f5d467c5f73ec708"
+PROSPECTIVE_PREVIOUS_POLICY_REVISION = "e038c334caa07a1547b86839f5d467c5f73ec708"
+PROSPECTIVE_PREVIOUS_POLICY_SHA256 = "1b80b7c198d510ab16784348661053a4bde6507548f5ec12d4a460287ec7b484"
+PROSPECTIVE_POLICY_REVISION = "83914cfc86f3add09ea65c89dc5b3e6035f709a0"
 PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.json"
-PROSPECTIVE_POLICY_SHA256 = "1b80b7c198d510ab16784348661053a4bde6507548f5ec12d4a460287ec7b484"
+PROSPECTIVE_POLICY_SHA256 = "fab269814476a5a0c1d65f268f6c4177bb942ea8e7cdf1ea5ab8d4d9dcd2e160"
 PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
@@ -544,13 +546,32 @@ def verified_numerical_source_sha256(repository, candidate_sha):
     return hashlib.sha256(archive).hexdigest()
 
 
-@lru_cache(maxsize=4)
-def approved_prospective_catalog(repository):
+def _prospective_policy_version(repository, candidate_sha):
+    for revision, digest in (
+            (PROSPECTIVE_POLICY_REVISION, PROSPECTIVE_POLICY_SHA256),
+            (PROSPECTIVE_PREVIOUS_POLICY_REVISION, PROSPECTIVE_PREVIOUS_POLICY_SHA256),
+            (PROSPECTIVE_HISTORICAL_POLICY_REVISION, PROSPECTIVE_HISTORICAL_POLICY_SHA256)):
+        checked = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+             "--is-ancestor", revision, candidate_sha],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        if checked.returncode == 0:
+            return revision, digest
+        if checked.returncode != 1:
+            raise ValueError("prospective policy revision ancestry is unavailable")
+    return PROSPECTIVE_HISTORICAL_POLICY_REVISION, PROSPECTIVE_HISTORICAL_POLICY_SHA256
+
+
+@lru_cache(maxsize=8)
+def approved_prospective_catalog(repository, candidate_sha=None):
+    revision, expected_sha = ((PROSPECTIVE_POLICY_REVISION, PROSPECTIVE_POLICY_SHA256)
+                              if candidate_sha is None else
+                              _prospective_policy_version(repository, candidate_sha))
     raw = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
-         f"{PROSPECTIVE_POLICY_REVISION}:{PROSPECTIVE_POLICY_PATH}"],
+         f"{revision}:{PROSPECTIVE_POLICY_PATH}"],
         stderr=subprocess.PIPE)
-    if hashlib.sha256(raw).hexdigest() != PROSPECTIVE_POLICY_SHA256:
+    if hashlib.sha256(raw).hexdigest() != expected_sha:
         raise ValueError("adopted prospective policy catalog differs")
     catalog = json.loads(raw, object_pairs_hook=_strict_object)
     cases = catalog.get("cases")
@@ -598,8 +619,7 @@ def _prospective_checker_binding(repository, candidate_sha):
     committed = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
          f"{candidate_sha}:{catalog}"], stderr=subprocess.PIPE)
-    catalog_sha256 = (PROSPECTIVE_POLICY_SHA256 if descends_from(PROSPECTIVE_POLICY_REVISION)
-                      else PROSPECTIVE_HISTORICAL_POLICY_SHA256)
+    _, catalog_sha256 = _prospective_policy_version(repository, candidate_sha)
     if (hashlib.sha256(committed).hexdigest() != catalog_sha256
             or hashlib.sha256((Path(__file__).resolve().parents[2] / catalog).read_bytes()).hexdigest()
             != PROSPECTIVE_POLICY_SHA256):
@@ -1240,13 +1260,14 @@ def verify_pending_prospective_bridge(root, receipt, repository, candidate_sha,
 
 def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                                      expected_artifact_hashes, source_sha):
-    catalog = approved_prospective_catalog(str(repository))
+    catalog = approved_prospective_catalog(str(repository), candidate_sha)
     expected = set(catalog["cases"])
     rows = receipt.get("prospective_cases")
     if (not isinstance(rows, list) or len(rows) != PROSPECTIVE_CASE_COUNT
             or {row.get("id") for row in rows if isinstance(row, dict)} != expected):
         raise ValueError("318 prospective rule/arithmetic raw case identities are missing or duplicated")
-    if receipt.get("prospective_catalog_sha256") != PROSPECTIVE_POLICY_SHA256:
+    _, catalog_sha256 = _prospective_policy_version(repository, candidate_sha)
+    if receipt.get("prospective_catalog_sha256") != catalog_sha256:
         raise ValueError("adopted prospective catalog identity differs")
     approved_export = _prospective_checker_binding(repository, candidate_sha)
     for relative in ("tools/numerical/compare.py", "tools/numerical/fixtures.json"):
