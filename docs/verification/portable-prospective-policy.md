@@ -37,10 +37,12 @@ and fixture source
 `70d7c4105224f570d5e4cef1cf9f488c4007aeb68a536dda76f9836bdfdd2b4f`.
 Its 318 prospective case-slice hashes agree with both later captures. Four
 frozen Weld and Pulley slices differ from 2c9 and remain under their separate
-policy. The new 4d capture changes only the source fixture identity against
-2c9. No prospective per-case SHA-256, path assignment, rule, or tolerance
-changed. This rebind does not establish candidate parity or target
-qualification.
+policy. The catalog changes only its fixture-source binding from 2c9 to 4d.
+The recorder commit, source archive SHA-256, and observed process SHA-256
+also differ between captures. The external 4d attestation binds both digests
+and the verified manifest containing the recorder commit. No prospective
+per-case SHA-256, path assignment, rule, or tolerance changed. This rebind
+does not establish candidate parity or target qualification.
 The catalog was made by reading every record of each of the 318 case slices,
 not by sampling the first state. It contains 566 distinct leaf paths, 92
 distinct case path sets, and 67,667 case-path memberships. Array positions are
