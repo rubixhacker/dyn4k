@@ -1295,7 +1295,11 @@ class IndependentAdapterTests(unittest.TestCase):
                                     for value in expected["expected_browser_bundles"].values()))
                 self.assertEqual(BROWSER_BUNDLES["development"],
                                  expected["expected_browser_bundles"])
-                return public_result
+                actual_digest = independent_gates.archive_digest(Path(actual_archive))
+                if expected["expected_archive_digests"]["staged-consumer"] != actual_digest:
+                    raise ValueError(
+                        "signed browser archive digest differs from transported archive")
+                return {**public_result, "archive_sha256": actual_digest}
 
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
                   mock.patch("full_suite_manifest.validate_manifest"),
@@ -1321,15 +1325,18 @@ class IndependentAdapterTests(unittest.TestCase):
                   mock.patch("full_suite_manifest.validate_manifest"),
                   mock.patch.object(independent_gates, "evaluate", return_value=generic),
                   mock.patch.object(full_browser_adapter,
-                                    "verify_full_browser_staged_consumer") as rejected,
+                                    "verify_full_browser_staged_consumer",
+                                    side_effect=verify_pinned) as rejected,
                   mock.patch.object(full_signed_routes, "verify_browser") as signed_replay):
                 with self.assertRaisesRegex(
-                        ValueError, "public browser verifier differs from independent gate"):
+                        ValueError,
+                        "signed browser archive digest differs from transported archive"):
                     independent_adapter.verify_lanes(
                         ROOT, BROWSER_CANDIDATE, suite, archive_map,
                         bad_audit, bad_signature, bad_public, bad_fingerprint,
                         candidate_manifest=candidate, artifact_audit=staged)
             rejected.assert_called_once()
+            self.assertEqual(1, rejected.call_count)
             signed_replay.assert_not_called()
 
 
