@@ -13,6 +13,25 @@ def workflow_jobs(workflow):
 
 
 class QualificationWorkflowContractTest(unittest.TestCase):
+    def test_mac_mini_uses_verified_preinstalled_python(self):
+        mac_mini = workflow_jobs(WORKFLOW.read_text())["hosted-mac"]
+        self.assertIn("    runs-on: mac-mini\n", mac_mini)
+        self.assertIn("          - target: macosArm64\n", mac_mini)
+        self.assertIn("          - target: iosSimulatorArm64\n", mac_mini)
+        self.assertIn("          - target: tvosSimulatorArm64\n", mac_mini)
+        self.assertIn("          - target: watchosSimulatorArm64\n", mac_mini)
+        self.assertIn("          - target: iosX64\n", mac_mini)
+        self.assertIn("          - target: jsSafari\n", mac_mini)
+        self.assertNotIn("actions/setup-python@v5", mac_mini)
+        self.assertIn("Use pre-installed Python 3.12.15", mac_mini)
+        self.assertIn(
+            "python_dir=/Users/stew/.cache/dyn4k-codex/tools/python-3.12.15/python/bin",
+            mac_mini,
+        )
+        self.assertIn("[[ ! -x \"$python_dir/python\" ]]", mac_mini)
+        self.assertIn("sys.version_info[:3] == (3, 12, 15)", mac_mini)
+        self.assertIn('echo "$python_dir" >> "$GITHUB_PATH"', mac_mini)
+
     def test_native_monitor_probe_runs_on_windows_publication_runner(self):
         publications = workflow_jobs(WORKFLOW.read_text())["hosted-publications"]
         self.assertIn("    runs-on: windows-2025\n", publications)
