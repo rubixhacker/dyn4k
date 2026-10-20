@@ -30,6 +30,139 @@ LANE = "tvosSimulatorArm64:tvOS simulator ARM64:current:debug-g"
 
 class CrossRunCollectionTests(unittest.TestCase):
     @contextlib.contextmanager
+    def unreadable_descendant(self, hidden):
+        real_scandir = os.scandir
+        hidden_id = hidden.stat().st_ino
+
+        def deny(anchor):
+            if ((isinstance(anchor, int) and os.fstat(anchor).st_ino == hidden_id)
+                    or (not isinstance(anchor, int) and Path(anchor) == hidden)):
+                raise PermissionError("unreadable artifact descendant")
+            return real_scandir(anchor)
+
+        with mock.patch.object(collection.os, "scandir", side_effect=deny):
+            yield
+
+    @contextlib.contextmanager
+    def ordinary_artifact_swap(self, source, alternate, member):
+        original_names = collection._directory_names
+        original_digest = collection.digest
+        source_id = source.stat().st_ino
+        swaps = []
+
+        @contextlib.contextmanager
+        def swapped_names(anchor):
+            with original_names(anchor) as names:
+                listed = list(names)
+                if os.fstat(anchor).st_ino != source_id:
+                    yield listed
+                    return
+                with move_alternate():
+                    yield listed
+
+        @contextlib.contextmanager
+        def move_alternate():
+            parked = source.with_name(source.name + "-parked")
+            source.rename(parked)
+            alternate.rename(source)
+            swaps.append(True)
+            try:
+                yield
+            finally:
+                source.rename(alternate)
+                parked.rename(source)
+
+        def swapped_digest(path, *args, **kwargs):
+            if Path(path) == member:
+                with move_alternate():
+                    return original_digest(path, *args, **kwargs)
+            return original_digest(path, *args, **kwargs)
+
+        with mock.patch.object(collection, "_directory_names",
+                               side_effect=swapped_names), \
+             mock.patch.object(collection, "digest", side_effect=swapped_digest):
+            yield swaps
+
+    def test_files_in_rejects_unreadable_descendant_and_keeps_hash_shape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "artifact"
+            hidden = artifact / "hidden"
+            hidden.mkdir(parents=True)
+            (artifact / "visible.bin").write_bytes(b"visible")
+            (hidden / "unlisted.bin").write_bytes(b"hidden")
+            with self.unreadable_descendant(hidden):
+                with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
+                    collection.files_in(artifact)
+            self.assertEqual({"hidden/unlisted.bin": hashlib.sha256(b"hidden").hexdigest(),
+                              "visible.bin": hashlib.sha256(b"visible").hexdigest()},
+                             collection.files_in(artifact))
+
+    def test_public_raw_artifact_rejects_unreadable_collect_and_verify(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "artifact"
+            hidden = artifact / "hidden"
+            hidden.mkdir(parents=True)
+            (artifact / "visible.bin").write_bytes(b"visible")
+            (hidden / "unlisted.bin").write_bytes(b"hidden")
+            name = f"windows-failure-raw-{HEAD}-unreadable"
+            with self.unreadable_descendant(hidden):
+                rejected = collection.collect(ROOT, HEAD, [(name, artifact)],
+                                              root / "rejected")
+            self.assertEqual("FAILED", rejected["artifacts"][0]["status"])
+            self.assertIn("unreadable artifact", rejected["artifacts"][0]["reason"])
+            recorded = collection.collect(ROOT, HEAD, [(name, artifact)], root / "recorded")
+            self.assertEqual("RETAINED_UNVERIFIED", recorded["artifacts"][0]["status"])
+            self.assertTrue(collection.verify_collection(
+                ROOT, HEAD, [(name, artifact)], root / "recorded"))
+            with self.unreadable_descendant(hidden):
+                with self.assertRaisesRegex(PermissionError, "unreadable artifact"):
+                    collection.verify_collection(
+                        ROOT, HEAD, [(name, artifact)], root / "recorded")
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_files_in_binds_ordinary_directory_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact, alternate = root / "artifact", root / "alternate"
+            (artifact / "nested").mkdir(parents=True)
+            (alternate / "nested").mkdir(parents=True)
+            member = artifact / "nested/receipt.bin"
+            member.write_bytes(b"approved")
+            (alternate / "nested/receipt.bin").write_bytes(b"outside")
+            with self.ordinary_artifact_swap(artifact, alternate, member) as swaps:
+                files = collection.files_in(artifact)
+            self.assertEqual(1, len(swaps))
+            self.assertEqual({"nested/receipt.bin":
+                              hashlib.sha256(b"approved").hexdigest()}, files)
+            self.assertEqual(b"approved", member.read_bytes())
+
+    @unittest.skipUnless(os.name == "posix", "requires ordinary directory rename")
+    def test_public_raw_artifact_collect_and_verify_bind_directory_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact, alternate = root / "artifact", root / "alternate"
+            (artifact / "nested").mkdir(parents=True)
+            (alternate / "nested").mkdir(parents=True)
+            member = artifact / "nested/receipt.bin"
+            member.write_bytes(b"approved")
+            (alternate / "nested/receipt.bin").write_bytes(b"outside")
+            name = f"windows-failure-raw-{HEAD}-swapped"
+            with self.ordinary_artifact_swap(artifact, alternate, member) as swaps:
+                report = collection.collect(ROOT, HEAD, [(name, artifact)],
+                                            root / "collection")
+            self.assertEqual(1, len(swaps))
+            self.assertEqual("RETAINED_UNVERIFIED", report["artifacts"][0]["status"])
+            self.assertEqual(hashlib.sha256(b"approved").hexdigest(),
+                             report["artifacts"][0]["files"]["nested/receipt.bin"])
+            with self.ordinary_artifact_swap(artifact, alternate, member) as swaps:
+                self.assertTrue(collection.verify_collection(
+                    ROOT, HEAD, [(name, artifact)], root / "collection"))
+            self.assertEqual(1, len(swaps))
+            self.assertEqual(b"approved", member.read_bytes())
+
+    @contextlib.contextmanager
     def regular_directory_swap(self, source, alternate):
         original_names = collection._directory_names
         source_id = source.stat().st_ino

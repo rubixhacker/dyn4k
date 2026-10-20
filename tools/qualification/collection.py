@@ -84,21 +84,10 @@ def artifact_route(name, candidate_sha):
 
 
 def files_in(root):
+    root = Path(root)
     if root.is_symlink() or not root.is_dir():
         raise ValueError("artifact root is missing or symbolic")
-    files = {}
-    for base, directories, filenames in os.walk(root, followlinks=False):
-        for name in directories + filenames:
-            path = Path(base) / name
-            relative = path.relative_to(root).as_posix()
-            independent_gates._file_path_name(relative)
-            if path.is_symlink():
-                raise ValueError(f"symbolic artifact path: {relative}")
-            if path.is_file():
-                files[relative] = digest(path)
-            elif not path.is_dir():
-                raise ValueError(f"nonregular artifact path: {relative}")
-    return dict(sorted(files.items()))
+    return {name: entry["sha256"] for name, entry in _file_inventory(root).items()}
 
 
 def checked_tar(path, destination):
