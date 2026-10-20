@@ -1122,6 +1122,8 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     work.mkdir(parents=True, exist_ok=True)
     runtime = family.lower()
     firefox_current = family == "Firefox" and role == "current"
+    firefox_minimum = family == "Firefox" and role == "minimum"
+    worker_observer = family == "Safari" or firefox_minimum
     launcher = repository / (LAUNCHER if family != "Safari" else
                              f"{CONSUMER}/safari_launcher.py")
     chromium_witness = repository / CHROMIUM_WITNESS
@@ -1134,7 +1136,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     env[{"Chromium": "CHROME_BIN", "Firefox": "FIREFOX_BIN",
          "Safari": "SAFARI_BIN"}[family]] = str(
              chromium_witness if family == "Chromium" else
-             firefox_witness if firefox_current else launcher)
+             firefox_witness if family == "Firefox" else launcher)
     base = gradle_args(repository, staging, output, work, inputs, lane, hashes, gradle)
     config_roots = []
     processes = {}
@@ -1157,7 +1159,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
             reporter = config_root / "qualification-browser-reporter.js"
             port_file = config_root / "qualification-port.js"
             reporter.write_bytes((repository / REPORTER).read_bytes())
-            if family == "Safari":
+            if worker_observer:
                 (config_root / "qualification-z-safari-observer.js").write_bytes(
                     (repository / SAFARI_OBSERVER).read_bytes())
             with socket.socket() as reservation:
@@ -1190,7 +1192,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                               DYN4K_BROWSER_HTTP_SOURCES=str(destination / "http-sources"),
                               DYN4K_BROWSER_WORK_ROOT=str(work),
                               DYN4K_BROWSER_TMPDIR=os.environ["TMPDIR"])
-            if family == "Safari":
+            if worker_observer:
                 module_env.update(
                     DYN4K_BROWSER_KARMA_PORT=str(port),
                     DYN4K_SAFARI_REDIRECT_ARCHIVE=str(destination / "safari-redirect.html"),
@@ -1198,6 +1200,8 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                     DYN4K_SAFARI_OBSERVER_SOURCE=str(repository / SAFARI_OBSERVER),
                     DYN4K_SAFARI_WORKER_SOURCE=str(repository / SAFARI_WORKER),
                     DYN4K_SAFARI_BOOTSTRAP_SOURCE=str(repository / SAFARI_BOOTSTRAP))
+            if firefox_minimum:
+                module_env["DYN4K_BROWSER_FIREFOX_MINIMUM_SW"] = "1"
             command = base + [f":{short}:{target}BrowserTest"]
             execution = process(command, inputs, module_env,
                                 destination / "gradle.stdout", destination / "gradle.stderr")
@@ -1235,7 +1239,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                 raise ValueError("external browser Karma configuration lacks isolated port")
             copy(generated, destination / "karma.conf.js")
             copy(reporter, destination / "browser-reporter.js")
-            if family == "Safari":
+            if worker_observer:
                 copy(repository / SAFARI_OBSERVER, destination / "safari-karma-observer.js")
                 copy(repository / SAFARI_WORKER, destination / "safari-response-worker.js")
                 copy(repository / SAFARI_BOOTSTRAP, destination / "safari-response-bootstrap.js")
@@ -1264,6 +1268,18 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                     observations, verify_http_responses(destination, processes[short], target, short),
                     short, target, candidate, str(firefox_witness),
                     sha(original(repository, candidate, FIREFOX_WITNESS)))
+            if firefox_minimum:
+                runpy.run_path(str(repository / SAFARI_WITNESS))["seal"](
+                    destination, processes[short], observations, candidate, short, target,
+                    str(repository / SAFARI_WITNESS),
+                    sha(original(repository, candidate, SAFARI_WITNESS)),
+                    sha(original(repository, candidate, SAFARI_WORKER)),
+                    sha(original(repository, candidate, SAFARI_BOOTSTRAP)),
+                    sha(original(repository, candidate, SAFARI_OBSERVER)))
+                verify_firefox_minimum_witness(
+                    destination, processes[short], observations,
+                    verify_http_responses(destination, processes[short], target, short),
+                    short, target, candidate, repository)
             if family == "Safari":
                 runpy.run_path(str(repository / SAFARI_WITNESS))["seal"](
                     destination, processes[short], observations, candidate, short, target,
@@ -1301,7 +1317,7 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
     run_finished = time.time_ns()
-    receipt = {"schema": 5 if family == "Safari" or firefox_current else
+    receipt = {"schema": 5 if worker_observer or firefox_current else
                4 if family == "Chromium" else 3,
                "status": "PASSED", "lane": lane,
                "candidate_sha": candidate,
@@ -1315,10 +1331,10 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
                "browser_support_sha256": {path: sha(original(repository, candidate, path))
                                           for path in (launcher.relative_to(repository).as_posix(), REPORTER,
                                                        *((CHROMIUM_WITNESS,) if family == "Chromium" else ()),
-                                                       *((FIREFOX_WITNESS,) if firefox_current else ()),
+                                                       *((FIREFOX_WITNESS,) if family == "Firefox" else ()),
                                                        *((SAFARI_WITNESS, SAFARI_OBSERVER,
                                                           SAFARI_WORKER, SAFARI_BOOTSTRAP)
-                                                         if family == "Safari" else ()))},
+                                                         if worker_observer else ()))},
                "toolchain": identity, "staged_hashes": hashes,
                "runtime_identity": f"{platform.system()} {platform.release()} {platform.machine()}",
                "paths": {"checkout": str(repository), "staging": str(staging),
@@ -1335,13 +1351,80 @@ def run(repository, candidate, lane, staging, output, gradle, browser, hashes,
     return receipt
 
 
+def verify_firefox_minimum_witness(folder, record, launches, served,
+                                   short, target, candidate, repository):
+    source = repository / FIREFOX_WITNESS
+    raw = folder / "firefox-bidi.jsonl"
+    if not raw.is_file() or raw.is_symlink():
+        raise ValueError("Firefox minimum browser session is absent")
+    try:
+        lines = raw.read_text().splitlines()
+        session = json.loads(lines[0]) if len(lines) == 1 else None
+    except (ValueError, IndexError):
+        session = None
+    keys = {"kind", "protocol", "module", "target", "candidate_sha", "browser_pid",
+            "bidi_browser_pid", "browser_version", "session_id", "context_id",
+            "navigation_id", "target_url", "bootstrap_url", "browser_token",
+            "started_ns", "navigation_requested_ns", "navigation_result_ns",
+            "bidi_port", "bidi_socket_inode", "source_path", "source_sha256",
+            "redirect_sha256"}
+    if not isinstance(session, dict) or set(session) != keys or len(launches) != 1:
+        raise ValueError("Firefox minimum browser session differs")
+    worker_source = repository / SAFARI_WITNESS
+    worker_sha = sha(original(repository, candidate, SAFARI_WORKER))
+    bootstrap_sha = sha(original(repository, candidate, SAFARI_BOOTSTRAP))
+    observer_sha = sha(original(repository, candidate, SAFARI_OBSERVER))
+    source_sha = sha(original(repository, candidate, FIREFOX_WITNESS))
+    if (session["kind"] != "session" or session["protocol"] != 2
+            or session["module"] != short or session["target"] != target
+            or session["candidate_sha"] != candidate
+            or session["browser_pid"] != launches[0]["pid"]
+            or session["bidi_browser_pid"] != launches[0]["pid"]
+            or not re.fullmatch(r"120(?:\.[0-9]+)+", session["browser_version"])
+            or any(not isinstance(session[key], str) or not session[key] for key in
+                   ("session_id", "context_id", "navigation_id", "target_url",
+                    "bootstrap_url", "bidi_socket_inode"))
+            or not re.fullmatch(r"[1-9][0-9]*", session["bidi_socket_inode"])
+            or type(session["bidi_port"]) is not int
+            or not 0 < session["bidi_port"] < 65536
+            or session["browser_token"] != record["browser_token"]
+            or session["source_path"] != str(source)
+            or session["source_sha256"] != source_sha
+            or file_hash(source) != source_sha
+            or session["redirect_sha256"] != file_hash(folder / "safari-redirect.html")
+            or any(type(session[key]) is not int for key in
+                   ("started_ns", "navigation_requested_ns", "navigation_result_ns"))
+            or not record["started_ns"] <= session["started_ns"]
+            <= session["navigation_requested_ns"] <= session["navigation_result_ns"]
+            <= record["finished_ns"]):
+        raise ValueError("Firefox minimum selected process, source, or time differs")
+    worker = verify_safari_response_witness(
+        folder, record, launches, served, short, target, candidate,
+        str(worker_source), sha(original(repository, candidate, SAFARI_WITNESS)),
+        worker_sha, bootstrap_sha, observer_sha)
+    sealed = json.loads((folder / "safari-browser-responses.jsonl").read_text().splitlines()[0])
+    if (sealed["browser_pid"] != session["browser_pid"]
+            or sealed["target_url"] != session["target_url"]
+            or sealed["browser_token"] != session["browser_token"]
+            or sealed["redirect_sha256"] != session["redirect_sha256"]
+            or session["navigation_result_ns"] > sealed["started_ns"]
+            or session["bootstrap_url"] not in
+            (folder / "safari-redirect.html").read_text()):
+        raise ValueError("Firefox minimum worker and BiDi navigation differ")
+    return worker
+
+
 def verify_schema5_process_witness(family, repository, candidate, folder, record,
-                                   launches, served, short, target):
+                                   launches, served, short, target, role="current"):
     if family == "Firefox":
-        verify_firefox_process_witness(
-            folder, record, launches, served, short, target, candidate,
-            str(repository / FIREFOX_WITNESS),
-            sha(original(repository, candidate, FIREFOX_WITNESS)))
+        if role == "minimum":
+            verify_firefox_minimum_witness(folder, record, launches, served,
+                                           short, target, candidate, repository)
+        else:
+            verify_firefox_process_witness(
+                folder, record, launches, served, short, target, candidate,
+                str(repository / FIREFOX_WITNESS),
+                sha(original(repository, candidate, FIREFOX_WITNESS)))
     elif family == "Safari":
         verify_safari_response_witness(
             folder, record, launches, served, short, target, candidate,
@@ -1373,20 +1456,25 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
         repository, candidate, "tools/qualification/full_browser_consumer.py")
     has_bidi_producer = b"DYN4K_BROWSER_BIDI_ARCHIVE" in original(
         repository, candidate, "tools/qualification/full_browser_consumer.py")
+    has_minimum_worker = b"DYN4K_BROWSER_FIREFOX_MINIMUM_SW" in original(
+        repository, candidate, "tools/qualification/full_browser_consumer.py")
     has_safari_producer = b'SAFARI_WORKER = ' in original(
         repository, candidate, "tools/qualification/full_browser_consumer.py")
     chromium = lane.split(":")[1] == "Chromium"
     firefox = lane.split(":")[1] == "Firefox"
     firefox_current = firefox and lane.split(":")[2] == "current"
+    firefox_minimum = firefox and lane.split(":")[2] == "minimum"
     safari = lane.split(":")[1] == "Safari"
     if (type(schema) is not int
             or not (schema == 5 and has_http_producer
-                    and (has_bidi_producer and firefox_current
+                    and (has_bidi_producer and (firefox_current or
+                         firefox_minimum and has_minimum_worker)
                          or has_safari_producer and safari)
                     or schema == 4 and has_http_producer and has_cdp_producer and chromium
                     or schema == 3 and has_http_producer
                     and not (chromium and has_cdp_producer)
                     and not (firefox_current and has_bidi_producer)
+                    and not (firefox_minimum and has_minimum_worker)
                     and not (safari and has_safari_producer)
                     or schema == 2 and not has_http_producer
                     and candidate not in LEGACY_LOCK_CANDIDATES
@@ -1420,9 +1508,9 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
     if receipt.get("browser_support_sha256") != {
             path: sha(original(repository, candidate, path)) for path in
             (support, REPORTER, *((CHROMIUM_WITNESS,) if schema == 4 else ()),
-             *((FIREFOX_WITNESS,) if schema == 5 and firefox_current else ()),
+             *((FIREFOX_WITNESS,) if schema == 5 and firefox else ()),
              *((SAFARI_WITNESS, SAFARI_OBSERVER, SAFARI_WORKER, SAFARI_BOOTSTRAP)
-               if schema == 5 and safari else ())) }:
+               if schema == 5 and (safari or firefox_minimum) else ())) }:
         raise ValueError("browser launcher or reporter source differs")
     target, family, role, mode = lane_parts(lane)
     major, pinned = runtime_pin(family, role, binary, browser_sha256)
@@ -1508,7 +1596,7 @@ def verify(repository, candidate, lane, archive, digest, binary, hashes,
                                                 sha(witness_source) if has_live_source else None)
             if schema == 5:
                 verify_schema5_process_witness(family, repository, candidate,
-                    folder, record, launches, served, short, target)
+                    folder, record, launches, served, short, target, role)
         text = (folder / "gradle.stdout").read_text()
         package = f"dyn4k-full-staged-browser-consumer-{short}-test"
         expected_bundle = bundle_paths(Path(paths["work"]), short, mode, target)[0]

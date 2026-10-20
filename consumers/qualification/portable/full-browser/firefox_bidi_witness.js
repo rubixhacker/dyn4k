@@ -336,8 +336,96 @@ async function main() {
         if (!failure) fs.rmSync(profile, {recursive: true, force: true});
     }
 }
+async function mainMinimum() {
+    const port = await reservePort();
+    const profile = fs.mkdtempSync(path.join(process.env.DYN4K_BROWSER_TMPDIR || os.tmpdir(),
+        'dyn4k-firefox-minimum-'));
+    const targetUrl = new URL(urls[0]);
+    const token = process.env.DYN4K_BROWSER_TOKEN;
+    const karmaPort = Number(process.env.DYN4K_BROWSER_KARMA_PORT);
+    const redirect = process.env.DYN4K_SAFARI_REDIRECT_ARCHIVE;
+    if (!/^[0-9a-f]{64}$/.test(token) || !Number.isInteger(karmaPort) ||
+            targetUrl.hostname !== 'localhost' || targetUrl.port !== String(karmaPort) ||
+            !redirect || !archive) throw new Error('Firefox minimum worker launch differs');
+    const bootstrap = `http://localhost:${karmaPort}/__dyn4k_bootstrap?token=${token}` +
+        `&target=${encodeURIComponent(targetUrl.href)}`;
+    fs.writeFileSync(redirect, '<!doctype html><meta charset="utf-8"><script>' +
+        `location.replace(${JSON.stringify(bootstrap)})</script>\n`,
+        {flag: 'wx', mode: 0o600});
+    const browserArgs = args.filter(arg => arg !== urls[0] &&
+        !arg.startsWith('--remote-debugging-port'));
+    browserArgs.push(`--remote-debugging-port=${port}`, '--no-remote',
+        '--profile', profile, 'about:blank');
+    const child = spawn(launcher, browserArgs, {env: process.env, stdio: 'inherit'});
+    const finished = new Promise(resolve => child.once('exit',
+        (code, signal) => resolve({code, signal})));
+    let client;
+    let failure = null;
+    let expectedShutdown = false;
+    const overall = setTimeout(() => {
+        failure = failure || 'Firefox minimum worker capture timed out';
+        child.kill('SIGTERM');
+    }, 120000);
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+        process.on(signal, () => {
+            expectedShutdown = true;
+            child.kill(signal);
+        });
+    }
+    try {
+        client = await connect(port);
+        client.onFailure = error => {
+            if (!expectedShutdown) failure = failure ||
+                `Firefox minimum BiDi connection closed: ${error}`;
+        };
+        const created = await client.send('session.new', {capabilities: {alwaysMatch: {}}});
+        if (created?.capabilities?.['moz:processID'] !== child.pid ||
+                created.capabilities.browserName !== 'firefox' ||
+                !/^120\./.test(created.capabilities.browserVersion)) {
+            throw new Error('Firefox minimum BiDi browser process differs');
+        }
+        const socketInode = listeningSocketInode(child.pid, port);
+        const context = await client.send('browsingContext.create', {type: 'tab'});
+        if (!context?.context) throw new Error('Firefox minimum context is absent');
+        const started = now();
+        const requested = now();
+        const navigation = await client.send('browsingContext.navigate',
+            {context: context.context, url: bootstrap, wait: 'none'});
+        const navigated = now();
+        if (navigation?.url !== bootstrap || !navigation.navigation) {
+            throw new Error('Firefox minimum bootstrap navigation differs');
+        }
+        const session = {kind: 'session', protocol: 2, module: moduleName, target,
+            candidate_sha: candidate, browser_pid: child.pid,
+            bidi_browser_pid: created.capabilities['moz:processID'],
+            browser_version: created.capabilities.browserVersion,
+            session_id: created.sessionId, context_id: context.context,
+            navigation_id: navigation.navigation, target_url: targetUrl.href,
+            bootstrap_url: bootstrap, browser_token: token,
+            started_ns: started, navigation_requested_ns: requested,
+            navigation_result_ns: navigated, bidi_port: port,
+            bidi_socket_inode: socketInode,
+            source_path: fs.realpathSync(__filename),
+            source_sha256: hash(fs.readFileSync(__filename)),
+            redirect_sha256: hash(fs.readFileSync(redirect))};
+        fs.writeFileSync(archive, JSON.stringify(session) + '\n',
+            {flag: 'wx', mode: 0o600});
+        const result = await finished;
+        if (failure || result.code !== 0 && result.signal !== 'SIGTERM') {
+            throw new Error(failure || `Firefox minimum exited ${result.code ?? result.signal}`);
+        }
+    } finally {
+        clearTimeout(overall);
+        expectedShutdown = true;
+        if (client) client.close();
+        if (child.exitCode === null) child.kill('SIGTERM');
+        if (!failure) fs.rmSync(profile, {recursive: true, force: true});
+    }
+}
 if (require.main === module) {
-    main().catch(error => {
+    const entry = process.env.DYN4K_BROWSER_FIREFOX_MINIMUM_SW === '1'
+        ? mainMinimum : main;
+    entry().catch(error => {
         console.error(`Firefox process witness: ${error.stack || error}`);
         process.exitCode = 1;
     });

@@ -17,6 +17,16 @@ import full_browser_consumer as browser
 
 
 class SchemaFiveDispatchTest(unittest.TestCase):
+    def test_minimum_firefox_uses_worker_and_process_witness(self):
+        repository = Path("/selected/source")
+        args = (repository, "a" * 40, Path("/archive/core"), {}, [], {}, "core", "js")
+        with mock.patch.object(browser, "verify_firefox_minimum_witness") as minimum, \
+                mock.patch.object(browser, "verify_firefox_process_witness") as current:
+            browser.verify_schema5_process_witness("Firefox", *args, role="minimum")
+        minimum.assert_called_once_with(
+            Path("/archive/core"), {}, [], {}, "core", "js", "a" * 40, repository)
+        current.assert_not_called()
+
     def test_replay_uses_only_the_selected_family_witness(self):
         repository = Path("/selected/source")
         args = (repository, "a" * 40, Path("/archive/core"), {}, [], {}, "core", "js")
@@ -35,6 +45,71 @@ class SchemaFiveDispatchTest(unittest.TestCase):
                                  selected_paths)
         with self.assertRaisesRegex(ValueError, "schema-5 browser family"):
             browser.verify_schema5_process_witness("Chromium", *args)
+
+
+class FirefoxMinimumWitnessTest(unittest.TestCase):
+    def test_worker_bidi_binding_rejects_wrong_process_source_url_and_time(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            repository = root / "source"
+            source = repository / browser.FIREFOX_WITNESS
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"selected Firefox observer")
+            folder = root / "archive"
+            folder.mkdir()
+            bootstrap = "http://localhost:9876/__dyn4k_bootstrap?token=abc&target=" + \
+                "http%3A%2F%2Flocalhost%3A9876%2F%3Fid%3Done"
+            target = "http://localhost:9876/?id=one"
+            redirect = ("<!doctype html><meta charset=\"utf-8\"><script>" +
+                        f"location.replace({json.dumps(bootstrap)})</script>\n")
+            (folder / "safari-redirect.html").write_text(redirect)
+            record = {"started_ns": 100, "finished_ns": 500,
+                      "browser_token": "abc", "karma_port": 9876}
+            session = {"kind": "session", "protocol": 2, "module": "core",
+                       "target": "wasmJs", "candidate_sha": "a" * 40,
+                       "browser_pid": 314, "bidi_browser_pid": 314,
+                       "browser_version": "120.0.1", "session_id": "session",
+                       "context_id": "context", "navigation_id": "navigation",
+                       "target_url": target, "bootstrap_url": bootstrap,
+                       "browser_token": "abc", "started_ns": 120,
+                       "navigation_requested_ns": 130,
+                       "navigation_result_ns": 140, "bidi_port": 40000,
+                       "bidi_socket_inode": "1234", "source_path": str(source),
+                       "source_sha256": browser.sha(source.read_bytes()),
+                       "redirect_sha256": browser.sha(redirect.encode())}
+            sealed = {"browser_pid": 314, "target_url": target,
+                      "browser_token": "abc", "redirect_sha256": session["redirect_sha256"],
+                      "started_ns": 150}
+            (folder / "safari-browser-responses.jsonl").write_text(json.dumps(sealed) + "\n")
+
+            def check(value, worker=sealed):
+                (folder / "firefox-bidi.jsonl").write_text(json.dumps(value) + "\n")
+                (folder / "safari-browser-responses.jsonl").write_text(
+                    json.dumps(worker) + "\n")
+                with mock.patch.object(browser, "original", return_value=source.read_bytes()), \
+                        mock.patch.object(browser, "verify_safari_response_witness",
+                                          return_value=[{"kind": "response"}]):
+                    return browser.verify_firefox_minimum_witness(
+                        folder, record, [{"pid": 314}], [], "core", "wasmJs",
+                        "a" * 40, repository)
+
+            self.assertEqual(len(check(session)), 1)
+            for name, field, value in (
+                    ("process", "browser_pid", 315),
+                    ("BiDi process", "bidi_browser_pid", 315),
+                    ("source", "source_sha256", "0" * 64),
+                    ("target", "target_url", "http://localhost:9876/foreign"),
+                    ("bootstrap", "bootstrap_url", "http://localhost:9876/foreign"),
+                    ("time", "navigation_result_ns", 501),
+                    ("socket", "bidi_socket_inode", "")):
+                with self.subTest(name=name):
+                    altered = dict(session, **{field: value})
+                    with self.assertRaisesRegex(ValueError, "Firefox minimum"):
+                        check(altered)
+            with self.assertRaisesRegex(ValueError, "Firefox minimum"):
+                check(session, dict(sealed, browser_pid=315))
+            with self.assertRaisesRegex(ValueError, "Firefox minimum"):
+                check(session, dict(sealed, started_ns=139))
 
 
 class SafariLauncherTest(unittest.TestCase):
