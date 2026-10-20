@@ -100,6 +100,7 @@ class FirefoxMinimumWitnessTest(unittest.TestCase):
                     ("source", "source_sha256", "0" * 64),
                     ("target", "target_url", "http://localhost:9876/foreign"),
                     ("bootstrap", "bootstrap_url", "http://localhost:9876/foreign"),
+                    ("bootstrap prefix", "bootstrap_url", "http://localhost"),
                     ("time", "navigation_result_ns", 501),
                     ("socket", "bidi_socket_inode", "")):
                 with self.subTest(name=name):

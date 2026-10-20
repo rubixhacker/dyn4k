@@ -1403,13 +1403,20 @@ def verify_firefox_minimum_witness(folder, record, launches, served,
         str(worker_source), sha(original(repository, candidate, SAFARI_WITNESS)),
         worker_sha, bootstrap_sha, observer_sha)
     sealed = json.loads((folder / "safari-browser-responses.jsonl").read_text().splitlines()[0])
+    redirect = (folder / "safari-redirect.html").read_text()
+    destination = re.fullmatch(
+        r'<!doctype html><meta charset="utf-8"><script>'
+        r'location\.replace\(("[^"\n]+")\)</script>\n', redirect)
+    try:
+        redirect_url = json.loads(destination[1]) if destination else None
+    except ValueError:
+        redirect_url = None
     if (sealed["browser_pid"] != session["browser_pid"]
             or sealed["target_url"] != session["target_url"]
             or sealed["browser_token"] != session["browser_token"]
             or sealed["redirect_sha256"] != session["redirect_sha256"]
             or session["navigation_result_ns"] > sealed["started_ns"]
-            or session["bootstrap_url"] not in
-            (folder / "safari-redirect.html").read_text()):
+            or session["bootstrap_url"] != redirect_url):
         raise ValueError("Firefox minimum worker and BiDi navigation differ")
     return worker
 
