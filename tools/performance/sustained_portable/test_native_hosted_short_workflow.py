@@ -26,9 +26,43 @@ AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
-    "qualification.yml": "9c27a2c26dd86cc86ea72000514bfab83652cefb9fa63b4230dd4501b2395424",
+    "qualification.yml": "8bc7bce8bb15136c3de0dbbf9a3f18b37fedcbd69e48bb650ac5cb9cd70d62f5",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
+SUSTAINED_WORKFLOW_REQUIRED_FRAGMENTS = (
+    "  validate-target:\n    runs-on: ubuntu-latest\n    env:\n      TARGET: ${{ inputs.target }}\n"
+    "    steps:\n      - name: Require the Windows target\n"
+    '        run: test "$TARGET" = mingwX64',
+    "  capture:\n    needs: validate-target\n    runs-on: windows-2025\n"
+    "    timeout-minutes: 150\n",
+    "      - uses: actions/checkout@v4\n"
+    "      - uses: actions/setup-java@v4\n        with:\n"
+    "          distribution: temurin\n          java-version: '21'\n"
+    "      - uses: actions/setup-python@v5\n        with:\n"
+    "          python-version: '3.12'\n"
+    "      - uses: gradle/actions/setup-gradle@v4\n",
+    "      - name: Stage and capture on selected host\n"
+    "        shell: bash\n"
+    '        run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"',
+    "      - name: Upload raw Native host evidence\n"
+    "        if: always()\n"
+    "        uses: actions/upload-artifact@v4\n"
+    "        with:\n"
+    "          name: performance-native-host-short-${{ github.sha }}-${{ inputs.target }}-${{ inputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}\n"
+    "          path: |\n"
+    "            ${{ runner.temp }}/performance-native-host-short/\n"
+    "            ${{ github.workspace }}/build/staging-repository/\n"
+    "          include-hidden-files: true\n"
+    "          if-no-files-found: warn",
+)
+
+
+def verify_sustained_workflow_contract(source):
+    for fragment in SUSTAINED_WORKFLOW_REQUIRED_FRAGMENTS:
+        if fragment not in source:
+            raise AssertionError("required sustained workflow step is missing or altered")
+
+
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(
     "DQotLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0NCkdyYWRsZSA5LjUu"
     "MA0KLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tDQoNCkJ1aWxkIHRp"
@@ -216,6 +250,23 @@ class WorkflowExpressionLimit(unittest.TestCase):
         for name, source in sources.items():
             with self.subTest(workflow=name):
                 self.assertNotRegex(source, r"(?m)^\s*runs-on:\s*.*\bmacos-[\w-]+")
+
+    def test_sustained_workflow_rejects_missing_or_altered_key_steps(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        verify_sustained_workflow_contract(source)
+        adverse_sources = (
+            source.replace("    runs-on: windows-2025", "    runs-on: ubuntu-latest", 1),
+            source.replace("          java-version: '21'", "          java-version: '17'", 1),
+            source.replace(
+                '        run: python -B "$GITHUB_WORKSPACE/tools/performance/sustained_portable/native_hosted_short_runner.py"',
+                "        run: echo skipped",
+                1),
+            source.replace("        if: always()", "        if: success()", 1),
+        )
+        for adverse in adverse_sources:
+            with self.subTest(source_changed=adverse != source):
+                with self.assertRaisesRegex(AssertionError, "required sustained workflow step"):
+                    verify_sustained_workflow_contract(adverse)
 
 
 def workflow_nodes():
