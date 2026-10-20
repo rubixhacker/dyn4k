@@ -2,8 +2,10 @@ import unittest
 import xml.etree.ElementTree as ET
 import importlib.util
 import json
+import runpy
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -57,6 +59,221 @@ class SafariLauncherTest(unittest.TestCase):
             row = json.loads(record.read_text())
             self.assertEqual(row["pid"], 19)
             self.assertEqual(row["process_sha256"], browser.sha(b"selected Safari"))
+
+
+class SafariResponseWitnessTest(unittest.TestCase):
+    def test_child_process_does_not_inherit_ollama_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            output = folder / "stdout"
+            result = browser.process(
+                [sys.executable, "-c", "import os; print('OLLAMA_API_KEY' in os.environ)"],
+                folder, dict(os.environ, OLLAMA_API_KEY="test-value"),
+                output, folder / "stderr")
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(output.read_text().strip(), "False")
+
+    def test_replay_rejects_missing_or_changed_browser_bodies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            process = {"started_ns": 100, "finished_ns": 900, "karma_port": 12345,
+                       "browser_token": "e" * 64}
+            launches = [{"pid": 42}]
+            root = Path(__file__).resolve().parents[2]
+            paths = [browser.SAFARI_WITNESS, browser.SAFARI_WORKER,
+                     browser.SAFARI_BOOTSTRAP, browser.SAFARI_OBSERVER]
+            source, worker, bootstrap, observer = [root / path for path in paths]
+            hashes = [browser.file_hash(path) for path in
+                      (source, worker, bootstrap, observer)]
+            for original, archived in ((worker, "safari-response-worker.js"),
+                                       (bootstrap, "safari-response-bootstrap.js"),
+                                       (observer, "safari-karma-observer.js")):
+                shutil.copyfile(original, folder / archived)
+            (folder / "selected-bundle.json").write_text(json.dumps({"node_pid": 99}))
+            (folder / "safari-worker-source.json").write_text(json.dumps({
+                "observer_sha256": hashes[3], "worker_sha256": hashes[1],
+                "bootstrap_sha256": hashes[2], "node_pid": 99,
+                "token": process["browser_token"], "port": 12345}))
+            (folder / "safari-worker-errors.jsonl").write_text("")
+            bootstrap_url = ("http://localhost:12345/__dyn4k_bootstrap?token=" +
+                             process["browser_token"] +
+                             "&target=http%3A%2F%2Flocalhost%3A12345%2F%3Fid%3D1")
+            target_url = "http://localhost:12345/?id=1"
+            (folder / "safari-redirect.html").write_text(
+                f"<script>location.replace({json.dumps(bootstrap_url)})</script>")
+            names = ["runtime.js", "commons.js", "deadbeef0123456789ab.wasm"]
+            server = []
+            events = [{"kind": "control", "token": process["browser_token"],
+                       "target": target_url, "client_id": "bootstrap",
+                       "bootstrap_url": bootstrap_url, "observed_ns": 150},
+                      {"kind": "navigation", "token": process["browser_token"],
+                       "request_id": "nav", "url": target_url,
+                       "client_id": "bootstrap", "client_url": bootstrap_url,
+                       "fetch_client_id": "", "client_id_source": "single-controlled-client",
+                       "eligible_count": 1,
+                       "resulting_client_id": "page", "status": 200,
+                       "request_ns": 160, "response_ns": 170,
+                       "finished_ns": 180, "observed_ns": 190,
+                       "body_path": None, "body_size": 0,
+                       "body_sha256": browser.sha(b"")}]
+            body_root = folder / "safari-browser-bodies"
+            body_root.mkdir()
+            for index, name in enumerate(names):
+                body = f"browser bytes {name}".encode()
+                relative = f"/absolute/build/{name}"
+                server.append({"url": relative, "size": len(body),
+                               "sha256": browser.sha(body),
+                               "body_path": f"http-responses/{index:04d}.body"})
+                (folder / "http-responses").mkdir(exist_ok=True)
+                (folder / server[-1]["body_path"]).write_bytes(body)
+                path = f"safari-browser-bodies/{index:04d}.body"
+                (folder / path).write_bytes(body)
+                events.append({"kind": "response", "token": process["browser_token"],
+                               "request_id": f"r-{index}",
+                               "url": f"http://localhost:12345{relative}",
+                               "client_id": "page", "client_url": target_url,
+                               "fetch_client_id": "page", "client_id_source": "fetch-event",
+                               "eligible_count": 0,
+                               "resulting_client_id": "", "status": 200,
+                               "request_ns": 200 + index * 100,
+                               "response_ns": 210 + index * 100,
+                               "finished_ns": 220 + index * 100,
+                               "observed_ns": 230 + index * 100,
+                               "body_path": path, "body_size": len(body),
+                               "body_sha256": browser.sha(body)})
+            raw = folder / "safari-worker-events.jsonl"
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            witness = folder / "safari-browser-responses.jsonl"
+            replay = lambda: browser.verify_safari_response_witness(
+                folder, process, launches, server, "core", "wasmJs", "a" * 40,
+                str(source), *hashes)
+            with self.assertRaisesRegex(ValueError, "absent"):
+                replay()
+            records = runpy.run_path(str(source))["seal"](
+                folder, process, launches, "a" * 40, "core", "wasmJs",
+                str(source), *hashes)
+            self.assertEqual(len(replay()), 3)
+            (folder / "safari-worker-errors.jsonl").write_text('{"error":"failed"}\n')
+            with self.assertRaisesRegex(ValueError, "fetch failure"):
+                replay()
+            (folder / "safari-worker-errors.jsonl").write_text("")
+            iframe_url = "http://localhost:12345/context.html"
+            nested = [dict(row) for row in events]
+            nested.insert(3, {"kind": "navigation", "token": process["browser_token"],
+                              "request_id": "iframe-nav", "url": iframe_url,
+                              "client_id": "page", "client_url": target_url,
+                              "fetch_client_id": "page", "client_id_source": "fetch-event",
+                              "eligible_count": 0,
+                              "resulting_client_id": "iframe", "status": 200,
+                              "request_ns": 231, "response_ns": 232,
+                              "finished_ns": 233, "observed_ns": 240,
+                              "body_path": None, "body_size": 0,
+                              "body_sha256": browser.sha(b"")})
+            for event in nested[4:]:
+                event["client_id"] = "iframe"
+                event["fetch_client_id"] = "iframe"
+                event["client_url"] = iframe_url
+            raw.write_text("\n".join(json.dumps(row) for row in nested) + "\n")
+            chained = runpy.run_path(str(source))["safari_records"](
+                folder, process, launches, "a" * 40, "core", "wasmJs",
+                str(source), *hashes)
+            self.assertEqual(len(chained[0]["navigations"]), 2)
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            server.reverse()
+            self.assertEqual(len(replay()), 3)
+            server.reverse()
+            original = (body_root / "0002.body").read_bytes()
+            (body_root / "0002.body").write_bytes(b"X" * len(original))
+            with self.assertRaisesRegex(ValueError, "body"):
+                replay()
+            (body_root / "0002.body").write_bytes(original)
+            for changed in ({**records[0], "browser_pid": 43},
+                            {**records[0], "source_sha256": "c" * 64},
+                            {**records[0], "candidate_sha": "d" * 40}):
+                witness.write_text("\n".join(json.dumps(row) for row in
+                                             [changed, *records[1:]]) + "\n")
+                with self.assertRaisesRegex(ValueError, "session or source"):
+                    replay()
+            witness.write_text("\n".join(json.dumps(row) for row in records[:-1]) + "\n")
+            with self.assertRaisesRegex(ValueError, "session or source"):
+                replay()
+            witness.write_text("\n".join(json.dumps(row) for row in records) + "\n")
+            changed_events = [dict(row) for row in events]
+            changed_events[-1]["client_id"] = "unrelated-process"
+            changed_events[-1]["fetch_client_id"] = "unrelated-process"
+            raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
+            with self.assertRaisesRegex(ValueError, "client lineage"):
+                replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            changed_events = [dict(row) for row in events]
+            changed_events[1]["eligible_count"] = 2
+            raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
+            with self.assertRaisesRegex(ValueError, "identity or timing"):
+                replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            for index, value in ((1, True), (2, False)):
+                with self.subTest(index=index, eligible_count=value):
+                    changed_events = [dict(row) for row in events]
+                    changed_events[index]["eligible_count"] = value
+                    raw.write_text("\n".join(json.dumps(row) for row in
+                                             changed_events) + "\n")
+                    with self.assertRaisesRegex(ValueError, "identity or timing"):
+                        replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            changed_events = [dict(row) for row in events]
+            changed_events[1]["resulting_client_id"] = "other-page"
+            raw.write_text("\n".join(json.dumps(row) for row in changed_events) + "\n")
+            with self.assertRaisesRegex(ValueError, "client lineage"):
+                replay()
+            raw.write_text("\n".join(json.dumps(row) for row in events) + "\n")
+            worker_copy = folder / "safari-response-worker.js"
+            worker_copy.write_bytes(worker_copy.read_bytes() + b"\n")
+            with self.assertRaisesRegex(ValueError, "observer source"):
+                replay()
+            shutil.copyfile(worker, worker_copy)
+            with self.assertRaisesRegex(ValueError, "session or source"):
+                browser.verify_safari_response_witness(
+                    folder, process, launches, server[:-1], "core", "wasmJs",
+                    "a" * 40, str(source), *hashes)
+
+
+class SafariControlServerTest(unittest.TestCase):
+    def test_control_accepts_only_ipv4_and_ipv6_loopback(self):
+        root = Path(__file__).resolve().parents[2]
+        fixture = root / "tools/qualification/safari_worker_control.js"
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            port_file = folder / "port"
+            child_env = {key: value for key, value in os.environ.items()
+                         if key != "OLLAMA_API_KEY"}
+            process = subprocess.Popen(
+                ["node", str(fixture), str(root), str(folder), str(port_file)],
+                env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 5
+                while not port_file.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(port_file.exists(), "control server did not bind")
+                port = int(port_file.read_text())
+                for address in ("127.0.0.1", "::1"):
+                    with self.subTest(loopback=address), socket.create_connection(
+                            (address, port), timeout=2) as connection:
+                        connection.sendall(
+                            b"GET /test.html HTTP/1.1\r\nHost: localhost\r\n"
+                            b"Connection: close\r\n\r\n")
+                        self.assertIn(b"HTTP/1.1 200", connection.recv(256))
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                    route.connect(("192.0.2.1", 9))
+                    non_loopback = route.getsockname()[0]
+                self.assertFalse(non_loopback.startswith("127."))
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                    connection.settimeout(2)
+                    with self.assertRaises(OSError):
+                        connection.connect((non_loopback, port))
+                self.assertFalse((folder / "browser-result.txt").exists())
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
 
 
 class ToolchainPinTest(unittest.TestCase):
@@ -404,6 +621,22 @@ class SelectedBundleTest(unittest.TestCase):
                         browser.configured_bundle(self.config(settings), work, "core", mode,
                                                   self.reporter, self.port)
 
+    def test_safari_config_pins_observer_after_reporter_and_port(self):
+        work = Path("/evidence/build")
+        observer = b"config.set({beforeMiddleware: ['qualification-response', 'qualification-safari-observer']});\n"
+        raw = self.config(self.settings(work, "development", "js", "Safari"))
+        raw = raw.replace(b"\n\n\n\n\n}\n", b"\n\n// qualification-z-safari-observer.js\n" +
+                          observer + b"\n\n\n\n}\n")
+        with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256", browser.sha(self.middle)):
+            self.assertEqual(browser.configured_bundle(raw, work, "core", "development",
+                                                       self.reporter, self.port, "js", "Safari",
+                                                       observer),
+                             browser.bundle_paths(work, "core", "development")[:2])
+            with self.assertRaisesRegex(ValueError, "later override"):
+                browser.configured_bundle(raw, work, "core", "development",
+                                          self.reporter, self.port, "js", "Safari",
+                                          observer + b"extra")
+
     def test_effective_files_reject_extra_script_and_changed_preprocessor(self):
         work = Path("/evidence/build")
         tmpdir = "/evidence/tmp"
@@ -584,8 +817,12 @@ class SelectedBundleTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_reporter_real_karma_pattern_rejects_binary_selected_script(self):
-        cache = Path("/var/home/stewart/dyn4k-evidence/session-control/"
-                     "full-browser-f565-review-findings-sol-current-development-attempt3-build")
+        cache_path = os.environ.get("DYN4K_TEST_BROWSER_BUILD")
+        if not cache_path:
+            self.skipTest("real Karma package fixture was not selected")
+        cache = Path(cache_path)
+        if not (cache / "root/js/node_modules/karma/package.json").is_file():
+            self.skipTest("selected real Karma package fixture is absent")
         reporter = Path(__file__).resolve().parents[2] / browser.REPORTER
         script = "\n".join((
             "const assert = require('node:assert/strict');",
