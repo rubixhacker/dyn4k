@@ -2168,20 +2168,25 @@ def _evaluate_signed_full_consumer(gate, root, candidate_sha, lane_id, repositor
         producer = full_browser_consumer.original(
             repository, candidate_sha, "tools/qualification/full_browser_consumer.py")
         has_bidi_producer = b"DYN4K_BROWSER_BIDI_ARCHIVE" in producer
+        has_minimum_worker = b"DYN4K_BROWSER_FIREFOX_MINIMUM_SW" in producer
         has_safari_producer = b'SAFARI_WORKER = ' in producer
         _, browser_family, browser_role, _ = lane_id.split(":")
         chromium = browser_family == "Chromium"
         firefox_current = browser_family == "Firefox" and browser_role == "current"
+        firefox_minimum = browser_family == "Firefox" and browser_role == "minimum"
         safari = browser_family == "Safari"
         schema = receipt.get("schema")
         if (type(schema) is not int or not (
                 schema == 5 and has_http_producer and (
                     firefox_current and has_bidi_producer
+                    or firefox_minimum and has_bidi_producer and has_minimum_worker
+                        and has_safari_producer
                     or safari and has_safari_producer)
                 or schema == 4 and has_http_producer and has_cdp_producer and chromium
                 or schema == 3 and has_http_producer
                     and not (chromium and has_cdp_producer)
                     and not (firefox_current and has_bidi_producer)
+                    and not (firefox_minimum and has_minimum_worker)
                     and not (safari and has_safari_producer)
                 or schema == 2 and not has_http_producer)):
             raise ValueError("browser receipt schema differs from exact producer source")

@@ -1358,15 +1358,16 @@ class SignedRouteTests(unittest.TestCase):
     def test_schema5_signed_firefox_and_safari_body_execution_controls(self):
         candidate = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        for family, runtime in (("Firefox", "Linux test x86_64"),
-                                ("Safari", "Darwin test arm64")):
+        for family, role, runtime in (("Firefox", "current", "Linux test x86_64"),
+                                      ("Firefox", "minimum", "Linux test x86_64"),
+                                      ("Safari", "current", "Darwin test arm64")):
             for target in ("js", "wasmJs"):
-                with self.subTest(family=family, target=target), tempfile.TemporaryDirectory() as tmp:
+                with self.subTest(family=family, role=role, target=target), tempfile.TemporaryDirectory() as tmp:
                     base = Path(tmp)
                     archive = base / "archive"
                     archive.mkdir()
                     responses, receipt = self._http_fixture(archive, target == "wasmJs")
-                    lane = f"{target}:{family}:current:development"
+                    lane = f"{target}:{family}:{role}:development"
                     receipt.update({"schema": 5, "status": "PASSED", "candidate_sha": candidate,
                                     "lane": lane, "runtime_identity": runtime,
                                     "staged_hashes": HASHES,
@@ -1434,24 +1435,58 @@ class SignedRouteTests(unittest.TestCase):
                                          "response_ns": 16, "finished_ns": 17,
                                          "body_size": item["size"],
                                          "body_sha256": item["sha256"]})
+                            if family == "Firefox" and role == "minimum":
+                                copied = folder / "safari-browser-bodies" / f"{item['ordinal']:04d}.body"
+                                copied.parent.mkdir(exist_ok=True)
+                                copied.write_bytes(body)
+                                rows[-1]["body_path"] = copied.relative_to(folder).as_posix()
                             observed.append({"url": item["url"], "size": item["size"],
                                              "body_sha256": item["sha256"],
                                              "body_path": str(outside),
                                              "request_ns": 11, "response_ns": 16,
                                              "finished_ns": 17})
-                        name = ("firefox-bidi.jsonl" if family == "Firefox" else
+                        name = ("firefox-bidi.jsonl" if family == "Firefox" and role == "current" else
                                 "safari-browser-responses.jsonl")
                         (folder / name).write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-                        consumption[short] = {"protocol": "bidi" if family == "Firefox"
-                                              else "service-worker", "clock": "unix-epoch-ns",
+                        if family == "Firefox" and role == "minimum":
+                            navigation = {"target_url": "http://localhost:9876/?id=1",
+                                          "bootstrap_url": "http://localhost:9876/__dyn4k_bootstrap",
+                                          "navigation_requested_ns": 11,
+                                          "navigation_result_ns": 12,
+                                          "bidi_socket_inode": "123"}
+                            bidi = {"kind": "session", "browser_pid": pid,
+                                    "bidi_browser_pid": pid,
+                                    "browser_token": "synthetic-token",
+                                    "redirect_sha256": "c" * 64,
+                                    "source_path": str(ROOT / full_browser_consumer.FIREFOX_WITNESS),
+                                    "source_sha256": collector_sha, **navigation}
+                            session.update({"target_url": navigation["target_url"],
+                                            "browser_token": bidi["browser_token"],
+                                            "redirect_sha256": bidi["redirect_sha256"],
+                                            "started_ns": 13})
+                            (folder / name).write_text("\n".join(json.dumps(row)
+                                for row in rows) + "\n")
+                            (folder / "firefox-bidi.jsonl").write_text(json.dumps(bidi) + "\n")
+                        consumption[short] = {"protocol": ("bidi-service-worker"
+                                              if family == "Firefox" and role == "minimum" else
+                                              "bidi" if family == "Firefox" else "service-worker"),
+                                              "clock": "unix-epoch-ns",
                                               "browser_pid": pid, "browser_sha256": image_sha,
                                               "process_executable": str(image),
                                               "started_ns": 10, "finished_ns": 90,
                                               "responses": observed}
+                        if family == "Firefox" and role == "minimum":
+                            consumption[short]["navigation"] = navigation
                     (archive / "receipt.json").write_text(json.dumps(receipt))
                     digest = independent_gates.archive_digest(archive)
-                    sources = ((full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox"
-                               else (full_browser_consumer.SAFARI_WITNESS,
+                    sources = ((full_browser_consumer.FIREFOX_WITNESS,
+                                full_browser_consumer.SAFARI_WITNESS,
+                                full_browser_consumer.SAFARI_WORKER,
+                                full_browser_consumer.SAFARI_BOOTSTRAP,
+                                full_browser_consumer.SAFARI_OBSERVER)
+                               if family == "Firefox" and role == "minimum" else
+                               (full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox" else
+                               (full_browser_consumer.SAFARI_WITNESS,
                                      full_browser_consumer.SAFARI_WORKER,
                                      full_browser_consumer.SAFARI_BOOTSTRAP,
                                      full_browser_consumer.SAFARI_OBSERVER))
@@ -1510,8 +1545,8 @@ class SignedRouteTests(unittest.TestCase):
                             manifest=MANIFEST, expected_signed_lane=expected)
                         self.assertEqual(copied_gate["status"], "PASSED", copied_gate)
                         self.assertEqual(public_verify.call_args.args[3], relocated)
-                        if target == "js":
-                            all_hashes = {name: (HASHES if name == "js" else {
+                        if target == "js" or family == "Firefox" and role == "minimum":
+                            all_hashes = {name: (HASHES if name == target else {
                                 module: hashlib.sha256(f"synthetic:{name}:{module}".encode())
                                     .hexdigest() for module in qualify.MODULES})
                                 for name in qualify.matrix_targets()}
@@ -1608,6 +1643,77 @@ class SignedRouteTests(unittest.TestCase):
                                     full_signed_routes.schema5_browser_witness(
                                         source_repo, expected, candidate, lane, digest,
                                         runtime, HASHES, toolchain, tampered_archive, receipt)
+                        if family == "Firefox" and role == "minimum":
+                            navigation = consumption["core"]["navigation"]
+                            for key, wrong in (("target_url", "http://localhost:9876/wrong"),
+                                               ("navigation_result_ns", 91),
+                                               ("bidi_socket_inode", "456")):
+                                prior = navigation[key]
+                                navigation[key] = wrong
+                                seal()
+                                with self.assertRaisesRegex(ValueError, "navigation differs"):
+                                    full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                        archive, expected, HASHES, runtime, digest)
+                                navigation[key] = prior
+                            seal()
+                            prior = witness["source_sha256"][full_browser_consumer.SAFARI_WORKER]
+                            witness["source_sha256"][full_browser_consumer.SAFARI_WORKER] = "0" * 64
+                            seal()
+                            with self.assertRaisesRegex(ValueError, "execution witness differs"):
+                                full_signed_routes.verify_browser(ROOT, candidate, lane,
+                                    archive, expected, HASHES, runtime, digest)
+                            witness["source_sha256"][full_browser_consumer.SAFARI_WORKER] = prior
+                            seal()
+                            worker_repo = base / "tampered-worker-source"
+                            for name in sources:
+                                destination = worker_repo / name
+                                destination.parent.mkdir(parents=True, exist_ok=True)
+                                destination.write_bytes(full_browser_consumer.original(
+                                    ROOT, candidate, name))
+                            (worker_repo / full_browser_consumer.SAFARI_WORKER).write_bytes(
+                                b"tampered worker despite archived committed digest")
+                            committed_source = full_browser_consumer.original
+                            with patch.object(full_browser_consumer, "original",
+                                side_effect=lambda _repository, selected, name:
+                                    committed_source(ROOT, selected, name)):
+                                with self.assertRaisesRegex(ValueError, "live Firefox collector"):
+                                    full_signed_routes.schema5_browser_witness(
+                                        worker_repo, expected, candidate, lane, digest,
+                                        runtime, HASHES, toolchain, archive, receipt)
+                            copied_body = archive / "core/safari-browser-bodies/0000.body"
+                            original_body = copied_body.read_bytes()
+                            body_stat = copied_body.stat()
+                            copied_body.write_bytes(b"changed service-worker body")
+                            with self.assertRaisesRegex(ValueError, "body or interval differs"):
+                                full_signed_routes.schema5_browser_witness(
+                                    ROOT, expected, candidate, lane, digest,
+                                    runtime, HASHES, toolchain, archive, receipt)
+                            copied_body.write_bytes(original_body)
+                            os.utime(copied_body, ns=(body_stat.st_atime_ns, body_stat.st_mtime_ns))
+                            worker_rows = archive / "core/safari-browser-responses.jsonl"
+                            original_rows = worker_rows.read_bytes()
+                            worker_stat = worker_rows.stat()
+                            changed = [json.loads(line) for line in original_rows.splitlines()]
+                            changed[0]["target_url"] = "http://localhost:9876/wrong"
+                            worker_rows.write_text("\n".join(json.dumps(row) for row in changed) + "\n")
+                            with self.assertRaisesRegex(ValueError, "navigation differs"):
+                                full_signed_routes.schema5_browser_witness(
+                                    ROOT, expected, candidate, lane, digest,
+                                    runtime, HASHES, toolchain, archive, receipt)
+                            worker_rows.write_bytes(original_rows)
+                            os.utime(worker_rows, ns=(worker_stat.st_atime_ns, worker_stat.st_mtime_ns))
+                            bidi_rows = archive / "core/firefox-bidi.jsonl"
+                            original_bidi = bidi_rows.read_bytes()
+                            bidi_stat = bidi_rows.stat()
+                            changed_bidi = json.loads(original_bidi)
+                            changed_bidi["bidi_browser_pid"] += 1
+                            bidi_rows.write_text(json.dumps(changed_bidi) + "\n")
+                            with self.assertRaisesRegex(ValueError, "navigation differs"):
+                                full_signed_routes.schema5_browser_witness(
+                                    ROOT, expected, candidate, lane, digest,
+                                    runtime, HASHES, toolchain, archive, receipt)
+                            bidi_rows.write_bytes(original_bidi)
+                            os.utime(bidi_rows, ns=(bidi_stat.st_atime_ns, bidi_stat.st_mtime_ns))
                         for field, wrong in (("family", "Chromium"), ("lane", "wrong"),
                                              ("source_sha256", {})):
                             prior = witness[field]
@@ -1701,6 +1807,37 @@ class SignedRouteTests(unittest.TestCase):
                         repository, expected, "a" * 40,
                         "js:Firefox:current:development", "b" * 64,
                         "Linux test x86_64", HASHES, {}, archive, {})
+
+    def test_retained_firefox_minimum_original_and_relocated_public_replay(self):
+        repository = Path("/var/home/stewart/Workspace/dyn4k-port-firefox-minimum-observer-20261020")
+        base = Path("/var/home/stewart/dyn4k-evidence/session-control/firefox-minimum")
+        browser = Path("/tmp/dyn4k-browser-wasi-tools/firefox-120/firefox/firefox")
+        if not repository.is_dir() or not browser.is_file() or not (
+                base / "js-min-dev-839-relocated/receipt.json").is_file():
+            self.skipTest("retained Firefox minimum replay inputs are absent")
+        candidate = "839589d508a74258d5a14433621ff202f6a56444"
+        browser_sha = "74b442bb10d62f01e80eeae8fee96fd98ecb1d414cf283b2fcef80410d827750"
+        routes = (
+            ("js", "js-min-dev-839-attempt2", "js-min-dev-839-relocated",
+             "5485d99f04e940e4f4109127513e0c0374879ec369a69536bf982deae7b5a1e0",
+             {"dyn4k-core": "3ba3a41448928c38e3e16e8752d7b2338468bf0157a2bdfa70d71b0b9e8f757f",
+              "dyn4k": "35f7be108fa3ae439ed025cece421e1ff9e7c3020eb47770a068bd1eeb4e8a53"}),
+            ("wasmJs", "wasm-min-dev-839-attempt1", "wasm-min-dev-839-relocated",
+             "0e18d29b28f055faed55888757cb6223e0463645b79ebe0b411f0a641dec5db2",
+             {"dyn4k-core": "1adb166d23fc006159a3d16376c016a7b6560e1465c15bec252b5b7c68ed29a9",
+              "dyn4k": "3d7b8fb339a4e60955c64be394edb225ee46b6cda52edc50dd735399f05442c0"}),
+        )
+        for target, original, relocated, digest, hashes in routes:
+            lane = f"{target}:Firefox:minimum:development"
+            for name in (original, relocated):
+                with self.subTest(archive=name):
+                    archive = base / name
+                    self.assertEqual(independent_gates.archive_digest(archive), digest)
+                    self.assertEqual(full_browser_consumer.verify(
+                        repository, candidate, lane, archive, digest, browser,
+                        hashes, browser_sha),
+                        {"status": "PASSED", "lane": lane, "selected_cases": 2523,
+                         "archive_sha256": digest, "candidate_sha": candidate})
 
     def test_retained_a14_schema4_response_shape_is_historical_only(self):
         root = Path("/var/home/stewart/dyn4k-evidence/root-browser-cdp-a14")

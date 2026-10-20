@@ -2703,6 +2703,7 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                    "files": []}
         receipt.update(changes.pop("receipt", {}))
         historical_source = changes.pop("historical_source", receipt["schema"] == 3)
+        missing_minimum_worker = changes.pop("missing_minimum_worker", False)
         expected = {"expected_artifact_hashes": self.HASHES,
                     "expected_runtime_identity": self.RUNTIME,
                     "expected_archive_digests": {},
@@ -2824,7 +2825,12 @@ class FullBrowserSignedGateTests(unittest.TestCase):
             raw = original(repository, candidate, path)
             if historical_source and path == "tools/qualification/full_browser_consumer.py":
                 return (raw.replace(b"DYN4K_BROWSER_BIDI_ARCHIVE", b"historical-bidi-marker")
+                           .replace(b"DYN4K_BROWSER_FIREFOX_MINIMUM_SW",
+                                    b"historical-minimum-marker")
                            .replace(b"SAFARI_WORKER = ", b"historical-worker-marker"))
+            if missing_minimum_worker and path == "tools/qualification/full_browser_consumer.py":
+                return raw.replace(b"DYN4K_BROWSER_FIREFOX_MINIMUM_SW",
+                                   b"missing-minimum-marker")
             return raw
         with mock.patch("full_browser_consumer.original", side_effect=source):
             return independent_gates.evaluate_gate(**selected), digest
@@ -2865,9 +2871,10 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                 self.assertEqual("FAILED", result["status"], result)
 
     def test_schema5_family_source_and_signature_dispatch(self):
-        for family in ("Firefox", "Safari"):
+        for family, role in (("Firefox", "current"), ("Firefox", "minimum"),
+                             ("Safari", "current")):
             for target in ("js", "wasmJs"):
-                lane = f"{target}:{family}:current:development"
+                lane = f"{target}:{family}:{role}:development"
                 with self.subTest(lane=lane), mock.patch(
                         "full_signed_routes.verify_browser") as replay:
                     replay.side_effect = lambda *args: {
@@ -2884,10 +2891,30 @@ class FullBrowserSignedGateTests(unittest.TestCase):
                                               historical_source=False)
                     self.assertEqual("FAILED", result["status"])
                     replay.assert_not_called()
-        for lane in ("js:Firefox:minimum:development",
-                     "wasmJs:Chromium:current:production"):
+                    if family == "Firefox" and role == "minimum":
+                        result, _ = self.evaluate(lane, receipt={"schema": 5},
+                                                  missing_minimum_worker=True)
+                        self.assertEqual("FAILED", result["status"])
+                        replay.assert_not_called()
+        for lane in ("wasmJs:Chromium:current:production",):
             with self.subTest(lane=lane), mock.patch("full_signed_routes.verify_browser") as replay:
                 result, _ = self.evaluate(lane, receipt={"schema": 5})
+                self.assertEqual("FAILED", result["status"])
+                replay.assert_not_called()
+
+    def test_schema5_firefox_minimum_production_dispatch_requires_signed_route(self):
+        for target in ("js", "wasmJs"):
+            lane = f"{target}:Firefox:minimum:production"
+            with self.subTest(lane=lane), mock.patch(
+                    "full_signed_routes.verify_browser") as replay:
+                replay.side_effect = lambda *args: {
+                    "status": "PASSED", "lane": args[2], "selected_cases": 2523,
+                    "archive_sha256": args[7], "candidate_sha": args[1]}
+                result, _ = self.evaluate(lane, receipt={"schema": 5})
+                self.assertEqual("PASSED", result["status"], result)
+                replay.assert_called_once()
+                replay.reset_mock()
+                result, _ = self.evaluate(lane, receipt={"schema": 5}, signed=False)
                 self.assertEqual("FAILED", result["status"])
                 replay.assert_not_called()
 

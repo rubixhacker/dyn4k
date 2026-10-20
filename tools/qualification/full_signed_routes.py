@@ -368,17 +368,23 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
                          parse_constant=lambda value: (_ for _ in ()).throw(
                              ValueError(f"non-finite browser witness value: {value}")))
     family = lane.split(":")[1]
-    sources = ((full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox" else
+    firefox_minimum = family == "Firefox" and lane.split(":")[2] == "minimum"
+    sources = ((full_browser_consumer.FIREFOX_WITNESS,
+                full_browser_consumer.SAFARI_WITNESS, full_browser_consumer.SAFARI_WORKER,
+                full_browser_consumer.SAFARI_BOOTSTRAP, full_browser_consumer.SAFARI_OBSERVER)
+               if firefox_minimum else
+               (full_browser_consumer.FIREFOX_WITNESS,) if family == "Firefox" else
                (full_browser_consumer.SAFARI_WITNESS, full_browser_consumer.SAFARI_WORKER,
                 full_browser_consumer.SAFARI_BOOTSTRAP, full_browser_consumer.SAFARI_OBSERVER))
     source_hashes = {name: hashlib.sha256(full_browser_consumer.original(
         repository, candidate, name)).hexdigest() for name in sources}
     if family == "Firefox":
-        collector = Path(repository) / full_browser_consumer.FIREFOX_WITNESS
-        if (not collector.is_file() or collector.is_symlink()
-                or hashlib.sha256(collector.read_bytes()).hexdigest()
-                != source_hashes[full_browser_consumer.FIREFOX_WITNESS]):
-            raise ValueError("live Firefox collector differs from exact candidate source")
+        for name in sources:
+            collector = Path(repository) / name
+            if (not collector.is_file() or collector.is_symlink()
+                    or hashlib.sha256(collector.read_bytes()).hexdigest()
+                    != source_hashes[name]):
+                raise ValueError("live Firefox collector differs from exact candidate source")
     if (not isinstance(witness, dict)
             or set(witness) != {"schema", "candidate_sha", "lane", "archive_sha256",
                                 "runtime_identity", "mode", "staged_artifacts",
@@ -400,8 +406,11 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
     if (not isinstance(observed, dict) or set(observed) != {"core", "facade"}
             or not isinstance(modules, dict) or set(modules) != {"core", "facade"}):
         raise ValueError("schema-5 independent browser module observation is missing")
-    protocol = "bidi" if family == "Firefox" else "service-worker"
-    row_file = "firefox-bidi.jsonl" if family == "Firefox" else "safari-browser-responses.jsonl"
+    protocol = ("bidi-service-worker" if firefox_minimum else
+                "bidi" if family == "Firefox" else "service-worker")
+    row_file = ("safari-browser-responses.jsonl" if firefox_minimum else
+                "firefox-bidi.jsonl" if family == "Firefox" else
+                "safari-browser-responses.jsonl")
     for short in ("core", "facade"):
         folder = Path(archive) / short
         process = modules[short]
@@ -411,6 +420,9 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
         server = independent_gates._json(folder / "http-responses.json")["responses"]
         archived = [independent_gates._strict_json_line(line) for line in
                     (folder / row_file).read_bytes().splitlines()]
+        navigation = ([independent_gates._strict_json_line(line) for line in
+                       (folder / "firefox-bidi.jsonl").read_bytes().splitlines()]
+                      if firefox_minimum else None)
         selected = Path(toolchain["browser"])
         launch = launches[0] if len(launches) == 1 else {}
         image_path = browser.get("process_executable") if isinstance(browser, dict) else None
@@ -419,9 +431,9 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
         if family == "Firefox":
             allowed_images.add(selected.with_name("firefox-bin"))
         if (not isinstance(process, dict) or not isinstance(browser, dict)
-                or set(browser) != {"protocol", "clock", "browser_pid", "browser_sha256",
-                                    "process_executable", "started_ns", "finished_ns",
-                                    "responses"}
+                or set(browser) != ({"protocol", "clock", "browser_pid", "browser_sha256",
+                                     "process_executable", "started_ns", "finished_ns",
+                                     "responses"} | ({"navigation"} if firefox_minimum else set()))
                 or browser["protocol"] != protocol or browser["clock"] != "unix-epoch-ns"
                 or len(launches) != 1 or not archived
                 or type(browser["browser_pid"]) is not int or browser["browser_pid"] <= 0
@@ -441,6 +453,27 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
                 or not server or len(browser["responses"]) != len(server)
                 or len(archived) != len(server) + 1):
             raise ValueError("schema-5 independent browser process differs")
+        if firefox_minimum:
+            session = navigation[0] if len(navigation) == 1 else {}
+            worker = archived[0]
+            observed_navigation = browser["navigation"]
+            fields = {"target_url", "bootstrap_url", "navigation_requested_ns",
+                      "navigation_result_ns", "bidi_socket_inode"}
+            if (not isinstance(observed_navigation, dict)
+                    or set(observed_navigation) != fields
+                    or any(observed_navigation[key] != session.get(key) for key in fields)
+                    or session.get("browser_pid") != browser["browser_pid"]
+                    or session.get("bidi_browser_pid") != browser["browser_pid"]
+                    or worker.get("browser_pid") != browser["browser_pid"]
+                    or worker.get("target_url") != session.get("target_url")
+                    or worker.get("browser_token") != session.get("browser_token")
+                    or worker.get("redirect_sha256") != session.get("redirect_sha256")
+                    or not browser["started_ns"] <= session.get("navigation_requested_ns", -1)
+                        <= session.get("navigation_result_ns", -1)
+                        <= worker.get("started_ns", -1) <= browser["finished_ns"]
+                    or not isinstance(session.get("target_url"), str)
+                    or not isinstance(session.get("bootstrap_url"), str)):
+                raise ValueError("schema-5 Firefox minimum navigation differs")
         served = {item["url"]: item for item in server}
         from urllib.parse import urlsplit
         captured = {}
@@ -488,7 +521,9 @@ def schema5_browser_witness(repository, expected, candidate, lane, digest, runti
                     or row["request_ns"] > item["finished_ns"]
                     or Path(body_path).stat().st_size != item["size"]
                     or Path(body_path).read_bytes() !=
-                       (folder / source["body_path"]).read_bytes()):
+                       (folder / source["body_path"]).read_bytes()
+                    or firefox_minimum and Path(body_path).read_bytes() !=
+                       (folder / row["body_path"]).read_bytes()):
                 raise ValueError("schema-5 independent browser body or interval differs")
             seen.add(url)
         if seen != set(served):
