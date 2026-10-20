@@ -893,7 +893,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                  "actual_arithmetic.py",
                  independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["actual_arithmetic.py"]),
                 (independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS,
-                 current, "run.py",
+                 independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION, "run.py",
                  independent_gates.APPROVED_P2_CLASS_LOAD_PRODUCERS["run.py"])):
             with self.subTest(candidate=candidate, stale=name), mock.patch.dict(
                     blobs, {name: stale}):
@@ -954,7 +954,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(expected, independent_gates.APPROVED_P2_EDBC_PRODUCERS)
         local_expected = dict(expected)
         local_expected["run.py"] = "7a52d41dcb96238402beee7cfc381ccb87b8ffd96ef247d602d92037bd073051"
-        self.assertEqual(local_expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(local_expected["run.py"],
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS["run.py"])
         self.assertEqual(local_expected["run.py"],
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
         self.assertEqual(run_git_blob, subprocess.check_output(
@@ -1014,7 +1015,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(expected, independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS)
         local_expected = dict(expected)
         local_expected["run.py"] = "7a52d41dcb96238402beee7cfc381ccb87b8ffd96ef247d602d92037bd073051"
-        self.assertEqual(local_expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(local_expected["run.py"],
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS["run.py"])
         self.assertEqual(local_expected["run.py"],
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
         self.assertEqual(run_git_blob, subprocess.check_output(
@@ -1074,8 +1076,10 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(independent_gates.APPROVED_P2_COMBINED_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, candidate_head))
+        self.assertEqual(independent_gates.APPROVED_P2_COMBINED_PRODUCERS,
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
         self.assertEqual(run_git_blob, subprocess.check_output(
@@ -1157,6 +1161,61 @@ class IndependentGateSeamTests(unittest.TestCase):
         with mock.patch.object(subprocess, "check_output", altered_committed):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, approved_revision)
+
+    def test_p2_combined_assembly_requires_both_reviewed_producer_lineages(self):
+        combined = "3212df564682e95b33b4bd59b248733b5b34b219"
+        operation = independent_gates.P2_OPERATION_ASSEMBLY_REVISION
+        direct_wasm = independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION
+        expected = dict(independent_gates.APPROVED_P2_OPERATION_PRODUCERS)
+        expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
+        self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, operation))
+        self.assertEqual(independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, direct_wasm))
+        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, combined))
+        for name, digest in expected.items():
+            path = f"tools/numerical/portable/{name}"
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{combined}:{path}"], cwd=ROOT)
+            self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+            self.assertEqual(digest, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+        for revision in ("00af7a10", "2acec83c", "03125a11", "15184cbf"):
+            with self.subTest(intermediate=revision), self.assertRaisesRegex(
+                    ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        for name, standalone in (("actual_arithmetic.py",
+                                  independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS),
+                                 ("run.py", independent_gates.APPROVED_P2_OPERATION_PRODUCERS)):
+            with self.subTest(stale=name), mock.patch.dict(
+                    independent_gates.APPROVED_P2_COMBINED_PRODUCERS,
+                    {name: standalone[name]}):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, combined)
+            path = ROOT / "tools/numerical/portable" / name
+            original_read = Path.read_bytes
+
+            def changed_local(file_path):
+                raw = original_read(file_path)
+                return raw + b"\n# changed\n" if file_path == path else raw
+
+            with mock.patch.object(Path, "read_bytes", changed_local):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, combined)
+            original_show = subprocess.check_output
+            relative = f"tools/numerical/portable/{name}"
+
+            def changed_committed(command, *args, **kwargs):
+                raw = original_show(command, *args, **kwargs)
+                if "show" in command and f"{combined}:{relative}" in command:
+                    return raw + b"\n# changed\n"
+                return raw
+
+            with mock.patch.object(subprocess, "check_output", changed_committed):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, combined)
 
     def test_p2_canonical_archive_source_keeps_exact_revision_windows(self):
         source = "tools/numerical/portable/actual_arithmetic.py"
