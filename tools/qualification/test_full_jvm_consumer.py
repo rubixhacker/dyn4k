@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -141,16 +142,52 @@ class FullJvmConsumerTests(unittest.TestCase):
             route._same_report(raw, normalized.replace(b'time="1"', b'time="2"'), selected)
 
     def test_prepared_inventory_is_full_approved_contract(self):
-        candidate = os.environ.get("DYN4K_FULL_JVM_CANDIDATE") or __import__(
-            "subprocess").check_output(["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"],
-                                         text=True).strip()
-        with tempfile.TemporaryDirectory() as directory:
-            result = route.prepare(REPOSITORY, candidate, Path(directory) / "inputs", TEST_LANE)
-            self.assertEqual(result["selected_cases"], 2526)
-            self.assertEqual(result["source_count"], 175)
-            inputs = Path(directory) / "inputs"
-            self.assertEqual(len((inputs / "core-cases.tsv").read_text().splitlines()), 2465)
-            self.assertEqual(len((inputs / "facade-cases.tsv").read_text().splitlines()), 61)
+        candidate = os.environ.get("DYN4K_FULL_JVM_CANDIDATE") or subprocess.check_output(
+            ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"], text=True).strip()
+        tracked = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(REPOSITORY), "ls-tree", "-r",
+             "--name-only", candidate, "--", *route.SOURCE_ROOTS], text=True).splitlines()
+        sources = {path: route.sha(route.git_blob(REPOSITORY, candidate, path))
+                   for path in tracked if path.endswith((".kt", ".java"))}
+        self.assertEqual(len(sources), 175)
+        source_bytes = "".join(f"{path}\t{digest}\n" for path, digest in
+                               sorted(sources.items())).encode()
+        script_bytes = (b"gradle.settingsEvaluated { settings ->\n"
+                        b"  if (settings.rootProject.name != 'dyn4k-full-staged-jvm-consumer') {\n"
+                        b"    throw new GradleException('qualification project differs')\n"
+                        b"  }\n"
+                        b"}\n")
+        for lane in route.LANES:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+                manifest, contract = route.selected_contract(REPOSITORY, lane)
+                cases = contract["cases"]
+                self.assertEqual(len(cases), 2526)
+                inputs = Path(directory) / "inputs"
+                result = route.prepare(REPOSITORY, candidate, inputs, lane)
+                self.assertEqual(result, {
+                    "manifest_sha256": independent_gates.digest(manifest),
+                    "contract_sha256": independent_gates.digest(contract),
+                    "source_count": 175, "selected_cases": 2526,
+                })
+                expected = {"source-inventory.tsv": source_bytes,
+                            "lane-script": script_bytes}
+                for module, name, count in (("dyn4k-core", "core-cases.tsv", 2465),
+                                            ("dyn4k", "facade-cases.tsv", 61)):
+                    selected = sorted((item for item in cases if item["module"] == module),
+                                      key=lambda item: item["id"])
+                    self.assertEqual(len(selected), count)
+                    expected[name] = "".join(
+                        f"{item['id']}\t{item['classname']}\t{item['method']}\n"
+                        for item in selected).encode()
+                    self.assertTrue(all(sources[item["source"]["path"]] ==
+                                        item["source"]["sha256"] for item in selected))
+                names = {path.name for path in inputs.iterdir()}
+                self.assertEqual(names, set(expected))
+                self.assertNotIn(lane, names)
+                for name, data in expected.items():
+                    self.assertIsNotNone(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name))
+                    self.assertNotIn(":", name)
+                    self.assertEqual((inputs / name).read_bytes(), data)
 
     def test_all_four_lanes_select_original_jvm_contract(self):
         selected = [route.selected_contract(REPOSITORY, lane)[1]
