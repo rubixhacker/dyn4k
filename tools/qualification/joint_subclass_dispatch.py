@@ -5,7 +5,8 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+
+import subclass_provider
 
 
 BASELINE_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
@@ -53,8 +54,7 @@ def observations(raw, provider):
     if set(values) != set(EXPECTED) | set(STATE_KEYS) | {f"provider_{name}" for name in PROVIDERS}:
         raise ValueError("missing or extra fixture observations")
     for name in PROVIDERS:
-        parsed = urlparse(values.pop(f"provider_{name}"))
-        if parsed.scheme != "file" or Path(unquote(parsed.path)).resolve() != provider:
+        if not subclass_provider.matches_provider(values.pop(f"provider_{name}"), provider):
             raise ValueError(f"{name} resolved from another provider")
     return values
 

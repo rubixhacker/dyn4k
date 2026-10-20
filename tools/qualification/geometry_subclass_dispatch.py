@@ -5,7 +5,8 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+
+import subclass_provider
 
 
 BASELINE_SHA256 = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
@@ -48,8 +49,7 @@ def parse(text, jar):
     if set(values) != expected:
         raise ValueError(f"fixture key mismatch: missing={sorted(expected - set(values))}, extra={sorted(set(values) - expected)}")
     for name in PROVIDERS:
-        url = urlparse(values.pop("provider." + name))
-        if url.scheme != "file" or Path(unquote(url.path)).resolve() != jar.resolve():
+        if not subclass_provider.matches_provider(values.pop("provider." + name), jar):
             raise ValueError(f"{name} class provider is not {jar}")
     return values
 
