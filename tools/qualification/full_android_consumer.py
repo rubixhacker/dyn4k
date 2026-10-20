@@ -724,7 +724,7 @@ def main(argv=None):
         if not (args.archive and args.expected_archive_digest and args.expected_core_aar_sha256
                 and args.expected_facade_aar_sha256 and args.expected_runtime_identity):
             parser.error("verify requires archive digest, both independent AAR hashes, and runtime identity")
-        print(json.dumps(verify_archive(checkout, args.archive.resolve(),
+        print(json.dumps(verify_archive(checkout, args.archive,
                                         args.expected_archive_digest,
                                         args.expected_core_aar_sha256,
                                         args.expected_facade_aar_sha256,

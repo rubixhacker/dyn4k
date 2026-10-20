@@ -1,3 +1,6 @@
+import contextlib
+import io
+import json
 import sys
 import tempfile
 import unittest
@@ -173,6 +176,51 @@ class Api21DeviceTests(unittest.TestCase):
                     subject.runtime_identity(archive, 21, "x86_64")
                 with self.assertRaisesRegex(ValueError, "approved guest"):
                     subject.runtime_identity(archive, 37, "x86")
+
+
+class VerifyArchivePathTests(unittest.TestCase):
+    def verify_cli(self, archive):
+        def scan_before_result(_checkout, supplied, *_expected):
+            return {"archive_digest": subject.independent_gates.archive_digest(supplied)}
+
+        arguments = ["verify", "--archive", str(archive),
+                     "--expected-archive-digest", "a" * 64,
+                     "--expected-core-aar-sha256", "b" * 64,
+                     "--expected-facade-aar-sha256", "c" * 64,
+                     "--expected-runtime-identity", "d" * 64]
+        with mock.patch.object(subject, "verify_archive", side_effect=scan_before_result), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            subject.main(arguments)
+        return json.loads(output.getvalue())
+
+    def test_public_verify_rejects_symbolic_archive_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            regular = Path(temporary) / "regular"
+            regular.mkdir()
+            (regular / "receipt.json").write_text("{}\n")
+            symbolic = Path(temporary) / "symbolic"
+            symbolic.symlink_to(regular, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symbolic or reparse archive path"):
+                self.verify_cli(symbolic)
+
+    def test_public_verify_rejects_symbolic_archive_ancestor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "parent"
+            regular = parent / "regular"
+            regular.mkdir(parents=True)
+            (regular / "receipt.json").write_text("{}\n")
+            symbolic = Path(temporary) / "symbolic-parent"
+            symbolic.symlink_to(parent, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symbolic or reparse archive path"):
+                self.verify_cli(symbolic / "regular")
+
+    def test_public_verify_accepts_regular_archive_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            regular = Path(temporary) / "regular"
+            regular.mkdir()
+            (regular / "receipt.json").write_text("{}\n")
+            self.assertEqual(self.verify_cli(regular),
+                             {"archive_digest": subject.independent_gates.archive_digest(regular)})
 
 
 if __name__ == "__main__":
