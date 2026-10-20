@@ -186,9 +186,10 @@ def prepare(repository, candidate_sha, candidate_manifest_path, staged_audit_pat
                 browser_receipt = _load(Path(paths["staged-consumer"]) / "receipt.json")
             except (OSError, ValueError, TypeError):
                 browser_receipt = None
-            if ((isinstance(browser_receipt, dict)
-                    and browser_receipt.get("schema") == 3)
-                    or lane_id.startswith("wasmJs:")):
+            if (isinstance(browser_receipt, dict)
+                    and (browser_receipt.get("schema") == 3
+                         or (browser_receipt.get("schema") == 4
+                             and lane_id.startswith("wasmJs:")))):
                 route_fields.add("expected_build_launcher_image")
         allowed = OPTIONAL_FIELDS | route_fields
         if set(fields) - allowed:
