@@ -720,18 +720,19 @@ class SelectedBundleTest(unittest.TestCase):
     def test_safari_config_pins_observer_after_reporter_and_port(self):
         work = Path("/evidence/build")
         observer = b"config.set({beforeMiddleware: ['qualification-response', 'qualification-safari-observer']});\n"
-        raw = self.config(self.settings(work, "development", "js", "Safari"))
-        raw = raw.replace(b"\n\n\n\n\n}\n", b"\n\n// qualification-z-safari-observer.js\n" +
-                          observer + b"\n\n\n\n}\n")
         with mock.patch.object(browser, "KARMA_GENERATED_MIDDLE_SHA256", browser.sha(self.middle)):
-            self.assertEqual(browser.configured_bundle(raw, work, "core", "development",
-                                                       self.reporter, self.port, "js", "Safari",
-                                                       observer),
-                             browser.bundle_paths(work, "core", "development")[:2])
-            with self.assertRaisesRegex(ValueError, "later override"):
-                browser.configured_bundle(raw, work, "core", "development",
-                                          self.reporter, self.port, "js", "Safari",
-                                          observer + b"extra")
+            for family in ("Safari", "Firefox"):
+                raw = self.config(self.settings(work, "development", "js", family))
+                raw = raw.replace(b"\n\n\n\n\n}\n",
+                                  b"\n\n\n// qualification-z-safari-observer.js\n" +
+                                  observer + b"\n\n\n\n}\n")
+                self.assertEqual(browser.configured_bundle(raw, work, "core", "development",
+                    self.reporter, self.port, "js", family, observer),
+                    browser.bundle_paths(work, "core", "development")[:2])
+                with self.assertRaisesRegex(ValueError, "later override"):
+                    browser.configured_bundle(raw, work, "core", "development",
+                                              self.reporter, self.port, "js", family,
+                                              observer + b"extra")
 
     def test_effective_files_reject_extra_script_and_changed_preprocessor(self):
         work = Path("/evidence/build")

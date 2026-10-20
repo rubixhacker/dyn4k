@@ -401,7 +401,7 @@ def configured_bundle(raw, work, short, mode, reporter, port, target="js", famil
     if not suffix.startswith(reporter):
         raise ValueError("archived Karma reporter script differs")
     suffix = suffix[len(reporter):]
-    observer_suffix = (b"\n// qualification-z-safari-observer.js\n" + safari_observer
+    observer_suffix = (b"\n\n// qualification-z-safari-observer.js\n" + safari_observer
                        if safari_observer is not None else b"")
     port_match = re.fullmatch(
         rb"\n\n// qualification-port\.js\nconfig\.set\(\{port: ([1-9][0-9]{0,4})\}\);\n"
