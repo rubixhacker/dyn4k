@@ -19,7 +19,7 @@ RUN_EXPRESSION_LIMIT = 21000
 AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
-    "qualification.yml": "ba3fccadc246fb4a5613cccf8edbaa727f79a6f36c446b647109ea3d0967ad71",
+    "qualification.yml": "5c6004c8ef2d70e7afab89027aa9eccaef3f6774e955c9bd35cc7b3f44924f95",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
 }
 WINDOWS_GRADLE_STDOUT_8FA = base64.b64decode(

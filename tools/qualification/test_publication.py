@@ -1174,6 +1174,53 @@ class PublicationAuditTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 publication.verify(bundle, "a" * 40, manifest_sha256)
 
+    def test_hosted_publication_transport_preserves_hidden_staging_evidence(self):
+        workflow = (self.REPOSITORY / ".github/workflows/qualification.yml").read_text()
+        hosted_upload = workflow.split("      - name: Upload hosted publication bytes\n", 1)[1].split(
+            "      - name:", 1)[0]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = self.stage(root)
+            stage_dir = staging / ".qualification/windows"
+            stage_dir.mkdir(parents=True)
+            targets = ("js", "jvm")
+            tasks = stage.publication_tasks(targets)
+            console = stage_dir / "stage.log"
+            console.write_text("".join(f"> Task {task}\n" for task in tasks) + "BUILD SUCCESSFUL\n")
+            receipt = stage_dir / "receipt.json"
+            receipt.write_text(json.dumps({"candidate_sha": "a" * 40,
+                                          "repository": str(self.REPOSITORY), "targets": list(targets),
+                                          "tasks": tasks, "command": self.publication_command(tasks),
+                                          "status": "PASSED", "exit_code": 0,
+                                          "console_sha256": hashlib.sha256(console.read_bytes()).hexdigest()}))
+            audit = qualify.audit_staging(staging, "a" * 40, targets, root / "LICENSE.md",
+                                          receipt, console)
+            self.assertEqual("PASSED", audit["status"], audit["errors"])
+            audit_path = root / "artifact-audit.json"
+            audit_path.write_text(json.dumps(audit))
+            bundle = root / "bundle"
+            publication.package(root, audit_path, bundle)
+            manifest_sha256 = hashlib.sha256((bundle / "manifest.json").read_bytes()).hexdigest()
+            hidden_files = (
+                "build/staging-repository/.qualification/windows/receipt.json",
+                "build/staging-repository/.qualification/windows/stage.log",
+            )
+            manifest = json.loads((bundle / "manifest.json").read_text())
+            for relative in hidden_files:
+                self.assertIn(relative, manifest["files"])
+            publication.verify(bundle, "a" * 40, manifest_sha256)
+
+            delivered = root / "delivered"
+
+            def omit_hidden_files(directory, names):
+                return [name for name in names if name.startswith(".")]
+
+            shutil.copytree(bundle, delivered, ignore=omit_hidden_files)
+            with self.assertRaisesRegex(ValueError, "publication bundle files or bytes differ from manifest"):
+                publication.verify(delivered, "a" * 40, manifest_sha256)
+        self.assertIn("          include-hidden-files: true\n", hosted_upload)
+
     def test_downloaded_bundle_rejects_coherently_refreshed_metadata_and_audit(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
