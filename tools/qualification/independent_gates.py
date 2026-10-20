@@ -36,12 +36,17 @@ PRODUCER_SCOPED_GATES = frozenset(("unchanged-java-corpus", "java-source-compati
                                    "independent-review"))
 APPROVED_POLICY = {
     "tools/numerical/fixtures.json": "3086e982d8a4915634bd62d50dbfa0bf4f6e8cc0070a7a16d1f4bede9764d48a",
-    "tools/numerical/compare.py": "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f",
+    "tools/numerical/compare.py": "4a6b4646683389aca643551b5672ca94d2f1e6dd49adad1c4684472b2b97348d",
     "tools/numerical/physical.py": "98ff243a02eece8a47a4faeda06385696174b2b10836e4e1315d6a13e22ee5ba",
     "tools/numerical/weld-pulley-physical-declaration.json": "9794a4ef64c93f6ff76afb03d98784b27be68fe413256362abf1a3f84cf96368",
     "tools/numerical/weld-pulley-physical-manifest.json": "5531b263fbd5a7684db0ea9fbef167c8d8772104949ce01ba4de7606498aecab",
     "tools/numerical/weld_pulley_quality.py": "f8c7cb7449b5d007e5c7dabb20e08deda93974b3cd8a4bedf0cd96f1640c2c87",
 }
+HISTORICAL_COMPARATOR_SHA256 = "6e9abe839c74ac9be1e8507e4a693b0414e70063f878481c94ab136c7ec89f4f"
+APPROVED_COMPARATOR_REVISIONS = (
+    "f0349a0d29f91879fc52286899f39e042c8523f6",
+    "168fbfcdabd68cfb9317310958d6be7f52b38f05",
+)
 HISTORICAL_FIXTURE_SHA256 = "658f3216584a9842b9d9826767521f6bca1a9df0ed006b447a72a47d4915065c"
 CURRENT_FIXTURE_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_MIGRATION = {
@@ -290,9 +295,28 @@ def consumer_contract(manifest, lane_id):
 
 def _policy_binding(repository, candidate_sha):
     fixture = "tools/numerical/fixtures.json"
+    checker = "tools/numerical/compare.py"
     approved = _source_binding(repository, candidate_sha,
                                {path: value for path, value in APPROVED_POLICY.items()
-                                if path != fixture}, "numerical approved policy/checker")
+                                if path not in (fixture, checker)},
+                               "numerical approved policy/checker")
+    local_checker = Path(__file__).resolve().parents[2] / checker
+    committed_checker = subprocess.check_output(
+        ["git", "--no-replace-objects", "-C", str(repository), "show",
+         f"{candidate_sha}:{checker}"], stderr=subprocess.PIPE)
+    lineage = [subprocess.run(
+        ["git", "--no-replace-objects", "-C", str(repository), "merge-base",
+         "--is-ancestor", revision, candidate_sha],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False).returncode
+        for revision in APPROVED_COMPARATOR_REVISIONS]
+    if any(code not in (0, 1) for code in lineage):
+        raise ValueError("numerical comparator revision ancestry is unavailable")
+    expected_checker = (APPROVED_POLICY[checker] if 0 in lineage
+                        else HISTORICAL_COMPARATOR_SHA256)
+    checker_digest = hashlib.sha256(committed_checker).hexdigest()
+    if (hashlib.sha256(local_checker.read_bytes()).hexdigest() != APPROVED_POLICY[checker]
+            or checker_digest != expected_checker):
+        raise ValueError(f"numerical approved policy/checker blob differs: {checker}")
     local = Path(__file__).resolve().parents[2] / fixture
     committed = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
@@ -309,7 +333,7 @@ def _policy_binding(repository, candidate_sha):
     if (hashlib.sha256(local.read_bytes()).hexdigest() != APPROVED_POLICY[fixture]
             or candidate_digest != expected_digest):
         raise ValueError(f"numerical approved policy/checker blob differs: {fixture}")
-    return {**approved, fixture: candidate_digest}
+    return {**approved, checker: checker_digest, fixture: candidate_digest}
 
 
 def verified_numerical_source_sha256(repository, candidate_sha):
