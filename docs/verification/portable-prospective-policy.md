@@ -14,28 +14,33 @@ been qualified by this policy.
 ## Reference and inventory
 
 The current reference is the complete dyn4j 6.0.0 capture at
-`/var/home/stewart/dyn4k-evidence/session-control/final-numerical/baseline-2c9-full/verified.json`.
+`/var/home/stewart/dyn4k-evidence/session-control/baseline-current-4d-home-full/verified.json`.
 Its external current-verifier attestation is
-`/var/home/stewart/dyn4k-evidence/session-control/final-numerical/baseline-d7a-current-verifier-attestation.json`.
-The [delegated rebind decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6254671817)
-changed only the catalog's whole-trace and fixture-source identities. The
-current capture records source
+`/var/home/stewart/dyn4k-evidence/session-control/baseline-current-4d-home-original-sol/attestation.json`.
+The current capture records source
 `058bf6d982a0fb89b54050f929f6ea9dae53b714`, JAR SHA-256
 `204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e`,
 fixture source SHA-256
-`6c12edda1bde1f1f8556ea7c8dadc4543d69a1c4f4e6f9c64ffe38d47cbf7d3d`,
+`dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce`,
 and trace SHA-256
 `5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801`.
-The historical complete capture at
+The preceding complete 2c9 capture at
+`/var/home/stewart/dyn4k-evidence/session-control/final-numerical/baseline-2c9-full/verified.json`
+has the same whole-trace and all 332 case-slice hashes. Its fixture source is
+`6c12edda1bde1f1f8556ea7c8dadc4543d69a1c4f4e6f9c64ffe38d47cbf7d3d`.
+The earlier [delegated rebind decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6254671817)
+selected 2c9 after comparing its prospective slices with the original
+247e capture. The still older capture at
 `/var/tmp/dyn4k-portable-baseline-247e15eb/verified.json` has trace
 `f31dc4a0a63e96a7212a58df02c7f1be539756532603e5f5b51e528dd7b84d07`
 and fixture source
 `70d7c4105224f570d5e4cef1cf9f488c4007aeb68a536dda76f9836bdfdd2b4f`.
-Both verified manifests list 332 cases and identical trace counts. Their
-case-slice hashes agree for all 318 prospective cases. Four frozen Weld and
-Pulley slices differ and remain under their separate policy. No prospective
-per-case SHA-256, path assignment, rule, or tolerance changed. This rebind
-does not establish candidate parity or target qualification.
+Its 318 prospective case-slice hashes agree with both later captures. Four
+frozen Weld and Pulley slices differ from 2c9 and remain under their separate
+policy. The new 4d capture changes only the source fixture identity against
+2c9. No prospective per-case SHA-256, path assignment, rule, or tolerance
+changed. This rebind does not establish candidate parity or target
+qualification.
 The catalog was made by reading every record of each of the 318 case slices,
 not by sampling the first state. It contains 566 distinct leaf paths, 92
 distinct case path sets, and 67,667 case-path memberships. Array positions are

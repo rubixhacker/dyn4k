@@ -327,7 +327,7 @@
   "qualification": "UNPASSED",
   "baseline_source_revision": "058bf6d982a0fb89b54050f929f6ea9dae53b714",
   "baseline_jar_sha256": "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e",
-  "baseline_fixture_source_sha256": "6c12edda1bde1f1f8556ea7c8dadc4543d69a1c4f4e6f9c64ffe38d47cbf7d3d",
+  "baseline_fixture_source_sha256": "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce",
   "baseline_trace_sha256": "5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801",
   "paths": [
     {"path":"action.force-and-torque.id","rule":"exact_structure","types":["str"]},

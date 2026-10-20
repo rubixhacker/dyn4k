@@ -133,6 +133,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
                           (6000, 42428), (6600, 46671)])
         self.assertEqual(catalog["baseline_trace_sha256"],
                          "5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801")
+        self.assertEqual(catalog["baseline_fixture_source_sha256"],
+                         "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce")
         self.assertTrue(all(catalog["paths"][index]["rule"]
                             for schema in catalog["path_sets"] for index in schema))
 
@@ -149,25 +151,36 @@ class ProspectiveComparisonTest(unittest.TestCase):
         catalog = load_policy_catalog()
         cases = declared_cases()
         frozen = {case["id"] for case in cases if case["require_frozen_projection"]}
+        self.assertEqual(len(frozen), 14)
+        self.assertTrue({
+            "P-JINT-Weld-enabled-equal",
+            "P-JINT-Pulley-slack-transition-preparation-0",
+            "P-JINT-Pulley-slack-transition-preparation-1",
+            "P-JINT-Pulley-slack-transition-main",
+        } <= frozen)
+        self.assertFalse(frozen & set(catalog["cases"]))
 
         self.assertEqual(len(current["case_sha256"]), 332)
         self.assertEqual(set(current["case_sha256"]), set(historical["case_sha256"]))
         changed = {case_id for case_id in current["case_sha256"]
                    if current["case_sha256"][case_id] != historical["case_sha256"][case_id]}
-        self.assertEqual(changed, {
-            "P-JINT-Weld-enabled-equal",
-            "P-JINT-Pulley-slack-transition-preparation-0",
-            "P-JINT-Pulley-slack-transition-preparation-1",
-            "P-JINT-Pulley-slack-transition-main",
-        })
+        self.assertEqual(changed, set())
         self.assertEqual(changed & set(catalog["cases"]), set())
+        self.assertEqual(current["trace_sha256"], historical["trace_sha256"])
+        self.assertEqual(current["baseline_source_revision"],
+                         historical["baseline_source_revision"])
+        self.assertEqual(current["baseline_jar_sha256"], historical["baseline_jar_sha256"])
+        self.assertEqual(historical["fixture_source_sha256"],
+                         "6c12edda1bde1f1f8556ea7c8dadc4543d69a1c4f4e6f9c64ffe38d47cbf7d3d")
+        self.assertEqual(current["fixture_source_sha256"],
+                         "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce")
         self.assertEqual({case_id: current["case_sha256"][case_id]
                           for case_id in catalog["cases"]},
                          {case_id: historical["case_sha256"][case_id]
                           for case_id in catalog["cases"]})
         verify_policy_catalog(catalog, current, cases, frozen)
 
-        with self.assertRaisesRegex(Exception, "baseline trace"):
+        with self.assertRaisesRegex(Exception, "baseline identity"):
             verify_policy_catalog(catalog, historical, cases, frozen)
         changed_case = deepcopy(current)
         case_id = next(iter(catalog["cases"]))
