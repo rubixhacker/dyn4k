@@ -1,6 +1,8 @@
 import os
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -114,6 +116,61 @@ class CaptureSourceGuardTest(unittest.TestCase):
         self.assertTrue(capture_actual.socket_owner(proc, 123, 40001))
         self.assertFalse(capture_actual.socket_owner(proc, 123, 40002))
         self.assertFalse(capture_actual.socket_owner(proc, 124, 40001))
+
+    def test_boolean_budget_counts_generated_output_and_expires(self):
+        generated = self.root / "build"
+        generated.mkdir()
+        (generated / "old.bin").write_bytes(b"a" * 100)
+        output = self.root / "capture"
+        output.mkdir()
+        temporary = self.root / "temporary"
+        temporary.mkdir()
+        budget = capture_actual.CaptureBudget(
+            output, temporary, (generated,), limit_bytes=10, seconds=2)
+        budget.check()
+        (generated / "new.bin").write_bytes(b"a" * 11)
+        with self.assertRaisesRegex(CaptureRejected, "budget"):
+            budget.check()
+        (generated / "new.bin").unlink()
+        with self.assertRaisesRegex(CaptureRejected, "budget"):
+            budget.check(extra_bytes=10)
+        with patch.object(capture_actual.time, "monotonic", return_value=budget.deadline + 1):
+            with self.assertRaisesRegex(CaptureRejected, "timed out"):
+                budget.check()
+
+    def test_bounded_stage_stops_process_on_budget_failure(self):
+        budget = SimpleNamespace(check=lambda: (_ for _ in ()).throw(
+            CaptureRejected("bounded budget")))
+        process = SimpleNamespace(poll=lambda: None)
+        active = []
+        with patch.object(capture_actual.subprocess, "Popen", return_value=process), \
+                patch.object(capture_actual, "stop_capture_process") as stop:
+            with self.assertRaisesRegex(CaptureRejected, "budget"):
+                capture_actual.run_bounded_process(
+                    ["tool"], self.root, {}, self.root / "stage.log", budget, active)
+        self.assertEqual(active, [])
+        stop.assert_called_once_with(process)
+
+    def test_completed_stage_reaps_group_before_later_sealing(self):
+        budget = SimpleNamespace(check=lambda: None)
+        process = SimpleNamespace(poll=lambda: 0, returncode=0)
+        active = []
+        with patch.object(capture_actual.subprocess, "Popen", return_value=process), \
+                patch.object(capture_actual, "stop_capture_process") as stop:
+            status = capture_actual.run_bounded_process(
+                ["tool"], self.root, {}, self.root / "stage.log", budget, active)
+        self.assertEqual(status, 0)
+        self.assertEqual(active, [])
+        stop.assert_called_once_with(process)
+
+    def test_watchdog_interrupts_blocked_sealing_and_restores_handler(self):
+        prior = signal.getsignal(signal.SIGALRM)
+        started = time.monotonic()
+        with self.assertRaisesRegex(CaptureRejected, "timed out"):
+            with capture_actual.capture_watchdog(0.02):
+                time.sleep(1)
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(signal.getsignal(signal.SIGALRM), prior)
 
     def test_selected_jdi_worker_needs_one_successful_exec(self):
         prefix = self.root / "worker-trace"

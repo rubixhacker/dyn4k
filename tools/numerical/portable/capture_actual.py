@@ -1,4 +1,5 @@
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -80,21 +81,92 @@ def selected_worker_pid(trace_prefix):
 
 
 def stop_capture_process(process):
-    if process is None or process.poll() is not None:
+    if process is None:
         return
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
     except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
         pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    process.wait(timeout=5)
 
 
-def capture_output_bytes(*roots):
-    return sum(path.stat().st_size for root in roots for path in Path(root).rglob("*")
-               if path.is_file() and not path.is_symlink())
+def _file_sizes(*roots):
+    return {path: path.stat().st_size for root in roots for path in Path(root).rglob("*")
+            if path.is_file() and not path.is_symlink()}
+
+
+class CaptureBudget:
+    def __init__(self, output, temporary, generated_roots, *,
+                 limit_bytes=1800 * 1024 * 1024, seconds=1200):
+        self.output = Path(output)
+        self.temporary = Path(temporary)
+        self.generated_roots = tuple(Path(root) for root in generated_roots)
+        self.initial = _file_sizes(*self.generated_roots)
+        self.limit_bytes = limit_bytes
+        self.deadline = time.monotonic() + seconds
+
+    def check(self, extra_bytes=0):
+        if time.monotonic() > self.deadline:
+            raise CaptureRejected("focused capture timed out")
+        generated = _file_sizes(*self.generated_roots)
+        growth = sum(max(size - self.initial.get(path, 0), 0)
+                     for path, size in generated.items())
+        total = sum(_file_sizes(self.output, self.temporary).values()) + growth
+        if total + extra_bytes >= self.limit_bytes:
+            raise CaptureRejected("new capture output exceeded the bounded budget")
+        return total
+
+
+@contextmanager
+def capture_watchdog(seconds):
+    previous = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+    def expired(signum, frame):
+        raise CaptureRejected("focused capture timed out")
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def run_bounded_process(command, cwd, environment, output_path, budget, active,
+                        combine_stderr=True):
+    with Path(output_path).open("xb") as stream:
+        process = subprocess.Popen(
+            command, cwd=cwd, env=environment, stdout=stream,
+            stderr=subprocess.STDOUT if combine_stderr else subprocess.DEVNULL,
+            start_new_session=True)
+        active.append(process)
+        try:
+            while process.poll() is None:
+                budget.check()
+                time.sleep(0.1)
+            budget.check()
+        except Exception:
+            stop_capture_process(process)
+            active.remove(process)
+            raise
+        stop_capture_process(process)
+        active.remove(process)
+    return process.returncode
+
+
+def child_environment():
+    environment = os.environ.copy()
+    environment.pop("OLLAMA_API_KEY", None)
+    return environment
 
 
 def reject_environment_trace(trace_path):
@@ -116,7 +188,7 @@ def reject_environment_trace(trace_path):
 
 def git(*args):
     return subprocess.run(("git", *args), cwd=ROOT, check=True,
-                          capture_output=True).stdout
+                          capture_output=True, env=child_environment()).stdout
 
 
 def clean_source():
@@ -214,11 +286,40 @@ def run_capture(method, output, reference_case=None):
         raise CaptureRejected("capture temporary root is not home-backed")
     temporary_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dyn4k-actual-", dir=temporary_root) as scratch:
-        return _run_capture(method, output, reference_case, commit, Path(scratch))
+        if method != _FOCUSED_BOOLEAN_METHOD:
+            return _run_capture(method, output, reference_case, commit, Path(scratch))
+        generated = tuple(ROOT / name for name in (
+            "build", ".gradle", ".kotlin", "dyn4k-core/build",
+            "dyn4k-core/.gradle", "dyn4k-core/.kotlin",
+            "tools/numerical/portable/build", "tools/numerical/portable/.gradle",
+            "tools/numerical/portable/.kotlin"))
+        active = []
+        previous_tmpdir = os.environ.get("TMPDIR")
+        os.environ["TMPDIR"] = scratch
+        try:
+            with capture_watchdog(1200):
+                budget = CaptureBudget(output, Path(scratch), generated)
+                try:
+                    return _run_capture(method, output, reference_case, commit,
+                                        Path(scratch), budget, active)
+                finally:
+                    for process in active:
+                        stop_capture_process(process)
+        finally:
+            if previous_tmpdir is None:
+                os.environ.pop("TMPDIR", None)
+            else:
+                os.environ["TMPDIR"] = previous_tmpdir
 
 
-def _run_capture(method, output, reference_case, commit, temporary):
+def _run_capture(method, output, reference_case, commit, temporary,
+                 budget=None, active=None):
     output.mkdir(parents=True)
+
+    def check_budget(extra_bytes=0):
+        if budget is not None:
+            budget.check(extra_bytes)
+
     if method == _FOCUSED_BOOLEAN_METHOD:
         try:
             reference = Path(reference_case).read_bytes()
@@ -227,31 +328,46 @@ def _run_capture(method, output, reference_case, commit, temporary):
         if hashlib.sha256(reference).hexdigest() != _FOCUSED_BOOLEAN_REFERENCE_SHA256:
             raise CaptureRejected("focused Boolean indexed reference differs")
         (output / "reference-case.jsonl").write_bytes(reference)
-    environment = os.environ.copy()
-    environment.pop("OLLAMA_API_KEY", None)
+        check_budget()
+    environment = child_environment()
     environment["JAVA_HOME"] = str(JDK21)
     environment["TMPDIR"] = str(temporary)
     environment["JAVA_TOOL_OPTIONS"] = f"-Djava.io.tmpdir={temporary}"
     environment["DYN4K_CAPTURE_ENV_SENTINEL"] = "portable-capture-check"
     if not (JDK21 / "bin/java").is_file():
         raise CaptureRejected("pinned JDK21 is unavailable")
-    with (output / "source.tar").open("xb") as archive:
-        subprocess.run(("git", "--no-replace-objects", "-c", "core.autocrlf=false", "archive",
-                        "--format=tar", commit), cwd=ROOT,
-                       stdout=archive, check=True)
+    source_command = ("git", "--no-replace-objects", "-c", "core.autocrlf=false",
+                      "archive", "--format=tar", commit)
+    if budget is None:
+        with (output / "source.tar").open("xb") as archive:
+            subprocess.run(source_command, cwd=ROOT, env=environment,
+                           stdout=archive, check=True)
+    elif run_bounded_process(source_command, ROOT, environment,
+                             output / "source.tar", budget, active,
+                             combine_stderr=False):
+        raise CaptureRejected("candidate source archive failed")
+    if budget is not None:
+        budget.check()
     stage_command = [str(ROOT / "gradlew"),
                      ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                      ":dyn4k-core:publishJvmPublicationToStagingRepository",
                      "--rerun-tasks", "--no-daemon", "--console=plain", "--offline",
                      "-Pkotlin.compiler.execution.strategy=in-process"]
-    with (output / "stage.log").open("xb") as log:
-        stage = subprocess.run(stage_command, cwd=ROOT, env=environment,
-                               stdout=log, stderr=subprocess.STDOUT, check=False)
-    if stage.returncode or not STAGED_JAR.is_file():
+    if budget is None:
+        with (output / "stage.log").open("xb") as log:
+            stage = subprocess.run(stage_command, cwd=ROOT, env=environment,
+                                   stdout=log, stderr=subprocess.STDOUT, check=False)
+            stage_code = stage.returncode
+    else:
+        stage_code = run_bounded_process(stage_command, ROOT, environment,
+                                         output / "stage.log", budget, active)
+    if stage_code or not STAGED_JAR.is_file():
         raise CaptureRejected("pinned source publication failed")
-    if capture_output_bytes(output, temporary) >= 1800 * 1024 * 1024:
-        raise CaptureRejected("new capture output exceeded the bounded budget")
+    if budget is not None:
+        budget.check(STAGED_JAR.stat().st_size)
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
+    if budget is not None:
+        budget.check()
     class_load_pattern = output / "worker-class-load-%p.log"
     argument_pattern = temporary / "worker-arguments-%p.log"
     jdi_port = None
@@ -269,6 +385,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
             (PORTABLE / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
             temporary)
         (output / "jdi-helper-classes.zip").write_bytes(helper_zip)
+        check_budget()
     if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
@@ -298,14 +415,16 @@ def _run_capture(method, output, reference_case, commit, temporary):
         target = subprocess.Popen(command, cwd=PORTABLE, env=environment,
                                   stdout=log, stderr=subprocess.STDOUT,
                                   start_new_session=True)
+        if active is not None:
+            active.append(target)
         deadline = time.monotonic() + 900
         next_size_check = time.monotonic()
         try:
             while target.poll() is None:
                 if time.monotonic() >= next_size_check:
-                    if capture_output_bytes(output, temporary) >= 1800 * 1024 * 1024:
-                        raise CaptureRejected("new capture output exceeded the bounded budget")
-                    next_size_check = time.monotonic() + 5
+                    if budget is not None:
+                        budget.check()
+                    next_size_check = time.monotonic() + 0.25
                 if not worker_arguments.exists():
                     output_text = (output / "gradle.log").read_text(errors="replace")
                     matches = re.findall(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
@@ -330,6 +449,8 @@ def _run_capture(method, output, reference_case, commit, temporary):
                                                       env=environment, stdout=helper_log,
                                                       stderr=subprocess.STDOUT,
                                                       start_new_session=True)
+                            if active is not None:
+                                active.append(helper)
                 if helper is not None and helper.poll() not in (None, 0):
                     raise CaptureRejected("JDI controller failed during target execution")
                 if time.monotonic() > deadline:
@@ -339,6 +460,11 @@ def _run_capture(method, output, reference_case, commit, temporary):
             stop_capture_process(helper)
             stop_capture_process(target)
             raise
+    if active is not None:
+        stop_capture_process(target)
+        active.remove(target)
+    if budget is not None:
+        budget.check()
     if method == _FOCUSED_BOOLEAN_METHOD:
         if helper is None or not live_socket_owner:
             raise CaptureRejected("selected JDI worker socket was not observed")
@@ -349,6 +475,11 @@ def _run_capture(method, output, reference_case, commit, temporary):
             raise CaptureRejected("JDI controller did not finish") from error
         if helper.returncode or not jdi_output.is_dir():
             raise CaptureRejected("JDI controller failed")
+        if active is not None:
+            stop_capture_process(helper)
+            active.remove(helper)
+        if budget is not None:
+            budget.check()
     if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_files = sorted(temporary.glob("worker-write-trace.*"))
         if not trace_files:
@@ -357,6 +488,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
         executions = []
         workers = []
         for path in trace_files:
+            check_budget()
             raw = path.read_bytes()
             pid = path.name.removeprefix("worker-write-trace.")
             if not pid.isdecimal():
@@ -389,8 +521,11 @@ def _run_capture(method, output, reference_case, commit, temporary):
                 raw = raw_traces[pid]
                 if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
                     raise CaptureRejected("worker write trace exposed the environment")
+                check_budget(len(raw))
                 archive.writestr("trace." + pid, raw)
+                check_budget()
         (output / "execve.log").write_text("\n".join(sorted(executions)) + "\n")
+        check_budget()
     if method == _FOCUSED_BOOLEAN_METHOD:
         helper_traces = sorted(temporary.glob("jdi-helper-trace.*"))
         helper_pids = []
@@ -398,6 +533,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
             raise CaptureRejected("JDI helper process trace is missing")
         with zipfile.ZipFile(output / "jdi-helper-traces.zip", "x") as archive:
             for path in helper_traces:
+                check_budget()
                 pid = path.name.removeprefix("jdi-helper-trace.")
                 if not pid.isdecimal() or path.is_symlink():
                     raise CaptureRejected("JDI helper trace PID differs")
@@ -407,14 +543,18 @@ def _run_capture(method, output, reference_case, commit, temporary):
                 if any(line.startswith(f'execve("{JDK21 / "bin/java"}"') and
                        line.endswith(" = 0") for line in raw.decode().splitlines()):
                     helper_pids.append(int(pid))
+                check_budget(len(raw))
                 archive.writestr("trace." + pid, raw)
+                check_budget()
         if len(helper_pids) != 1:
             raise CaptureRejected("JDI helper process is ambiguous")
         with zipfile.ZipFile(output / "jdi-evidence.zip", "x") as archive:
             for path in sorted(jdi_output.iterdir()):
                 if not path.is_file() or path.is_symlink():
                     raise CaptureRejected("JDI output inventory differs")
+                check_budget(path.stat().st_size)
                 archive.writestr(path.name, path.read_bytes())
+                check_budget()
         transport = {"schema": "boolean-jdi-transport/1", "port": jdi_port,
                      "worker_pid": selected_worker_pid(trace_prefix),
                      "helper_pid": helper_pids[0],
@@ -423,6 +563,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
                      "live_socket_owner": live_socket_owner}
         (output / "jdi-transport.json").write_text(
             json.dumps(transport, sort_keys=True) + "\n")
+        check_budget()
     reject_environment_trace(output / "execve.log")
     if target.returncode or not xml.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
@@ -443,14 +584,23 @@ def _run_capture(method, output, reference_case, commit, temporary):
         if not raw_argument_log.is_file():
             raise CaptureRejected("executed JVM worker argument log missing")
         worker_argument_log = output / f"worker-arguments-{worker_pid}.log"
+        check_budget(raw_argument_log.stat().st_size)
         shutil.copyfile(raw_argument_log, worker_argument_log)
+        check_budget()
+    check_budget(xml.stat().st_size)
     shutil.copyfile(xml, output / "capture.xml")
+    check_budget()
     with (output / "portable-classes.zip").open("xb") as classes:
-        classes.write(_portable_classes_archive())
+        class_archive = _portable_classes_archive()
+        check_budget(len(class_archive))
+        classes.write(class_archive)
+    check_budget()
     if clean_source() != commit:
         raise CaptureRejected("target source changed during capture")
     runtime_path = JDK21 / "bin/java"
+    check_budget(runtime_path.stat().st_size)
     shutil.copyfile(runtime_path, output / "runtime-java")
+    check_budget()
     files = {key: (output / name).read_bytes() for key, name in {
         "xml": "capture.xml", "stage_log": "stage.log", "gradle_log": "gradle.log",
         "execve_log": "execve.log", "artifact": "artifact.jar",
@@ -464,6 +614,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
         case_path = output / "joint-Revolute-LimitsEnabled-false.jsonl"
         trace, _ = focused_wheel_stream(files["xml"])
         case_path.write_bytes(trace)
+        check_budget()
         files["candidate_case"] = trace
         files["reference_case"] = (output / "reference-case.jsonl").read_bytes()
         files["worker_arguments"] = worker_argument_log.read_bytes()
@@ -479,10 +630,13 @@ def _run_capture(method, output, reference_case, commit, temporary):
         raise CaptureRejected("copied producer artifact differs")
     receipt = make_capture_receipt(files, method, commit,
                                    capture_case_ids()[method], str(runtime_path))
+    check_budget()
     verify_capture_receipt(receipt, files, method, commit,
                            capture_case_ids()[method], str(runtime_path))
+    check_budget()
     (output / "receipt.json").write_text(json.dumps(receipt, sort_keys=True,
                                                      indent=2) + "\n")
+    check_budget()
     if method == "captureWheelActive":
         trace, _ = focused_wheel_stream(files["xml"])
         case_path = output / "joint-Wheel-active.jsonl"
@@ -492,6 +646,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
         (output / "focused-assessment.json").write_text(
             json.dumps(assessment, sort_keys=True, indent=2) + "\n")
     verify_archive_inventory(output, method, worker_log, worker_argument_log)
+    check_budget()
     return receipt
 
 
