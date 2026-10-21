@@ -10,15 +10,14 @@ the class loader ID, and ordered entry/exit records. Each record contains raw
 bits for the `c` and `s` arguments, rotation fields before and after the method,
 the boxed angle, receiver and thread IDs, and the source caller's method and
 bytecode location. The probe requires a VM death event and an exact event count
-before it writes `complete.txt`. Its current completion rule fits the tiny toy.
-A Gradle worker capture needs a separate reviewed endpoint and process witness.
+before it writes `complete.txt`. A disconnect without VM death fails the capture.
 
 `loaded_code.py` compares the observed constant pool and method inventory and
 bytes with a source-pinned JAR class. A match covers only the code that JDI
 exposes. It does not establish the complete loaded class file, classpath, JAR
 origin, JVM loader decision, or source provenance by itself.
 
-`source_guard.py` pins the five source files that define this one-case fixture
+`source_guard.py` pins the six source files that define this one-case fixture
 and call schedule. `witness.py` checks 1,800 ordered calls against 600 marker
 steps and the source schedule: body `b1` integration, then `b0` and `b1`
 Revolute point corrections. All three calls enter `rotatePivotObserved`.
@@ -29,17 +28,21 @@ The three caller bytecode locations must come from an independent source and
 compiled-code review. Without them, the checker returns
 `UNPASSED_SOURCE_CALL_SITE`.
 
-The coordinator must connect a future exact-source worker capture to this
-probe through a reviewed producer change. That change must arrange JDWP before
-the selected worker executes, prove the attached PID and process descendants,
-seal the JDI output with the worker XML and operation markers, and compare the
-JDI receiver IDs to independently witnessed body identities. It must define
-the worker endpoint so missing or later operations reject. It must also bind
-the helper binary and its own execution to the receipt. The current
-`capture_actual.py` does not provide those hooks. A candidate marker or audit
-cannot supply its own independent expected call sequence.
+`capture_actual.py` now starts JDWP for the selected Boolean `jvmTest` worker.
+It checks the worker's live loopback socket before it attaches the helper.
+The producer seals the helper classes, JDI output, process traces, worker XML,
+and operation markers. `actual_arithmetic.py` checks these inputs in a
+versioned `/5` receipt. It derives caller bytecode locations from the staged
+artifact and checks 1,800 JDI calls against 600 worker marker steps. A
+candidate marker or audit cannot supply its own expected call sequence.
 
-Response-file READ bytes, write FD destination, actual JVM loader bytes, and
-global order across threads remain separate premises. A JDI observation is a
-JVM report and does not prove those kernel facts. The fixed 32-ULP failure at
-step 231 and the conditional arithmetic premise remain open.
+The `/5` route has not run on an actual selected Gradle worker. Its source-only
+and toy controls do not establish a passing worker witness. Historical `/4`
+Boolean and `/3` Wheel receipts remain separate, unqualified evidence.
+
+Response-file READ bytes, worker write FD destination, actual JVM loader
+bytes, and global order across threads remain separate premises. The helper
+class ZIP is source-bound, but its JVM class loading is not independently
+proved. A JDI observation is a JVM report and does not prove those kernel
+facts. The fixed 32-ULP failure at step 231 and the conditional arithmetic
+premise remain open.

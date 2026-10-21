@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[4]
 
 
 class SourceGuardTest(unittest.TestCase):
+    def test_guide_describes_current_unpassed_receipt(self):
+        guide = (Path(__file__).resolve().parent / "README.md").read_text()
+        self.assertIn("six source files", guide)
+        self.assertIn("capture_actual.py", guide)
+        self.assertIn("/5", guide)
+        self.assertNotIn("does not provide those hooks", guide)
+
     def test_body_mapping_owner_is_source_pinned(self):
         self.assertIn(
             "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/"
