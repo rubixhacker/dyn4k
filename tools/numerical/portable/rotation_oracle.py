@@ -229,8 +229,8 @@ def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input,
             raise ValueError("rotation pair input differs")
     else:
         raise ValueError("unknown rotation input")
-    branches = ("integrate", "joint", "contact", None) if allow_null_branch else (
-        "integrate", "joint", "contact")
+    branches = ("integrate", "joint", "contact", "fixture", None) if allow_null_branch else (
+        "integrate", "joint", "contact", "fixture")
     if set(call) != fields or call["branch"] not in branches:
         raise ValueError("rotate record shape differs")
     raw = _pair(call["raw"])
@@ -252,6 +252,17 @@ def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input,
         if call["post"][index] != _bits(expected):
             raise ValueError("clamped orientation differs")
     return observed
+
+
+_FIXTURE_CASE_IDS = frozenset((
+    "rotation-premise-mode", "rotation-premise-zero",
+    "rotation-premise-negative-zero", "rotation-premise-tiny-angle",
+    "rotation-premise-subnormal-product",
+))
+
+
+def _fixture_source(case_id, method, expected_method):
+    return case_id in _FIXTURE_CASE_IDS and method == expected_method
 
 
 def _verify_reset(call, pre, trig, start_rotation, end_rotation,
@@ -538,6 +549,10 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                     counts[body] += 1
                     if counts[body] > rotation_cap:
                         raise ValueError("source rotation cap exceeded")
+                    if call["branch"] == "fixture" and not _fixture_source(
+                            case["id"], binding["producer_command"],
+                            "portable.RotationPremiseFixtureTest.captureRotationPremises"):
+                        raise ValueError("fixture source identity differs")
                     observed_modes.append(_verify_rotate(
                         call, pre, trig, binding["allowed_evaluations"],
                         binding["pair_inputs"].get(str(position)),
@@ -608,8 +623,11 @@ def verify_operation_marker(marker, allowed_evaluations=("strict",), *,
                 (marker["body_id"] is not None and
                  (type(marker["body_id"]) is not str or not marker["body_id"])):
             raise ValueError("operation case binding shape differs")
-        if marker["branch"] not in (None, "integrate", "joint", "contact"):
+        if marker["branch"] not in (None, "integrate", "joint", "contact", "fixture"):
             raise ValueError("operation source branch differs")
+        if marker["branch"] == "fixture" and not _fixture_source(
+                marker["case_id"], marker["method"], "captureRotationPremises"):
+            raise ValueError("fixture source identity differs")
         if type(allowed_evaluations) not in (tuple, list) or \
                 not allowed_evaluations or any(mode not in _EVALUATIONS
                                                 for mode in allowed_evaluations):

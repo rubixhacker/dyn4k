@@ -48,6 +48,7 @@ _WRAPPERS = {
     "captureConfigured120Repeat2": "configured120Repeat2",
     "captureJoints": "everyJointWithInitialAndApplicableActiveModes",
     "captureWheelActive": "everyJointWithInitialAndApplicableActiveModes",
+    "captureRotationPremises": "captureRotationPremises",
     "captureRevoluteLimitsFalse": "independentJointBooleanModes",
     "captureJointBooleanModes": "independentJointBooleanModes",
     "captureJointNumericModes": "independentJointNumericAndLimitModes",
@@ -58,6 +59,18 @@ _WRAPPERS = {
 
 _FOCUSED_WHEEL_STEP_CALLS = (("b1", "integrate"), ("b0", "joint"),
                              ("b1", "joint"))
+_ROTATION_PREMISES = (
+    ("rotation-premise-mode", "bfd0cd683f9d3fea", "3feee0a3e97da062",
+     "4001c867da8b78fc"),
+    ("rotation-premise-zero", "3ff0000000000000", "0000000000000000",
+     "0000000000000000"),
+    ("rotation-premise-negative-zero", "3ff0000000000000", "8000000000000000",
+     "8000000000000000"),
+    ("rotation-premise-tiny-angle", "3ff0000000000000", "0000000000000000",
+     "0000000000000001"),
+    ("rotation-premise-subnormal-product", "0000000000000001",
+     "0000000000000000", "0000000000000000"),
+)
 _FOCUSED_BOOLEAN_CASE = "joint-Revolute-LimitsEnabled-false"
 _FOCUSED_BOOLEAN_METHOD = "captureRevoluteLimitsFalse"
 _FOCUSED_BOOLEAN_CLASS = "portable.RevoluteLimitsFalseCaptureTest"
@@ -120,16 +133,89 @@ def expected_case_ids(include_focused=False):
             raise CaptureRejected(f"unmapped case: {case_id}")
         result[method].append(case_id)
     inventory = [case_id for method, ids in result.items()
-                 if method not in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD)
+                 if method not in ("captureWheelActive", "captureRotationPremises",
+                                  _FOCUSED_BOOLEAN_METHOD)
                  for case_id in ids]
     if len(inventory) != 332 or len(set(inventory)) != 332:
         raise CaptureRejected("prospective wrapper inventory differs")
     if include_focused:
         result["captureWheelActive"] = ["joint-Wheel-active"]
+        result["captureRotationPremises"] = [row[0] for row in _ROTATION_PREMISES]
     else:
         del result["captureWheelActive"]
+        del result["captureRotationPremises"]
     del result[_FOCUSED_BOOLEAN_METHOD]
     return result
+
+
+def verify_rotation_premise_capture(xml, expected_ids):
+    if expected_ids != [row[0] for row in _ROTATION_PREMISES]:
+        raise CaptureRejected("rotation premise case inventory differs")
+    try:
+        document = ET.fromstring(xml)
+        cases = document.findall("testcase")
+        outputs = document.findall("system-out")
+        if document.tag != "testsuite" or len(cases) != 1 or \
+                cases[0].get("classname") != "portable.RotationPremiseFixtureTest" or \
+                not cases[0].get("name", "").startswith("captureRotationPremises") or \
+                len(outputs) != 1 or outputs[0].text is None or \
+                cases[0].find("failure") is not None or \
+                cases[0].find("skipped") is not None:
+            raise CaptureRejected("rotation premise target test differs")
+        lines = outputs[0].text.splitlines()
+        if len(lines) != 4 * len(_ROTATION_PREMISES):
+            raise CaptureRejected("rotation premise output count differs")
+        trace = []
+        arithmetic = []
+        for index, (case_id, cost, sint, angle) in enumerate(_ROTATION_PREMISES):
+            group = lines[index * 4:index * 4 + 4]
+            if [line.split(" ", 1)[0] for line in group] != [
+                    "NUMERICAL_JSON", "PROSPECTIVE_ROTATION_JSON",
+                    "NUMERICAL_JSON", "NUMERICAL_JSON"]:
+                raise CaptureRejected("rotation premise record order differs")
+            inputs, marker, state, ending = [json.loads(
+                line.split(" ", 1)[1], object_pairs_hook=_unique_object)
+                for line in group]
+            if inputs.get("kind") != "inputs" or inputs.get("id") != case_id or \
+                    inputs.get("steps") != 1 or \
+                    inputs.get("setup") != {"bodies": [{"id": "b0"}]} or \
+                    state.get("kind") != "state" or state.get("id") != case_id or \
+                    state.get("step") != 1 or ending != {
+                        "kind": "case-end", "id": case_id, "steps": 1}:
+                raise CaptureRejected("rotation premise trace identity differs")
+            initial = inputs.get("initial", {}).get("bodies", [])
+            observed = state.get("state", {}).get("bodies", [])
+            if len(initial) != 1 or len(observed) != 1 or \
+                    initial[0].get("id") != "b0" or observed[0].get("id") != "b0" or \
+                    any(struct.pack(">d", initial[0]["transform"][key]).hex() != value
+                        for key, value in (("getCost", cost), ("getSint", sint))) or \
+                    marker.get("case_id") != case_id or marker.get("method") != \
+                    "captureRotationPremises" or marker.get("sequence") != 0 or \
+                    marker.get("target_token") != 0 or marker.get("step") != 1 or \
+                    marker.get("body_id") != "b0" or marker.get("branch") != "fixture" or \
+                    marker.get("source") != "origin" or marker.get("kind") != "rotate" or \
+                    marker.get("angle_bits") != angle or marker.get("pre") != [cost, sint] or \
+                    any(struct.pack(">d", observed[0]["transform"][key]).hex() != value
+                        for key, value in zip(("getCost", "getSint"), marker["post"])):
+                raise CaptureRejected("rotation premise source binding differs")
+            status = verify_operation_marker(marker,
+                ("strict", "fma_left", "fma_right", "fused"))["status"]
+            if status != "PASSED_ARITHMETIC":
+                raise CaptureRejected("rotation premise arithmetic differs")
+            arithmetic.append(status)
+            trace.extend(line.split(" ", 1)[1] + "\n" for line in
+                         (group[0], group[2], group[3]))
+        return {"status": "VERIFIED_FIXTURE_EXECUTION", "qualification": "UNPASSED",
+                "cases": len(_ROTATION_PREMISES), "steps": len(_ROTATION_PREMISES),
+                "operations_verified": sum(status == "PASSED_ARITHMETIC"
+                                           for status in arithmetic),
+                "operation_statuses": dict(zip(expected_ids, arithmetic)),
+                "selected_resets": 0, "trace_sha256": _sha("".join(trace).encode())}
+    except (ET.ParseError, UnicodeError, TypeError, KeyError, IndexError,
+            OverflowError, struct.error, ValueError) as error:
+        if isinstance(error, CaptureRejected):
+            raise
+        raise CaptureRejected("rotation premise output is malformed") from error
 
 
 def verify_capture(xml, method, expected_ids=None, reset_order="either"):
@@ -139,9 +225,12 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
         raise CaptureRejected("unknown accepted reset order")
     if expected_ids is None:
         expected_ids = ([_FOCUSED_BOOLEAN_CASE] if method == _FOCUSED_BOOLEAN_METHOD
-                        else expected_case_ids(method == "captureWheelActive")[method])
+                        else expected_case_ids(method in (
+                            "captureWheelActive", "captureRotationPremises"))[method])
     if not isinstance(expected_ids, list) or len(set(expected_ids)) != len(expected_ids):
         raise CaptureRejected("expected case inventory differs")
+    if method == "captureRotationPremises":
+        return verify_rotation_premise_capture(xml, expected_ids)
     expected_method = _WRAPPERS[method]
     trace_hash = hashlib.sha256()
     operation_hash = hashlib.sha256()
@@ -524,6 +613,13 @@ _WHEEL_RECORDER_CLASSES = frozenset({
     "portable/NumericalRecorder$capture$timeOfImpact$1.class",
     "portable/NumericalRecorder$json$$inlined$sortedBy$1.class",
 })
+_FIXTURE_CLASSES = frozenset({
+    "portable/RotationPremiseFixtureTest.class",
+    "portable/RotationPremiseFixtureTest$SeededTransform.class",
+    "portable/RotationPremiseFixtureTest$PremiseInput.class",
+})
+_FIXTURE_CLASS_MEMBER = re.compile(
+    r"(?:^|/)portable/RotationPremiseFixtureTest(?:\$[^/]*)?\.class$")
 
 
 def _sha(value):
@@ -665,8 +761,14 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
         raise CaptureRejected("worker class-load encoding differs") from error
     audited = {name.removesuffix(".class").replace("/", ".")
                for name in _AUDITED_ENGINE_CLASSES}
-    required = audited if require_toi_reset else audited - {
-        _TOI_RESET_CLASS.removesuffix(".class").replace("/", ".")}
+    if method == "captureRotationPremises":
+        required = {name.removesuffix(".class").replace("/", ".") for name in (
+            "org/dyn4j/geometry/Transform.class",
+            "org/dyn4j/geometry/RotationOperationTap.class",
+            "org/dyn4j/geometry/RotationCaptureSlot.class")}
+    else:
+        required = audited if require_toi_reset else audited - {
+            _TOI_RESET_CLASS.removesuffix(".class").replace("/", ".")}
     observed = {}
     portable_sources = {name: source_set for source_set, names in
                         portable_classes.items() for name in names}
@@ -717,15 +819,16 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
         raise CaptureRejected("audited worker class-load inventory differs")
     if not dynamic_owners <= portable_observed:
         raise CaptureRejected("portable lambda owner was not loaded")
-    required_portable = {"portable/NumericalRecorder.class"}
-    required_portable.add("portable/RevoluteLimitsFalseCaptureTest.class" if
-                          method == _FOCUSED_BOOLEAN_METHOD else
-                          "portable/ProspectiveArithmeticTest.class")
-    if method != _FOCUSED_BOOLEAN_METHOD:
-        required_portable.add("portable/PortableMatrixTest.class")
-    if method == "captureWheelActive":
-        required_portable |= _WHEEL_RECORDER_CLASSES
-    elif method == _FOCUSED_BOOLEAN_METHOD:
+    if method == "captureRotationPremises":
+        required_portable = _FIXTURE_CLASSES | {"portable/ProspectiveOperationMarker.class"}
+    else:
+        required_portable = {"portable/NumericalRecorder.class"}
+        required_portable.add("portable/RevoluteLimitsFalseCaptureTest.class" if
+                              method == _FOCUSED_BOOLEAN_METHOD else
+                              "portable/ProspectiveArithmeticTest.class")
+        if method != _FOCUSED_BOOLEAN_METHOD:
+            required_portable.add("portable/PortableMatrixTest.class")
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         required_portable |= _WHEEL_RECORDER_CLASSES
     if not required_portable <= portable_observed:
         raise CaptureRejected("required portable worker class-load inventory differs")
@@ -774,6 +877,8 @@ def _check_process(files, runtime_executable, method, jdi_port=None):
             not in process_lines[0]:
         raise CaptureRejected("executed worker class-load option differs")
     target_class = (_FOCUSED_BOOLEAN_CLASS if method == _FOCUSED_BOOLEAN_METHOD
+                    else "portable.RotationPremiseFixtureTest"
+                    if method == "captureRotationPremises"
                     else "portable.ProspectiveArithmeticTest")
     capture_invocations = [line for line in executions.splitlines()
                            if f'execve("{_ROOT / "gradlew"}"' in line and
@@ -804,6 +909,11 @@ def _check_process(files, runtime_executable, method, jdi_port=None):
                         not name.endswith(".class") for name in entries) or \
                     classes.testzip() is not None:
                 raise CaptureRejected("portable test payload differs")
+            if method == "captureRotationPremises" and {
+                    name.removeprefix("test/") for name in names
+                    if name.startswith("test/") and _FIXTURE_CLASS_MEMBER.search(name)
+            } != _FIXTURE_CLASSES:
+                raise CaptureRejected("compiled fixture class inventory differs")
             portable_classes = {
                 source_set: {name.removeprefix(source_set + "/"): _sha(classes.read(name))
                              for name in names if name.startswith(source_set + "/portable/")}
@@ -1158,7 +1268,8 @@ def _verify_boolean_jdi(files, summary, worker_pid):
 
 
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
-    requires_writes = method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD)
+    requires_writes = method in ("captureWheelActive", "captureRotationPremises",
+                                 _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
                                      if requires_writes else set())
     jdi_files = (set(files) & _JDI_FILES) if type(files) is dict else set()

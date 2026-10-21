@@ -269,6 +269,21 @@ class RotationOracleTest(unittest.TestCase):
                 with self.subTest(schema=data[0]["schema"], calls=calls):
                     self.assertEqual(self.verify(data)["status"], "FAILED_COVERAGE")
 
+    def test_fixture_branch_requires_pinned_case_and_method_for_both_schemas(self):
+        for fixture in (self.fixture, self.synthetic_schema_two_fixture):
+            for case_id, command in (("one", "target-test"),
+                                     ("rotation-premise-mode", "target-test"),
+                                     ("one", "portable.RotationPremiseFixtureTest.captureRotationPremises")):
+                data = fixture()
+                data[0]["case_id"] = case_id
+                data[1]["id"] = case_id
+                data[4]["producer_command"] = command
+                data[0]["calls"][0]["branch"] = "fixture"
+                data[4]["expected_calls"][0]["branch"] = "fixture"
+                with self.subTest(schema=data[0]["schema"], case_id=case_id,
+                                  command=command):
+                    self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+
     def test_schema_two_requires_versioned_external_binding(self):
         data = self.synthetic_schema_two_fixture()
         self.assertEqual(verify_rotation_arithmetic(*data[:4], 5)["status"], "UNPASSED")

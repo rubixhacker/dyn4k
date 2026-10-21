@@ -10,10 +10,21 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import capture_actual
+import baseline_capture
 from actual_arithmetic import CaptureRejected
 
 
 class CaptureSourceGuardTest(unittest.TestCase):
+    def test_jvm_fixture_preserves_approved_baseline_source(self):
+        self.assertEqual(baseline_capture.fixture_source_sha256(),
+                         "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce")
+
+    def test_rotation_fixture_requires_sealed_worker_writes(self):
+        names = capture_actual.archive_file_names(
+            "captureRotationPremises", "worker-class-load-42.log")
+        self.assertIn("worker-write-traces.zip", names)
+        self.assertNotIn("focused-assessment.json", names)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home())))
         self.addCleanup(temporary.cleanup)
@@ -69,7 +80,9 @@ class CaptureSourceGuardTest(unittest.TestCase):
                          "portable.RevoluteLimitsFalseCaptureTest")
         self.assertEqual(capture_actual.target_test_class("captureWheelActive"),
                          "portable.ProspectiveArithmeticTest")
-        self.assertEqual(len(capture_actual.capture_case_ids()), 17)
+        self.assertEqual(capture_actual.target_test_class("captureRotationPremises"),
+                         "portable.RotationPremiseFixtureTest")
+        self.assertEqual(len(capture_actual.capture_case_ids()), 18)
         with patch.object(capture_actual, "clean_source",
                           side_effect=CaptureRejected("selected source guard")):
             with self.assertRaisesRegex(CaptureRejected, "selected source guard"):

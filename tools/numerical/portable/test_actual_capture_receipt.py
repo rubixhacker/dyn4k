@@ -16,12 +16,92 @@ from unittest.mock import patch
 import actual_arithmetic as actual
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
 from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
-                               _ROOT, _STAGED_JAR, _WHEEL_RECORDER_CLASSES,
+                               _FIXTURE_CLASSES, _ROOT, _STAGED_JAR,
+                               _WHEEL_RECORDER_CLASSES,
                                _inspect_worker_classpath,
                                make_capture_receipt,
                                verify_capture_receipt)
 from test_actual_arithmetic import fixture, focused_wheel_fixture, xml_for
 from test_rotation_marker import bits, marker
+
+
+class RetainedFixtureProviderTest(unittest.TestCase):
+    def _retained(self):
+        archive = os.environ.get("DYN4K_ROTATION_ARCHIVE")
+        origin_name = os.environ.get("DYN4K_ROTATION_ORIGIN")
+        if archive is None or origin_name is None:
+            self.skipTest("retained local fixture archive is unavailable")
+        from external_rotation_binding import _load
+        origin = Path(origin_name).resolve()
+        receipt, files, method = _load(archive, origin)
+        return receipt, files, method, origin
+
+    def test_resealed_alternate_fixture_provider_fails(self):
+        receipt, original, method, origin = self._retained()
+        files = dict(original)
+        fixture_name = "portable/RotationPremiseFixtureTest.class"
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
+            compiled = classes.read("test/" + fixture_name)
+            source_name = b"RotationPremiseFixtureTest.kt"
+            self.assertEqual(compiled.count(source_name), 1)
+            altered = compiled.replace(source_name, b"RotationPremiseText.kt")
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            shadow = Path(folder) / "alternate.jar"
+            with zipfile.ZipFile(shadow, "w") as classes:
+                classes.writestr(fixture_name, altered)
+            classpath = files["worker_classpath"].decode().splitlines()
+            files["worker_classpath"] = (
+                f"-cp\n{shadow}:{classpath[1]}\n").encode()
+            resealed = copy.deepcopy(receipt)
+            resealed["worker_classpath_sha256"] = hashlib.sha256(
+                files["worker_classpath"]).hexdigest()
+            resealed["worker_classpath_entries"].insert(0, {
+                "path": str(shadow),
+                "sha256": hashlib.sha256(shadow.read_bytes()).hexdigest(),
+            })
+            for redirect_load in (False, True):
+                if redirect_load:
+                    test_root = (origin / "tools/numerical/portable/build/classes/"
+                                 "kotlin/jvm/test")
+                    files["worker_class_load"] = files["worker_class_load"].replace(
+                        test_root.as_uri().encode() + b"/", shadow.as_uri().encode())
+                    resealed["worker_class_load_sha256"] = hashlib.sha256(
+                        files["worker_class_load"]).hexdigest()
+                with self.subTest(redirect_load=redirect_load), self.assertRaises(
+                        CaptureRejected):
+                    verify_capture_receipt(
+                        resealed, files, method, receipt["candidate_commit"],
+                        ["rotation-premise-mode", "rotation-premise-zero",
+                         "rotation-premise-negative-zero", "rotation-premise-tiny-angle",
+                         "rotation-premise-subnormal-product"],
+                        receipt["runtime_executable"])
+
+    def test_resealed_missing_or_redirected_fixture_load_fails(self):
+        receipt, original, method, origin = self._retained()
+        lines = original["worker_class_load"].splitlines(keepends=True)
+        for changed in (
+                [line for line in lines if b"RotationPremiseFixtureTest$SeededTransform "
+                 not in line],
+                [line.replace(b"RotationPremiseFixtureTest source: file:",
+                              b"RotationPremiseFixtureTest source: file:/other/")
+                 for line in lines],
+                [line.replace(b"source: portable.RotationPremiseFixtureTest",
+                              b"source: file:/other/fixture.jar")
+                 if b"RotationPremiseFixtureTest$$Lambda/" in line else line
+                 for line in lines]):
+            files = dict(original)
+            files["worker_class_load"] = b"".join(changed)
+            resealed = copy.deepcopy(receipt)
+            resealed["worker_class_load_sha256"] = hashlib.sha256(
+                files["worker_class_load"]).hexdigest()
+            with self.subTest(changed_load=hashlib.sha256(
+                    files["worker_class_load"]).hexdigest()), self.assertRaises(
+                    CaptureRejected):
+                verify_capture_receipt(
+                    resealed, files, method, receipt["candidate_commit"],
+                    ["rotation-premise-mode", "rotation-premise-zero",
+                     "rotation-premise-negative-zero", "rotation-premise-tiny-angle",
+                     "rotation-premise-subnormal-product"], receipt["runtime_executable"])
 
 
 class RetainedWheelProviderTest(unittest.TestCase):
@@ -858,8 +938,9 @@ class ClasspathProviderTest(unittest.TestCase):
             names = {
                 "main": {"portable/NumericalRecorder.class",
                          "portable/NumericalRecorder$capture$steps$1.class"},
-                "test": {"portable/PortableMatrixTest.class",
-                         "portable/ProspectiveArithmeticTest.class"},
+                "test": set(_FIXTURE_CLASSES) | {
+                    "portable/PortableMatrixTest.class",
+                    "portable/ProspectiveArithmeticTest.class"},
             }
             inventory = {
                 source_set: {name: hashlib.sha256(b"compiled").hexdigest()

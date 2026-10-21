@@ -2,6 +2,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import os
 import struct
 import subprocess
@@ -22,9 +23,44 @@ from test_rotation_marker import bits, marker
 
 def xml_for(lines, method="captureGeometry"):
     output = "\n".join(lines) + "\n"
+    test_class = ("RotationPremiseFixtureTest" if method == "captureRotationPremises"
+                  else "ProspectiveArithmeticTest")
     return (f'<testsuite tests="1" skipped="0" failures="0" errors="0">'
-            f'<testcase classname="portable.ProspectiveArithmeticTest" name="{method}[jvm]"/>'
+            f'<testcase classname="portable.{test_class}" name="{method}[jvm]"/>'
             f'<system-out>{escape(output)}</system-out></testsuite>').encode()
+
+
+def synthetic_rotation_premise_lines():
+    lines = []
+    for case_id, cost_bits, sint_bits, angle_bits in actual_arithmetic._ROTATION_PREMISES:
+        cost, sint, angle = (struct.unpack(">d", bytes.fromhex(value))[0]
+                             for value in (cost_bits, sint_bits, angle_bits))
+        trig_cost, trig_sint = math.cos(angle), math.sin(angle)
+        raw_cost = trig_cost * cost - trig_sint * sint
+        raw_sint = trig_sint * cost + trig_cost * sint
+        post_cost = min(1.0, max(-1.0, raw_cost))
+        post_sint = min(1.0, max(-1.0, raw_sint))
+        operation = marker()
+        operation.update(method="captureRotationPremises", case_id=case_id,
+                         step=1, body_id="b0", branch="fixture",
+                         pre=[cost_bits, sint_bits], angle_bits=angle_bits,
+                         trig=[bits(trig_cost), bits(trig_sint)],
+                         raw=[bits(raw_cost), bits(raw_sint)],
+                         post=[bits(post_cost), bits(post_sint)])
+        initial = {"bodies": [{"id": "b0", "transform": {
+            "getCost": cost, "getSint": sint}}]}
+        state = {"bodies": [{"id": "b0", "transform": {
+            "getCost": post_cost, "getSint": post_sint}}]}
+        records = (("NUMERICAL_JSON", {"kind": "inputs", "id": case_id,
+                     "steps": 1, "setup": {"bodies": [{"id": "b0"}]},
+                     "initial": initial}),
+                   ("PROSPECTIVE_ROTATION_JSON", operation),
+                   ("NUMERICAL_JSON", {"kind": "state", "id": case_id,
+                     "step": 1, "state": state}),
+                   ("NUMERICAL_JSON", {"kind": "case-end", "id": case_id,
+                     "steps": 1}))
+        lines.extend(prefix + " " + json.dumps(data) for prefix, data in records)
+    return lines
 
 
 def fixture():
@@ -189,6 +225,38 @@ class CaptureArchiveTest(unittest.TestCase):
 
 
 class ActualArithmeticTest(unittest.TestCase):
+    def test_separate_rotation_fixture_requires_exact_runtime_records(self):
+        rows = synthetic_rotation_premise_lines()
+        expected = [row[0] for row in actual_arithmetic._ROTATION_PREMISES]
+        summary = verify_capture(xml_for(rows, "captureRotationPremises"),
+                                 "captureRotationPremises", expected)
+        self.assertEqual(summary["operations_verified"], 5)
+        self.assertEqual(summary["qualification"], "UNPASSED")
+        changed = rows[:]
+        operation = json.loads(changed[1].split(" ", 1)[1])
+        operation["raw"][0] = bits(0.0)
+        changed[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+        with self.assertRaisesRegex(CaptureRejected, "rotation premise arithmetic differs"):
+            verify_capture(xml_for(changed, "captureRotationPremises"),
+                           "captureRotationPremises", expected)
+        for field, value in (("case_id", "wrong"), ("angle_bits", bits(1.0)),
+                             ("branch", "joint"), ("pre", [bits(1.0), bits(0.0)])):
+            changed = rows[:]
+            operation = json.loads(changed[1].split(" ", 1)[1])
+            operation[field] = value
+            changed[1] = "PROSPECTIVE_ROTATION_JSON " + json.dumps(operation)
+            with self.subTest(field=field), self.assertRaises(CaptureRejected):
+                verify_capture(xml_for(changed, "captureRotationPremises"),
+                               "captureRotationPremises", expected)
+        with self.assertRaises(CaptureRejected):
+            verify_capture(xml_for(rows[:-1], "captureRotationPremises"),
+                           "captureRotationPremises", expected)
+        malformed = rows[:]
+        malformed[0] = malformed[0][:-1]
+        with self.assertRaisesRegex(CaptureRejected, "rotation premise output is malformed"):
+            verify_capture(xml_for(malformed, "captureRotationPremises"),
+                           "captureRotationPremises", expected)
+
     def test_accepted_selection_after_resets_matches_callback_and_targets(self):
         rows = fixture()
         case_id = "geometry-boundary-s0-o0-d0"
@@ -339,9 +407,14 @@ class ActualArithmeticTest(unittest.TestCase):
     def test_case_inventory_is_complete(self):
         mapping = expected_case_ids(include_focused=True)
         self.assertEqual(mapping["captureWheelActive"], ["joint-Wheel-active"])
+        self.assertEqual(mapping["captureRotationPremises"], [
+            "rotation-premise-mode", "rotation-premise-zero",
+            "rotation-premise-negative-zero",
+            "rotation-premise-tiny-angle", "rotation-premise-subnormal-product"])
         self.assertNotIn("captureWheelActive", expected_case_ids())
+        self.assertNotIn("captureRotationPremises", expected_case_ids())
         full = {name: ids for name, ids in mapping.items()
-                if name != "captureWheelActive"}
+                if name not in ("captureWheelActive", "captureRotationPremises")}
         self.assertEqual(len(full), 15)
         self.assertEqual(sum(map(len, full.values())), 332)
         self.assertEqual(len(mapping["captureJoints"]), 24)

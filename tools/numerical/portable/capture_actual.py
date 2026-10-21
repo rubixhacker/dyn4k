@@ -51,7 +51,7 @@ def trace_syscalls(method, helper=False):
         return "trace=execve,execveat,clone,clone3,connect,openat,write,writev,close"
     if method == _FOCUSED_BOOLEAN_METHOD:
         return "trace=execve,execveat,clone,clone3,bind,listen,write,writev,sendto,sendmsg"
-    if method == "captureWheelActive":
+    if method in ("captureWheelActive", "captureRotationPremises"):
         return "trace=execve,clone,clone3,write,writev,sendto,sendmsg"
     return "trace=execve"
 
@@ -237,9 +237,10 @@ def archive_file_names(method, worker_log, worker_argument_log=None):
         "portable-classes.zip", "runtime-java", "receipt.json",
         Path(worker_log).name,
     }
+    if method in ("captureWheelActive", "captureRotationPremises"):
+        names.add("worker-write-traces.zip")
     if method == "captureWheelActive":
-        names.update(("worker-write-traces.zip", "joint-Wheel-active.jsonl",
-                      "focused-assessment.json"))
+        names.update(("joint-Wheel-active.jsonl", "focused-assessment.json"))
     elif method == _FOCUSED_BOOLEAN_METHOD:
         if worker_argument_log is None:
             raise CaptureRejected("worker argument log is missing")
@@ -260,6 +261,8 @@ def target_test_class(method):
         raise CaptureRejected("unknown arithmetic producer method")
     return ("portable.RevoluteLimitsFalseCaptureTest" if
             method == _FOCUSED_BOOLEAN_METHOD else
+            "portable.RotationPremiseFixtureTest"
+            if method == "captureRotationPremises" else
             "portable.ProspectiveArithmeticTest")
 
 
@@ -275,7 +278,8 @@ def verify_archive_inventory(output, method, worker_log, worker_argument_log=Non
         if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
             raise CaptureRejected("archive exposed the environment")
     archives = ({"worker-write-traces.zip"} if method in
-                ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD) else set())
+                ("captureWheelActive", "captureRotationPremises",
+                 _FOCUSED_BOOLEAN_METHOD) else set())
     if method == _FOCUSED_BOOLEAN_METHOD:
         archives |= {"jdi-helper-classes.zip", "jdi-evidence.zip",
                      "jdi-helper-traces.zip"}
@@ -410,7 +414,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
             temporary)
         (output / "jdi-helper-classes.zip").write_bytes(helper_zip)
         check_budget()
-    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
+    if method in ("captureWheelActive", "captureRotationPremises",
+                  _FOCUSED_BOOLEAN_METHOD):
         trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
                   trace_syscalls(method),
@@ -502,7 +507,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
             active.remove(helper)
         if budget is not None:
             budget.check()
-    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
+    if method in ("captureWheelActive", "captureRotationPremises",
+                  _FOCUSED_BOOLEAN_METHOD):
         trace_files = sorted(temporary.glob("worker-write-trace.*"))
         if not trace_files:
             raise CaptureRejected("worker write trace is missing")
@@ -629,7 +635,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
         "worker_classpath": "worker-classpath.txt",
         "portable_classes": "portable-classes.zip"}.items()}
     files["worker_class_load"] = worker_log.read_bytes()
-    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
+    if method in ("captureWheelActive", "captureRotationPremises",
+                  _FOCUSED_BOOLEAN_METHOD):
         files["worker_write_traces"] = (output / "worker-write-traces.zip").read_bytes()
     if method == _FOCUSED_BOOLEAN_METHOD:
         case_path = output / "joint-Revolute-LimitsEnabled-false.jsonl"

@@ -25,6 +25,30 @@ def marker():
 
 
 class OperationMarkerTest(unittest.TestCase):
+    def test_separate_fixture_branch_is_source_bound(self):
+        observed = marker()
+        observed.update(method="captureRotationPremises",
+                        case_id="rotation-premise-zero", step=1,
+                        body_id="b0", branch="fixture")
+        self.assertEqual(verify_operation_marker(observed)["status"],
+                         "PASSED_ARITHMETIC")
+        for case_id in ("rotation-premise-mode", "rotation-premise-zero",
+                        "rotation-premise-negative-zero", "rotation-premise-tiny-angle",
+                        "rotation-premise-subnormal-product"):
+            observed["case_id"] = case_id
+            with self.subTest(case_id=case_id):
+                self.assertEqual(verify_operation_marker(observed)["status"],
+                                 "PASSED_ARITHMETIC")
+        for case_id, method in (("one", "captureRotationPremises"),
+                                ("rotation-premise-mode", "observedProbe")):
+            observed.update(case_id=case_id, method=method)
+            with self.subTest(case_id=case_id, method=method):
+                self.assertEqual(verify_operation_marker(observed)["status"],
+                                 "FAILED_ARITHMETIC")
+        observed["branch"] = "unreviewed"
+        self.assertEqual(verify_operation_marker(observed)["status"],
+                         "FAILED_ARITHMETIC")
+
     def test_executed_rotate_zero_and_adverse_bits(self):
         original = marker()
         self.assertEqual(verify_operation_marker(original)["status"], "PASSED_ARITHMETIC")
