@@ -203,12 +203,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
                  "print(\"GNU MPFR\", mpfr.version)'"),
                 ("name: Test source-only numerical regressions",
-                 "env -u OLLAMA_API_KEY -u DYN4K_WHEEL_ARCHIVE "
+                 "env -u OLLAMA_API_KEY -u DYN4K_JDI_JDK_HOME "
+                 "-u DYN4K_JDI_RETAINED_JAR -u DYN4K_WHEEL_ARCHIVE "
                  "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
                  "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
                  "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
                  "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
-                 "-u DYN4K_BOOLEAN_JDI_TOY -u DYN4K_JDI_RETAINED_JAR "
+                 "-u DYN4K_BOOLEAN_JDI_TOY "
                  "-u BOOLEAN_JDI_TOY_ROOT "
                  "PYTHONPATH=tools/numerical/portable:"
                  "tools/numerical/portable/boolean_rotation_jdi "
@@ -345,7 +346,10 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("runner label", "runs-on: ubuntu-26.04", "runs-on: ubuntu-latest"),
             ("history depth", "fetch-depth: 0", "fetch-depth: 1"),
             ("archive unset", "-u DYN4K_WHEEL_ORIGIN ", ""),
+            ("JDI JDK home unset omitted", "-u DYN4K_JDI_JDK_HOME ", ""),
+            ("JDI retained JAR unset omitted", "-u DYN4K_JDI_RETAINED_JAR ", ""),
             ("numerical module", "test_rotation_oracle", "test_rotation_oracle_changed"),
+            ("JDI bridge module omitted", "test_jdi_bridge", "test_jdi_bridge_changed"),
             ("capture regression omitted", "              test_capture_actual \\\n", ""),
             ("JDI bridge regression omitted", "              test_jdi_bridge\n", ""),
             ("JDI reference origin unset omitted", "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN ", ""),
@@ -467,12 +471,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         script = textwrap.dedent(step.group(1))
         command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
         self.assertEqual(
-            "env -u OLLAMA_API_KEY -u DYN4K_WHEEL_ARCHIVE "
+            "env -u OLLAMA_API_KEY -u DYN4K_JDI_JDK_HOME "
+            "-u DYN4K_JDI_RETAINED_JAR -u DYN4K_WHEEL_ARCHIVE "
             "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
             "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
             "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
             "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
-            "-u DYN4K_BOOLEAN_JDI_TOY -u DYN4K_JDI_RETAINED_JAR "
+            "-u DYN4K_BOOLEAN_JDI_TOY "
             "-u BOOLEAN_JDI_TOY_ROOT "
             "PYTHONPATH=tools/numerical/portable:"
             "tools/numerical/portable/boolean_rotation_jdi "

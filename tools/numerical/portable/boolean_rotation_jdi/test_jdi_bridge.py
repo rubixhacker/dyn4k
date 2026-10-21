@@ -1,6 +1,7 @@
 import io
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -265,18 +266,52 @@ class JdiBridgeTest(unittest.TestCase):
 
     def test_vm_disconnect_is_not_vm_death(self):
         source = Path(__file__).resolve().parent
+        configured_home = os.environ.get("DYN4K_JDI_JDK_HOME")
+        if configured_home:
+            java_home = Path(configured_home).expanduser().resolve()
+            java = java_home / "bin" / "java"
+            javac = java_home / "bin" / "javac"
+            if not java.is_file() or not javac.is_file() or not os.access(java, os.X_OK) or \
+                    not os.access(javac, os.X_OK):
+                self.fail("DYN4K_JDI_JDK_HOME must contain executable Java 21 tools")
+        else:
+            java_name = shutil.which("java")
+            javac_name = shutil.which("javac")
+            if java_name is None or javac_name is None:
+                self.skipTest(
+                    "JDK 21 is unavailable; set DYN4K_JDI_JDK_HOME or provide java and javac"
+                )
+            java = Path(java_name).resolve()
+            javac = Path(javac_name).resolve()
+            if java.parent != javac.parent:
+                self.skipTest("system java and javac do not share a toolchain")
+            java_home = java.parent.parent
+
+        for executable in (java, javac):
+            version = subprocess.run((str(executable), "-version"), capture_output=True,
+                                     text=True, timeout=10)
+            self.assertEqual(version.returncode, 0, "Java tool version check failed")
+            output = version.stdout + version.stderr
+            token = next((part.strip('"') for part in output.split()
+                          if part.strip('"')[:1].isdigit()), None)
+            is_java_21 = token is not None and token.split(".", 1)[0].split("-", 1)[0] == "21"
+            if not is_java_21:
+                if configured_home:
+                    self.fail("DYN4K_JDI_JDK_HOME does not point to Java 21")
+                self.skipTest("system Java toolchain is not version 21")
+
         environment = os.environ.copy()
         environment.pop("OLLAMA_API_KEY", None)
-        environment["JAVA_HOME"] = "/tmp/dyn4k-tools/jdk21"
+        environment["JAVA_HOME"] = str(java_home)
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as root:
             environment["TMPDIR"] = root
-            build = subprocess.run(("/tmp/dyn4k-tools/jdk21/bin/javac",
+            build = subprocess.run((str(javac),
                                     "--add-modules", "jdk.jdi", "-d", root,
                                     str(source / "RotationJdiProbe.java"),
                                     str(source / "EndpointControl.java")),
                                    env=environment, capture_output=True, timeout=30)
             self.assertEqual(build.returncode, 0, "JDI endpoint control did not compile")
-            run = subprocess.run(("/tmp/dyn4k-tools/jdk21/bin/java", "--add-modules",
+            run = subprocess.run((str(java), "--add-modules",
                                   "jdk.jdi", "-Djava.io.tmpdir=" + root, "-cp", root,
                                   "EndpointControl"), env=environment,
                                  capture_output=True, timeout=15)
