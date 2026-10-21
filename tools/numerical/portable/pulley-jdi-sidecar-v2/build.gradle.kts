@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     kotlin("jvm") version "2.4.20"
 }
@@ -51,6 +53,6 @@ tasks.register("writePulleyClasspath") {
             .map { it.canonicalFile }
             .filter { it.isFile && it.extension == "jar" && it != provider && it != fixture }
         output.writeText((listOf(fixture, provider) + dependencies).joinToString(
-            java.io.File.pathSeparator) { it.absolutePath } + "\n")
+            File.pathSeparator) { it.absolutePath } + "\n")
     }
 }
