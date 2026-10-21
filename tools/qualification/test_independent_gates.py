@@ -1223,9 +1223,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
@@ -1317,7 +1317,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
         self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, operation))
@@ -1405,7 +1405,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "cf3b0906edb69b08cb24fb2be9a741ffacd3229a8ab466598887005d71109a47")
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_COVERAGE_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1430,7 +1430,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "e2e01e3c10de4e06c86365661821cb9c1ee6985b8944098683bd1f6039c8652b")
         self.assertEqual(current, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1543,7 +1543,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            if name in ("actual_arithmetic.py", "capture_actual.py"):
+            if name in ("actual_arithmetic.py", "capture_actual.py", "rotation_oracle.py"):
                 self.assertNotEqual(committed, (ROOT / relative).read_bytes())
             else:
                 self.assertEqual(committed, (ROOT / relative).read_bytes())
@@ -1634,24 +1634,28 @@ class IndependentGateSeamTests(unittest.TestCase):
         }
         self.assertEqual(current, independent_gates.P2_BOOLEAN_JDI_SOURCE_REVISION)
         self.assertEqual(expected, independent_gates.P2_BOOLEAN_JDI_PRODUCERS)
-        self.assertNotEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(dependencies, independent_gates.P2_BOOLEAN_JDI_DEPENDENCIES)
         for name, digest in expected.items():
             relative = f"tools/numerical/portable/{name}"
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            self.assertEqual(committed == (ROOT / relative).read_bytes(),
-                             name not in ("actual_arithmetic.py", "capture_actual.py"))
+            if name in ("actual_arithmetic.py", "capture_actual.py", "rotation_oracle.py"):
+                self.assertNotEqual(committed, (ROOT / relative).read_bytes())
+            else:
+                self.assertEqual(committed, (ROOT / relative).read_bytes())
         for relative, digest in dependencies.items():
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            self.assertEqual(committed == (ROOT / relative).read_bytes(),
-                             relative not in {
-                                 "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java",
-                                 "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
-                                 "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py"})
+            if relative in ("tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java",
+                            "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
+                            "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py"):
+                self.assertNotEqual(committed, (ROOT / relative).read_bytes())
+            else:
+                self.assertEqual(committed, (ROOT / relative).read_bytes())
         self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
         self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, earlier))
