@@ -29,6 +29,8 @@ def receipt_for(binding):
             "target_source_sha256", "runtime_id", "trace_sha256",
             "payload_sha256", "audit_sha256", "manifest_sha256",
             "operation_source_revision")
+    if "audit_schema" in binding:
+        keys += ("audit_schema",)
     receipt = {key: binding[key] for key in keys}
     receipt["exit_code"] = 0
     return json.dumps(receipt, sort_keys=True).encode()
@@ -49,6 +51,8 @@ def manifest_digest(binding):
               "accepted_toi_events",
               "reset_start_rotations", "reset_end_rotations", "pair_inputs",
               "allowed_evaluations")
+    if "audit_schema" in binding:
+        fields += ("audit_schema",)
     return audit_digest({key: binding[key] for key in fields})
 
 
@@ -104,6 +108,104 @@ class RotationOracleTest(unittest.TestCase):
                                           binding=binding, trace_bytes=trace,
                                           payload_bytes=payload, receipt_bytes=receipt,
                                           artifact_bytes=artifact, source_bytes=source)
+
+    def synthetic_schema_two_fixture(self):
+        data = list(self.fixture())
+        audit, binding = data[0], data[4]
+        audit["schema"] = "portable-rotation-audit/2"
+        binding["audit_schema"] = audit["schema"]
+        binding["audit_sha256"] = audit_digest(audit)
+        data[6] = json.dumps(audit).encode()
+        binding["payload_sha256"] = digest(data[6])
+        binding["manifest_sha256"] = manifest_digest(binding)
+        data[7] = receipt_for(binding)
+        binding["receipt_sha256"] = digest(data[7])
+        return data
+
+    def test_schema_two_requires_versioned_external_binding(self):
+        data = self.synthetic_schema_two_fixture()
+        self.assertEqual(verify_rotation_arithmetic(*data[:4], 5)["status"], "UNPASSED")
+        self.assertEqual(self.verify(data, refresh_hash=False)["status"],
+                         "PASSED_ARITHMETIC")
+        for field in ("audit_schema", "producer_process", "manifest_sha256"):
+            changed = self.synthetic_schema_two_fixture()
+            changed[4].pop(field)
+            with self.subTest(missing=field):
+                self.assertEqual(self.verify(changed, refresh_hash=False)["status"],
+                                 "UNPASSED")
+        for slot in (5, 6, 7, 8, 9):
+            changed = self.synthetic_schema_two_fixture()
+            changed[slot] += b"changed"
+            with self.subTest(changed_bytes=slot):
+                self.assertEqual(self.verify(changed, refresh_hash=False)["status"],
+                                 "FAILED_IDENTITY")
+        changed = self.synthetic_schema_two_fixture()
+        changed[4]["producer_process"] = "pid:99 exit:0"
+        self.assertEqual(self.verify(changed, refresh_hash=False)["status"],
+                         "FAILED_IDENTITY")
+        resealed = self.synthetic_schema_two_fixture()
+        resealed[4]["producer_process"] = "pid:99 exit:0"
+        arithmetic = self.verify(resealed)
+        self.assertEqual(arithmetic["status"], "PASSED_ARITHMETIC")
+        self.assertEqual(arithmetic["qualification"], "UNPASSED")
+        changed = self.synthetic_schema_two_fixture()
+        changed[4]["audit_schema"] = "portable-rotation-audit/1"
+        self.assertEqual(self.verify(changed)["status"], "FAILED_IDENTITY")
+        changed = self.synthetic_schema_two_fixture()
+        changed[0]["calls"][0]["sequence"] = 1
+        self.assertEqual(self.verify(changed)["status"], "FAILED_COVERAGE")
+        changed = self.synthetic_schema_two_fixture()
+        changed[0]["calls"] = []
+        changed[0]["declared_calls"] = 0
+        self.assertEqual(self.verify(changed)["status"], "FAILED_COVERAGE")
+        changed = self.synthetic_schema_two_fixture()
+        changed[0]["accepted_toi_resets"] = [[1, "b0"]]
+        self.assertEqual(self.verify(changed)["status"], "UNPASSED")
+
+    def test_schema_two_keeps_mode_and_zero_controls(self):
+        data = self.synthetic_schema_two_fixture()
+        data[4]["allowed_evaluations"] = ["fused"]
+        self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+        data[0]["calls"][0]["raw"][1] = bits(-0.0)
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+
+        data = self.synthetic_schema_two_fixture()
+        call = data[0]["calls"][0]
+        call["angle_bits"] = bits(math.ulp(0.0))
+        call["trig"][1] = bits(math.ulp(0.0))
+        call["raw"][1] = bits(math.ulp(0.0))
+        call["post"][1] = bits(math.ulp(0.0))
+        data[3][1]["bodies"][0]["transform"] = {
+            "getCost": 1.0, "getSint": math.ulp(0.0)}
+        self.assertEqual(self.verify(data)["status"], "PASSED_ARITHMETIC")
+        call["raw"][1] = bits(2 * math.ulp(0.0))
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+
+    def test_schema_two_requires_a_matching_declared_fused_mode(self):
+        data = self.synthetic_schema_two_fixture()
+        audit, _, header, states, binding, *_ = data
+        call = audit["calls"][0]
+        pre = [float.fromhex("-0x1.0cd683f9d3feap-2"),
+               float.fromhex("0x1.ee0a3e97da062p-1")]
+        trig = [float.fromhex("-0x1.36b190dd3c693p-1"),
+                float.fromhex("0x1.96f4d3d0bd5bep-1")]
+        call["angle_bits"] = bits(float.fromhex("0x1.1c867da8b78fcp+1"))
+        call["pre"] = [bits(value) for value in pre]
+        call["trig"] = [bits(value) for value in trig]
+        call["raw"] = ["bfe371ccdd630997", "bfe96a2de45f0e24"]
+        call["post"] = call["raw"][:]
+        header["initial"]["bodies"][0]["transform"] = dict(zip(
+            ("getCost", "getSint"), pre))
+        states[1]["bodies"][0]["transform"] = dict(zip(
+            ("getCost", "getSint"), (struct.unpack(">d", bytes.fromhex(value))[0]
+                                       for value in call["post"])))
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+        binding["allowed_evaluations"] = ["fused"]
+        result = self.verify(data)
+        self.assertEqual(result["status"], "PASSED_ARITHMETIC")
+        self.assertIn("fused", result["matching_evaluations"][0][0])
+        call["raw"][0] = "bfe371ccdd630998"
+        self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
 
     def test_missing_external_binding_is_unpassed_then_exact_zero_passes(self):
         data = self.fixture()

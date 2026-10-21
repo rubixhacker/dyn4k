@@ -299,6 +299,8 @@ def _manifest_bytes(binding):
               "accepted_toi_events",
               "reset_start_rotations", "reset_end_rotations", "pair_inputs",
               "allowed_evaluations")
+    if binding.get("audit_schema") == "portable-rotation-audit/2":
+        fields += ("audit_schema",)
     return _audit_bytes({key: binding[key] for key in fields})
 
 
@@ -370,6 +372,14 @@ def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
                     artifact_bytes, source_bytes):
     if type(binding) is not dict or not _BINDING_FIELDS <= set(binding):
         return "UNPASSED"
+    schema = audit.get("schema") if type(audit) is dict else None
+    if schema == "portable-rotation-audit/2":
+        if "audit_schema" not in binding:
+            return "UNPASSED"
+        if binding["audit_schema"] != schema:
+            return "FAILED_IDENTITY"
+    elif "audit_schema" in binding:
+        return "FAILED_IDENTITY"
     if any(type(binding[key]) is not str or not binding[key] for key in
            ("producer_process", "producer_command", "runtime_id")):
         return "UNPASSED"
@@ -415,6 +425,8 @@ def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
     fields = {"producer_process", "producer_command", "exit_code", "artifact_sha256",
               "target_source_sha256", "runtime_id", "trace_sha256", "payload_sha256",
               "audit_sha256", "manifest_sha256", "operation_source_revision"}
+    if schema == "portable-rotation-audit/2":
+        fields.add("audit_schema")
     if type(receipt) is not dict or set(receipt) != fields or \
             type(receipt["exit_code"]) is not int or receipt["exit_code"] != 0 or any(
                 receipt[key] != binding[key] for key in fields - {"exit_code"}):
@@ -437,9 +449,15 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                 "schema", "case_id", "operation_model_revision", "declared_calls",
                 "accepted_toi_resets", "calls"}:
             raise ValueError("audit schema differs")
-        if audit["schema"] != "portable-rotation-audit/1" or audit["case_id"] != case["id"] or \
+        if audit["schema"] not in ("portable-rotation-audit/1",
+                                   "portable-rotation-audit/2") or \
+                audit["case_id"] != case["id"] or \
                 audit["operation_model_revision"] != SOURCE_REVISION:
             return {"status": "FAILED_IDENTITY", "reason": "audit source or case differs"}
+        if audit["schema"] == "portable-rotation-audit/2" and (
+                audit["accepted_toi_resets"] or any(call.get("kind") == "lerp-reset"
+                                                    for call in audit["calls"])):
+            return {"status": "UNPASSED", "reason": "schema-2 reset binding is unavailable"}
         if type(case["steps"]) is not int or case["steps"] < 1 or \
                 type(rotation_cap) is not int or rotation_cap < 0:
             raise ValueError("case or source cap differs")
