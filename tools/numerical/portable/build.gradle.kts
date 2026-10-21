@@ -103,6 +103,17 @@ providers.gradleProperty("portableWorkerClassLoadLog").orNull?.let { logPattern 
     }
 }
 
+providers.gradleProperty("portableBooleanJdiPort").orNull?.let { rawPort ->
+    val port = rawPort.toIntOrNull()
+    require(rawPort.matches(Regex("[1-9][0-9]{0,4}")) && port != null && port in 1..65535)
+    require(providers.gradleProperty("portableBooleanJdiMethod").orNull ==
+        "captureRevoluteLimitsFalse")
+    tasks.named<Test>("jvmTest") {
+        jvmArgs("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+            + "address=127.0.0.1:$port")
+    }
+}
+
 if (providers.gradleProperty("portableJvm8").orNull == "true") {
     tasks.named<Test>("jvmTest") {
         javaLauncher.set(javaToolchains.launcherFor {

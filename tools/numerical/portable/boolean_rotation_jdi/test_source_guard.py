@@ -9,6 +9,11 @@ ROOT = Path(__file__).resolve().parents[4]
 
 
 class SourceGuardTest(unittest.TestCase):
+    def test_body_mapping_owner_is_source_pinned(self):
+        self.assertIn(
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/"
+            "AbstractPairedBodyJoint.kt", PINNED_FILES)
+
     def test_exact_checkout_matches(self):
         self.assertEqual(verify_source_schedule(ROOT)["status"], "MATCHED_SOURCE_SCHEDULE")
 

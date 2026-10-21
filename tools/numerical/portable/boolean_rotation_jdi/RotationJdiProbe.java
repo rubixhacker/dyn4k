@@ -6,7 +6,6 @@ import com.sun.jdi.Method;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.ReferenceType;
 import com.sun.jdi.StackFrame;
-import com.sun.jdi.StringReference;
 import com.sun.jdi.Value;
 import com.sun.jdi.VirtualMachine;
 import com.sun.jdi.connect.Connector;
@@ -30,6 +29,7 @@ import java.util.Map;
 public final class RotationJdiProbe {
     private record Pending(int ordinal, long thread, ObjectReference receiver, String pre,
                            String trig, String angle, String caller, long callerIndex) { }
+    private record Site(String caller, long index, long integrated, long body1, long body2) { }
 
     private static String bits(Value value) {
         if (!(value instanceof DoubleValue number)) throw new IllegalStateException("Expected double");
@@ -51,24 +51,46 @@ public final class RotationJdiProbe {
         return bits(box.getValue(box.referenceType().fieldByName("value")));
     }
 
-    private static String[] caller(List<StackFrame> frames) {
+    private static ObjectReference objectField(ObjectReference object, String name) {
+        Field field = object.referenceType().fieldByName(name);
+        if (field == null || !(object.getValue(field) instanceof ObjectReference value))
+            throw new IllegalStateException("Missing source body field");
+        return value;
+    }
+
+    private static long transformId(ObjectReference body) {
+        return objectField(body, "transform").uniqueID();
+    }
+
+    private static Site caller(List<StackFrame> frames) {
         for (int index = 1; index < frames.size(); index++) {
-            Location location = frames.get(index).location();
+            StackFrame frame = frames.get(index);
+            Location location = frame.location();
             String type = location.declaringType().name();
-            if (type.equals("org.dyn4j.dynamics.AbstractPhysicsBody") &&
-                location.method().name().equals("integrate"))
-                return new String[] {type + ".integrate", Long.toString(location.codeIndex())};
-            if (type.equals("org.dyn4j.dynamics.joint.RevoluteJoint") &&
-                location.method().name().equals("solvePositionConstraints"))
-                return new String[] {type + ".solvePositionConstraints",
-                                     Long.toString(location.codeIndex())};
+            String name = location.method().name();
+            if ((type.equals("org.dyn4j.dynamics.AbstractPhysicsBody") &&
+                 name.equals("integratePosition$lambda$0")) ||
+                (type.equals("ToyBooleanJdi") && name.equals("integratePosition$lambda$0"))) {
+                List<Value> arguments = frame.getArgumentValues();
+                if (arguments.isEmpty() || !(arguments.get(0) instanceof ObjectReference body))
+                    throw new IllegalStateException("Missing integration body");
+                return new Site(type + "." + name, location.codeIndex(),
+                                transformId(body), -1, -1);
+            }
+            if ((type.equals("org.dyn4j.dynamics.joint.RevoluteJoint") ||
+                 type.equals("ToyBooleanJdi$Joint")) &&
+                name.equals("solvePositionConstraints")) {
+                ObjectReference joint = frame.thisObject();
+                if (joint == null) throw new IllegalStateException("Missing source joint");
+                return new Site(type + "." + name, location.codeIndex(), -1,
+                                transformId(objectField(joint, "body1")),
+                                transformId(objectField(joint, "body2")));
+            }
             if (type.equals("ToyRotation") &&
-                (location.method().name().equals("integrate") ||
-                 location.method().name().equals("solvePositionConstraints")))
-                return new String[] {type + "." + location.method().name(),
-                                     Long.toString(location.codeIndex())};
+                (name.equals("integrate") || name.equals("solvePositionConstraints")))
+                return new Site(type + "." + name, location.codeIndex(), -1, -1, -1);
         }
-        return new String[] {"UNBOUND", "-1"};
+        return new Site("UNBOUND", -1, -1, -1, -1);
     }
 
     private static void captureCode(ReferenceType type, Path output) throws Exception {
@@ -87,12 +109,18 @@ public final class RotationJdiProbe {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 6 || !(args[0].equals("launch") || args[0].equals("attach")))
+        if ((args.length != 6 && args.length != 7) ||
+            !(args[0].equals("launch") || args[0].equals("attach")))
             throw new IllegalArgumentException("Expected mode, output, target, main-or-port, class, count");
         Path output = Path.of(args[1]);
         Files.createDirectory(output);
         int expected = Integer.parseInt(args[5]);
         if (expected <= 0) throw new IllegalArgumentException("Expected positive count");
+        int deadlineSeconds = args.length == 7 ? Integer.parseInt(args[6]) : 20;
+        if (deadlineSeconds < 1 || deadlineSeconds > 600)
+            throw new IllegalArgumentException("Invalid observation deadline");
+        boolean requireBodyMap = args[4].equals("org.dyn4j.geometry.Transform") ||
+                                 args[4].equals("ToyBooleanJdi$Rotation");
         VirtualMachine vm;
         Process process = null;
         if (args[0].equals("launch")) {
@@ -118,6 +146,9 @@ public final class RotationJdiProbe {
         int entered = 0;
         int exited = 0;
         boolean dead = false;
+        long body1 = -1;
+        long body2 = -1;
+        long integrated = -1;
         try {
             if (!vm.canGetBytecodes() || !vm.canGetConstantPool())
                 throw new IllegalStateException("Target lacks loaded-code access");
@@ -135,7 +166,7 @@ public final class RotationJdiProbe {
             exit.setSuspendPolicy(EventRequest.SUSPEND_ALL);
             exit.enable();
             vm.resume();
-            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            long deadline = System.nanoTime() + Duration.ofSeconds(deadlineSeconds).toNanos();
             while (!dead && System.nanoTime() < deadline) {
                 EventSet events = vm.eventQueue().remove(500);
                 if (events == null) continue;
@@ -152,11 +183,28 @@ public final class RotationJdiProbe {
                             if (values.size() != 5 || frame.thisObject() == null)
                                 throw new IllegalStateException("Unexpected rotation signature");
                             ObjectReference receiver = frame.thisObject();
-                            String[] site = caller(frames);
+                            Site site = caller(frames);
+                            if (requireBodyMap && site.caller().equals("UNBOUND"))
+                                throw new IllegalStateException("Source call site is unbound");
+                            if (site.integrated() > 0) {
+                                if ((integrated > 0 && integrated != site.integrated()) ||
+                                    receiver.uniqueID() != site.integrated())
+                                    throw new IllegalStateException("Integration body differs");
+                                integrated = site.integrated();
+                            }
+                            if (site.body1() > 0) {
+                                if ((body1 > 0 && body1 != site.body1()) ||
+                                    (body2 > 0 && body2 != site.body2()) ||
+                                    (receiver.uniqueID() != site.body1() &&
+                                     receiver.uniqueID() != site.body2()))
+                                    throw new IllegalStateException("Joint body relationship differs");
+                                body1 = site.body1();
+                                body2 = site.body2();
+                            }
                             long thread = methodEvent.thread().uniqueID();
                             Pending item = new Pending(entered++, thread, receiver, pair(receiver),
                                 bits(values.get(0)) + "\t" + bits(values.get(1)),
-                                boxedAngle(values.get(4)), site[0], Long.parseLong(site[1]));
+                                boxedAngle(values.get(4)), site.caller(), site.index());
                             pending.computeIfAbsent(thread, ignored -> new ArrayDeque<>()).push(item);
                         } else if (event instanceof MethodExitEvent methodEvent &&
                                    methodEvent.method().name().equals("rotatePivotObserved")) {
@@ -182,6 +230,12 @@ public final class RotationJdiProbe {
             if (!dead || prepared != 1 || entered != expected || exited != expected ||
                 pending.values().stream().anyMatch(stack -> !stack.isEmpty()))
                 throw new IllegalStateException("Incomplete target observation");
+            if (requireBodyMap) {
+                if (body1 <= 0 || body2 <= 0 || integrated != body2 || body1 == body2)
+                    throw new IllegalStateException("Source body map is incomplete");
+                Files.writeString(output.resolve("body-map.tsv"), "b0\t" + body1 +
+                                  "\nb1\t" + body2 + "\nintegrated\t" + integrated + "\n");
+            }
             Files.write(output.resolve("events.tsv"), rows);
             Files.writeString(output.resolve("complete.txt"), "vm-death\n" +
                               (process == null ? "unbound" : process.pid()) + "\n" +

@@ -3,10 +3,12 @@ from collections import Counter
 import hashlib
 import io
 import json
+import os
 import re
 import struct
 import subprocess
 import tarfile
+import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -17,6 +19,8 @@ from cases import declared_cases
 from rotation_oracle import REVOLUTE_LIMITS_FALSE_CONTEXT, verify_operation_marker
 from orthogonality import source_rotation_cap, validate_rotation_audit
 from prospective_compare import compare_policy_case, load_policy_catalog
+from boolean_rotation_jdi import (jdi_bridge, source_guard as jdi_source_guard,
+                                  witness as jdi_witness)
 
 
 class CaptureRejected(ValueError):
@@ -726,7 +730,7 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
     return observed
 
 
-def _check_process(files, runtime_executable, method):
+def _check_process(files, runtime_executable, method, jdi_port=None):
     if runtime_executable != _PINNED_JAVA:
         raise CaptureRejected("runtime executable identity differs")
     try:
@@ -750,6 +754,15 @@ def _check_process(files, runtime_executable, method):
     if len(worker_lines) != 1:
         raise CaptureRejected("executed JVM worker identity differs")
     worker_pid, worker_line = worker_lines[0]
+    if jdi_port is not None:
+        if method != _FOCUSED_BOOLEAN_METHOD or type(jdi_port) is not int or \
+                not 1 <= jdi_port <= 65535:
+            raise CaptureRejected("JDI target identity differs")
+        option = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+                  f"address=127.0.0.1:{jdi_port}")
+        if worker_line.count(f'"{option}"') != 1 or \
+                process_lines[0].count(option) != 1:
+            raise CaptureRejected("executed JDI worker option differs")
     log_paths = re.findall(r'"-Xlog:class\+load=info:file='
                            r'(/[^"\r\n:]+/worker-class-load-%p\.log)'
                            r':pid,level,tags:filecount=0"', worker_line)
@@ -767,6 +780,11 @@ def _check_process(files, runtime_executable, method):
                            line.endswith(" = 0")]
     if len(capture_invocations) != 1:
         raise CaptureRejected("executed capture method or worker log differs")
+    if jdi_port is not None and any(
+            capture_invocations[0].count(value) != 1 for value in (
+                f'"-PportableBooleanJdiPort={jdi_port}"',
+                f'"-PportableBooleanJdiMethod={_FOCUSED_BOOLEAN_METHOD}"')):
+        raise CaptureRejected("executed JDI method selector differs")
     arguments = worker_classpath.splitlines()
     if len(arguments) != 2 or arguments[0] != "-cp" or \
             str(_STAGED_JAR) not in arguments[1].split(":"):
@@ -1025,12 +1043,113 @@ def _verify_worker_argument_log(raw, response, archive, worker_pid):
         raise CaptureRejected("worker argument log witness is malformed") from error
 
 
+_JDI_FILES = {"jdi_helper_classes", "jdi_evidence", "jdi_helper_traces",
+              "jdi_transport"}
+
+
+def _verify_boolean_jdi(files, summary, worker_pid):
+    try:
+        transport = json.loads(files["jdi_transport"], object_pairs_hook=_unique_object)
+        if type(transport) is not dict or set(transport) != {
+                "schema", "port", "worker_pid", "helper_pid", "helper_classes_path",
+                "output_path", "temp_path", "live_socket_owner"} or \
+                transport["schema"] != "boolean-jdi-transport/1" or \
+                transport["worker_pid"] != int(worker_pid) or \
+                transport["live_socket_owner"] is not True:
+            raise CaptureRejected("JDI transport declaration differs")
+        port = transport["port"]
+        helper_pid = transport["helper_pid"]
+        paths = [transport[name] for name in (
+            "helper_classes_path", "output_path", "temp_path")]
+        if any(type(path) is not str or not Path(path).is_absolute() or
+               not Path(path).resolve().is_relative_to(Path.home().resolve())
+               for path in paths):
+            raise CaptureRejected("JDI transport path differs")
+        with tarfile.open(fileobj=io.BytesIO(files["source"]), mode="r:") as source:
+            name = "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java"
+            required = {name, *jdi_source_guard.PINNED_FILES}
+            members = {key: [] for key in required}
+            for member in source:
+                if member.name in members:
+                    members[member.name].append(member)
+            if any(len(entries) != 1 or not entries[0].isfile()
+                   for entries in members.values()):
+                raise CaptureRejected("JDI helper source differs")
+            for path, digest in jdi_source_guard.PINNED_FILES.items():
+                entry = source.extractfile(members[path][0])
+                if entry is None or _sha(entry.read()) != digest:
+                    raise CaptureRejected("JDI source call schedule differs")
+            member = source.extractfile(members[name][0])
+            if member is None:
+                raise CaptureRejected("JDI helper source is unavailable")
+            helper_source = member.read()
+        temporary_root = Path(os.environ.get("TMPDIR", ""))
+        if not temporary_root.is_absolute() or not temporary_root.resolve().is_relative_to(
+                Path.home().resolve()):
+            raise CaptureRejected("JDI verifier temporary root differs")
+        with tempfile.TemporaryDirectory(dir=temporary_root) as scratch:
+            _, compiled = jdi_bridge.compile_helper(helper_source, Path(scratch))
+            if compiled != files["jdi_helper_classes"]:
+                raise CaptureRejected("JDI helper binary differs from source")
+        with zipfile.ZipFile(io.BytesIO(files["artifact"])) as artifact:
+            class_name = "org.dyn4j.geometry.Transform"
+            class_path = class_name.replace(".", "/") + ".class"
+            if artifact.namelist().count(class_path) != 1:
+                raise CaptureRejected("JDI engine class inventory differs")
+            class_bytes = artifact.read(class_path)
+        _, markers = focused_wheel_stream(files["xml"])
+        observation = jdi_bridge.verify_jdi_archive(
+            files["jdi_evidence"], class_bytes, class_name, 1800, markers)
+        writes = jdi_bridge.verify_jdi_file_writes(
+            files["jdi_helper_traces"], files["jdi_evidence"], paths[1])
+        argv = [str(jdi_bridge.JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
+                "-Djava.io.tmpdir=" + paths[2], "-cp", paths[0],
+                "RotationJdiProbe", "attach", paths[1], "127.0.0.1",
+                str(port), class_name, "1800", "300"]
+        process = jdi_bridge.verify_jdi_transport(
+            files["worker_write_traces"], files["jdi_helper_traces"],
+            port, int(worker_pid), helper_pid, argv)
+        sites = jdi_bridge.derive_call_sites(files["artifact"])
+        identity = {"schema": jdi_witness.SCHEMA, "pid": int(worker_pid),
+                    "case_id": _FOCUSED_BOOLEAN_CASE,
+                    "source_sha256": _sha(files["source"]),
+                    "jar_sha256": _sha(files["artifact"]),
+                    "loaded_code_sha256": _sha(class_bytes),
+                    "marker_sha256": summary["operations_sha256"],
+                    "calls": observation["calls"]}
+        result = jdi_witness.verify_stream(identity, {
+            **{key: identity[key] for key in (
+                "pid", "case_id", "source_sha256", "jar_sha256",
+                "loaded_code_sha256", "marker_sha256")},
+            "markers": markers, "caller_code_indices": sites})
+        if result != {"status": "UNPASSED_WORKER_BINDING",
+                      "qualification": "UNPASSED", "calls_checked": 1800}:
+            raise CaptureRejected("JDI source operation stream differs")
+        return {"status": "MATCHED_JDI_SOURCE_STREAM_UNPASSED_RUNTIME_ORIGIN",
+                "qualification": "UNPASSED", "calls_checked": 1800,
+                "source_sites": sites,
+                "loaded_class_sha256": observation["loaded_class_sha256"],
+                "helper_classes_sha256": _sha(compiled),
+                "event_archive_sha256": _sha(files["jdi_evidence"]),
+                "transport_status": process["status"],
+                "file_write_status": writes["status"]}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            tarfile.TarError, zipfile.BadZipFile, jdi_bridge.EvidenceRejected) as error:
+        if isinstance(error, CaptureRejected):
+            raise
+        raise CaptureRejected("JDI source or process evidence differs") from error
+
+
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
     requires_writes = method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
                                      if requires_writes else set())
+    jdi_files = (set(files) & _JDI_FILES) if type(files) is dict else set()
+    if jdi_files and (method != _FOCUSED_BOOLEAN_METHOD or jdi_files != _JDI_FILES):
+        raise CaptureRejected("JDI receipt inventory differs")
     if method == _FOCUSED_BOOLEAN_METHOD:
         required_files |= {"worker_arguments", "reference_case", "candidate_case"}
+        required_files |= jdi_files
     if type(files) is not dict or set(files) != required_files or \
             any(type(value) is not bytes or not value for value in files.values()) or \
             type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
@@ -1040,8 +1159,18 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     if method == _FOCUSED_BOOLEAN_METHOD:
         _verify_boolean_source(files["source"])
     _check_local_binaries(files, runtime_executable)
+    jdi_transport = None
+    if jdi_files:
+        try:
+            jdi_transport = json.loads(files["jdi_transport"],
+                                       object_pairs_hook=_unique_object)
+            if type(jdi_transport) is not dict:
+                raise CaptureRejected("JDI transport declaration differs")
+        except (UnicodeError, TypeError, ValueError) as error:
+            raise CaptureRejected("JDI transport declaration differs") from error
     classpath_evidence, worker_pid, log_path, portable_classes = _check_process(
-        files, runtime_executable, method)
+        files, runtime_executable, method,
+        jdi_port=jdi_transport.get("port") if jdi_transport else None)
     reset_order = ("pre" if commit == "fe4d63cb7f08cea304e5691f2f2ebc23379db6b0"
                    else "post")
     summary = verify_capture(files["xml"], method, expected_ids, reset_order)
@@ -1056,7 +1185,8 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     worker_sources = _verify_worker_class_load(
         files["worker_class_load"], worker_pid, summary["selected_resets"] > 0,
         method, portable_classes)
-    receipt = {"schema": ("portable-arithmetic-capture-receipt/4" if
+    receipt = {"schema": ("portable-arithmetic-capture-receipt/5" if jdi_files
+                          else "portable-arithmetic-capture-receipt/4" if
                           method == _FOCUSED_BOOLEAN_METHOD else
                           "portable-arithmetic-capture-receipt/3"),
             "candidate_commit": commit, "method": method, "exit_code": 0,
@@ -1092,6 +1222,12 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
         receipt["candidate_case_sha256"] = _sha(files["candidate_case"])
         receipt["worker_argument_witness"] = argument_witness
         summary["effective_classpath_witness"] = argument_witness["status"]
+        if jdi_files:
+            jdi_witness = _verify_boolean_jdi(files, summary, worker_pid)
+            for name in _JDI_FILES:
+                receipt[name + "_sha256"] = _sha(files[name])
+            receipt["jdi_external_witness"] = jdi_witness
+            summary["jdi_external_witness"] = jdi_witness["status"]
     return receipt
 
 

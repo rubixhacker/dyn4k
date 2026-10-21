@@ -81,16 +81,56 @@ class CaptureSourceGuardTest(unittest.TestCase):
         class_log = output / "worker-class-load-123.log"
         argument_log = output / "worker-arguments-123.log"
         names = capture_actual.archive_file_names(method, class_log, argument_log)
-        for name in names - {"worker-write-traces.zip"}:
+        self.assertTrue({"jdi-helper-classes.zip", "jdi-evidence.zip",
+                         "jdi-helper-traces.zip", "jdi-transport.json"} <= names)
+        archive_names = {"worker-write-traces.zip", "jdi-helper-classes.zip",
+                         "jdi-evidence.zip", "jdi-helper-traces.zip"}
+        for name in names - archive_names:
             (output / name).write_bytes(b"sealed")
-        with zipfile.ZipFile(output / "worker-write-traces.zip", "w") as archive:
-            archive.writestr("trace.123", b"safe\n")
+        for name in archive_names:
+            with zipfile.ZipFile(output / name, "w") as archive:
+                archive.writestr("trace.123", b"safe\n")
         capture_actual.verify_archive_inventory(output, method,
                                                 class_log, argument_log)
         (output / "worker-arguments-999.log").write_bytes(b"unvetted")
         with self.assertRaisesRegex(CaptureRejected, "archive inventory"):
             capture_actual.verify_archive_inventory(output, method,
                                                     class_log, argument_log)
+
+    def test_boolean_jdwp_option_and_live_socket_owner(self):
+        self.assertEqual(capture_actual.boolean_jdwp_option(40001),
+                         "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+                         "address=127.0.0.1:40001")
+        for port in (0, 65536, True, "40001"):
+            with self.assertRaises(CaptureRejected):
+                capture_actual.boolean_jdwp_option(port)
+        proc = self.root / "proc"
+        (proc / "net").mkdir(parents=True)
+        (proc / "net/tcp").write_text(
+            "sl  local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+            "0: 0100007F:9C41 00000000:0000 0A 0 0 0 0 0 77123\n")
+        (proc / "123/fd").mkdir(parents=True)
+        (proc / "123/fd/9").symlink_to("socket:[77123]")
+        self.assertTrue(capture_actual.socket_owner(proc, 123, 40001))
+        self.assertFalse(capture_actual.socket_owner(proc, 123, 40002))
+        self.assertFalse(capture_actual.socket_owner(proc, 124, 40001))
+
+    def test_selected_jdi_worker_needs_one_successful_exec(self):
+        prefix = self.root / "worker-trace"
+        (self.root / "worker-trace.12").write_text(
+            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            '["java", "GradleWorkerMain"], 0x0) = 0\n')
+        self.assertEqual(capture_actual.selected_worker_pid(prefix), 12)
+        (self.root / "worker-trace.13").write_text(
+            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            '["java", "GradleWorkerMain"], 0x0) = 0\n')
+        with self.assertRaisesRegex(CaptureRejected, "ambiguous"):
+            capture_actual.selected_worker_pid(prefix)
+        (self.root / "worker-trace.13").write_text("unrelated\n")
+        (self.root / "worker-trace.12").write_text(
+            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            '["java", "GradleWorkerMain"], 0x0) = -1\n')
+        self.assertIsNone(capture_actual.selected_worker_pid(prefix))
 
     def test_capture_source_tar_ignores_same_type_commit_replacement(self):
         original = capture_actual.git("rev-parse", "HEAD").decode().strip()

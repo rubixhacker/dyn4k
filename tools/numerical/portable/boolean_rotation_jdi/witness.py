@@ -4,7 +4,7 @@ from pathlib import Path
 
 CASE = "joint-Revolute-LimitsEnabled-false"
 SCHEMA = "boolean-rotation-jdi/1"
-INTEGRATE = "org.dyn4j.dynamics.AbstractPhysicsBody.integrate"
+INTEGRATE = "org.dyn4j.dynamics.AbstractPhysicsBody.integratePosition$lambda$0"
 POINT = "org.dyn4j.dynamics.joint.RevoluteJoint.solvePositionConstraints"
 HEX64 = re.compile(r"[0-9a-f]{16}\Z")
 

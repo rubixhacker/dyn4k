@@ -479,6 +479,23 @@ class CaptureReceiptTest(unittest.TestCase):
             files, runtime, "captureRevoluteLimitsFalse")
         self.assertEqual(pid, "123")
         self.assertIn("portable/RevoluteLimitsFalseCaptureTest.class", classes["test"])
+        with self.assertRaisesRegex(CaptureRejected, "JDI"):
+            actual._check_process(files, runtime, "captureRevoluteLimitsFalse",
+                                  jdi_port=40001)
+        option = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+                  "address=127.0.0.1:40001")
+        files["gradle_log"] = files["gradle_log"].replace(
+            b"worker.org.gradle.process.internal.worker.GradleWorkerMain",
+            option.encode() + b" worker.org.gradle.process.internal.worker.GradleWorkerMain")
+        files["execve_log"] = files["execve_log"].replace(
+            b'"worker.org.gradle.process.internal.worker.GradleWorkerMain"',
+            f'"{option}", "worker.org.gradle.process.internal.worker.GradleWorkerMain"'.encode())
+        files["execve_log"] = files["execve_log"].replace(
+            b'"-PportableWorkerClassLoadLog=',
+            b'"-PportableBooleanJdiPort=40001", '
+            b'"-PportableBooleanJdiMethod=captureRevoluteLimitsFalse", '
+            b'"-PportableWorkerClassLoadLog=')
+        actual._check_process(files, runtime, "captureRevoluteLimitsFalse", jdi_port=40001)
         files["execve_log"] = files["execve_log"].replace(new, old)
         with self.assertRaisesRegex(CaptureRejected, "capture method"):
             actual._check_process(files, runtime, "captureRevoluteLimitsFalse")
@@ -492,6 +509,17 @@ class CaptureReceiptTest(unittest.TestCase):
         files["portable_classes"] = buffer.getvalue()
         with self.assertRaisesRegex(CaptureRejected, "portable test payload"):
             actual._check_process(files, runtime, "captureRevoluteLimitsFalse")
+
+    def test_jdi_receipt_requires_versioned_complete_transport(self):
+        _, files, runtime = self.fixture()
+        files["jdi_evidence"] = b"forged"
+        with self.assertRaisesRegex(CaptureRejected, "JDI receipt inventory"):
+            actual.make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                        ["geometry-Square"], runtime)
+        for value in (b"{}", b'{"schema":"boolean-jdi-transport/1"}',
+                      b'{"port":40001,"port":40002}'):
+            with self.assertRaises(CaptureRejected):
+                actual._verify_boolean_jdi({"jdi_transport": value}, {}, "123")
 
     def test_boolean_source_pin_rejects_changed_jvm_fixture(self):
         name = ("tools/numerical/portable/src/jvmTest/kotlin/portable/"

@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from witness import verify_stream
+from witness import INTEGRATE, verify_stream
 
 
 CASE = "joint-Revolute-LimitsEnabled-false"
@@ -18,7 +18,7 @@ def fixture():
     markers = []
     for step in range(1, 601):
         for body, branch, caller, code_index in (
-            ("b1", "integrate", "org.dyn4j.dynamics.AbstractPhysicsBody.integrate", 17),
+            ("b1", "integrate", "org.dyn4j.dynamics.AbstractPhysicsBody.integratePosition$lambda$0", 17),
             ("b0", None, "org.dyn4j.dynamics.joint.RevoluteJoint.solvePositionConstraints", 31),
             ("b1", None, "org.dyn4j.dynamics.joint.RevoluteJoint.solvePositionConstraints", 47),
         ):
@@ -41,6 +41,10 @@ def fixture():
 
 
 class WitnessTest(unittest.TestCase):
+    def test_integration_caller_matches_compiled_lambda(self):
+        self.assertEqual(INTEGRATE,
+                         "org.dyn4j.dynamics.AbstractPhysicsBody.integratePosition$lambda$0")
+
     def test_synthetic_shape_stays_unpassed(self):
         witness, expected = fixture()
         result = verify_stream(witness, expected)

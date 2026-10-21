@@ -11,6 +11,8 @@ PINNED_FILES = {
         "569979aee3583bf61d11dcffed236901257e606b207011c52f417e2ce1513719",
     "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/RevoluteJoint.kt":
         "8be0bf63a1b2940a2570bd814040aaa1d6058862a1419528d02ed5c0f2748e58",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/AbstractPairedBodyJoint.kt":
+        "90a4dc4bdf28e6ea785af699f5f40acd80afba86bf0e2a40a88ca03f8962d17f",
     "tools/numerical/portable/src/jvmTest/kotlin/portable/RevoluteLimitsFalseCaptureTest.kt":
         "d7a8467eb390a4c0db1544472fdb092420933470c879880f23ac64c2e43ff881",
 }

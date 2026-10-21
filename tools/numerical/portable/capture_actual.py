@@ -4,6 +4,8 @@ import json
 import os
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import tempfile
 import time
@@ -16,6 +18,7 @@ from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
                                _portable_classes_archive,
                                _FOCUSED_BOOLEAN_METHOD,
                                _FOCUSED_BOOLEAN_REFERENCE_SHA256)
+from boolean_rotation_jdi import jdi_bridge
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,6 +34,67 @@ GENERATED_ROOTS = (
     "tools/numerical/portable/build", "tools/numerical/portable/__pycache__",
     "tools/numerical/portable/kotlin-js-store",
 )
+
+
+def boolean_jdwp_option(port):
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise CaptureRejected("Boolean JDI port differs")
+    return ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+            f"address=127.0.0.1:{port}")
+
+
+def socket_owner(proc_root, pid, port):
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        rows = (Path(proc_root) / "net/tcp").read_text().splitlines()[1:]
+        matching = [parts[9] for row in rows if (parts := row.split()) and
+                    len(parts) > 9 and parts[1] == f"0100007F:{port:04X}" and
+                    parts[3] == "0A"]
+        if len(matching) != 1:
+            return False
+        sockets = [os.readlink(path) for path in (Path(proc_root) / str(pid) / "fd").iterdir()]
+        return sockets.count(f"socket:[{matching[0]}]") == 1
+    except (OSError, ValueError):
+        return False
+
+
+def reserve_boolean_jdi_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def selected_worker_pid(trace_prefix):
+    selected = []
+    for path in Path(trace_prefix).parent.glob(Path(trace_prefix).name + ".*"):
+        pid = path.name.removeprefix(Path(trace_prefix).name + ".")
+        if not pid.isdecimal():
+            raise CaptureRejected("worker trace PID differs")
+        if any(line.startswith("execve(") and "GradleWorkerMain" in line and
+               line.endswith(" = 0") for line in path.read_text(errors="replace").splitlines()):
+            selected.append(int(pid))
+    if len(selected) > 1:
+        raise CaptureRejected("selected JDI worker is ambiguous")
+    return selected[0] if selected else None
+
+
+def stop_capture_process(process):
+    if process is None or process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+    except ProcessLookupError:
+        pass
+
+
+def capture_output_bytes(*roots):
+    return sum(path.stat().st_size for root in roots for path in Path(root).rglob("*")
+               if path.is_file() and not path.is_symlink())
 
 
 def reject_environment_trace(trace_path):
@@ -84,7 +148,9 @@ def archive_file_names(method, worker_log, worker_argument_log=None):
         if worker_argument_log is None:
             raise CaptureRejected("worker argument log is missing")
         names.update(("worker-write-traces.zip", "joint-Revolute-LimitsEnabled-false.jsonl",
-                      "reference-case.jsonl", Path(worker_argument_log).name))
+                      "reference-case.jsonl", Path(worker_argument_log).name,
+                      "jdi-helper-classes.zip", "jdi-evidence.zip",
+                      "jdi-helper-traces.zip", "jdi-transport.json"))
     return names
 
 
@@ -112,9 +178,16 @@ def verify_archive_inventory(output, method, worker_log, worker_argument_log=Non
         raw = (output / name).read_bytes()
         if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
             raise CaptureRejected("archive exposed the environment")
-    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
+    archives = ({"worker-write-traces.zip"} if method in
+                ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD) else set())
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        archives |= {"jdi-helper-classes.zip", "jdi-evidence.zip",
+                     "jdi-helper-traces.zip"}
+    for archive_name in archives:
         try:
-            with zipfile.ZipFile(output / "worker-write-traces.zip") as archive:
+            with zipfile.ZipFile(output / archive_name) as archive:
+                if archive.testzip() is not None:
+                    raise CaptureRejected("archive member differs")
                 for name in archive.namelist():
                     raw = archive.read(name)
                     if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
@@ -130,6 +203,9 @@ def run_capture(method, output, reference_case=None):
             reference_case is None:
         raise CaptureRejected("focused reference is required")
     output = Path(output).resolve()
+    if method == _FOCUSED_BOOLEAN_METHOD and not output.is_relative_to(
+            Path.home().resolve()):
+        raise CaptureRejected("focused JDI output root is not home-backed")
     if output.exists():
         raise CaptureRejected("capture output already exists")
     commit = clean_source()
@@ -173,16 +249,31 @@ def _run_capture(method, output, reference_case, commit, temporary):
                                stdout=log, stderr=subprocess.STDOUT, check=False)
     if stage.returncode or not STAGED_JAR.is_file():
         raise CaptureRejected("pinned source publication failed")
+    if capture_output_bytes(output, temporary) >= 1800 * 1024 * 1024:
+        raise CaptureRejected("new capture output exceeded the bounded budget")
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
     class_load_pattern = output / "worker-class-load-%p.log"
     argument_pattern = temporary / "worker-arguments-%p.log"
+    jdi_port = None
+    jdi_classes = None
+    jdi_output = None
+    jdi_trace_prefix = None
     if method == _FOCUSED_BOOLEAN_METHOD:
         environment["JAVA_TOOL_OPTIONS"] += (
             f" -Xlog:arguments=info:file={argument_pattern}:"
             "pid,level,tags:filecount=0")
+        jdi_port = reserve_boolean_jdi_port()
+        jdi_output = temporary / "jdi-output"
+        jdi_trace_prefix = temporary / "jdi-helper-trace"
+        jdi_classes, helper_zip = jdi_bridge.compile_helper(
+            (PORTABLE / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
+            temporary)
+        (output / "jdi-helper-classes.zip").write_bytes(helper_zip)
     if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
+                  "trace=execve,clone,clone3,bind,listen,write,writev,sendto,sendmsg"
+                  if method == _FOCUSED_BOOLEAN_METHOD else
                   "trace=execve,clone,clone3,write,writev,sendto,sendmsg",
                   "-o", str(trace_prefix)]
     else:
@@ -197,18 +288,67 @@ def _run_capture(method, output, reference_case, commit, temporary):
                f"-PportableWorkerClassLoadLog={class_load_pattern}",
                "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info",
                "-Pkotlin.compiler.execution.strategy=in-process"]
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        command.extend((f"-PportableBooleanJdiPort={jdi_port}",
+                        f"-PportableBooleanJdiMethod={method}"))
     worker_arguments = output / "worker-classpath.txt"
+    helper = None
+    live_socket_owner = False
     with (output / "gradle.log").open("xb") as log:
         target = subprocess.Popen(command, cwd=PORTABLE, env=environment,
-                                  stdout=log, stderr=subprocess.STDOUT)
-        while target.poll() is None:
-            if not worker_arguments.exists():
-                output_text = (output / "gradle.log").read_text(errors="replace")
-                matches = re.findall(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
-                                     output_text)
-                if matches and Path(matches[-1]).is_file():
-                    shutil.copyfile(matches[-1], worker_arguments)
-            time.sleep(0.02)
+                                  stdout=log, stderr=subprocess.STDOUT,
+                                  start_new_session=True)
+        deadline = time.monotonic() + 900
+        next_size_check = time.monotonic()
+        try:
+            while target.poll() is None:
+                if time.monotonic() >= next_size_check:
+                    if capture_output_bytes(output, temporary) >= 1800 * 1024 * 1024:
+                        raise CaptureRejected("new capture output exceeded the bounded budget")
+                    next_size_check = time.monotonic() + 5
+                if not worker_arguments.exists():
+                    output_text = (output / "gradle.log").read_text(errors="replace")
+                    matches = re.findall(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
+                                         output_text)
+                    if matches and Path(matches[-1]).is_file():
+                        shutil.copyfile(matches[-1], worker_arguments)
+                if method == _FOCUSED_BOOLEAN_METHOD and helper is None:
+                    worker = selected_worker_pid(trace_prefix)
+                    if worker is not None and socket_owner(Path("/proc"), worker, jdi_port):
+                        live_socket_owner = True
+                        helper_command = ["strace", "-ff", "-s", "1048576", "-e",
+                                          "trace=execve,clone,clone3,connect,openat,"
+                                          "write,writev,close", "-o", str(jdi_trace_prefix),
+                                          str(JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
+                                          "-Djava.io.tmpdir=" + str(temporary),
+                                          "-cp", str(jdi_classes), "RotationJdiProbe",
+                                          "attach", str(jdi_output), "127.0.0.1",
+                                          str(jdi_port), "org.dyn4j.geometry.Transform",
+                                          "1800", "300"]
+                        with (temporary / "jdi-helper.log").open("xb") as helper_log:
+                            helper = subprocess.Popen(helper_command, cwd=PORTABLE,
+                                                      env=environment, stdout=helper_log,
+                                                      stderr=subprocess.STDOUT,
+                                                      start_new_session=True)
+                if helper is not None and helper.poll() not in (None, 0):
+                    raise CaptureRejected("JDI controller failed during target execution")
+                if time.monotonic() > deadline:
+                    raise CaptureRejected("focused target or JDI worker timed out")
+                time.sleep(0.02)
+        except Exception:
+            stop_capture_process(helper)
+            stop_capture_process(target)
+            raise
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        if helper is None or not live_socket_owner:
+            raise CaptureRejected("selected JDI worker socket was not observed")
+        try:
+            helper.wait(timeout=30)
+        except subprocess.TimeoutExpired as error:
+            stop_capture_process(helper)
+            raise CaptureRejected("JDI controller did not finish") from error
+        if helper.returncode or not jdi_output.is_dir():
+            raise CaptureRejected("JDI controller failed")
     if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_files = sorted(temporary.glob("worker-write-trace.*"))
         if not trace_files:
@@ -251,6 +391,38 @@ def _run_capture(method, output, reference_case, commit, temporary):
                     raise CaptureRejected("worker write trace exposed the environment")
                 archive.writestr("trace." + pid, raw)
         (output / "execve.log").write_text("\n".join(sorted(executions)) + "\n")
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        helper_traces = sorted(temporary.glob("jdi-helper-trace.*"))
+        helper_pids = []
+        if not helper_traces:
+            raise CaptureRejected("JDI helper process trace is missing")
+        with zipfile.ZipFile(output / "jdi-helper-traces.zip", "x") as archive:
+            for path in helper_traces:
+                pid = path.name.removeprefix("jdi-helper-trace.")
+                if not pid.isdecimal() or path.is_symlink():
+                    raise CaptureRejected("JDI helper trace PID differs")
+                raw = path.read_bytes()
+                if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+                    raise CaptureRejected("JDI helper trace exposed the environment")
+                if any(line.startswith(f'execve("{JDK21 / "bin/java"}"') and
+                       line.endswith(" = 0") for line in raw.decode().splitlines()):
+                    helper_pids.append(int(pid))
+                archive.writestr("trace." + pid, raw)
+        if len(helper_pids) != 1:
+            raise CaptureRejected("JDI helper process is ambiguous")
+        with zipfile.ZipFile(output / "jdi-evidence.zip", "x") as archive:
+            for path in sorted(jdi_output.iterdir()):
+                if not path.is_file() or path.is_symlink():
+                    raise CaptureRejected("JDI output inventory differs")
+                archive.writestr(path.name, path.read_bytes())
+        transport = {"schema": "boolean-jdi-transport/1", "port": jdi_port,
+                     "worker_pid": selected_worker_pid(trace_prefix),
+                     "helper_pid": helper_pids[0],
+                     "helper_classes_path": str(jdi_classes),
+                     "output_path": str(jdi_output), "temp_path": str(temporary),
+                     "live_socket_owner": live_socket_owner}
+        (output / "jdi-transport.json").write_text(
+            json.dumps(transport, sort_keys=True) + "\n")
     reject_environment_trace(output / "execve.log")
     if target.returncode or not xml.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
@@ -295,6 +467,11 @@ def _run_capture(method, output, reference_case, commit, temporary):
         files["candidate_case"] = trace
         files["reference_case"] = (output / "reference-case.jsonl").read_bytes()
         files["worker_arguments"] = worker_argument_log.read_bytes()
+        files.update({key: (output / name).read_bytes() for key, name in {
+            "jdi_helper_classes": "jdi-helper-classes.zip",
+            "jdi_evidence": "jdi-evidence.zip",
+            "jdi_helper_traces": "jdi-helper-traces.zip",
+            "jdi_transport": "jdi-transport.json"}.items()})
     if hashlib.sha256(files["artifact"]).hexdigest() != hashlib.sha256(
             STAGED_JAR.read_bytes()).hexdigest() or \
             hashlib.sha256(files["runtime"]).hexdigest() != hashlib.sha256(
