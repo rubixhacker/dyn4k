@@ -110,7 +110,8 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         self.assertTrue(all(value is not None and "OLLAMA_API_KEY" not in value
                             for value in seen))
 
-    def observe_fake_process(self, name, command_read, rss_read):
+    def observe_fake_process(self, name, command_read, rss_read,
+                             environment_read=None, image_read=None, timeout=1):
         command = [str(JDK / "bin/java"), "fixture"]
         state = {"exited": False}
 
@@ -132,18 +133,26 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         def read_rss(pid):
             return rss_read(state)
 
+        def read_environment(pid):
+            if environment_read is not None:
+                return environment_read(state)
+            return {"DYN4K_CLOCK_NONCE": "nonce"}
+
+        def read_image(pid):
+            if image_read is not None:
+                return image_read(command, state)
+            return {"sha256": "image", "executable_path": command[0]}
+
         with mock.patch.object(producer.subprocess, "Popen", return_value=Process()), \
                 mock.patch.object(producer, "host_identity", return_value=("host", "boot")), \
-                mock.patch.object(producer, "observe_process_image",
-                                  return_value={"sha256": "image",
-                                                "executable_path": command[0]}), \
+                mock.patch.object(producer, "observe_process_image", side_effect=read_image), \
                 mock.patch.object(producer, "process_start_ticks", return_value=11), \
                 mock.patch.object(producer, "process_command", side_effect=read_command), \
                 mock.patch.object(producer, "process_environment",
-                                  return_value={"DYN4K_CLOCK_NONCE": "nonce"}), \
+                                  side_effect=read_environment), \
                 mock.patch.object(producer, "process_rss_bytes", side_effect=read_rss):
             return producer.observe_process(command, self.keyed_env, self.root / name,
-                                            "nonce", "image", timeout=1)
+                                            "nonce", "image", timeout=timeout)
 
     def test_nonempty_command_mismatch_before_exit_is_rejected_without_argv(self):
         calls = 0
@@ -161,6 +170,87 @@ class ReferenceStudyProducerTest(unittest.TestCase):
                                       lambda state: 1024)
         self.assertTrue(str(caught.exception) == "observed process command differs")
         self.assertFalse(self.keyed_env["OLLAMA_API_KEY"] in str(caught.exception))
+
+    def test_nonempty_mismatch_rejects_before_terminal_environment_loss(self):
+        calls = 0
+
+        def command_read(command, state):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                state["mismatch"] = True
+                state["exited"] = True
+                return [*command, self.keyed_env["OLLAMA_API_KEY"]]
+            return command
+
+        def environment_read(state):
+            if state.get("mismatch"):
+                raise FileNotFoundError("procfs environment vanished")
+            return {"DYN4K_CLOCK_NONCE": "nonce"}
+
+        with self.assertRaises(ValueError) as caught:
+            self.observe_fake_process("mismatch-before-env", command_read,
+                                      lambda state: 1024, environment_read=environment_read)
+        self.assertTrue(str(caught.exception) == "observed process command differs")
+        self.assertFalse(self.keyed_env["OLLAMA_API_KEY"] in str(caught.exception))
+
+    def test_wrong_image_after_complete_sample_rejects_before_exit(self):
+        calls = 0
+
+        def image_read(command, state):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                state["exited"] = True
+                return {"sha256": "wrong", "executable_path": command[0]}
+            return {"sha256": "image", "executable_path": command[0]}
+
+        with self.assertRaises(ValueError) as caught:
+            self.observe_fake_process("wrong-image-after-sample",
+                                      lambda command, state: command,
+                                      lambda state: 1024, image_read=image_read)
+        self.assertTrue(str(caught.exception) == "observed process image differs")
+
+    def test_startup_image_retry_is_bounded_and_requires_complete_sample(self):
+        calls = 0
+
+        def transient_image(command, state):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"sha256": "startup", "executable_path": command[0]}
+            return {"sha256": "image", "executable_path": command[0]}
+
+        def exit_after_sample(state):
+            state["exited"] = True
+            return 1024
+
+        observation = self.observe_fake_process("startup-image-retry",
+                                                lambda command, state: command,
+                                                exit_after_sample, image_read=transient_image)
+        self.assertEqual(observation["process_start_id"], "11")
+        self.assertEqual(calls, 2)
+
+        def always_wrong(command, state):
+            return {"sha256": "startup", "executable_path": command[0]}
+
+        with self.assertRaises(ValueError):
+            self.observe_fake_process("startup-image-timeout",
+                                      lambda command, state: command,
+                                      lambda state: 1024, image_read=always_wrong,
+                                      timeout=0.03)
+
+    def test_public_cli_rejects_invalid_arguments_without_echo(self):
+        marker = self.keyed_env["OLLAMA_API_KEY"]
+        common = [sys.executable, str(SOURCE), "audit", "--output-root", str(self.output),
+                  "--trusted-key", str(self.key)]
+        for name, extra in (("unknown", ["--unknown", marker]),
+                            ("invalid-seconds", ["--seconds", marker])):
+            with self.subTest(name=name):
+                result = subprocess.run([*common, *extra], env=self.env,
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(marker in result.stdout or marker in result.stderr)
 
     def test_empty_terminal_command_recovers_only_after_complete_sample(self):
         calls = 0

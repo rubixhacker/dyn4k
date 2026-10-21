@@ -32,6 +32,11 @@ class ProducerError(ValueError):
     pass
 
 
+class SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ProducerError("invalid producer arguments") from None
+
+
 def need(condition, message):
     if not condition:
         raise ProducerError(message)
@@ -149,18 +154,20 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                 try:
                     candidate = observe_process_image(process.pid)
                     if candidate["sha256"] != expected_image_sha:
+                        if samples:
+                            raise ProducerError("observed process image differs")
                         time.sleep(0.01)
                         continue
                     need(Path(candidate["executable_path"]).resolve() ==
                          Path(command[0]).resolve(), "observed process image path differs")
                     current_ticks = process_start_ticks(process.pid)
                     current_argv = process_command(process.pid)
-                    current_env = process_environment(process.pid)
                     if not current_argv:
                         if process.poll() is not None and samples:
                             break
                         raise ProducerError("observed process command is unavailable")
                     need(current_argv == command, "observed process command differs")
+                    current_env = process_environment(process.pid)
                     observed_nonce = current_env["DYN4K_CLOCK_NONCE"]
                     if not observed_nonce and process.poll() is not None and samples:
                         break
@@ -535,7 +542,7 @@ def audit_output(root, key):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = SafeArgumentParser()
     parser.add_argument("command", choices=("capture", "audit"))
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--trusted-key", required=True)
@@ -545,8 +552,8 @@ def main():
     parser.add_argument("--baseline")
     parser.add_argument("--seconds", type=int, default=1)
     parser.add_argument("--warmup-seconds", type=int, default=1)
-    args = parser.parse_args()
     try:
+        args = parser.parse_args()
         if args.command == "capture":
             need(all((args.java, args.javac, args.gradle, args.baseline)),
                  "capture requires pinned Java, javac, Gradle, and baseline paths")
