@@ -47,6 +47,18 @@ HELPER_ARGS = ["/tmp/dyn4k-tools/jdk21/bin/java", "--add-modules", "jdk.jdi",
                f"-Djava.io.tmpdir={TEST_HOME}/tmp", "-cp", f"{TEST_HOME}/helper-classes",
                "RotationJdiProbe", "attach", f"{TEST_HOME}/jdi", "127.0.0.1",
                "40001", "org.dyn4j.geometry.Transform", "1800", "300"]
+WORKER_EXEC = (b'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+               b'["java", "GradleWorkerMain"], 0x7f) = 0\n')
+THREAD_CLONE = (b'clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+                b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 124\n')
+SOCKET_BIND = (b'bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
+               b'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n')
+SOCKET_LISTEN = b'listen(9, 1) = 0\n'
+HELPER_SOCKET_TRACE = (
+    'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+    + str(HELPER_ARGS).replace("'", '"') + ', 0x7f /* 1 var */) = 0\n'
+    'connect(7, {sa_family=AF_INET, sin_port=htons(40001), '
+    'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n').encode()
 
 
 class JdiBridgeTest(unittest.TestCase):
@@ -122,15 +134,11 @@ class JdiBridgeTest(unittest.TestCase):
             parse_call_sites(BODY, JOINT.replace("line 269", "line 268"))
 
     def test_transport_needs_worker_bind_and_helper_connect(self):
-        worker = archive({"trace.123": (
+        worker = archive({"trace.123": WORKER_EXEC + (
             'bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
             'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
             'listen(9, 1) = 0\n').encode()})
-        helper = archive({"trace.456": (
-            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-            + str(HELPER_ARGS).replace("'", '"') + ', 0x7f /* 1 var */) = 0\n'
-            'connect(7, {sa_family=AF_INET, sin_port=htons(40001), '
-            'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n').encode()})
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE})
         result = verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
         self.assertEqual(result["status"], "MATCHED_JDI_SOCKET_SYSCALLS_UNPASSED_PROCESS")
         self.assertEqual(result["qualification"], "UNPASSED")
@@ -152,34 +160,86 @@ class JdiBridgeTest(unittest.TestCase):
                 verify_jdi_transport(worker, changed, 40001, 123, 456, HELPER_ARGS)
 
     def test_selected_worker_bind_requires_thread_clone_chain(self):
-        helper = archive({"trace.456": (
-            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-            + str(HELPER_ARGS).replace("'", '"') + ', 0x7f /* 1 var */) = 0\n'
-            'connect(7, {sa_family=AF_INET, sin_port=htons(40001), '
-            'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n').encode()})
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE})
         bind = ('bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
                 'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
                 'listen(9, 1) = 0\n').encode()
         thread = ('clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|'
                   'CLONE_THREAD, exit_signal=0}, 88) = 124\n').encode()
         fork = b'clone(child_stack=NULL, flags=SIGCHLD) = 124\n'
-        good = archive({"trace.123": thread, "trace.124": bind})
-        self.assertEqual(verify_jdi_transport(good, helper, 40001, 123, 456,
-                                              HELPER_ARGS)["worker_socket_writer"], 124)
-        split = archive({"trace.123": thread + bind.split(b"listen(")[0],
+        good = archive({"trace.123": WORKER_EXEC + thread, "trace.124": bind})
+        result = verify_jdi_transport(good, helper, 40001, 123, 456,
+                                      HELPER_ARGS)
+        self.assertEqual(result["worker_socket_writer"], 124)
+        self.assertEqual(result["worker_socket_listener"], 124)
+        self.assertEqual(result["worker_tgid"], 123)
+        split = archive({"trace.123": WORKER_EXEC + thread + bind.split(b"listen(")[0],
                          "trace.124": b"listen(9, 1) = 0\n"})
-        self.assertEqual(verify_jdi_transport(split, helper, 40001, 123, 456,
-                                              HELPER_ARGS)["worker_socket_listener"], 124)
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(split, helper, 40001, 123, 456, HELPER_ARGS)
         for root in (fork, b"", thread.replace(b"CLONE_THREAD", b"CLONE_PARENT")):
             with self.assertRaises(EvidenceRejected):
-                verify_jdi_transport(archive({"trace.123": root,
+                verify_jdi_transport(archive({"trace.123": WORKER_EXEC + root,
                                               "trace.124": bind}), helper,
                                      40001, 123, 456, HELPER_ARGS)
         with self.assertRaises(EvidenceRejected):
-            verify_jdi_transport(archive({"trace.123": thread,
+            verify_jdi_transport(archive({"trace.123": WORKER_EXEC + thread,
                                           "trace.124": bind,
                                           "trace.125": b"unrelated\n"}), helper,
                                  40001, 123, 456, HELPER_ARGS)
+
+    def test_successful_later_exec_rejects_worker_thread_attribution(self):
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE})
+        replacement = (b'execve("/home/stewart/replacement", '
+                       b'["replacement"], 0x7f) = 0\n')
+        replacement_at = (b'execveat(AT_FDCWD, "/home/stewart/replacement", '
+                          b'["replacement"], 0x7f, 0) = 0\n')
+        for leader, member in (
+                (WORKER_EXEC + THREAD_CLONE,
+                 SOCKET_BIND + SOCKET_LISTEN + replacement),
+                (WORKER_EXEC + THREAD_CLONE + replacement,
+                 SOCKET_BIND + SOCKET_LISTEN),
+                (WORKER_EXEC + THREAD_CLONE,
+                 SOCKET_BIND + SOCKET_LISTEN + replacement_at)):
+            worker = archive({"trace.123": leader, "trace.124": member})
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_transport(worker, helper, 40001, 123, 456,
+                                     HELPER_ARGS)
+        failed = (b'execve("/home/stewart/missing", '
+                  b'["missing"], 0x7f) = -1 ENOENT (No such file or directory)\n')
+        worker = archive({"trace.123": WORKER_EXEC + THREAD_CLONE,
+                          "trace.124": SOCKET_BIND + failed + SOCKET_LISTEN})
+        self.assertEqual(verify_jdi_transport(
+            worker, helper, 40001, 123, 456, HELPER_ARGS)["worker_socket_writer"], 124)
+        worker = archive({"trace.123": WORKER_EXEC + failed + THREAD_CLONE,
+                          "trace.124": SOCKET_BIND + SOCKET_LISTEN})
+        self.assertEqual(verify_jdi_transport(
+            worker, helper, 40001, 123, 456, HELPER_ARGS)["worker_tgid"], 123)
+        worker = archive({"trace.123": THREAD_CLONE + WORKER_EXEC,
+                          "trace.124": SOCKET_BIND + SOCKET_LISTEN})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+
+    def test_reversed_listen_rejects_socket_attribution(self):
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE})
+        for member in (SOCKET_LISTEN + SOCKET_BIND,
+                       SOCKET_BIND + SOCKET_LISTEN + SOCKET_LISTEN):
+            worker = archive({"trace.123": WORKER_EXEC + THREAD_CLONE,
+                              "trace.124": member})
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_transport(worker, helper, 40001, 123, 456,
+                                     HELPER_ARGS)
+
+    def test_cross_thread_listen_rejects_socket_attribution(self):
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE})
+        for leader, member in (
+                (WORKER_EXEC + THREAD_CLONE + SOCKET_BIND, SOCKET_LISTEN),
+                (WORKER_EXEC + THREAD_CLONE + SOCKET_LISTEN,
+                 SOCKET_BIND + SOCKET_LISTEN)):
+            worker = archive({"trace.123": leader, "trace.124": member})
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_transport(worker, helper, 40001, 123, 456,
+                                     HELPER_ARGS)
 
     def test_vm_disconnect_is_not_vm_death(self):
         source = Path(__file__).resolve().parent

@@ -280,6 +280,10 @@ def _worker_thread_ids(workers, root):
     return threads
 
 
+def _successful_exec(line):
+    return line.startswith(("execve(", "execveat(")) and line.endswith(" = 0")
+
+
 def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
                          helper_pid, expected_argv):
     if (type(port) is not int or not 1 <= port <= 65535 or
@@ -291,6 +295,19 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
     if worker_pid not in workers or helper_pid not in helpers:
         raise EvidenceRejected("JDI process trace PID differs")
     worker_threads = _worker_thread_ids(workers, worker_pid)
+    leader_lines = workers[worker_pid].splitlines()
+    selected = [index for index, line in enumerate(leader_lines)
+                if (_successful_exec(line) and
+                    line.startswith(f'execve("{JDK21 / "bin/java"}",') and
+                    "GradleWorkerMain" in line)]
+    if (len(selected) != 1 or
+            any(line.startswith(("clone(", "clone3(")) and
+                re.search(r"\)\s+= [1-9][0-9]*$", line)
+                for line in leader_lines[:selected[0]]) or
+            any(_successful_exec(line) for line in leader_lines[selected[0] + 1:]) or
+            any(_successful_exec(line) for pid in worker_threads - {worker_pid}
+                for line in workers[pid].splitlines())):
+        raise EvidenceRejected("JDI worker program identity changed")
     if (type(expected_argv) is not list or
             any(type(value) is not str for value in expected_argv) or
             len(expected_argv) != 14 or
@@ -328,20 +345,26 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
     connect = re.compile(r'connect\((\d+), \{sa_family=AF_INET, sin_port=htons\('
                          + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
                          r'\d+\) = 0$')
-    bound = [(pid, match.group(1)) for pid, trace in workers.items()
-             for line in trace.splitlines() if (match := bind.fullmatch(line))]
-    listened = [(pid, fd) for _, fd in bound for pid in worker_threads
-                for line in workers[pid].splitlines()
-                if re.fullmatch(r'listen\(' + re.escape(fd) +
-                                r', \d+\) = 0$', line)]
+    bound = [(pid, index, match.group(1)) for pid, trace in workers.items()
+             for index, line in enumerate(trace.splitlines())
+             if (match := bind.fullmatch(line))]
+    listened = []
+    if len(bound) == 1:
+        binder, _, fd = bound[0]
+        listened = [(pid, index) for pid in worker_threads
+                    for index, line in enumerate(workers[pid].splitlines())
+                    if re.fullmatch(r'listen\(' + re.escape(fd) +
+                                    r', \d+\) = 0$', line)]
     connected = [(pid, match.group(1)) for pid, trace in helpers.items()
                  for line in trace.splitlines() if (match := connect.fullmatch(line))]
     if (len(bound) != 1 or len(listened) != 1 or len(connected) != 1 or
-            bound[0][0] not in worker_threads or connected[0][0] != helper_pid):
+            bound[0][0] not in worker_threads or listened[0][0] != bound[0][0] or
+            listened[0][1] <= bound[0][1] or
+            connected[0][0] != helper_pid):
         raise EvidenceRejected("JDI worker socket or helper connection differs")
     return {"status": "MATCHED_JDI_SOCKET_SYSCALLS_UNPASSED_PROCESS",
             "qualification": "UNPASSED", "worker_socket_writer": bound[0][0],
-            "worker_socket_listener": listened[0][0],
+            "worker_socket_listener": bound[0][0], "worker_tgid": worker_pid,
             "helper_connector": helper_pid, "port": port}
 
 
