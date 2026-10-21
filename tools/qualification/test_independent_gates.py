@@ -1223,9 +1223,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
@@ -1317,7 +1317,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
         self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
-        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, operation))
@@ -1405,7 +1405,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "cf3b0906edb69b08cb24fb2be9a741ffacd3229a8ab466598887005d71109a47")
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_COVERAGE_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS)
-        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1430,7 +1430,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "e2e01e3c10de4e06c86365661821cb9c1ee6985b8944098683bd1f6039c8652b")
         self.assertEqual(current, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS)
-        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
