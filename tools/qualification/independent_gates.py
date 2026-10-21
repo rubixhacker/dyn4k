@@ -673,7 +673,7 @@ def _missing_numerical_subgates(repository):
             "prospective-rule-arithmetic": {
                 "status": "NOT_RUN", "required_cases": PROSPECTIVE_CASE_COUNT,
                 "reason": "318 per-case rule comparisons and target arithmetic audits are absent",
-                "reference_diagnostic": "41 failed derived rules, 4 unpassed premises, 1 failed physical case under operative fixed-32-ulps policy",
+                "reference_diagnostic": "historical b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b 318-case self-check: 41 failed derived rules, 4 unpassed premises, 1 failed physical; current checker 75-case geometry replay: 12 unpassed premises; current 318-case self-check NOT_RUN",
                 "cases": cases}}
 
 

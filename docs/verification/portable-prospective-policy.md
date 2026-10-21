@@ -276,14 +276,22 @@ a separate error suite remains necessary.
 
 ## Reference self-check and remaining work
 
-The operative fixed-32 self-check gives 272 within policy, 41
-`FAILED_DERIVED`, four `UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`.
-In explicitly requested U(N) diagnostic mode, the pinned 318 reference slices
-compared with themselves yield **313 within the conditional envelope**, four
-`UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`. The four boundary cases have
-nonzero declared deltas that round to zero in their represented setup.
-The Angle case still becomes nonfinite. Every reference self-check case
-retains `qualification: UNPASSED`; no candidate target was compared.
+The 318-case reference self-check recorded at
+`b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b` used checker SHA-256
+`2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f`.
+It found 272 within the operative fixed-32 policy, 41 `FAILED_DERIVED`, four
+`UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`. Its separate U(N) diagnostic
+found 313 within the conditional envelope, four `UNPASSED_PREMISE`, and one
+`FAILED_PHYSICAL`. These are historical self-check counts for that checker.
+
+The current checker also rejects eight geometry cases whose requested center
+delta disappears in binary64 even though a rounded gap is nonzero. A bounded
+replay of all 75 indexed geometry cases found 12 `UNPASSED_PREMISE` and 63
+case-policy passes. The complete 318-case self-check has not been rerun with
+this checker. The fixed-32 rule remains operative, the Angle baseline case
+still becomes nonfinite, and every reference-only result retains
+`qualification: UNPASSED`. No candidate target was compared by either
+self-check.
 
 The original portable owner must provide reviewed target arithmetic
 instrumentation and an execution-time seal of the raw call stream, executed
