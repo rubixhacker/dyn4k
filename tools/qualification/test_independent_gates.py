@@ -1223,9 +1223,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
@@ -1317,7 +1317,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
         self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
-        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, operation))
@@ -1405,7 +1405,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "cf3b0906edb69b08cb24fb2be9a741ffacd3229a8ab466598887005d71109a47")
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_COVERAGE_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS)
-        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1430,7 +1430,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "e2e01e3c10de4e06c86365661821cb9c1ee6985b8944098683bd1f6039c8652b")
         self.assertEqual(current, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS)
-        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1537,13 +1537,16 @@ class IndependentGateSeamTests(unittest.TestCase):
                     **changed}
         self.assertEqual(current, independent_gates.P2_D3D6_SOURCE_REVISION)
         self.assertEqual(expected, independent_gates.P2_D3D6_PRODUCERS)
-        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertNotEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         for name, digest in expected.items():
             relative = f"tools/numerical/portable/{name}"
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            self.assertEqual(committed, (ROOT / relative).read_bytes())
+            if name in ("actual_arithmetic.py", "capture_actual.py"):
+                self.assertNotEqual(committed, (ROOT / relative).read_bytes())
+            else:
+                self.assertEqual(committed, (ROOT / relative).read_bytes())
         self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
         self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, historical))
@@ -1592,6 +1595,119 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._p2_producer_binding(ROOT, current)
             with self.subTest(file=name, pin="unknown"), mock.patch.dict(
                     independent_gates.APPROVED_P2_LOCAL_PRODUCERS, {name: "0" * 64}):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
+    def test_p2_boolean_jdi_2a2_binds_worker_source_and_rejects_mutations(self):
+        current = "2a2c4b797b8adcdf3c03ee8475366ba2cfd9b16e"
+        earlier = independent_gates.P2_D3D6_SOURCE_REVISION
+        expected = {**independent_gates.P2_D3D6_PRODUCERS,
+                    "actual_arithmetic.py":
+                    "6d1d478637b9645e6c007a2e5ce3def044742030698aefb3d792080a2be984c0",
+                    "capture_actual.py":
+                    "8f07d4d00877e1f57c74e75d99b052adb60c9f98c8b70f08691b8e533962106e"}
+        dependencies = {
+            "tools/numerical/portable/build.gradle.kts":
+                "3d49cad9fd9205073f880cc20185856b2994c67e2e360cec64772d1e152a71f0",
+            "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java":
+                "bd83b069d0eea15872b916024b2c5fd9af553a1f0bb9b91b534932491155921f",
+            "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+                "e041836cd3caf0ee0cfa847d66b718d9f10786ee9a914d85ebd4faac77e5dec7",
+            "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py":
+                "1cc52a98ec4d93ad199f82831758bb61ae962f13da47f594a290f010a62087be",
+            "tools/numerical/portable/boolean_rotation_jdi/source_guard.py":
+                "5c44941dbe31ba0e2c196a53ed8fdfcd990aa51096661345e39731d54b132180",
+            "tools/numerical/portable/boolean_rotation_jdi/witness.py":
+                "dd7edfa3e0120520e4fd2fb2125e4f438cc73f0dbb08d70cb20ef0beddcb82a6",
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Transform.kt":
+                "ec22ca59049bbe090f381f133a43d7e1e72b3b220960ec751c3f278b7b280747",
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/collision/CollisionBody.kt":
+                "71690455e111fbc3076885ef5a968a66e32616b334afdf428d8f9e56e74b0174",
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/AbstractPhysicsBody.kt":
+                "569979aee3583bf61d11dcffed236901257e606b207011c52f417e2ce1513719",
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/RevoluteJoint.kt":
+                "8be0bf63a1b2940a2570bd814040aaa1d6058862a1419528d02ed5c0f2748e58",
+            "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/AbstractPairedBodyJoint.kt":
+                "90a4dc4bdf28e6ea785af699f5f40acd80afba86bf0e2a40a88ca03f8962d17f",
+            "tools/numerical/portable/src/jvmTest/kotlin/portable/RevoluteLimitsFalseCaptureTest.kt":
+                "d7a8467eb390a4c0db1544472fdb092420933470c879880f23ac64c2e43ff881",
+        }
+        self.assertEqual(current, independent_gates.P2_BOOLEAN_JDI_SOURCE_REVISION)
+        self.assertEqual(expected, independent_gates.P2_BOOLEAN_JDI_PRODUCERS)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertEqual(dependencies, independent_gates.P2_BOOLEAN_JDI_DEPENDENCIES)
+        for name, digest in expected.items():
+            relative = f"tools/numerical/portable/{name}"
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
+            self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+            self.assertEqual(committed, (ROOT / relative).read_bytes())
+        for relative, digest in dependencies.items():
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
+            self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+            self.assertEqual(committed, (ROOT / relative).read_bytes())
+        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
+        self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, earlier))
+        self.assertEqual(independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS,
+                         independent_gates._p2_producer_binding(
+                             ROOT, independent_gates.P2_GENERIC_CLASS_ASSEMBLY_REVISION))
+        for revision in ("341276fd55ea23c35fabab4a859f520dd5831429",
+                         "d0ddb5da98acb997af9db0b88bcab06590370747"):
+            with self.subTest(incomplete=revision), self.assertRaisesRegex(
+                    ValueError, "incomplete Boolean JDI producer lineage"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        for relative in dependencies:
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def changed_local(path_value):
+                raw = original_read(path_value)
+                return raw + b"changed" if path_value == local else raw
+
+            with self.subTest(path=relative, surface="local"), mock.patch.object(
+                    Path, "read_bytes", changed_local):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+            original_show = subprocess.check_output
+
+            def changed_committed(command, *args, **kwargs):
+                raw = original_show(command, *args, **kwargs)
+                return raw + b"changed" if "show" in command and \
+                    f"{current}:{relative}" in command else raw
+
+            with self.subTest(path=relative, surface="committed"), mock.patch.object(
+                    subprocess, "check_output", changed_committed):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+        for name in ("actual_arithmetic.py", "capture_actual.py"):
+            relative = f"tools/numerical/portable/{name}"
+            stale = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{earlier}:{relative}"], cwd=ROOT)
+            self.assertEqual(independent_gates.P2_D3D6_PRODUCERS[name],
+                             hashlib.sha256(stale).hexdigest())
+            local = ROOT / relative
+            original_read = Path.read_bytes
+            with self.subTest(file=name, local="altered"), mock.patch.object(
+                    Path, "read_bytes", lambda path_value: original_read(path_value) + b"changed"
+                    if path_value == local else original_read(path_value)):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+            original_show = subprocess.check_output
+
+            def stale_committed(command, *args, **kwargs):
+                if "show" in command and f"{current}:{relative}" in command:
+                    return stale
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(file=name, committed="stale"), mock.patch.object(
+                    subprocess, "check_output", stale_committed):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+            with self.subTest(file=name, pin="stale"), mock.patch.dict(
+                    independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+                    {name: hashlib.sha256(stale).hexdigest()}):
                 with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                     independent_gates._p2_producer_binding(ROOT, current)
 

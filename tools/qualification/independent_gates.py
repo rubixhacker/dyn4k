@@ -128,6 +128,8 @@ P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION = "fac06d5240f8b030bfd9c5960d7784fa1a50c4
 P2_DYNAMIC_CLASS_ASSEMBLY_REVISION = "41926bd3d14a472f809c2e5693e6e774fb502ddc"
 P2_GENERIC_CLASS_ASSEMBLY_REVISION = "fc576e69703b6757d7306be720a9834a59e81af6"
 P2_D3D6_SOURCE_REVISION = "d3d6d554450060c8785209a6380535a33d87bfb4"
+P2_BOOLEAN_JDI_HELPER_REVISION = "341276fd55ea23c35fabab4a859f520dd5831429"
+P2_BOOLEAN_JDI_SOURCE_REVISION = "2a2c4b797b8adcdf3c03ee8475366ba2cfd9b16e"
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
     "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
@@ -188,7 +190,38 @@ P2_D3D6_PRODUCERS = {
     "capture_actual.py": "9615eda6953125fa8fef0b991e4b4763c1db054625a587cdd2dac563874de265",
     "rotation_oracle.py": "0e7d89680e5fdac765b83a3c625c1e041b2c2e38a974492461fae150c8f46e9a",
 }
-APPROVED_P2_LOCAL_PRODUCERS = dict(P2_D3D6_PRODUCERS)
+P2_BOOLEAN_JDI_PRODUCERS = {
+    **P2_D3D6_PRODUCERS,
+    "actual_arithmetic.py": "6d1d478637b9645e6c007a2e5ce3def044742030698aefb3d792080a2be984c0",
+    "capture_actual.py": "8f07d4d00877e1f57c74e75d99b052adb60c9f98c8b70f08691b8e533962106e",
+}
+P2_BOOLEAN_JDI_DEPENDENCIES = {
+    "tools/numerical/portable/build.gradle.kts":
+        "3d49cad9fd9205073f880cc20185856b2994c67e2e360cec64772d1e152a71f0",
+    "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java":
+        "bd83b069d0eea15872b916024b2c5fd9af553a1f0bb9b91b534932491155921f",
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "e041836cd3caf0ee0cfa847d66b718d9f10786ee9a914d85ebd4faac77e5dec7",
+    "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py":
+        "1cc52a98ec4d93ad199f82831758bb61ae962f13da47f594a290f010a62087be",
+    "tools/numerical/portable/boolean_rotation_jdi/source_guard.py":
+        "5c44941dbe31ba0e2c196a53ed8fdfcd990aa51096661345e39731d54b132180",
+    "tools/numerical/portable/boolean_rotation_jdi/witness.py":
+        "dd7edfa3e0120520e4fd2fb2125e4f438cc73f0dbb08d70cb20ef0beddcb82a6",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Transform.kt":
+        "ec22ca59049bbe090f381f133a43d7e1e72b3b220960ec751c3f278b7b280747",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/collision/CollisionBody.kt":
+        "71690455e111fbc3076885ef5a968a66e32616b334afdf428d8f9e56e74b0174",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/AbstractPhysicsBody.kt":
+        "569979aee3583bf61d11dcffed236901257e606b207011c52f417e2ce1513719",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/RevoluteJoint.kt":
+        "8be0bf63a1b2940a2570bd814040aaa1d6058862a1419528d02ed5c0f2748e58",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/joint/AbstractPairedBodyJoint.kt":
+        "90a4dc4bdf28e6ea785af699f5f40acd80afba86bf0e2a40a88ca03f8962d17f",
+    "tools/numerical/portable/src/jvmTest/kotlin/portable/RevoluteLimitsFalseCaptureTest.kt":
+        "d7a8467eb390a4c0db1544472fdb092420933470c879880f23ac64c2e43ff881",
+}
+APPROVED_P2_LOCAL_PRODUCERS = dict(P2_BOOLEAN_JDI_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -744,7 +777,12 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
-    if descends_from(P2_D3D6_SOURCE_REVISION):
+    boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
+    if boolean_jdi:
+        approved = P2_BOOLEAN_JDI_PRODUCERS
+    elif descends_from(P2_BOOLEAN_JDI_HELPER_REVISION):
+        raise ValueError("candidate has incomplete Boolean JDI producer lineage")
+    elif descends_from(P2_D3D6_SOURCE_REVISION):
         approved = P2_D3D6_PRODUCERS
     elif descends_from(P2_GENERIC_CLASS_ASSEMBLY_REVISION):
         approved = APPROVED_P2_GENERIC_CLASS_PRODUCERS
@@ -793,6 +831,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved
                 or hashlib.sha256(committed).hexdigest() != approved[name]):
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
+    if boolean_jdi:
+        _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
+                        "Boolean JDI producer")
     return dict(approved)
 
 
