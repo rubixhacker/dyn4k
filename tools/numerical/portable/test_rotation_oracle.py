@@ -122,6 +122,15 @@ class RotationOracleTest(unittest.TestCase):
         binding["receipt_sha256"] = digest(data[7])
         return data
 
+    def test_malformed_call_objects_return_coverage_for_both_schemas(self):
+        for fixture in (self.fixture, self.synthetic_schema_two_fixture):
+            for calls in ([0], [None], {"0": {}}, None):
+                data = fixture()
+                data[0]["calls"] = calls
+                data[0]["declared_calls"] = 1
+                with self.subTest(schema=data[0]["schema"], calls=calls):
+                    self.assertEqual(self.verify(data)["status"], "FAILED_COVERAGE")
+
     def test_schema_two_requires_versioned_external_binding(self):
         data = self.synthetic_schema_two_fixture()
         self.assertEqual(verify_rotation_arithmetic(*data[:4], 5)["status"], "UNPASSED")

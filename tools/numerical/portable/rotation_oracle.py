@@ -454,9 +454,15 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                 audit["case_id"] != case["id"] or \
                 audit["operation_model_revision"] != SOURCE_REVISION:
             return {"status": "FAILED_IDENTITY", "reason": "audit source or case differs"}
+        calls = audit["calls"]
+        if type(calls) is not list or any(type(call) is not dict for call in calls) or \
+                type(audit["declared_calls"]) is not int or \
+                audit["declared_calls"] != len(calls) or \
+                len(binding["expected_calls"]) != len(calls):
+            return {"status": "FAILED_COVERAGE", "reason": "call inventory differs"}
         if audit["schema"] == "portable-rotation-audit/2" and (
                 audit["accepted_toi_resets"] or any(call.get("kind") == "lerp-reset"
-                                                    for call in audit["calls"])):
+                                                    for call in calls)):
             return {"status": "UNPASSED", "reason": "schema-2 reset binding is unavailable"}
         if type(case["steps"]) is not int or case["steps"] < 1 or \
                 type(rotation_cap) is not int or rotation_cap < 0:
@@ -474,11 +480,6 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                 any(type(step) is not int for step in states) or \
                 set(states) != set(range(1, case["steps"] + 1)):
             return {"status": "FAILED_COVERAGE", "reason": "body-step receipt differs"}
-        calls = audit["calls"]
-        if type(calls) is not list or type(audit["declared_calls"]) is not int or \
-                audit["declared_calls"] != len(calls) or \
-                len(binding["expected_calls"]) != len(calls):
-            return {"status": "FAILED_COVERAGE", "reason": "call count differs"}
         chain = {body: _state_pair(state["transform"])
                  for body, state in zip(bodies, initial)}
         resets = []
