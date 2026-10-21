@@ -701,7 +701,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates.verify_prospective_case_subgates(
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
-        self.assertEqual([independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS[
+        self.assertEqual([independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS[
             "prospective_compare.py"]], exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -749,7 +749,9 @@ class IndependentGateSeamTests(unittest.TestCase):
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
             ("7d319d5027f2b10c11eae7f4574e6edf407449c0",
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
-            (current, independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS),
+            ("68339377a5d8dff1fd3dd6bf1ab17a32a0a402cd",
+             independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS),
+            (current, independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS),
         )
         checker_paths = [f"tools/numerical/portable/{name}" for name in
                          independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
@@ -797,6 +799,42 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ROOT, "7d319d5027f2b10c11eae7f4574e6edf407449c0")
         with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS,
                              {"prospective_compare.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(
+                    ROOT, "68339377a5d8dff1fd3dd6bf1ab17a32a0a402cd")
+        with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS,
+                             {"prospective_compare.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current)
+
+    def test_represented_checker_revision_binds_exact_current_and_historical_bytes(self):
+        current = "2bd0d70f36b521949641a5404bdb3fa5890f61d3"
+        relative = "tools/numerical/portable/prospective_compare.py"
+        expected = "469c23f619b5b37ab79fc75d7b73328aae122d712104bbe094cf2357eda1cd07"
+        self.assertEqual(current, independent_gates.PROSPECTIVE_REPRESENTED_CHECKER_REVISION)
+        self.assertEqual(expected, independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS[
+            "prospective_compare.py"])
+        self.assertEqual(expected, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
+        self.assertEqual(expected, independent_gates._prospective_checker_binding(
+            ROOT, current)[relative])
+        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS[
+            "prospective_compare.py"], independent_gates._prospective_checker_binding(
+                ROOT, "4a15c77771d7cb65f0bfd303770b58c1afba29ef")[relative])
+        original_read = Path.read_bytes
+        local = ROOT / relative
+        with mock.patch.object(Path, "read_bytes", lambda path_value: b"altered"
+                               if path_value == local else original_read(path_value)):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, current)
+        original_show = subprocess.check_output
+
+        def altered_committed(command, *args, **kwargs):
+            raw = original_show(command, *args, **kwargs)
+            if "show" in command and f"{current}:{relative}" in command:
+                return raw + b"altered"
+            return raw
+
+        with mock.patch.object(subprocess, "check_output", altered_committed):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(ROOT, current)
 
