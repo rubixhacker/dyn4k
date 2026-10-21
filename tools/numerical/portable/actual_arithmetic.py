@@ -888,11 +888,10 @@ def verify_capture_receipt(receipt, files, method, commit, expected_ids,
                                     runtime_executable)
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
-    summary = expected["summary"]
-    if method == "captureWheelActive":
-        summary = dict(summary)
-        summary["operation_record_status"] = summary["status"]
-        summary["dynamic_class_load_status"] = "UNBOUND"
+    summary = dict(expected["summary"])
+    summary["operation_record_status"] = summary["status"]
+    summary["dynamic_class_load_status"] = "UNBOUND"
+    if summary["status"] == "VERIFIED_ARITHMETIC_BINDING":
         summary["status"] = "UNPASSED_DYNAMIC_CLASS_LOAD"
     return summary
 

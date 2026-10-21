@@ -498,8 +498,9 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "wrong sidecar"):
                     compare_host(baseline, lane, set(), sidecar)
 
-    def test_arithmetic_bridge_binds_raw_receipt_and_matrix_case(self):
-        from actual_arithmetic import CaptureRejected, make_capture_receipt
+    def test_arithmetic_bridge_rejects_unbound_and_checks_matrix_case(self):
+        from actual_arithmetic import (CaptureRejected, make_capture_receipt,
+                                       verify_capture_receipt as verify_raw_receipt)
         from test_actual_arithmetic import fixture, xml_for
         from test_actual_capture_receipt import CaptureReceiptTest
 
@@ -538,6 +539,18 @@ class ProspectiveComparisonTest(unittest.TestCase):
                     root, lane, commit, digest(directory / "source.tar"),
                     digest(directory / "artifact.jar"))
 
+            with self.assertRaisesRegex(Exception, "arithmetic source, artifact, or premise differs"):
+                verify()
+
+            def assumed_bound_witness(*args):
+                summary = verify_raw_receipt(*args)
+                self.assertEqual(summary["status"], "UNPASSED_DYNAMIC_CLASS_LOAD")
+                return {**summary, "status": "VERIFIED_ARITHMETIC_BINDING"}
+
+            witness_stub = patch("actual_arithmetic.verify_capture_receipt",
+                                 side_effect=assumed_bound_witness)
+            witness_stub.start()
+            self.addCleanup(witness_stub.stop)
             result = verify()
             self.assertEqual(result[method]["operations_verified"], 1)
             self.assertEqual(result[method]["trace_sha256"],

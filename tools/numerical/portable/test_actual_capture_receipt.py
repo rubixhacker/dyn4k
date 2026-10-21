@@ -253,9 +253,35 @@ class CaptureReceiptTest(unittest.TestCase):
         receipt, files, runtime = self.fixture()
         result = verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
                                         ["geometry-boundary-s0-o0-d0"], runtime)
-        self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["status"], "UNPASSED_DYNAMIC_CLASS_LOAD")
+        self.assertEqual(result["operation_record_status"],
+                         "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
         self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1)
+
+    def test_resealed_generic_lambda_cannot_claim_full_binding(self):
+        _, files, runtime = self.fixture()
+        files["worker_class_load"] += (
+            b"[123][info][class,load] portable.NumericalRecorder$$Lambda/0xdeadbeef "
+            b"source: portable.NumericalRecorder\n")
+        receipt = make_capture_receipt(files, "captureGeometry", "a" * 40,
+                                       ["geometry-boundary-s0-o0-d0"], runtime)
+        result = verify_capture_receipt(receipt, files, "captureGeometry", "a" * 40,
+                                        ["geometry-boundary-s0-o0-d0"], runtime)
+        self.assertEqual(result["status"], "UNPASSED_DYNAMIC_CLASS_LOAD")
+        self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
+
+    def test_unbound_pair_input_status_is_not_promoted(self):
+        receipt = {"exit_code": 0, "summary": {
+            "status": "UNPASSED_INPUT_ORIGIN", "qualification": "UNPASSED"}}
+        with patch("actual_arithmetic.make_capture_receipt", return_value=receipt):
+            result = verify_capture_receipt(receipt, {}, "captureGeometry", "a" * 40,
+                                            ["geometry-boundary-s0-o0-d0"], "java")
+        self.assertEqual(result["status"], "UNPASSED_INPUT_ORIGIN")
+        self.assertEqual(result["operation_record_status"],
+                         "UNPASSED_INPUT_ORIGIN")
+        self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
 
     def test_resealed_wheel_receipt_rejects_nonworker_trace(self):
         _, files, runtime = self.fixture()
