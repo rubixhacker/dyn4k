@@ -76,6 +76,28 @@ class CaptureSourceGuardTest(unittest.TestCase):
                 capture_actual.run_capture(method, self.root / "capture",
                                            self.root / "reference.jsonl")
 
+    def test_boolean_execveat_trace_command_and_process_lines(self):
+        method = "captureRevoluteLimitsFalse"
+        self.assertEqual(
+            capture_actual.trace_syscalls(method),
+            "trace=execve,execveat,clone,clone3,bind,listen,write,writev,sendto,sendmsg")
+        self.assertEqual(
+            capture_actual.trace_syscalls(method, helper=True),
+            "trace=execve,execveat,clone,clone3,connect,openat,write,writev,close")
+        self.assertEqual(
+            capture_actual.trace_syscalls("captureWheelActive"),
+            "trace=execve,clone,clone3,write,writev,sendto,sendmsg")
+        self.assertEqual(capture_actual.trace_syscalls("captureGeometry"),
+                         "trace=execve")
+        records = (b'execve("/jdk/java", ["java"], 0x0) = 0\n'
+                   b'execveat(AT_FDCWD, "/jdk/java", ["java"], 0x0, 0) = -1 ENOENT\n'
+                   b'clone3({flags=CLONE_THREAD}, 88) = 124\n')
+        expected = [f"123 {line.decode()}" for line in records.splitlines()[:2]]
+        self.assertEqual(capture_actual.executed_process_lines(
+            "123", records, method), expected)
+        self.assertEqual(capture_actual.executed_process_lines(
+            "123", records, "captureWheelActive"), expected[:1])
+
     def test_boolean_archive_inventory_excludes_nonworker_argument_logs(self):
         output = self.root / "archive"
         output.mkdir()

@@ -44,6 +44,30 @@ def boolean_jdwp_option(port):
             f"address=127.0.0.1:{port}")
 
 
+def trace_syscalls(method, helper=False):
+    if helper:
+        if method != _FOCUSED_BOOLEAN_METHOD:
+            raise CaptureRejected("JDI helper method differs")
+        return "trace=execve,execveat,clone,clone3,connect,openat,write,writev,close"
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        return "trace=execve,execveat,clone,clone3,bind,listen,write,writev,sendto,sendmsg"
+    if method == "captureWheelActive":
+        return "trace=execve,clone,clone3,write,writev,sendto,sendmsg"
+    return "trace=execve"
+
+
+def executed_process_lines(pid, raw, method):
+    if type(pid) is not str or not pid.isdecimal() or type(raw) is not bytes:
+        raise CaptureRejected("process trace identity differs")
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise CaptureRejected("process trace encoding differs") from error
+    return [f"{pid} {line}" for line in lines
+            if line.startswith("execve(") or
+            (method == _FOCUSED_BOOLEAN_METHOD and line.startswith("execveat("))]
+
+
 def socket_owner(proc_root, pid, port):
     if type(pid) is not int or pid <= 0:
         return False
@@ -389,12 +413,10 @@ def _run_capture(method, output, reference_case, commit, temporary,
     if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
-                  "trace=execve,clone,clone3,bind,listen,write,writev,sendto,sendmsg"
-                  if method == _FOCUSED_BOOLEAN_METHOD else
-                  "trace=execve,clone,clone3,write,writev,sendto,sendmsg",
+                  trace_syscalls(method),
                   "-o", str(trace_prefix)]
     else:
-        tracer = ["strace", "-f", "-s", "16384", "-e", "trace=execve",
+        tracer = ["strace", "-f", "-s", "16384", "-e", trace_syscalls(method),
                   "-o", str(output / "execve.log")]
     target_class = target_test_class(method)
     xml = (PORTABLE / "build/test-results/jvmTest" /
@@ -436,8 +458,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
                     if worker is not None and socket_owner(Path("/proc"), worker, jdi_port):
                         live_socket_owner = True
                         helper_command = ["strace", "-ff", "-s", "1048576", "-e",
-                                          "trace=execve,clone,clone3,connect,openat,"
-                                          "write,writev,close", "-o", str(jdi_trace_prefix),
+                                          trace_syscalls(method, helper=True),
+                                          "-o", str(jdi_trace_prefix),
                                           str(JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
                                           "-Djava.io.tmpdir=" + str(temporary),
                                           "-cp", str(jdi_classes), "RotationJdiProbe",
@@ -494,8 +516,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
             if not pid.isdecimal():
                 raise CaptureRejected("worker write trace PID differs")
             raw_traces[pid] = raw
-            executions.extend(f"{pid} {line}" for line in raw.decode().splitlines()
-                              if line.startswith("execve("))
+            executions.extend(executed_process_lines(pid, raw, method))
             if any(line.startswith("execve(") and "GradleWorkerMain" in line and
                    line.endswith(" = 0") for line in raw.decode().splitlines()):
                 workers.append(pid)

@@ -327,6 +327,8 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
     executions = []
     for pid, trace in helpers.items():
         for line in trace.splitlines():
+            if line.startswith("execveat(") and _successful_exec(line):
+                raise EvidenceRejected("JDI helper program identity changed")
             if not line.startswith("execve(") or not line.endswith(" = 0"):
                 continue
             match = re.fullmatch(r'execve\("([^"\n]+)", (\[[^\n]+\]), .+\) = 0', line)

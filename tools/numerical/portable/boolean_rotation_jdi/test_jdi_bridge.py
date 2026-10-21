@@ -220,6 +220,28 @@ class JdiBridgeTest(unittest.TestCase):
         with self.assertRaises(EvidenceRejected):
             verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
 
+    def test_helper_execveat_replacement_is_rejected(self):
+        worker = archive({"trace.123": WORKER_EXEC + SOCKET_BIND + SOCKET_LISTEN})
+        replacement = (b'execveat(AT_FDCWD, "/home/stewart/replacement", '
+                       b'["replacement"], 0x7f, 0) = 0\n')
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE + replacement})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE + b"clone(0) = 457\n",
+                          "trace.457": replacement})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE +
+                          b'execve("/home/stewart/replacement", '
+                          b'["replacement"], 0x7f) = 0\n'})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+        failed = replacement.replace(b" = 0\n", b" = -1 ENOENT\n")
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE + failed})
+        self.assertEqual(verify_jdi_transport(
+            worker, helper, 40001, 123, 456, HELPER_ARGS)["qualification"],
+            "UNPASSED")
+
     def test_reversed_listen_rejects_socket_attribution(self):
         helper = archive({"trace.456": HELPER_SOCKET_TRACE})
         for member in (SOCKET_LISTEN + SOCKET_BIND,

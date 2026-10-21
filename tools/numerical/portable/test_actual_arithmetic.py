@@ -450,6 +450,23 @@ class ActualArithmeticTest(unittest.TestCase):
             archive(), xml, "42", execution)
         self.assertEqual(result["status"], "PASSED_KERNEL_WORKER_WRITES")
         self.assertEqual(result["operation_lines"], 3)
+        at = b'execveat(AT_FDCWD, "/jdk/java", ["java"], 0x0, 0) = -1 ENOENT\n'
+        with self.assertRaises(CaptureRejected):
+            actual_arithmetic.verify_worker_write_witness(
+                archive(source=worker + at), xml, "42", execution,
+                complete_exec=True)
+        full_log = execution + b"42 " + at
+        self.assertEqual(actual_arithmetic.verify_worker_write_witness(
+            archive(source=worker + at), xml, "42", full_log,
+            complete_exec=True)["status"], "PASSED_KERNEL_WORKER_WRITES")
+        with self.assertRaises(CaptureRejected):
+            actual_arithmetic.verify_worker_write_witness(
+                archive(source=worker), xml, "42", full_log,
+                complete_exec=True)
+        with self.assertRaises(CaptureRejected):
+            actual_arithmetic.verify_worker_write_witness(
+                archive(source=worker + at), xml, "42", full_log + b"42 " + at,
+                complete_exec=True)
         for changed, source, child, payload, pid in (
                 (output.replace(b"PROSPECTIVE_ROTATION_JSON ", b"REMOVED_", 1), worker,
                  "43", xml, "42"),

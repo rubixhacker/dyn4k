@@ -820,8 +820,11 @@ def _check_process(files, runtime_executable, method, jdi_port=None):
     return classpath_evidence, worker_pid, log_paths[0], portable_classes
 
 
-def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
+def verify_worker_write_witness(archive, xml, worker_pid, execve_log,
+                                complete_exec=False):
     try:
+        if type(complete_exec) is not bool:
+            raise CaptureRejected("worker process trace mode differs")
         with zipfile.ZipFile(io.BytesIO(archive)) as traces:
             names = traces.namelist()
             if not names or len(names) > 1024 or len(names) != len(set(names)) or any(
@@ -832,10 +835,22 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
                 worker_pid not in records:
             raise CaptureRejected("worker write trace identity differs")
         decoded = {pid: raw.decode("utf-8") for pid, raw in records.items()}
-        witnessed_execve = sorted(f"{pid} {line}" for pid, content in decoded.items()
-                                  for line in content.splitlines()
-                                  if line.startswith("execve("))
-        if not set(witnessed_execve) <= set(execve_log.decode("utf-8").splitlines()):
+        witnessed_execs = sorted(f"{pid} {line}" for pid, content in decoded.items()
+                                 for line in content.splitlines()
+                                 if line.startswith("execve(") or
+                                 (complete_exec and line.startswith("execveat(")))
+        log_lines = execve_log.decode("utf-8").splitlines()
+        if complete_exec:
+            logged_worker = []
+            for line in log_lines:
+                pid, separator, call = line.partition(" ")
+                if pid in decoded:
+                    if not separator or not call.startswith(("execve(", "execveat(")):
+                        raise CaptureRejected("worker process log inventory differs")
+                    logged_worker.append(line)
+            if witnessed_execs != sorted(logged_worker):
+                raise CaptureRejected("worker process log inventory differs")
+        elif not set(witnessed_execs) <= set(log_lines):
             raise CaptureRejected("worker write process trace differs")
         worker_calls = [line for line in decoded[worker_pid].splitlines()
                         if line.startswith("execve(") and "GradleWorkerMain" in line and
@@ -1211,7 +1226,8 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     if requires_writes:
         witness = verify_worker_write_witness(files["worker_write_traces"],
                                               files["xml"], worker_pid,
-                                              files["execve_log"])
+                                              files["execve_log"],
+                                              complete_exec=bool(jdi_files))
         receipt["worker_write_traces_sha256"] = _sha(files["worker_write_traces"])
         receipt["external_xml_witness"] = witness
         summary["external_xml_witness"] = witness["status"]
