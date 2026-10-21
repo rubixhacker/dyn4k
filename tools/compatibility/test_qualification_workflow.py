@@ -86,6 +86,37 @@ def workflow_jobs_for_event(workflow, event, inputs=None):
     return selected
 
 
+def _yaml_structural_entry(content):
+    match = re.fullmatch(
+        r'(?P<key>"(?:[^"\\]|\\.)*"|\'(?:[^\']|\'\')*\'|'
+        r'[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?P<value>.*)',
+        content,
+    )
+    if match is None:
+        raise AssertionError("invalid workflow mapping entry")
+    key = match.group("key")
+    if key.startswith(('"', "'")):
+        raise AssertionError("quoted workflow structural keys are not allowed")
+    return key, match.group("value")
+
+
+def _yaml_structural_entries_at_indent(source, indentation):
+    entries = []
+    seen = set()
+    for line in source.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        leading = len(line) - len(line.lstrip(" "))
+        if leading != indentation:
+            continue
+        key, value = _yaml_structural_entry(line[indentation:])
+        if key in seen:
+            raise AssertionError(f"duplicate workflow structural key: {key}")
+        seen.add(key)
+        entries.append((key, value))
+    return entries
+
+
 class QualificationWorkflowContractTest(unittest.TestCase):
     def assert_source_checks_job_contract(self, source):
         events = workflow_event_blocks(source)
@@ -97,6 +128,10 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         jobs = workflow_jobs(source)
         self.assertEqual({"workflow-source-contracts"}, set(jobs))
         job = jobs["workflow-source-contracts"]
+        self.assertEqual(
+            [("runs-on", "ubuntu-26.04"), ("timeout-minutes", "5"), ("steps", "")],
+            _yaml_structural_entries_at_indent(job, 4),
+        )
         self.assertEqual(
             ["runs-on", "timeout-minutes", "steps"],
             re.findall(r"(?m)^    ([a-z][a-z0-9-]*):(?:\s+.*)?$", job),
@@ -115,6 +150,18 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         for index, match in enumerate(step_matches):
             end = step_matches[index + 1].start() if index + 1 < len(step_matches) else len(job)
             block = job[match.start():end]
+            first_key, first_value = _yaml_structural_entry(match.group(1))
+            continuation = _yaml_structural_entries_at_indent(block, 8)
+            keys = [first_key, *(key for key, _ in continuation)]
+            if len(keys) != len(set(keys)):
+                raise AssertionError("duplicate workflow step structural key")
+            if first_key == "uses":
+                self.assertEqual(["uses", "with"], keys)
+                self.assertEqual("actions/checkout@v4", first_value)
+                self.assertEqual([("fetch-depth", "0")],
+                                 _yaml_structural_entries_at_indent(block, 10))
+            else:
+                self.assertEqual(["name", "run"], keys)
             multiline = re.search(r"(?ms)^        run: \|\n((?: {10}.*\n)+)", block)
             if multiline is not None:
                 script = textwrap.dedent(multiline.group(1))
@@ -164,6 +211,42 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("version enforcement skipped", "mpfr = _MPFR()", "mpfr = None"),
             ("loaded version not printed", "print(\"GNU MPFR\", mpfr.version)",
              "print(\"GNU MPFR\", _MPFR.MPFR_VERSION)"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, source.count(old), name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
+    def test_source_contract_rejects_yaml_key_execution_overrides(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        preflight_run = (
+            "        run: env -u OLLAMA_API_KEY "
+            "PYTHONPATH=tools/numerical/portable python3 -B -c "
+            "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
+            "print(\"GNU MPFR\", mpfr.version)'\n"
+        )
+        hosted_guard_run = "        run: python3 -B tools/qualification/guard_hosted_runners.py\n"
+        timeout = "    timeout-minutes: 5\n"
+        mutations = (
+            ("quoted job failure suppression", timeout,
+             timeout + '    "continue-on-error": true\n'),
+            ("quoted job permission override", timeout,
+             timeout + '    "permissions": write-all\n'),
+            ("quoted job steps override", timeout,
+             timeout + '    "steps": []\n'),
+            ("duplicate job timeout", timeout,
+             timeout + "    timeout-minutes: 1\n"),
+            ("quoted preflight skip", preflight_run,
+             preflight_run + '        "if": false\n'),
+            ("quoted hosted guard skip", hosted_guard_run,
+             hosted_guard_run + '        "if": false\n'),
+            ("unknown shell override", preflight_run,
+             preflight_run + "        shell: bash\n"),
+            ("unknown step execution key", preflight_run,
+             preflight_run + "        continue-on-error: true\n"),
+            ("duplicate step command", preflight_run,
+             preflight_run + "        run: echo skipped\n"),
         )
         for name, old, new in mutations:
             with self.subTest(mutation=name):
