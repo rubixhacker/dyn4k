@@ -14,10 +14,12 @@ SOURCE = Path(__file__).with_name("RepresentedGeometryProbe.java")
 BASELINE = Path("/var/home/stewart/dyn4k-evidence/session-control/baseline-current-4d-home-full")
 CANDIDATE = Path("/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/wheel/capture-7d")
 JDK = Path("/tmp/dyn4k-tools/jdk21")
+KOTLIN_STDLIB = Path("/var/home/stewart/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.4.20/94c1451890d164aed65d43b3db0b7ecef7c183e7/kotlin-stdlib-2.4.20.jar")
 FIXTURE_SHA = "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce"
 BASELINE_JAR_SHA = "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e"
 CANDIDATE_JAR_SHA = "07d7a18f418a9f222e8dce1c2f1005865cb25052eab088854a968c3c8b8b3d13"
 CANDIDATE_COMMIT = "7d319d5027f2b10c11eae7f4574e6edf407449c0"
+KOTLIN_STDLIB_SHA = "2226de463d309d4a5500a481320b3dea515a6981dcae1def531fbc158884e25f"
 
 
 def sha(data):
@@ -144,6 +146,11 @@ def main():
             candidate_receipt["artifact_sha256"] == CANDIDATE_JAR_SHA and
             file_sha(candidate_jar) == CANDIDATE_JAR_SHA,
             "candidate artifact identity differs")
+    require(any(entry["path"] == str(KOTLIN_STDLIB) and
+                entry["sha256"] == KOTLIN_STDLIB_SHA
+                for entry in candidate_receipt["worker_classpath_entries"]) and
+            file_sha(KOTLIN_STDLIB) == KOTLIN_STDLIB_SHA,
+            "candidate Kotlin runtime identity differs")
 
     java = JDK / "bin/java"
     javac = JDK / "bin/javac"
@@ -158,7 +165,10 @@ def main():
     class_sha = file_sha(classes / "RepresentedGeometryProbe.class")
     captures = {}
     for label, jar in (("baseline", baseline_jar), ("candidate", candidate_jar)):
-        data, process_receipt = run(label, (java, "-cp", f"{classes}{os.pathsep}{jar}",
+        classpath = f"{classes}{os.pathsep}{jar}"
+        if label == "candidate":
+            classpath += f"{os.pathsep}{KOTLIN_STDLIB}"
+        data, process_receipt = run(label, (java, "-cp", classpath,
                                            "RepresentedGeometryProbe"), environment, output)
         rows = parse_rows(data)
         inputs = encode_rows([{"id": row["id"], **row["input"]} for row in rows])
@@ -179,7 +189,9 @@ def main():
         "candidate_origin_receipt_sha256": file_sha(candidate_receipt_path),
         "candidate_origin_source_archive_sha256": candidate_receipt["source_archive_sha256"],
         "artifacts": {"baseline": {"path": str(baseline_jar), "sha256": BASELINE_JAR_SHA},
-                      "candidate": {"path": str(candidate_jar), "sha256": CANDIDATE_JAR_SHA}},
+                      "candidate": {"path": str(candidate_jar), "sha256": CANDIDATE_JAR_SHA},
+                      "candidate_kotlin_stdlib": {"path": str(KOTLIN_STDLIB),
+                                                   "sha256": KOTLIN_STDLIB_SHA}},
         "jdk": {"java_sha256": file_sha(java), "javac_sha256": file_sha(javac),
                 "release_sha256": file_sha(JDK / "release"),
                 "java_version": java_version_receipt,
