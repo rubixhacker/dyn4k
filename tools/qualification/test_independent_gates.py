@@ -1465,15 +1465,49 @@ class IndependentGateSeamTests(unittest.TestCase):
             "e1732c31c7c3c290c81e379848b865b3b6968c63ebbc9d1dd03a6b6049fc7aa7")
         self.assertEqual(current, independent_gates.P2_DYNAMIC_CLASS_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS)
+        self.assertNotEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
+        self.assertEqual(expected["actual_arithmetic.py"], hashlib.sha256(committed).hexdigest())
+        self.assertNotEqual(committed, (ROOT / relative).read_bytes())
+        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
+        self.assertEqual(independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS,
+                         independent_gates._p2_producer_binding(
+                             ROOT, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION))
+        original_read = Path.read_bytes
+        local = ROOT / relative
+        with mock.patch.object(Path, "read_bytes", lambda path_value: committed + b"changed"
+                               if path_value == local else original_read(path_value)):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
+        original_show = subprocess.check_output
+
+        def altered_show(command, *args, **kwargs):
+            content = original_show(command, *args, **kwargs)
+            return content + b"changed" if "show" in command and \
+                f"{current}:{relative}" in command else content
+
+        with mock.patch.object(subprocess, "check_output", altered_show):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
+
+    def test_p2_generic_class_revision_keeps_all_methods_unbound(self):
+        current = "fc576e69703b6757d7306be720a9834a59e81af6"
+        relative = "tools/numerical/portable/actual_arithmetic.py"
+        expected = dict(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS)
+        expected["actual_arithmetic.py"] = (
+            "83454c14e4e72412f11acdeb15bc4c405c3bc651df542319e9ac3e94bf76fa4b")
+        self.assertEqual(current, independent_gates.P2_GENERIC_CLASS_ASSEMBLY_REVISION)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_GENERIC_CLASS_PRODUCERS)
         self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
         self.assertEqual(expected["actual_arithmetic.py"], hashlib.sha256(committed).hexdigest())
         self.assertEqual(committed, (ROOT / relative).read_bytes())
         self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
-        self.assertEqual(independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_DYNAMIC_CLASS_PRODUCERS,
                          independent_gates._p2_producer_binding(
-                             ROOT, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION))
+                             ROOT, independent_gates.P2_DYNAMIC_CLASS_ASSEMBLY_REVISION))
         original_read = Path.read_bytes
         local = ROOT / relative
         with mock.patch.object(Path, "read_bytes", lambda path_value: committed + b"changed"
