@@ -124,6 +124,19 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              ("on", ""), ("permissions", ""), ("jobs", "")],
             _yaml_structural_entries_at_indent(source, 0),
         )
+        jobs_block = re.search(r"(?ms)^jobs:\n(.*)\Z", source)
+        self.assertIsNotNone(jobs_block)
+        jobs_source = jobs_block.group(1)
+        self.assertEqual(
+            [("workflow-source-contracts", "")],
+            _yaml_structural_entries_at_indent(jobs_source, 2),
+        )
+        job_id_lines = [
+            line for line in jobs_source.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+            and len(line) - len(line.lstrip(" ")) == 2
+        ]
+        self.assertEqual(["  workflow-source-contracts:"], job_id_lines)
         events = workflow_event_blocks(source)
         self.assertEqual(["push", "pull_request"], list(events))
         trigger_block = re.search(r"(?ms)^on:\n(.*?)^permissions:\n", source)
@@ -280,6 +293,34 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 self.assertEqual(1, source.count(old), name)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
+    def test_source_contract_rejects_job_id_overrides(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        jobs_marker = "jobs:\n"
+        extra_job = (
+            "  {job_id}:\n"
+            "    runs-on: ubuntu-26.04\n"
+            "    steps:\n"
+            "      - run: echo extra\n"
+        )
+        original_job = workflow_jobs(source)["workflow-source-contracts"]
+        duplicate_job = (
+            source.rstrip("\n") + "\n  workflow-source-contracts:\n" + original_job
+        )
+        mutations = (
+            ("quoted extra job id", source.replace(
+                jobs_marker, jobs_marker + extra_job.format(job_id='"extra"'), 1)),
+            ("unknown extra job id", source.replace(
+                jobs_marker, jobs_marker + extra_job.format(job_id="extra"), 1)),
+            ("spaced job id", source.replace(
+                jobs_marker, jobs_marker + extra_job.format(job_id="extra "), 1)),
+            ("duplicate job id", duplicate_job),
+        )
+        for name, mutated in mutations:
+            with self.subTest(mutation=name):
+                self.assertNotEqual(source, mutated, name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
 
     def test_source_job_contract_rejects_failure_suppression_and_body_changes(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
