@@ -92,6 +92,17 @@ class WitnessTest(unittest.TestCase):
         self.assertEqual(verify_stream(witness, expected)["status"],
                          "UNPASSED_SOURCE_CALL_SITE")
 
+    def test_boolean_identity_and_location_reject(self):
+        witness, expected = fixture()
+        witness["pid"] = True
+        expected["pid"] = True
+        self.assertEqual(verify_stream(witness, expected)["status"], "FAILED_IDENTITY")
+        witness, expected = fixture()
+        witness["calls"][1]["caller_code_index"] = True
+        expected["caller_code_indices"][1] = True
+        self.assertEqual(verify_stream(witness, expected)["status"],
+                         "UNPASSED_SOURCE_CALL_SITE")
+
 
 if __name__ == "__main__":
     unittest.main()

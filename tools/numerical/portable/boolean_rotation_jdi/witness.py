@@ -58,7 +58,7 @@ def verify_stream(witness, expected):
                   "loaded_code_sha256", "marker_sha256"):
         if witness.get(field) != expected.get(field):
             return _result("FAILED_IDENTITY")
-    if witness.get("case_id") != CASE or not isinstance(witness.get("pid"), int) or witness["pid"] <= 0:
+    if witness.get("case_id") != CASE or type(witness.get("pid")) is not int or witness["pid"] <= 0:
         return _result("FAILED_IDENTITY")
     for field in ("source_sha256", "jar_sha256", "loaded_code_sha256", "marker_sha256"):
         value = witness.get(field)
@@ -69,7 +69,7 @@ def verify_stream(witness, expected):
         return _result("FAILED_COVERAGE")
     sites = expected.get("caller_code_indices")
     if (not isinstance(sites, list) or len(sites) != 3 or
-            any(not isinstance(site, int) or site < 0 for site in sites) or
+            any(type(site) is not int or site < 0 for site in sites) or
             len(set(sites)) != 3):
         return _result("UNPASSED_SOURCE_CALL_SITE")
     body_receivers = {}
@@ -82,7 +82,8 @@ def verify_stream(witness, expected):
             ("b0", None, POINT),
             ("b1", None, POINT),
         )[index % 3]
-        if (call.get("ordinal") != index or marker.get("step") != index // 3 + 1 or
+        if (type(call.get("ordinal")) is not int or call["ordinal"] != index or
+                type(marker.get("step")) is not int or marker["step"] != index // 3 + 1 or
                 marker.get("body_id") != body or marker.get("branch") != branch or
                 marker.get("kind") != "rotate"):
             return _result("FAILED_COVERAGE", index)
@@ -90,8 +91,8 @@ def verify_stream(witness, expected):
                 call.get("caller_code_index") != sites[index % 3]):
             return _result("FAILED_SOURCE_SITE", index)
         receiver, thread = call.get("receiver"), call.get("thread")
-        if (not isinstance(receiver, int) or receiver <= 0 or
-                not isinstance(thread, int) or thread <= 0):
+        if (type(receiver) is not int or receiver <= 0 or
+                type(thread) is not int or thread <= 0):
             return _result("FAILED_SOURCE_SITE", index)
         threads.add(thread)
         old_receiver = body_receivers.setdefault(body, receiver)
