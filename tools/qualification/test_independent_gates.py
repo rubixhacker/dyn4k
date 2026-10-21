@@ -1223,9 +1223,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
@@ -1317,7 +1317,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
         self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, operation))
@@ -1405,7 +1405,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "cf3b0906edb69b08cb24fb2be9a741ffacd3229a8ab466598887005d71109a47")
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_COVERAGE_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1430,7 +1430,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             "e2e01e3c10de4e06c86365661821cb9c1ee6985b8944098683bd1f6039c8652b")
         self.assertEqual(current, independent_gates.P2_PORTABLE_PROVIDER_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_PORTABLE_PROVIDER_PRODUCERS)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
@@ -1634,19 +1634,24 @@ class IndependentGateSeamTests(unittest.TestCase):
         }
         self.assertEqual(current, independent_gates.P2_BOOLEAN_JDI_SOURCE_REVISION)
         self.assertEqual(expected, independent_gates.P2_BOOLEAN_JDI_PRODUCERS)
-        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertNotEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(dependencies, independent_gates.P2_BOOLEAN_JDI_DEPENDENCIES)
         for name, digest in expected.items():
             relative = f"tools/numerical/portable/{name}"
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            self.assertEqual(committed, (ROOT / relative).read_bytes())
+            self.assertEqual(committed == (ROOT / relative).read_bytes(),
+                             name not in ("actual_arithmetic.py", "capture_actual.py"))
         for relative, digest in dependencies.items():
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-            self.assertEqual(committed, (ROOT / relative).read_bytes())
+            self.assertEqual(committed == (ROOT / relative).read_bytes(),
+                             relative not in {
+                                 "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java",
+                                 "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
+                                 "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py"})
         self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
         self.assertEqual(independent_gates.P2_D3D6_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, earlier))
@@ -1709,6 +1714,150 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                     {name: hashlib.sha256(stale).hexdigest()}):
                 with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
+    def test_p2_boolean_jdi_final_binds_reviewed_source_and_rejects_mutations(self):
+        current = "1ef6554b4edb4e6066f5ae16ee64dbeda131d568"
+        assembly = "990910f697dbb8c183793796d0aca7a16c520815"
+        parent = "d5683a7474e2379f5aa4d5c29dc49b1b109aa98f"
+        self.assertEqual(current, independent_gates.P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
+        self.assertEqual(assembly, independent_gates.P2_BOOLEAN_JDI_FINAL_ASSEMBLY_REVISION)
+        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        self.assertNotEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+                            independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS)
+        self.assertEqual(
+            {**independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
+             "actual_arithmetic.py":
+             "2c3b33719c03ff2e57ac1eb6739bb248a554ed4efbf4b1e5fa59244e411b54d2",
+             "capture_actual.py":
+             "b3a867bfaf835bd41f998c93823375ec1e08b9ee4b2de8d2c52010447c28e5cc"},
+            independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS)
+        self.assertEqual(
+            {**independent_gates.P2_BOOLEAN_JDI_DEPENDENCIES,
+             "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java":
+             "70990e22075d2c34bc6c03a194291ece66de13c11926494042b93d511f75c712",
+             "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+             "bc6662c300718d82af7eb7b13e089780a8caf41bb43694a90767044c0cda13cb",
+             "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py":
+             "d76aeb947911108c29fc27b53ec2dced6648c160a78017eaf595a6d41fdb3235",
+             "tools/numerical/portable/boolean_rotation_jdi/EndpointControl.java":
+             "d32c7dbeb06c3c73f739faf8869ef485b13f853151369cea1d40cdefe6b948dd"},
+            independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES)
+        for revision in (current, assembly):
+            for name, digest in independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS.items():
+                relative = f"tools/numerical/portable/{name}"
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
+                self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+                self.assertEqual(committed, (ROOT / relative).read_bytes())
+            for relative, digest in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES.items():
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
+                self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+                self.assertEqual(committed, (ROOT / relative).read_bytes())
+        for revision in (current, assembly):
+            self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+                             independent_gates._p2_producer_binding(ROOT, revision))
+        with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+            independent_gates._p2_producer_binding(ROOT, parent)
+        for revision in ("b1939e1290721a34c8d0901dc6e6981ac9f8d26d",
+                         "54505a49c8cbecb416b44e43a6f491b2f4033224",
+                         "edd9d5f2e82154b5bfc3df7ba51b66c8dab542c9",
+                         "d5683a7474e2379f5aa4d5c29dc49b1b109aa98f",
+                         "1d64b344623192b1e8ada06c24d01117a6f6779e",
+                         "2aa68a2ab0ac3864cd593085211dc9733d93c1a5",
+                         "53a4b8e36c24efc2c2d3b481f6f42a02553bd359",
+                         "9ac147b864fe5d33e5d3756963e0b043fc848a57",
+                         "b3def0da2a443e90984e67aede5c45cbea8d7282"):
+            with self.subTest(partial=revision), self.assertRaisesRegex(
+                    ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        for name, digest in independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS.items():
+            relative = f"tools/numerical/portable/{name}"
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def altered_local(path_value):
+                raw = original_read(path_value)
+                return raw + b"\n# changed\n" if path_value == local else raw
+
+            with self.subTest(file=name, surface="local"), mock.patch.object(
+                    Path, "read_bytes", altered_local):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+            original_show = subprocess.check_output
+
+            def altered_committed(command, *args, **kwargs):
+                raw = original_show(command, *args, **kwargs)
+                return raw + b"\n# changed\n" if "show" in command and \
+                    f"{current}:{relative}" in command else raw
+
+            with self.subTest(file=name, surface="committed"), mock.patch.object(
+                    subprocess, "check_output", altered_committed):
+                with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+        for relative in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES:
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def altered_dependency_local(path_value):
+                raw = original_read(path_value)
+                return raw + b"\n# changed\n" if path_value == local else raw
+
+            with self.subTest(path=relative, surface="local"), mock.patch.object(
+                    Path, "read_bytes", altered_dependency_local):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+            original_show = subprocess.check_output
+
+            def altered_dependency_committed(command, *args, **kwargs):
+                raw = original_show(command, *args, **kwargs)
+                return raw + b"\n# changed\n" if "show" in command and \
+                    f"{current}:{relative}" in command else raw
+
+            with self.subTest(path=relative, surface="committed"), mock.patch.object(
+                    subprocess, "check_output", altered_dependency_committed):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+        for relative in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES:
+            original_show = subprocess.check_output
+
+            def missing_committed(command, *args, **kwargs):
+                if "show" in command and f"{current}:{relative}" in command:
+                    raise subprocess.CalledProcessError(1, command)
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(path=relative, surface="missing"), mock.patch.object(
+                    subprocess, "check_output", missing_committed):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    independent_gates._p2_producer_binding(ROOT, current)
+        for name in independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS:
+            relative = f"tools/numerical/portable/{name}"
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def missing_local(path_value):
+                if path_value == local:
+                    raise FileNotFoundError(path_value)
+                return original_read(path_value)
+
+            with self.subTest(file=name, surface="missing-local"), mock.patch.object(
+                    Path, "read_bytes", missing_local):
+                with self.assertRaises(FileNotFoundError):
+                    independent_gates._p2_producer_binding(ROOT, current)
+        for relative in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES:
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def missing_dependency_local(path_value):
+                if path_value == local:
+                    raise FileNotFoundError(path_value)
+                return original_read(path_value)
+
+            with self.subTest(path=relative, surface="missing-local"), mock.patch.object(
+                    Path, "read_bytes", missing_dependency_local):
+                with self.assertRaises(FileNotFoundError):
                     independent_gates._p2_producer_binding(ROOT, current)
 
     def test_p2_reviewed_arithmetic_assembly_rejects_stale_and_altered_bytes(self):

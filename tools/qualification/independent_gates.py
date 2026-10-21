@@ -130,6 +130,8 @@ P2_GENERIC_CLASS_ASSEMBLY_REVISION = "fc576e69703b6757d7306be720a9834a59e81af6"
 P2_D3D6_SOURCE_REVISION = "d3d6d554450060c8785209a6380535a33d87bfb4"
 P2_BOOLEAN_JDI_HELPER_REVISION = "341276fd55ea23c35fabab4a859f520dd5831429"
 P2_BOOLEAN_JDI_SOURCE_REVISION = "2a2c4b797b8adcdf3c03ee8475366ba2cfd9b16e"
+P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION = "1ef6554b4edb4e6066f5ae16ee64dbeda131d568"
+P2_BOOLEAN_JDI_FINAL_ASSEMBLY_REVISION = "990910f697dbb8c183793796d0aca7a16c520815"
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
     "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
@@ -221,7 +223,23 @@ P2_BOOLEAN_JDI_DEPENDENCIES = {
     "tools/numerical/portable/src/jvmTest/kotlin/portable/RevoluteLimitsFalseCaptureTest.kt":
         "d7a8467eb390a4c0db1544472fdb092420933470c879880f23ac64c2e43ff881",
 }
-APPROVED_P2_LOCAL_PRODUCERS = dict(P2_BOOLEAN_JDI_PRODUCERS)
+P2_BOOLEAN_JDI_FINAL_PRODUCERS = {
+    **P2_BOOLEAN_JDI_PRODUCERS,
+    "actual_arithmetic.py": "2c3b33719c03ff2e57ac1eb6739bb248a554ed4efbf4b1e5fa59244e411b54d2",
+    "capture_actual.py": "b3a867bfaf835bd41f998c93823375ec1e08b9ee4b2de8d2c52010447c28e5cc",
+}
+P2_BOOLEAN_JDI_FINAL_DEPENDENCIES = {
+    **P2_BOOLEAN_JDI_DEPENDENCIES,
+    "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java":
+        "70990e22075d2c34bc6c03a194291ece66de13c11926494042b93d511f75c712",
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "bc6662c300718d82af7eb7b13e089780a8caf41bb43694a90767044c0cda13cb",
+    "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py":
+        "d76aeb947911108c29fc27b53ec2dced6648c160a78017eaf595a6d41fdb3235",
+    "tools/numerical/portable/boolean_rotation_jdi/EndpointControl.java":
+        "d32c7dbeb06c3c73f739faf8869ef485b13f853151369cea1d40cdefe6b948dd",
+}
+APPROVED_P2_LOCAL_PRODUCERS = dict(P2_BOOLEAN_JDI_FINAL_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -753,13 +771,15 @@ def _missing_physical_profiles():
                         "reason": "candidate nominal physical quality evidence is absent"}}
 
 
-def _source_binding(repository, candidate_sha, approved_paths, label):
+def _source_binding(repository, candidate_sha, approved_paths, label, local_approved=None):
+    if local_approved is None:
+        local_approved = approved_paths
     for relative, approved in approved_paths.items():
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "-C", str(repository), "show", f"{candidate_sha}:{relative}"],
             stderr=subprocess.PIPE)
-        if (hashlib.sha256(local.read_bytes()).hexdigest() != approved
+        if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved[relative]
                 or hashlib.sha256(committed).hexdigest() != approved):
             raise ValueError(f"{label} blob differs: {relative}")
     return dict(approved_paths)
@@ -777,8 +797,11 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if boolean_jdi:
+    if boolean_jdi_final:
+        approved = P2_BOOLEAN_JDI_FINAL_PRODUCERS
+    elif boolean_jdi:
         approved = P2_BOOLEAN_JDI_PRODUCERS
     elif descends_from(P2_BOOLEAN_JDI_HELPER_REVISION):
         raise ValueError("candidate has incomplete Boolean JDI producer lineage")
@@ -831,9 +854,13 @@ def _p2_producer_binding(repository, candidate_sha):
         if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved
                 or hashlib.sha256(committed).hexdigest() != approved[name]):
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
-    if boolean_jdi:
-        _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
+    if boolean_jdi_final:
+        _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI producer")
+    elif boolean_jdi:
+        _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
+                        "Boolean JDI producer",
+                        local_approved=P2_BOOLEAN_JDI_FINAL_DEPENDENCIES)
     return dict(approved)
 
 
