@@ -9,7 +9,13 @@ import unittest
 from decimal import Decimal, localcontext
 from fractions import Fraction
 
-from rotation_oracle import trig_interval, verify_rotation_arithmetic
+from rotation_oracle import (trig_interval, verify_operation_marker,
+                             verify_rotation_arithmetic)
+from test_rotation_marker import marker as marker_fixture
+
+
+BOOLEAN_CONTEXT = "revolute-limits-false-point/1"
+BOOLEAN_CASE = "joint-Revolute-LimitsEnabled-false"
 
 
 def bits(value):
@@ -93,7 +99,7 @@ class RotationOracleTest(unittest.TestCase):
         binding["receipt_sha256"] = digest(receipt)
         return audit, case, header, states, binding, trace, payload, receipt, artifact, source
 
-    def verify(self, data, *, refresh_hash=True):
+    def verify(self, data, *, refresh_hash=True, source_context=None):
         audit, case, header, states, binding, trace, payload, receipt, artifact, source = data
         if refresh_hash:
             binding["audit_sha256"] = audit_digest(audit)
@@ -104,10 +110,12 @@ class RotationOracleTest(unittest.TestCase):
             binding["trace_sha256"] = digest(trace)
             receipt = receipt_for(binding)
             binding["receipt_sha256"] = digest(receipt)
+        options = {"source_context": source_context} if source_context is not None else {}
         return verify_rotation_arithmetic(audit, case, header, states, 5,
                                           binding=binding, trace_bytes=trace,
                                           payload_bytes=payload, receipt_bytes=receipt,
-                                          artifact_bytes=artifact, source_bytes=source)
+                                          artifact_bytes=artifact, source_bytes=source,
+                                          **options)
 
     def synthetic_schema_two_fixture(self):
         data = list(self.fixture())
@@ -121,6 +129,136 @@ class RotationOracleTest(unittest.TestCase):
         data[7] = receipt_for(binding)
         binding["receipt_sha256"] = digest(data[7])
         return data
+
+    def boolean_source_fixture(self, schema_two=False):
+        data = (self.synthetic_schema_two_fixture() if schema_two else self.fixture())
+        audit, case, header, states, binding = data[:5]
+        case.update(id=BOOLEAN_CASE, steps=600)
+        audit["case_id"] = BOOLEAN_CASE
+        transform = {"getCost": 1.0, "getSint": 0.0}
+        header["setup"]["bodies"] = [{"id": "b0"}, {"id": "b1"}]
+        header["initial"]["bodies"] = [
+            {"transform": transform.copy()}, {"transform": transform.copy()}]
+        states.clear()
+        for step in range(1, 601):
+            states[step] = {"bodies": [
+                {"id": body, "transform": transform.copy()}
+                for body in ("b0", "b1")]}
+        sample = audit["calls"][0]
+        calls = []
+        expected = []
+        for step in range(1, 601):
+            for body, branch in (("b1", "integrate"), ("b0", None), ("b1", None)):
+                call = copy.deepcopy(sample)
+                call.update(sequence=len(calls), step=step, body_id=body,
+                            branch=branch)
+                calls.append(call)
+                expected.append({"step": step, "body_id": body,
+                                 "kind": "rotate", "branch": branch,
+                                 "input_kind": "angle"})
+        audit["calls"] = calls
+        audit["declared_calls"] = len(calls)
+        binding["expected_calls"] = expected
+        binding["body_step_receipts"] = [
+            [step, body] for step in range(1, 601) for body in ("b0", "b1")]
+        return data
+
+    def test_source_bound_boolean_null_calls_in_both_arithmetic_schemas(self):
+        for schema_two in (False, True):
+            data = self.boolean_source_fixture(schema_two)
+            with self.subTest(schema_two=schema_two):
+                self.assertEqual(self.verify(data)["status"], "FAILED_ARITHMETIC")
+                result = self.verify(data, source_context=BOOLEAN_CONTEXT)
+                self.assertEqual(result["status"], "PASSED_ARITHMETIC")
+                self.assertEqual(result["qualification"], "UNPASSED")
+                self.assertEqual(result["source_context_status"],
+                                 "SOURCE_SCHEDULE_ONLY")
+                self.assertIsNone(data[0]["calls"][1]["branch"])
+                self.assertIsNone(data[4]["expected_calls"][1]["branch"])
+
+    def test_boolean_null_context_rejects_wrong_site_and_input(self):
+        changes = (
+            (0, "branch", None, "FAILED_COVERAGE"),
+            (1, "branch", "joint", "FAILED_COVERAGE"),
+            (1, "body_id", "b1", "FAILED_COVERAGE"),
+            (1, "angle_bits", bits(0.5), "FAILED_ARITHMETIC"),
+        )
+        for position, field, value, status in changes:
+            data = self.boolean_source_fixture()
+            data[0]["calls"][position][field] = value
+            if field in ("branch", "body_id"):
+                data[4]["expected_calls"][position][field] = value
+            with self.subTest(position=position, field=field):
+                self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)[
+                    "status"], status)
+        data = self.boolean_source_fixture()
+        data[1]["id"] = "other"
+        data[0]["case_id"] = "other"
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "UNPASSED")
+        data = self.boolean_source_fixture()
+        self.assertEqual(self.verify(data, source_context="other")["status"],
+                         "UNPASSED")
+        data = self.boolean_source_fixture()
+        data[0]["calls"].pop()
+        data[0]["declared_calls"] -= 1
+        data[4]["expected_calls"].pop()
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "FAILED_COVERAGE")
+        data = self.boolean_source_fixture()
+        call = data[0]["calls"][1]
+        call["angle_bits"] = bits(-0.0)
+        call["trig"][1] = bits(-0.0)
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "PASSED_ARITHMETIC")
+        call["trig"][1] = bits(0.0)
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "FAILED_ARITHMETIC")
+        data = self.boolean_source_fixture()
+        call = data[0]["calls"][1]
+        call["input_kind"] = "pair"
+        call["rotation_input"] = call["trig"][:]
+        call.pop("angle_bits")
+        data[4]["expected_calls"][1]["input_kind"] = "pair"
+        data[4]["pair_inputs"] = {"1": call["rotation_input"][:]}
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "FAILED_COVERAGE")
+        data = self.boolean_source_fixture()
+        data[0]["calls"][1]["raw"][1] = bits(-0.0)
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "FAILED_ARITHMETIC")
+        data = self.boolean_source_fixture()
+        data[0]["calls"][1]["angle_bits"] = bits(math.inf)
+        self.assertEqual(self.verify(data, source_context=BOOLEAN_CONTEXT)["status"],
+                         "FAILED_ARITHMETIC")
+
+    def test_marker_keeps_null_and_requires_case_bound_site_context(self):
+        marker = marker_fixture()
+        self.assertEqual(verify_operation_marker(marker)["source_branch_status"],
+                         "UNBOUND")
+        marker.update(case_id=BOOLEAN_CASE, step=1, body_id="b0", sequence=1,
+                      source="pivot", angle_bits=bits(0.0),
+                      trig=[bits(1.0), bits(0.0)])
+        self.assertEqual(verify_operation_marker(marker)["status"], "UNPASSED")
+        result = verify_operation_marker(marker, source_context=BOOLEAN_CONTEXT)
+        self.assertEqual(result["status"], "PASSED_ARITHMETIC")
+        self.assertEqual(result["source_branch_status"], "SOURCE_CALL_SITE_ONLY")
+        self.assertIsNone(marker["branch"])
+        changed = copy.deepcopy(marker)
+        changed["source"] = "origin"
+        self.assertEqual(verify_operation_marker(
+            changed, source_context=BOOLEAN_CONTEXT)["status"], "UNPASSED")
+        changed = copy.deepcopy(marker)
+        changed["case_id"] = "other"
+        generic = verify_operation_marker(changed)
+        self.assertEqual(generic["status"], "PASSED_ARITHMETIC")
+        self.assertEqual(generic["source_branch_status"], "UNBOUND")
+        marker["sequence"] = 0
+        self.assertEqual(verify_operation_marker(
+            marker, source_context=BOOLEAN_CONTEXT)["status"], "UNPASSED")
+        marker.update(step=601, sequence=1801)
+        self.assertEqual(verify_operation_marker(
+            marker, source_context=BOOLEAN_CONTEXT)["status"], "UNPASSED")
 
     def test_malformed_call_objects_return_coverage_for_both_schemas(self):
         for fixture in (self.fixture, self.synthetic_schema_two_fixture):

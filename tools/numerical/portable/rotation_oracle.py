@@ -9,6 +9,9 @@ from fractions import Fraction
 
 
 SOURCE_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
+REVOLUTE_LIMITS_FALSE_CONTEXT = "revolute-limits-false-point/1"
+_REVOLUTE_LIMITS_FALSE_CASE = "joint-Revolute-LimitsEnabled-false"
+_REVOLUTE_LIMITS_FALSE_SITES = (("b1", "integrate"), ("b0", None), ("b1", None))
 MPFR_VERSION = "4.2.2"
 _TRIG_ERROR = 2.0 ** -52
 _PI = struct.unpack(">d", bytes.fromhex("400921fb54442d18"))[0]
@@ -209,7 +212,8 @@ def _source_angle_matches(rotation, observed):
     return _within_error("acos", cost, abs(observed), error)
 
 
-def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input):
+def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input,
+                   allow_null_branch=False):
     fields = {"sequence", "step", "body_id", "kind", "branch", "input_kind",
               "pre", "trig", "raw", "post", "clamp"}
     if call.get("input_kind") == "angle":
@@ -225,7 +229,9 @@ def _verify_rotate(call, pre, trig, allowed_evaluations, pair_input):
             raise ValueError("rotation pair input differs")
     else:
         raise ValueError("unknown rotation input")
-    if set(call) != fields or call["branch"] not in ("integrate", "joint", "contact"):
+    branches = ("integrate", "joint", "contact", None) if allow_null_branch else (
+        "integrate", "joint", "contact")
+    if set(call) != fields or call["branch"] not in branches:
         raise ValueError("rotate record shape differs")
     raw = _pair(call["raw"])
     if type(call["clamp"]) is not list or len(call["clamp"]) != 2 or any(
@@ -434,10 +440,28 @@ def _verify_binding(audit, binding, trace_bytes, payload_bytes, receipt_bytes,
     return None
 
 
+def _revolute_null_source_schedule(source_context, case, bodies, calls):
+    if source_context != REVOLUTE_LIMITS_FALSE_CONTEXT or \
+            case["id"] != _REVOLUTE_LIMITS_FALSE_CASE:
+        return {"status": "UNPASSED", "reason": "source call-site context is unavailable"}
+    if case["steps"] != 600 or bodies != ["b0", "b1"] or len(calls) != 1800:
+        return {"status": "FAILED_COVERAGE", "reason": "source call schedule differs"}
+    for position, call in enumerate(calls):
+        body, branch = _REVOLUTE_LIMITS_FALSE_SITES[position % 3]
+        if call.get("sequence") != position or call.get("step") != position // 3 + 1 or \
+                call.get("body_id") != body or call.get("branch") != branch or \
+                call.get("kind") != "rotate" or call.get("input_kind") != "angle":
+            return {"status": "FAILED_COVERAGE", "reason": "source call site differs"}
+        if branch is None and _binary64(call.get("angle_bits")) != 0:
+            return {"status": "FAILED_ARITHMETIC",
+                    "reason": "point-constraint angle is not zero"}
+    return None
+
+
 def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                                binding=None, trace_bytes=None, payload_bytes=None,
                                receipt_bytes=None, artifact_bytes=None,
-                               source_bytes=None):
+                               source_bytes=None, source_context=None):
     try:
         identity = _verify_binding(audit, binding, trace_bytes, payload_bytes,
                                    receipt_bytes, artifact_bytes, source_bytes)
@@ -472,6 +496,11 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
         if len(bodies) != len(set(bodies)) or len(bodies) != len(initial) or not bodies or \
                 any(type(body) is not str or not body for body in bodies):
             raise ValueError("body inventory differs")
+        if source_context is not None:
+            source_status = _revolute_null_source_schedule(
+                source_context, case, bodies, calls)
+            if source_status is not None:
+                return source_status
         expected_steps = [[step, body] for step in range(1, case["steps"] + 1)
                           for body in bodies]
         if binding["body_step_receipts"] != expected_steps or any(
@@ -511,7 +540,9 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                         raise ValueError("source rotation cap exceeded")
                     observed_modes.append(_verify_rotate(
                         call, pre, trig, binding["allowed_evaluations"],
-                        binding["pair_inputs"].get(str(position))))
+                        binding["pair_inputs"].get(str(position)),
+                        allow_null_branch=source_context ==
+                        REVOLUTE_LIMITS_FALSE_CONTEXT and call["branch"] is None))
                 elif call.get("kind") == "lerp-reset":
                     resets.append([step, body])
                     _verify_reset_provenance(call, binding, states, trace_bytes, bodies)
@@ -542,9 +573,12 @@ def verify_rotation_arithmetic(audit, case, header, states, rotation_cap, *,
                     str(i) for i, call in enumerate(calls) if call["kind"] == "rotate"
                     and call["input_kind"] == "pair"}:
             return {"status": "FAILED_COVERAGE", "reason": "call or reset coverage differs"}
-        return {"status": "PASSED_ARITHMETIC", "qualification": "UNPASSED",
-                "matching_evaluations": observed_modes,
-                "matching_lerp_evaluations": reset_modes}
+        result = {"status": "PASSED_ARITHMETIC", "qualification": "UNPASSED",
+                  "matching_evaluations": observed_modes,
+                  "matching_lerp_evaluations": reset_modes}
+        if source_context is not None:
+            result["source_context_status"] = "SOURCE_SCHEDULE_ONLY"
+        return result
     except RuntimeError as error:
         return {"status": "UNPASSED", "reason": str(error)}
     except (ValueError, TypeError, KeyError, IndexError, OverflowError) as error:
@@ -557,7 +591,8 @@ _MARKER_FIELDS = {"schema", "method", "sequence", "target_token", "kind",
                   "diff_bits", "start", "end", "case_id", "step", "body_id"}
 
 
-def verify_operation_marker(marker, allowed_evaluations=("strict",)):
+def verify_operation_marker(marker, allowed_evaluations=("strict",), *,
+                            source_context=None):
     try:
         if type(marker) is not dict or set(marker) != _MARKER_FIELDS or \
                 marker["schema"] != "portable-rotation-op/2" or \
@@ -588,8 +623,25 @@ def verify_operation_marker(marker, allowed_evaluations=("strict",)):
                 raise ValueError("rotate source marker differs")
             raw = _pair(marker["raw"])
             angle = marker["angle_bits"]
+            source_status = None
+            if marker["branch"] is None:
+                if marker["case_id"] != _REVOLUTE_LIMITS_FALSE_CASE:
+                    source_status = "UNBOUND"
+                elif source_context == REVOLUTE_LIMITS_FALSE_CONTEXT and \
+                        marker["case_id"] == _REVOLUTE_LIMITS_FALSE_CASE and \
+                        marker["source"] == "pivot" and \
+                        marker["step"] <= 600 and \
+                        marker["sequence"] == 3 * (marker["step"] - 1) + (
+                            1 if marker["body_id"] == "b0" else 2) and \
+                        marker["body_id"] in ("b0", "b1"):
+                    if _binary64(angle) != 0:
+                        raise ValueError("point-constraint angle is not zero")
+                    source_status = "SOURCE_CALL_SITE_ONLY"
+                else:
+                    return {"status": "UNPASSED",
+                            "reason": "null branch call site is unbound"}
             call = {"sequence": marker["sequence"], "step": 1, "body_id": "b0",
-                    "kind": "rotate", "branch": marker["branch"] or "integrate",
+                    "kind": "rotate", "branch": marker["branch"],
                     "pre": marker["pre"],
                     "trig": marker["trig"], "raw": marker["raw"],
                     "post": marker["post"],
@@ -601,10 +653,14 @@ def verify_operation_marker(marker, allowed_evaluations=("strict",)):
                 _binary64(angle)
                 call.update(input_kind="angle", angle_bits=angle)
                 pair = None
-            modes = _verify_rotate(call, pre, trig, allowed_evaluations, pair)
-            return {"status": "PASSED_ARITHMETIC" if angle is not None else
-                    "UNPASSED_INPUT_ORIGIN", "qualification": "UNPASSED",
-                    "matching_evaluations": modes}
+            modes = _verify_rotate(call, pre, trig, allowed_evaluations, pair,
+                                   allow_null_branch=source_status is not None)
+            result = {"status": "PASSED_ARITHMETIC" if angle is not None else
+                      "UNPASSED_INPUT_ORIGIN", "qualification": "UNPASSED",
+                      "matching_evaluations": modes}
+            if source_status is not None:
+                result["source_branch_status"] = source_status
+            return result
         if marker["kind"] != "lerp-reset" or marker["source"] != "direct" or \
                 marker["raw"] != [None, None]:
             raise ValueError("unknown operation or reset shape")
