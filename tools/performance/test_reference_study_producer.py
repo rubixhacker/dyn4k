@@ -10,6 +10,8 @@ import unittest
 from unittest import mock
 
 import reference_study_producer as producer
+from reference_study import CAPTURE_IDENTITY_KEYS, V3_RAW_FILES
+from sustained_archive import signature
 
 
 SOURCE = Path(__file__).with_name("reference_study_producer.py")
@@ -49,6 +51,9 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         self.assertEqual(result["study"], "structurally_verified")
         self.assertEqual(result["qualification"], "unpassed")
         self.assertEqual(result["validated_reference_rows"], 0)
+        self.assertEqual(result["numeric_limits"], "not_approved")
+        protocol = json.loads((self.output / "archive/protocol.json").read_text())
+        self.assertEqual(protocol["context"]["version"], "reference-study-v3")
         captures = json.loads((self.output / "captures.json").read_text())
         self.assertEqual([(row["pair"], row["side"], row["order"]) for row in captures],
                          [(1, "a", 1), (1, "b", 2), (2, "b", 1),
@@ -56,15 +61,35 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         self.assertEqual(len({(row["boot_id"], row["os_pid"], row["process_start_id"])
                               for row in captures}), 6)
         self.assertEqual(len({row["run_id"] for row in captures}), 6)
+        physical = set()
         for ordinal, row in enumerate(captures):
             series = (self.output / row["series_path"]).read_text()
             self.assertEqual(len(series.splitlines()), 31)
-            self.assertTrue(series.startswith("step,elapsed_ns,"))
+            self.assertEqual(series.splitlines()[0], "step,elapsed_ns")
             monitor = json.loads((self.output / row["monitor_path"]).read_text())
             self.assertEqual(monitor["os_pid"], row["os_pid"])
             self.assertEqual(monitor["process_start_id"], row["process_start_id"])
             self.assertTrue(monitor["samples"])
             self.assertEqual(monitor["launch_nonce"], row["run_id"])
+            for kind in V3_RAW_FILES:
+                path = self.output / row[kind + "_path"]
+                self.assertTrue(path.is_file(), kind)
+                identity = (path.stat().st_dev, path.stat().st_ino)
+                self.assertNotIn(identity, physical)
+                physical.add(identity)
+            receipt = json.loads((self.output / row["source_receipt_path"]).read_text())
+            self.assertEqual(receipt["capture"],
+                             {name: row[name] for name in CAPTURE_IDENTITY_KEYS})
+            self.assertEqual(receipt["raw_sha256"], {
+                kind: hashlib.sha256((self.output / row[kind + "_path"]).read_bytes()).hexdigest()
+                for kind in V3_RAW_FILES if kind != "source_receipt"})
+            self.assertEqual(receipt["command"],
+                             json.loads((self.output / row["observer_path"]).read_text())
+                             ["observed_command"])
+            self.assertEqual(receipt["classpath"], [
+                {"path": protocol["controls"][0][name + "_source_path"],
+                 "sha256": protocol["controls"][0][name + "_sha256"]}
+                for name in ("probe", "artifact")])
         audit = subprocess.run([sys.executable, str(SOURCE), "audit", "--output-root",
                                 str(self.output), "--trusted-key", str(self.key)],
                                env=self.env, capture_output=True, text=True)
@@ -72,6 +97,108 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         marker = self.keyed_env["OLLAMA_API_KEY"].encode()
         self.assertFalse(any(marker in path.read_bytes()
                              for path in self.output.rglob("*") if path.is_file()))
+
+    def test_real_v3_archive_replays_after_relocation_with_external_key(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
+        relocated = self.root / "relocated-archive"
+        shutil.copytree(self.output / "archive", relocated)
+        result = subprocess.run([sys.executable, str(producer.ROOT /
+                                 "tools/performance/reference_study.py"), "verify",
+                                 "--archive", str(relocated), "--trusted-key", str(self.key),
+                                 "--expected-source-commit", producer.SOURCE_COMMIT],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["qualification"], "unpassed")
+
+    def test_v3_rejects_swapped_raw_observer_source_and_resigned_identity(self):
+        self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
+        from reference_study import verify_archive
+
+        def resigned_copy(name, change, reason=None):
+            copy = self.root / name
+            shutil.copytree(self.output / "archive", copy)
+            index_path = copy / "archive.json"
+            index = json.loads(index_path.read_text())
+            change(copy, index)
+            index["signature"] = signature(index, self.key.read_bytes())
+            index_path.write_text(json.dumps(index))
+            with self.assertRaises(ValueError) as caught:
+                verify_archive(copy, self.key.read_bytes(), producer.SOURCE_COMMIT)
+            if reason is not None:
+                self.assertIn(reason, str(caught.exception))
+
+        for kind in ("series", "observer", "source_receipt"):
+            with self.subTest(kind=kind):
+                def swap(copy, index):
+                    first, second = index["captures"][:2]
+                    first[kind + "_path"] = second[kind + "_path"]
+                    first[kind + "_sha256"] = second[kind + "_sha256"]
+                resigned_copy("swapped-" + kind, swap)
+
+        for field, value in (("os_pid", 999999), ("process_start_id", "wrong-start"),
+                             ("run_id", "wrong-nonce"), ("ended_ns", 1)):
+            with self.subTest(field=field):
+                resigned_copy("changed-" + field,
+                              lambda copy, index: index["captures"][0].__setitem__(field, value))
+
+        def changed_raw(kind, field, value):
+            def change(copy, index):
+                row = index["captures"][0]
+                path = copy / row[kind + "_path"]
+                record = json.loads(path.read_text())
+                record[field] = value
+                path.write_text(json.dumps(record))
+                row[kind + "_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                environment_path = copy / row["environment_path"]
+                environment = json.loads(environment_path.read_text())
+                environment[kind + "_sha256"] = row[kind + "_sha256"]
+                environment_path.write_text(json.dumps(environment))
+                row["environment_sha256"] = hashlib.sha256(
+                    environment_path.read_bytes()).hexdigest()
+                source_path = copy / row["source_receipt_path"]
+                source = json.loads(source_path.read_text())
+                source["raw_sha256"][kind] = row[kind + "_sha256"]
+                source["raw_sha256"]["environment"] = row["environment_sha256"]
+                source_path.write_text(json.dumps(source))
+                row["source_receipt_sha256"] = hashlib.sha256(
+                    source_path.read_bytes()).hexdigest()
+            resigned_copy("changed-" + kind + "-" + field, change,
+                          "baseline loaded provider differs")
+
+        changed_raw("provider", "baseline_sha256", "0" * 64)
+        def changed_stage(copy, index):
+            row = index["captures"][0]
+            path = copy / row["staged_core_path"]
+            path.write_bytes(b"changed stage")
+            row["staged_core_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            source_path = copy / row["source_receipt_path"]
+            source = json.loads(source_path.read_text())
+            source["raw_sha256"]["staged_core"] = row["staged_core_sha256"]
+            source_path.write_text(json.dumps(source))
+            row["source_receipt_sha256"] = hashlib.sha256(
+                source_path.read_bytes()).hexdigest()
+        resigned_copy("changed-stage", changed_stage, "staged artifact receipt differs")
+
+        def classpath_alias(copy, index):
+            row = index["captures"][0]
+            path = copy / row["source_receipt_path"]
+            source = json.loads(path.read_text())
+            source["classpath"][0]["path"] += "/alias"
+            path.write_text(json.dumps(source))
+            row["source_receipt_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        resigned_copy("classpath-alias", classpath_alias, "unbound classpath entry or path")
+
+    def test_historical_349_context_hash_rejected_without_mutation(self):
+        from reference_study import load_unique_json, validate_protocol
+
+        historical = Path.home() / "dyn4k-evidence/session-control/reference-study-real-producer-34914323/archive"
+        protocol_path = historical / "protocol.json"
+        before = hashlib.sha256(protocol_path.read_bytes()).hexdigest()
+        self.assertEqual(before,
+                         "1c51d8c517d85a1a8c9dabfffd9fb30b043655378a04f9fa1e7f4a6f8f7ce60a")
+        with self.assertRaisesRegex(ValueError, "frozen study context differs"):
+            validate_protocol(load_unique_json(protocol_path), historical)
+        self.assertEqual(hashlib.sha256(protocol_path.read_bytes()).hexdigest(), before)
 
     def test_distinct_real_java_processes_can_emit_identical_zero_series(self):
         from reference_study_producer import observe_process

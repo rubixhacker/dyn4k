@@ -13,7 +13,8 @@ import sys
 import time
 
 from candidate_runner import API, CORE, ROOT, STAGING
-from reference_study import (PAIR_ORDER, SOURCE_COMMIT, controls_for, policy_context,
+from reference_study import (CAPTURE_IDENTITY_KEYS, PAIR_ORDER, SOURCE_COMMIT,
+                             V3_RAW_FILES, VERSION, controls_for, policy_context,
                              verify_archive)
 from sustained_archive import frozen_policy, observe_process_image, require_external_key
 
@@ -165,13 +166,16 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                          "process start identity changed during observation")
                     current_argv = process_command(process.pid)
                     if not current_argv:
-                        if process.poll() is not None and samples:
+                        if samples and confirmed_exit():
                             break
+                        if not samples and process.poll() is None:
+                            time.sleep(0.01)
+                            continue
                         raise ProducerError("observed process command is unavailable")
                     need(current_argv == command, "observed process command differs")
                     current_env = process_environment(process.pid)
                     observed_nonce = current_env["DYN4K_CLOCK_NONCE"]
-                    if not observed_nonce and process.poll() is not None and samples:
+                    if not observed_nonce and samples and confirmed_exit():
                         break
                     need(observed_nonce == nonce, "observed launch nonce differs")
                     if process.poll() is not None:
@@ -235,6 +239,16 @@ def checked_rows(path, header, count):
         rows = list(reader)
     need(len(rows) == count, f"invalid {Path(path).name} row count")
     return rows
+
+
+def project_timing_series(folder, count):
+    rows = checked_rows(folder / "series.csv", ["step", "elapsed_ns"], count)
+    target = folder / "series-v3.csv"
+    with target.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("step", "elapsed_ns"))
+        writer.writerows((row["step"], row["elapsed_ns"]) for row in rows)
+    return target
 
 
 def check_pilot(folder, observation, baseline_sha, harness_sha, java_sha,
@@ -335,7 +349,8 @@ def toolchain(args, root, env):
                "staged_kotlin_sha256": digest(staged / "kotlin.jar"),
                "runtime_sha256": digest(java), "gradle_sha256": digest(gradle),
                "gradle_command": [str(gradle), "--offline", "--no-daemon", *STAGE_TASKS],
-               "java": str(java), "javac": str(javac), "gradle": str(gradle)}
+               "java": str(java), "javac": str(javac), "gradle": str(gradle),
+               "baseline_path": str(baseline)}
     write_json(build / "receipt.json", receipt)
     return java, baseline, harness, receipt
 
@@ -372,7 +387,7 @@ def capture(args):
     receipt["warmup_seconds"] = args.warmup_seconds
     write_json(root / "build/receipt.json", receipt)
     host_id, boot_id = host_identity()
-    plan = {"source_commit": SOURCE_COMMIT,
+    plan = {"archive_version": VERSION, "source_commit": SOURCE_COMMIT,
             "assignments": [{"phase": "source", "key": STUDY_KEY,
                              "controls": ["dyn4j_6_0_0_jvm"]}],
             "controls": [{"row_id": "jvm.java", "control_id": "dyn4j_6_0_0_jvm",
@@ -417,6 +432,7 @@ def capture(args):
                         receipt["harness_sha256"], receipt["runtime_sha256"],
                         receipt["staged_core_sha256"], receipt["staged_kotlin_sha256"],
                         args.seconds, args.warmup_seconds)
+            timing_series = project_timing_series(folder, 30 * args.seconds)
             environment = {"host_id": host_id, "boot_id": boot_id,
                            "os_pid": observed["os_pid"],
                            "process_start_id": observed["process_start_id"],
@@ -429,9 +445,26 @@ def capture(args):
                            "staged_kotlin_sha256": receipt["staged_kotlin_sha256"],
                            "provider_sha256": digest(outputs["provider.json"]),
                            "clock_origin_sha256": digest(outputs["clock-origin.json"]),
-                           "series_sha256": digest(folder / "series.csv"),
+                           "series_sha256": digest(timing_series),
                            "monitor_sha256": digest(folder / "monitor.json")}
             write_json(folder / "environment.json", environment)
+            for source, destination in ((root / "build/receipt.json", folder / "build-receipt.json"),
+                                        (root / "staged/core.jar", folder / "staged-core.jar"),
+                                        (root / "staged/kotlin.jar", folder / "staged-kotlin.jar")):
+                shutil.copyfile(source, destination)
+                need(digest(source) == digest(destination), "raw staged input changed during copy")
+            raw_sources = {"series": timing_series,
+                           "environment": folder / "environment.json",
+                           "monitor": folder / "monitor.json",
+                           "observer": folder / "observation.json",
+                           "build_receipt": folder / "build-receipt.json",
+                           "provider": folder / "provider.json",
+                           "clock_origin": folder / "clock-origin.json",
+                           "measure_clock": folder / "clock.csv",
+                           "warmup_clock": folder / "warmup-clock.csv",
+                           "run_receipt": folder / "run.json",
+                           "staged_core": folder / "staged-core.jar",
+                           "staged_kotlin": folder / "staged-kotlin.jar"}
             capture_row = {"phase": "source", "key": STUDY_KEY,
                            "control_id": "dyn4j_6_0_0_jvm", "row_id": "jvm.java",
                            "route": "baseline", "host_id": host_id, "boot_id": boot_id,
@@ -444,15 +477,25 @@ def capture(args):
                            "invalid_reason": None, "stop_reason": "completed",
                            **{name + "_sha256": environment[name + "_sha256"]
                               for name in ("artifact", "probe", "runtime", "image")},
-                           "series_path": str((folder / "series.csv").relative_to(root)),
-                           "environment_path": str((folder / "environment.json").relative_to(root)),
-                           "monitor_path": str((folder / "monitor.json").relative_to(root))}
+                           **{name + "_path": str(path.relative_to(root))
+                              for name, path in raw_sources.items()}}
+            source = {"capture": {name: capture_row[name] for name in CAPTURE_IDENTITY_KEYS},
+                      "raw_sha256": {name: digest(path) for name, path in raw_sources.items()},
+                      "source_commit": SOURCE_COMMIT,
+                      "staged_core_sha256": receipt["staged_core_sha256"],
+                      "staged_kotlin_sha256": receipt["staged_kotlin_sha256"],
+                      "command": observed["observed_command"],
+                      "classpath": [{"path": str(path), "sha256": receipt[sha_name]}
+                                    for path, sha_name in ((harness, "harness_sha256"),
+                                                           (baseline, "baseline_sha256"))]}
+            source_path = folder / "source-receipt.json"
+            write_json(source_path, source)
+            capture_row["source_receipt_path"] = str(source_path.relative_to(root))
+            raw_sources["source_receipt"] = source_path
             captures.append(capture_row)
-            observations.append({"observation_path": str((folder / "observation.json").relative_to(root)),
-                                 "observation_sha256": digest(folder / "observation.json"),
-                                 "environment_sha256": digest(folder / "environment.json"),
-                                 "monitor_sha256": digest(folder / "monitor.json"),
-                                 "series_sha256": digest(folder / "series.csv")})
+            observations.append({"raw_sha256": {name: digest(path)
+                                                 for name, path in raw_sources.items()},
+                                 "stdout_sha256": digest(folder / "series.csv")})
     write_json(root / "captures.json", captures)
     write_json(root / "producer-observations.json", {
         "protocol_sha256_before_capture": protocol_sha,
@@ -479,29 +522,48 @@ def audit_output(root, key):
          "staged artifact or probe bytes differ")
     need(len(captures) == len(indexed) == len(provenance["captures"]) == 6,
          "producer capture inventory differs")
+    need(read_json(root / "archive/protocol.json")["context"]["version"] == VERSION,
+         "producer archive version differs")
     need(provenance["protocol_sha256_before_capture"] ==
          digest(root / "archive/protocol.json") and
          provenance["tool_sha256"] == digest(__file__) and
          provenance["build_receipt_sha256"] == digest(root / "build/receipt.json"),
          "producer or frozen protocol receipt differs")
     control = controls[0]
+    need(control["probe_source_path"] == str(root / "build/sustained-harness.jar") and
+         control["artifact_source_path"] == receipt["baseline_path"] and
+         control["runtime_source_path"] == receipt["java"] and
+         control["image_source_path"] == receipt["java"],
+         "control source path differs")
     for name in ("artifact", "probe", "runtime", "image"):
         expected = receipt["baseline_sha256"] if name == "artifact" else (
             receipt["harness_sha256"] if name == "probe" else receipt["runtime_sha256"])
         need(control[name + "_sha256"] == expected, "control file receipt differs")
+    raw_inodes = set()
     for position, (capture_row, index, meta) in enumerate(zip(captures, indexed,
                                                                  provenance["captures"])):
         folder = root / "runs" / f"{position + 1:02d}-pair{capture_row['pair']}-{capture_row['side']}"
-        observation = read_json(root / meta["observation_path"])
-        need(digest(root / meta["observation_path"]) == meta["observation_sha256"],
-             "external process observation bytes differ")
+        observation = read_json(root / capture_row["observer_path"])
         monitor = read_json(root / capture_row["monitor_path"])
         environment = read_json(root / capture_row["environment_path"])
-        for name in ("series", "monitor", "environment"):
+        source = read_json(root / capture_row["source_receipt_path"])
+        need(source["capture"] == {name: capture_row[name] for name in CAPTURE_IDENTITY_KEYS} and
+             source["command"] == observation["observed_command"] and
+             source["classpath"] == [{"path": control[name + "_source_path"],
+                                      "sha256": control[name + "_sha256"]}
+                                     for name in ("probe", "artifact")],
+             "source process or classpath receipt differs")
+        need(source["raw_sha256"] == {name: digest(root / capture_row[name + "_path"])
+                                      for name in V3_RAW_FILES if name != "source_receipt"},
+             "source raw receipt differs")
+        for name in V3_RAW_FILES:
             original = root / capture_row[name + "_path"]
-            need(original.is_file() and digest(original) == meta[name + "_sha256"] and
+            need(original.is_file() and original.resolve().is_relative_to(root) and
+                 (original.stat().st_dev, original.stat().st_ino) not in raw_inodes and
+                 digest(original) == meta["raw_sha256"][name] and
                  digest(original) == index[name + "_sha256"],
                  f"{name} source, observer, or archive bytes differ")
+            raw_inodes.add((original.stat().st_dev, original.stat().st_ino))
         for name in ("phase", "key", "control_id", "row_id", "route", "host_id",
                      "boot_id", "pair", "side", "order", "process_id", "run_id",
                      "os_pid", "process_start_id", "started_ns", "ended_ns",
@@ -525,7 +587,14 @@ def audit_output(root, key):
         for name in ("artifact", "probe", "runtime", "image"):
             need(environment[name + "_sha256"] == capture_row[name + "_sha256"],
                  f"environment {name} differs")
-        need(environment["series_sha256"] == digest(folder / "series.csv") and
+        source_rows = checked_rows(folder / "series.csv", ["step", "elapsed_ns"],
+                                   receipt["seconds"] * 30)
+        projected_rows = checked_rows(folder / "series-v3.csv", ["step", "elapsed_ns"],
+                                      receipt["seconds"] * 30)
+        need(digest(folder / "series.csv") == meta["stdout_sha256"] and
+             [{"step": row["step"], "elapsed_ns": row["elapsed_ns"]}
+              for row in source_rows] == projected_rows and
+             environment["series_sha256"] == digest(folder / "series-v3.csv") and
              environment["monitor_sha256"] == digest(folder / "monitor.json") and
              environment["provider_sha256"] == digest(folder / "provider.json") and
              environment["clock_origin_sha256"] == digest(folder / "clock-origin.json") and
@@ -538,6 +607,10 @@ def audit_output(root, key):
                     receipt["harness_sha256"], receipt["runtime_sha256"],
                     receipt["staged_core_sha256"], receipt["staged_kotlin_sha256"],
                     receipt["seconds"], receipt["warmup_seconds"])
+        need(digest(folder / "build-receipt.json") == digest(root / "build/receipt.json") and
+             digest(folder / "staged-core.jar") == digest(root / "staged/core.jar") and
+             digest(folder / "staged-kotlin.jar") == digest(root / "staged/kotlin.jar"),
+             "per-run build or staged bytes differ")
     return result
 
 
