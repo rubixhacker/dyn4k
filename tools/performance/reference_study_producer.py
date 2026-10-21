@@ -111,7 +111,10 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                     current_ticks = process_start_ticks(process.pid)
                     current_argv = process_command(process.pid)
                     current_env = process_environment(process.pid)
-                    need(current_argv == command, "observed process command differs")
+                    if process.poll() is not None:
+                        break
+                    need(current_argv == command,
+                         f"observed process command differs: {current_argv!r}")
                     need(current_env["DYN4K_CLOCK_NONCE"] == nonce,
                          "observed launch nonce differs")
                     need(ticks is None or ticks == current_ticks,
