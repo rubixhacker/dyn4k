@@ -516,7 +516,8 @@ class CaptureReceiptTest(unittest.TestCase):
     def test_startup_log_requires_exact_effective_classpath_and_writes(self):
         pid = "123"
         response = b"-cp\n/engine.jar:/compiled/main:/compiled/test\n"
-        option = ("-Xlog:arguments=info:file=/home/stewart/evidence/"
+        home = Path.home()
+        option = (f"-Xlog:arguments=info:file={home}/evidence/"
                   "worker-arguments-%p.log:pid,level,tags:filecount=0")
         records = ["VM Arguments:", "jvm_args: " + option,
                    "java_command: worker.org.gradle.process.internal.worker.GradleWorkerMain",
@@ -535,6 +536,14 @@ class CaptureReceiptTest(unittest.TestCase):
         witness = actual._verify_worker_argument_log(raw, response, trace(raw), pid)
         self.assertEqual(witness["status"],
                          "MATCHED_INITIAL_CLASSPATH_WRITES_UNBOUND_DESTINATION")
+        with tempfile.TemporaryDirectory(dir=home) as alternate_home, \
+                patch.dict(os.environ, {"HOME": alternate_home}):
+            alternate_raw = raw.replace(str(home).encode(), alternate_home.encode())
+            alternate_witness = actual._verify_worker_argument_log(
+                alternate_raw, response, trace(alternate_raw), pid)
+            self.assertEqual(
+                alternate_witness["status"],
+                "MATCHED_INITIAL_CLASSPATH_WRITES_UNBOUND_DESTINATION")
         for name, candidate, saved_response, writes in (
                 ("override", raw.replace(b"/engine.jar:", b"/other.jar:", 1),
                  response, trace(raw)),
