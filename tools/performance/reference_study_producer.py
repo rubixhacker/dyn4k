@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from candidate_runner import API, CORE, ROOT, STAGING, source_trees
+from candidate_runner import API, CORE, ROOT, STAGING
 from reference_study import (PAIR_ORDER, SOURCE_COMMIT, controls_for, policy_context,
                              verify_archive)
 from sustained_archive import frozen_policy, observe_process_image, require_external_key
@@ -23,11 +23,49 @@ STUDY_KEY = ("jvm_vs_dyn4j|jvm.java|separated.default.small.30hz.compatibility|"
 SOURCE_FILES = ("SustainedPilot.java", "SustainedSidecars.java")
 STAGE_TASKS = (":dyn4k-core:publishJvmPublicationToStagingRepository",
                ":dyn4k:publishJvmPublicationToStagingRepository")
+BUILD_INPUTS = ("dyn4k", "dyn4k-core", "tools/performance/sustained_jvm",
+                "build.gradle.kts", "settings.gradle.kts", "gradle.properties",
+                "gradle", "gradlew", "gradlew.bat", "buildSrc", "build-logic")
+
+
+class ProducerError(ValueError):
+    pass
 
 
 def need(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise ProducerError(message)
+
+
+def child_environment(env=None):
+    result = dict(os.environ if env is None else env)
+    result.pop("OLLAMA_API_KEY", None)
+    return result
+
+
+def git_result(root, *args):
+    result = subprocess.run(["git", *args], cwd=root, env=child_environment(),
+                            capture_output=True, text=True)
+    need(result.returncode == 0, "source check failed")
+    return result.stdout.strip()
+
+
+def source_trees(commit, root=ROOT):
+    return {name: git_result(root, "rev-parse", f"{commit}:{name}")
+            for name in ("dyn4k-core", "dyn4k")}
+
+
+def check_frozen_inputs(root, source_commit):
+    need(not (Path(root) / "local.properties").exists(),
+         "ignored local Gradle properties are present")
+    need(not git_result(root, "status", "--porcelain", "--untracked-files=all", "--",
+                        *BUILD_INPUTS), "build or JVM source inputs have uncommitted changes")
+    need(source_trees("HEAD", root) == source_trees(source_commit, root),
+         "engine source differs from frozen reference source")
+    sources = [f"tools/performance/sustained_jvm/{name}" for name in SOURCE_FILES]
+    result = subprocess.run(["git", "diff", "--quiet", source_commit, "--", *sources],
+                            cwd=root, env=child_environment())
+    need(result.returncode == 0, "JVM producer source differs from frozen reference source")
 
 
 def digest(path):
@@ -70,7 +108,7 @@ def process_rss_bytes(pid):
 
 def process_command(pid):
     raw = Path(f"/proc/{pid}/cmdline").read_bytes().rstrip(b"\0")
-    return [part.decode("utf-8") for part in raw.split(b"\0")]
+    return [part.decode("utf-8") for part in raw.split(b"\0")] if raw else []
 
 
 def process_environment(pid):
@@ -86,7 +124,7 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
     need(not folder.exists(), "run folder already exists")
     folder.mkdir(parents=True)
     host_id, boot_id = host_identity()
-    run_env = dict(env)
+    run_env = child_environment(env)
     run_env["DYN4K_CLOCK_NONCE"] = nonce
     started = time.monotonic_ns()
     with (folder / "series.csv").open("wb") as stdout, \
@@ -99,6 +137,13 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
         observed_env = None
         samples = []
         deadline = time.monotonic() + timeout
+
+        def confirmed_exit():
+            if process.poll() is not None:
+                return True
+            time.sleep(0.01)
+            return process.poll() is not None
+
         try:
             while time.monotonic() < deadline and process.poll() is None:
                 try:
@@ -111,21 +156,38 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                     current_ticks = process_start_ticks(process.pid)
                     current_argv = process_command(process.pid)
                     current_env = process_environment(process.pid)
-                    if process.poll() is not None:
+                    if not current_argv:
+                        if process.poll() is not None and samples:
+                            break
+                        raise ProducerError("observed process command is unavailable")
+                    need(current_argv == command, "observed process command differs")
+                    observed_nonce = current_env["DYN4K_CLOCK_NONCE"]
+                    if not observed_nonce and process.poll() is not None and samples:
                         break
-                    need(current_argv == command,
-                         f"observed process command differs: {current_argv!r}")
-                    need(current_env["DYN4K_CLOCK_NONCE"] == nonce,
-                         "observed launch nonce differs")
+                    need(observed_nonce == nonce, "observed launch nonce differs")
                     need(ticks is None or ticks == current_ticks,
                          "process start identity changed during observation")
+                    if process.poll() is not None:
+                        break
+                    try:
+                        rss = process_rss_bytes(process.pid)
+                    except (OSError, ValueError):
+                        if confirmed_exit() and samples:
+                            break
+                        raise ProducerError("process RSS observation is unavailable") from None
+                    need(isinstance(rss, int) and rss >= 0,
+                         "process RSS observation is invalid")
                     ticks, argv, observed_env = current_ticks, current_argv, current_env
                     image = candidate
                     samples.append({"clock_ns": time.monotonic_ns(), "os_pid": process.pid,
                                     "process_start_id": str(ticks),
-                                    "rss_bytes": process_rss_bytes(process.pid)})
+                                    "rss_bytes": rss})
                 except (FileNotFoundError, ProcessLookupError):
-                    pass
+                    if confirmed_exit() and samples:
+                        break
+                    if not samples and process.poll() is None:
+                        continue
+                    raise ProducerError("process identity observation is unavailable") from None
                 time.sleep(0.01)
             if process.poll() is None:
                 process.kill()
@@ -216,9 +278,9 @@ def check_pilot(folder, observation, baseline_sha, harness_sha, java_sha,
 
 def run_checked(command, cwd, env, stdout, stderr, timeout):
     with Path(stdout).open("wb") as out, Path(stderr).open("wb") as err:
-        result = subprocess.run(command, cwd=cwd, env=env, stdout=out, stderr=err,
+        result = subprocess.run(command, cwd=cwd, env=child_environment(env), stdout=out, stderr=err,
                                 timeout=timeout)
-    need(result.returncode == 0, f"command failed: {command[0]}")
+    need(result.returncode == 0, "helper command failed")
 
 
 def toolchain(args, root, env):
@@ -231,12 +293,8 @@ def toolchain(args, root, env):
     need("gradle-9.5.0" in gradle.parts, "pinned Gradle 9.5.0 is required")
     need(digest(baseline) == frozen_policy()["baseline_jar_sha256"],
          "pinned dyn4j baseline bytes differ")
-    need(source_trees("HEAD") == source_trees(SOURCE_COMMIT),
-         "engine source differs from frozen reference source")
+    check_frozen_inputs(ROOT, SOURCE_COMMIT)
     sources = [ROOT / "tools/performance/sustained_jvm" / name for name in SOURCE_FILES]
-    diff = subprocess.run(["git", "diff", "--quiet", SOURCE_COMMIT, "--", *map(str, sources)],
-                          cwd=ROOT)
-    need(diff.returncode == 0, "JVM producer source differs from frozen reference source")
     env.update(JAVA_HOME=str(java.parent.parent),
                PATH=str(java.parent) + os.pathsep + env["PATH"],
                GRADLE_OPTS=f"-Djava.io.tmpdir={env['TMPDIR']}")
@@ -279,8 +337,9 @@ def study_cli(command, root, key, *options):
     script = ROOT / "tools/performance/reference_study.py"
     result = subprocess.run([sys.executable, str(script), command, "--archive",
                              str(root / "archive"), "--trusted-key", str(key), *options],
-                            cwd=root, capture_output=True, text=True, timeout=60)
-    need(result.returncode == 0, f"reference study {command} failed: {result.stdout} {result.stderr}")
+                            cwd=root, env=child_environment(), capture_output=True,
+                            text=True, timeout=60)
+    need(result.returncode == 0, "reference study helper failed")
     return json.loads(result.stdout)
 
 
@@ -299,7 +358,7 @@ def capture(args):
     need(temporary.is_dir() and temporary.is_relative_to(home),
          "home-backed TMPDIR is required")
     root.mkdir(parents=True)
-    env = os.environ.copy()
+    env = child_environment()
     env["JAVA_TOOL_OPTIONS"] = f"-Djava.io.tmpdir={temporary}"
     java, baseline, harness, receipt = toolchain(args, root, env)
     receipt["seconds"] = args.seconds
@@ -496,8 +555,9 @@ def main():
             result = audit_output(args.output_root, args.trusted_key)
         print(json.dumps(result, sort_keys=True))
     except Exception as exc:
-        print(json.dumps({"qualification": "unpassed", "reason": str(exc)}, sort_keys=True))
-        raise SystemExit(1) from exc
+        reason = str(exc) if isinstance(exc, ProducerError) else "producer failed closed"
+        print(json.dumps({"qualification": "unpassed", "reason": reason}, sort_keys=True))
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
