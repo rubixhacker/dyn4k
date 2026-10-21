@@ -133,6 +133,10 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "python3 -B -m unittest tools.compatibility.test_qualification_workflow"),
                 ("name: Test hosted runner guard",
                  "PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners"),
+                ("name: Verify pinned GNU MPFR runtime",
+                 "env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c "
+                 "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
+                 "print(\"GNU MPFR\", mpfr.version)'"),
                 ("name: Test source-only numerical regressions",
                  "env -u OLLAMA_API_KEY -u DYN4K_WHEEL_ARCHIVE "
                  "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
@@ -144,6 +148,28 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ],
             step_contract,
         )
+
+    def test_source_mpfr_preflight_is_required_and_pinned(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        preflight = (
+            "      - name: Verify pinned GNU MPFR runtime\n"
+            "        run: env -u OLLAMA_API_KEY "
+            "PYTHONPATH=tools/numerical/portable python3 -B -c "
+            "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
+            "print(\"GNU MPFR\", mpfr.version)'\n"
+        )
+        mutations = (
+            ("preflight removed", preflight, ""),
+            ("version enforcement skipped", "mpfr = _MPFR()", "mpfr = None"),
+            ("loaded version not printed", "print(\"GNU MPFR\", mpfr.version)",
+             "print(\"GNU MPFR\", _MPFR.MPFR_VERSION)"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, source.count(old), name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(source.replace(old, new, 1))
 
     def test_source_job_contract_rejects_failure_suppression_and_body_changes(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
@@ -258,6 +284,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Reject hosted macOS routes",
              "      - name: Test qualification workflow contracts",
              "      - name: Test hosted runner guard",
+             "      - name: Verify pinned GNU MPFR runtime",
              "      - name: Test source-only numerical regressions"],
             step_names,
         )

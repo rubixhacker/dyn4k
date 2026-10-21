@@ -21,6 +21,8 @@ jobs:
         run: python3 -B -m unittest tools.compatibility.test_qualification_workflow
       - name: Test hosted runner guard
         run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners
+      - name: Verify pinned GNU MPFR runtime
+        run: env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c 'from rotation_oracle import _MPFR; mpfr = _MPFR(); print("GNU MPFR", mpfr.version)'
       - name: Test source-only numerical regressions
         run: |
           env -u OLLAMA_API_KEY \
