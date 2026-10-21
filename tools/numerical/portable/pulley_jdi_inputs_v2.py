@@ -1,6 +1,8 @@
 import hashlib
+import io
 import json
 import os
+import re
 import stat
 import zipfile
 from pathlib import Path
@@ -39,18 +41,78 @@ def bounded_file(path, maximum=MAX_ENTRY_BYTES):
     return path
 
 
+def _manifest_multi_release(raw):
+    _require(len(raw) <= 64 * 1024, "classpath manifest exceeds bound")
+    normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    _require(normalized.endswith(b"\n\n") and b"\x00" not in normalized,
+             "classpath manifest is malformed")
+    section = 0
+    seen = set()
+    current = None
+    multi_release = False
+    has_version = False
+
+    def finish():
+        nonlocal multi_release, has_version
+        if current is None:
+            return
+        name, value = current
+        try:
+            text = value.decode("utf-8")
+        except UnicodeError as error:
+            raise Rejected("classpath manifest is malformed") from error
+        if name == b"manifest-version":
+            _require(section == 0 and re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", text),
+                     "classpath manifest is malformed")
+            has_version = True
+        if name == b"class-path":
+            raise Rejected("classpath manifest adds hidden providers")
+        if name == b"multi-release":
+            _require(section == 0 and text.lower() in ("true", "false"),
+                     "classpath manifest is malformed")
+            multi_release = text.lower() == "true"
+
+    for line in normalized.split(b"\n"):
+        _require(len(line) <= 72, "classpath manifest is malformed")
+        if not line:
+            finish()
+            current = None
+            if seen:
+                section += 1
+            seen = set()
+        elif line.startswith(b" "):
+            _require(current is not None, "classpath manifest is malformed")
+            current[1].extend(line[1:])
+        else:
+            finish()
+            name, marker, value = line.partition(b": ")
+            _require(marker and re.fullmatch(rb"[A-Za-z0-9][A-Za-z0-9_-]*", name),
+                     "classpath manifest is malformed")
+            name = name.lower()
+            if section == 0 and not seen:
+                _require(name == b"manifest-version", "classpath manifest is malformed")
+            _require(name not in seen, "classpath manifest is malformed")
+            seen.add(name)
+            current = [name, bytearray(value)]
+    _require(has_version, "classpath manifest is malformed")
+    return multi_release
+
+
 def _jar_classes(path):
     classes = set()
     uncompressed = 0
     try:
-        with zipfile.ZipFile(path) as archive:
+        raw = bounded_file(path).read_bytes()
+        _require(len(raw) <= MAX_ENTRY_BYTES, "classpath JAR exceeds bound")
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             _require(len(archive.infolist()) <= MAX_CLASS_FILES,
                      "classpath ZIP entry count exceeds bound")
             names = set()
+            versioned = []
             for item in archive.infolist():
                 name = item.filename
                 _require(name not in names and not name.startswith("/") and
-                         ".." not in Path(name).parts and
+                         ".." not in Path(name).parts and "\\" not in name and
                          stat.S_IFMT(item.external_attr >> 16) != stat.S_IFLNK,
                          "classpath ZIP entry is duplicate, linked or unsafe")
                 names.add(name)
@@ -59,17 +121,31 @@ def _jar_classes(path):
                          item.file_size <= MAX_ENTRY_BYTES and
                          item.file_size <= max(1024, item.compress_size * 100),
                          "classpath ZIP expansion exceeds bound")
-                if name.endswith(".class") and not name.startswith("META-INF/"):
+                if name.endswith(".class") and name.startswith("META-INF/versions/"):
+                    parts = name.split("/", 3)
+                    _require(len(parts) == 4 and
+                             re.fullmatch(r"[1-9][0-9]*", parts[2]) and
+                             int(parts[2]) >= 9 and parts[3] and
+                             not parts[3].startswith("META-INF/"),
+                             "classpath versioned class path is malformed")
+                    versioned.append((int(parts[2]), parts[3]))
+                elif name.endswith(".class") and name != "module-info.class" and not name.startswith("META-INF/"):
                     classes.add(name)
+            multi_release = False
+            manifest_names = [name for name in names
+                              if name.upper() == "META-INF/MANIFEST.MF"]
+            _require(not manifest_names or manifest_names == ["META-INF/MANIFEST.MF"],
+                     "classpath manifest path differs")
             if "META-INF/MANIFEST.MF" in names:
-                raw = archive.read("META-INF/MANIFEST.MF")
-                _require(len(raw) <= 64 * 1024, "classpath manifest exceeds bound")
-                lines = raw.decode("utf-8", "replace").splitlines()
-                _require(not any(line.lower().startswith(("class-path:", "multi-release: true"))
-                                 for line in lines), "classpath manifest adds hidden providers")
+                multi_release = _manifest_multi_release(archive.read("META-INF/MANIFEST.MF"))
+            _require(multi_release or not versioned,
+                     "classpath versioned class lacks multi-release declaration")
+            for version, name in versioned:
+                if version <= 21 and name != "module-info.class":
+                    classes.add(name)
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as error:
         raise Rejected("classpath JAR is malformed") from error
-    return classes
+    return classes, hashlib.sha256(raw).hexdigest()
 
 
 def inspect_classpath(classpath_file, provider, fixture, dependency_root):
@@ -104,11 +180,11 @@ def inspect_classpath(classpath_file, provider, fixture, dependency_root):
             role = "dependency"
         total += path.stat().st_size
         _require(total <= MAX_CLASSPATH_BYTES, "classpath bytes exceed bound")
-        classes = _jar_classes(path)
+        classes, digest = _jar_classes(path)
         for name in classes:
             _require(name not in owners, "duplicate classpath class: " + name)
             owners[name] = role
-        entries.append({"role": role, "index": index, "sha256": _digest(path),
+        entries.append({"role": role, "index": index, "sha256": digest,
                         "size": path.stat().st_size, "path": str(path)})
     _require(all(owners.get(name) == "provider" for name in REQUIRED_PROVIDER),
              "engine provider class origin differs")
