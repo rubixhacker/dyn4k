@@ -1,6 +1,8 @@
 import io
 import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 import zipfile
 
@@ -100,6 +102,8 @@ class JdiBridgeTest(unittest.TestCase):
                                     "ToyBooleanJdi$Rotation", 3, markers)
         self.assertEqual(result["status"], "MATCHED_JDI_BYTES_UNPASSED_ORIGIN")
         self.assertEqual(result["qualification"], "UNPASSED")
+        self.assertIn("artifact_class_sha256", result)
+        self.assertNotIn("loaded_class_sha256", result)
         for changed in ({key: value for key, value in original.items()
                          if key != "body-map.tsv"},
                         {**original, "extra.txt": b"forged"},
@@ -146,6 +150,55 @@ class JdiBridgeTest(unittest.TestCase):
                                  "trace.999": b"forged\n"})):
             with self.assertRaises(EvidenceRejected):
                 verify_jdi_transport(worker, changed, 40001, 123, 456, HELPER_ARGS)
+
+    def test_selected_worker_bind_requires_thread_clone_chain(self):
+        helper = archive({"trace.456": (
+            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            + str(HELPER_ARGS).replace("'", '"') + ', 0x7f /* 1 var */) = 0\n'
+            'connect(7, {sa_family=AF_INET, sin_port=htons(40001), '
+            'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n').encode()})
+        bind = ('bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
+                'sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
+                'listen(9, 1) = 0\n').encode()
+        thread = ('clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|'
+                  'CLONE_THREAD, exit_signal=0}, 88) = 124\n').encode()
+        fork = b'clone(child_stack=NULL, flags=SIGCHLD) = 124\n'
+        good = archive({"trace.123": thread, "trace.124": bind})
+        self.assertEqual(verify_jdi_transport(good, helper, 40001, 123, 456,
+                                              HELPER_ARGS)["worker_socket_writer"], 124)
+        split = archive({"trace.123": thread + bind.split(b"listen(")[0],
+                         "trace.124": b"listen(9, 1) = 0\n"})
+        self.assertEqual(verify_jdi_transport(split, helper, 40001, 123, 456,
+                                              HELPER_ARGS)["worker_socket_listener"], 124)
+        for root in (fork, b"", thread.replace(b"CLONE_THREAD", b"CLONE_PARENT")):
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_transport(archive({"trace.123": root,
+                                              "trace.124": bind}), helper,
+                                     40001, 123, 456, HELPER_ARGS)
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(archive({"trace.123": thread,
+                                          "trace.124": bind,
+                                          "trace.125": b"unrelated\n"}), helper,
+                                 40001, 123, 456, HELPER_ARGS)
+
+    def test_vm_disconnect_is_not_vm_death(self):
+        source = Path(__file__).resolve().parent
+        environment = os.environ.copy()
+        environment.pop("OLLAMA_API_KEY", None)
+        environment["JAVA_HOME"] = "/tmp/dyn4k-tools/jdk21"
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as root:
+            environment["TMPDIR"] = root
+            build = subprocess.run(("/tmp/dyn4k-tools/jdk21/bin/javac",
+                                    "--add-modules", "jdk.jdi", "-d", root,
+                                    str(source / "RotationJdiProbe.java"),
+                                    str(source / "EndpointControl.java")),
+                                   env=environment, capture_output=True, timeout=30)
+            self.assertEqual(build.returncode, 0, "JDI endpoint control did not compile")
+            run = subprocess.run(("/tmp/dyn4k-tools/jdk21/bin/java", "--add-modules",
+                                  "jdk.jdi", "-Djava.io.tmpdir=" + root, "-cp", root,
+                                  "EndpointControl"), env=environment,
+                                 capture_output=True, timeout=15)
+            self.assertEqual(run.returncode, 0, "JDI endpoint control failed")
 
     @unittest.skipUnless(os.environ.get("DYN4K_JDI_RETAINED_JAR"),
                          "No retained source-compatible JAR supplied")

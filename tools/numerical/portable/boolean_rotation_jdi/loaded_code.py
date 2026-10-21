@@ -110,7 +110,8 @@ def verify_probe_code(output, class_bytes, class_name):
         if len(list(output.glob("method-*.bin"))) != len(methods):
             return {"status": "FAILED_LOADED_CODE_INVENTORY", "qualification": "UNPASSED"}
         return {"status": "MATCHED_JDI_LOADED_CODE", "qualification": "UNPASSED",
-                "class_sha256": _sha(class_bytes), "constant_pool_sha256": _sha(pool),
+                "artifact_class_sha256": _sha(class_bytes),
+                "constant_pool_sha256": _sha(pool),
                 "methods": len(methods)}
     except (OSError, UnicodeError, ValueError, KeyError, IndexError):
         return {"status": "FAILED_LOADED_CODE_INVENTORY", "qualification": "UNPASSED"}

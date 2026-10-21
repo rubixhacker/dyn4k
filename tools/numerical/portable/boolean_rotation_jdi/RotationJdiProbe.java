@@ -108,6 +108,12 @@ public final class RotationJdiProbe {
                           type.classLoader().uniqueID() + "\n");
     }
 
+    static String terminalEvent(Event event) {
+        if (event instanceof VMDeathEvent) return "vm-death";
+        if (event instanceof VMDisconnectEvent) return "vm-disconnect";
+        return null;
+    }
+
     public static void main(String[] args) throws Exception {
         if ((args.length != 6 && args.length != 7) ||
             !(args[0].equals("launch") || args[0].equals("attach")))
@@ -145,7 +151,7 @@ public final class RotationJdiProbe {
         int prepared = 0;
         int entered = 0;
         int exited = 0;
-        boolean dead = false;
+        String endpoint = null;
         long body1 = -1;
         long body2 = -1;
         long integrated = -1;
@@ -167,7 +173,7 @@ public final class RotationJdiProbe {
             exit.enable();
             vm.resume();
             long deadline = System.nanoTime() + Duration.ofSeconds(deadlineSeconds).toNanos();
-            while (!dead && System.nanoTime() < deadline) {
+            while (endpoint == null && System.nanoTime() < deadline) {
                 EventSet events = vm.eventQueue().remove(500);
                 if (events == null) continue;
                 try {
@@ -219,15 +225,18 @@ public final class RotationJdiProbe {
                                 item.angle() + "\t" + item.caller() + "\t" +
                                 item.callerIndex());
                             exited++;
-                        } else if (event instanceof VMDeathEvent || event instanceof VMDisconnectEvent) {
-                            dead = true;
+                        } else {
+                            String observed = terminalEvent(event);
+                            if (observed != null && !"vm-death".equals(endpoint))
+                                endpoint = observed;
                         }
                     }
                 } finally {
                     events.resume();
                 }
             }
-            if (!dead || prepared != 1 || entered != expected || exited != expected ||
+            if (!"vm-death".equals(endpoint) || prepared != 1 ||
+                entered != expected || exited != expected ||
                 pending.values().stream().anyMatch(stack -> !stack.isEmpty()))
                 throw new IllegalStateException("Incomplete target observation");
             if (requireBodyMap) {
@@ -237,7 +246,7 @@ public final class RotationJdiProbe {
                                   "\nb1\t" + body2 + "\nintegrated\t" + integrated + "\n");
             }
             Files.write(output.resolve("events.tsv"), rows);
-            Files.writeString(output.resolve("complete.txt"), "vm-death\n" +
+            Files.writeString(output.resolve("complete.txt"), endpoint + "\n" +
                               (process == null ? "unbound" : process.pid()) + "\n" +
                               expected + "\n");
         } finally {

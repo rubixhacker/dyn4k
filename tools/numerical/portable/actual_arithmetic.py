@@ -533,10 +533,12 @@ def _sha(value):
 def _source_archive(commit):
     if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("candidate commit identity differs")
+    environment = os.environ.copy()
+    environment.pop("OLLAMA_API_KEY", None)
     result = subprocess.run(("git", "-c", "core.autocrlf=false",
                              "--no-replace-objects", "archive", "--format=tar",
                              commit),
-                            cwd=_ROOT, capture_output=True, check=False)
+                            cwd=_ROOT, env=environment, capture_output=True, check=False)
     if result.returncode:
         raise CaptureRejected("candidate commit archive unavailable")
     return result.stdout
@@ -1128,7 +1130,7 @@ def _verify_boolean_jdi(files, summary, worker_pid):
         return {"status": "MATCHED_JDI_SOURCE_STREAM_UNPASSED_RUNTIME_ORIGIN",
                 "qualification": "UNPASSED", "calls_checked": 1800,
                 "source_sites": sites,
-                "loaded_class_sha256": observation["loaded_class_sha256"],
+                "artifact_class_sha256": observation["artifact_class_sha256"],
                 "helper_classes_sha256": _sha(compiled),
                 "event_archive_sha256": _sha(files["jdi_evidence"]),
                 "transport_status": process["status"],

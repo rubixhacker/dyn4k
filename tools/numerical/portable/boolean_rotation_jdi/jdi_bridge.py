@@ -199,7 +199,7 @@ def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers):
                         raise EvidenceRejected("JDI operation bits differ from worker marker")
             return {"status": "MATCHED_JDI_BYTES_UNPASSED_ORIGIN",
                     "qualification": "UNPASSED", "calls": calls,
-                    "loaded_class_sha256": code["class_sha256"]}
+                    "artifact_class_sha256": code["artifact_class_sha256"]}
     except (OSError, UnicodeError, ValueError, zipfile.BadZipFile, RuntimeError,
             KeyError, IndexError) as error:
         if isinstance(error, EvidenceRejected):
@@ -242,6 +242,44 @@ def _helper_descendants(helpers, root):
         raise EvidenceRejected("JDI helper trace has an unrelated process")
 
 
+def _worker_thread_ids(workers, root):
+    parents = {}
+    for parent, trace in workers.items():
+        for line in trace.splitlines():
+            if not line.startswith(("clone(", "clone3(")):
+                continue
+            child = re.search(r"\)\s+= ([1-9][0-9]*)$", line)
+            if child is None:
+                continue
+            identity = int(child.group(1))
+            if identity not in workers or identity in parents or identity == root:
+                raise EvidenceRejected("JDI worker clone ancestry differs")
+            flags = re.search(r"\bflags=([A-Z_0-9|]+)", line)
+            names = set(flags.group(1).split("|")) if flags else set()
+            same_process = {"CLONE_THREAD", "CLONE_VM", "CLONE_SIGHAND",
+                            "CLONE_FILES"} <= names
+            parents[identity] = (parent, same_process)
+    if set(parents) != set(workers) - {root}:
+        raise EvidenceRejected("JDI worker trace has an unrelated descendant")
+    threads = {root}
+    pending = [root]
+    seen = {root}
+    while pending:
+        parent = pending.pop()
+        for child, (owner, same_process) in parents.items():
+            if owner != parent:
+                continue
+            if child in seen:
+                raise EvidenceRejected("JDI worker clone chain is cyclic")
+            seen.add(child)
+            pending.append(child)
+            if same_process and parent in threads:
+                threads.add(child)
+    if seen != set(workers):
+        raise EvidenceRejected("JDI worker clone chain is disconnected")
+    return threads
+
+
 def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
                          helper_pid, expected_argv):
     if (type(port) is not int or not 1 <= port <= 65535 or
@@ -252,6 +290,7 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
     helpers = _trace_members(helper_archive)
     if worker_pid not in workers or helper_pid not in helpers:
         raise EvidenceRejected("JDI process trace PID differs")
+    worker_threads = _worker_thread_ids(workers, worker_pid)
     if (type(expected_argv) is not list or
             any(type(value) is not str for value in expected_argv) or
             len(expected_argv) != 14 or
@@ -291,17 +330,18 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
                          r'\d+\) = 0$')
     bound = [(pid, match.group(1)) for pid, trace in workers.items()
              for line in trace.splitlines() if (match := bind.fullmatch(line))]
-    listened = [(pid, fd) for pid, fd in bound
-                if any(re.fullmatch(r'listen\(' + re.escape(fd) +
-                                    r', \d+\) = 0$', line)
-                       for line in workers[pid].splitlines())]
+    listened = [(pid, fd) for _, fd in bound for pid in worker_threads
+                for line in workers[pid].splitlines()
+                if re.fullmatch(r'listen\(' + re.escape(fd) +
+                                r', \d+\) = 0$', line)]
     connected = [(pid, match.group(1)) for pid, trace in helpers.items()
                  for line in trace.splitlines() if (match := connect.fullmatch(line))]
     if (len(bound) != 1 or len(listened) != 1 or len(connected) != 1 or
-            connected[0][0] != helper_pid):
+            bound[0][0] not in worker_threads or connected[0][0] != helper_pid):
         raise EvidenceRejected("JDI worker socket or helper connection differs")
     return {"status": "MATCHED_JDI_SOCKET_SYSCALLS_UNPASSED_PROCESS",
             "qualification": "UNPASSED", "worker_socket_writer": bound[0][0],
+            "worker_socket_listener": listened[0][0],
             "helper_connector": helper_pid, "port": port}
 
 
