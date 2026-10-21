@@ -22,6 +22,8 @@ jobs:
       - name: Test source-only numerical regressions
         run: |
           env -u OLLAMA_API_KEY \
+            -u DYN4K_WHEEL_ARCHIVE \
+            -u DYN4K_WHEEL_ORIGIN \
             -u DYN4K_GEOMETRY_BASELINE \
             -u DYN4K_PROSPECTIVE_CURRENT_MANIFEST \
             -u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST \

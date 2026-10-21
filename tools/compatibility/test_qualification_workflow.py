@@ -181,7 +181,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         script = textwrap.dedent(step.group(1))
         command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
         self.assertEqual(
-            "env -u OLLAMA_API_KEY -u DYN4K_GEOMETRY_BASELINE "
+            "env -u OLLAMA_API_KEY -u DYN4K_WHEEL_ARCHIVE "
+            "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
             "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
             "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
             "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
