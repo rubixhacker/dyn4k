@@ -90,6 +90,10 @@ APPROVED_PROSPECTIVE_CHECKERS = {
     "reference_diagnostic.py": "f3e40a4671c8e07d5d0071f11818f9235d7a0f4a8ddfd784cb01604b0bb4b967",
     "receipt.py": "36c6c18255274195f58e4361e91d5fd7a5fc77eb9d5df01acc4abc0d36c75b0c",
 }
+APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS = {
+    **APPROVED_PROSPECTIVE_CHECKERS,
+    "prospective_compare.py": "f38b85d2e661182e6a5c3bef538f8127188197ee661c67dd1137c6e7c1d5f9d3",
+}
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -606,7 +610,14 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     if descends_from(PROSPECTIVE_CHECKER_REVISION):
-        approved = APPROVED_PROSPECTIVE_CHECKERS
+        committed_comparator = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(repository), "show",
+             f"{candidate_sha}:{source_dir}/prospective_compare.py"],
+            stderr=subprocess.PIPE)
+        comparator_sha256 = hashlib.sha256(committed_comparator).hexdigest()
+        approved = (APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS
+                    if comparator_sha256 == APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS[
+                        "prospective_compare.py"] else APPROVED_PROSPECTIVE_CHECKERS)
     elif descends_from(PROSPECTIVE_BRIDGE_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_CHECKERS
     elif descends_from(PROSPECTIVE_ASSEMBLED_CHECKER_REVISION):
@@ -615,7 +626,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         approved = APPROVED_PROSPECTIVE_POLICY_CHECKERS
     else:
         raise ValueError("prospective checker candidate predates approved revisions")
-    for filename, current in APPROVED_PROSPECTIVE_CHECKERS.items():
+    for filename, current in APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS.items():
         relative = f"{source_dir}/{filename}"
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(

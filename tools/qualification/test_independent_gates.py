@@ -701,7 +701,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates.verify_prospective_case_subgates(
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
-        self.assertEqual([independent_gates.APPROVED_PROSPECTIVE_CHECKERS[
+        self.assertEqual([independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS[
             "prospective_compare.py"]], exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -747,7 +747,9 @@ class IndependentGateSeamTests(unittest.TestCase):
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
             (independent_gates.PROSPECTIVE_POLICY_REVISION,
              independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
-            (current, independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+            ("7d319d5027f2b10c11eae7f4574e6edf407449c0",
+             independent_gates.APPROVED_PROSPECTIVE_CHECKERS),
+            (current, independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS),
         )
         checker_paths = [f"tools/numerical/portable/{name}" for name in
                          independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
@@ -789,6 +791,11 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates._prospective_checker_binding(
                     ROOT, independent_gates.PROSPECTIVE_ASSEMBLED_CHECKER_REVISION)
         with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_CHECKERS,
+                             {"prospective_compare.py": "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(
+                    ROOT, "7d319d5027f2b10c11eae7f4574e6edf407449c0")
+        with mock.patch.dict(independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS,
                              {"prospective_compare.py": "0" * 64}):
             with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                 independent_gates._prospective_checker_binding(ROOT, current)
