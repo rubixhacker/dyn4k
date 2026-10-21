@@ -40,6 +40,7 @@ class ReferenceStudyCliTest(unittest.TestCase):
                              "controls": [self.control_id]}],
             "controls": [{"row_id": "js.node", "control_id": self.control_id,
                           "route": "direct_kotlin", "host_id": "synthetic-host",
+                          "boot_id": "synthetic-boot",
                           **{name + "_path": path for name, path in self.identities.items()}}],
         }
 
@@ -72,9 +73,11 @@ class ReferenceStudyCliTest(unittest.TestCase):
                     rows.append({"phase": phase, "key": self.key_id,
                                  "control_id": self.control_id, "row_id": "js.node",
                                  "route": "direct_kotlin", "host_id": "synthetic-host",
+                                 "boot_id": "synthetic-boot",
                                  "pair": pair, "side": side, "order": order,
                                  "process_id": f"study-process-{serial}",
                                  "run_id": f"study-run-{serial}", "os_pid": 1000 + serial,
+                                 "process_start_id": f"os-start-{serial}",
                                  "started_ns": 1000000 + serial * 10000,
                                  "ended_ns": 1000500 + serial * 10000,
                                  "invalid_reason": None, "stop_reason": "completed",
@@ -119,25 +122,40 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertEqual(result["declared_assignments"], 4)
         self.assertEqual(result["validated_reference_rows"], 0)
 
-    def test_rejects_repeated_series_within_fresh_source_pairs(self):
+    def test_identical_zero_series_environment_and_monitor_across_phases(self):
+        self.plan["assignments"].append({"phase": "model_holdout", "key": self.key_id,
+                                         "controls": [self.control_id]})
+        self.create()
+        rows = self.captures(("source", "model_holdout"))
+        for row in rows:
+            Path(row["series_path"]).write_bytes(b"0\n")
+            Path(row["environment_path"]).write_bytes(b"same environment\n")
+            Path(row["monitor_path"]).write_bytes(b"same monitor\n")
+        result = self.seal(rows)
+        self.assertEqual(result["qualification"], "unpassed")
+        self.assertEqual(result["validated_reference_rows"], 0)
+        self.assertEqual(result["numeric_limits"], "not_approved")
+        self.assertEqual(self.verify()["study"], "structurally_verified")
+
+    def test_accepts_repeated_series_within_distinct_source_processes(self):
         self.create()
         rows = self.captures()
         Path(rows[1]["series_path"]).write_bytes(Path(rows[0]["series_path"]).read_bytes())
-        self.assertIn("reused series bytes", self.seal(rows, success=False)["reason"])
+        self.assertEqual(self.seal(rows)["study"], "structurally_verified")
 
-    def test_rejects_reused_series_across_feasibility_and_source(self):
+    def test_accepts_equal_series_across_feasibility_and_source(self):
         self.plan["assignments"].insert(0, {"phase": "feasibility", "key": self.key_id,
                                             "controls": [self.control_id]})
         self.create()
         rows = self.captures(("feasibility", "source"))
         rows[6]["series_path"] = rows[0]["series_path"]
-        self.assertIn("reused series bytes", self.seal(rows, success=False)["reason"])
+        self.assertEqual(self.seal(rows)["study"], "structurally_verified")
 
-    def test_rejects_reused_monitor_bytes_across_fresh_processes(self):
+    def test_accepts_equal_monitor_bytes_across_distinct_processes(self):
         self.create()
         rows = self.captures()
         rows[1]["monitor_path"] = rows[0]["monitor_path"]
-        self.assertIn("reused monitor bytes", self.seal(rows, success=False)["reason"])
+        self.assertEqual(self.seal(rows)["study"], "structurally_verified")
 
     def test_repeated_environment_identity_remains_valid(self):
         self.plan["assignments"].append({"phase": "model_holdout", "key": self.key_id,
@@ -183,6 +201,31 @@ class ReferenceStudyCliTest(unittest.TestCase):
                                                1))
         self.assertIn("duplicate JSON key", self.verify(success=False)["reason"])
 
+    def test_rejects_wrong_index_hmac(self):
+        self.create()
+        self.seal(self.captures())
+        index_path = self.archive / "archive.json"
+        index = json.loads(index_path.read_text())
+        index["signature"] = "0" * 64
+        index_path.write_text(json.dumps(index))
+        self.assertIn("archive.json signature differs",
+                      self.verify(success=False)["reason"])
+
+    def test_requires_declared_boot_and_process_start(self):
+        self.create()
+        rows = self.captures()
+        rows[0]["boot_id"] = "another-boot"
+        self.assertIn("capture route, host, or boot differs",
+                      self.seal(rows, success=False)["reason"])
+        rows = self.captures()
+        rows[0]["process_start_id"] = ""
+        self.assertIn("invalid process identity or interval",
+                      self.seal(rows, success=False)["reason"])
+        rows = self.captures()
+        del rows[0]["boot_id"]
+        self.assertIn("capture input keys differ",
+                      self.seal(rows, success=False)["reason"])
+
     def test_rejects_duplicate_signed_protocol_key_before_seal(self):
         self.create()
         protocol_path = self.archive / "protocol.json"
@@ -191,24 +234,24 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertIn("duplicate JSON key",
                       self.seal(self.captures(), success=False)["reason"])
 
-    def test_resigned_archive_rejects_reused_series_and_overlapping_pid(self):
-        for mutation in ("series", "interval"):
+    def test_resigned_archive_rejects_reused_process_start_and_overlapping_pid(self):
+        for mutation in ("process_start", "interval"):
             with self.subTest(mutation=mutation):
                 self.archive = self.root / f"signed-{mutation}"
                 self.create()
                 self.seal(self.captures())
                 index = json.loads((self.archive / "archive.json").read_text())
                 first, second = index["captures"][:2]
-                if mutation == "series":
-                    second["series_path"] = first["series_path"]
-                    second["series_sha256"] = first["series_sha256"]
+                if mutation == "process_start":
+                    second["os_pid"] = first["os_pid"]
+                    second["process_start_id"] = first["process_start_id"]
                 else:
                     second["os_pid"] = first["os_pid"]
                     second["started_ns"] = first["started_ns"] + 1
                     second["ended_ns"] = first["ended_ns"] + 1
                 self.resign_index(index)
                 reason = self.verify(success=False)["reason"]
-                self.assertIn("reused series bytes" if mutation == "series" else
+                self.assertIn("reused declared process identity" if mutation == "process_start" else
                               "overlapping observed host/PID intervals", reason)
 
     def test_accepts_unique_key_canonical_signed_json(self):
@@ -291,10 +334,12 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.create()
         rows = self.captures(("source", "model_holdout"))
         rows[6]["process_id"] = rows[0]["process_id"]
-        self.seal(rows, success=False)
+        self.assertIn("duplicate or missing process_id", self.seal(rows, success=False)["reason"])
         rows = self.captures(("source", "model_holdout"))
-        rows[6]["series_path"] = rows[0]["series_path"]
-        self.seal(rows, success=False)
+        rows[6]["os_pid"] = rows[0]["os_pid"]
+        rows[6]["process_start_id"] = rows[0]["process_start_id"]
+        self.assertIn("reused declared process identity",
+                      self.seal(rows, success=False)["reason"])
         rows = self.captures(("source", "model_holdout"))
         rows[0]["noise_upper_ratio_max"] = 9
         self.seal(rows, success=False)

@@ -12,7 +12,7 @@ from sustained_archive import (FROZEN_MANIFEST_SHA256, canonical,
 
 
 SOURCE_COMMIT = "bb7d5cf7671f96a13449a5e0c3d65ff44d4b4975"
-VERSION = "reference-study-v1"
+VERSION = "reference-study-v2"
 PHASES = ("feasibility", "source", "model_holdout", "confirmation")
 IDENTITY_FILES = ("artifact", "probe", "runtime", "image")
 RAW_FILES = ("series", "environment", "monitor")
@@ -21,11 +21,11 @@ CONTROL_ROUTES = {"dyn4j_6_0_0_jvm": "baseline",
                   "direct_kotlin_self": "direct_kotlin",
                   "compatibility_self": "compatibility"}
 PAIR_ORDER = (("a", "b"), ("b", "a"), ("a", "b"))
-CONTROL_KEYS = frozenset({"row_id", "control_id", "route", "host_id"} |
+CONTROL_KEYS = frozenset({"row_id", "control_id", "route", "host_id", "boot_id"} |
                          {name + "_path" for name in IDENTITY_FILES})
 CAPTURE_KEYS = frozenset({"phase", "key", "control_id", "row_id", "route",
-                          "host_id", "pair", "side", "order", "process_id", "run_id",
-                          "os_pid", "started_ns", "ended_ns", "invalid_reason",
+                          "host_id", "boot_id", "pair", "side", "order", "process_id", "run_id",
+                          "os_pid", "process_start_id", "started_ns", "ended_ns", "invalid_reason",
                           "stop_reason"} |
                          {name + "_sha256" for name in IDENTITY_FILES} |
                          {name + "_path" for name in RAW_FILES})
@@ -145,7 +145,7 @@ def validate_protocol(protocol, root):
     require(isinstance(controls, list), "controls must be a list")
     actual = set()
     for control in controls:
-        exact_keys(control, {"row_id", "control_id", "route", "host_id"} |
+        exact_keys(control, {"row_id", "control_id", "route", "host_id", "boot_id"} |
                    {name + "_path" for name in IDENTITY_FILES} |
                    {name + "_sha256" for name in IDENTITY_FILES}, "control")
         identity = (control["row_id"], control["control_id"])
@@ -153,8 +153,10 @@ def validate_protocol(protocol, root):
                 "missing, extra, or duplicate control")
         require(control["route"] == CONTROL_ROUTES[control["control_id"]],
                 "control route differs")
-        require(isinstance(control["host_id"], str) and control["host_id"],
+        require(isinstance(control["host_id"], str) and control["host_id"].strip(),
                 "missing control host")
+        require(isinstance(control["boot_id"], str) and control["boot_id"].strip(),
+                "missing control boot identity")
         for name in IDENTITY_FILES:
             checked_relative(root, control[name + "_path"],
                              control[name + "_sha256"])
@@ -209,8 +211,8 @@ def validate_captures(root, protocol, captures):
     actual = set()
     process_ids = set()
     run_ids = set()
+    declared_processes = set()
     process_intervals = {}
-    process_raw_hashes = {"series": set(), "monitor": set()}
     for capture in captures:
         exact_keys(capture, CAPTURE_KEYS | {name + "_sha256" for name in RAW_FILES},
                    "capture")
@@ -223,7 +225,9 @@ def validate_captures(root, protocol, captures):
                 "capture control differs")
         control = controls[(row_id, control_id)]
         require(capture["route"] == control["route"] and
-                capture["host_id"] == control["host_id"], "capture route or host differs")
+                capture["host_id"] == control["host_id"] and
+                capture["boot_id"] == control["boot_id"],
+                "capture route, host, or boot differs")
         for name in IDENTITY_FILES:
             require(capture[name + "_sha256"] == control[name + "_sha256"],
                     f"capture {name} differs")
@@ -237,15 +241,21 @@ def validate_captures(root, protocol, captures):
         actual.add(slot)
         for id_key, seen in (("process_id", process_ids), ("run_id", run_ids)):
             value = capture[id_key]
-            require(isinstance(value, str) and value and value not in seen,
+            require(isinstance(value, str) and value.strip() and value not in seen,
                     f"duplicate or missing {id_key}")
             seen.add(value)
         require(type(capture["os_pid"]) is int and capture["os_pid"] > 0 and
+                isinstance(capture["process_start_id"], str) and
+                capture["process_start_id"].strip() and
                 type(capture["started_ns"]) is int and
                 type(capture["ended_ns"]) is int and
-                0 <= capture["started_ns"] < capture["ended_ns"],
+                0 <= capture["started_ns"] < capture["ended_ns"] <= (1 << 63) - 1,
                 "invalid process identity or interval")
-        process_key = (capture["host_id"], capture["os_pid"])
+        process_key = (capture["host_id"], capture["boot_id"], capture["os_pid"])
+        process_identity = (*process_key, capture["process_start_id"])
+        require(process_identity not in declared_processes,
+                "reused declared process identity")
+        declared_processes.add(process_identity)
         intervals = process_intervals.setdefault(process_key, [])
         start, end = capture["started_ns"], capture["ended_ns"]
         position = bisect_left(intervals, (start, end))
@@ -259,11 +269,6 @@ def validate_captures(root, protocol, captures):
         for name in RAW_FILES:
             checked_relative(root, capture[name + "_path"],
                              capture[name + "_sha256"])
-            if name in process_raw_hashes:
-                raw_hash = capture[name + "_sha256"]
-                require(raw_hash not in process_raw_hashes[name],
-                        f"reused {name} bytes across process captures")
-                process_raw_hashes[name].add(raw_hash)
     require(actual == expected, "declared assignment pair inventory incomplete")
     return len(assignments)
 
