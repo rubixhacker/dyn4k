@@ -119,6 +119,11 @@ def _yaml_structural_entries_at_indent(source, indentation):
 
 class QualificationWorkflowContractTest(unittest.TestCase):
     def assert_source_checks_job_contract(self, source):
+        self.assertEqual(
+            [("name", "Qualification workflow source checks"),
+             ("on", ""), ("permissions", ""), ("jobs", "")],
+            _yaml_structural_entries_at_indent(source, 0),
+        )
         events = workflow_event_blocks(source)
         self.assertEqual(["push", "pull_request"], list(events))
         trigger_block = re.search(r"(?ms)^on:\n(.*?)^permissions:\n", source)
@@ -247,6 +252,28 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              preflight_run + "        continue-on-error: true\n"),
             ("duplicate step command", preflight_run,
              preflight_run + "        run: echo skipped\n"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, source.count(old), name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
+    def test_source_contract_rejects_root_execution_overrides(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        name_line = "name: Qualification workflow source checks\n"
+        mutations = (
+            ("root environment override", name_line,
+             name_line + "env:\n  BASH_ENV: /dev/null\n"),
+            ("root shell defaults override", name_line,
+             name_line + "defaults:\n  run:\n    shell: pwsh\n"),
+            ("quoted unknown root key", name_line,
+             name_line + '"env":\n  BASH_ENV: /dev/null\n'),
+            ("spaced unknown root key", name_line,
+             name_line + "env :\n  BASH_ENV: /dev/null\n"),
+            ("duplicate unknown root key", name_line,
+             name_line + "env:\n  BASH_ENV: /dev/null\n"
+             "env:\n  CI: false\n"),
         )
         for name, old, new in mutations:
             with self.subTest(mutation=name):
