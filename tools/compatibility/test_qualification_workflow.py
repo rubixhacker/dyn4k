@@ -207,10 +207,16 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
                  "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
                  "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
-                 "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
+                 "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
+                 "-u DYN4K_BOOLEAN_JDI_TOY -u DYN4K_JDI_RETAINED_JAR "
+                 "-u BOOLEAN_JDI_TOY_ROOT "
+                 "PYTHONPATH=tools/numerical/portable:"
+                 "tools/numerical/portable/boolean_rotation_jdi "
+                 "python3 -B -m unittest -v "
                  "test_actual_arithmetic test_actual_capture_receipt "
                  "test_capture_actual test_rotation_oracle test_rotation_marker "
-                 "test_prospective_compare"),
+                 "test_prospective_compare test_witness test_source_guard "
+                 "test_jdi_bridge"),
             ],
             step_contract,
         )
@@ -341,6 +347,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("archive unset", "-u DYN4K_WHEEL_ORIGIN ", ""),
             ("numerical module", "test_rotation_oracle", "test_rotation_oracle_changed"),
             ("capture regression omitted", "              test_capture_actual \\\n", ""),
+            ("JDI bridge regression omitted", "              test_jdi_bridge\n", ""),
+            ("JDI reference origin unset omitted", "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN ", ""),
             ("added installation step",
              "      - name: Test source-only numerical regressions\n",
              "      - name: Install a dependency\n"
@@ -463,10 +471,16 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
             "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
             "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
-            "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
+            "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
+            "-u DYN4K_BOOLEAN_JDI_TOY -u DYN4K_JDI_RETAINED_JAR "
+            "-u BOOLEAN_JDI_TOY_ROOT "
+            "PYTHONPATH=tools/numerical/portable:"
+            "tools/numerical/portable/boolean_rotation_jdi "
+            "python3 -B -m unittest -v "
             "test_actual_arithmetic test_actual_capture_receipt "
             "test_capture_actual test_rotation_oracle test_rotation_marker "
-            "test_prospective_compare",
+            "test_prospective_compare test_witness test_source_guard "
+            "test_jdi_bridge",
             command,
         )
 

@@ -402,18 +402,39 @@ class CaptureReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(CaptureRejected, "source call schedule"):
             actual._require_focused_boolean_step_calls(markers, 1)
 
-    def test_synthetic_boolean_xml_covers_all_steps_but_stays_unpassed(self):
-        reference = Path("/var/home/stewart/dyn4k-evidence/session-control/"
-                         "baseline-current-4d-home-full/baseline-jvm/cases/"
-                         "joint-Revolute-LimitsEnabled-false.jsonl")
+    def test_optional_indexed_boolean_reference_hash_catalog_and_origin(self):
+        origin_name = os.environ.get("DYN4K_BOOLEAN_REFERENCE_ORIGIN")
+        if not origin_name:
+            self.skipTest("indexed Boolean reference origin is not configured")
+        case_id = "joint-Revolute-LimitsEnabled-false"
+        origin = Path(origin_name)
+        reference = origin / "baseline-jvm" / "cases" / f"{case_id}.jsonl"
         if not reference.is_file():
-            self.skipTest("indexed Boolean reference is unavailable")
-        self.assertEqual(hashlib.sha256(reference.read_bytes()).hexdigest(),
+            self.skipTest("indexed Boolean reference archive is unavailable")
+        reference_bytes = reference.read_bytes()
+        self.assertEqual(hashlib.sha256(reference_bytes).hexdigest(),
                          actual._FOCUSED_BOOLEAN_REFERENCE_SHA256)
-        self.assertEqual(actual.load_policy_catalog()["cases"]["joint-Revolute-LimitsEnabled-false"]
-                         ["sha256"], actual._FOCUSED_BOOLEAN_REFERENCE_SHA256)
-        with reference.open("rb") as source:
-            header = source.readline().decode().rstrip("\n")
+        catalog_entry = actual.load_policy_catalog()["cases"][case_id]
+        self.assertEqual(catalog_entry["sha256"],
+                         actual._FOCUSED_BOOLEAN_REFERENCE_SHA256)
+        header, separator, _ = reference_bytes.partition(b"\n")
+        self.assertEqual(separator, b"\n")
+        header_bytes = header + separator
+        fixture = (Path(__file__).resolve().parent / "boolean_rotation_jdi" /
+                   "fixtures" / "revolute-limits-false-header.jsonl")
+        self.assertEqual(hashlib.sha256(header_bytes).hexdigest(),
+                         actual._FOCUSED_BOOLEAN_INPUT_SHA256)
+        self.assertEqual(header_bytes, fixture.read_bytes())
+
+    def test_synthetic_boolean_xml_covers_all_steps_but_stays_unpassed(self):
+        fixture = (Path(__file__).resolve().parent / "boolean_rotation_jdi" /
+                   "fixtures" / "revolute-limits-false-header.jsonl")
+        header_bytes = fixture.read_bytes()
+        self.assertEqual(len(header_bytes), 4470)
+        self.assertTrue(header_bytes.endswith(b"\n"))
+        self.assertEqual(hashlib.sha256(header_bytes).hexdigest(),
+                         actual._FOCUSED_BOOLEAN_INPUT_SHA256)
+        header = header_bytes.decode("utf-8").rstrip("\n")
         case_id = "joint-Revolute-LimitsEnabled-false"
         body_rows = json.loads(header)["initial"]["bodies"]
         identity = [bits(1.0), bits(0.0)]
