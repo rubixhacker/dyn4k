@@ -14,7 +14,7 @@ from pulley_jdi_v2 import (class_inventory, compare_indexed_onecase,
                            inspect_capture, inspect_loaded_code)
 from pulley_jdi_capture_v2 import _build_sidecar, _copy_bounded, _run_bounded, capture, replay_capture
 from pulley_jdi_inputs_v2 import (inspect_classpath, verify_candidate_publication,
-                                  MAX_LOG_BYTES)
+                                  MAX_ARTIFACT_BYTES, MAX_LOG_BYTES)
 
 
 class PulleyJdiV2Test(unittest.TestCase):
@@ -23,6 +23,7 @@ class PulleyJdiV2Test(unittest.TestCase):
     CANDIDATE = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/wheel/capture-7d/artifact.jar')
     TASK_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-controller-followup')
     REVIEW_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-reviewfix-f9')
+    P3_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-offline-bound-p3')
 
     def test_capture_fixture_is_absent_from_normal_jvm_source_root(self):
         root = Path(__file__).resolve().parent
@@ -229,6 +230,31 @@ class PulleyJdiV2Test(unittest.TestCase):
     def test_missing_capture_fails_closed(self):
         with self.assertRaises(Exception):
             inspect_capture(Path('/no/such/capture'))
+
+    def test_offline_capture_rejects_oversized_artifact_before_digest(self):
+        fields = (
+            'schema', 'profile', 'source_revision', 'source_sha256', 'artifact_sha256',
+            'controller_sha256', 'controller_class_sha256', 'classpath_sha256',
+            'worker_sha256', 'case_sha256', 'events_sha256', 'process_sha256',
+            'loaded_pool_sha256', 'loaded_methods_sha256', 'java_sha256', 'live_sha256',
+            'classpath_entries_sha256', 'publication_sha256', 'publication_log_sha256',
+            'source_archive_sha256', 'fixture_commit', 'fixture_archive_sha256',
+            'sidecar_build_stdout_sha256', 'sidecar_build_stderr_sha256',
+            'sidecar_classpath_sha256',
+        )
+        with tempfile.TemporaryDirectory(dir=self.P3_HOME) as directory:
+            root = Path(directory)
+            artifact = root / 'oversized.jar'
+            with artifact.open('wb') as stream:
+                stream.truncate(MAX_ARTIFACT_BYTES + 1)
+            manifest = dict.fromkeys(fields)
+            manifest.update(schema='pulley-jdi-capture/2', profile='baseline',
+                            artifact_sha256='0' * 64)
+            (root / 'capture-v2.json').write_text(json.dumps(manifest))
+            with patch('pulley_jdi_v2._digest',
+                       side_effect=AssertionError('oversized artifact was hashed')):
+                with self.assertRaisesRegex(Rejected, 'bound'):
+                    inspect_capture(root, artifact)
 
     def test_replay_rejects_forged_local_values_even_if_original_is_resealed(self):
         with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:

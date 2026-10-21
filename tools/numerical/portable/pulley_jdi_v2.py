@@ -7,7 +7,8 @@ import zipfile
 from pathlib import Path
 
 from pulley_jdi_v1 import BASELINE_JAR_SHA256, Rejected, _digest, _json, _require, inspect_bundle
-from pulley_jdi_inputs_v2 import inspect_classpath, verify_candidate_publication
+from pulley_jdi_inputs_v2 import (MAX_ARTIFACT_BYTES, bounded_file, inspect_classpath,
+                                  verify_candidate_publication)
 import run as portable_runner
 from reference_diagnostic import projected_records
 from frozen_weld_pulley import compare_records
@@ -179,7 +180,9 @@ def inspect_capture(directory, artifact=None):
     _require(manifest["schema"] == "pulley-jdi-capture/2" and
              manifest["profile"] in ("baseline", "candidate"),
              "capture version or profile differs")
-    _require(_digest(artifact) == manifest["artifact_sha256"], "artifact hash differs")
+    artifact = bounded_file(artifact, MAX_ARTIFACT_BYTES)
+    _require(_digest(artifact, MAX_ARTIFACT_BYTES) == manifest["artifact_sha256"],
+             "artifact hash differs")
     source = BASELINE_SOURCE if manifest["profile"] == "baseline" else CANDIDATE_SOURCE
     _require(_digest(source) == manifest["source_sha256"], "provider source differs")
     if manifest["profile"] == "baseline":
