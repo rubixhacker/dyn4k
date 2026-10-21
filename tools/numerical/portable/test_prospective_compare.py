@@ -1674,6 +1674,67 @@ class ProspectiveComparisonTest(unittest.TestCase):
             self.assertEqual(self.policy_result(rows, candidate, case, catalog)["status"],
                              expected)
 
+    def test_indexed_geometry_delta_premises_and_input_identity(self):
+        from cases import declared_cases
+
+        archive = os.environ.get("DYN4K_GEOMETRY_BASELINE")
+        if archive is None:
+            self.skipTest("set DYN4K_GEOMETRY_BASELINE for indexed geometry controls")
+        archive = Path(archive)
+        manifest = json.loads((archive / "verified.json").read_text())
+        self.assertEqual(manifest["fixture_source_sha256"],
+                         "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce")
+        self.assertEqual(manifest["baseline_jar_sha256"],
+                         "204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e")
+        cases = {case["id"]: case for case in declared_cases()}
+        catalog = load_policy_catalog()
+
+        def compare_indexed(case_id):
+            source = archive / "baseline-jvm/cases" / f"{case_id}.jsonl"
+            self.assertEqual(digest(source), manifest["case_sha256"][case_id])
+            return compare_policy_case(source, source, cases[case_id], catalog)
+
+        for origin in range(1, 5):
+            for delta in (1, 3):
+                case_id = f"geometry-boundary-s0-o{origin}-d{delta}"
+                with self.subTest(lost_delta=case_id):
+                    result = compare_indexed(case_id)
+                    self.assertEqual(result["status"], "UNPASSED_PREMISE")
+                    self.assertEqual(result["reason"], "boundary delta rounds away")
+                    self.assertEqual(result["qualification"], "UNPASSED")
+
+        for origin in (3, 4):
+            for delta in (1, 3):
+                case_id = f"geometry-boundary-s1-o{origin}-d{delta}"
+                with self.subTest(existing_zero_gap=case_id):
+                    result = compare_indexed(case_id)
+                    self.assertEqual(result["status"], "UNPASSED_PREMISE")
+                    self.assertEqual(result["reason"], "boundary delta rounds away")
+
+        for delta, sign in ((0, -1), (4, 1)):
+            case_id = f"geometry-boundary-s0-o1-d{delta}"
+            source = archive / "baseline-jvm/cases" / f"{case_id}.jsonl"
+            with self.subTest(represented_neighbor=case_id):
+                with source.open(encoding="utf-8") as stream:
+                    header = json.loads(stream.readline())
+                values = header["input"]
+                center = header["setup"]["bodies"][1]["transform"]["getTranslationX"]
+                neutral = values["origin"][0] + values["scale"] * 1.5
+                gap = (center - values["origin"][0]) - values["scale"] * 1.5
+                self.assertNotEqual(center, neutral)
+                self.assertEqual(math.copysign(1.0, gap), sign)
+                self.assertEqual(compare_indexed(case_id)["status"],
+                                 "PASSED_NUMERICAL_POLICY")
+
+        case_id = "geometry-boundary-s0-o1-d1"
+        source = archive / "baseline-jvm/cases" / f"{case_id}.jsonl"
+        rows = source.read_text().splitlines()
+        header = json.loads(rows[0])
+        header["input"]["delta"] = -1e-8
+        self.candidate.write_text(json.dumps(header) + "\n" + "\n".join(rows[1:]) + "\n")
+        self.assertEqual(compare_policy_case(source, self.candidate, cases[case_id],
+                                             catalog)["status"], "FAILED_INPUT")
+
     def test_free_motion_caps_and_computed_zero_are_target_specific(self):
         for rule, field, limit in (
                 ("bounded_position", "position", 2e-9),

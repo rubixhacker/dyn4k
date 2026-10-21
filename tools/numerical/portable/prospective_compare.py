@@ -721,6 +721,10 @@ def compare_policy_case(reference, candidate, case, catalog, rotation_audit=None
                     raise Difference("UNPASSED_PREMISE", "target timestep differs")
                 if case["family"] == "geometry-collision":
                     gap, _ = _represented_gap(header)
+                    center = header["setup"]["bodies"][1]["transform"]["getTranslationX"]
+                    neutral = header["input"]["origin"][0] + header["input"]["scale"] * 1.5
+                    if header["input"]["delta"] != 0 and center == neutral:
+                        raise Difference("UNPASSED_PREMISE", "boundary delta rounds away")
                     if header["input"]["delta"] != 0 and gap == 0:
                         raise Difference("UNPASSED_PREMISE", "boundary delta rounds away")
             elif kind in ("event", "action", "state"):
