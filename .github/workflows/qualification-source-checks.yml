@@ -9,10 +9,12 @@ permissions:
 
 jobs:
   workflow-source-contracts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Reject hosted macOS routes
         run: python3 -B tools/qualification/guard_hosted_runners.py
       - name: Test qualification workflow contracts

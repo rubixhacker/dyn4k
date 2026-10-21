@@ -87,6 +87,95 @@ def workflow_jobs_for_event(workflow, event, inputs=None):
 
 
 class QualificationWorkflowContractTest(unittest.TestCase):
+    def assert_source_checks_job_contract(self, source):
+        events = workflow_event_blocks(source)
+        self.assertEqual(["push", "pull_request"], list(events))
+        trigger_block = re.search(r"(?ms)^on:\n(.*?)^permissions:\n", source)
+        self.assertIsNotNone(trigger_block)
+        self.assertEqual("  push:\n  pull_request:\n\n", trigger_block.group(1))
+        self.assertIn("permissions:\n  contents: read\n\njobs:\n", source)
+        jobs = workflow_jobs(source)
+        self.assertEqual({"workflow-source-contracts"}, set(jobs))
+        job = jobs["workflow-source-contracts"]
+        self.assertEqual(
+            ["runs-on", "timeout-minutes", "steps"],
+            re.findall(r"(?m)^    ([a-z][a-z0-9-]*):(?:\s+.*)?$", job),
+        )
+        self.assertIn("    runs-on: ubuntu-26.04\n", job)
+        self.assertIn("    timeout-minutes: 5\n", job)
+        checkout = re.search(
+            r"(?m)^      - uses: actions/checkout@v4\n((?: {8,}.*\n)+)", job
+        )
+        self.assertIsNotNone(checkout)
+        self.assertEqual("        with:\n          fetch-depth: 0\n", checkout.group(1))
+        self.assertNotRegex(job, r"(?m)^        (?:if|continue-on-error):")
+
+        step_matches = list(re.finditer(r"(?m)^      - (.+)$", job))
+        step_contract = []
+        for index, match in enumerate(step_matches):
+            end = step_matches[index + 1].start() if index + 1 < len(step_matches) else len(job)
+            block = job[match.start():end]
+            multiline = re.search(r"(?ms)^        run: \|\n((?: {10}.*\n)+)", block)
+            if multiline is not None:
+                script = textwrap.dedent(multiline.group(1))
+                command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
+            else:
+                inline = re.search(r"(?m)^        run: (.+)$", block)
+                command = inline.group(1) if inline is not None else None
+            step_contract.append((match.group(1), command))
+
+        self.assertEqual(
+            [
+                ("uses: actions/checkout@v4", None),
+                ("name: Reject hosted macOS routes",
+                 "python3 -B tools/qualification/guard_hosted_runners.py"),
+                ("name: Test qualification workflow contracts",
+                 "python3 -B -m unittest tools.compatibility.test_qualification_workflow"),
+                ("name: Test hosted runner guard",
+                 "PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners"),
+                ("name: Test source-only numerical regressions",
+                 "env -u OLLAMA_API_KEY -u DYN4K_WHEEL_ARCHIVE "
+                 "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
+                 "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
+                 "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
+                 "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
+                 "test_actual_arithmetic test_actual_capture_receipt "
+                 "test_rotation_oracle test_rotation_marker test_prospective_compare"),
+            ],
+            step_contract,
+        )
+
+    def test_source_job_contract_rejects_failure_suppression_and_body_changes(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        mutations = (
+            ("job failure suppression", "    timeout-minutes: 5\n",
+             "    timeout-minutes: 5\n    continue-on-error: true\n"),
+            ("runner guard body", "run: python3 -B tools/qualification/guard_hosted_runners.py",
+             "run: python3 -B tools/qualification/guard_hosted_runners.py && true"),
+            ("workflow contract body",
+             "run: python3 -B -m unittest tools.compatibility.test_qualification_workflow",
+             "run: python3 -B -m unittest tools.compatibility.test_qualification_workflow -q"),
+            ("hosted runner test body",
+             "run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners",
+             "run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners -q"),
+            ("runner label", "runs-on: ubuntu-26.04", "runs-on: ubuntu-latest"),
+            ("history depth", "fetch-depth: 0", "fetch-depth: 1"),
+            ("archive unset", "-u DYN4K_WHEEL_ORIGIN ", ""),
+            ("numerical module", "test_rotation_oracle", "test_rotation_oracle_changed"),
+            ("added installation step",
+             "      - name: Test source-only numerical regressions\n",
+             "      - name: Install a dependency\n"
+             "        run: pip install example\n"
+             "      - name: Test source-only numerical regressions\n"),
+            ("push trigger filter", "  push:\n", "  push:\n    branches: [main]\n"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, source.count(old), name)
+                mutated = source.replace(old, new, 1)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
+
     def test_push_and_pull_request_do_not_schedule_qualification_jobs(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(["workflow_dispatch"], list(workflow_event_blocks(workflow)))
@@ -135,13 +224,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
 
     def test_automatic_source_checks_are_lightweight_and_mac_is_dispatch_only(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
-        self.assertEqual(["push", "pull_request"], list(workflow_event_blocks(source)))
+        self.assert_source_checks_job_contract(source)
         jobs = workflow_jobs(source)
         self.assertEqual({"workflow-source-contracts"}, set(jobs))
         for event in ("push", "pull_request"):
             self.assertEqual({"workflow-source-contracts"},
                              workflow_jobs_for_event(source, event), event)
-        self.assertIn("runs-on: ubuntu-latest", jobs["workflow-source-contracts"])
+        self.assertIn("runs-on: ubuntu-26.04", jobs["workflow-source-contracts"])
         self.assertIn("timeout-minutes: 5", jobs["workflow-source-contracts"])
         self.assertIn("tools/qualification/guard_hosted_runners.py", jobs["workflow-source-contracts"])
         self.assertIn("tools.compatibility.test_qualification_workflow",
