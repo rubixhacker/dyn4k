@@ -7,7 +7,9 @@ import subprocess
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import independent_adapter
@@ -51,6 +53,36 @@ def _patch_archive_member_open(callback, windows_directory_type=None):
         return handle
 
     return mock.patch.object(independent_gates.os, "open", opened)
+
+
+@contextmanager
+def _stable_archive_directory_metadata(directory):
+    original_identity = independent_gates._archive_identity
+    original_fstat = independent_gates.os.fstat
+    before = original_identity(directory)
+    fields = {"st_dev": before[0], "st_ino": before[1], "st_mode": before[2],
+              "st_nlink": before[3], "st_size": before[4],
+              "st_mtime_ns": before[5], "st_ctime_ns": before[6],
+              "st_file_attributes": before[7]}
+
+    class StableState:
+        def __init__(self, state):
+            self.state = state
+
+        def __getattr__(self, name):
+            return fields[name] if name in fields else getattr(self.state, name)
+
+    def stable_identity(path):
+        return before if Path(path) == directory else original_identity(path)
+
+    def stable_fstat(handle):
+        state = original_fstat(handle)
+        return (StableState(state) if (state.st_dev, state.st_ino) == before[:2]
+                else state)
+
+    with (mock.patch.object(independent_gates, "_archive_identity", stable_identity),
+          mock.patch.object(independent_gates.os, "fstat", side_effect=stable_fstat)):
+        yield
 
 
 class IndependentAuditProducerTests(unittest.TestCase):
@@ -299,6 +331,49 @@ class IndependentAuditProducerTests(unittest.TestCase):
                 with self.assertRaisesRegex(PermissionError, "descendant enumeration"):
                     scan(archive)
 
+    def test_archive_scan_rejects_final_nested_membership_changes_and_enumeration_error(self):
+        archive = self.root / "final-membership"
+        nested = archive / "nested"
+        nested.mkdir(parents=True)
+        (archive / "receipt.json").write_text("{}")
+        (nested / "payload.bin").write_bytes(b"stable")
+        original_scandir = os.scandir
+        original_fstat = os.fstat
+        nested_state = nested.stat()
+
+        def is_nested(target):
+            state = original_fstat(target) if isinstance(target, int) else Path(target).stat()
+            return (state.st_dev, state.st_ino) == (nested_state.st_dev, nested_state.st_ino)
+
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            for alteration in ("duplicate", "case", "enumeration"):
+                calls = 0
+
+                def changed_scandir(target):
+                    nonlocal calls
+                    if is_nested(target):
+                        calls += 1
+                        if calls == 2 and alteration == "enumeration":
+                            raise PermissionError("final descendant enumeration blocked")
+                    with original_scandir(target) as entries:
+                        rows = list(entries)
+                    if is_nested(target) and calls == 2:
+                        if alteration == "duplicate":
+                            rows.append(next(row for row in rows if row.name == "payload.bin"))
+                        elif alteration == "case":
+                            rows = [SimpleNamespace(name="PAYLOAD.bin") if row.name == "payload.bin"
+                                    else row for row in rows]
+                    return nullcontext(iter(rows))
+
+                with self.subTest(scan=scan, alteration=alteration), mock.patch.object(
+                        independent_gates.os, "scandir", side_effect=changed_scandir):
+                    expected = (PermissionError if alteration == "enumeration" else ValueError)
+                    message = ("final descendant enumeration blocked" if alteration == "enumeration"
+                               else "archive entry changed during scan")
+                    with self.assertRaisesRegex(expected, message):
+                        scan(archive)
+                    self.assertEqual(2, calls)
+
     def test_archive_scan_accepts_path_and_handle_ctime_with_distinct_meanings(self):
         archive = self.root / "ctime-archive"
         archive.mkdir()
@@ -349,12 +424,11 @@ class IndependentAuditProducerTests(unittest.TestCase):
                     self.assertIn("payload.bin", result["files"])
 
     def test_archive_scan_rejects_new_archive_member_during_read(self):
-        archive = self.root / "changed-archive"
-        archive.mkdir()
-        (archive / "receipt.json").write_text("{}")
-        (archive / "payload.bin").write_bytes(b"stable")
-
         for scan in (producer._snapshot, independent_gates.archive_digest):
+            archive = self.root / f"changed-{scan.__name__}"
+            archive.mkdir()
+            (archive / "receipt.json").write_text("{}")
+            (archive / "payload.bin").write_bytes(b"stable")
             new_member = archive / f"new-{scan.__name__}.bin"
             changed = False
 
@@ -364,10 +438,47 @@ class IndependentAuditProducerTests(unittest.TestCase):
                     changed = True
                     new_member.write_bytes(b"concurrent")
 
-            with self.subTest(scan=scan), _patch_archive_member_open(add_member):
-                with self.assertRaisesRegex(ValueError, "archive entry changed during scan"):
+            with (self.subTest(scan=scan),
+                  _stable_archive_directory_metadata(archive),
+                  _patch_archive_member_open(add_member)):
+                failure = None
+                try:
                     scan(archive)
+                except ValueError as error:
+                    failure = error
                 self.assertTrue(changed)
+                self.assertTrue(new_member.is_file())
+                self.assertIsNotNone(failure, "scanner accepted a new archive member")
+                self.assertRegex(str(failure), "archive entry changed during scan")
+
+    def test_archive_scan_rejects_new_nested_member_with_stable_directory_identity(self):
+        for scan in (producer._snapshot, independent_gates.archive_digest):
+            archive = self.root / f"nested-{scan.__name__}"
+            nested = archive / "nested"
+            nested.mkdir(parents=True)
+            (archive / "receipt.json").write_text("{}")
+            (nested / "payload.bin").write_bytes(b"stable")
+            new_member = nested / f"new-{scan.__name__}.bin"
+            changed = False
+
+            def add_member():
+                nonlocal changed
+                if not changed:
+                    changed = True
+                    new_member.write_bytes(b"concurrent")
+
+            with (self.subTest(scan=scan),
+                  _stable_archive_directory_metadata(nested),
+                  _patch_archive_member_open(add_member)):
+                failure = None
+                try:
+                    scan(archive)
+                except ValueError as error:
+                    failure = error
+                self.assertTrue(changed)
+                self.assertTrue(new_member.is_file())
+                self.assertIsNotNone(failure, "scanner accepted a new nested archive member")
+                self.assertRegex(str(failure), "archive entry changed during scan")
 
     def test_windows_modelled_member_open_injection_reaches_callback(self):
         payload = self.root / "payload.bin"

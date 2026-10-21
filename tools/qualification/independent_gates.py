@@ -328,12 +328,14 @@ def _archive_scan(root):
         if not stat.S_ISDIR(identity[2]):
             raise ValueError(f"archive ancestor is not a directory: {path}")
     identities = {root: ancestors[root]}
+    directory_members = {}
     files = {}
     seen = set()
 
     def visit(base, directory):
         with os.scandir(directory.path if os.name == "nt" else directory) as entries:
             members = list(entries)
+        directory_members[base] = sorted(entry.name for entry in members)
         for entry in members:
             name = entry.name
             path = base / name
@@ -396,6 +398,13 @@ def _archive_scan(root):
         visit(root, directory)
         for path, before in identities.items():
             if _archive_identity(path) != before:
+                raise ValueError(f"archive entry changed during scan: {path}")
+        checked_ancestors = {**ancestors, **identities}
+        for path, listed in directory_members.items():
+            with _archive_directory(path, ancestors=checked_ancestors) as checked:
+                with os.scandir(checked.path if os.name == "nt" else checked) as entries:
+                    current_members = sorted(entry.name for entry in entries)
+            if current_members != listed or _archive_identity(path) != identities[path]:
                 raise ValueError(f"archive entry changed during scan: {path}")
         for path, before in ancestors.items():
             current = _archive_identity(path)
