@@ -136,6 +136,60 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertEqual(result["validated_reference_rows"], 0)
         self.assertEqual(result["numeric_limits"], "not_approved")
         self.assertEqual(self.verify()["study"], "structurally_verified")
+        captures = json.loads((self.archive / "archive.json").read_text())["captures"]
+        for kind in ("series", "environment", "monitor"):
+            self.assertEqual(len({row[kind + "_sha256"] for row in captures}), 1)
+            self.assertEqual(len({row[kind + "_path"] for row in captures}), len(captures))
+
+    def test_resigned_index_rejects_raw_path_collision_with_equal_bytes(self):
+        self.create()
+        self.seal(self.captures())
+        index = json.loads((self.archive / "archive.json").read_text())
+        first, second = index["captures"][:2]
+        second["series_path"] = first["series_path"]
+        second["series_sha256"] = first["series_sha256"]
+        self.resign_index(index)
+        self.assertIn("raw archive path reused", self.verify(success=False)["reason"])
+
+    def test_resigned_index_rejects_control_or_protocol_file_as_raw(self):
+        for target in ("protocol", "control"):
+            with self.subTest(target=target):
+                self.archive = self.root / f"alias-{target}"
+                self.create()
+                self.seal(self.captures())
+                index = json.loads((self.archive / "archive.json").read_text())
+                if target == "protocol":
+                    path = "protocol.json"
+                    raw = self.archive / path
+                else:
+                    control = json.loads((self.archive / "protocol.json").read_text())["controls"][0]
+                    path = control["artifact_path"]
+                    raw = self.archive / path
+                index["captures"][0]["series_path"] = path
+                index["captures"][0]["series_sha256"] = digest(raw.read_bytes())
+                self.resign_index(index)
+                self.assertIn("capture raw path must be under raw/",
+                              self.verify(success=False)["reason"])
+
+    def test_resigned_index_rejects_raw_hardlink_to_control_or_other_capture(self):
+        for target in ("control", "capture"):
+            with self.subTest(target=target):
+                self.archive = self.root / f"hardlink-{target}"
+                self.create()
+                self.seal(self.captures())
+                index = json.loads((self.archive / "archive.json").read_text())
+                if target == "control":
+                    control = json.loads((self.archive / "protocol.json").read_text())["controls"][0]
+                    source = self.archive / control["artifact_path"]
+                else:
+                    source = self.archive / index["captures"][0]["series_path"]
+                alias = self.archive / "raw" / f"linked-{target}.bin"
+                os.link(source, alias)
+                index["captures"][1]["series_path"] = str(alias.relative_to(self.archive))
+                index["captures"][1]["series_sha256"] = digest(source.read_bytes())
+                self.resign_index(index)
+                self.assertIn("raw archive path reused",
+                              self.verify(success=False)["reason"])
 
     def test_accepts_repeated_series_within_distinct_source_processes(self):
         self.create()

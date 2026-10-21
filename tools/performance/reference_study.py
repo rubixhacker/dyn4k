@@ -204,6 +204,11 @@ def create_archive(root, plan, key, key_path):
 def validate_captures(root, protocol, captures):
     assignments, controls = validate_protocol(protocol, root)
     require(isinstance(captures, list), "captures must be a list")
+    protected = [root / "protocol.json", root / "archive.json"]
+    protected.extend(root / control[name + "_path"] for control in controls.values()
+                     for name in IDENTITY_FILES)
+    protected_inodes = {(path.stat().st_dev, path.stat().st_ino)
+                        for path in protected if path.is_file()}
     expected = {(phase, assignment_key, control_id, pair, side)
                 for (phase, assignment_key), assignment in assignments.items()
                 for control_id in assignment["controls"]
@@ -213,6 +218,8 @@ def validate_captures(root, protocol, captures):
     run_ids = set()
     declared_processes = set()
     process_intervals = {}
+    raw_paths = set()
+    raw_inodes = set()
     for capture in captures:
         exact_keys(capture, CAPTURE_KEYS | {name + "_sha256" for name in RAW_FILES},
                    "capture")
@@ -267,8 +274,16 @@ def validate_captures(root, protocol, captures):
                 capture["stop_reason"] == "completed",
                 "invalid or stopped study capture")
         for name in RAW_FILES:
-            checked_relative(root, capture[name + "_path"],
-                             capture[name + "_sha256"])
+            relative = capture[name + "_path"]
+            require(isinstance(relative, str) and len(Path(relative).parts) >= 2 and
+                    Path(relative).parts[0] == "raw",
+                    "capture raw path must be under raw/")
+            path = checked_relative(root, relative, capture[name + "_sha256"])
+            inode = (path.stat().st_dev, path.stat().st_ino)
+            require(path.resolve() not in raw_paths and inode not in raw_inodes and
+                    inode not in protected_inodes, "raw archive path reused")
+            raw_paths.add(path.resolve())
+            raw_inodes.add(inode)
     require(actual == expected, "declared assignment pair inventory incomplete")
     return len(assignments)
 
