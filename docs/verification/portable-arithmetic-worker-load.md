@@ -11,10 +11,14 @@ The public receipt checker selects the one successful Gradle test worker
 `execve`. It requires the captured method and log pattern in the Gradle
 invocation, the same logging option in the worker launch, and the worker PID
 on every class-load record. It requires `Transform`, `RotationOperationTap`,
-`AbstractPhysicsWorld`, and `ToiAcceptedResetTap` to load exactly once from
-the staged JAR. A separate scan rejects other engine class providers on the
-complete worker classpath. The receipt hashes the raw log and capture XML.
+`AbstractPhysicsWorld` to load exactly once from the staged JAR. It requires
+`ToiAcceptedResetTap` when the selected method exercises an accepted TOI
+reset. A separate scan rejects other engine class providers on the complete
+worker classpath. The receipt hashes the raw log and capture XML.
 
-This is executed JVM worker evidence for the audited class sources. It does
-not qualify numerical parity, other target runtimes, or the 318 prospective
-cases. The fixed 32-ulp rule and conditional `U(N)` status stay separate.
+The archived receipt records the audited class sources and its historical
+status. The current public checker also requires independent runtime bindings
+for dynamic classes and method operations. Its method status remains unpassed
+until those bindings are captured and verified. This evidence does not qualify
+numerical parity, other target runtimes, or the 318 prospective cases. The
+fixed 32-ulp rule and conditional `U(N)` status stay separate.
