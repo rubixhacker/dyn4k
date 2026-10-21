@@ -1,10 +1,12 @@
 import copy
+import hashlib
 import io
 import json
 import os
 import tempfile
 import unittest
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +15,7 @@ from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                _ROOT, _STAGED_JAR, _inspect_worker_classpath,
                                make_capture_receipt,
                                verify_capture_receipt)
-from test_actual_arithmetic import fixture, xml_for
+from test_actual_arithmetic import fixture, focused_wheel_fixture, xml_for
 from test_rotation_marker import bits
 
 
@@ -76,6 +78,46 @@ class CaptureReceiptTest(unittest.TestCase):
         self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
         self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1)
+
+    def test_resealed_wheel_receipt_rejects_nonworker_trace(self):
+        _, files, runtime = self.fixture()
+        files["xml"] = xml_for(focused_wheel_fixture(), "captureWheelActive")
+        for name in ("gradle_log", "execve_log"):
+            files[name] = files[name].replace(b"captureGeometry", b"captureWheelActive")
+        worker_line = next(line.split(b" ", 1)[1]
+                           for line in files["execve_log"].splitlines()
+                           if line.startswith(b"123 execve("))
+        output = ET.fromstring(files["xml"]).find("system-out").text.encode()
+        write = (f'write(51, {json.dumps(output.decode())}, {len(output)}) = '
+                 f'{len(output)}\n').encode()
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as traces:
+            traces.writestr("trace.123", worker_line + b"\nclone(0) = 124\n")
+            traces.writestr("trace.124", write)
+        files["worker_write_traces"] = stream.getvalue()
+        summary = {"selected_resets": 0, "status": "VERIFIED_ARITHMETIC_BINDING",
+                   "qualification": "UNPASSED"}
+        with patch("actual_arithmetic.verify_capture", return_value=summary):
+            receipt = make_capture_receipt(files, "captureWheelActive", "a" * 40,
+                                           ["joint-Wheel-active"], runtime)
+            genuine = verify_capture_receipt(receipt, files, "captureWheelActive",
+                                             "a" * 40, ["joint-Wheel-active"], runtime)
+            self.assertEqual(genuine["status"], "VERIFIED_ARITHMETIC_BINDING")
+            self.assertEqual(genuine["external_xml_witness"],
+                             "PASSED_KERNEL_WORKER_WRITES")
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as traces:
+                traces.writestr("trace.123", worker_line + b"\nclone(0) = 124\n")
+                traces.writestr("trace.124", write)
+                traces.writestr("trace.999999", b"benign unrelated trace\n")
+            files["worker_write_traces"] = stream.getvalue()
+            resealed = copy.deepcopy(receipt)
+            resealed["worker_write_traces_sha256"] = hashlib.sha256(
+                files["worker_write_traces"]).hexdigest()
+            with self.assertRaisesRegex(CaptureRejected,
+                                        "worker write trace inventory differs"):
+                verify_capture_receipt(resealed, files, "captureWheelActive", "a" * 40,
+                                       ["joint-Wheel-active"], runtime)
 
     def test_geometry_without_accepted_toi_does_not_require_reset_hook_execution(self):
         _, files, runtime = self.fixture()

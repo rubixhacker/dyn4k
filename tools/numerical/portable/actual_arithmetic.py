@@ -705,6 +705,8 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
                 if pid not in descendants:
                     descendants.add(pid)
                     pending.append(pid)
+        if set(decoded) != descendants:
+            raise CaptureRejected("worker write trace inventory differs")
         document = ET.fromstring(xml)
         outputs = document.findall("system-out")
         if len(outputs) != 1 or outputs[0].text is None:

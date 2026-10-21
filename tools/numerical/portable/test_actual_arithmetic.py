@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+import warnings
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -432,13 +433,17 @@ class ActualArithmeticTest(unittest.TestCase):
                   '["GradleWorkerMain"], 0x0) = 0\nclone(0) = 43\n').encode()
         execution = b'42 ' + worker.splitlines()[0] + b'\n'
 
-        def archive(stream=output, source=worker, child="43"):
+        def archive(stream=output, source=worker, child="43", extras=(),
+                    omit_child=False):
             payload = io.BytesIO()
             with zipfile.ZipFile(payload, "w") as traces:
                 traces.writestr("trace.42", source)
-                traces.writestr("trace." + child,
-                                f'write(51, {json.dumps(stream.decode())}, '
-                                f'{len(stream)}) = {len(stream)}\n')
+                if not omit_child:
+                    traces.writestr("trace." + child,
+                                    f'write(51, {json.dumps(stream.decode())}, '
+                                    f'{len(stream)}) = {len(stream)}\n')
+                for name, content in extras:
+                    traces.writestr(name, content)
             return payload.getvalue()
 
         result = actual_arithmetic.verify_worker_write_witness(
@@ -456,6 +461,19 @@ class ActualArithmeticTest(unittest.TestCase):
             with self.assertRaises(CaptureRejected):
                 actual_arithmetic.verify_worker_write_witness(
                     archive(changed, source, child), payload, pid, execution)
+        for changed in (archive(omit_child=True), archive(child="44")):
+            with self.assertRaisesRegex(CaptureRejected,
+                                        "worker write child trace is missing"):
+                actual_arithmetic.verify_worker_write_witness(
+                    changed, xml, "42", execution)
+        for name in ("trace.999999", "trace.043", "trace.43"):
+            with self.subTest(extra_member=name), warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with self.assertRaisesRegex(CaptureRejected,
+                                            "worker write trace inventory differs"):
+                    actual_arithmetic.verify_worker_write_witness(
+                        archive(extras=((name, b"unrelated trace\n"),)),
+                        xml, "42", execution)
 
     def test_missing_extra_reordered_and_wrong_method_fail(self):
         original = fixture()
