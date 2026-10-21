@@ -242,12 +242,16 @@ P2_BOOLEAN_JDI_FINAL_DEPENDENCIES = {
 }
 P2_ROTATION_PREMISE_PRODUCERS = {
     **P2_BOOLEAN_JDI_FINAL_PRODUCERS,
-    "actual_arithmetic.py": "c5582c1062780019d47766e73d9af6536f636e66fc3ec593673eb2870db351f3",
-    "capture_actual.py": "7842f3232b861485a63b1b1440e9b09f45c1bd66fe6f3d07e66dc05944b58a53",
+    "actual_arithmetic.py": "ca461d3100a4c96e36b966b10856f17e26f4660a90a71d84897c40ae8b1479ad",
+    "capture_actual.py": "6b4d7686d995f74835e96b4937fabcf2db9de67df26c58ed6fb52418249d1a57",
     "rotation_oracle.py": "28642216813d88e9b6dc03e7006b83b992056297a113daf15218a7e641e3af14",
 }
 P2_ROTATION_PREMISE_DEPENDENCIES = {
     **P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "ffe6d47cca98df6f41bb66a08995ef2b05d1235d1c65aad22540be574e78458e",
+    "tools/numerical/portable/boolean_rotation_jdi/witness.py":
+        "a3eda01387d3ffb9571be152783f0f6e3d775751281c84c61c46bce97e285fdd",
     "tools/numerical/portable/external_rotation_binding.py":
         "448a1e1e94a4d9929ca07f212545b45f3d2db120f66d05b374fe8914dbfa6a41",
     "tools/numerical/portable/src/jvmTest/kotlin/portable/RotationPremiseFixtureTest.kt":

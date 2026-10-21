@@ -1652,7 +1652,8 @@ class IndependentGateSeamTests(unittest.TestCase):
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
             if relative in ("tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java",
                             "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
-                            "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py"):
+                            "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py",
+                            "tools/numerical/portable/boolean_rotation_jdi/witness.py"):
                 self.assertNotEqual(committed, (ROOT / relative).read_bytes())
             else:
                 self.assertEqual(committed, (ROOT / relative).read_bytes())
