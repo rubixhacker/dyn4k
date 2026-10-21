@@ -1,4 +1,5 @@
 import ast
+from collections import Counter
 import hashlib
 import io
 import json
@@ -833,6 +834,63 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
         raise CaptureRejected("worker write witness is malformed") from error
 
 
+def _verify_kernel_class_load_writes(archive, class_load_log, worker_pid):
+    pattern = re.compile(rb"\[" + worker_pid.encode() +
+                         rb"\]\[info\]\[class,load\] [^ \r\n]+ source: [^\r\n]+")
+    try:
+        expected = class_load_log.splitlines(keepends=True)
+        if not expected or any(not line.endswith(b"\n") or
+                               pattern.fullmatch(line[:-1]) is None for line in expected):
+            raise CaptureRejected("kernel class-load write log differs")
+        if len(expected) != len(set(expected)):
+            raise CaptureRejected("duplicate kernel class-load record")
+        observed = []
+        descriptors = set()
+        writers = set()
+        streams = {}
+        stream_records = Counter()
+        with zipfile.ZipFile(io.BytesIO(archive)) as traces:
+            for name in traces.namelist():
+                pid = name.removeprefix("trace.")
+                for line in traces.read(name).decode("utf-8").splitlines():
+                    if not line.startswith("write("):
+                        if "[class,load]" in line:
+                            raise CaptureRejected("kernel class-load write is untrusted")
+                        continue
+                    match = _WITNESS_WRITE.fullmatch(line)
+                    if match is None:
+                        raise CaptureRejected("kernel class-load write is incomplete")
+                    fd, literal, requested, written = match.groups()
+                    payload = ast.literal_eval("b" + literal)
+                    if type(payload) is not bytes or len(payload) != int(requested) or \
+                            int(requested) != int(written):
+                        raise CaptureRejected("kernel class-load write is incomplete")
+                    stream = (pid, fd)
+                    streams.setdefault(stream, []).append(payload)
+                    if b"[class,load]" not in payload:
+                        continue
+                    if not payload.endswith(b"\n") or payload.count(b"\n") != 1 or \
+                            pattern.fullmatch(payload[:-1]) is None:
+                        raise CaptureRejected("kernel class-load write is incomplete")
+                    observed.append(payload[:-1])
+                    descriptors.add(fd)
+                    writers.add(pid)
+                    stream_records[stream] += 1
+        if any(b"".join(writes).count(b"[class,load]") != stream_records[stream]
+               for stream, writes in streams.items()):
+            raise CaptureRejected("kernel class-load write is untrusted")
+        if len(descriptors) != 1 or Counter(line[:-1] for line in expected) != \
+                Counter(observed):
+            raise CaptureRejected("kernel class-load write membership differs")
+        return {"status": "MATCHED_COMPLETE_WRITES_UNBOUND_DESTINATION",
+                "records": len(observed), "writer_threads": len(writers)}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            zipfile.BadZipFile, SyntaxError) as error:
+        if isinstance(error, CaptureRejected):
+            raise
+        raise CaptureRejected("kernel class-load write witness is malformed") from error
+
+
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
                                      if method == "captureWheelActive" else set())
@@ -889,6 +947,12 @@ def verify_capture_receipt(receipt, files, method, commit, expected_ids,
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
     summary = dict(expected["summary"])
+    if method == "captureWheelActive":
+        # The receipt check binds every ZIP member to the worker process tree.
+        # Write matching does not identify the descriptor destination.
+        summary["kernel_class_load_write_witness"] = _verify_kernel_class_load_writes(
+            files["worker_write_traces"], files["worker_class_load"],
+            expected["worker_pid"])
     summary["operation_record_status"] = summary["status"]
     summary["dynamic_class_load_status"] = "UNBOUND"
     if summary["status"] == "VERIFIED_ARITHMETIC_BINDING":

@@ -1,8 +1,10 @@
+import ast
 import copy
 import hashlib
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 import zipfile
@@ -60,10 +62,143 @@ class RetainedWheelProviderTest(unittest.TestCase):
         self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
         self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1800)
+        self.assertEqual(result["kernel_class_load_write_witness"], {
+            "status": "MATCHED_COMPLETE_WRITES_UNBOUND_DESTINATION",
+            "records": 2796, "writer_threads": 7})
         self.assertEqual(receipt["summary"]["status"],
                          "VERIFIED_ARITHMETIC_BINDING")
 
-    def test_resealed_duplicate_lambda_rejects_and_new_or_missing_is_unbound(self):
+    def _verify_resealed(self, receipt, original, origin, staged, args, key, changed):
+        files = dict(original)
+        files[key] = changed
+        resealed = copy.deepcopy(receipt)
+        resealed[f"{key}_sha256"] = hashlib.sha256(changed).hexdigest()
+        with patch.object(actual, "_ROOT", origin), patch.object(
+                actual, "_STAGED_JAR", staged):
+            return verify_capture_receipt(resealed, files, *args)
+
+    def _alter_class_write(self, archive, variant):
+        output = io.BytesIO()
+        changed = False
+        with zipfile.ZipFile(io.BytesIO(archive)) as old, zipfile.ZipFile(output, "w") as new:
+            for name in old.namelist():
+                lines = old.read(name).splitlines(keepends=True)
+                for index, line in enumerate(lines):
+                    if changed or not line.startswith(b"write(") or \
+                            b"[class,load]" not in line:
+                        continue
+                    changed = True
+                    if variant == "missing":
+                        del lines[index]
+                    elif variant == "duplicate":
+                        lines.insert(index, line)
+                    elif variant == "partial":
+                        before, count = line.rstrip(b"\n").rsplit(b" = ", 1)
+                        lines[index] = before + b" = " + str(int(count) - 1).encode() + b"\n"
+                    elif variant == "second_fd":
+                        lines[index] = re.sub(rb"^write\([0-9]+,", b"write(97,", line)
+                    elif variant == "altered":
+                        lines[index] = re.sub(
+                            rb"(\[class,load\] )([A-Za-z])",
+                            lambda match: match.group(1) +
+                            (b"X" if match.group(2) != b"X" else b"Y"), line,
+                            count=1)
+                        self.assertNotEqual(lines[index], line)
+                    elif variant == "untrusted":
+                        lines.insert(index, b"untrusted [class,load] text\n")
+                    elif variant == "split_untrusted":
+                        match = actual._WITNESS_WRITE.fullmatch(line.decode().rstrip("\n"))
+                        self.assertIsNotNone(match)
+                        existing = ast.literal_eval("b" + match.group(2))
+                        pid = existing.split(b"]", 1)[0][1:].decode()
+                        record = (f'[{pid}][info][class,load] '
+                                  'java.lang.Fabricated source: jrt:/java.base\n').encode()
+                        split = record.index(b"[class,load]") + 4
+                        fragments = (record[:split], record[split:])
+                        writes = [
+                            (f'write(4, {json.dumps(part.decode())}, {len(part)}) = '
+                             f'{len(part)}\n').encode() for part in fragments]
+                        lines[index:index] = writes
+                    else:
+                        self.fail("unknown write mutation")
+                new.writestr(name, b"".join(lines))
+        self.assertTrue(changed)
+        return output.getvalue()
+
+    def test_resealed_class_load_log_requires_kernel_write_membership(self):
+        receipt, original, origin, staged, args = self._retained()
+        lines = original["worker_class_load"].splitlines(keepends=True)
+        ordinary = next(line for line in lines if b" portable." not in line and
+                        b" org.dyn4j." not in line)
+        fabricated = (f'[{receipt["worker_pid"]}][info][class,load] '
+                      'java.lang.Fabricated source: jrt:/java.base\n').encode()
+        variants = {
+            "duplicate": original["worker_class_load"] + ordinary,
+            "fabricated": original["worker_class_load"] + fabricated,
+            "missing": original["worker_class_load"].replace(ordinary, b"", 1),
+        }
+        for name, changed in variants.items():
+            reason = ("duplicate kernel class-load record" if name == "duplicate"
+                      else "kernel class-load write")
+            with self.subTest(name=name), self.assertRaisesRegex(
+                    CaptureRejected, reason):
+                self._verify_resealed(receipt, original, origin, staged, args,
+                                      "worker_class_load", changed)
+
+    def test_resealed_kernel_class_load_writes_require_complete_single_fd_match(self):
+        receipt, original, origin, staged, args = self._retained()
+        for variant in ("missing", "duplicate", "altered", "partial",
+                        "second_fd", "untrusted", "split_untrusted"):
+            changed = self._alter_class_write(original["worker_write_traces"], variant)
+            with self.subTest(variant=variant), self.assertRaisesRegex(
+                    CaptureRejected, "kernel class-load write"):
+                self._verify_resealed(receipt, original, origin, staged, args,
+                                      "worker_write_traces", changed)
+
+    def test_resealed_matching_duplicate_log_and_kernel_write_rejects(self):
+        receipt, original, origin, staged, args = self._retained()
+        with zipfile.ZipFile(io.BytesIO(original["worker_write_traces"])) as traces:
+            record = next(
+                ast.literal_eval("b" + match.group(2))
+                for name in traces.namelist()
+                for line in traces.read(name).decode().splitlines()
+                if (match := actual._WITNESS_WRITE.fullmatch(line)) is not None and
+                "[class,load]" in line)
+        self.assertNotIn(b" portable.", record)
+        self.assertNotIn(b" org.dyn4j.", record)
+        files = dict(original)
+        files["worker_class_load"] += record
+        files["worker_write_traces"] = self._alter_class_write(
+            original["worker_write_traces"], "duplicate")
+        resealed = copy.deepcopy(receipt)
+        for key in ("worker_class_load", "worker_write_traces"):
+            resealed[f"{key}_sha256"] = hashlib.sha256(files[key]).hexdigest()
+        with patch.object(actual, "_ROOT", origin), patch.object(
+                actual, "_STAGED_JAR", staged), self.assertRaisesRegex(
+                CaptureRejected, "duplicate kernel class-load record"):
+            verify_capture_receipt(resealed, files, *args)
+
+    def test_resealed_kernel_trace_requires_exact_worker_descendants(self):
+        receipt, original, origin, staged, args = self._retained()
+        with zipfile.ZipFile(io.BytesIO(original["worker_write_traces"])) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        child = next(name for name in members if name != f'trace.{receipt["worker_pid"]}')
+        for variant in ("missing_child", "extra_thread"):
+            changed_members = dict(members)
+            if variant == "missing_child":
+                del changed_members[child]
+            else:
+                changed_members["trace.999999"] = b"unrelated trace\n"
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                for name, content in changed_members.items():
+                    archive.writestr(name, content)
+            with self.subTest(variant=variant), self.assertRaisesRegex(
+                    CaptureRejected, "worker write"):
+                self._verify_resealed(receipt, original, origin, staged, args,
+                                      "worker_write_traces", output.getvalue())
+
+    def test_resealed_duplicate_fabricated_or_missing_lambda_rejects(self):
         receipt, original, origin, staged, args = self._retained()
         lines = original["worker_class_load"].splitlines(keepends=True)
         lambdas = [line for line in lines if b"portable." in line and
@@ -93,13 +228,9 @@ class RetainedWheelProviderTest(unittest.TestCase):
                                                 "duplicate portable lambda"):
                         verify_capture_receipt(resealed, files, *args)
                 else:
-                    result = verify_capture_receipt(resealed, files, *args)
-                    self.assertEqual(result["status"],
-                                     "UNPASSED_DYNAMIC_CLASS_LOAD")
-                    self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
-                    self.assertEqual(result["operation_record_status"],
-                                     "VERIFIED_ARITHMETIC_BINDING")
-                    self.assertEqual(result["operations_verified"], 1800)
+                    with self.assertRaisesRegex(CaptureRejected,
+                                                "kernel class-load write"):
+                        verify_capture_receipt(resealed, files, *args)
 
     def test_lambda_owner_must_have_an_ordinary_load(self):
         receipt, original, origin, staged, args = self._retained()
@@ -306,10 +437,14 @@ class CaptureReceiptTest(unittest.TestCase):
         output = ET.fromstring(files["xml"]).find("system-out").text.encode()
         write = (f'write(51, {json.dumps(output.decode())}, {len(output)}) = '
                  f'{len(output)}\n').encode()
+        class_writes = b"".join(
+            (f'write(4, {json.dumps(line.decode())}, {len(line)}) = '
+             f'{len(line)}\n').encode()
+            for line in files["worker_class_load"].splitlines(keepends=True))
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w") as traces:
             traces.writestr("trace.123", worker_line + b"\nclone(0) = 124\n")
-            traces.writestr("trace.124", write)
+            traces.writestr("trace.124", write + class_writes)
         files["worker_write_traces"] = stream.getvalue()
         summary = {"selected_resets": 0, "status": "VERIFIED_ARITHMETIC_BINDING",
                    "qualification": "UNPASSED"}
@@ -324,7 +459,7 @@ class CaptureReceiptTest(unittest.TestCase):
             stream = io.BytesIO()
             with zipfile.ZipFile(stream, "w") as traces:
                 traces.writestr("trace.123", worker_line + b"\nclone(0) = 124\n")
-                traces.writestr("trace.124", write)
+                traces.writestr("trace.124", write + class_writes)
                 traces.writestr("trace.999999", b"benign unrelated trace\n")
             files["worker_write_traces"] = stream.getvalue()
             resealed = copy.deepcopy(receipt)
