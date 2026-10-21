@@ -4,7 +4,7 @@ import csv
 import hashlib
 import hmac
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 
 from sustained_archive import (FROZEN_MANIFEST_SHA256, canonical,
@@ -43,6 +43,11 @@ def raw_files(version):
 
 def capture_keys(version):
     return CAPTURE_IDENTITY_KEYS | {name + "_path" for name in raw_files(version)}
+
+
+def absolute_source_path(value):
+    return (isinstance(value, str) and value and
+            (PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute()))
 
 
 def sha_bytes(data):
@@ -166,7 +171,9 @@ def validate_protocol(protocol, root):
     for control in controls:
         exact_keys(control, {"row_id", "control_id", "route", "host_id", "boot_id"} |
                    {name + "_path" for name in IDENTITY_FILES} |
-                   {name + "_sha256" for name in IDENTITY_FILES}, "control")
+                   {name + "_sha256" for name in IDENTITY_FILES} |
+                   ({name + "_source_path" for name in IDENTITY_FILES}
+                    if context["version"] == VERSION else set()), "control")
         identity = (control["row_id"], control["control_id"])
         require(identity in needed and identity not in actual,
                 "missing, extra, or duplicate control")
@@ -179,6 +186,10 @@ def validate_protocol(protocol, root):
         for name in IDENTITY_FILES:
             checked_relative(root, control[name + "_path"],
                              control[name + "_sha256"])
+            if context["version"] == VERSION:
+                source_path = control[name + "_source_path"]
+                require(absolute_source_path(source_path),
+                        f"control {name} source path differs")
         if control["control_id"] == "dyn4j_6_0_0_jvm":
             require(control["artifact_sha256"] ==
                     context["baseline_jar_sha256"], "dyn4j baseline artifact differs")
@@ -209,6 +220,9 @@ def create_archive(root, plan, key, key_path):
             require(source.is_file() and source.resolve() != key_path.resolve() and
                     sha_file(source) != sha_bytes(key),
                     "missing control input or trusted key used as input")
+            if version == VERSION:
+                require(source.is_absolute(), "version 3 control source path must be absolute")
+                record[name + "_source_path"] = str(source)
             relative = f"inputs/{ordinal}-{name}.bin"
             destination = root / relative
             destination.parent.mkdir(exist_ok=True)
@@ -245,6 +259,10 @@ def v3_digest(value, label):
     return value
 
 
+def same_json(left, right):
+    return canonical(left) == canonical(right)
+
+
 def validate_v3_capture(root, capture, control):
     observer = v3_json(root, capture, "observer")
     environment = v3_json(root, capture, "environment")
@@ -258,7 +276,8 @@ def validate_v3_capture(root, capture, control):
                         "staged_core_sha256", "staged_kotlin_sha256",
                         "command", "classpath"}, "source receipt")
     require(source["source_commit"] == SOURCE_COMMIT and
-            source["capture"] == {key: capture[key] for key in CAPTURE_IDENTITY_KEYS},
+            same_json(source["capture"],
+                      {key: capture[key] for key in CAPTURE_IDENTITY_KEYS}),
             "source receipt capture or source differs")
     others = set(V3_RAW_FILES) - {"source_receipt"}
     exact_keys(source["raw_sha256"], others, "source raw inventory")
@@ -268,14 +287,14 @@ def validate_v3_capture(root, capture, control):
                      "process_id", "run_id", "started_ns", "ended_ns"}
     exact_keys(observer, observed_keys | {"observed_command", "observed_environment",
                                          "image", "exit_code"}, "observer")
-    require(all(observer[name] == capture[name] for name in observed_keys) and
+    require(all(same_json(observer[name], capture[name]) for name in observed_keys) and
             type(observer["exit_code"]) is int and observer["exit_code"] == 0,
             "observer process or exit differs")
     image = observer["image"]
     exact_keys(image, {"pid", "sha256", "executable_path", "method", "observed_ns"},
                "observed image")
     start, end = capture["started_ns"], capture["ended_ns"]
-    require(image["pid"] == capture["os_pid"] and
+    require(same_json(image["pid"], capture["os_pid"]) and
             image["sha256"] == control["image_sha256"] and
             type(image["observed_ns"]) is int and
             start <= image["observed_ns"] < end and
@@ -294,34 +313,23 @@ def validate_v3_capture(root, capture, control):
             "observed launch nonce or source differs")
     classpath = source["classpath"]
     require(isinstance(classpath, list), "source classpath differs")
-    for entry in classpath:
-        exact_keys(entry, {"path", "sha256"}, "classpath entry")
-        require(isinstance(entry["path"], str) and entry["path"],
-                "source classpath path differs")
-        v3_digest(entry["sha256"], "classpath digest")
-    allowed_classpath = {control["artifact_sha256"], control["probe_sha256"],
-                         source["staged_core_sha256"], source["staged_kotlin_sha256"]}
-    require(all(entry["sha256"] in allowed_classpath for entry in classpath),
-            "unbound classpath entry")
     if "-cp" in command:
         require(command.count("-cp") == 1 and command.index("-cp") + 1 < len(command),
                 "observed classpath differs")
         value = command[command.index("-cp") + 1]
         separator = ";" if ";" in value else ":"
-        require([entry["path"] for entry in classpath] == value.split(separator) and
-                {control["artifact_sha256"], control["probe_sha256"]} <=
-                {entry["sha256"] for entry in classpath},
-                "observed classpath or control bytes differ")
-        if capture["control_id"] == "dyn4j_6_0_0_jvm":
-            require([entry["sha256"] for entry in classpath] ==
-                    [control["probe_sha256"], control["artifact_sha256"]],
-                    "baseline classpath differs")
+        expected = [{"path": control[name + "_source_path"],
+                     "sha256": control[name + "_sha256"]}
+                    for name in ("probe", "artifact")]
+        require(classpath == expected and
+                [entry["path"] for entry in classpath] == value.split(separator),
+                "unbound classpath entry or path")
     else:
         require(not classpath and capture["row_id"] != "jvm.java",
                 "missing JVM classpath")
     exact_keys(monitor, {"host_id", "boot_id", "os_pid", "process_start_id",
                          "launch_nonce", "started_ns", "ended_ns", "samples"}, "monitor")
-    require(all(monitor[name] == capture[name] for name in
+    require(all(same_json(monitor[name], capture[name]) for name in
                 ("host_id", "boot_id", "os_pid", "process_start_id", "started_ns", "ended_ns")) and
             monitor["launch_nonce"] == capture["run_id"] and
             isinstance(monitor["samples"], list) and monitor["samples"],
@@ -332,15 +340,15 @@ def validate_v3_capture(root, capture, control):
                    "monitor sample")
         stamp = sample["clock_ns"]
         require(type(stamp) is int and previous <= stamp < end and
-                sample["os_pid"] == capture["os_pid"] and
+                same_json(sample["os_pid"], capture["os_pid"]) and
                 sample["process_start_id"] == capture["process_start_id"] and
                 type(sample["rss_bytes"]) is int and sample["rss_bytes"] >= 0,
                 "monitor sample outside observed process")
         previous = stamp
-    require(all(environment.get(name) == capture[name] for name in
+    require(all(same_json(environment.get(name), capture[name]) for name in
                 ("host_id", "boot_id", "os_pid", "process_start_id")) and
             environment.get("launch_nonce") == capture["run_id"] and
-            environment.get("observer") == observer,
+            same_json(environment.get("observer"), observer),
             "environment observer or process differs")
     for name in IDENTITY_FILES:
         require(environment.get(name + "_sha256") == control[name + "_sha256"],
@@ -363,7 +371,7 @@ def validate_v3_capture(root, capture, control):
                 environment.get("staged_" + kind + "_sha256") == value and
                 capture["staged_" + kind + "_sha256"] == value,
                 "staged artifact receipt differs")
-    require(provider.get("pid") == capture["os_pid"] and
+    require(same_json(provider.get("pid"), capture["os_pid"]) and
             provider.get("source_commit") == SOURCE_COMMIT and
             provider.get("runtime_sha256") == control["runtime_sha256"] and
             provider.get("artifact_sha256") == {
@@ -383,7 +391,7 @@ def validate_v3_capture(root, capture, control):
                 provider.get("loaded_artifact_sha256") == control["artifact_sha256"] and
                 provider.get("loaded_probe_sha256") == control["probe_sha256"],
                 "loaded provider control differs")
-    require(origin.get("pid") == capture["os_pid"] and
+    require(same_json(origin.get("pid"), capture["os_pid"]) and
             origin.get("nonce") == capture["run_id"] and
             type(origin.get("runtime_ns")) is int and
             start <= origin["runtime_ns"] <= end,
@@ -394,6 +402,8 @@ def validate_v3_capture(root, capture, control):
     assignment_mode = capture["key"].split("|")[3]
     require(len(series) == len(measured) and
             run.get("status") == "complete" and
+            type(run.get("sample_count")) is int and
+            type(run.get("warmup_count")) is int and
             run.get("sample_count") == len(series) and
             run.get("warmup_count") == len(warmup) and
             run.get("mode") == assignment_mode == "timing" and

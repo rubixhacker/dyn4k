@@ -1,9 +1,11 @@
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -45,10 +47,10 @@ class ReferenceStudyCliTest(unittest.TestCase):
                           **{name + "_path": path for name, path in self.identities.items()}}],
         }
 
-    def cli(self, command, *args, success=True):
+    def cli(self, command, *args, success=True, script=SCRIPT):
         env = os.environ.copy()
         env.pop("OLLAMA_API_KEY", None)
-        completed = subprocess.run([sys.executable, str(SCRIPT), command, *map(str, args)],
+        completed = subprocess.run([sys.executable, str(script), command, *map(str, args)],
                                    text=True, capture_output=True, env=env)
         self.assertEqual(completed.returncode == 0, success, completed.stdout + completed.stderr)
         return json.loads(completed.stdout)
@@ -113,6 +115,50 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertEqual(result["qualification"], "unpassed")
         self.assertEqual(result["validated_reference_rows"], 0)
         self.assertEqual(result["numeric_limits"], "not_approved")
+
+    def test_old_v2_archive_needs_exact_pinned_historical_verifier(self):
+        old_commit = "7f41614e0e1fbdbe0ef1d4a7585efa7dbc52c046"
+        old_digest = "189565b3737cd3885e98744320bd1633b44ad70c35012fe582ac63eae3fb1e3b"
+        env = os.environ.copy()
+        env.pop("OLLAMA_API_KEY", None)
+        env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        producer_source = subprocess.run(
+            ["git", "show", "0c48f867951d0fb9ace0038031843075817314ce:"
+             "tools/performance/reference_study.py"],
+            cwd=SCRIPT.parents[2], env=env, capture_output=True, check=True)
+        self.assertEqual(digest(producer_source.stdout),
+                         "e18c2ee7ef6da7503e23e0e73c154ecffc67d55984226989f4e1f85e1793fa8d")
+        exported = subprocess.run(
+            ["git", "archive", "--format=tar", old_commit, "tools/performance",
+             "docs/research/performance-manifest-v1.json"],
+            cwd=SCRIPT.parents[2], env=env, capture_output=True, check=True)
+        historical = self.root / "historical-source"
+        with tarfile.open(fileobj=io.BytesIO(exported.stdout)) as bundle:
+            for member in bundle:
+                if not member.isfile():
+                    continue
+                self.assertFalse(Path(member.name).is_absolute())
+                self.assertNotIn("..", Path(member.name).parts)
+                target = historical / member.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(bundle.extractfile(member).read())
+        old_script = historical / "tools/performance/reference_study.py"
+        self.assertEqual(digest(old_script.read_bytes()), old_digest)
+        old_plan = {name: value for name, value in self.plan.items()
+                    if name != "archive_version"}
+        plan_path = self.root / "old-plan.json"
+        plan_path.write_text(json.dumps(old_plan))
+        self.cli("create", "--archive", self.archive, "--plan", plan_path,
+                 "--trusted-key", self.key, script=old_script)
+        captures_path = self.root / "old-captures.json"
+        captures_path.write_text(json.dumps(self.captures()))
+        self.cli("seal", "--archive", self.archive, "--captures", captures_path,
+                 "--trusted-key", self.key, script=old_script)
+        self.assertIn("frozen study context differs", self.verify(success=False)["reason"])
+        result = self.cli("verify", "--archive", self.archive, "--trusted-key", self.key,
+                          "--expected-source-commit", SOURCE, script=old_script)
+        self.assertEqual(result["qualification"], "unpassed")
+        self.assertEqual(result["validated_reference_rows"], 0)
 
     def v3_captures(self):
         rows = self.captures()
@@ -342,6 +388,82 @@ class ReferenceStudyCliTest(unittest.TestCase):
             source["raw_sha256"][kind] = digest(Path(row[kind + "_path"]).read_bytes())
         source_path.write_text(json.dumps(source))
         self.assertIn("unbound classpath", self.seal(rows, success=False)["reason"])
+
+    def test_v3_rejects_repeated_allowed_digest_and_rogue_classpath_path(self):
+        for mutation in ("append", "replace"):
+            with self.subTest(mutation=mutation):
+                self.archive = self.root / f"v3-classpath-{mutation}"
+                index = self.v3_archive()
+                row = index["captures"][0]
+                def changed_command(observer):
+                    command = observer["observed_command"][:]
+                    parts = command[2].split(os.pathsep)
+                    if mutation == "append":
+                        parts.append("/unbound/rogue.jar")
+                    else:
+                        parts[0] = "/unbound/rogue.jar"
+                    command[2] = os.pathsep.join(parts)
+                    return {**observer, "observed_command": command}
+                self.rewrite_v3_raw(index, 0, "observer", changed_command)
+                observer = json.loads((self.archive / row["observer_path"]).read_text())
+                self.rewrite_v3_raw(index, 0, "environment",
+                                    lambda value: {**value, "observer": observer})
+                def changed_receipt(receipt):
+                    entries = receipt["classpath"][:]
+                    rogue = {"path": "/unbound/rogue.jar",
+                             "sha256": entries[0]["sha256"]}
+                    if mutation == "append":
+                        entries.append(rogue)
+                    else:
+                        entries[0] = rogue
+                    return {**receipt, "command": observer["observed_command"],
+                            "classpath": entries}
+                self.rewrite_v3_raw(index, 0, "source_receipt", changed_receipt)
+                self.assertIn("classpath", self.verify(success=False)["reason"])
+
+    def test_v3_rejects_resigned_json_boolean_identity_and_counts(self):
+        for kind, field in (("source_receipt", "pair"),
+                            ("source_receipt", "order"),
+                            ("run_receipt", "sample_count"),
+                            ("run_receipt", "warmup_count")):
+            with self.subTest(kind=kind, field=field):
+                self.archive = self.root / f"v3-bool-{kind}-{field}"
+                index = self.v3_archive()
+                def boolean_field(value):
+                    if kind == "source_receipt":
+                        value["capture"][field] = True
+                    else:
+                        value[field] = True
+                    return value
+                self.rewrite_v3_raw(index, 0, kind, boolean_field)
+                self.assertIn("receipt", self.verify(success=False)["reason"])
+
+    def test_v3_relocated_replay_accepts_frozen_windows_source_paths(self):
+        index = self.v3_archive()
+        protocol_path = self.archive / "protocol.json"
+        protocol = json.loads(protocol_path.read_text())
+        probe, artifact = r"C:\perf\probe.jar", r"C:\perf\control.jar"
+        control = protocol["controls"][0]
+        control["probe_source_path"] = probe
+        control["artifact_source_path"] = artifact
+        protocol["signature"] = signature(protocol, self.key.read_bytes())
+        protocol_path.write_text(json.dumps(protocol))
+        index["protocol_sha256"] = digest(protocol_path.read_bytes())
+        for ordinal, row in enumerate(index["captures"]):
+            self.rewrite_v3_raw(index, ordinal, "observer",
+                                lambda value: {**value, "observed_command":
+                                               [*value["observed_command"][:2],
+                                                probe + ";" + artifact,
+                                                *value["observed_command"][3:]]})
+            observer = json.loads((self.archive / row["observer_path"]).read_text())
+            self.rewrite_v3_raw(index, ordinal, "environment",
+                                lambda value: {**value, "observer": observer})
+            self.rewrite_v3_raw(index, ordinal, "source_receipt",
+                                lambda value: {**value, "command": observer["observed_command"],
+                                               "classpath": [
+                                                   {**value["classpath"][0], "path": probe},
+                                                   {**value["classpath"][1], "path": artifact}]})
+        self.assertEqual(self.verify()["qualification"], "unpassed")
 
     def test_v3_rejects_unsupported_raw_mode_at_create(self):
         self.plan["archive_version"] = "reference-study-v3"
