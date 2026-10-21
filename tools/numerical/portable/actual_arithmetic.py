@@ -470,6 +470,14 @@ _AUDITED_ENGINE_CLASSES = {
     "org/dyn4j/world/ToiAcceptedResetTap.class",
 }
 _TOI_RESET_CLASS = "org/dyn4j/world/ToiAcceptedResetTap.class"
+_PORTABLE_CLASS_MEMBER = re.compile(r"(?:^|/)portable/(?:[^/]+/)*[^/]+\.class$")
+_WHEEL_RECORDER_CLASSES = frozenset({
+    "portable/NumericalRecorder$capture$collisions$1.class",
+    "portable/NumericalRecorder$capture$contacts$1.class",
+    "portable/NumericalRecorder$capture$steps$1.class",
+    "portable/NumericalRecorder$capture$timeOfImpact$1.class",
+    "portable/NumericalRecorder$json$$inlined$sortedBy$1.class",
+})
 
 
 def _sha(value):
@@ -523,7 +531,7 @@ def _check_local_binaries(files, runtime_executable):
         raise CaptureRejected("local binary evidence unavailable") from error
 
 
-def _inspect_worker_classpath(value, staged_jar, class_root):
+def _inspect_worker_classpath(value, staged_jar, class_root, portable_classes=None):
     entries = value.split(":")
     staged = str(staged_jar)
     if not entries or len(entries) != len(set(entries)) or \
@@ -540,12 +548,15 @@ def _inspect_worker_classpath(value, staged_jar, class_root):
                 files = sorted(item for item in path.rglob("*") if item.is_file())
                 digest = hashlib.sha256()
                 providers = []
+                portable_providers = []
                 for item in files:
                     relative = item.relative_to(path).as_posix()
                     content = item.read_bytes()
                     digest.update(relative.encode() + b"\0" + _sha(content).encode() + b"\n")
                     if relative.startswith("org/dyn4j/") and relative.endswith(".class"):
                         providers.append(relative)
+                    if _PORTABLE_CLASS_MEMBER.search(relative):
+                        portable_providers.append((relative, _sha(content)))
                 fingerprint = digest.hexdigest()
             elif path.is_file():
                 data = path.read_bytes()
@@ -555,6 +566,9 @@ def _inspect_worker_classpath(value, staged_jar, class_root):
                     providers = [member for member in members if member.endswith(".class") and
                                  (member.startswith("org/dyn4j/") or
                                   "/org/dyn4j/" in member)]
+                    portable_providers = [(member, _sha(archive.read(member)))
+                                          for member in members
+                                          if _PORTABLE_CLASS_MEMBER.search(member)]
                     if "META-INF/MANIFEST.MF" in members and re.search(
                             rb"(?im)^Class-Path:\s*\S", archive.read("META-INF/MANIFEST.MF")):
                         raise CaptureRejected("worker archive has an indirect classpath")
@@ -567,11 +581,21 @@ def _inspect_worker_classpath(value, staged_jar, class_root):
                 raise CaptureRejected("staged JAR omits audited engine classes")
         elif providers:
             raise CaptureRejected("worker classpath shadows the staged engine")
+        if portable_classes is not None:
+            source_set = next((source_set for source_set in ("main", "test")
+                               if name == str(class_root / source_set)), None)
+            if source_set is None:
+                if portable_providers:
+                    raise CaptureRejected("worker classpath shadows compiled portable classes")
+            elif dict(portable_providers) != portable_classes[source_set] or \
+                    len(portable_providers) != len(portable_classes[source_set]):
+                raise CaptureRejected("compiled portable class provider differs")
         evidence.append({"path": name, "sha256": fingerprint})
     return evidence
 
 
-def _verify_worker_class_load(raw, worker_pid, require_toi_reset):
+def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
+                              portable_classes):
     try:
         lines = raw.decode("utf-8").splitlines()
     except UnicodeError as error:
@@ -581,12 +605,35 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset):
     required = audited if require_toi_reset else audited - {
         _TOI_RESET_CLASS.removesuffix(".class").replace("/", ".")}
     observed = {}
+    portable_sources = {name: source_set for source_set, names in
+                        portable_classes.items() for name in names}
+    portable_observed = set()
     for line in lines:
         record = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] "
                               r"([^ ]+) source: (.+)", line)
         if record is None or record.group(1) != worker_pid:
             raise CaptureRejected("worker class-load PID or format differs")
         name, location = record.group(2, 3)
+        if name.startswith("portable."):
+            if "$$Lambda/" in name:
+                owner = name.split("$$Lambda/", 1)[0]
+                if owner.replace(".", "/") + ".class" not in portable_sources or \
+                        location != owner:
+                    raise CaptureRejected("portable lambda source differs")
+                continue
+            member = name.replace(".", "/") + ".class"
+            source_set = portable_sources.get(member)
+            if source_set is None or member in portable_observed:
+                raise CaptureRejected("portable worker class-load inventory differs")
+            source_root = (_ROOT / "tools/numerical/portable/build/classes/"
+                           "kotlin/jvm" / source_set)
+            source = urlparse(location)
+            if source.scheme != "file" or source.netloc or source.query or \
+                    source.fragment or Path(unquote(source.path)).resolve() != \
+                    source_root.resolve():
+                raise CaptureRejected("portable class loaded outside compiled classes")
+            portable_observed.add(member)
+            continue
         if name not in audited:
             continue
         if name in observed:
@@ -599,6 +646,13 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset):
         observed[name] = location
     if not required <= set(observed):
         raise CaptureRejected("audited worker class-load inventory differs")
+    required_portable = {"portable/ProspectiveArithmeticTest.class",
+                         "portable/PortableMatrixTest.class",
+                         "portable/NumericalRecorder.class"}
+    if method == "captureWheelActive":
+        required_portable |= _WHEEL_RECORDER_CLASSES
+    if not required_portable <= portable_observed:
+        raise CaptureRejected("required portable worker class-load inventory differs")
     return observed
 
 
@@ -646,7 +700,6 @@ def _check_process(files, runtime_executable, method):
             str(_STAGED_JAR) not in arguments[1].split(":"):
         raise CaptureRejected("executed worker classpath omits staged engine")
     class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
-    classpath_evidence = _inspect_worker_classpath(arguments[1], _STAGED_JAR, class_root)
     try:
         with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
             entries = classes.namelist()
@@ -659,12 +712,20 @@ def _check_process(files, runtime_executable, method):
                         not name.endswith(".class") for name in entries) or \
                     classes.testzip() is not None:
                 raise CaptureRejected("portable test payload differs")
+            portable_classes = {
+                source_set: {name.removeprefix(source_set + "/"): _sha(classes.read(name))
+                             for name in names if name.startswith(source_set + "/portable/")}
+                for source_set in ("main", "test")}
+            if portable_classes["main"].keys() & portable_classes["test"].keys():
+                raise CaptureRejected("compiled portable class identity is ambiguous")
     except (zipfile.BadZipFile, OSError) as error:
         raise CaptureRejected("portable test payload differs") from error
+    classpath_evidence = _inspect_worker_classpath(
+        arguments[1], _STAGED_JAR, class_root, portable_classes)
     response_file = re.search(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)", log)
     if response_file is None or f'"@{response_file.group(1)}"' not in executions:
         raise CaptureRejected("executed worker classpath evidence differs")
-    return classpath_evidence, worker_pid, log_paths[0]
+    return classpath_evidence, worker_pid, log_paths[0], portable_classes
 
 
 def verify_worker_write_witness(archive, xml, worker_pid, execve_log):
@@ -774,13 +835,14 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
     if files["source"] != _source_archive(commit):
         raise CaptureRejected("source archive differs from candidate commit")
     _check_local_binaries(files, runtime_executable)
-    classpath_evidence, worker_pid, log_path = _check_process(files,
-                                                               runtime_executable, method)
+    classpath_evidence, worker_pid, log_path, portable_classes = _check_process(
+        files, runtime_executable, method)
     reset_order = ("pre" if commit == "fe4d63cb7f08cea304e5691f2f2ebc23379db6b0"
                    else "post")
     summary = verify_capture(files["xml"], method, expected_ids, reset_order)
     worker_sources = _verify_worker_class_load(
-        files["worker_class_load"], worker_pid, summary["selected_resets"] > 0)
+        files["worker_class_load"], worker_pid, summary["selected_resets"] > 0,
+        method, portable_classes)
     receipt = {"schema": "portable-arithmetic-capture-receipt/3",
             "candidate_commit": commit, "method": method, "exit_code": 0,
             "runtime_executable": runtime_executable,

@@ -10,13 +10,120 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
+import actual_arithmetic as actual
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
 from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
-                               _ROOT, _STAGED_JAR, _inspect_worker_classpath,
+                               _ROOT, _STAGED_JAR, _WHEEL_RECORDER_CLASSES,
+                               _inspect_worker_classpath,
                                make_capture_receipt,
                                verify_capture_receipt)
 from test_actual_arithmetic import fixture, focused_wheel_fixture, xml_for
 from test_rotation_marker import bits
+
+
+class RetainedWheelProviderTest(unittest.TestCase):
+    def _retained(self):
+        archive_name = os.environ.get("DYN4K_WHEEL_ARCHIVE")
+        origin_name = os.environ.get("DYN4K_WHEEL_ORIGIN")
+        if archive_name is None or origin_name is None:
+            self.skipTest("retained Wheel archive is unavailable")
+        archive = Path(archive_name)
+        origin = Path(origin_name)
+        names = {
+            "xml": "capture.xml", "stage_log": "stage.log",
+            "gradle_log": "gradle.log", "execve_log": "execve.log",
+            "artifact": "artifact.jar", "runtime": "runtime-java",
+            "source": "source.tar", "worker_classpath": "worker-classpath.txt",
+            "portable_classes": "portable-classes.zip",
+            "worker_write_traces": "worker-write-traces.zip",
+        }
+        files = {key: (archive / name).read_bytes() for key, name in names.items()}
+        logs = list(archive.glob("worker-class-load-*.log"))
+        self.assertEqual(len(logs), 1)
+        files["worker_class_load"] = logs[0].read_bytes()
+        receipt = json.loads((archive / "receipt.json").read_bytes())
+        staged = (origin / "build/staging-repository/io/github/rubixhacker/"
+                  "dyn4k-core-jvm/0.1.0-alpha.1/"
+                  "dyn4k-core-jvm-0.1.0-alpha.1.jar")
+        args = ("captureWheelActive", receipt["candidate_commit"],
+                ["joint-Wheel-active"], receipt["runtime_executable"])
+        return receipt, files, origin, staged, args
+
+    def test_unchanged_wheel_receipt_verifies(self):
+        receipt, files, origin, staged, args = self._retained()
+        with patch.object(actual, "_ROOT", origin), patch.object(
+                actual, "_STAGED_JAR", staged):
+            result = verify_capture_receipt(receipt, files, *args)
+        self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["qualification"], "UNPASSED")
+
+    def test_resealed_earlier_and_later_portable_provider_fail(self):
+        receipt, original, origin, staged, args = self._retained()
+        with zipfile.ZipFile(io.BytesIO(original["portable_classes"])) as classes:
+            compiled = classes.read("test/portable/ProspectiveArithmeticTest.class")
+        altered = compiled.replace(b"ProspectiveArithmeticTest.kt",
+                                   b"ProspectiveArithmeticTesx.kt")
+        self.assertNotEqual(altered, compiled)
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            shadow = Path(folder) / "alternate.jar"
+            with zipfile.ZipFile(shadow, "w") as classes:
+                classes.writestr("portable/ProspectiveArithmeticTest.class", altered)
+            classpath = original["worker_classpath"].decode().splitlines()
+            self.assertEqual(classpath[0], "-cp")
+            for earlier in (True, False):
+                files = dict(original)
+                entries = (f"{shadow}:{classpath[1]}" if earlier else
+                           f"{classpath[1]}:{shadow}")
+                files["worker_classpath"] = f"-cp\n{entries}\n".encode()
+                resealed = copy.deepcopy(receipt)
+                resealed["worker_classpath_sha256"] = hashlib.sha256(
+                    files["worker_classpath"]).hexdigest()
+                evidence = {"path": str(shadow),
+                            "sha256": hashlib.sha256(shadow.read_bytes()).hexdigest()}
+                if earlier:
+                    resealed["worker_classpath_entries"].insert(0, evidence)
+                else:
+                    resealed["worker_classpath_entries"].append(evidence)
+                with self.subTest(earlier=earlier), patch.object(
+                        actual, "_ROOT", origin), patch.object(
+                        actual, "_STAGED_JAR", staged), self.assertRaises(CaptureRejected):
+                    verify_capture_receipt(resealed, files, *args)
+
+    def test_missing_unknown_and_duplicate_portable_load_fail(self):
+        receipt, original, origin, staged, args = self._retained()
+        lines = original["worker_class_load"].splitlines(keepends=True)
+        required = (
+            b"portable.ProspectiveArithmeticTest ",
+            b"portable.PortableMatrixTest ",
+            b"portable.NumericalRecorder ",
+            b"portable.NumericalRecorder$capture$collisions$1 ",
+            b"portable.NumericalRecorder$capture$contacts$1 ",
+            b"portable.NumericalRecorder$capture$steps$1 ",
+            b"portable.NumericalRecorder$capture$timeOfImpact$1 ",
+            b"portable.NumericalRecorder$json$$inlined$sortedBy$1 ",
+        )
+        for target in required:
+            changed = [line for line in lines if target not in line]
+            self.assertEqual(len(lines) - len(changed), 1)
+            files = dict(original)
+            files["worker_class_load"] = b"".join(changed)
+            with self.subTest(missing=target), patch.object(
+                    actual, "_ROOT", origin), patch.object(
+                    actual, "_STAGED_JAR", staged), self.assertRaises(CaptureRejected):
+                make_capture_receipt(files, *args)
+        test_root = (origin / "tools/numerical/portable/build/classes/kotlin/jvm/test")
+        additions = (
+            (f'[{receipt["worker_pid"]}][info][class,load] portable.Unknown '
+             f'source: {test_root.as_uri()}/\n').encode(),
+            next(line for line in lines if b"portable.ProspectiveArithmeticTest " in line),
+        )
+        for added in additions:
+            files = dict(original)
+            files["worker_class_load"] += added
+            with self.subTest(added=hashlib.sha256(added).hexdigest()), patch.object(
+                    actual, "_ROOT", origin), patch.object(
+                    actual, "_STAGED_JAR", staged), self.assertRaises(CaptureRejected):
+                make_capture_receipt(files, *args)
 
 
 class CaptureReceiptTest(unittest.TestCase):
@@ -53,13 +160,19 @@ class CaptureReceiptTest(unittest.TestCase):
                        f"{name.removesuffix('.class').replace('/', '.')} "
                        f"source: {_STAGED_JAR.as_uri()}\n"
                        for name in sorted(_AUDITED_ENGINE_CLASSES)).encode()
+        class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
+        load += "".join(f"[123][info][class,load] {name} "
+                        f"source: {(class_root / source_set).as_uri()}/\n"
+                        for source_set, name in (
+                            ("main", "portable.NumericalRecorder"),
+                            ("test", "portable.PortableMatrixTest"),
+                            ("test", "portable.ProspectiveArithmeticTest"))).encode()
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w") as classes:
             for name in ("main/portable/NumericalRecorder.class",
                          "test/portable/ProspectiveArithmeticTest.class",
                          "test/portable/PortableMatrixTest.class"):
                 classes.writestr(name, b"class")
-        class_root = _ROOT / "tools/numerical/portable/build/classes/kotlin/jvm"
         files = {"xml": xml, "stage_log": b"BUILD SUCCESSFUL\n",
                  "gradle_log": log, "execve_log": execve,
                  "artifact": b"artifact", "runtime": b"runtime", "source": b"source",
@@ -82,6 +195,18 @@ class CaptureReceiptTest(unittest.TestCase):
     def test_resealed_wheel_receipt_rejects_nonworker_trace(self):
         _, files, runtime = self.fixture()
         files["xml"] = xml_for(focused_wheel_fixture(), "captureWheelActive")
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes:
+            retained = {name: classes.read(name) for name in classes.namelist()}
+        retained.update({"main/" + name: b"class" for name in _WHEEL_RECORDER_CLASSES})
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w") as classes:
+            for name, content in retained.items():
+                classes.writestr(name, content)
+        files["portable_classes"] = archive_bytes.getvalue()
+        files["worker_class_load"] += "".join(
+            f"[123][info][class,load] {name.removesuffix('.class').replace('/', '.')} "
+            f"source: {(_ROOT / 'tools/numerical/portable/build/classes/kotlin/jvm/main').as_uri()}/\n"
+            for name in sorted(_WHEEL_RECORDER_CLASSES)).encode()
         for name in ("gradle_log", "execve_log"):
             files[name] = files[name].replace(b"captureGeometry", b"captureWheelActive")
         worker_line = next(line.split(b" ", 1)[1]
@@ -266,6 +391,53 @@ class CaptureReceiptTest(unittest.TestCase):
 
 
 class ClasspathProviderTest(unittest.TestCase):
+    def test_portable_provider_bytes_and_precedence(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
+            root = Path(folder)
+            staged = root / "staged.jar"
+            class_root = root / "classes"
+            for source_set in ("main", "test"):
+                (class_root / source_set).mkdir(parents=True)
+            with zipfile.ZipFile(staged, "w") as archive:
+                for name in _AUDITED_ENGINE_CLASSES:
+                    archive.writestr(name, b"engine")
+            names = {
+                "main": {"portable/NumericalRecorder.class",
+                         "portable/NumericalRecorder$capture$steps$1.class"},
+                "test": {"portable/PortableMatrixTest.class",
+                         "portable/ProspectiveArithmeticTest.class"},
+            }
+            inventory = {
+                source_set: {name: hashlib.sha256(b"compiled").hexdigest()
+                             for name in members}
+                for source_set, members in names.items()}
+            for source_set, members in names.items():
+                for name in members:
+                    path = class_root / source_set / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"compiled")
+            main, test = class_root / "main", class_root / "test"
+            valid = f"{main}:{test}:{staged}"
+            self.assertEqual(len(_inspect_worker_classpath(
+                valid, staged, class_root, inventory)), 3)
+            shadow = root / "alternate.jar"
+            for class_name in names["main"] | names["test"]:
+                with zipfile.ZipFile(shadow, "w") as archive:
+                    archive.writestr(class_name, b"altered")
+                for value in (f"{shadow}:{valid}", f"{valid}:{shadow}"):
+                    with self.subTest(class_name=class_name, value=value), \
+                            self.assertRaises(CaptureRejected):
+                        _inspect_worker_classpath(value, staged, class_root, inventory)
+            missing = test / "portable/PortableMatrixTest.class"
+            missing.unlink()
+            with self.assertRaisesRegex(CaptureRejected,
+                                        "compiled portable class provider differs"):
+                _inspect_worker_classpath(valid, staged, class_root, inventory)
+            missing.write_bytes(b"altered")
+            with self.assertRaisesRegex(CaptureRejected,
+                                        "compiled portable class provider differs"):
+                _inspect_worker_classpath(valid, staged, class_root, inventory)
+
     def test_prior_and_later_engine_providers_fail(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as folder:
             root = Path(folder)
