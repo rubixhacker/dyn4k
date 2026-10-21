@@ -1,0 +1,21 @@
+name: Qualification workflow source checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject hosted macOS routes
+        run: python3 -B tools/qualification/guard_hosted_runners.py
+      - name: Test qualification workflow contracts
+        run: python3 -B -m unittest tools.compatibility.test_qualification_workflow
+      - name: Test hosted runner guard
+        run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners

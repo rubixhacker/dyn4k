@@ -1,3 +1,4 @@
+import ast
 import re
 import subprocess
 import tempfile
@@ -7,6 +8,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/qualification.yml"
+SOURCE_CHECKS = WORKFLOW.with_name("qualification-source-checks.yml")
 UPSTREAM_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
 
 
@@ -15,7 +17,148 @@ def workflow_jobs(workflow):
     return dict(zip(jobs[1::2], jobs[2::2]))
 
 
+def workflow_event_blocks(workflow):
+    match = re.search(r"(?ms)^on:\n(.*?)(?=^jobs:\n)", workflow)
+    if match is None:
+        raise AssertionError("workflow trigger block is missing")
+    source = match.group(1)
+    events = list(re.finditer(r"(?m)^  ([a-z][a-z0-9_-]*):\s*$", source))
+    return {
+        event.group(1): source[event.end():events[index + 1].start() if index + 1 < len(events) else len(source)]
+        for index, event in enumerate(events)
+    }
+
+
+def workflow_dispatch_inputs(workflow):
+    dispatch = workflow_event_blocks(workflow).get("workflow_dispatch", "")
+    inputs = re.search(r"(?m)^    inputs:\n((?:      .*\n|        .*\n|\s*\n)+)", dispatch)
+    if inputs is None:
+        return {}
+    source = inputs.group(1)
+    fields = list(re.finditer(r"(?m)^      ([a-z][a-z0-9_-]*):\n", source))
+    result = {}
+    for index, field in enumerate(fields):
+        body = source[field.end():fields[index + 1].start() if index + 1 < len(fields) else len(source)]
+        result[field.group(1)] = body
+    return result
+
+
+def _condition_value(node):
+    if isinstance(node, ast.Expression):
+        return _condition_value(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+        values = [_condition_value(value) for value in node.values]
+        return all(values) if isinstance(node.op, ast.And) else any(values)
+    raise AssertionError(f"unsupported workflow job condition: {ast.dump(node)}")
+
+
+def workflow_job_enabled(condition, event, inputs):
+    if condition is None:
+        return True
+    expression = condition.replace("always()", "True")
+    expression = re.sub(
+        r"github\.event_name\s*(==|!=)\s*'workflow_dispatch'",
+        lambda match: str((event == "workflow_dispatch") == (match.group(1) == "==")),
+        expression,
+    )
+
+    def replace_input(match):
+        equal = inputs.get(match.group(1)) is True
+        return str(equal if match.group(2) == "==" else not equal)
+
+    expression = re.sub(r"inputs\.([a-z][a-z0-9_-]*)\s*(==|!=)\s*true", replace_input, expression)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    return _condition_value(ast.parse(expression, mode="eval"))
+
+
+def workflow_jobs_for_event(workflow, event, inputs=None):
+    if event not in workflow_event_blocks(workflow):
+        return set()
+    inputs = inputs or {}
+    jobs = workflow_jobs(workflow)
+    selected = set()
+    for name, job in jobs.items():
+        condition = re.search(r"(?m)^    if: (.+)$", job)
+        if workflow_job_enabled(condition.group(1) if condition else None, event, inputs):
+            selected.add(name)
+    return selected
+
+
 class QualificationWorkflowContractTest(unittest.TestCase):
+    def test_push_and_pull_request_do_not_schedule_qualification_jobs(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(["workflow_dispatch"], list(workflow_event_blocks(workflow)))
+        commit_message = "Fix qualification workflow dispatch guard"
+        self.assertNotIn("[skip ci]", commit_message)
+        for event in ("push", "pull_request"):
+            with self.subTest(event=event):
+                self.assertEqual(set(), workflow_jobs_for_event(workflow, event))
+
+    def test_manual_dispatch_retains_full_and_bounded_routes(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        inputs = workflow_dispatch_inputs(workflow)
+        self.assertEqual(
+            {"windows_diagnostics", "cross_run_only", "cross_run_source_index"},
+            set(inputs),
+        )
+        self.assertIn("type: boolean", inputs["windows_diagnostics"])
+        self.assertIn("default: false", inputs["windows_diagnostics"])
+        self.assertIn("type: boolean", inputs["cross_run_only"])
+        self.assertIn("default: false", inputs["cross_run_only"])
+        self.assertIn("type: string", inputs["cross_run_source_index"])
+
+        full = workflow_jobs_for_event(
+            workflow, "workflow_dispatch",
+            {"windows_diagnostics": False, "cross_run_only": False},
+        )
+        self.assertEqual(set(workflow_jobs(workflow)), full)
+
+        windows = workflow_jobs_for_event(
+            workflow, "workflow_dispatch",
+            {"windows_diagnostics": True, "cross_run_only": False},
+        )
+        self.assertEqual(
+            {"hosted-runner-guard", "hosted-publications", "hosted-native"}, windows
+        )
+
+        cross_run = workflow_jobs_for_event(
+            workflow, "workflow_dispatch",
+            {"windows_diagnostics": False, "cross_run_only": True,
+             "cross_run_source_index": "source-index-v1.json"},
+        )
+        self.assertEqual({"hosted-runner-guard", "central-qualification-collection"},
+                         cross_run)
+        self.assertIn("${{ inputs.cross_run_source_index }}",
+                      workflow_jobs(workflow)["central-qualification-collection"])
+
+    def test_automatic_source_checks_are_lightweight_and_mac_is_dispatch_only(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assertEqual(["push", "pull_request"], list(workflow_event_blocks(source)))
+        jobs = workflow_jobs(source)
+        self.assertEqual({"workflow-source-contracts"}, set(jobs))
+        for event in ("push", "pull_request"):
+            self.assertEqual({"workflow-source-contracts"},
+                             workflow_jobs_for_event(source, event), event)
+        self.assertIn("runs-on: ubuntu-latest", jobs["workflow-source-contracts"])
+        self.assertIn("tools/qualification/guard_hosted_runners.py", jobs["workflow-source-contracts"])
+        self.assertIn("tools.compatibility.test_qualification_workflow",
+                      jobs["workflow-source-contracts"])
+        self.assertIn("test_guard_hosted_runners", jobs["workflow-source-contracts"])
+        self.assertNotIn("mac-mini", jobs["workflow-source-contracts"])
+
+        workflows = sorted(WORKFLOW.parent.glob("*.yml")) + sorted(WORKFLOW.parent.glob("*.yaml"))
+        mac_routes = []
+        for path in workflows:
+            source_text = path.read_text(encoding="utf-8")
+            for job_name, job in workflow_jobs(source_text).items():
+                if re.search(r"(?m)^    runs-on: mac-mini\s*$", job):
+                    mac_routes.append((path.name, job_name))
+                    self.assertEqual(["workflow_dispatch"],
+                                     list(workflow_event_blocks(source_text)), path.name)
+        self.assertEqual([("qualification.yml", "hosted-mac")], mac_routes)
+
     def test_mac_mini_uses_verified_preinstalled_python(self):
         mac_mini = workflow_jobs(WORKFLOW.read_text())["hosted-mac"]
         self.assertIn("    runs-on: mac-mini\n", mac_mini)
@@ -197,13 +340,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertLess(ubuntu.index("- name: Stage all target publications"),
                         ubuntu.index("- name: Run full staged Java compatibility closure"))
 
-    def test_main_push_keeps_diagnostic_branch_routes(self):
-        workflow = WORKFLOW.read_text()
-        push = workflow.split("  push:\n    branches:\n", 1)[1].split("  pull_request:", 1)[0]
-        for branch in ("main", "codex/port-qualification-harness", "codex/dyn4k-port",
-                       "codex/port-publication-assembly"):
-            with self.subTest(branch=branch):
-                self.assertIn(f"      - {branch}\n", push)
+    def test_full_qualification_workflow_is_dispatch_only(self):
+        events = workflow_event_blocks(WORKFLOW.read_text())
+        self.assertEqual(["workflow_dispatch"], list(events))
 
     def test_extracted_common_archive_is_verified_before_upload(self):
         ubuntu = workflow_jobs(WORKFLOW.read_text())["staged-jvm-and-linux"]
@@ -227,6 +366,15 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertTrue(invoking)
         for name, job in invoking.items():
             with self.subTest(job=name):
+                if name.startswith("windows-qualification-harness.yml:"):
+                    self.assertIn("$env:DYN4K_UPSTREAM_SOURCE = $upstreamSource", job)
+                    self.assertIn(
+                        "'fetch', '--depth=1', 'origin', '058bf6d982a0fb89b54050f929f6ea9dae53b714'",
+                        job)
+                    self.assertIn(
+                        "$upstreamSha -ne '058bf6d982a0fb89b54050f929f6ea9dae53b714'",
+                        job)
+                    continue
                 suite = re.search(
                     r"python(?:3)? -m unittest discover -s tools/qualification\b", job)
                 before_suite = job[:suite.start()]

@@ -17,13 +17,6 @@ on:
         description: Exact versioned JSON source index for cross-run collection
         type: string
         required: false
-  push:
-    branches:
-      - main
-      - codex/port-qualification-harness
-      - codex/dyn4k-port
-      - codex/port-publication-assembly
-  pull_request:
 
 jobs:
   hosted-runner-guard:

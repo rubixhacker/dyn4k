@@ -29,8 +29,10 @@ AUDITED_WORKFLOW_SHA256 = {
     "performance-host-capacity-control.yml": "03336de80b8deb55d6d8c1eee7247ab5cb54c404f188f240f0cfd2940873bcc1",
     "full-staged-native-host.yml": "dc312ad2acbd8c777e6c3ead5ffc1c5d9d171cab24ba776273411780818d3d7b",
     "performance-native-host-short.yml": "c49cc12671fdbe29b0c34e4b2d20920e8ab4a54c367d32f9ed2d041f32ccd9d2",
-    "qualification.yml": "f9e93932734cb8dc9a039826314804a2d3a86f9399eeb31bc3b807bafa96be1a",
+    "qualification.yml": "2cc871bb937f946f9bf3ca1879066bddcb52d0c88ef289c2def768961c81800f",
+    "qualification-source-checks.yml": "9db48a5301b242f772679cfb546feacd44c5d87ccf0efd60d49f9625b2051252",
     "windows-collision-focus.yml": "861655f85b23426ed77022229a01f992f2fa276745148a17eda8bb04fb4b6b64",
+    "windows-qualification-harness.yml": "7aae8a06840b1f690814cb33b6943ff2ef1730ebe53997bfe4bf6a1ef210ae5d",
 }
 def verify_sustained_workflow_contract(source):
     document = yaml.safe_load(source)
@@ -284,7 +286,7 @@ class WorkflowExpressionLimit(unittest.TestCase):
                     self.assertLess(upper_bound, RUN_EXPRESSION_LIMIT)
                 if upper_bound >= RUN_EXPRESSION_LIMIT:
                     violations.append((name, line, upper_bound))
-        self.assertEqual(checked, 66)
+        self.assertEqual(checked, 70)
         self.assertEqual(violations, [])
 
     def test_changed_workflow_sources_are_rejected(self):
