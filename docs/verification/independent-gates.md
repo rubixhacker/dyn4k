@@ -139,7 +139,16 @@ The gate replays the reviewed `compare_host()` verifier against those raw inputs
 
 The reviewed producer replay also needs its exact clean candidate checkout, staged JVM binaries, compiled portable classes, and pinned JDK 21. Those local paths are part of its current process receipt contract. The numerical archive alone cannot recreate that execution environment in a new path. Final 332/318 recapture must supply those inputs and a new external baseline sidecar at the final source SHA.
 
-The current reference audit still has 41 failed derived rules, four unpassed premises, and one failed physical case under fixed 32 ulps. The retained real `captureFreeMotion` receipt verifies ten historical cases, not the full 15-method route. The retained Angle capture fails on nonfinite binary64 arithmetic. Neither can qualify a current-source numerical lane.
+The historical 318-case reference self-check at
+`b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b` recorded 41 failed derived
+rules, four unpassed premises, and one failed physical case under fixed 32
+ulps. Its checker SHA-256 was
+`2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f`.
+A bounded replay under the current checker found 12 unpassed premises among
+75 indexed geometry cases; a complete current 318-case self-check is not run.
+The retained real `captureFreeMotion` receipt verifies ten historical cases,
+not the full 15-method route. The retained Angle capture fails on nonfinite
+binary64 arithmetic. Neither can qualify a current-source numerical lane.
 
 For sustained performance, supply `evidence/archive.json` in the producer manifest map. Also supply independent `verifier_sha256` and `policy_sha256` values in its scope. Pass an external trusted key through `--expected-performance-key`. The verifier checks the exact candidate's producer files, including the stress monitor, and JVM JAR inventory. It copies the raw archive under home-backed `TMPDIR` before running `sustained_archive.py verify`. The key must remain outside the archive. A missing historical producer is `NOT_RUN`, and the current checked-in policy is still unpassed. A pilot result cannot satisfy this route.
 
