@@ -142,6 +142,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             self.assertEqual({"workflow-source-contracts"},
                              workflow_jobs_for_event(source, event), event)
         self.assertIn("runs-on: ubuntu-latest", jobs["workflow-source-contracts"])
+        self.assertIn("timeout-minutes: 5", jobs["workflow-source-contracts"])
         self.assertIn("tools/qualification/guard_hosted_runners.py", jobs["workflow-source-contracts"])
         self.assertIn("tools.compatibility.test_qualification_workflow",
                       jobs["workflow-source-contracts"])
@@ -158,6 +159,36 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                     self.assertEqual(["workflow_dispatch"],
                                      list(workflow_event_blocks(source_text)), path.name)
         self.assertEqual([("qualification.yml", "hosted-mac")], mac_routes)
+
+    def test_source_checks_run_archive_isolated_numerical_regressions(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        job = workflow_jobs(source)["workflow-source-contracts"]
+        step_names = re.findall(r"(?m)^      - (?:name: .+|uses: .+)$", job)
+        self.assertEqual(
+            ["      - uses: actions/checkout@v4",
+             "      - name: Reject hosted macOS routes",
+             "      - name: Test qualification workflow contracts",
+             "      - name: Test hosted runner guard",
+             "      - name: Test source-only numerical regressions"],
+            step_names,
+        )
+        step = re.search(
+            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"        run: \|\n((?:          .*\n)+)",
+            job,
+        )
+        self.assertIsNotNone(step)
+        script = textwrap.dedent(step.group(1))
+        command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
+        self.assertEqual(
+            "env -u OLLAMA_API_KEY -u DYN4K_GEOMETRY_BASELINE "
+            "-u DYN4K_PROSPECTIVE_CURRENT_MANIFEST "
+            "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
+            "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
+            "test_actual_arithmetic test_actual_capture_receipt "
+            "test_rotation_oracle test_rotation_marker test_prospective_compare",
+            command,
+        )
 
     def test_mac_mini_uses_verified_preinstalled_python(self):
         mac_mini = workflow_jobs(WORKFLOW.read_text())["hosted-mac"]

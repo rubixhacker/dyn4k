@@ -19,3 +19,16 @@ jobs:
         run: python3 -B -m unittest tools.compatibility.test_qualification_workflow
       - name: Test hosted runner guard
         run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners
+      - name: Test source-only numerical regressions
+        run: |
+          env -u OLLAMA_API_KEY \
+            -u DYN4K_GEOMETRY_BASELINE \
+            -u DYN4K_PROSPECTIVE_CURRENT_MANIFEST \
+            -u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST \
+            PYTHONPATH=tools/numerical/portable \
+            python3 -B -m unittest -v \
+              test_actual_arithmetic \
+              test_actual_capture_receipt \
+              test_rotation_oracle \
+              test_rotation_marker \
+              test_prospective_compare
