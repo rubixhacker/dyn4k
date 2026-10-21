@@ -675,7 +675,9 @@ def _missing_numerical_subgates(repository):
                 "reason": "318 per-case rule comparisons and target arithmetic audits are absent",
                 "reference_diagnostic": (
                     "historical b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b 318-case "
-                    "self-check: 41 failed derived rules, 4 unpassed premises, "
+                    "self-check with checker SHA-256 "
+                    "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f: "
+                    "41 failed derived rules, 4 unpassed premises, "
                     "1 failed physical; current checker 75-case geometry replay: "
                     "12 unpassed premises; current 318-case self-check NOT_RUN"),
                 "cases": cases}}
