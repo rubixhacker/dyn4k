@@ -16,6 +16,55 @@ from runner import (gradle_test_task, runtime_version, source_cases, staged_file
 
 
 class BrowserReporterStageTest(unittest.TestCase):
+    def test_browser_xml_requires_exact_target_label(self):
+        for target, other in (("js", "wasmJs"), ("wasmJs", "js")):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                report = Path(directory) / "TEST-suite.xml"
+                task = f"{target}BrowserTest"
+                report.write_text(
+                    f'<testsuite tests="1" failures="0" errors="0" skipped="0" time="0.0">'
+                    f'<testcase classname="{task}.sample.FirstTest" time="0.001" '
+                    f'name="identity[{target}, browser, ChromeHeadless155.0.0.0, Linux0.0.0]"/>'
+                    '</testsuite>'
+                )
+                expected = {("sample.FirstTest", "identity")}
+                self.assertEqual(1, verify_reports(
+                    report.parent, expected, task, "ChromeHeadless155", target)['executed'])
+                report.write_text(report.read_text().replace(
+                    f"identity[{target}, browser,", f"identity[{other}, browser,"))
+                with self.assertRaisesRegex(ValueError, "target"):
+                    verify_reports(report.parent, expected, task, "ChromeHeadless155", target)
+
+    def test_browser_xml_requires_finite_nonnegative_durations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "TEST-suite.xml"
+            expected = {("sample.FirstTest", "identity")}
+            original = (
+                '<testsuite tests="1" failures="0" errors="0" skipped="0" time="0.0">'
+                '<testcase classname="jsBrowserTest.sample.FirstTest" time="0.001" '
+                'name="identity[js, browser, ChromeHeadless155.0.0.0, Linux0.0.0]"/>'
+                '</testsuite>'
+            )
+            report.write_text(original)
+            self.assertEqual(1, verify_reports(
+                report.parent, expected, "jsBrowserTest", "ChromeHeadless155", "js")['executed'])
+            import xml.etree.ElementTree as ET
+
+            for level in ("suite", "case"):
+                for value in ("NaN", "Infinity", "1e309", "-1", "-0.0",
+                              "not-a-number", "0x1", " 1 ", "", None):
+                    with self.subTest(level=level, value=value):
+                        root = ET.fromstring(original)
+                        element = root if level == "suite" else root.find("testcase")
+                        if value is None:
+                            element.attrib.pop("time")
+                        else:
+                            element.set("time", value)
+                        ET.ElementTree(root).write(report, encoding="unicode")
+                        with self.assertRaisesRegex(ValueError, "duration"):
+                            verify_reports(report.parent, expected, "jsBrowserTest",
+                                           "ChromeHeadless155", "js")
+
     def test_finite_decimal_range_preserves_binary_edges(self):
         from runner import verify_collision_value
 
@@ -113,7 +162,7 @@ class BrowserReporterStageTest(unittest.TestCase):
             }
             task = suite.attrib["name"].split(".", 1)[0]
             marker = "ChromeHeadless119"
-            verify_reports(report.parent, cases, task, marker,
+            verify_reports(report.parent, cases, task, marker, "js",
                            require_collision_diagnostics=True)
             original = suite.find("system-out").text
             rows = original.splitlines()
@@ -142,7 +191,7 @@ class BrowserReporterStageTest(unittest.TestCase):
                 suite.find("system-out").text = "\n".join(mutation) + "\n"
                 ET.ElementTree(suite).write(report, encoding="unicode")
                 with self.assertRaisesRegex(ValueError, "diagnostic"):
-                    verify_reports(report.parent, cases, task, marker,
+                    verify_reports(report.parent, cases, task, marker, "js",
                                    require_collision_diagnostics=True)
 
     def test_wasmtime_retained_executable_replays_after_source_changes(self):
@@ -699,6 +748,70 @@ class SourceCasesTest(unittest.TestCase):
                                 if key not in ("result_json", "result_json_sha256")})
             module["result_json_sha256"] = sha256(result)
         write_json(copied / "lane.json", sealed_lane(lane))
+
+    def test_public_browser_xml_target_and_duration_replay(self):
+        import runner
+        import xml.etree.ElementTree as ET
+
+        keys = ("REAL_JS", "TARGET_ADVERSE", "DURATION_ADVERSE", "REAL_WASM")
+        paths = {key: os.environ.get(f"DYN4K_BROWSER_WASI_XML_{key}_RECEIPT")
+                 for key in keys}
+        if any(value is None for value in paths.values()):
+            self.skipTest("set retained exact76c browser XML receipts")
+
+        def audit(receipt):
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("runner.py")),
+                 "audit", "--receipt", str(receipt)],
+                capture_output=True, text=True, check=False,
+            )
+
+        for key in ("REAL_JS", "REAL_WASM"):
+            positive = audit(paths[key])
+            with self.subTest(positive=key):
+                self.assertEqual(0, positive.returncode, positive.stderr)
+        for key, expected_error in (("TARGET_ADVERSE", "target"),
+                                    ("DURATION_ADVERSE", "duration")):
+            negative = audit(paths[key])
+            with self.subTest(negative=key):
+                self.assertEqual(1, negative.returncode, negative.stderr)
+                self.assertIn(expected_error, negative.stderr)
+
+        with tempfile.TemporaryDirectory() as directory:
+            for level, value in (("suite", "NaN"), ("case", "-1")):
+                lane, copied = self.copy_lane(Path(paths["REAL_JS"]).parent, directory)
+                item = lane["modules"]["dyn4k-core"]["raw_xml"][0]
+                report = Path(item["path"])
+                timestamp = report.stat()
+                tree = ET.parse(report)
+                element = tree.getroot() if level == "suite" else tree.getroot().find("testcase")
+                element.set("time", value)
+                tree.write(report, encoding="unicode")
+                os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
+                item["sha256"] = runner.sha256(report)
+                self.save_copied_lane(lane, copied)
+                negative = audit(copied / "lane.json")
+                with self.subTest(duration_level=level):
+                    self.assertEqual(1, negative.returncode, negative.stderr)
+                    self.assertIn("duration", negative.stderr)
+                shutil.rmtree(copied)
+
+            lane, copied = self.copy_lane(Path(paths["REAL_WASM"]).parent, directory)
+            item = lane["modules"]["dyn4k-core"]["raw_xml"][0]
+            report = Path(item["path"])
+            timestamp = report.stat()
+            tree = ET.parse(report)
+            case = tree.getroot().find("testcase")
+            name = case.attrib["name"]
+            self.assertIn("[wasmJs, browser,", name)
+            case.set("name", name.replace("[wasmJs, browser,", "[js, browser,", 1))
+            tree.write(report, encoding="unicode")
+            os.utime(report, ns=(timestamp.st_atime_ns, timestamp.st_mtime_ns))
+            item["sha256"] = runner.sha256(report)
+            self.save_copied_lane(lane, copied)
+            negative = audit(copied / "lane.json")
+            self.assertEqual(1, negative.returncode, negative.stderr)
+            self.assertIn("target", negative.stderr)
 
     def test_public_firefox_lock_replay_rejects_resealed_variants_and_source_drift(self):
         import runner
@@ -1295,8 +1408,8 @@ class SourceCasesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "TEST-suite.xml"
             report.write_text(
-                '<testsuite tests="1" failures="0" errors="0" skipped="1">'
-                '<testcase classname="jsBrowserTest.sample.FirstTest" '
+                '<testsuite tests="1" failures="0" errors="0" skipped="1" time="0.0">'
+                '<testcase classname="jsBrowserTest.sample.FirstTest" time="0.0" '
                 'name="identity[js, browser, ChromeHeadless155.0.0.0, Linux0.0.0]">'
                 '<skipped/></testcase></testsuite>'
             )
@@ -1306,23 +1419,26 @@ class SourceCasesTest(unittest.TestCase):
                     {("sample.FirstTest", "identity")},
                     "jsBrowserTest",
                     "ChromeHeadless155",
+                    "js",
                 )
 
-            report.write_text('<testsuite tests="0" failures="0" errors="0" skipped="0"/>')
+            report.write_text('<testsuite tests="0" failures="0" errors="0" skipped="0" '
+                              'time="0.0"/>')
             with self.assertRaisesRegex(ValueError, "zero"):
                 verify_reports(
                     Path(directory),
                     {("sample.FirstTest", "identity")},
                     "jsBrowserTest",
                     "ChromeHeadless155",
+                    "js",
                 )
 
     def test_rejects_browser_major_that_only_starts_with_selected_major(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "TEST-suite.xml"
             report.write_text(
-                '<testsuite tests="1" failures="0" errors="0" skipped="0">'
-                '<testcase classname="jsBrowserTest.sample.FirstTest" '
+                '<testsuite tests="1" failures="0" errors="0" skipped="0" time="0.0">'
+                '<testcase classname="jsBrowserTest.sample.FirstTest" time="0.0" '
                 'name="identity[js, browser, ChromeHeadless1199.0.0.0, Linux0.0.0]"/>'
                 '</testsuite>'
             )
@@ -1332,6 +1448,7 @@ class SourceCasesTest(unittest.TestCase):
                     {("sample.FirstTest", "identity")},
                     "jsBrowserTest",
                     "ChromeHeadless119",
+                    "js",
                 )
 
     def test_browser_launcher_binds_the_process_image(self):

@@ -380,11 +380,25 @@ def verify_reports(
     expected: set[tuple[str, str]],
     task_name: str,
     runtime_marker: str,
+    target: str,
     require_collision_diagnostics: bool = False,
 ) -> dict[str, object]:
     selected = re.fullmatch(r"(ChromeHeadless|Firefox)(\d+)", runtime_marker)
-    if selected is None:
+    if selected is None or target not in ("js", "wasmJs"):
         raise ValueError(f"invalid selected browser marker: {runtime_marker}")
+
+    def check_duration(value: str | None, level: str, path: Path) -> None:
+        if (value is None or re.fullmatch(
+                r"\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?",
+                value) is None):
+            raise ValueError(f"invalid {level} duration: {path}")
+        try:
+            duration = float(value)
+        except (ValueError, OverflowError) as error:
+            raise ValueError(f"invalid {level} duration: {path}") from error
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError(f"invalid {level} duration: {path}")
+
     files = sorted(report_dir.glob("TEST-*.xml"))
     if not files:
         raise ValueError(f"missing XML reports: {report_dir}")
@@ -396,6 +410,7 @@ def verify_reports(
         suite = ET.parse(path).getroot()
         if suite.tag != "testsuite":
             raise ValueError(f"invalid test suite: {path}")
+        check_duration(suite.attrib.get("time"), "suite", path)
         if suite.attrib.get("name") == f"{task_name}.{COLLISION_DIAGNOSTIC_CLASS}":
             diagnostic_suites.append(suite)
         cases = suite.findall("testcase")
@@ -409,6 +424,7 @@ def verify_reports(
         failures += actual_failures + actual_errors
         skipped += actual_skips
         for case in cases:
+            check_duration(case.attrib.get("time"), "testcase", path)
             name = case.attrib.get("name", "")
             class_name = case.attrib.get("classname", "")
             parts = name.rsplit("[", 1)
@@ -416,6 +432,8 @@ def verify_reports(
             observed_browser = re.fullmatch(
                 r"(ChromeHeadless|Firefox)(\d+(?:\.\d+)*)", platform[2]
             ) if len(platform) == 4 and platform[1] == "browser" else None
+            if len(platform) == 4 and platform[0] != target:
+                raise ValueError(f"wrong browser target identity: {name}")
             if (observed_browser is None or observed_browser.group(1) != selected.group(1)
                     or observed_browser.group(2).split(".", 1)[0] != selected.group(2)):
                 raise ValueError(f"wrong runtime or missing runtime identity: {name}")
@@ -1130,7 +1148,7 @@ def audit_lane_receipt(receipt: Path) -> dict[str, object]:
                 marker = ("ChromeHeadless" if lane["runtime"] == "chromium" else
                           "Firefox") + lane["expected_runtime_version"].split(".")[0]
                 observed = verify_reports(Path(module["raw_xml"][0]["path"]).parent,
-                                          expected, f"{target}BrowserTest", marker,
+                                          expected, f"{target}BrowserTest", marker, target,
                                           require_collision_diagnostics=name == "dyn4k-core")
                 if {str(path) for path in observed["report_files"]} != {
                         item["path"] for item in module["raw_xml"]}:
@@ -1494,7 +1512,7 @@ def run_lane(root: Path, sha: str, receipt: Path, output: Path, target: str,
                                         browser_attestation_sha256=sha256(attestation))
                     marker = ("ChromeHeadless" if runtime == "chromium" else "Firefox") + expected_version.split(".")[0]
                     evidence.update(verify_reports(
-                        xml_dir, expected, f"{target}BrowserTest", marker,
+                        xml_dir, expected, f"{target}BrowserTest", marker, target,
                         require_collision_diagnostics=module == "dyn4k-core",
                     ))
                     launches = verify_browser_launches(attestation, binary, token, runtime)
