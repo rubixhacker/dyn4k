@@ -54,8 +54,73 @@ class RetainedWheelProviderTest(unittest.TestCase):
         with patch.object(actual, "_ROOT", origin), patch.object(
                 actual, "_STAGED_JAR", staged):
             result = verify_capture_receipt(receipt, files, *args)
-        self.assertEqual(result["status"], "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["status"], "UNPASSED_DYNAMIC_CLASS_LOAD")
+        self.assertEqual(result["operation_record_status"],
+                         "VERIFIED_ARITHMETIC_BINDING")
+        self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
         self.assertEqual(result["qualification"], "UNPASSED")
+        self.assertEqual(result["operations_verified"], 1800)
+        self.assertEqual(receipt["summary"]["status"],
+                         "VERIFIED_ARITHMETIC_BINDING")
+
+    def test_resealed_duplicate_lambda_rejects_and_new_or_missing_is_unbound(self):
+        receipt, original, origin, staged, args = self._retained()
+        lines = original["worker_class_load"].splitlines(keepends=True)
+        lambdas = [line for line in lines if b"portable." in line and
+                   b"$$Lambda/" in line]
+        self.assertGreater(len(lambdas), 1)
+        fabricated = (
+            f'[{receipt["worker_pid"]}][info][class,load] '
+            'portable.NumericalRecorder$$Lambda/0xdeadbeef '
+            'source: portable.NumericalRecorder\n').encode()
+        variants = {
+            "duplicate": original["worker_class_load"] + lambdas[0],
+            "fabricated": original["worker_class_load"] + fabricated,
+            "missing": b"".join(line for line in lines if line != lambdas[0]),
+            "missing_all": b"".join(line for line in lines
+                                    if b"$$Lambda/" not in line),
+        }
+        for name, changed in variants.items():
+            files = dict(original)
+            files["worker_class_load"] = changed
+            resealed = copy.deepcopy(receipt)
+            resealed["worker_class_load_sha256"] = hashlib.sha256(changed).hexdigest()
+            with self.subTest(name=name), patch.object(
+                    actual, "_ROOT", origin), patch.object(
+                    actual, "_STAGED_JAR", staged):
+                if name == "duplicate":
+                    with self.assertRaisesRegex(CaptureRejected,
+                                                "duplicate portable lambda"):
+                        verify_capture_receipt(resealed, files, *args)
+                else:
+                    result = verify_capture_receipt(resealed, files, *args)
+                    self.assertEqual(result["status"],
+                                     "UNPASSED_DYNAMIC_CLASS_LOAD")
+                    self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
+                    self.assertEqual(result["operation_record_status"],
+                                     "VERIFIED_ARITHMETIC_BINDING")
+                    self.assertEqual(result["operations_verified"], 1800)
+
+    def test_lambda_owner_must_have_an_ordinary_load(self):
+        receipt, original, origin, staged, args = self._retained()
+        with zipfile.ZipFile(io.BytesIO(original["portable_classes"])) as classes:
+            owners = (name.split("/", 1)[1].removesuffix(".class").replace("/", ".")
+                      for name in classes.namelist() if name.endswith(".class") and
+                      "/portable/" in name)
+            owner = next(name for name in owners if
+                         f" {name} source:".encode() not in
+                         original["worker_class_load"])
+        added = (f'[{receipt["worker_pid"]}][info][class,load] '
+                 f'{owner}$$Lambda/0xdeadbeef source: {owner}\n').encode()
+        files = dict(original)
+        files["worker_class_load"] += added
+        resealed = copy.deepcopy(receipt)
+        resealed["worker_class_load_sha256"] = hashlib.sha256(
+            files["worker_class_load"]).hexdigest()
+        with patch.object(actual, "_ROOT", origin), patch.object(
+                actual, "_STAGED_JAR", staged), self.assertRaisesRegex(
+                CaptureRejected, "portable lambda owner was not loaded"):
+            verify_capture_receipt(resealed, files, *args)
 
     def test_resealed_earlier_and_later_portable_provider_fail(self):
         receipt, original, origin, staged, args = self._retained()
@@ -227,7 +292,7 @@ class CaptureReceiptTest(unittest.TestCase):
                                            ["joint-Wheel-active"], runtime)
             genuine = verify_capture_receipt(receipt, files, "captureWheelActive",
                                              "a" * 40, ["joint-Wheel-active"], runtime)
-            self.assertEqual(genuine["status"], "VERIFIED_ARITHMETIC_BINDING")
+            self.assertEqual(genuine["status"], "UNPASSED_DYNAMIC_CLASS_LOAD")
             self.assertEqual(genuine["external_xml_witness"],
                              "PASSED_KERNEL_WORKER_WRITES")
             stream = io.BytesIO()

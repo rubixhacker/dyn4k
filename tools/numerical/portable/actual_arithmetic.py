@@ -608,6 +608,8 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
     portable_sources = {name: source_set for source_set, names in
                         portable_classes.items() for name in names}
     portable_observed = set()
+    dynamic_observed = set()
+    dynamic_owners = set()
     for line in lines:
         record = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] "
                               r"([^ ]+) source: (.+)", line)
@@ -620,6 +622,10 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
                 if owner.replace(".", "/") + ".class" not in portable_sources or \
                         location != owner:
                     raise CaptureRejected("portable lambda source differs")
+                if name in dynamic_observed:
+                    raise CaptureRejected("duplicate portable lambda class-load record")
+                dynamic_observed.add(name)
+                dynamic_owners.add(owner.replace(".", "/") + ".class")
                 continue
             member = name.replace(".", "/") + ".class"
             source_set = portable_sources.get(member)
@@ -646,6 +652,8 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
         observed[name] = location
     if not required <= set(observed):
         raise CaptureRejected("audited worker class-load inventory differs")
+    if not dynamic_owners <= portable_observed:
+        raise CaptureRejected("portable lambda owner was not loaded")
     required_portable = {"portable/ProspectiveArithmeticTest.class",
                          "portable/PortableMatrixTest.class",
                          "portable/NumericalRecorder.class"}
@@ -880,7 +888,13 @@ def verify_capture_receipt(receipt, files, method, commit, expected_ids,
                                     runtime_executable)
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
-    return expected["summary"]
+    summary = expected["summary"]
+    if method == "captureWheelActive":
+        summary = dict(summary)
+        summary["operation_record_status"] = summary["status"]
+        summary["dynamic_class_load_status"] = "UNBOUND"
+        summary["status"] = "UNPASSED_DYNAMIC_CLASS_LOAD"
+    return summary
 
 
 def focused_wheel_stream(xml):
