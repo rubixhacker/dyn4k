@@ -9,6 +9,7 @@ repositories {
 val profile = providers.gradleProperty("pulleyProfile").get()
 require(profile == "baseline" || profile == "candidate")
 val providerJar = providers.gradleProperty("providerJar").map(::file)
+layout.buildDirectory.set(layout.dir(providers.gradleProperty("pulleyBuildDirectory").map(::file)))
 
 dependencies {
     implementation(files(providerJar))
@@ -25,17 +26,31 @@ sourceSets {
         if (profile == "baseline") kotlin.srcDir("../baseline/src/main/kotlin")
     }
     test {
-        kotlin.srcDir("../src/jvmTest/kotlin")
+        kotlin.srcDir("src/test/kotlin")
         kotlin.include("portable/PulleyPreparationJdiV1Test.kt")
     }
 }
 
-tasks.register("writePulleyClasspath") {
+val pulleyFixtureJar = tasks.register<Jar>("pulleyFixtureJar") {
     dependsOn(tasks.named("testClasses"))
+    archiveFileName.set("pulley-fixture.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("pulley-jdi"))
+    from(sourceSets.main.get().output)
+    from(sourceSets.test.get().output)
+}
+
+tasks.register("writePulleyClasspath") {
+    dependsOn(pulleyFixtureJar)
     doLast {
         val output = providers.gradleProperty("pulleyClasspathFile").map(::file).get()
         require(output.parentFile.isDirectory)
         require(!output.exists())
-        output.writeText(sourceSets.test.get().runtimeClasspath.asPath)
+        val fixture = pulleyFixtureJar.get().archiveFile.get().asFile.canonicalFile
+        val provider = providerJar.get().canonicalFile
+        val dependencies = sourceSets.test.get().runtimeClasspath.files
+            .map { it.canonicalFile }
+            .filter { it.isFile && it.extension == "jar" && it != provider && it != fixture }
+        output.writeText((listOf(fixture, provider) + dependencies).joinToString(
+            java.io.File.pathSeparator) { it.absolutePath } + "\n")
     }
 }

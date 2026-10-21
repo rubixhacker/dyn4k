@@ -7,14 +7,24 @@ import zipfile
 from pathlib import Path
 
 from pulley_jdi_v1 import BASELINE_JAR_SHA256, Rejected, _digest, _json, _require, inspect_bundle
+from pulley_jdi_inputs_v2 import inspect_classpath, verify_candidate_publication
+import run as portable_runner
 from reference_diagnostic import projected_records
 from frozen_weld_pulley import compare_records
 
 
 CLASS_ENTRY = "org/dyn4j/dynamics/joint/PulleyJoint.class"
+BOUND_CLASSES = {
+    "pulley": ("provider", CLASS_ENTRY),
+    "body": ("provider", "org/dyn4j/dynamics/Body.class"),
+    "world": ("provider", "org/dyn4j/world/World.class"),
+    "geometry": ("provider", "org/dyn4j/geometry/Geometry.class"),
+    "case": ("fixture", "portable/PulleyPreparationJdiV1Test.class"),
+    "recorder": ("fixture", "portable/NumericalRecorder.class"),
+}
 CONTROLLER = Path(__file__).with_name("PulleyJdiControllerV2.java")
 CASE_ID = "P-JINT-Pulley-slack-transition-preparation-0"
-CONTROLLER_CLASS_SHA256 = "0a753df2c63aad616b961a4f6e4b7a6d7f1b0e8cb7f4d5827af2798e31a66202"
+CONTROLLER_CLASS_SHA256 = "a1a72bd5ea1c654cd5e8ee74e85a29cf8358bbb92cc66c2be6932c6992b7d4b8"
 JDK = Path("/tmp/dyn4k-tools/jdk21")
 BASELINE_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
 BASELINE_SOURCE = Path("/tmp/dyn4k-upstream-6.0.0/src/main/java/org/dyn4j/dynamics/joint/PulleyJoint.java")
@@ -43,12 +53,12 @@ class Reader:
         return struct.unpack(">I", self.take(4))[0]
 
 
-def class_inventory(artifact):
+def class_inventory(artifact, class_entry=CLASS_ENTRY):
     try:
         with zipfile.ZipFile(artifact) as archive:
-            _require(archive.getinfo(CLASS_ENTRY).file_size < 1024 * 1024,
-                     "Pulley class exceeds bound")
-            data = archive.read(CLASS_ENTRY)
+            _require(archive.getinfo(class_entry).file_size < 1024 * 1024,
+                     "bound class exceeds bound")
+            data = archive.read(class_entry)
     except (OSError, zipfile.BadZipFile, KeyError) as error:
         raise Rejected("Pulley artifact class is absent") from error
     reader = Reader(data)
@@ -120,11 +130,12 @@ def _properties(path):
     return result
 
 
-def inspect_loaded_code(directory, artifact):
+def inspect_loaded_code(directory, artifact, class_entry=CLASS_ENTRY, strict=False):
     directory = Path(directory)
-    pool, expected = class_inventory(artifact)
+    pool, expected = class_inventory(artifact, class_entry)
+    _digest(directory / "constant-pool.bin", 1024 * 1024)
     _require((directory / "constant-pool.bin").read_bytes() == pool,
-             "loaded Pulley constant pool differs")
+             "loaded class constant pool differs")
     lines = _lines(directory / "methods.tsv", 64 * 1024)
     _require(len(lines) == len(expected), "loaded Pulley method count differs")
     seen = set()
@@ -139,10 +150,15 @@ def inspect_loaded_code(directory, artifact):
         path = directory / file
         _require(path.is_file() and not path.is_symlink() and
                  path.stat().st_size <= 128 * 1024 and
-                 path.read_bytes() == expected[key], "loaded Pulley method bytes differ")
-    _require(seen == set(expected), "loaded Pulley method inventory incomplete")
+                 path.read_bytes() == expected[key], "loaded class method bytes differ")
+    _require(seen == set(expected), "loaded class method inventory incomplete")
     _require(len(list(directory.glob("method-*.bin"))) == len(expected),
-             "extra loaded Pulley method bytes")
+             "extra loaded class method bytes")
+    if strict:
+        _require({path.name for path in directory.iterdir()} ==
+                 {"constant-pool.bin", "methods.tsv"} |
+                 {f"method-{index}.bin" for index in range(len(expected))},
+                 "extra loaded class evidence")
     return {"methods": len(seen), "pool_sha256": hashlib.sha256(pool).hexdigest()}
 
 
@@ -155,6 +171,10 @@ def inspect_capture(directory, artifact=None):
         "controller_sha256", "controller_class_sha256", "classpath_sha256",
         "worker_sha256", "case_sha256", "events_sha256", "process_sha256",
         "loaded_pool_sha256", "loaded_methods_sha256", "java_sha256", "live_sha256",
+        "classpath_entries_sha256", "publication_sha256", "publication_log_sha256",
+        "source_archive_sha256",
+        "fixture_commit", "fixture_archive_sha256", "sidecar_build_stdout_sha256",
+        "sidecar_build_stderr_sha256", "sidecar_classpath_sha256",
     })
     _require(manifest["schema"] == "pulley-jdi-capture/2" and
              manifest["profile"] in ("baseline", "candidate"),
@@ -199,12 +219,61 @@ def inspect_capture(directory, artifact=None):
              "reviewed controller binary differs")
     _require(_digest(directory / "classpath.txt", 64 * 1024) ==
              manifest["classpath_sha256"], "worker classpath differs")
+    classpath_receipt = _json(directory / "classpath-entries.json",
+                              {"schema", "entries"})
+    _require(_digest(directory / "classpath-entries.json", 64 * 1024) ==
+             manifest["classpath_entries_sha256"] and
+             classpath_receipt["schema"] == "pulley-jdi-classpath/2" and
+             isinstance(classpath_receipt["entries"], list),
+             "classpath receipt differs")
+    archived_entries = inspect_classpath(directory / "classpath.txt", artifact,
+                                         directory / "classpath/000.jar",
+                                         directory / "classpath")
+    _require(len(archived_entries) == len(classpath_receipt["entries"]) and
+             all({key: entry[key] for key in ("role", "index", "sha256", "size")} ==
+                 {key: prior[key] for key in ("role", "index", "sha256", "size")}
+                 for entry, prior in zip(archived_entries, classpath_receipt["entries"])),
+             "retained classpath bytes or roles differ")
+    fixture_commit, fixture_archive = portable_runner.clean_identity()
+    _require(manifest["fixture_commit"] == fixture_commit and
+             manifest["fixture_archive_sha256"] == fixture_archive,
+             "focused fixture source identity differs")
+    for name, field in (("sidecar-build.stdout", "sidecar_build_stdout_sha256"),
+                        ("sidecar-build.stderr", "sidecar_build_stderr_sha256")):
+        _require(_digest(directory / name, 2 * 1024 * 1024) == manifest[field],
+                 "focused sidecar build log differs")
+    sidecar_classpath = directory / "sidecar-classpath.txt"
+    _require(_digest(sidecar_classpath, 64 * 1024) ==
+             manifest["sidecar_classpath_sha256"] and
+             sidecar_classpath.read_text() ==
+             os.pathsep.join(entry["path"] for entry in classpath_receipt["entries"]) + "\n",
+             "focused sidecar classpath receipt differs")
+    if manifest["profile"] == "candidate":
+        publication = verify_candidate_publication(artifact,
+                                                    directory / "publication.json")
+        _require((manifest["publication_sha256"] == publication["record_sha256"] and
+                  manifest["publication_log_sha256"] == publication["log_sha256"] and
+                  manifest["source_archive_sha256"] == publication["source_archive_sha256"]),
+                 "candidate publication binding differs")
+    else:
+        _require(all(manifest[field] is None for field in
+                     ("publication_sha256", "publication_log_sha256",
+                      "source_archive_sha256")),
+                 "baseline publication declaration differs")
     details = inspect_loaded_code(directory, artifact)
+    loaded_root = directory / "loaded"
+    _require(loaded_root.is_dir() and not loaded_root.is_symlink() and
+             {path.name for path in loaded_root.iterdir()} == set(BOUND_CLASSES),
+             "loaded class inventory differs")
+    for label, (role, class_entry) in BOUND_CLASSES.items():
+        source_jar = artifact if role == "provider" else directory / "classpath/000.jar"
+        inspect_loaded_code(loaded_root / label, source_jar, class_entry, strict=True)
     process = _properties(directory / "process.properties")
     _require(set(process) == {"schema", "controller_pid", "worker_pid", "parent_pid",
                              "entry_count", "breakpoint_count", "class_count",
                              "class_source_name", "class_loader_id", "exit_code",
-                             "nonce", "java_home"}, "controller process schema differs")
+                             "nonce", "java_home", "bound_class_count"},
+             "controller process schema differs")
     worker = _json(directory / "worker.json", {"schema", "pid", "case_id", "step",
                         "nonce", "case_sha256", "artifact_sha256", "class_source_uri"})
     live = _json(directory / "live.json", {"schema", "runner_pid", "controller_pid",
@@ -226,7 +295,9 @@ def inspect_capture(directory, artifact=None):
              process["nonce"] == worker["nonce"] and
              process["entry_count"] == "1" and
              process["breakpoint_count"] == "1" and
-             process["class_count"] == "1" and process["exit_code"] == "0",
+             process["class_count"] == "1" and
+             process["bound_class_count"] == str(len(BOUND_CLASSES)) and
+             process["exit_code"] == "0",
              "controller process or call count differs")
     source_name = "PulleyJoint.java" if manifest["profile"] == "baseline" else "PulleyJoint.kt"
     _require(process["class_source_name"] == source_name and

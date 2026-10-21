@@ -25,7 +25,7 @@ class PulleyJdiV1Test(unittest.TestCase):
     def test_external_producer_keeps_frozen_source_setup_and_fixture_hash(self):
         root = Path(__file__).resolve().parent
         original = (root / "src/commonTest/kotlin/portable/PortableMatrixTest.kt").read_text()
-        producer_path = root / "src/jvmTest/kotlin/portable/PulleyPreparationJdiV1Test.kt"
+        producer_path = root / "pulley-jdi-sidecar-v2/src/test/kotlin/portable/PulleyPreparationJdiV1Test.kt"
         self.assertTrue(producer_path.is_file())
         producer = producer_path.read_text()
         helper_start = "    private fun body(world: World<Body>"
