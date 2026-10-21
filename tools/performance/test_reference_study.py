@@ -35,6 +35,7 @@ class ReferenceStudyCliTest(unittest.TestCase):
             path.write_bytes((name + "-fixed-study-input").encode())
             self.identities[name] = str(path)
         self.plan = {
+            "archive_version": "reference-study-v2",
             "source_commit": SOURCE,
             "assignments": [{"phase": "source", "key": self.key_id,
                              "controls": [self.control_id]}],
@@ -112,6 +113,247 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertEqual(result["qualification"], "unpassed")
         self.assertEqual(result["validated_reference_rows"], 0)
         self.assertEqual(result["numeric_limits"], "not_approved")
+
+    def v3_captures(self):
+        rows = self.captures()
+        for serial, row in enumerate(rows, 1):
+            start, end = row["started_ns"], row["ended_ns"]
+            command = [self.identities["image"], "-cp",
+                       self.identities["probe"] + os.pathsep + self.identities["artifact"],
+                       "SyntheticRunner"]
+            observation = {key: row[key] for key in ("host_id", "boot_id", "os_pid",
+                           "process_start_id", "process_id", "run_id", "started_ns", "ended_ns")}
+            observation.update(observed_command=command,
+                               observed_environment={"DYN4K_CLOCK_NONCE": row["run_id"],
+                                                     "DYN4K_SOURCE_COMMIT": SOURCE},
+                               image={"pid": row["os_pid"], "sha256": row["image_sha256"],
+                                      "executable_path": self.identities["image"],
+                                      "method": "synthetic_observer", "observed_ns": start + 20},
+                               exit_code=0)
+            staged = {"core": row["artifact_sha256"], "kotlin": row["artifact_sha256"]}
+            provider = {"pid": row["os_pid"], "run_id": row["run_id"],
+                        "source_commit": SOURCE, "loaded_artifact_sha256": row["artifact_sha256"],
+                        "loaded_probe_sha256": row["probe_sha256"],
+                        "runtime_sha256": row["runtime_sha256"],
+                        "artifact_sha256": staged}
+            build = {"source_commit": SOURCE, "artifact_sha256": row["artifact_sha256"],
+                     "probe_sha256": row["probe_sha256"],
+                     "runtime_sha256": row["runtime_sha256"],
+                     "image_sha256": row["image_sha256"],
+                     "staged_core_sha256": staged["core"],
+                     "staged_kotlin_sha256": staged["kotlin"]}
+            origin = {"pid": row["os_pid"], "nonce": row["run_id"],
+                      "runtime_ns": start + 5}
+            monitor = {"host_id": row["host_id"], "boot_id": row["boot_id"],
+                       "os_pid": row["os_pid"], "process_start_id": row["process_start_id"],
+                       "launch_nonce": row["run_id"], "started_ns": start, "ended_ns": end,
+                       "samples": [{"clock_ns": start + 20, "os_pid": row["os_pid"],
+                                    "process_start_id": row["process_start_id"], "rss_bytes": 0}]}
+            run = {"api": "direct_kotlin", "mode": "timing", "sample_count": 1,
+                   "warmup_count": 1, "status": "complete"}
+            files = {"series": "step,elapsed_ns\n0,50\n",
+                     "measure_clock": "step,begin_ns,end_ns\n0,%d,%d\n" % (start + 100, start + 150),
+                     "warmup_clock": "warmup_step,begin_ns,end_ns\n0,%d,%d\n" %
+                                     (start + 10, start + 50),
+                     "observer": observation, "monitor": monitor, "provider": provider,
+                     "build_receipt": build, "clock_origin": origin, "run_receipt": run}
+            for kind, value in files.items():
+                path = self.root / f"v3-{kind}-{serial}.raw"
+                path.write_text(value if isinstance(value, str) else json.dumps(value))
+                row[kind + "_path"] = str(path)
+            for kind in ("staged_core", "staged_kotlin"):
+                row[kind + "_path"] = self.identities["artifact"]
+            environment = {key: row[key] for key in ("host_id", "boot_id", "os_pid",
+                             "process_start_id")}
+            environment.update(launch_nonce=row["run_id"], observer=observation,
+                               **{kind + "_sha256": row[kind + "_sha256"]
+                                  for kind in ("artifact", "probe", "runtime", "image")},
+                               staged_core_sha256=staged["core"],
+                               staged_kotlin_sha256=staged["kotlin"],
+                               **{kind + "_sha256": digest(Path(row[kind + "_path"]).read_bytes())
+                                  for kind in ("series", "monitor", "provider", "clock_origin")})
+            Path(row["environment_path"]).write_text(json.dumps(environment))
+            raw_kinds = ("series", "environment", "monitor", "observer", "build_receipt",
+                         "provider", "clock_origin", "measure_clock", "warmup_clock", "run_receipt",
+                         "staged_core", "staged_kotlin")
+            receipt = {"capture": {key: value for key, value in row.items()
+                                   if not key.endswith("_path")},
+                       "source_commit": SOURCE,
+                       "raw_sha256": {kind: digest(Path(row[kind + "_path"]).read_bytes())
+                                      for kind in raw_kinds},
+                       "staged_core_sha256": staged["core"],
+                       "staged_kotlin_sha256": staged["kotlin"],
+                       "command": command,
+                       "classpath": [{"path": self.identities[kind],
+                                      "sha256": row[kind + "_sha256"]}
+                                     for kind in ("probe", "artifact")]}
+            path = self.root / f"v3-source_receipt-{serial}.json"
+            path.write_text(json.dumps(receipt))
+            row["source_receipt_path"] = str(path)
+        return rows
+
+    def test_v3_signed_observer_source_roundtrip_remains_unpassed(self):
+        self.plan["archive_version"] = "reference-study-v3"
+        self.create()
+        self.seal(self.v3_captures())
+        self.assertEqual(self.verify()["qualification"], "unpassed")
+
+    def v3_archive(self):
+        self.plan["archive_version"] = "reference-study-v3"
+        self.create()
+        self.seal(self.v3_captures())
+        return json.loads((self.archive / "archive.json").read_text())
+
+    def rewrite_v3_raw(self, index, ordinal, kind, change):
+        row = index["captures"][ordinal]
+        path = self.archive / row[kind + "_path"]
+        value = json.loads(path.read_text()) if kind not in ("series", "measure_clock",
+                                                               "warmup_clock") else path.read_text()
+        updated = change(value)
+        path.write_text(updated if isinstance(updated, str) else json.dumps(updated))
+        row[kind + "_sha256"] = digest(path.read_bytes())
+        if kind != "source_receipt":
+            source_path = self.archive / row["source_receipt_path"]
+            source = json.loads(source_path.read_text())
+            source["raw_sha256"][kind] = row[kind + "_sha256"]
+            source_path.write_text(json.dumps(source))
+            row["source_receipt_sha256"] = digest(source_path.read_bytes())
+        self.resign_index(index)
+
+    def test_v3_equal_readings_in_distinct_files_and_relocated_replay(self):
+        self.plan["archive_version"] = "reference-study-v3"
+        self.create()
+        rows = self.v3_captures()
+        self.assertEqual(len({Path(row["series_path"]).read_bytes() for row in rows}), 1)
+        self.seal(rows)
+        moved = self.root / "v3-relocated"
+        self.archive.rename(moved)
+        self.archive = moved
+        result = self.verify()
+        self.assertEqual(result["validated_reference_rows"], 0)
+        self.assertEqual(result["numeric_limits"], "not_approved")
+        indexed = json.loads((moved / "archive.json").read_text())["captures"]
+        self.assertEqual(len({row["series_path"] for row in indexed}), 6)
+
+    def test_v3_rejects_missing_or_aliased_observer_and_source_receipts(self):
+        for kind in ("observer", "source_receipt"):
+            with self.subTest(kind=kind):
+                self.archive = self.root / f"v3-missing-{kind}"
+                index = self.v3_archive()
+                (self.archive / index["captures"][0][kind + "_path"]).unlink()
+                self.assertIn("missing archived bytes", self.verify(success=False)["reason"])
+                self.archive = self.root / f"v3-alias-{kind}"
+                index = self.v3_archive()
+                first, second = index["captures"][:2]
+                second[kind + "_path"] = first[kind + "_path"]
+                second[kind + "_sha256"] = first[kind + "_sha256"]
+                self.resign_index(index)
+                self.assertIn("raw archive path reused", self.verify(success=False)["reason"])
+
+    def test_v3_resigned_observer_process_change_is_rejected(self):
+        index = self.v3_archive()
+        self.rewrite_v3_raw(index, 0, "observer",
+                            lambda value: {**value, "os_pid": value["os_pid"] + 1})
+        self.assertIn("observer process or exit differs", self.verify(success=False)["reason"])
+
+    def test_v3_resigned_series_change_with_updated_environment_is_rejected(self):
+        index = self.v3_archive()
+        self.rewrite_v3_raw(index, 0, "series",
+                            lambda value: value.replace("0,50", "0,60"))
+        row = index["captures"][0]
+        self.rewrite_v3_raw(index, 0, "environment",
+                            lambda value: {**value, "series_sha256": row["series_sha256"]})
+        self.assertIn("measured series clock", self.verify(success=False)["reason"])
+
+    def test_v3_resigned_monitor_and_clock_outside_observed_process_are_rejected(self):
+        index = self.v3_archive()
+        ended = index["captures"][0]["ended_ns"]
+        self.rewrite_v3_raw(index, 0, "monitor",
+                            lambda value: {**value, "samples": [
+                                {**value["samples"][0], "clock_ns": ended}]})
+        row = index["captures"][0]
+        self.rewrite_v3_raw(index, 0, "environment",
+                            lambda value: {**value, "monitor_sha256": row["monitor_sha256"]})
+        self.assertIn("monitor sample outside observed process",
+                      self.verify(success=False)["reason"])
+        self.archive = self.root / "v3-late-clock"
+        index = self.v3_archive()
+        row = index["captures"][0]
+        self.rewrite_v3_raw(index, 0, "measure_clock",
+                            lambda value: "step,begin_ns,end_ns\n0,%d,%d\n" %
+                            (row["ended_ns"] + 1, row["ended_ns"] + 51))
+        self.assertIn("measured series clock outside observed process",
+                      self.verify(success=False)["reason"])
+
+    def test_v3_resigned_provider_and_stage_changes_are_rejected(self):
+        index = self.v3_archive()
+        self.rewrite_v3_raw(index, 0, "provider",
+                            lambda value: {**value, "loaded_artifact_sha256": "0" * 64})
+        row = index["captures"][0]
+        self.rewrite_v3_raw(index, 0, "environment",
+                            lambda value: {**value, "provider_sha256": row["provider_sha256"]})
+        self.assertIn("loaded provider control differs", self.verify(success=False)["reason"])
+        self.archive = self.root / "v3-stage"
+        index = self.v3_archive()
+        row = index["captures"][0]
+        stage = self.archive / row["staged_core_path"]
+        stage.write_bytes(b"changed-staged-core")
+        row["staged_core_sha256"] = digest(stage.read_bytes())
+        source_path = self.archive / row["source_receipt_path"]
+        source = json.loads(source_path.read_text())
+        source["raw_sha256"]["staged_core"] = row["staged_core_sha256"]
+        source_path.write_text(json.dumps(source))
+        row["source_receipt_sha256"] = digest(source_path.read_bytes())
+        self.resign_index(index)
+        self.assertIn("staged artifact receipt differs", self.verify(success=False)["reason"])
+
+    def test_v3_resigned_control_receipt_change_is_rejected(self):
+        index = self.v3_archive()
+        path = self.archive / "protocol.json"
+        protocol = json.loads(path.read_text())
+        control = protocol["controls"][0]
+        artifact = self.archive / control["artifact_path"]
+        artifact.write_bytes(b"changed-control")
+        control["artifact_sha256"] = digest(artifact.read_bytes())
+        protocol["signature"] = signature(protocol, self.key.read_bytes())
+        path.write_text(json.dumps(protocol))
+        index["protocol_sha256"] = digest(path.read_bytes())
+        self.resign_index(index)
+        self.assertIn("capture artifact differs", self.verify(success=False)["reason"])
+
+    def test_v3_rejects_unbound_observed_classpath_entry(self):
+        self.plan["archive_version"] = "reference-study-v3"
+        self.create()
+        rows = self.v3_captures()
+        row = rows[0]
+        observer_path = Path(row["observer_path"])
+        observer = json.loads(observer_path.read_text())
+        observer["observed_command"][2] += os.pathsep + "/unbound/rogue.jar"
+        observer_path.write_text(json.dumps(observer))
+        environment_path = Path(row["environment_path"])
+        environment = json.loads(environment_path.read_text())
+        environment["observer"] = observer
+        environment_path.write_text(json.dumps(environment))
+        source_path = Path(row["source_receipt_path"])
+        source = json.loads(source_path.read_text())
+        source["command"] = observer["observed_command"]
+        source["classpath"].append({"path": "/unbound/rogue.jar", "sha256": "0" * 64})
+        for kind in ("observer", "environment"):
+            source["raw_sha256"][kind] = digest(Path(row[kind + "_path"]).read_bytes())
+        source_path.write_text(json.dumps(source))
+        self.assertIn("unbound classpath", self.seal(rows, success=False)["reason"])
+
+    def test_v3_rejects_unsupported_raw_mode_at_create(self):
+        self.plan["archive_version"] = "reference-study-v3"
+        self.plan["assignments"][0]["key"] = sorted(
+            key for key in comparison_control_keys(frozen_policy())
+            if key.startswith("absolute_memory|js.node|"))[0]
+        self.plan["controls"][0]["control_id"] = "row_reference_self"
+        path = self.root / "memory-plan.json"
+        path.write_text(json.dumps(self.plan))
+        self.assertIn("timing raw schema", self.cli(
+            "create", "--archive", self.archive, "--plan", path,
+            "--trusted-key", self.key, success=False)["reason"])
 
     def test_four_declared_phases_verify_without_qualifying_a_row(self):
         phases = ("feasibility", "source", "model_holdout", "confirmation")
