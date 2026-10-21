@@ -253,14 +253,22 @@ def check_cases(observed, expected):
     return len(observed)
 
 
+def require_task_device(raw):
+    lines = raw.decode("utf-8").splitlines()
+    if not lines or lines[0] != "List of devices attached":
+        raise ValueError("isolated ADB device listing header differs")
+    target = [line for line in lines[1:] if line.split() and line.split()[0] == "emulator-5558"]
+    if len(target) != 1 or not re.fullmatch(
+            r"emulator-5558[ \t]+device(?:[ \t]+[A-Za-z_][A-Za-z0-9_.-]*:[^\s]+)*[ \t]*", target[0]):
+        raise ValueError("isolated ADB task device is absent, duplicated, or not ready")
+
+
 def guest_query(root, adb):
     prefix = [adb, "-P", "5038", "-s", "emulator-5558"]
     devices = command(root, [adb, "-P", "5038", "devices", "-l"])
     if devices["exit_code"] or devices["stderr"]:
         raise ValueError("isolated ADB device query failed")
-    device_lines = [line for line in devices["stdout"].decode().splitlines() if line.startswith("emulator-")]
-    if len(device_lines) != 1 or device_lines[0].split()[:2] != ["emulator-5558", "device"]:
-        raise ValueError("isolated ADB server has an unexpected device")
+    require_task_device(devices["stdout"])
     observations = {}
     for prop in GUEST_PROPERTIES:
         proc = command(root, prefix + ["shell", "getprop", prop])
@@ -306,9 +314,9 @@ def validate_deployment_output(push, push_err, chmod_err, remote_out, remote_err
 def validate_guest(record, root):
     adb = trusted_adb()
     devices, stderr = validate_command_record(record["devices"], [adb, "-P", "5038", "devices", "-l"])
-    device_lines = [line for line in devices.decode().splitlines() if line.startswith("emulator-")]
-    if stderr or len(device_lines) != 1 or device_lines[0].split()[:2] != ["emulator-5558", "device"]:
-        raise ValueError("guest device listing differs")
+    if stderr:
+        raise ValueError("guest device listing has stderr")
+    require_task_device(devices)
     observations = {}
     if set(record.get("observations", {})) != set(GUEST_PROPERTIES):
         raise ValueError("guest property observations are incomplete")
