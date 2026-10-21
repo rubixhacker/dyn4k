@@ -35,6 +35,7 @@ jobs:
             python3 -B -m unittest -v \
               test_actual_arithmetic \
               test_actual_capture_receipt \
+              test_capture_actual \
               test_rotation_oracle \
               test_rotation_marker \
               test_prospective_compare

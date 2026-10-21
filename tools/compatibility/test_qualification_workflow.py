@@ -209,7 +209,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
                  "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
                  "test_actual_arithmetic test_actual_capture_receipt "
-                 "test_rotation_oracle test_rotation_marker test_prospective_compare"),
+                 "test_capture_actual test_rotation_oracle test_rotation_marker "
+                 "test_prospective_compare"),
             ],
             step_contract,
         )
@@ -339,6 +340,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("history depth", "fetch-depth: 0", "fetch-depth: 1"),
             ("archive unset", "-u DYN4K_WHEEL_ORIGIN ", ""),
             ("numerical module", "test_rotation_oracle", "test_rotation_oracle_changed"),
+            ("capture regression omitted", "              test_capture_actual \\\n", ""),
             ("added installation step",
              "      - name: Test source-only numerical regressions\n",
              "      - name: Install a dependency\n"
@@ -352,6 +354,15 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 mutated = source.replace(old, new, 1)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(mutated)
+
+    def test_capture_actual_source_regression_is_required(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assertIn("test_capture_actual", source)
+        self.assert_source_checks_job_contract(source)
+        without_capture = source.replace("              test_capture_actual \\\n", "", 1)
+        self.assertNotEqual(source, without_capture)
+        with self.assertRaises(AssertionError):
+            self.assert_source_checks_job_contract(without_capture)
 
     def test_push_and_pull_request_do_not_schedule_qualification_jobs(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -454,7 +465,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "-u DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST "
             "PYTHONPATH=tools/numerical/portable python3 -B -m unittest -v "
             "test_actual_arithmetic test_actual_capture_receipt "
-            "test_rotation_oracle test_rotation_marker test_prospective_compare",
+            "test_capture_actual test_rotation_oracle test_rotation_marker "
+            "test_prospective_compare",
             command,
         )
 
