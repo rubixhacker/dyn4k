@@ -283,7 +283,7 @@ class PulleyJdiV2Test(unittest.TestCase):
                 with self.assertRaisesRegex(Rejected, 'live operands differ'):
                     replay_capture(original, root / 'replay-red')
                 self.assertEqual(replay_capture(original, root / 'replay-green')['status'],
-                                 'PROVED_REPLAYED_ONECASE_OPERATION')
+                                 'REPLAYED_ONECASE_OPERATION')
 
     def test_indexed_reference_hash_is_checked_before_any_policy_claim(self):
         with tempfile.TemporaryDirectory() as directory:

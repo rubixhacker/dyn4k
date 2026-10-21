@@ -122,8 +122,17 @@ def stop_capture_process(process):
 
 
 def _file_sizes(*roots):
-    return {path: path.stat().st_size for root in roots for path in Path(root).rglob("*")
-            if path.is_file() and not path.is_symlink()}
+    sizes = {}
+    for root in roots:
+        for path in Path(root).rglob("*"):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                sizes[path] = path.stat().st_size
+            except OSError:
+                # skip transient files deleted during an active build
+                pass
+    return sizes
 
 
 class CaptureBudget:
@@ -470,7 +479,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
                                           "-cp", str(jdi_classes), "RotationJdiProbe",
                                           "attach", str(jdi_output), "127.0.0.1",
                                           str(jdi_port), "org.dyn4j.geometry.Transform",
-                                          "1800", "300"]
+                                          "1800", "600"]
                         with (temporary / "jdi-helper.log").open("xb") as helper_log:
                             helper = subprocess.Popen(helper_command, cwd=PORTABLE,
                                                       env=environment, stdout=helper_log,

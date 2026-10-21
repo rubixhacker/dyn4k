@@ -47,7 +47,7 @@ TEST_HOME = str(Path.home() / "boolean-jdi-test")
 HELPER_ARGS = ["/tmp/dyn4k-tools/jdk21/bin/java", "--add-modules", "jdk.jdi",
                f"-Djava.io.tmpdir={TEST_HOME}/tmp", "-cp", f"{TEST_HOME}/helper-classes",
                "RotationJdiProbe", "attach", f"{TEST_HOME}/jdi", "127.0.0.1",
-               "40001", "org.dyn4j.geometry.Transform", "1800", "300"]
+               "40001", "org.dyn4j.geometry.Transform", "1800", "600"]
 WORKER_EXEC = (b'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
                b'["java", "GradleWorkerMain"], 0x7f) = 0\n')
 THREAD_CLONE = (b'clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'

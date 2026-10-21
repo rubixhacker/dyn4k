@@ -264,7 +264,7 @@ def replay_capture(original, replay_output):
              "replayed Pulley live operands differ")
     _require(prior["artifact_sha256"] == replay["artifact_sha256"],
              "replayed provider artifact differs")
-    return {"status": "PROVED_REPLAYED_ONECASE_OPERATION",
+    return {"status": "REPLAYED_ONECASE_OPERATION",
             "case_sha256": prior["case_sha256"],
             "artifact_sha256": prior["artifact_sha256"],
             "replay_output": str(replay_output),

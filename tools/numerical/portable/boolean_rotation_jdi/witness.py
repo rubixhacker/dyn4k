@@ -72,6 +72,8 @@ def verify_stream(witness, expected):
             any(type(site) is not int or site < 0 for site in sites) or
             len(set(sites)) != 3):
         return _result("UNPASSED_SOURCE_CALL_SITE")
+    if len(calls) != len(markers):
+        return _result("FAILED_COVERAGE")
     body_receivers = {}
     threads = set()
     for index, (call, marker) in enumerate(zip(calls, markers)):

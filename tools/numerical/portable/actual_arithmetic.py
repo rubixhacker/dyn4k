@@ -174,7 +174,9 @@ def verify_rotation_premise_capture(xml, expected_ids):
                     "NUMERICAL_JSON", "NUMERICAL_JSON"]:
                 raise CaptureRejected("rotation premise record order differs")
             inputs, marker, state, ending = [json.loads(
-                line.split(" ", 1)[1], object_pairs_hook=_unique_object)
+                line.split(" ", 1)[1], object_pairs_hook=_unique_object,
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    CaptureRejected(f"nonfinite rotation premise token: {value}")))
                 for line in group]
             if inputs.get("kind") != "inputs" or inputs.get("id") != case_id or \
                     inputs.get("steps") != 1 or \
@@ -1232,7 +1234,7 @@ def _verify_boolean_jdi(files, summary, worker_pid):
         argv = [str(jdi_bridge.JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
                 "-Djava.io.tmpdir=" + paths[2], "-cp", paths[0],
                 "RotationJdiProbe", "attach", paths[1], "127.0.0.1",
-                str(port), class_name, "1800", "300"]
+                str(port), class_name, "1800", "600"]
         process = jdi_bridge.verify_jdi_transport(
             files["worker_write_traces"], files["jdi_helper_traces"],
             port, int(worker_pid), helper_pid, argv)

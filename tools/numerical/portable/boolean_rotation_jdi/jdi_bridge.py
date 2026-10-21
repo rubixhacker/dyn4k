@@ -192,6 +192,8 @@ def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers):
                     raise EvidenceRejected("JDI loaded code differs from artifact")
                 calls = read_probe_events(output, expected_count)
                 verify_body_map((output / "body-map.tsv").read_bytes(), calls)
+                if len(calls) != len(markers):
+                    raise EvidenceRejected("JDI call and marker counts differ")
                 for call, marker in zip(calls, markers):
                     if type(marker) is not dict or any(
                             call[key] != marker.get(key) for key in
@@ -317,7 +319,7 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
             not expected_argv[3].startswith("-Djava.io.tmpdir=") or
             expected_argv[7] != "attach" or expected_argv[9:11] != [
                 "127.0.0.1", str(port)] or
-            expected_argv[11:] != ["org.dyn4j.geometry.Transform", "1800", "300"] or
+            expected_argv[11:] != ["org.dyn4j.geometry.Transform", "1800", "600"] or
             any(not Path(value).is_absolute() or
                 not Path(value).resolve().is_relative_to(Path.home().resolve())
                 for value in (expected_argv[3].removeprefix("-Djava.io.tmpdir="),
