@@ -111,7 +111,8 @@ class ReferenceStudyProducerTest(unittest.TestCase):
                             for value in seen))
 
     def observe_fake_process(self, name, command_read, rss_read,
-                             environment_read=None, image_read=None, timeout=1):
+                             environment_read=None, image_read=None, start_read=None,
+                             timeout=1):
         command = [str(JDK / "bin/java"), "fixture"]
         state = {"exited": False}
 
@@ -143,10 +144,13 @@ class ReferenceStudyProducerTest(unittest.TestCase):
                 return image_read(command, state)
             return {"sha256": "image", "executable_path": command[0]}
 
+        def read_start(pid):
+            return start_read(state) if start_read is not None else 11
+
         with mock.patch.object(producer.subprocess, "Popen", return_value=Process()), \
                 mock.patch.object(producer, "host_identity", return_value=("host", "boot")), \
                 mock.patch.object(producer, "observe_process_image", side_effect=read_image), \
-                mock.patch.object(producer, "process_start_ticks", return_value=11), \
+                mock.patch.object(producer, "process_start_ticks", side_effect=read_start), \
                 mock.patch.object(producer, "process_command", side_effect=read_command), \
                 mock.patch.object(producer, "process_environment",
                                   side_effect=read_environment), \
@@ -265,6 +269,82 @@ class ReferenceStudyProducerTest(unittest.TestCase):
 
         observation = self.observe_fake_process("empty-terminal-command", command_read,
                                                 lambda state: 1024)
+        self.assertEqual(observation["process_start_id"], "11")
+
+    def test_changed_start_id_rejects_before_terminal_empty_command(self):
+        reads = 0
+
+        def read_start(state):
+            nonlocal reads
+            reads += 1
+            return 11 if reads == 1 else 12
+
+        def terminal_command(command, state):
+            if reads == 2:
+                state["exited"] = True
+                return []
+            return command
+
+        with self.assertRaises(ValueError) as caught:
+            self.observe_fake_process("changed-start-empty-command", terminal_command,
+                                      lambda state: 1024, start_read=read_start)
+        self.assertTrue(str(caught.exception) ==
+                        "process start identity changed during observation")
+
+    def test_changed_start_id_rejects_before_terminal_missing_environment(self):
+        reads = 0
+
+        def read_start(state):
+            nonlocal reads
+            reads += 1
+            return 11 if reads == 1 else 12
+
+        def terminal_environment(state):
+            if reads == 2:
+                state["exited"] = True
+                raise FileNotFoundError("procfs environment vanished")
+            return {"DYN4K_CLOCK_NONCE": "nonce"}
+
+        with self.assertRaises(ValueError) as caught:
+            self.observe_fake_process("changed-start-missing-environment",
+                                      lambda command, state: command, lambda state: 1024,
+                                      environment_read=terminal_environment,
+                                      start_read=read_start)
+        self.assertTrue(str(caught.exception) ==
+                        "process start identity changed during observation")
+
+    def test_same_start_id_allows_genuine_terminal_disappearance(self):
+        reads = 0
+
+        def read_start(state):
+            nonlocal reads
+            reads += 1
+            return 11
+
+        def terminal_command(command, state):
+            if reads == 2:
+                state["exited"] = True
+                return []
+            return command
+
+        observation = self.observe_fake_process("same-start-terminal-command",
+                                                terminal_command, lambda state: 1024,
+                                                start_read=read_start)
+        self.assertEqual(observation["process_start_id"], "11")
+
+        reads = 0
+
+        def terminal_environment(state):
+            if reads == 2:
+                state["exited"] = True
+                raise FileNotFoundError("procfs environment vanished")
+            return {"DYN4K_CLOCK_NONCE": "nonce"}
+
+        observation = self.observe_fake_process("same-start-terminal-environment",
+                                                lambda command, state: command,
+                                                lambda state: 1024,
+                                                environment_read=terminal_environment,
+                                                start_read=read_start)
         self.assertEqual(observation["process_start_id"], "11")
 
     def test_terminal_missing_rss_recovers_but_live_missing_rss_fails(self):

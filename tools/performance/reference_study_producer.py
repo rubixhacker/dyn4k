@@ -161,6 +161,8 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                     need(Path(candidate["executable_path"]).resolve() ==
                          Path(command[0]).resolve(), "observed process image path differs")
                     current_ticks = process_start_ticks(process.pid)
+                    need(ticks is None or ticks == current_ticks,
+                         "process start identity changed during observation")
                     current_argv = process_command(process.pid)
                     if not current_argv:
                         if process.poll() is not None and samples:
@@ -172,8 +174,6 @@ def observe_process(command, env, folder, nonce, expected_image_sha, timeout=15)
                     if not observed_nonce and process.poll() is not None and samples:
                         break
                     need(observed_nonce == nonce, "observed launch nonce differs")
-                    need(ticks is None or ticks == current_ticks,
-                         "process start identity changed during observation")
                     if process.poll() is not None:
                         break
                     try:
