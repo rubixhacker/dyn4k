@@ -1726,7 +1726,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         parent = "d5683a7474e2379f5aa4d5c29dc49b1b109aa98f"
         self.assertEqual(current, independent_gates.P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
         self.assertEqual(assembly, independent_gates.P2_BOOLEAN_JDI_FINAL_ASSEMBLY_REVISION)
-        self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertNotEqual(independent_gates.P2_BOOLEAN_JDI_PRODUCERS,
                             independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS)
@@ -1754,12 +1754,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(committed, (ROOT / relative).read_bytes())
             for relative, digest in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES.items():
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(committed, (ROOT / relative).read_bytes())
         for revision in (current, assembly):
             self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
                              independent_gates._p2_producer_binding(ROOT, revision))
@@ -1811,7 +1809,7 @@ class IndependentGateSeamTests(unittest.TestCase):
 
             with self.subTest(path=relative, surface="local"), mock.patch.object(
                     Path, "read_bytes", altered_dependency_local):
-                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI final producer blob differs"):
                     independent_gates._p2_producer_binding(ROOT, current)
             original_show = subprocess.check_output
 
@@ -1822,7 +1820,7 @@ class IndependentGateSeamTests(unittest.TestCase):
 
             with self.subTest(path=relative, surface="committed"), mock.patch.object(
                     subprocess, "check_output", altered_dependency_committed):
-                with self.assertRaisesRegex(ValueError, "Boolean JDI producer blob differs"):
+                with self.assertRaisesRegex(ValueError, "Boolean JDI final producer blob differs"):
                     independent_gates._p2_producer_binding(ROOT, current)
         for relative in independent_gates.P2_BOOLEAN_JDI_FINAL_DEPENDENCIES:
             original_show = subprocess.check_output

@@ -132,7 +132,7 @@ P2_BOOLEAN_JDI_HELPER_REVISION = "341276fd55ea23c35fabab4a859f520dd5831429"
 P2_BOOLEAN_JDI_SOURCE_REVISION = "2a2c4b797b8adcdf3c03ee8475366ba2cfd9b16e"
 P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION = "1ef6554b4edb4e6066f5ae16ee64dbeda131d568"
 P2_BOOLEAN_JDI_FINAL_ASSEMBLY_REVISION = "990910f697dbb8c183793796d0aca7a16c520815"
-P2_ROTATION_PREMISE_SOURCE_REVISION = "0db6038d34e55d2597efce784e82f77c0119fcda"
+P2_ROTATION_PREMISE_SOURCE_REVISION = "a7fb17a65f936f4224e2a38a7481f2d698f2d155"
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
     "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
@@ -876,10 +876,12 @@ def _p2_producer_binding(repository, candidate_sha):
                         "rotation premise producer")
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
-                        "Boolean JDI final producer")
+                        "Boolean JDI final producer",
+                        local_approved=P2_ROTATION_PREMISE_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
-                        "Boolean JDI producer")
+                        "Boolean JDI producer",
+                        local_approved=P2_ROTATION_PREMISE_DEPENDENCIES)
     return dict(approved)
 
 
