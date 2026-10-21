@@ -119,6 +119,111 @@ class ReferenceStudyCliTest(unittest.TestCase):
         self.assertEqual(result["declared_assignments"], 4)
         self.assertEqual(result["validated_reference_rows"], 0)
 
+    def test_rejects_repeated_series_within_fresh_source_pairs(self):
+        self.create()
+        rows = self.captures()
+        Path(rows[1]["series_path"]).write_bytes(Path(rows[0]["series_path"]).read_bytes())
+        self.assertIn("reused series bytes", self.seal(rows, success=False)["reason"])
+
+    def test_rejects_reused_series_across_feasibility_and_source(self):
+        self.plan["assignments"].insert(0, {"phase": "feasibility", "key": self.key_id,
+                                            "controls": [self.control_id]})
+        self.create()
+        rows = self.captures(("feasibility", "source"))
+        rows[6]["series_path"] = rows[0]["series_path"]
+        self.assertIn("reused series bytes", self.seal(rows, success=False)["reason"])
+
+    def test_rejects_reused_monitor_bytes_across_fresh_processes(self):
+        self.create()
+        rows = self.captures()
+        rows[1]["monitor_path"] = rows[0]["monitor_path"]
+        self.assertIn("reused monitor bytes", self.seal(rows, success=False)["reason"])
+
+    def test_repeated_environment_identity_remains_valid(self):
+        self.plan["assignments"].append({"phase": "model_holdout", "key": self.key_id,
+                                         "controls": [self.control_id]})
+        self.create()
+        rows = self.captures(("source", "model_holdout"))
+        for row in rows[1:]:
+            row["environment_path"] = rows[0]["environment_path"]
+        result = self.seal(rows)
+        self.assertEqual(result["study"], "structurally_verified")
+        self.assertEqual(result["qualification"], "unpassed")
+
+    def test_rejects_overlapping_same_host_pid_intervals(self):
+        self.create()
+        rows = self.captures()
+        rows[1]["os_pid"] = rows[0]["os_pid"]
+        rows[1]["started_ns"] = rows[0]["started_ns"] + 1
+        rows[1]["ended_ns"] = rows[0]["ended_ns"] + 1
+        self.assertIn("overlapping observed host/PID intervals",
+                      self.seal(rows, success=False)["reason"])
+
+    def test_allows_nonoverlapping_same_host_pid_intervals(self):
+        self.create()
+        rows = self.captures()
+        rows[1]["os_pid"] = rows[0]["os_pid"]
+        self.assertEqual(self.seal(rows)["study"], "structurally_verified")
+
+    def test_rejects_unsigned_duplicate_index_key(self):
+        self.create()
+        self.seal(self.captures())
+        index_path = self.archive / "archive.json"
+        original = index_path.read_text()
+        index_path.write_text(original.replace("{", '{"captures":[],', 1))
+        self.assertIn("duplicate JSON key", self.verify(success=False)["reason"])
+
+    def test_rejects_unsigned_nested_duplicate_index_key(self):
+        self.create()
+        self.seal(self.captures())
+        index_path = self.archive / "archive.json"
+        original = index_path.read_text()
+        index_path.write_text(original.replace('"route": "direct_kotlin"',
+                                               '"route": "baseline", "route": "direct_kotlin"',
+                                               1))
+        self.assertIn("duplicate JSON key", self.verify(success=False)["reason"])
+
+    def test_rejects_duplicate_signed_protocol_key_before_seal(self):
+        self.create()
+        protocol_path = self.archive / "protocol.json"
+        original = protocol_path.read_text()
+        protocol_path.write_text(original.replace("{", '{"controls":[],', 1))
+        self.assertIn("duplicate JSON key",
+                      self.seal(self.captures(), success=False)["reason"])
+
+    def test_resigned_archive_rejects_reused_series_and_overlapping_pid(self):
+        for mutation in ("series", "interval"):
+            with self.subTest(mutation=mutation):
+                self.archive = self.root / f"signed-{mutation}"
+                self.create()
+                self.seal(self.captures())
+                index = json.loads((self.archive / "archive.json").read_text())
+                first, second = index["captures"][:2]
+                if mutation == "series":
+                    second["series_path"] = first["series_path"]
+                    second["series_sha256"] = first["series_sha256"]
+                else:
+                    second["os_pid"] = first["os_pid"]
+                    second["started_ns"] = first["started_ns"] + 1
+                    second["ended_ns"] = first["ended_ns"] + 1
+                self.resign_index(index)
+                reason = self.verify(success=False)["reason"]
+                self.assertIn("reused series bytes" if mutation == "series" else
+                              "overlapping observed host/PID intervals", reason)
+
+    def test_accepts_unique_key_canonical_signed_json(self):
+        self.create()
+        protocol_path = self.archive / "protocol.json"
+        protocol_path.write_text(json.dumps(json.loads(protocol_path.read_text()),
+                                            sort_keys=True, separators=(",", ":")))
+        self.seal(self.captures())
+        index_path = self.archive / "archive.json"
+        index_path.write_text(json.dumps(json.loads(index_path.read_text()),
+                                         sort_keys=True, separators=(",", ":")))
+        result = self.verify()
+        self.assertEqual(result["study"], "structurally_verified")
+        self.assertEqual(result["qualification"], "unpassed")
+
     def test_rejects_wrong_assignment_route_artifact_and_unbalanced_order(self):
         for mutation in (lambda r: r[0].update(key="absolute_timing|wrong"),
                          lambda r: r[0].update(route="baseline"),

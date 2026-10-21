@@ -1,4 +1,5 @@
 import argparse
+from bisect import bisect_left
 import hashlib
 import hmac
 import json
@@ -13,7 +14,6 @@ from sustained_archive import (FROZEN_MANIFEST_SHA256, canonical,
 SOURCE_COMMIT = "bb7d5cf7671f96a13449a5e0c3d65ff44d4b4975"
 VERSION = "reference-study-v1"
 PHASES = ("feasibility", "source", "model_holdout", "confirmation")
-INDEPENDENT_PHASES = frozenset(PHASES[1:])
 IDENTITY_FILES = ("artifact", "probe", "runtime", "image")
 RAW_FILES = ("series", "environment", "monitor")
 CONTROL_ROUTES = {"dyn4j_6_0_0_jvm": "baseline",
@@ -89,10 +89,23 @@ def checked_relative(root, relative, expected_hash):
     return path
 
 
+def unique_object(pairs):
+    value = {}
+    for name, item in pairs:
+        require(name not in value, "duplicate JSON key")
+        value[name] = item
+    return value
+
+
+def load_unique_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"),
+                      object_pairs_hook=unique_object)
+
+
 def signed_json(root, name, key):
     path = root / name
     require(path.is_file() and not path.is_symlink(), f"missing {name}")
-    record = json.loads(path.read_text())
+    record = load_unique_json(path)
     require(isinstance(record, dict) and "signature" in record,
             f"missing {name} signature")
     require(hmac.compare_digest(record["signature"], signature(record, key)),
@@ -196,8 +209,8 @@ def validate_captures(root, protocol, captures):
     actual = set()
     process_ids = set()
     run_ids = set()
-    observed_processes = set()
-    raw_phase = {}
+    process_intervals = {}
+    process_raw_hashes = {"series": set(), "monitor": set()}
     for capture in captures:
         exact_keys(capture, CAPTURE_KEYS | {name + "_sha256" for name in RAW_FILES},
                    "capture")
@@ -232,20 +245,25 @@ def validate_captures(root, protocol, captures):
                 type(capture["ended_ns"]) is int and
                 0 <= capture["started_ns"] < capture["ended_ns"],
                 "invalid process identity or interval")
-        observed = (capture["host_id"], capture["os_pid"], capture["started_ns"])
-        require(observed not in observed_processes, "reused observed process")
-        observed_processes.add(observed)
+        process_key = (capture["host_id"], capture["os_pid"])
+        intervals = process_intervals.setdefault(process_key, [])
+        start, end = capture["started_ns"], capture["ended_ns"]
+        position = bisect_left(intervals, (start, end))
+        require((position == 0 or intervals[position - 1][1] <= start) and
+                (position == len(intervals) or end <= intervals[position][0]),
+                "overlapping observed host/PID intervals")
+        intervals.insert(position, (start, end))
         require(capture["invalid_reason"] is None and
                 capture["stop_reason"] == "completed",
                 "invalid or stopped study capture")
         for name in RAW_FILES:
             checked_relative(root, capture[name + "_path"],
                              capture[name + "_sha256"])
-            raw_hash = capture[name + "_sha256"]
-            if phase in INDEPENDENT_PHASES:
-                require(raw_hash not in raw_phase or raw_phase[raw_hash] == phase,
-                        "raw bytes reused across independent phases")
-                raw_phase[raw_hash] = phase
+            if name in process_raw_hashes:
+                raw_hash = capture[name + "_sha256"]
+                require(raw_hash not in process_raw_hashes[name],
+                        f"reused {name} bytes across process captures")
+                process_raw_hashes[name].add(raw_hash)
     require(actual == expected, "declared assignment pair inventory incomplete")
     return len(assignments)
 
@@ -309,10 +327,10 @@ def main():
         require(len(key) >= 32, "trusted key is too short")
         if args.command == "create":
             require(args.plan, "create requires a plan")
-            result = create_archive(root, json.loads(Path(args.plan).read_text()), key, key_path)
+            result = create_archive(root, load_unique_json(args.plan), key, key_path)
         elif args.command == "seal":
             require(args.captures, "seal requires captures")
-            result = seal_archive(root, json.loads(Path(args.captures).read_text()), key,
+            result = seal_archive(root, load_unique_json(args.captures), key,
                                   key_path)
         else:
             require(args.expected_source_commit, "verify requires expected source")
