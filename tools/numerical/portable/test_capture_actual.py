@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -57,6 +58,39 @@ class CaptureSourceGuardTest(unittest.TestCase):
                 capture_actual.run_capture("method", output)
         self.assertEqual((output / "source.tar").read_bytes(), canonical)
         self.assertFalse((output / "receipt.json").exists())
+
+    def test_boolean_selector_reaches_clean_source_guard(self):
+        method = "captureRevoluteLimitsFalse"
+        self.assertEqual(capture_actual.capture_case_ids()[method],
+                         ["joint-Revolute-LimitsEnabled-false"])
+        self.assertEqual(capture_actual.target_test_class(method),
+                         "portable.RevoluteLimitsFalseCaptureTest")
+        self.assertEqual(capture_actual.target_test_class("captureWheelActive"),
+                         "portable.ProspectiveArithmeticTest")
+        self.assertEqual(len(capture_actual.capture_case_ids()), 17)
+        with patch.object(capture_actual, "clean_source",
+                          side_effect=CaptureRejected("selected source guard")):
+            with self.assertRaisesRegex(CaptureRejected, "selected source guard"):
+                capture_actual.run_capture(method, self.root / "capture",
+                                           self.root / "reference.jsonl")
+
+    def test_boolean_archive_inventory_excludes_nonworker_argument_logs(self):
+        output = self.root / "archive"
+        output.mkdir()
+        method = "captureRevoluteLimitsFalse"
+        class_log = output / "worker-class-load-123.log"
+        argument_log = output / "worker-arguments-123.log"
+        names = capture_actual.archive_file_names(method, class_log, argument_log)
+        for name in names - {"worker-write-traces.zip"}:
+            (output / name).write_bytes(b"sealed")
+        with zipfile.ZipFile(output / "worker-write-traces.zip", "w") as archive:
+            archive.writestr("trace.123", b"safe\n")
+        capture_actual.verify_archive_inventory(output, method,
+                                                class_log, argument_log)
+        (output / "worker-arguments-999.log").write_bytes(b"unvetted")
+        with self.assertRaisesRegex(CaptureRejected, "archive inventory"):
+            capture_actual.verify_archive_inventory(output, method,
+                                                    class_log, argument_log)
 
     def test_capture_source_tar_ignores_same_type_commit_replacement(self):
         original = capture_actual.git("rev-parse", "HEAD").decode().strip()

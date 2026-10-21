@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -20,7 +21,7 @@ from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                make_capture_receipt,
                                verify_capture_receipt)
 from test_actual_arithmetic import fixture, focused_wheel_fixture, xml_for
-from test_rotation_marker import bits
+from test_rotation_marker import bits, marker
 
 
 class RetainedWheelProviderTest(unittest.TestCase):
@@ -390,6 +391,175 @@ class CaptureReceiptTest(unittest.TestCase):
         self.assertEqual(result["dynamic_class_load_status"], "UNBOUND")
         self.assertEqual(result["qualification"], "UNPASSED")
         self.assertEqual(result["operations_verified"], 1)
+
+    def test_boolean_source_call_sites_reject_one_changed_branch(self):
+        sites = [("b1", "integrate"), ("b0", None), ("b1", None)]
+        markers = [{"step": 1, "sequence": index, "body_id": body,
+                    "branch": branch, "kind": "rotate"}
+                   for index, (body, branch) in enumerate(sites)]
+        actual._require_focused_boolean_step_calls(markers, 1)
+        markers[1]["branch"] = "joint"
+        with self.assertRaisesRegex(CaptureRejected, "source call schedule"):
+            actual._require_focused_boolean_step_calls(markers, 1)
+
+    def test_synthetic_boolean_xml_covers_all_steps_but_stays_unpassed(self):
+        reference = Path("/var/home/stewart/dyn4k-evidence/session-control/"
+                         "baseline-current-4d-home-full/baseline-jvm/cases/"
+                         "joint-Revolute-LimitsEnabled-false.jsonl")
+        if not reference.is_file():
+            self.skipTest("indexed Boolean reference is unavailable")
+        self.assertEqual(hashlib.sha256(reference.read_bytes()).hexdigest(),
+                         actual._FOCUSED_BOOLEAN_REFERENCE_SHA256)
+        self.assertEqual(actual.load_policy_catalog()["cases"]["joint-Revolute-LimitsEnabled-false"]
+                         ["sha256"], actual._FOCUSED_BOOLEAN_REFERENCE_SHA256)
+        with reference.open("rb") as source:
+            header = source.readline().decode().rstrip("\n")
+        case_id = "joint-Revolute-LimitsEnabled-false"
+        body_rows = json.loads(header)["initial"]["bodies"]
+        identity = [bits(1.0), bits(0.0)]
+        rows = ["NUMERICAL_JSON " + header]
+        for step in range(1, 601):
+            for index, (body_id, branch) in enumerate((
+                    ("b1", "integrate"), ("b0", None), ("b1", None))):
+                call = marker()
+                call.update(method="independentJointBooleanModes", case_id=case_id,
+                            step=step, sequence=(step - 1) * 3 + index,
+                            body_id=body_id, target_token=int(body_id[1:]),
+                            branch=branch, source="pivot" if branch is None else "origin")
+                rows.append("PROSPECTIVE_ROTATION_JSON " + json.dumps(call))
+            state = {"kind": "state", "id": case_id, "step": step, "order": 0,
+                     "state": {"bodies": body_rows}}
+            rows.append("NUMERICAL_JSON " + json.dumps(state))
+            receipt = {"kind": "body-step", "case_id": case_id, "step": step,
+                       "bodies": [{"body_id": "b0", "calls": 1, "pre": identity,
+                                   "post": identity},
+                                  {"body_id": "b1", "calls": 2, "pre": identity,
+                                   "post": identity}], "temporary_calls": 0}
+            rows.append("PROSPECTIVE_BINDING_JSON " + json.dumps(receipt))
+        rows.append("NUMERICAL_JSON " + json.dumps(
+            {"kind": "case-end", "id": case_id, "steps": 600}))
+        xml = xml_for(rows, "captureRevoluteLimitsFalse").replace(
+            b"portable.ProspectiveArithmeticTest",
+            b"portable.RevoluteLimitsFalseCaptureTest")
+        summary = actual.verify_capture(xml, "captureRevoluteLimitsFalse", [case_id])
+        self.assertEqual((summary["cases"], summary["steps"],
+                          summary["operations_verified"]), (1, 600, 1800))
+        self.assertEqual(summary["status"], "UNPASSED_SOURCE_CALL_SITE")
+        self.assertEqual(summary["qualification"], "UNPASSED")
+        marker_line = next(line for line in rows
+                           if line.startswith("PROSPECTIVE_ROTATION_JSON "))
+        variants = {
+            "branch": xml.replace(b'"branch": null', b'"branch": "joint"', 1),
+            "class": xml.replace(b"portable.RevoluteLimitsFalseCaptureTest",
+                                 b"portable.ProspectiveArithmeticTest", 1),
+            "method": xml.replace(b"captureRevoluteLimitsFalse[jvm]",
+                                  b"captureJointBooleanModes[jvm]", 1),
+            "missing_call": xml.replace((marker_line + "\n").encode(), b"", 1),
+            "changed_input": xml.replace(b'"steps": 600', b'"steps": 599', 1),
+        }
+        for name, changed in variants.items():
+            self.assertNotEqual(changed, xml)
+            with self.subTest(name=name), self.assertRaises(CaptureRejected):
+                actual.verify_capture(changed, "captureRevoluteLimitsFalse", [case_id])
+
+    def test_boolean_process_requires_distinct_compiled_fixture_selector(self):
+        _, files, runtime = self.fixture()
+        old = b"portable.ProspectiveArithmeticTest.captureGeometry"
+        new = b"portable.RevoluteLimitsFalseCaptureTest.captureRevoluteLimitsFalse"
+        files["execve_log"] = files["execve_log"].replace(old, new)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as old_zip, \
+                zipfile.ZipFile(buffer, "w") as new_zip:
+            for name in old_zip.namelist():
+                new_zip.writestr(name, old_zip.read(name))
+            new_zip.writestr("test/portable/RevoluteLimitsFalseCaptureTest.class",
+                             b"compiled fixture")
+        files["portable_classes"] = buffer.getvalue()
+        _, pid, _, classes = actual._check_process(
+            files, runtime, "captureRevoluteLimitsFalse")
+        self.assertEqual(pid, "123")
+        self.assertIn("portable/RevoluteLimitsFalseCaptureTest.class", classes["test"])
+        files["execve_log"] = files["execve_log"].replace(new, old)
+        with self.assertRaisesRegex(CaptureRejected, "capture method"):
+            actual._check_process(files, runtime, "captureRevoluteLimitsFalse")
+        files["execve_log"] = files["execve_log"].replace(old, new)
+        with zipfile.ZipFile(io.BytesIO(files["portable_classes"])) as classes_zip:
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as missing:
+                for name in classes_zip.namelist():
+                    if name != "test/portable/RevoluteLimitsFalseCaptureTest.class":
+                        missing.writestr(name, classes_zip.read(name))
+        files["portable_classes"] = buffer.getvalue()
+        with self.assertRaisesRegex(CaptureRejected, "portable test payload"):
+            actual._check_process(files, runtime, "captureRevoluteLimitsFalse")
+
+    def test_boolean_source_pin_rejects_changed_jvm_fixture(self):
+        name = ("tools/numerical/portable/src/jvmTest/kotlin/portable/"
+                "RevoluteLimitsFalseCaptureTest.kt")
+        source = (actual._ROOT / name).read_bytes()
+        def archive(payload):
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode="w") as tar:
+                member = tarfile.TarInfo(name)
+                member.size = len(payload)
+                tar.addfile(member, io.BytesIO(payload))
+            return output.getvalue()
+        actual._verify_boolean_source(archive(source))
+        with self.assertRaisesRegex(CaptureRejected, "source schedule"):
+            actual._verify_boolean_source(archive(source + b"\n"))
+        empty = io.BytesIO()
+        with tarfile.open(fileobj=empty, mode="w"):
+            pass
+        with self.assertRaisesRegex(CaptureRejected, "source inventory"):
+            actual._verify_boolean_source(empty.getvalue())
+
+    def test_startup_log_requires_exact_effective_classpath_and_writes(self):
+        pid = "123"
+        response = b"-cp\n/engine.jar:/compiled/main:/compiled/test\n"
+        option = ("-Xlog:arguments=info:file=/home/stewart/evidence/"
+                  "worker-arguments-%p.log:pid,level,tags:filecount=0")
+        records = ["VM Arguments:", "jvm_args: " + option,
+                   "java_command: worker.org.gradle.process.internal.worker.GradleWorkerMain",
+                   "java_class_path (initial): /engine.jar:/compiled/main:/compiled/test",
+                   "Launcher Type: SUN_STANDARD"]
+        raw = "".join(f"[{pid}][info][arguments] {row}\n" for row in records).encode()
+        def trace(payload):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("trace.123", b"execve(dummy) = 0\n"
+                                 b"clone3(dummy) = 124\n")
+                archive.writestr("trace.124", b"".join(
+                    f'write(4, {json.dumps(line.decode())}, {len(line)}) = '
+                    f'{len(line)}\n'.encode() for line in payload.splitlines(keepends=True)))
+            return output.getvalue()
+        witness = actual._verify_worker_argument_log(raw, response, trace(raw), pid)
+        self.assertEqual(witness["status"],
+                         "MATCHED_INITIAL_CLASSPATH_WRITES_UNBOUND_DESTINATION")
+        for name, candidate, saved_response, writes in (
+                ("override", raw.replace(b"/engine.jar:", b"/other.jar:", 1),
+                 response, trace(raw)),
+                ("response", raw, response.replace(b"/engine.jar:", b"/other.jar:", 1),
+                 trace(raw)),
+                ("wrong_pid", raw.replace(b"[123]", b"[999]", 1),
+                 response, trace(raw)),
+                ("missing_record", b"".join(raw.splitlines(keepends=True)[:-1]),
+                 response, trace(raw)),
+                ("duplicate_record", raw + raw.splitlines(keepends=True)[-1],
+                 response, trace(raw)),
+                ("missing_option", raw.replace(b"-Xlog:arguments=info:file=", b"-Xlog:off=", 1),
+                 response, trace(raw)),
+                ("other_worker", raw.replace(b"GradleWorkerMain", b"OtherMain", 1),
+                 response, trace(raw)),
+                ("partial_write", raw, response, trace(raw[:-1])),
+                ("changed_write", raw, response,
+                 trace(raw.replace(b"/engine.jar:", b"/other.jar:", 1))),
+                ("missing_write", raw, response,
+                 trace(b"".join(raw.splitlines(keepends=True)[:-1]))),
+                ("extra_write", raw, response,
+                 trace(raw + raw.splitlines(keepends=True)[-1]))):
+            with self.subTest(name=name), self.assertRaises(CaptureRejected):
+                actual._verify_worker_argument_log(candidate, saved_response,
+                                                   writes, pid)
 
     def test_resealed_generic_lambda_cannot_claim_full_binding(self):
         _, files, runtime = self.fixture()

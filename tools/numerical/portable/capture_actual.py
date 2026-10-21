@@ -13,7 +13,9 @@ from pathlib import Path
 from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
                                expected_case_ids, focused_wheel_stream,
                                make_capture_receipt, verify_capture_receipt,
-                               _portable_classes_archive)
+                               _portable_classes_archive,
+                               _FOCUSED_BOOLEAN_METHOD,
+                               _FOCUSED_BOOLEAN_REFERENCE_SHA256)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,7 +23,6 @@ PORTABLE = Path(__file__).resolve().parent
 JDK21 = Path("/tmp/dyn4k-tools/jdk21")
 STAGED_JAR = (ROOT / "build/staging-repository/io/github/rubixhacker/"
               "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
-XML = PORTABLE / "build/test-results/jvmTest/TEST-portable.ProspectiveArithmeticTest.xml"
 ENVIRONMENT_SENTINEL = "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
 GENERATED_ROOTS = (
     ".gradle", ".kotlin", "build",
@@ -69,7 +70,7 @@ def clean_source():
     return git("--no-replace-objects", "rev-parse", "HEAD").decode().strip()
 
 
-def archive_file_names(method, worker_log):
+def archive_file_names(method, worker_log, worker_argument_log=None):
     names = {
         "source.tar", "stage.log", "artifact.jar", "gradle.log",
         "worker-classpath.txt", "execve.log", "capture.xml",
@@ -79,12 +80,30 @@ def archive_file_names(method, worker_log):
     if method == "captureWheelActive":
         names.update(("worker-write-traces.zip", "joint-Wheel-active.jsonl",
                       "focused-assessment.json"))
+    elif method == _FOCUSED_BOOLEAN_METHOD:
+        if worker_argument_log is None:
+            raise CaptureRejected("worker argument log is missing")
+        names.update(("worker-write-traces.zip", "joint-Revolute-LimitsEnabled-false.jsonl",
+                      "reference-case.jsonl", Path(worker_argument_log).name))
     return names
 
 
-def verify_archive_inventory(output, method, worker_log):
+def capture_case_ids():
+    return {**expected_case_ids(include_focused=True),
+            _FOCUSED_BOOLEAN_METHOD: ["joint-Revolute-LimitsEnabled-false"]}
+
+
+def target_test_class(method):
+    if method not in capture_case_ids():
+        raise CaptureRejected("unknown arithmetic producer method")
+    return ("portable.RevoluteLimitsFalseCaptureTest" if
+            method == _FOCUSED_BOOLEAN_METHOD else
+            "portable.ProspectiveArithmeticTest")
+
+
+def verify_archive_inventory(output, method, worker_log, worker_argument_log=None):
     output = Path(output)
-    expected = archive_file_names(method, worker_log)
+    expected = archive_file_names(method, worker_log, worker_argument_log)
     actual = {path.name for path in output.iterdir()}
     if actual != expected or any(not path.is_file() or path.is_symlink()
                                  for path in output.iterdir()):
@@ -93,7 +112,7 @@ def verify_archive_inventory(output, method, worker_log):
         raw = (output / name).read_bytes()
         if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
             raise CaptureRejected("archive exposed the environment")
-    if method == "captureWheelActive":
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         try:
             with zipfile.ZipFile(output / "worker-write-traces.zip") as archive:
                 for name in archive.namelist():
@@ -105,10 +124,11 @@ def verify_archive_inventory(output, method, worker_log):
 
 
 def run_capture(method, output, reference_case=None):
-    if method not in expected_case_ids(include_focused=True):
+    if method not in capture_case_ids():
         raise CaptureRejected("unknown arithmetic producer method")
-    if method == "captureWheelActive" and reference_case is None:
-        raise CaptureRejected("focused Wheel reference is required")
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD) and \
+            reference_case is None:
+        raise CaptureRejected("focused reference is required")
     output = Path(output).resolve()
     if output.exists():
         raise CaptureRejected("capture output already exists")
@@ -123,6 +143,14 @@ def run_capture(method, output, reference_case=None):
 
 def _run_capture(method, output, reference_case, commit, temporary):
     output.mkdir(parents=True)
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        try:
+            reference = Path(reference_case).read_bytes()
+        except OSError as error:
+            raise CaptureRejected("focused Boolean indexed reference unavailable") from error
+        if hashlib.sha256(reference).hexdigest() != _FOCUSED_BOOLEAN_REFERENCE_SHA256:
+            raise CaptureRejected("focused Boolean indexed reference differs")
+        (output / "reference-case.jsonl").write_bytes(reference)
     environment = os.environ.copy()
     environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(JDK21)
@@ -147,7 +175,12 @@ def _run_capture(method, output, reference_case, commit, temporary):
         raise CaptureRejected("pinned source publication failed")
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
     class_load_pattern = output / "worker-class-load-%p.log"
-    if method == "captureWheelActive":
+    argument_pattern = temporary / "worker-arguments-%p.log"
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        environment["JAVA_TOOL_OPTIONS"] += (
+            f" -Xlog:arguments=info:file={argument_pattern}:"
+            "pid,level,tags:filecount=0")
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_prefix = temporary / "worker-write-trace"
         tracer = ["strace", "-ff", "-s", "65536", "-e",
                   "trace=execve,clone,clone3,write,writev,sendto,sendmsg",
@@ -155,8 +188,11 @@ def _run_capture(method, output, reference_case, commit, temporary):
     else:
         tracer = ["strace", "-f", "-s", "16384", "-e", "trace=execve",
                   "-o", str(output / "execve.log")]
+    target_class = target_test_class(method)
+    xml = (PORTABLE / "build/test-results/jvmTest" /
+           f"TEST-{target_class}.xml")
     command = [*tracer, str(ROOT / "gradlew"),
-               "jvmTest", "--tests", f"portable.ProspectiveArithmeticTest.{method}",
+               "jvmTest", "--tests", f"{target_class}.{method}",
                f"-PportableRepository={ROOT / 'build/staging-repository'}",
                f"-PportableWorkerClassLoadLog={class_load_pattern}",
                "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info",
@@ -173,7 +209,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
                 if matches and Path(matches[-1]).is_file():
                     shutil.copyfile(matches[-1], worker_arguments)
             time.sleep(0.02)
-    if method == "captureWheelActive":
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         trace_files = sorted(temporary.glob("worker-write-trace.*"))
         if not trace_files:
             raise CaptureRejected("worker write trace is missing")
@@ -216,7 +252,7 @@ def _run_capture(method, output, reference_case, commit, temporary):
                 archive.writestr("trace." + pid, raw)
         (output / "execve.log").write_text("\n".join(sorted(executions)) + "\n")
     reject_environment_trace(output / "execve.log")
-    if target.returncode or not XML.is_file() or not worker_arguments.is_file():
+    if target.returncode or not xml.is_file() or not worker_arguments.is_file():
         raise CaptureRejected("executed arithmetic target method failed")
     worker_lines = [line for line in (output / "execve.log").read_text().splitlines()
                     if f'execve("{JDK21 / "bin/java"}"' in line and
@@ -229,7 +265,14 @@ def _run_capture(method, output, reference_case, commit, temporary):
     worker_log = Path(str(class_load_pattern).replace("%p", worker_pid))
     if not worker_log.is_file():
         raise CaptureRejected("executed JVM worker class-load log missing")
-    shutil.copyfile(XML, output / "capture.xml")
+    worker_argument_log = None
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        raw_argument_log = Path(str(argument_pattern).replace("%p", worker_pid))
+        if not raw_argument_log.is_file():
+            raise CaptureRejected("executed JVM worker argument log missing")
+        worker_argument_log = output / f"worker-arguments-{worker_pid}.log"
+        shutil.copyfile(raw_argument_log, worker_argument_log)
+    shutil.copyfile(xml, output / "capture.xml")
     with (output / "portable-classes.zip").open("xb") as classes:
         classes.write(_portable_classes_archive())
     if clean_source() != commit:
@@ -243,17 +286,24 @@ def _run_capture(method, output, reference_case, commit, temporary):
         "worker_classpath": "worker-classpath.txt",
         "portable_classes": "portable-classes.zip"}.items()}
     files["worker_class_load"] = worker_log.read_bytes()
-    if method == "captureWheelActive":
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         files["worker_write_traces"] = (output / "worker-write-traces.zip").read_bytes()
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        case_path = output / "joint-Revolute-LimitsEnabled-false.jsonl"
+        trace, _ = focused_wheel_stream(files["xml"])
+        case_path.write_bytes(trace)
+        files["candidate_case"] = trace
+        files["reference_case"] = (output / "reference-case.jsonl").read_bytes()
+        files["worker_arguments"] = worker_argument_log.read_bytes()
     if hashlib.sha256(files["artifact"]).hexdigest() != hashlib.sha256(
             STAGED_JAR.read_bytes()).hexdigest() or \
             hashlib.sha256(files["runtime"]).hexdigest() != hashlib.sha256(
                 runtime_path.read_bytes()).hexdigest():
         raise CaptureRejected("copied producer artifact differs")
     receipt = make_capture_receipt(files, method, commit,
-                                   expected_case_ids(include_focused=True)[method], str(runtime_path))
+                                   capture_case_ids()[method], str(runtime_path))
     verify_capture_receipt(receipt, files, method, commit,
-                           expected_case_ids(include_focused=True)[method], str(runtime_path))
+                           capture_case_ids()[method], str(runtime_path))
     (output / "receipt.json").write_text(json.dumps(receipt, sort_keys=True,
                                                      indent=2) + "\n")
     if method == "captureWheelActive":
@@ -264,13 +314,13 @@ def _run_capture(method, output, reference_case, commit, temporary):
                                           reference_case, case_path)
         (output / "focused-assessment.json").write_text(
             json.dumps(assessment, sort_keys=True, indent=2) + "\n")
-    verify_archive_inventory(output, method, worker_log)
+    verify_archive_inventory(output, method, worker_log, worker_argument_log)
     return receipt
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", choices=tuple(expected_case_ids(include_focused=True)),
+    parser.add_argument("--method", choices=tuple(capture_case_ids()),
                         required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--reference-case", type=Path)

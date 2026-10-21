@@ -6,6 +6,7 @@ import json
 import re
 import struct
 import subprocess
+import tarfile
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -13,7 +14,7 @@ from urllib.parse import unquote, urlparse
 from xml.parsers import expat
 
 from cases import declared_cases
-from rotation_oracle import verify_operation_marker
+from rotation_oracle import REVOLUTE_LIMITS_FALSE_CONTEXT, verify_operation_marker
 from orthogonality import source_rotation_cap, validate_rotation_audit
 from prospective_compare import compare_policy_case, load_policy_catalog
 
@@ -43,6 +44,7 @@ _WRAPPERS = {
     "captureConfigured120Repeat2": "configured120Repeat2",
     "captureJoints": "everyJointWithInitialAndApplicableActiveModes",
     "captureWheelActive": "everyJointWithInitialAndApplicableActiveModes",
+    "captureRevoluteLimitsFalse": "independentJointBooleanModes",
     "captureJointBooleanModes": "independentJointBooleanModes",
     "captureJointNumericModes": "independentJointNumericAndLimitModes",
     "captureAngleFailure": "baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure",
@@ -52,6 +54,13 @@ _WRAPPERS = {
 
 _FOCUSED_WHEEL_STEP_CALLS = (("b1", "integrate"), ("b0", "joint"),
                              ("b1", "joint"))
+_FOCUSED_BOOLEAN_CASE = "joint-Revolute-LimitsEnabled-false"
+_FOCUSED_BOOLEAN_METHOD = "captureRevoluteLimitsFalse"
+_FOCUSED_BOOLEAN_CLASS = "portable.RevoluteLimitsFalseCaptureTest"
+_FOCUSED_BOOLEAN_STEP_CALLS = (("b1", "integrate"), ("b0", None), ("b1", None))
+_FOCUSED_BOOLEAN_INPUT_SHA256 = "8966b3e0f34f2a6d442cb3b8348f4ea262186b9cd80daa5b8a7c58dbf8d8da17"
+_FOCUSED_BOOLEAN_REFERENCE_SHA256 = "80c4e6c5133953eb7dd480e34b2d51a244b9c02d1d9f1d367d7b6cbf8eed2f36"
+_FOCUSED_BOOLEAN_SOURCE_SHA256 = "d7a8467eb390a4c0db1544472fdb092420933470c879880f23ac64c2e43ff881"
 _WITNESS_PREFIXES = (b"NUMERICAL_JSON ", b"PROSPECTIVE_ROTATION_JSON ",
                      b"PROSPECTIVE_BINDING_JSON ")
 _WITNESS_WRITE = re.compile(r'^write\((\d+), ("(?:\\.|[^"\\])*"), (\d+)\)\s+= (\d+)$')
@@ -64,6 +73,15 @@ def _require_focused_wheel_step_calls(markers, step):
                  marker.get("branch"), marker.get("kind")) for marker in markers]
     if observed != expected:
         raise CaptureRejected("focused Wheel source call schedule differs")
+
+
+def _require_focused_boolean_step_calls(markers, step):
+    expected = [(step, (step - 1) * 3 + index, body_id, branch, "rotate")
+                for index, (body_id, branch) in enumerate(_FOCUSED_BOOLEAN_STEP_CALLS)]
+    observed = [(marker.get("step"), marker.get("sequence"), marker.get("body_id"),
+                 marker.get("branch"), marker.get("kind")) for marker in markers]
+    if observed != expected:
+        raise CaptureRejected("focused Boolean source call schedule differs")
 
 
 def expected_case_ids(include_focused=False):
@@ -98,13 +116,15 @@ def expected_case_ids(include_focused=False):
             raise CaptureRejected(f"unmapped case: {case_id}")
         result[method].append(case_id)
     inventory = [case_id for method, ids in result.items()
-                 if method != "captureWheelActive" for case_id in ids]
+                 if method not in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD)
+                 for case_id in ids]
     if len(inventory) != 332 or len(set(inventory)) != 332:
         raise CaptureRejected("prospective wrapper inventory differs")
     if include_focused:
         result["captureWheelActive"] = ["joint-Wheel-active"]
     else:
         del result["captureWheelActive"]
+    del result[_FOCUSED_BOOLEAN_METHOD]
     return result
 
 
@@ -114,7 +134,8 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
     if reset_order not in {"pre", "post", "either"}:
         raise CaptureRejected("unknown accepted reset order")
     if expected_ids is None:
-        expected_ids = expected_case_ids(method == "captureWheelActive")[method]
+        expected_ids = ([_FOCUSED_BOOLEAN_CASE] if method == _FOCUSED_BOOLEAN_METHOD
+                        else expected_case_ids(method == "captureWheelActive")[method])
     if not isinstance(expected_ids, list) or len(set(expected_ids)) != len(expected_ids):
         raise CaptureRejected("expected case inventory differs")
     expected_method = _WRAPPERS[method]
@@ -189,6 +210,10 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
                         type(row.get("steps")) is not int or row["steps"] < 1 or \
                         type(row.get("startStep", 0)) is not int:
                     raise CaptureRejected("case header or order differs")
+                if method == _FOCUSED_BOOLEAN_METHOD and (
+                        row["steps"] != 600 or
+                        _sha((raw + "\n").encode()) != _FOCUSED_BOOLEAN_INPUT_SHA256):
+                    raise CaptureRejected("focused Boolean input header differs")
                 active = row
                 state_count = 0
                 last_main.clear()
@@ -303,6 +328,8 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
                     raise CaptureRejected("body-step inventory differs")
                 if method == "captureWheelActive":
                     _require_focused_wheel_step_calls(step_operations, binding["step"])
+                elif method == _FOCUSED_BOOLEAN_METHOD:
+                    _require_focused_boolean_step_calls(step_operations, binding["step"])
                 for index, receipt in enumerate(receipts):
                     calls = [call for call in step_operations
                              if call["body_id"] == names[index]]
@@ -350,9 +377,12 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
             raise CaptureRejected("operation case, step, or body binding differs")
         if step_receipted:
             step_receipted = False
-        if method == "captureWheelActive" and marker["body_id"] is not None and \
+        if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD) and \
+                marker["body_id"] is not None and \
                 marker.get("branch") not in ("integrate", "joint", "contact"):
-            raise CaptureRejected("focused Wheel source branch is unbound")
+            if not (method == _FOCUSED_BOOLEAN_METHOD and
+                    marker.get("branch") is None):
+                raise CaptureRejected("focused source branch is unbound")
         if marker["body_id"] is not None:
             body_bound_operations += 1
             token = marker["target_token"]
@@ -374,7 +404,9 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
             unclaimed_resets.append(marker)
         elif unclaimed_resets:
             raise CaptureRejected("reset lacks adjacent source selection")
-        outcome = verify_operation_marker(marker)
+        outcome = verify_operation_marker(
+            marker, source_context=REVOLUTE_LIMITS_FALSE_CONTEXT
+            if method == _FOCUSED_BOOLEAN_METHOD else None)
         if outcome["status"] == "UNPASSED_INPUT_ORIGIN":
             pair_inputs_unbound += 1
         elif outcome["status"] != "PASSED_ARITHMETIC":
@@ -437,14 +469,23 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
                             (("tests", "1"), ("skipped", "0"),
                              ("failures", "0"), ("errors", "0"))) or \
             len(testcases) != 1 or \
-            testcases[0].get("classname") != "portable.ProspectiveArithmeticTest" or \
+            testcases[0].get("classname") != (_FOCUSED_BOOLEAN_CLASS if
+                method == _FOCUSED_BOOLEAN_METHOD else
+                "portable.ProspectiveArithmeticTest") or \
             testcases[0].get("name") not in (method, f"{method}[jvm]") or \
             active is not None or ids != expected_ids:
         raise CaptureRejected("target method or case inventory differs")
     if body_step_receipts == 0:
         raise CaptureRejected("empty body-step inventory")
-    return {"status": "VERIFIED_ARITHMETIC_BINDING" if not pair_inputs_unbound
-            else "UNPASSED_INPUT_ORIGIN", "qualification": "UNPASSED",
+    if method == _FOCUSED_BOOLEAN_METHOD and (
+            len(ids) != 1 or total_steps != 600 or operations != 1800 or
+            body_bound_operations != 1800 or body_step_receipts != 1200 or
+            temporary_operations or selected_resets):
+        raise CaptureRejected("focused Boolean operation coverage differs")
+    status = ("UNPASSED_SOURCE_CALL_SITE" if method == _FOCUSED_BOOLEAN_METHOD
+              else "UNPASSED_INPUT_ORIGIN" if pair_inputs_unbound else
+              "VERIFIED_ARITHMETIC_BINDING")
+    return {"status": status, "qualification": "UNPASSED",
             "method": method, "cases": len(ids), "steps": total_steps,
             "operations_verified": operations,
             "body_bound_operations": body_bound_operations,
@@ -495,6 +536,21 @@ def _source_archive(commit):
     if result.returncode:
         raise CaptureRejected("candidate commit archive unavailable")
     return result.stdout
+
+
+def _verify_boolean_source(source):
+    name = ("tools/numerical/portable/src/jvmTest/kotlin/portable/"
+            "RevoluteLimitsFalseCaptureTest.kt")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(source), mode="r:") as archive:
+            entries = [entry for entry in archive if entry.name == name]
+            if len(entries) != 1 or not entries[0].isfile():
+                raise CaptureRejected("focused Boolean source inventory differs")
+            member = archive.extractfile(entries[0])
+            if member is None or _sha(member.read()) != _FOCUSED_BOOLEAN_SOURCE_SHA256:
+                raise CaptureRejected("focused Boolean source schedule differs")
+    except (OSError, tarfile.TarError) as error:
+        raise CaptureRejected("focused Boolean source archive is malformed") from error
 
 
 def _portable_classes_archive():
@@ -655,10 +711,15 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
         raise CaptureRejected("audited worker class-load inventory differs")
     if not dynamic_owners <= portable_observed:
         raise CaptureRejected("portable lambda owner was not loaded")
-    required_portable = {"portable/ProspectiveArithmeticTest.class",
-                         "portable/PortableMatrixTest.class",
-                         "portable/NumericalRecorder.class"}
+    required_portable = {"portable/NumericalRecorder.class"}
+    required_portable.add("portable/RevoluteLimitsFalseCaptureTest.class" if
+                          method == _FOCUSED_BOOLEAN_METHOD else
+                          "portable/ProspectiveArithmeticTest.class")
+    if method != _FOCUSED_BOOLEAN_METHOD:
+        required_portable.add("portable/PortableMatrixTest.class")
     if method == "captureWheelActive":
+        required_portable |= _WHEEL_RECORDER_CLASSES
+    elif method == _FOCUSED_BOOLEAN_METHOD:
         required_portable |= _WHEEL_RECORDER_CLASSES
     if not required_portable <= portable_observed:
         raise CaptureRejected("required portable worker class-load inventory differs")
@@ -697,9 +758,11 @@ def _check_process(files, runtime_executable, method):
             f"-Xlog:class+load=info:file={log_paths[0]}:pid,level,tags:filecount=0" \
             not in process_lines[0]:
         raise CaptureRejected("executed worker class-load option differs")
+    target_class = (_FOCUSED_BOOLEAN_CLASS if method == _FOCUSED_BOOLEAN_METHOD
+                    else "portable.ProspectiveArithmeticTest")
     capture_invocations = [line for line in executions.splitlines()
                            if f'execve("{_ROOT / "gradlew"}"' in line and
-                           f'"portable.ProspectiveArithmeticTest.{method}"' in line and
+                           f'"{target_class}.{method}"' in line and
                            f'"-PportableWorkerClassLoadLog={log_paths[0]}"' in line and
                            line.endswith(" = 0")]
     if len(capture_invocations) != 1:
@@ -714,7 +777,7 @@ def _check_process(files, runtime_executable, method):
             entries = classes.namelist()
             names = set(entries)
             if not {"main/portable/NumericalRecorder.class",
-                    "test/portable/ProspectiveArithmeticTest.class",
+                    "test/" + target_class.replace(".", "/") + ".class",
                     "test/portable/PortableMatrixTest.class"} <= names or \
                     len(entries) != len(names) or \
                     any(not name.startswith(("main/", "test/")) or
@@ -891,25 +954,111 @@ def _verify_kernel_class_load_writes(archive, class_load_log, worker_pid):
         raise CaptureRejected("kernel class-load write witness is malformed") from error
 
 
+def _verify_worker_argument_log(raw, response, archive, worker_pid):
+    try:
+        prefix = f"[{worker_pid}][info][arguments] "
+        lines = raw.decode("utf-8").splitlines(keepends=True)
+        if len(lines) != 5 or any(not line.endswith("\n") or
+                                  not line.startswith(prefix) for line in lines):
+            raise CaptureRejected("worker argument log PID or format differs")
+        records = [line[len(prefix):-1] for line in lines]
+        fields = ("VM Arguments:", "jvm_args: ", "java_command: ",
+                  "java_class_path (initial): ", "Launcher Type: ")
+        if any(not record.startswith(field) for record, field in zip(records, fields)) or \
+                records[0] != fields[0] or \
+                not records[2].startswith(
+                    fields[2] + "worker.org.gradle.process.internal.worker.GradleWorkerMain") or \
+                records[4] != "Launcher Type: SUN_STANDARD":
+            raise CaptureRejected("worker startup argument record differs")
+        options = re.findall(r"-Xlog:arguments=info:file="
+                             r"(/[^\s:]+/worker-arguments-%p\.log)"
+                             r":pid,level,tags:filecount=0(?=\s|$)", records[1])
+        if len(options) != 1 or records[1].count("-Xlog:arguments=") != 1 or \
+                not Path(options[0]).parent.resolve().is_relative_to(
+                Path.home().resolve()):
+            raise CaptureRejected("worker startup logging option differs")
+        response_lines = response.decode("utf-8").splitlines()
+        if len(response_lines) != 2 or response_lines[0] != "-cp" or \
+                records[3].removeprefix(fields[3]) != response_lines[1]:
+            raise CaptureRejected("effective worker classpath differs from response")
+        streams = {}
+        tagged_streams = set()
+        with zipfile.ZipFile(io.BytesIO(archive)) as traces:
+            for name in traces.namelist():
+                if re.fullmatch(r"trace\.[1-9][0-9]*", name) is None:
+                    raise CaptureRejected("worker argument trace member differs")
+                pid = name.removeprefix("trace.")
+                for line in traces.read(name).decode("utf-8").splitlines():
+                    if not line.startswith("write("):
+                        if "[arguments]" in line:
+                            raise CaptureRejected("untrusted worker argument text")
+                        continue
+                    match = _WITNESS_WRITE.fullmatch(line)
+                    if match is None:
+                        if "[arguments]" in line:
+                            raise CaptureRejected("worker argument write is incomplete")
+                        continue
+                    fd, literal, requested, written = match.groups()
+                    payload = ast.literal_eval("b" + literal)
+                    if type(payload) is not bytes or len(payload) != int(requested) or \
+                            int(requested) != int(written):
+                        if b"[arguments]" in payload:
+                            raise CaptureRejected("worker argument write is incomplete")
+                        continue
+                    identity = (pid, fd)
+                    streams.setdefault(identity, []).append(payload)
+                    if b"[arguments]" in payload:
+                        tagged_streams.add(identity)
+        matches = [(identity, values) for identity, values in streams.items()
+                   if b"".join(values) == raw]
+        if len(matches) != 1 or tagged_streams != {matches[0][0]}:
+            raise CaptureRejected("worker argument kernel writes differ")
+        (writer_pid, writer_fd), writes = matches[0]
+        return {"status": "MATCHED_INITIAL_CLASSPATH_WRITES_UNBOUND_DESTINATION",
+                "writer_thread_pid": writer_pid, "writer_fd": writer_fd,
+                "writes": len(writes), "records": len(lines),
+                "log_pattern": options[0], "log_sha256": _sha(raw)}
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
+            zipfile.BadZipFile, SyntaxError) as error:
+        if isinstance(error, CaptureRejected):
+            raise
+        raise CaptureRejected("worker argument log witness is malformed") from error
+
+
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
+    requires_writes = method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
-                                     if method == "captureWheelActive" else set())
+                                     if requires_writes else set())
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        required_files |= {"worker_arguments", "reference_case", "candidate_case"}
     if type(files) is not dict or set(files) != required_files or \
             any(type(value) is not bytes or not value for value in files.values()) or \
             type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("receipt input identity differs")
     if files["source"] != _source_archive(commit):
         raise CaptureRejected("source archive differs from candidate commit")
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        _verify_boolean_source(files["source"])
     _check_local_binaries(files, runtime_executable)
     classpath_evidence, worker_pid, log_path, portable_classes = _check_process(
         files, runtime_executable, method)
     reset_order = ("pre" if commit == "fe4d63cb7f08cea304e5691f2f2ebc23379db6b0"
                    else "post")
     summary = verify_capture(files["xml"], method, expected_ids, reset_order)
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        if expected_ids != [_FOCUSED_BOOLEAN_CASE] or \
+                _sha(files["reference_case"]) != _FOCUSED_BOOLEAN_REFERENCE_SHA256 or \
+                load_policy_catalog()["cases"][_FOCUSED_BOOLEAN_CASE]["sha256"] != \
+                _FOCUSED_BOOLEAN_REFERENCE_SHA256 or \
+                focused_wheel_stream(files["xml"])[0] != files["candidate_case"] or \
+                _sha(files["candidate_case"]) != summary["trace_sha256"]:
+            raise CaptureRejected("focused Boolean indexed reference differs")
     worker_sources = _verify_worker_class_load(
         files["worker_class_load"], worker_pid, summary["selected_resets"] > 0,
         method, portable_classes)
-    receipt = {"schema": "portable-arithmetic-capture-receipt/3",
+    receipt = {"schema": ("portable-arithmetic-capture-receipt/4" if
+                          method == _FOCUSED_BOOLEAN_METHOD else
+                          "portable-arithmetic-capture-receipt/3"),
             "candidate_commit": commit, "method": method, "exit_code": 0,
             "runtime_executable": runtime_executable,
             "source_archive_sha256": _sha(files["source"]),
@@ -927,13 +1076,22 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             "worker_class_load_pattern": log_path,
             "worker_class_load_sources": worker_sources,
             "summary": summary}
-    if method == "captureWheelActive":
+    if requires_writes:
         witness = verify_worker_write_witness(files["worker_write_traces"],
                                               files["xml"], worker_pid,
                                               files["execve_log"])
         receipt["worker_write_traces_sha256"] = _sha(files["worker_write_traces"])
         receipt["external_xml_witness"] = witness
         summary["external_xml_witness"] = witness["status"]
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        argument_witness = _verify_worker_argument_log(
+            files["worker_arguments"], files["worker_classpath"],
+            files["worker_write_traces"], worker_pid)
+        receipt["worker_arguments_sha256"] = _sha(files["worker_arguments"])
+        receipt["reference_case_sha256"] = _sha(files["reference_case"])
+        receipt["candidate_case_sha256"] = _sha(files["candidate_case"])
+        receipt["worker_argument_witness"] = argument_witness
+        summary["effective_classpath_witness"] = argument_witness["status"]
     return receipt
 
 
@@ -947,12 +1105,16 @@ def verify_capture_receipt(receipt, files, method, commit, expected_ids,
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
     summary = dict(expected["summary"])
-    if method == "captureWheelActive":
+    if method in ("captureWheelActive", _FOCUSED_BOOLEAN_METHOD):
         # The receipt check binds every ZIP member to the worker process tree.
         # Write matching does not identify the descriptor destination.
         summary["kernel_class_load_write_witness"] = _verify_kernel_class_load_writes(
             files["worker_write_traces"], files["worker_class_load"],
             expected["worker_pid"])
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        summary["effective_classpath_witness"] = _verify_worker_argument_log(
+            files["worker_arguments"], files["worker_classpath"],
+            files["worker_write_traces"], expected["worker_pid"])["status"]
     summary["operation_record_status"] = summary["status"]
     summary["dynamic_class_load_status"] = "UNBOUND"
     if summary["status"] == "VERIFIED_ARITHMETIC_BINDING":
