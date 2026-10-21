@@ -802,6 +802,69 @@ class ProspectiveComparisonTest(unittest.TestCase):
         self.assertEqual(self.policy_result(rows, bad, case, catalog)["status"],
                          "FAILED_DERIVED")
 
+    def test_public_policy_transform_negative_zero_angle_and_alias_controls(self):
+        observed = {
+            "getCost": -1.0, "getSint": -0.0, "getRotationAngle": math.pi,
+            "getTranslation": [0.0, 0.0], "getTranslationX": 0.0,
+            "getTranslationY": 0.0,
+            "getValues": [-1.0, 0.0, 0.0, -0.0, -1.0, 0.0],
+        }
+        rows, case, _ = self.policy_rows()
+        rows[0]["initial"]["bodies"] = [{"transform": deepcopy(observed)}]
+        rows[0]["setup"]["bodies"][0]["transform"] = deepcopy(observed)
+        rows[2]["state"]["bodies"][0].update(
+            transform=deepcopy(observed), previousTransform=deepcopy(observed),
+            velocity=[0.0, 0.0], angularVelocity=0.0,
+            linearMomentum=[0.0, 0.0], angularMomentumCenter=0.0,
+            kineticEnergy=0.0)
+        catalog = self.small_policy(rows, {
+            "state.state.bodies[].transform.getRotationAngle": "derived_transform",
+            "event.step.begin.payload": "exact_step"})
+
+        def compare(source, candidate_state=None):
+            reference = deepcopy(rows)
+            candidate = deepcopy(rows)
+            for target in (reference, candidate):
+                target[0]["initial"]["bodies"][0]["transform"] = deepcopy(source)
+                target[0]["setup"]["bodies"][0]["transform"] = deepcopy(source)
+                target[2]["state"]["bodies"][0]["transform"] = deepcopy(source)
+                target[2]["state"]["bodies"][0]["previousTransform"] = deepcopy(source)
+            if candidate_state is not None:
+                candidate[2]["state"]["bodies"][0]["transform"] = deepcopy(candidate_state)
+            return self.policy_result(reference, candidate, case, catalog)
+
+        positive_zero = deepcopy(observed)
+        positive_zero["getSint"] = 0.0
+        positive_zero["getValues"][1] = -0.0
+        positive_zero["getValues"][3] = 0.0
+        negative_angle = deepcopy(observed)
+        negative_angle["getRotationAngle"] = -math.pi
+        nearby_negative = deepcopy(observed)
+        nearby_negative["getSint"] = -math.ulp(1.0)
+        nearby_negative["getValues"][1] = math.ulp(1.0)
+        nearby_negative["getValues"][3] = -math.ulp(1.0)
+        nearby_negative["getRotationAngle"] = -math.pi
+        adverse_angle = deepcopy(positive_zero)
+        adverse_angle["getRotationAngle"] = -math.pi
+        alias_sign = deepcopy(positive_zero)
+        alias_sign["getValues"][1] = 0.0
+        alias_value = deepcopy(positive_zero)
+        alias_value["getValues"][1] = 1e-9
+
+        controls = (
+            ("retained Java negative zero", observed, None, "PASSED_NUMERICAL_POLICY"),
+            ("positive zero", positive_zero, None, "PASSED_NUMERICAL_POLICY"),
+            ("negative zero wrong angle", negative_angle, None, "FAILED_DERIVED"),
+            ("nearby negative sine", nearby_negative, None, "PASSED_NUMERICAL_POLICY"),
+            ("wrong positive-zero angle", positive_zero, adverse_angle, "FAILED_DERIVED"),
+            ("signed-zero alias is numerically equal", positive_zero, alias_sign,
+             "PASSED_NUMERICAL_POLICY"),
+            ("wrong alias value", positive_zero, alias_value, "FAILED_DERIVED"),
+        )
+        for name, source, candidate_state, expected in controls:
+            with self.subTest(name=name):
+                self.assertEqual(compare(source, candidate_state)["status"], expected)
+
     def test_same_run_transform_momentum_energy_and_normal_controls(self):
         rows, case, _ = self.policy_rows()
 

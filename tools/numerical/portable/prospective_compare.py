@@ -382,7 +382,8 @@ def _transform_invariant(transform, limit_ulps):
     if abs(c * c + s * s - 1.0) > limit_ulps * math.ulp(1.0):
         raise Difference("FAILED_DERIVED", "transform rotation is not orthogonal")
     angle = _finite_number(transform["getRotationAngle"], "transform.angle")
-    expected = math.copysign(math.acos(max(-1.0, min(1.0, c))), s)
+    positive_angle = math.acos(max(-1.0, min(1.0, c)))
+    expected = positive_angle if s >= 0.0 else -positive_angle
     if abs(angle - expected) > 32 * math.ulp(math.pi):
         raise Difference("FAILED_DERIVED", "transform angle differs from cosine and sine")
 
