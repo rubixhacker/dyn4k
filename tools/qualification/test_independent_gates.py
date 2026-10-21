@@ -1185,9 +1185,9 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
-        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(run_sha256,
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
@@ -1279,7 +1279,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS["run.py"]
         self.assertEqual(combined, independent_gates.P2_COMBINED_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_COMBINED_PRODUCERS)
-        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         self.assertEqual(independent_gates.APPROVED_P2_OPERATION_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, operation))
@@ -1337,7 +1337,6 @@ class IndependentGateSeamTests(unittest.TestCase):
         })
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS)
-        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         for name, revision in (
                 ("actual_arithmetic.py", "b5b0611192e8fa667047eec81fc54825571a0c40"),
                 ("rotation_oracle.py", "f35a64eae6e8d7927712e2b6551cc2d9db6c8e77")):
@@ -1348,7 +1347,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                 ["git", "--no-replace-objects", "show", f"{current}:{path}"], cwd=ROOT)
             self.assertEqual(reviewed, committed)
             self.assertEqual(expected[name], hashlib.sha256(reviewed).hexdigest())
-            self.assertEqual(expected[name], hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+            self.assertEqual(independent_gates.APPROVED_P2_LOCAL_PRODUCERS[name],
+                             hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
         self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
         self.assertEqual(independent_gates.APPROVED_P2_COMBINED_PRODUCERS,
                          independent_gates._p2_producer_binding(
@@ -1358,6 +1358,30 @@ class IndependentGateSeamTests(unittest.TestCase):
                              ROOT, "7d319d5027f2b10c11eae7f4574e6edf407449c0"))
         with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
             independent_gates._p2_producer_binding(ROOT, "a7d54467")
+
+    def test_p2_arithmetic_coverage_revision_binds_reviewed_call_shape_repair(self):
+        current = "d981bdd2e6d915554f8fae1ea9b2c2a41cfcc7b0"
+        relative = "tools/numerical/portable/rotation_oracle.py"
+        expected = dict(independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS)
+        expected["rotation_oracle.py"] = (
+            "cf3b0906edb69b08cb24fb2be9a741ffacd3229a8ab466598887005d71109a47")
+        self.assertEqual(current, independent_gates.P2_ARITHMETIC_COVERAGE_ASSEMBLY_REVISION)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_COVERAGE_PRODUCERS)
+        self.assertEqual(expected, independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{current}:{relative}"], cwd=ROOT)
+        self.assertEqual(expected["rotation_oracle.py"], hashlib.sha256(committed).hexdigest())
+        self.assertEqual(committed, (ROOT / relative).read_bytes())
+        self.assertEqual(expected, independent_gates._p2_producer_binding(ROOT, current))
+        self.assertEqual(independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS,
+                         independent_gates._p2_producer_binding(
+                             ROOT, independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION))
+        original_read = Path.read_bytes
+        local = ROOT / relative
+        with mock.patch.object(Path, "read_bytes", lambda path_value: committed + b"changed"
+                               if path_value == local else original_read(path_value)):
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, current)
 
     def test_p2_reviewed_arithmetic_assembly_rejects_stale_and_altered_bytes(self):
         current = independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION
