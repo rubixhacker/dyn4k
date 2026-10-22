@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import os
@@ -413,8 +414,13 @@ class ProspectiveComparisonTest(unittest.TestCase):
         self.assertFalse(verify_numeric_probe(lane, "commit", "source", "trace",
                                               artifacts, runtime))
 
-    def test_compare_host_keeps_case_unpassed_without_target_probe_producer(self):
-        lane, _, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+    def test_compare_host_keeps_case_unpassed_without_bound_probe_producer(self):
+        lane, probe_receipt, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+        probe_receipt["runtime"] = {
+            **runtime, "dependency_sha256": digest(artifacts["target"]),
+            "method_process_sha256": hashlib.sha256(json.dumps(
+                [runtime] * 15, sort_keys=True).encode()).hexdigest()}
+        (lane / "numeric-probe-receipt.json").write_text(json.dumps(probe_receipt))
         baseline = self.root / "baseline"
         baseline.mkdir()
         (baseline / "verified.json").write_text(json.dumps({
@@ -424,7 +430,7 @@ class ProspectiveComparisonTest(unittest.TestCase):
         sidecar.write_text("{}")
         (lane / "receipt.json").write_text(json.dumps({
             "artifact_sha256": {"target": digest(artifacts["target"])},
-            "trace_sha256": "candidate-trace"}))
+            "trace_sha256": "trace"}))
         (self.root / "publication.log").write_text("published\n")
         (self.root / "publication.json").write_text(json.dumps({
             "candidate_commit": "commit", "source_sha256": "source",
@@ -433,7 +439,11 @@ class ProspectiveComparisonTest(unittest.TestCase):
         case = {"id": "one", "steps": 1, "family": "free-motion"}
         numerical = {"id": "one", "status": "PASSED_NUMERICAL_POLICY",
                      "qualification": "UNPASSED", "different_numeric_values": 0,
-                     "target_premises": {"producer": "UNPASSED"}}
+                     "target_arithmetic": "UNPASSED_UNBOUND_AUDIT",
+                     "target_premises": {name: "UNPASSED" for name in
+                                         ("producer", "trig", "rounding", "subnormal",
+                                          "zero_product", "fma")},
+                     "rotation_audit": "UNPASSED_NOT_EXECUTED"}
         with ExitStack() as stack:
             for name in ("verify_candidate_inventory", "verify_baseline_manifest",
                          "verify_baseline_bytes", "verify_policy_catalog",
@@ -458,41 +468,64 @@ class ProspectiveComparisonTest(unittest.TestCase):
             stack.enter_context(patch("run.runtime", return_value=runtime))
             with self.assertRaisesRegex(Exception, "external baseline attestation"):
                 compare_host(baseline, lane, set())
-            for archive_consistent in (False, True):
-                with patch("prospective_compare.verify_numeric_probe",
-                           return_value=archive_consistent):
-                    result = compare_host(baseline, lane, set(), sidecar)
-                self.assertEqual(result["passed_case_policy"], 0)
-                self.assertEqual(result["results"][0]["qualification"], "UNPASSED")
-                self.assertEqual(result["numeric_probe"],
-                                 "PASSED" if archive_consistent else
-                                 "UNPASSED_NOT_EXECUTED")
+            consistent = compare_host(baseline, lane, set(), sidecar)
+            self.assertEqual(consistent["status"], "UNPASSED")
+            self.assertEqual(consistent["passed_case_policy"], 0)
+            self.assertEqual(consistent["results"][0]["qualification"], "UNPASSED")
+            self.assertEqual(consistent["numeric_probe"], "UNPASSED_UNBOUND_PRODUCER")
+            self.assertEqual(consistent["numeric_probe_receipt_sha256"],
+                             digest(lane / "numeric-probe-receipt.json"))
+            self.assertEqual(consistent["operation_binding"], "UNPASSED_NOT_EXECUTED")
+            (lane / "numeric-probe-receipt.json").unlink()
+            absent = compare_host(baseline, lane, set(), sidecar)
+            self.assertEqual(absent["status"], "UNPASSED")
+            self.assertEqual(absent["passed_case_policy"], 0)
+            self.assertEqual(absent["numeric_probe"], "UNPASSED_NOT_EXECUTED")
+            self.assertIsNone(absent["numeric_probe_receipt_sha256"])
             verify_attestation.assert_called_with(baseline, sidecar)
             with patch("actual_arithmetic.expected_case_ids",
                        return_value={"captureGeometry": ["one"]}), \
-                    patch("prospective_compare.verify_numeric_probe", return_value=True), \
                     patch("prospective_compare.verify_arithmetic_captures",
                           return_value={"captureGeometry": {"receipt_sha256": "proof"}}):
-                result = compare_host(baseline, lane, set(), sidecar,
-                                      self.root / "arithmetic")
-            self.assertEqual(result["passed_case_policy"], 1)
-            self.assertEqual(result["numeric_probe"], "PASSED")
-            self.assertEqual(result["qualification"], "UNPASSED")
-            self.assertEqual(result["baseline_attestation_sha256"], digest(sidecar))
-            self.assertEqual(result["operation_evidence"]["captureGeometry"]["receipt_sha256"],
-                             "proof")
-            with patch("actual_arithmetic.expected_case_ids",
-                       return_value={"captureGeometry": ["one"]}), \
-                    patch("prospective_compare.verify_numeric_probe", return_value=False), \
-                    patch("prospective_compare.verify_arithmetic_captures",
-                          return_value={"captureGeometry": {"receipt_sha256": "proof"}}):
-                without_optional_probe = compare_host(baseline, lane, set(), sidecar,
-                                                      self.root / "arithmetic")
-            self.assertEqual(without_optional_probe["passed_case_policy"], 1)
-            self.assertEqual(without_optional_probe["numeric_probe"],
-                             "UNPASSED_NOT_EXECUTED")
-            self.assertEqual(without_optional_probe["operation_binding"],
-                             "VERIFIED_ARITHMETIC_BINDING")
+                for present in (False, True):
+                    if present:
+                        (lane / "numeric-probe-receipt.json").write_text(
+                            json.dumps(probe_receipt))
+                    result = compare_host(baseline, lane, set(), sidecar,
+                                          self.root / "arithmetic")
+                    self.assertEqual(result["status"], "UNPASSED")
+                    self.assertEqual(result["passed_case_policy"], 0)
+                    self.assertEqual(result["results"][0]["qualification"], "UNPASSED")
+                    self.assertEqual(result["numeric_probe"],
+                                     "UNPASSED_UNBOUND_PRODUCER" if present else
+                                     "UNPASSED_NOT_EXECUTED")
+                    self.assertEqual(result["operation_binding"],
+                                     "VERIFIED_ARITHMETIC_BINDING")
+                    self.assertEqual(result["operation_evidence"]["captureGeometry"]
+                                     ["receipt_sha256"], "proof")
+                    self.assertEqual(result["results"][0]["operation_method"],
+                                     "captureGeometry")
+                    self.assertEqual(result["results"][0]["operation_receipt_sha256"],
+                                     "proof")
+                    self.assertEqual(result["results"][0]["target_arithmetic"],
+                                     "PASSED_BOUND_OPERATION_EVIDENCE")
+                    self.assertEqual(result["results"][0]["rotation_audit"],
+                                     "PASSED_BOUND_OPERATION_TRACE")
+                    self.assertEqual(result["results"][0]["target_premises"],
+                                     numerical["target_premises"])
+                stale = {**probe_receipt, "candidate_commit": "stale"}
+                (lane / "numeric-probe-receipt.json").write_text(json.dumps(stale))
+                with self.assertRaisesRegex(Exception, "numeric probe source identity"):
+                    compare_host(baseline, lane, set(), sidecar,
+                                 self.root / "arithmetic")
+                contradictory = deepcopy(probe_receipt)
+                contradictory["probe"]["nextUpOneBits"] = "3ff0000000000002"
+                (lane / "numeric-probe-receipt.json").write_text(
+                    json.dumps(contradictory))
+                with self.assertRaisesRegex(Exception, "numeric probe target arithmetic"):
+                    compare_host(baseline, lane, set(), sidecar,
+                                 self.root / "arithmetic")
+            self.assertEqual(consistent["baseline_attestation_sha256"], digest(sidecar))
             with patch("baseline_capture.verify_attestation", side_effect=ValueError(
                     "wrong sidecar")):
                 with self.assertRaisesRegex(ValueError, "wrong sidecar"):

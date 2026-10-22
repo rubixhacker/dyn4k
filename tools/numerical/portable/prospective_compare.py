@@ -1076,10 +1076,7 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
         verify_reference_inventory(reference, case_id, catalog)
         compared = compare_policy_case(reference, candidate, case, catalog)
         if compared["status"] == "PASSED_NUMERICAL_POLICY" and arithmetic_verified:
-            compared["qualification"] = "PASSED_CASE_POLICY"
             compared["target_arithmetic"] = "PASSED_BOUND_OPERATION_EVIDENCE"
-            compared["target_premises"] = {name: "PASSED_CAPTURE" for name in
-                                            compared["target_premises"]}
             compared["rotation_audit"] = "PASSED_BOUND_OPERATION_TRACE"
         if operation_evidence is not None:
             method = arithmetic_method[case_id]
@@ -1093,10 +1090,9 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
     passed = sum(row["qualification"] == "PASSED_CASE_POLICY" for row in results)
     summary = {"status": ("FAILED_PHYSICAL" if any(row["status"] == "FAILED_PHYSICAL"
                             for row in results) else
-                          "UNPASSED" if failed or unpassed or not arithmetic_verified else
-                          "PASSED_NUMERICAL_POLICY"),
+                          "UNPASSED"),
                "qualification": "UNPASSED",
-               "numeric_probe": ("PASSED" if probe_archive_consistent else
+               "numeric_probe": ("UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
                                  "UNPASSED_NOT_EXECUTED"),
                "operation_binding": ("VERIFIED_ARITHMETIC_BINDING" if
                                      arithmetic_verified else "UNPASSED_NOT_EXECUTED"),
