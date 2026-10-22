@@ -56,3 +56,15 @@ jobs:
               test_pulley_jdi_v2 \
               test_pulley_jdi_classpath_v2 \
               test_external_rotation_binding
+      - name: Test bounded JDI wait on JDK 21
+        run: |
+          test -n "${JAVA_HOME_21_X64:-}"
+          test -x "$JAVA_HOME_21_X64/bin/java"
+          test -x "$JAVA_HOME_21_X64/bin/javac"
+          "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | grep -Eq 'version "21\.'
+          command -v strace
+          env -u OLLAMA_API_KEY \
+            DYN4K_JDI_JDK_HOME="$JAVA_HOME_21_X64" \
+            PYTHONDONTWRITEBYTECODE=1 \
+            PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi \
+            python3 -B -m unittest -v test_jdi_wait

@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 import subprocess
 import tempfile
@@ -224,6 +225,18 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "test_prospective_compare test_witness test_source_guard "
                  "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
                  "test_pulley_jdi_classpath_v2 test_external_rotation_binding"),
+                ("name: Test bounded JDI wait on JDK 21",
+                 "test -n \"${JAVA_HOME_21_X64:-}\" "
+                 "test -x \"$JAVA_HOME_21_X64/bin/java\" "
+                 "test -x \"$JAVA_HOME_21_X64/bin/javac\" "
+                 "\"$JAVA_HOME_21_X64/bin/java\" -version 2>&1 | "
+                 "grep -Eq 'version \"21\\.' "
+                 "command -v strace "
+                 "env -u OLLAMA_API_KEY "
+                 "DYN4K_JDI_JDK_HOME=\"$JAVA_HOME_21_X64\" "
+                 "PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi "
+                 "python3 -B -m unittest -v test_jdi_wait"),
             ],
             step_contract,
         )
@@ -249,6 +262,26 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 self.assertEqual(1, source.count(old), name)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
+    def test_bounded_jdi_step_fails_when_required_jdk21_is_missing(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        step = re.search(
+            r"(?m)^      - name: Test bounded JDI wait on JDK 21\n"
+            r"        run: \|\n((?:          [^\n]*\n)+)", source,
+        )
+        self.assertIsNotNone(step)
+        environment = os.environ.copy()
+        environment.pop("OLLAMA_API_KEY", None)
+        environment.pop("JAVA_HOME_21_X64", None)
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c",
+             textwrap.dedent(step.group(1))],
+            cwd=WORKFLOW.parents[2], env=environment, capture_output=True, text=True,
+            timeout=5,
+        )
+        self.assertNotEqual(0, result.returncode)
 
     def test_source_contract_rejects_yaml_key_execution_overrides(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
@@ -361,6 +394,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("Pulley v2 regression omitted", "test_pulley_jdi_v2", "test_pulley_jdi_v2_changed"),
             ("Pulley classpath regression omitted", "test_pulley_jdi_classpath_v2", "test_pulley_jdi_classpath_v2_changed"),
             ("external rotation binding omitted", "test_external_rotation_binding", "test_external_rotation_binding_changed"),
+            ("bounded JDI module omitted", "test_jdi_wait", "test_jdi_bridge"),
+            ("required JDK executable omitted", "test -x \"$JAVA_HOME_21_X64/bin/javac\"", "true"),
+            ("required JDK version omitted", "grep -Eq 'version \"21\\.'", "cat"),
+            ("required strace omitted", "command -v strace", "true"),
+            ("bounded JDI failure suppressed", "python3 -B -m unittest -v test_jdi_wait", "python3 -B -m unittest -v test_jdi_wait || true"),
             ("JDI reference origin unset omitted", "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN ", ""),
             ("Pulley baseline input unset omitted", "-u DYN4K_PULLEY_BASELINE_JAR ", ""),
             ("Pulley loaded-code input unset omitted", "-u DYN4K_PULLEY_LOADED_CODE_ROOT ", ""),
@@ -473,12 +511,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test qualification workflow contracts",
              "      - name: Test hosted runner guard",
              "      - name: Verify pinned GNU MPFR runtime",
-             "      - name: Test source-only numerical regressions"],
+             "      - name: Test source-only numerical regressions",
+             "      - name: Test bounded JDI wait on JDK 21"],
             step_names,
         )
         step = re.search(
             r"(?ms)^      - name: Test source-only numerical regressions\n"
-            r"        run: \|\n((?:          .*\n)+)",
+            r"        run: \|\n((?:          [^\n]*\n)+)",
             job,
         )
         self.assertIsNotNone(step)
