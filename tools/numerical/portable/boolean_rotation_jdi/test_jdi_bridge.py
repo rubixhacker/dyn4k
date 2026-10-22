@@ -63,6 +63,25 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_aligned_strace_results_allow_closed_fd_reuse(self):
+        output = Path(TEST_HOME) / "jdi"
+        raw = archive({"first.txt": b"one\n", "second.txt": b"two\n"})
+        trace = (
+            f'openat(AT_FDCWD, "{output}/first.txt", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 7\n'
+            'write(7, "one\\n", 4)                   = 4\n'
+            'close(7)                                = 0\n'
+            f'openat(AT_FDCWD, "{output}/second.txt", O_WRONLY|O_CREAT|O_TRUNC, 0666) = 7\n'
+            'write(7, "two\\n", 4)                   = 4\n'
+            'close(7)                                = 0\n').encode()
+        result = verify_jdi_file_writes(archive({"trace.456": trace}), raw, output)
+        self.assertEqual(result["files"], 2)
+        for changed in (trace.replace(b"close(7)                                = 0",
+                                      b"close(7)                                = -1", 1),
+                        trace.replace(b"write(7, \"two\\n\", 4)                   = 4",
+                                      b"write(7, \"two\\n\", 4)                   = 3", 1)):
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_file_writes(archive({"trace.456": changed}), raw, output)
+
     def test_output_bytes_require_complete_kernel_file_writes(self):
         output = Path(TEST_HOME) / "jdi"
         raw = archive({"events.tsv": b"one\ntwo\n", "complete.txt": b"vm-death\n"})
@@ -160,6 +179,30 @@ class JdiBridgeTest(unittest.TestCase):
             with self.assertRaises(EvidenceRejected):
                 verify_jdi_transport(worker, changed, 40001, 123, 456, HELPER_ARGS)
 
+    def test_helper_connect_requires_same_process_thread_ancestry(self):
+        worker = archive({"trace.123": WORKER_EXEC + SOCKET_BIND + SOCKET_LISTEN})
+        leader, connect = HELPER_SOCKET_TRACE.split(b"connect(", 1)
+        connect = b"connect(" + connect
+        clone = THREAD_CLONE.replace(b"124", b"457")
+        helper = archive({"trace.456": leader + clone, "trace.457": connect})
+        result = verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+        self.assertEqual(result["helper_connector"], 457)
+        nested = archive({"trace.456": leader + clone,
+                          "trace.457": THREAD_CLONE.replace(b"124", b"458"),
+                          "trace.458": connect})
+        self.assertEqual(verify_jdi_transport(
+            worker, nested, 40001, 123, 456, HELPER_ARGS)["helper_connector"], 458)
+        for parent, member in (
+                (leader + b"clone(child_stack=NULL, flags=SIGCHLD) = 457\n", connect),
+                (leader + clone.replace(b"CLONE_FILES", b"CLONE_PARENT"), connect),
+                (leader, connect),
+                (leader + clone, connect + b'execveat(AT_FDCWD, "/home/stewart/other", '
+                 b'["other"], 0x7f, 0) = 0\n')):
+            with self.assertRaises(EvidenceRejected):
+                verify_jdi_transport(
+                    worker, archive({"trace.456": parent, "trace.457": member}),
+                    40001, 123, 456, HELPER_ARGS)
+
     def test_selected_worker_bind_requires_thread_clone_chain(self):
         helper = archive({"trace.456": HELPER_SOCKET_TRACE})
         bind = ('bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
@@ -226,6 +269,10 @@ class JdiBridgeTest(unittest.TestCase):
         replacement = (b'execveat(AT_FDCWD, "/home/stewart/replacement", '
                        b'["replacement"], 0x7f, 0) = 0\n')
         helper = archive({"trace.456": HELPER_SOCKET_TRACE + replacement})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
+        aligned = replacement.replace(b") = 0\n", b")              = 0\n")
+        helper = archive({"trace.456": HELPER_SOCKET_TRACE + aligned})
         with self.assertRaises(EvidenceRejected):
             verify_jdi_transport(worker, helper, 40001, 123, 456, HELPER_ARGS)
         helper = archive({"trace.456": HELPER_SOCKET_TRACE + b"clone(0) = 457\n",

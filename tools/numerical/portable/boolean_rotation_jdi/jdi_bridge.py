@@ -288,7 +288,8 @@ def _worker_thread_ids(workers, root):
 
 
 def _successful_exec(line):
-    return line.startswith(("execve(", "execveat(")) and line.endswith(" = 0")
+    return (line.startswith(("execve(", "execveat(")) and
+            re.search(r"\) += 0$", line) is not None)
 
 
 def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
@@ -331,14 +332,15 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
                               expected_argv[5], expected_argv[8]))):
         raise EvidenceRejected("JDI helper command identity differs")
     _helper_descendants(helpers, helper_pid)
+    helper_threads = _worker_thread_ids(helpers, helper_pid)
     executions = []
     for pid, trace in helpers.items():
         for line in trace.splitlines():
             if line.startswith("execveat(") and _successful_exec(line):
                 raise EvidenceRejected("JDI helper program identity changed")
-            if not line.startswith("execve(") or not line.endswith(" = 0"):
+            if not line.startswith("execve(") or not _successful_exec(line):
                 continue
-            match = re.fullmatch(r'execve\("([^"\n]+)", (\[[^\n]+\]), .+\) = 0', line)
+            match = re.fullmatch(r'execve\("([^"\n]+)", (\[[^\n]+\]), .+\) += 0', line)
             if match is None:
                 raise EvidenceRejected("JDI helper execution format differs")
             try:
@@ -350,10 +352,10 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
         raise EvidenceRejected("JDI helper execution differs")
     bind = re.compile(r'bind\((\d+), \{sa_family=AF_INET, sin_port=htons\('
                       + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
-                      r'\d+\) = 0$')
+                      r'\d+\) += 0$')
     connect = re.compile(r'connect\((\d+), \{sa_family=AF_INET, sin_port=htons\('
                          + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
-                         r'\d+\) = 0$')
+                         r'\d+\) += 0$')
     bound = [(pid, index, match.group(1)) for pid, trace in workers.items()
              for index, line in enumerate(trace.splitlines())
              if (match := bind.fullmatch(line))]
@@ -363,18 +365,18 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
         listened = [(pid, index) for pid in worker_threads
                     for index, line in enumerate(workers[pid].splitlines())
                     if re.fullmatch(r'listen\(' + re.escape(fd) +
-                                    r', \d+\) = 0$', line)]
+                                    r', \d+\) += 0$', line)]
     connected = [(pid, match.group(1)) for pid, trace in helpers.items()
                  for line in trace.splitlines() if (match := connect.fullmatch(line))]
     if (len(bound) != 1 or len(listened) != 1 or len(connected) != 1 or
             bound[0][0] not in worker_threads or listened[0][0] != bound[0][0] or
             listened[0][1] <= bound[0][1] or
-            connected[0][0] != helper_pid):
+            connected[0][0] not in helper_threads):
         raise EvidenceRejected("JDI worker socket or helper connection differs")
     return {"status": "MATCHED_JDI_SOCKET_SYSCALLS_UNPASSED_PROCESS",
             "qualification": "UNPASSED", "worker_socket_writer": bound[0][0],
             "worker_socket_listener": bound[0][0], "worker_tgid": worker_pid,
-            "helper_connector": helper_pid, "port": port}
+            "helper_connector": connected[0][0], "port": port}
 
 
 def verify_jdi_file_writes(helper_archive, evidence_archive, output_path):
@@ -414,7 +416,7 @@ def verify_jdi_file_writes(helper_archive, evidence_archive, output_path):
                             raise EvidenceRejected("JDI output writev is unbound")
                         continue
                     match = re.fullmatch(
-                        r'write\((\d+), ("(?:\\.|[^"\\])*"), (\d+)\) = (\d+)', line)
+                        r'write\((\d+), ("(?:\\.|[^"\\])*"), (\d+)\) += (\d+)', line)
                     if match is None:
                         if any(re.match(r'write\(' + fd + r'[,)]', line)
                                for fd in active):
@@ -429,7 +431,7 @@ def verify_jdi_file_writes(helper_archive, evidence_archive, output_path):
                         raise EvidenceRejected("JDI output write is incomplete")
                     active[fd][1].append(payload)
                 elif line.startswith("close("):
-                    match = re.fullmatch(r'close\((\d+)\) = 0', line)
+                    match = re.fullmatch(r'close\((\d+)\) += 0', line)
                     if match and match.group(1) in active:
                         path, parts = active.pop(match.group(1))
                         observed[path] = b"".join(parts)
