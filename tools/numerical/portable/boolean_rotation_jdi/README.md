@@ -11,6 +11,11 @@ bits for the `c` and `s` arguments, rotation fields before and after the method,
 the boxed angle, receiver and thread IDs, and the source caller's method and
 bytecode location. The probe requires a VM death event and an exact event count
 before it writes `complete.txt`. A disconnect without VM death fails the capture.
+One reusable reader waits for JDI events. The controller applies the observation
+deadline while it waits for that reader. This avoids a new JDK timer thread for
+each event set. `JdiWaitControl.java` and `test_jdi_wait.py` are synthetic public
+CLI controls for thread use, the deadline, VM disconnect, and normal completion.
+They do not qualify a numerical or runtime lane.
 
 `loaded_code.py` compares the observed constant pool and method inventory and
 bytes with a source-pinned JAR class. A match covers only the code that JDI

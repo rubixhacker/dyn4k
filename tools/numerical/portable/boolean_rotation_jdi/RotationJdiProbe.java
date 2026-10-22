@@ -25,6 +25,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class RotationJdiProbe {
     private record Pending(int ordinal, long thread, ObjectReference receiver, String pre,
@@ -155,6 +161,11 @@ public final class RotationJdiProbe {
         long body1 = -1;
         long body2 = -1;
         long integrated = -1;
+        ExecutorService reader = Executors.newSingleThreadExecutor(task -> {
+            Thread thread = new Thread(task, "jdi-event-reader");
+            thread.setDaemon(true);
+            return thread;
+        });
         try {
             if (!vm.canGetBytecodes() || !vm.canGetConstantPool())
                 throw new IllegalStateException("Target lacks loaded-code access");
@@ -173,8 +184,19 @@ public final class RotationJdiProbe {
             exit.enable();
             vm.resume();
             long deadline = System.nanoTime() + Duration.ofSeconds(deadlineSeconds).toNanos();
-            while (endpoint == null && System.nanoTime() < deadline) {
-                EventSet events = vm.eventQueue().remove(500);
+            while (endpoint == null) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) break;
+                Future<EventSet> waiting = reader.submit(() -> vm.eventQueue().remove());
+                EventSet events;
+                try {
+                    events = waiting.get(remaining, TimeUnit.NANOSECONDS);
+                } catch (TimeoutException error) {
+                    waiting.cancel(true);
+                    break;
+                } catch (ExecutionException error) {
+                    throw new IllegalStateException("JDI event reader failed", error.getCause());
+                }
                 if (events == null) continue;
                 try {
                     for (Event event : events) {
@@ -250,6 +272,7 @@ public final class RotationJdiProbe {
                               (process == null ? "unbound" : process.pid()) + "\n" +
                               expected + "\n");
         } finally {
+            reader.shutdownNow();
             if (process != null && process.isAlive()) process.destroyForcibly();
             try { vm.dispose(); } catch (Exception ignored) { }
         }
