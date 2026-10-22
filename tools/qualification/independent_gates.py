@@ -135,6 +135,7 @@ P2_BOOLEAN_JDI_FINAL_ASSEMBLY_REVISION = "990910f697dbb8c183793796d0aca7a16c5208
 P2_ROTATION_PREMISE_SOURCE_REVISION = "a7fb17a65f936f4224e2a38a7481f2d698f2d155"
 P2_BOUNDED_JDI_SOURCE_REVISION = "7173d5058ed5524998cc26e3bfc8e8cfb9fa1b86"
 P2_CORRECTED_JDI_SOURCE_REVISION = "e9776f80e1bd5c7f6a3e622d052adaae97c45dfb"
+P2_JDK21_JDI_SOURCE_REVISION = "a50e798e2490e7e74937808405b04f413b9e9dbc"
 APPROVED_P2_PRODUCERS = {
     "actual_arithmetic.py": "5f02723e84401f612f4b7a1c72d7686b651e486e5153180ff80e2ec512faa1bf",
     "baseline_capture.py": "e4b4977da095744c3478ad6607a3281e4224f1ef83417c13dc88a51c9108bf34",
@@ -268,6 +269,11 @@ P2_CORRECTED_JDI_DEPENDENCIES = {
     **P2_BOUNDED_JDI_DEPENDENCIES,
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
         "ebd32c6add81e9ea25fdaeac52056db56f428a669f15b9400854ffc5da3d1f61",
+}
+P2_JDK21_JDI_DEPENDENCIES = {
+    **P2_CORRECTED_JDI_DEPENDENCIES,
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "bffde8be5655e2a47dea2bd97734d15fc4d46112d032ac432b646c17ab3d611b",
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
@@ -827,12 +833,13 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if corrected_jdi or bounded_jdi:
+    if jdk21_jdi or corrected_jdi or bounded_jdi:
         approved = P2_ROTATION_PREMISE_PRODUCERS
     elif rotation_premise:
         approved = P2_ROTATION_PREMISE_PRODUCERS
@@ -891,25 +898,29 @@ def _p2_producer_binding(repository, candidate_sha):
         if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved
                 or hashlib.sha256(committed).hexdigest() != approved[name]):
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
-    if corrected_jdi:
+    if jdk21_jdi:
+        _source_binding(repository, candidate_sha, P2_JDK21_JDI_DEPENDENCIES,
+                        "JDK 21 JDI producer")
+    elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
-                        "corrected JDI producer")
+                        "corrected JDI producer",
+                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_CORRECTED_JDI_DEPENDENCIES)
+                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_CORRECTED_JDI_DEPENDENCIES)
+                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_CORRECTED_JDI_DEPENDENCIES)
+                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_CORRECTED_JDI_DEPENDENCIES)
+                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
     return dict(approved)
 
 

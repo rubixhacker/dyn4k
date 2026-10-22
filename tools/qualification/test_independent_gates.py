@@ -1983,6 +1983,93 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 independent_gates._p2_producer_binding(ROOT, current)
 
+    def test_p2_jdk21_bridge_window_keeps_prior_lineages_and_rejects_wrong_bytes(self):
+        bridge = "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py"
+        helper = "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java"
+        current = "a50e798e2490e7e74937808405b04f413b9e9dbc"
+        previous = "09bee230a1ea6fbd8c748732d1872b3e907a8e0e"
+        old = "481ffa64c82045be93da14f89dc4dcc3c3b30f49"
+        bounded = independent_gates.P2_BOUNDED_JDI_SOURCE_REVISION
+        prior_digest = "ebd32c6add81e9ea25fdaeac52056db56f428a669f15b9400854ffc5da3d1f61"
+        new_digest = "bffde8be5655e2a47dea2bd97734d15fc4d46112d032ac432b646c17ab3d611b"
+        self.assertEqual(current, independent_gates.P2_JDK21_JDI_SOURCE_REVISION)
+        self.assertEqual(prior_digest, independent_gates.P2_CORRECTED_JDI_DEPENDENCIES[bridge])
+        self.assertEqual({**independent_gates.P2_CORRECTED_JDI_DEPENDENCIES,
+                          bridge: new_digest},
+                         independent_gates.P2_JDK21_JDI_DEPENDENCIES)
+        self.assertEqual(independent_gates.P2_CORRECTED_JDI_DEPENDENCIES[helper],
+                         independent_gates.P2_JDK21_JDI_DEPENDENCIES[helper])
+        for revision in (current, "HEAD", previous, old, bounded):
+            with self.subTest(revision=revision):
+                self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                                 independent_gates._p2_producer_binding(ROOT, revision))
+        for revision in ("aa3cd31465ebcad278001754b9a0f9ab40c4d30a",
+                         "0d1acbb7c38fed7e616c85c8efb8e4b29f699908"):
+            with self.subTest(incomplete=revision), self.assertRaisesRegex(
+                    ValueError, "bounded JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+
+        original_show = subprocess.check_output
+        prior_bytes = original_show(["git", "--no-replace-objects", "show",
+                                     f"{previous}:{bridge}"], cwd=ROOT)
+        current_bytes = original_show(["git", "--no-replace-objects", "show",
+                                       f"{current}:{bridge}"], cwd=ROOT)
+        self.assertEqual(prior_digest, hashlib.sha256(prior_bytes).hexdigest())
+        self.assertEqual(new_digest, hashlib.sha256(current_bytes).hexdigest())
+
+        for revision, substitute in ((current, prior_bytes), (previous, current_bytes),
+                                     (old, current_bytes), (bounded, current_bytes),
+                                     (current, current_bytes + b"\n# altered\n")):
+            def wrong_committed(command, *args, **kwargs):
+                if "show" in command and f"{revision}:{bridge}" in command:
+                    return substitute
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(wrong_lineage=revision), mock.patch.object(
+                    subprocess, "check_output", wrong_committed):
+                with self.assertRaisesRegex(ValueError, "JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, revision)
+
+        stale_helper = original_show(["git", "--no-replace-objects", "show",
+                                      f"1ef6554b4edb4e6066f5ae16ee64dbeda131d568:{helper}"],
+                                     cwd=ROOT)
+        for relative, substitute in ((bridge, prior_bytes), (helper, stale_helper),
+                                     (bridge, current_bytes + b"\n# altered\n")):
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def wrong_local(path):
+                return substitute if path == local else original_read(path)
+
+            with self.subTest(stale_local=relative), mock.patch.object(
+                    Path, "read_bytes", wrong_local):
+                with self.assertRaisesRegex(ValueError, "JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
+        for relative in (bridge, helper):
+            local = ROOT / relative
+            original_read = Path.read_bytes
+
+            def missing_local(path):
+                if path == local:
+                    raise FileNotFoundError(path)
+                return original_read(path)
+
+            with self.subTest(missing_local=relative), mock.patch.object(
+                    Path, "read_bytes", missing_local):
+                with self.assertRaises(FileNotFoundError):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
+            def missing_committed(command, *args, **kwargs):
+                if "show" in command and f"{current}:{relative}" in command:
+                    raise subprocess.CalledProcessError(1, command)
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(missing_committed=relative), mock.patch.object(
+                    subprocess, "check_output", missing_committed):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
     def test_p2_reviewed_arithmetic_assembly_rejects_stale_and_altered_bytes(self):
         current = independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION
         old = independent_gates.APPROVED_P2_COMBINED_PRODUCERS
