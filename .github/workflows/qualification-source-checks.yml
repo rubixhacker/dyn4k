@@ -46,4 +46,8 @@ jobs:
               test_prospective_compare \
               test_witness \
               test_source_guard \
-              test_jdi_bridge
+              test_jdi_bridge \
+              test_pulley_jdi_v1 \
+              test_pulley_jdi_v2 \
+              test_pulley_jdi_classpath_v2 \
+              test_external_rotation_binding

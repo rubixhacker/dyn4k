@@ -18,12 +18,25 @@ from pulley_jdi_inputs_v2 import (inspect_classpath, verify_candidate_publicatio
 
 
 class PulleyJdiV2Test(unittest.TestCase):
-    ROOT = Path('/var/home/stewart/dyn4k-evidence/root-jdi-loaded-code')
-    BASELINE = Path('/tmp/dyn4k-baseline-cache/dyn4j-6.0.0.jar')
-    CANDIDATE = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/wheel/capture-7d/artifact.jar')
-    TASK_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-controller-followup')
-    REVIEW_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-reviewfix-f9')
-    P3_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-jdi-offline-bound-p3')
+    PROVIDER_CLASSES = ('org/dyn4j/dynamics/joint/PulleyJoint.class',
+                        'org/dyn4j/dynamics/Body.class',
+                        'org/dyn4j/world/World.class',
+                        'org/dyn4j/geometry/Geometry.class')
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=Path.home())
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.BASELINE = self.root / 'baseline-test-only.jar'
+        self.CANDIDATE = self.root / 'candidate-test-only.jar'
+        self._jar(self.BASELINE, self.PROVIDER_CLASSES)
+        shutil.copyfile(self.BASELINE, self.CANDIDATE)
+
+    @staticmethod
+    def _jar(path, classes):
+        with zipfile.ZipFile(path, 'w') as archive:
+            for name in classes:
+                archive.writestr(name, b'test-only class placeholder')
 
     def test_capture_fixture_is_absent_from_normal_jvm_source_root(self):
         root = Path(__file__).resolve().parent
@@ -31,7 +44,7 @@ class PulleyJdiV2Test(unittest.TestCase):
         self.assertTrue((root / 'pulley-jdi-sidecar-v2/src/test/kotlin/portable/PulleyPreparationJdiV1Test.kt').is_file())
 
     def test_shadow_provider_is_rejected_before_output_creation(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             shadow = root / 'shadow.jar'
             shadow.write_bytes(b'other provider')
@@ -46,10 +59,10 @@ class PulleyJdiV2Test(unittest.TestCase):
     def jar(path, names):
         with zipfile.ZipFile(path, 'w') as archive:
             for name in names:
-                archive.writestr(name, b'\xca\xfe\xba\xbe')
+                archive.writestr(name, b'test-only class placeholder')
 
     def test_complete_classpath_rejects_shadow_and_changed_fixture(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             cache = root / 'cache'
             cache.mkdir()
@@ -82,7 +95,7 @@ class PulleyJdiV2Test(unittest.TestCase):
         self.assertNotIn('readAllBytes()', controller)
 
     def test_copied_input_and_child_log_stop_at_bounds(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             source = root / 'source'
             source.write_bytes(b'12345')
@@ -98,7 +111,7 @@ class PulleyJdiV2Test(unittest.TestCase):
             self.assertLessEqual((root / 'child.stdout').stat().st_size, MAX_LOG_BYTES)
 
     def test_oversized_provider_is_rejected_before_hash_or_copy(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             provider = root / 'oversized.jar'
             with provider.open('wb') as stream:
@@ -114,7 +127,7 @@ class PulleyJdiV2Test(unittest.TestCase):
             verify_candidate_publication(self.CANDIDATE, None)
 
     def test_candidate_publication_binds_current_tree_log_and_all_staged_bytes(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             staged = root / 'staged'
             staged.mkdir()
@@ -153,7 +166,7 @@ class PulleyJdiV2Test(unittest.TestCase):
     def test_fresh_sidecar_source_build_must_match_declared_fixture(self):
         expected = [{'role': 'fixture', 'sha256': 'a' * 64, 'path': '/fixture.jar'},
                     {'role': 'provider', 'sha256': 'b' * 64, 'path': '/provider.jar'}]
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             with patch('pulley_jdi_capture_v2._run_bounded', return_value=(123, 0)) as run, \
                     patch('pulley_jdi_capture_v2.portable_runner.clean_identity',
                           return_value=('c' * 40, 'd' * 64)), \
@@ -174,41 +187,60 @@ class PulleyJdiV2Test(unittest.TestCase):
                     _build_sidecar('baseline', self.BASELINE, Path(directory), {}, expected)
 
     def test_pinned_baseline_class_inventory(self):
+        if os.environ.get('DYN4K_PULLEY_BASELINE_JAR'):
+            self.BASELINE = Path(os.environ['DYN4K_PULLEY_BASELINE_JAR'])
+        else:
+            self.skipTest('set DYN4K_PULLEY_BASELINE_JAR for baseline class-byte verification')
         pool, methods = class_inventory(self.BASELINE)
         self.assertEqual(len(methods), 28)
         self.assertGreater(len(pool), 100)
 
     def test_root_loaded_code_matches_both_sealed_providers(self):
-        baseline = inspect_loaded_code(self.ROOT / 'baseline', self.BASELINE)
-        candidate = inspect_loaded_code(self.ROOT / 'candidate-historical', self.CANDIDATE)
+        root = Path(os.environ.get('DYN4K_PULLEY_LOADED_CODE_ROOT', ''))
+        candidate = Path(os.environ.get('DYN4K_PULLEY_CANDIDATE_JAR', ''))
+        if not root.is_dir() or not candidate.is_file() or not os.environ.get('DYN4K_PULLEY_BASELINE_JAR'):
+            self.skipTest('set loaded-code root and baseline and candidate JAR inputs for historical verification')
+        baseline = inspect_loaded_code(root / 'baseline', self.BASELINE)
+        candidate = inspect_loaded_code(root / 'candidate-historical', Path(os.environ['DYN4K_PULLEY_CANDIDATE_JAR']))
         self.assertEqual(baseline['methods'], 28)
         self.assertEqual(candidate['methods'], 29)
         self.assertEqual(baseline['pool_sha256'],
                          'abd20fdf00e2a540cd3813616d18e07d6e24d879b89f043d8b4d70d8b5259563')
 
     def test_altered_loaded_pool_is_rejected(self):
+        root = Path(os.environ.get('DYN4K_PULLEY_LOADED_CODE_ROOT', ''))
+        baseline = os.environ.get('DYN4K_PULLEY_BASELINE_JAR')
+        if not root.is_dir() or not baseline:
+            self.skipTest('set loaded-code root and baseline JAR inputs for altered-pool verification')
         with self.assertRaisesRegex(Rejected, 'constant pool'):
-            inspect_loaded_code(self.ROOT / 'altered-baseline-provider', self.BASELINE)
+            inspect_loaded_code(root / 'altered-baseline-provider', Path(baseline))
 
     def test_changed_and_extra_method_bytes_are_rejected(self):
+        root = Path(os.environ.get('DYN4K_PULLEY_LOADED_CODE_ROOT', ''))
+        baseline = os.environ.get('DYN4K_PULLEY_BASELINE_JAR')
+        if not root.is_dir() or not baseline:
+            self.skipTest('set loaded-code root and baseline JAR inputs for historical method verification')
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            for path in (self.ROOT / 'baseline').iterdir():
+            for path in (root / 'baseline').iterdir():
                 if path.is_file():
                     shutil.copyfile(path, target / path.name)
             method = target / 'method-0.bin'
             method.write_bytes(method.read_bytes() + b'X')
             with self.assertRaisesRegex(Rejected, 'method bytes'):
-                inspect_loaded_code(target, self.BASELINE)
-            shutil.copyfile(self.ROOT / 'baseline/method-0.bin', method)
+                inspect_loaded_code(target, Path(baseline))
+            shutil.copyfile(root / 'baseline/method-0.bin', method)
             (target / 'method-28.bin').write_bytes(b'X')
             with self.assertRaisesRegex(Rejected, 'extra loaded'):
-                inspect_loaded_code(target, self.BASELINE)
+                inspect_loaded_code(target, Path(baseline))
 
     def test_non_pulley_loaded_world_bytes_are_compared_with_provider(self):
+        if not os.environ.get('DYN4K_PULLEY_BASELINE_JAR'):
+            self.skipTest('set DYN4K_PULLEY_BASELINE_JAR for baseline class-byte verification')
+        self.BASELINE = Path(os.environ['DYN4K_PULLEY_BASELINE_JAR'])
         entry = 'org/dyn4j/world/World.class'
         pool, methods = class_inventory(self.BASELINE, entry)
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             target = Path(directory)
             (target / 'constant-pool.bin').write_bytes(pool)
             rows = []
@@ -242,7 +274,7 @@ class PulleyJdiV2Test(unittest.TestCase):
             'sidecar_build_stdout_sha256', 'sidecar_build_stderr_sha256',
             'sidecar_classpath_sha256',
         )
-        with tempfile.TemporaryDirectory(dir=self.P3_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             artifact = root / 'oversized.jar'
             with artifact.open('wb') as stream:
@@ -257,7 +289,7 @@ class PulleyJdiV2Test(unittest.TestCase):
                     inspect_capture(root, artifact)
 
     def test_replay_rejects_forged_local_values_even_if_original_is_resealed(self):
-        with tempfile.TemporaryDirectory(dir=self.REVIEW_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             original = root / 'original'
             original.mkdir()
@@ -293,11 +325,13 @@ class PulleyJdiV2Test(unittest.TestCase):
                 compare_indexed_onecase(reference, directory, directory, '0' * 64)
 
     def test_wrong_provider_hash_stops_before_creating_capture(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             output = Path(directory) / 'capture'
+            classpath = Path(directory) / 'classpath.txt'
+            classpath.write_text('test-only classpath\n')
             with self.assertRaisesRegex(Rejected, 'provider artifact hash differs'):
                 capture('baseline', self.BASELINE,
-                        self.TASK_HOME / 'toy-classpath.txt', output, '0' * 64)
+                        classpath, output, '0' * 64)
             self.assertFalse(output.exists())
 
     def test_sidecar_selects_only_the_onecase_producer(self):

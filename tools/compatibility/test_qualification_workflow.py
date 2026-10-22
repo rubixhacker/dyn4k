@@ -217,7 +217,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "test_actual_arithmetic test_actual_capture_receipt "
                  "test_capture_actual test_rotation_oracle test_rotation_marker "
                  "test_prospective_compare test_witness test_source_guard "
-                 "test_jdi_bridge"),
+                 "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
+                 "test_pulley_jdi_classpath_v2 test_external_rotation_binding"),
             ],
             step_contract,
         )
@@ -351,7 +352,10 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("numerical module", "test_rotation_oracle", "test_rotation_oracle_changed"),
             ("JDI bridge module omitted", "test_jdi_bridge", "test_jdi_bridge_changed"),
             ("capture regression omitted", "              test_capture_actual \\\n", ""),
-            ("JDI bridge regression omitted", "              test_jdi_bridge\n", ""),
+            ("Pulley v1 regression omitted", "test_pulley_jdi_v1", "test_pulley_jdi_v1_changed"),
+            ("Pulley v2 regression omitted", "test_pulley_jdi_v2", "test_pulley_jdi_v2_changed"),
+            ("Pulley classpath regression omitted", "test_pulley_jdi_classpath_v2", "test_pulley_jdi_classpath_v2_changed"),
+            ("external rotation binding omitted", "test_external_rotation_binding", "test_external_rotation_binding_changed"),
             ("JDI reference origin unset omitted", "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN ", ""),
             ("added installation step",
              "      - name: Test source-only numerical regressions\n",
@@ -485,7 +489,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "test_actual_arithmetic test_actual_capture_receipt "
             "test_capture_actual test_rotation_oracle test_rotation_marker "
             "test_prospective_compare test_witness test_source_guard "
-            "test_jdi_bridge",
+            "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
+            "test_pulley_jdi_classpath_v2 test_external_rotation_binding",
             command,
         )
 

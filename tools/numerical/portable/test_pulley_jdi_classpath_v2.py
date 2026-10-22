@@ -1,4 +1,5 @@
 import hashlib
+import os
 import tempfile
 import unittest
 import zipfile
@@ -9,28 +10,37 @@ from pulley_jdi_v1 import Rejected
 
 
 class PulleyMultiReleaseClasspathTest(unittest.TestCase):
-    BASELINE = Path('/tmp/dyn4k-baseline-cache/dyn4j-6.0.0.jar')
-    REAL = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-sidecar-gradle-script-repair')
-    TASK_HOME = Path('/var/home/stewart/dyn4k-evidence/session-control/numerical-followup-7d/pulley-multirelease-classpath-repair')
-    CACHE = Path('/var/home/stewart/.gradle/caches/modules-2/files-2.1')
+    PROVIDER_CLASSES = ('org/dyn4j/dynamics/joint/PulleyJoint.class',
+                        'org/dyn4j/dynamics/Body.class',
+                        'org/dyn4j/world/World.class',
+                        'org/dyn4j/geometry/Geometry.class')
     FIXTURE_CLASSES = ('portable/PulleyPreparationJdiV1Test.class',
                        'portable/NumericalRecorder.class')
     RUNTIME_CLASSES = ('org/junit/runner/JUnitCore.class',
                        'kotlin/jvm/internal/Intrinsics.class')
     MR_MANIFEST = b'Manifest-Version: 1.0\r\nMulti-Release: true\r\n\r\n'
 
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.cache = self.root / 'cache'
+        self.cache.mkdir()
+        self.BASELINE = self.root / 'baseline-test-only.jar'
+        self.jar(self.BASELINE, self.PROVIDER_CLASSES)
+
     @staticmethod
     def jar(path, classes, manifest=b'Manifest-Version: 1.0\r\n\r\n'):
         with zipfile.ZipFile(path, 'w') as archive:
             archive.writestr('META-INF/MANIFEST.MF', manifest)
             for name in classes:
-                archive.writestr(name, b'\xca\xfe\xba\xbe')
+                archive.writestr(name, b'test-only class placeholder')
 
     def setup_synthetic(self, root, extra=(), manifest=None):
         cache = root / 'cache'
-        cache.mkdir()
-        fixture = root / 'fixture.jar'
-        runtime = cache / 'runtime.jar'
+        cache.mkdir(exist_ok=True)
+        fixture = root / 'fixture-test-only.jar'
+        runtime = cache / 'runtime-test-only.jar'
         self.jar(fixture, self.FIXTURE_CLASSES)
         self.jar(runtime, self.RUNTIME_CLASSES + tuple(extra),
                  self.MR_MANIFEST if manifest is None else manifest)
@@ -39,11 +49,14 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
         return classpath, fixture, runtime, cache
 
     def test_real_eight_entry_classpath_is_admitted_with_bound_hashes(self):
-        classpath = self.REAL / 'classpath.txt'
+        classpath = Path(os.environ.get('DYN4K_PULLEY_REAL_CLASSPATH', ''))
+        cache = Path(os.environ.get('DYN4K_PULLEY_CACHE_ROOT', ''))
+        if not classpath.is_file() or not cache.is_dir():
+            self.skipTest('set real classpath and dependency cache inputs for historical archive verification')
         self.assertEqual(hashlib.sha256(classpath.read_bytes()).hexdigest(),
                          '791e12b6ab0366a3fb86119f2534c01cab2b4e0ed40bfa040d451966dc4f66db')
         paths = [Path(part) for part in classpath.read_text().strip().split(':')]
-        entries = inspect_classpath(classpath, paths[1], paths[0], self.CACHE)
+        entries = inspect_classpath(classpath, paths[1], paths[0], cache)
         self.assertEqual(len(entries), 8)
         self.assertEqual([entry['role'] for entry in entries[:2]], ['fixture', 'provider'])
         self.assertEqual([entry['sha256'] for entry in entries[:2]], [
@@ -57,13 +70,13 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
     def test_versioned_engine_and_fixture_shadows_are_rejected(self):
         for name in ('META-INF/versions/9/org/dyn4j/world/World.class',
                      'META-INF/versions/21/portable/NumericalRecorder.class'):
-            with self.subTest(name=name), tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(dir=self.root) as directory:
                 classpath, fixture, _, cache = self.setup_synthetic(Path(directory), (name,))
                 with self.assertRaisesRegex(Rejected, 'duplicate classpath class'):
                     inspect_classpath(classpath, self.BASELINE, fixture, cache)
 
     def test_versioned_duplicate_between_dependencies_is_rejected(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             classpath, fixture, _, cache = self.setup_synthetic(
                 Path(directory), ('META-INF/versions/11/extra/Duplicate.class',))
             duplicate = cache / 'duplicate.jar'
@@ -73,21 +86,21 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
                 inspect_classpath(classpath, self.BASELINE, fixture, cache)
 
     def test_base_and_versioned_class_in_same_jar_are_one_owner(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             classpath, fixture, _, cache = self.setup_synthetic(
                 Path(directory), ('extra/Owned.class',
                                   'META-INF/versions/9/extra/Owned.class',
                                   'META-INF/versions/21/extra/Owned.class'))
             first = inspect_classpath(classpath, self.BASELINE, fixture, cache)
             self.assertEqual(len(first), 3)
-            runtime = cache / 'runtime.jar'
+            runtime = cache / 'runtime-test-only.jar'
             with zipfile.ZipFile(runtime, 'w') as archive:
                 archive.writestr('META-INF/MANIFEST.MF', self.MR_MANIFEST)
                 for name in self.RUNTIME_CLASSES:
-                    archive.writestr(name, b'\xca\xfe\xba\xbe')
-                archive.writestr('extra/Owned.class', b'\xca\xfe\xba\xbe')
+                    archive.writestr(name, b'test-only class placeholder')
+                archive.writestr('extra/Owned.class', b'test-only class placeholder')
                 archive.writestr('META-INF/versions/9/extra/Owned.class', b'changed')
-                archive.writestr('META-INF/versions/21/extra/Owned.class', b'\xca\xfe\xba\xbe')
+                archive.writestr('META-INF/versions/21/extra/Owned.class', b'test-only class placeholder')
             second = inspect_classpath(classpath, self.BASELINE, fixture, cache)
             self.assertNotEqual(first[2]['sha256'], second[2]['sha256'])
             self.assertEqual(second[2]['sha256'], hashlib.sha256(runtime.read_bytes()).hexdigest())
@@ -102,20 +115,20 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
             b'Manifest-Version: 1.0\r\n\r\nName: entry\r\nClass-Path: extra.jar\r\n\r\n',
         )
         for manifest in manifests:
-            with self.subTest(manifest=manifest), tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+            with self.subTest(manifest=manifest), tempfile.TemporaryDirectory(dir=self.root) as directory:
                 classpath, fixture, _, cache = self.setup_synthetic(Path(directory), manifest=manifest)
                 with self.assertRaises(Rejected):
                     inspect_classpath(classpath, self.BASELINE, fixture, cache)
 
     def test_folded_multi_release_value_is_recognized(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             classpath, fixture, _, cache = self.setup_synthetic(
                 Path(directory), ('META-INF/versions/9/extra/Owned.class',),
                 b'Manifest-Version: 1.0\r\nMulti-Release: tr\r\n ue\r\n\r\n')
             self.assertEqual(len(inspect_classpath(classpath, self.BASELINE, fixture, cache)), 3)
 
     def test_manifest_alias_and_invalid_version_directory_are_rejected(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             classpath, fixture, runtime, cache = self.setup_synthetic(Path(directory))
             with zipfile.ZipFile(runtime, 'w') as archive:
                 archive.writestr('META-INF/manifest.mf',
@@ -130,7 +143,7 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
                 inspect_classpath(classpath, self.BASELINE, fixture, cache)
 
     def test_above_jdk21_class_is_ignored_but_archive_is_inspected(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             classpath, fixture, runtime, cache = self.setup_synthetic(
                 root, ('META-INF/versions/22/org/dyn4j/world/World.class',))
@@ -141,7 +154,7 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
                 inspect_classpath(classpath, self.BASELINE, fixture, cache)
 
     def test_versioned_classes_require_multi_release_declaration(self):
-        with tempfile.TemporaryDirectory(dir=self.TASK_HOME) as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             classpath, fixture, _, cache = self.setup_synthetic(
                 Path(directory), ('META-INF/versions/9/extra/Hidden.class',),
                 b'Manifest-Version: 1.0\r\n\r\n')
