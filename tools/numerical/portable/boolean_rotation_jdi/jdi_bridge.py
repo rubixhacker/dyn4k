@@ -102,6 +102,21 @@ def derive_call_sites(artifact):
     return parse_call_sites(*output)
 
 
+def _require_jdk21_javac(javac, environment):
+    try:
+        run = subprocess.run((str(javac), "-version"), env=environment,
+                             capture_output=True, text=True, timeout=10,
+                             check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise EvidenceRejected("selected JDI compiler version check failed") from error
+    version_lines = [line for line in (run.stdout + "\n" + run.stderr).splitlines()
+                     if line.startswith("javac ")]
+    if (run.returncode or len(version_lines) != 1 or
+            re.fullmatch(r"javac 21(?:\.[0-9]+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._+-]*)?",
+                         version_lines[0]) is None):
+        raise EvidenceRejected("selected JDI compiler is not JDK 21")
+
+
 def compile_helper(source, temporary_root):
     temporary_root = Path(temporary_root).resolve()
     if (not temporary_root.is_relative_to(Path.home().resolve()) or
@@ -118,7 +133,9 @@ def compile_helper(source, temporary_root):
     environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(jdk)
     environment["TMPDIR"] = str(temporary_root)
-    run = subprocess.run((str(jdk / "bin/javac"), "--add-modules", "jdk.jdi",
+    javac = jdk / "bin/javac"
+    _require_jdk21_javac(javac, environment)
+    run = subprocess.run((str(javac), "--add-modules", "jdk.jdi",
                           "-J-Djava.io.tmpdir=" + str(temporary_root),
                           "-d", str(classes), str(java)), env=environment,
                          capture_output=True, timeout=30, check=False)

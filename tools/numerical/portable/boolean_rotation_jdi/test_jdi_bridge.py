@@ -6,8 +6,10 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
-from jdi_bridge import (EvidenceRejected, parse_call_sites, verify_body_map,
+import jdi_bridge
+from jdi_bridge import (EvidenceRejected, compile_helper, parse_call_sites, verify_body_map,
                         verify_jdi_archive, verify_jdi_file_writes,
                         verify_jdi_transport)
 from witness import read_probe_events
@@ -63,6 +65,61 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_compile_helper_rejects_missing_javac_for_default_and_override(self):
+        selected_jdks = (
+            (None, Path("/default/jdk")),
+            ("/ci/jdk", Path("/ci/jdk")),
+        )
+        with tempfile.TemporaryDirectory(dir=Path.home()) as temporary:
+            temporary_root = Path(temporary)
+            for configured_jdk, expected_jdk in selected_jdks:
+                with self.subTest(configured_jdk=configured_jdk):
+                    with patch.dict(os.environ):
+                        os.environ.pop("DYN4K_JDI_JDK_HOME", None)
+                        if configured_jdk is not None:
+                            os.environ["DYN4K_JDI_JDK_HOME"] = configured_jdk
+                        with patch.object(jdi_bridge, "JDK21", Path("/default/jdk")):
+                            command = (str(expected_jdk / "bin/javac"), "-version")
+                            with patch("jdi_bridge.subprocess.run",
+                                       side_effect=FileNotFoundError("javac missing")) as run:
+                                with self.assertRaises(EvidenceRejected):
+                                    compile_helper(b"public class Probe {}",
+                                                   temporary_root)
+                            self.assertEqual(run.call_args.args[0], command)
+
+    def test_compile_helper_rejects_unpinned_javac_versions(self):
+        invalid_versions = (
+            ("", "", 0),
+            ("", "javac 21.0.12", 1),
+            ("javac twenty-one", "", 0),
+            ("javac 25.0.1", "", 0),
+        )
+        selected_jdks = (
+            (None, Path("/default/jdk")),
+            ("/ci/jdk", Path("/ci/jdk")),
+        )
+        with tempfile.TemporaryDirectory(dir=Path.home()) as temporary:
+            temporary_root = Path(temporary)
+            for configured_jdk, expected_jdk in selected_jdks:
+                for stdout, stderr, returncode in invalid_versions:
+                    with self.subTest(configured_jdk=configured_jdk,
+                                      stdout=stdout, stderr=stderr,
+                                      returncode=returncode):
+                        with patch.dict(os.environ):
+                            os.environ.pop("DYN4K_JDI_JDK_HOME", None)
+                            if configured_jdk is not None:
+                                os.environ["DYN4K_JDI_JDK_HOME"] = configured_jdk
+                            with patch.object(jdi_bridge, "JDK21", Path("/default/jdk")):
+                                command = (str(expected_jdk / "bin/javac"), "-version")
+                                result = subprocess.CompletedProcess(
+                                    command, returncode, stdout, stderr)
+                                with patch("jdi_bridge.subprocess.run",
+                                           return_value=result) as run:
+                                    with self.assertRaises(EvidenceRejected):
+                                        compile_helper(b"public class Probe {}",
+                                                       temporary_root)
+                                self.assertEqual(run.call_args.args[0], command)
+
     def test_aligned_strace_results_allow_closed_fd_reuse(self):
         output = Path(TEST_HOME) / "jdi"
         raw = archive({"first.txt": b"one\n", "second.txt": b"two\n"})
