@@ -1,3 +1,4 @@
+import io
 import os
 from pathlib import Path
 import shutil
@@ -5,6 +6,11 @@ import subprocess
 import tempfile
 import time
 import unittest
+import zipfile
+from unittest.mock import patch
+
+import jdi_bridge
+from jdi_bridge import compile_helper
 
 
 SOURCE = Path(__file__).resolve().parent
@@ -59,6 +65,31 @@ class JdiWaitTest(unittest.TestCase):
         result = subprocess.run(command, env=self.environment, capture_output=True,
                                 timeout=90)
         return output, result, time.monotonic() - started
+
+    def test_helper_archives_match_when_compiled_on_distinct_dates(self):
+        source = (SOURCE / "RotationJdiProbe.java").read_bytes()
+        first_date = (2024, 1, 2, 3, 4, 6, 0, 0, -1)
+        second_date = (2026, 10, 22, 9, 8, 6, 0, 0, -1)
+        jdk_override = self.root / "jdk-override"
+        jdk_override.symlink_to(JDK21, target_is_directory=True)
+
+        with patch.dict(os.environ, {"DYN4K_JDI_JDK_HOME": str(jdk_override)}), \
+                patch.object(jdi_bridge, "JDK21", self.root / "unused-jdk"):
+            with patch("zipfile.time.localtime", return_value=first_date):
+                _, first = compile_helper(source, self.root / "first")
+            with patch("zipfile.time.localtime", return_value=second_date):
+                _, second = compile_helper(source, self.root / "second")
+
+        with zipfile.ZipFile(io.BytesIO(first)) as first_archive, \
+                zipfile.ZipFile(io.BytesIO(second)) as second_archive:
+            first_names = first_archive.namelist()
+            second_names = second_archive.namelist()
+            self.assertTrue(first_names)
+            self.assertEqual(first_names, second_names)
+            self.assertEqual(
+                {name: first_archive.read(name) for name in first_names},
+                {name: second_archive.read(name) for name in second_names})
+        self.assertEqual(first, second)
 
     def test_traced_public_cli_completes_with_bounded_thread_members(self):
         output, result, elapsed = self.run_control("normal", 60, traced=True)

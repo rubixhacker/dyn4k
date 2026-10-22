@@ -113,11 +113,12 @@ def compile_helper(source, temporary_root):
     classes.mkdir()
     java = workspace / "RotationJdiProbe.java"
     java.write_bytes(source)
+    jdk = Path(os.environ.get("DYN4K_JDI_JDK_HOME", str(JDK21)))
     environment = os.environ.copy()
     environment.pop("OLLAMA_API_KEY", None)
-    environment["JAVA_HOME"] = str(JDK21)
+    environment["JAVA_HOME"] = str(jdk)
     environment["TMPDIR"] = str(temporary_root)
-    run = subprocess.run((str(JDK21 / "bin/javac"), "--add-modules", "jdk.jdi",
+    run = subprocess.run((str(jdk / "bin/javac"), "--add-modules", "jdk.jdi",
                           "-J-Djava.io.tmpdir=" + str(temporary_root),
                           "-d", str(classes), str(java)), env=environment,
                          capture_output=True, timeout=30, check=False)
@@ -130,7 +131,11 @@ def compile_helper(source, temporary_root):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         for file in files:
-            archive.writestr(file.name, file.read_bytes())
+            member = zipfile.ZipInfo(file.name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.compress_type = zipfile.ZIP_STORED
+            member.create_system = 3
+            member.external_attr = 0o100644 << 16
+            archive.writestr(member, file.read_bytes())
     return classes, output.getvalue()
 
 
