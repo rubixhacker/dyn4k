@@ -1863,6 +1863,55 @@ class IndependentGateSeamTests(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError):
                     independent_gates._p2_producer_binding(ROOT, current)
 
+    def test_p2_bounded_jdi_window_binds_helper_and_replays_historical_source(self):
+        helper = "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java"
+        revised = "7173d5058ed5524998cc26e3bfc8e8cfb9fa1b86"
+        assembly = "48b198fb3fcb23847f345dedbb7e65a8f2ccf3a5"
+        historical = "878727b172806fb6cf021a5495f206d145c46e17"
+        new_digest = "ebf9cc36aba29df0a0fc39d5aa8813bb5b5b951c36d7a98355d2512bd2f0df8d"
+        old_digest = "70990e22075d2c34bc6c03a194291ece66de13c11926494042b93d511f75c712"
+        self.assertEqual(revised, independent_gates.P2_BOUNDED_JDI_SOURCE_REVISION)
+        self.assertEqual(old_digest, independent_gates.P2_ROTATION_PREMISE_DEPENDENCIES[helper])
+        self.assertEqual(new_digest, independent_gates.P2_BOUNDED_JDI_DEPENDENCIES[helper])
+        for revision in (revised, assembly):
+            with self.subTest(revision=revision):
+                self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                                 independent_gates._p2_producer_binding(ROOT, revision))
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                         independent_gates._p2_producer_binding(ROOT, historical))
+
+        original_show = subprocess.check_output
+        stale = original_show(["git", "--no-replace-objects", "show",
+                              f"{historical}:{helper}"], cwd=ROOT)
+
+        def stale_committed(command, *args, **kwargs):
+            if "show" in command and f"{assembly}:{helper}" in command:
+                return stale
+            return original_show(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", stale_committed):
+            with self.assertRaisesRegex(ValueError, "bounded JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, assembly)
+
+        revised_bytes = original_show(["git", "--no-replace-objects", "show",
+                                       f"{revised}:{helper}"], cwd=ROOT)
+
+        def revised_at_ancestor(command, *args, **kwargs):
+            if "show" in command and f"{historical}:{helper}" in command:
+                return revised_bytes
+            return original_show(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", revised_at_ancestor):
+            with self.assertRaisesRegex(ValueError, "rotation premise producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, historical)
+
+        original_read = Path.read_bytes
+        local = ROOT / helper
+        with mock.patch.object(Path, "read_bytes",
+                               lambda path: stale if path == local else original_read(path)):
+            with self.assertRaisesRegex(ValueError, "bounded JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, assembly)
+
     def test_p2_reviewed_arithmetic_assembly_rejects_stale_and_altered_bytes(self):
         current = independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION
         old = independent_gates.APPROVED_P2_COMBINED_PRODUCERS
