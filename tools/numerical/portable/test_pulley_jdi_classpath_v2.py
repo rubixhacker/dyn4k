@@ -29,6 +29,18 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
         self.BASELINE = self.root / 'baseline-test-only.jar'
         self.jar(self.BASELINE, self.PROVIDER_CLASSES)
 
+    def configured_paths(self, names, directories, reason):
+        values = tuple(os.environ.get(name) for name in names)
+        if not any(value is not None for value in values):
+            self.skipTest(reason)
+        self.assertTrue(all(values), f'{reason}; partial or empty input was supplied')
+        paths = tuple(Path(value) for value in values)
+        self.assertEqual(len(paths), len(directories))
+        for path, is_directory in zip(paths, directories):
+            self.assertTrue(path.is_dir() if is_directory else path.is_file(),
+                            f'configured evidence path has the wrong type: {path}')
+        return paths
+
     @staticmethod
     def jar(path, classes, manifest=b'Manifest-Version: 1.0\r\n\r\n'):
         with zipfile.ZipFile(path, 'w') as archive:
@@ -49,10 +61,10 @@ class PulleyMultiReleaseClasspathTest(unittest.TestCase):
         return classpath, fixture, runtime, cache
 
     def test_real_eight_entry_classpath_is_admitted_with_bound_hashes(self):
-        classpath = Path(os.environ.get('DYN4K_PULLEY_REAL_CLASSPATH', ''))
-        cache = Path(os.environ.get('DYN4K_PULLEY_CACHE_ROOT', ''))
-        if not classpath.is_file() or not cache.is_dir():
-            self.skipTest('set real classpath and dependency cache inputs for historical archive verification')
+        classpath, cache = self.configured_paths(
+            ('DYN4K_PULLEY_REAL_CLASSPATH', 'DYN4K_PULLEY_CACHE_ROOT'),
+            (False, True),
+            'set real classpath and dependency cache inputs for historical archive verification')
         self.assertEqual(hashlib.sha256(classpath.read_bytes()).hexdigest(),
                          '791e12b6ab0366a3fb86119f2534c01cab2b4e0ed40bfa040d451966dc4f66db')
         paths = [Path(part) for part in classpath.read_text().strip().split(':')]

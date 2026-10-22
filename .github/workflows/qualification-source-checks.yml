@@ -36,6 +36,11 @@ jobs:
             -u DYN4K_BOOLEAN_REFERENCE_ORIGIN \
             -u DYN4K_BOOLEAN_JDI_TOY \
             -u BOOLEAN_JDI_TOY_ROOT \
+            -u DYN4K_PULLEY_BASELINE_JAR \
+            -u DYN4K_PULLEY_LOADED_CODE_ROOT \
+            -u DYN4K_PULLEY_CANDIDATE_JAR \
+            -u DYN4K_PULLEY_REAL_CLASSPATH \
+            -u DYN4K_PULLEY_CACHE_ROOT \
             PYTHONPATH=tools/numerical/portable:tools/numerical/portable/boolean_rotation_jdi \
             python3 -B -m unittest -v \
               test_actual_arithmetic \

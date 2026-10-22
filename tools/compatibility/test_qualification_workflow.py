@@ -211,6 +211,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
                  "-u DYN4K_BOOLEAN_JDI_TOY "
                  "-u BOOLEAN_JDI_TOY_ROOT "
+                 "-u DYN4K_PULLEY_BASELINE_JAR "
+                 "-u DYN4K_PULLEY_LOADED_CODE_ROOT "
+                 "-u DYN4K_PULLEY_CANDIDATE_JAR "
+                 "-u DYN4K_PULLEY_REAL_CLASSPATH "
+                 "-u DYN4K_PULLEY_CACHE_ROOT "
                  "PYTHONPATH=tools/numerical/portable:"
                  "tools/numerical/portable/boolean_rotation_jdi "
                  "python3 -B -m unittest -v "
@@ -357,6 +362,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("Pulley classpath regression omitted", "test_pulley_jdi_classpath_v2", "test_pulley_jdi_classpath_v2_changed"),
             ("external rotation binding omitted", "test_external_rotation_binding", "test_external_rotation_binding_changed"),
             ("JDI reference origin unset omitted", "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN ", ""),
+            ("Pulley baseline input unset omitted", "-u DYN4K_PULLEY_BASELINE_JAR ", ""),
+            ("Pulley loaded-code input unset omitted", "-u DYN4K_PULLEY_LOADED_CODE_ROOT ", ""),
+            ("Pulley candidate input unset omitted", "-u DYN4K_PULLEY_CANDIDATE_JAR ", ""),
+            ("Pulley classpath input unset omitted", "-u DYN4K_PULLEY_REAL_CLASSPATH ", ""),
+            ("Pulley cache input unset omitted", "-u DYN4K_PULLEY_CACHE_ROOT ", ""),
             ("added installation step",
              "      - name: Test source-only numerical regressions\n",
              "      - name: Install a dependency\n"
@@ -483,6 +493,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "-u DYN4K_BOOLEAN_REFERENCE_ORIGIN "
             "-u DYN4K_BOOLEAN_JDI_TOY "
             "-u BOOLEAN_JDI_TOY_ROOT "
+            "-u DYN4K_PULLEY_BASELINE_JAR "
+            "-u DYN4K_PULLEY_LOADED_CODE_ROOT "
+            "-u DYN4K_PULLEY_CANDIDATE_JAR "
+            "-u DYN4K_PULLEY_REAL_CLASSPATH "
+            "-u DYN4K_PULLEY_CACHE_ROOT "
             "PYTHONPATH=tools/numerical/portable:"
             "tools/numerical/portable/boolean_rotation_jdi "
             "python3 -B -m unittest -v "
