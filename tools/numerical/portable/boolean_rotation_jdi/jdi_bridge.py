@@ -353,9 +353,15 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
     bind = re.compile(r'bind\((\d+), \{sa_family=AF_INET, sin_port=htons\('
                       + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
                       r'\d+\) += 0$')
-    connect = re.compile(r'connect\((\d+), \{sa_family=AF_INET, sin_port=htons\('
-                         + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
-                         r'\d+\) += 0$')
+    connect_ipv4 = re.compile(
+        r'connect\((\d+), \{sa_family=AF_INET, sin_port=htons\('
+        + str(port) + r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
+        r'\d+\) += 0$')
+    connect_mapped_ipv4 = re.compile(
+        r'connect\((\d+), \{sa_family=AF_INET6, sin6_port=htons\('
+        + str(port) + r'\), sin6_flowinfo=htonl\(0\), '
+        r'inet_pton\(AF_INET6, "::ffff:127\.0\.0\.1", &sin6_addr\), '
+        r'sin6_scope_id=0\}, 28\) += 0$')
     bound = [(pid, index, match.group(1)) for pid, trace in workers.items()
              for index, line in enumerate(trace.splitlines())
              if (match := bind.fullmatch(line))]
@@ -366,8 +372,16 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
                     for index, line in enumerate(workers[pid].splitlines())
                     if re.fullmatch(r'listen\(' + re.escape(fd) +
                                     r', \d+\) += 0$', line)]
-    connected = [(pid, match.group(1)) for pid, trace in helpers.items()
-                 for line in trace.splitlines() if (match := connect.fullmatch(line))]
+    connected = []
+    for pid, trace in helpers.items():
+        for line in trace.splitlines():
+            if not line.startswith("connect(") or re.search(
+                    r'\) += -1(?: |$)', line):
+                continue
+            match = connect_ipv4.fullmatch(line) or connect_mapped_ipv4.fullmatch(line)
+            if match is None:
+                raise EvidenceRejected("JDI helper connection format differs")
+            connected.append((pid, match.group(1)))
     if (len(bound) != 1 or len(listened) != 1 or len(connected) != 1 or
             bound[0][0] not in worker_threads or listened[0][0] != bound[0][0] or
             listened[0][1] <= bound[0][1] or

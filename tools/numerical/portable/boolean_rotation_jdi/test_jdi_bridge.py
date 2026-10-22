@@ -203,6 +203,56 @@ class JdiBridgeTest(unittest.TestCase):
                     worker, archive({"trace.456": parent, "trace.457": member}),
                     40001, 123, 456, HELPER_ARGS)
 
+    def test_mapped_ipv4_loopback_connect_requires_exact_sockaddr(self):
+        port = 37177
+        args = HELPER_ARGS.copy()
+        args[10] = str(port)
+        leader = HELPER_SOCKET_TRACE.split(b"connect(", 1)[0].replace(
+            b"40001", str(port).encode())
+        clone = THREAD_CLONE.replace(b"124", b"457")
+        worker = archive({"trace.123": WORKER_EXEC + SOCKET_BIND.replace(
+            b"40001", str(port).encode()) + SOCKET_LISTEN})
+        connect = (
+            b'connect(6, {sa_family=AF_INET6, sin6_port=htons(37177), '
+            b'sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::ffff:127.0.0.1", '
+            b'&sin6_addr), sin6_scope_id=0}, 28) = 0\n')
+        helper = archive({"trace.456": leader + clone, "trace.457": connect})
+        result = verify_jdi_transport(worker, helper, port, 123, 456, args)
+        self.assertEqual(result["helper_connector"], 457)
+        self.assertEqual(result["qualification"], "UNPASSED")
+        for old, new in (
+                (b"::ffff:127.0.0.1", b"::1"),
+                (b"::ffff:127.0.0.1", b"::"),
+                (b"::ffff:127.0.0.1", b"::ffff:0.0.0.0"),
+                (b"::ffff:127.0.0.1", b"::ffff:192.0.2.1"),
+                (b"sa_family=AF_INET6", b"sa_family=AF_INET"),
+                (b"inet_pton(AF_INET6", b"inet_pton(AF_INET"),
+                (b"htons(37177)", b"htons(37178)"),
+                (b"sin6_flowinfo=htonl(0)", b"sin6_flowinfo=htonl(1)"),
+                (b"sin6_scope_id=0", b"sin6_scope_id=1"),
+                (b"&sin6_addr", b"sin6_addr"),
+                (b"}, 28)", b"}, 16)"),
+                (b"}, 28)", b", extra=0}, 28)"),
+                (b") = 0\n", b") = 0 extra\n")):
+            with self.subTest(old=old, new=new):
+                changed = connect.replace(old, new)
+                self.assertNotEqual(changed, connect)
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport(
+                        worker, archive({"trace.456": leader + clone,
+                                         "trace.457": changed}), port, 123, 456, args)
+        fork = b"clone(child_stack=NULL, flags=SIGCHLD) = 457\n"
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(
+                worker, archive({"trace.456": leader + fork,
+                                 "trace.457": connect}), port, 123, 456, args)
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport(
+                worker, archive({"trace.456": leader + clone,
+                                 "trace.457": connect + connect.replace(
+                                     b"::ffff:127.0.0.1", b"::1")}),
+                port, 123, 456, args)
+
     def test_selected_worker_bind_requires_thread_clone_chain(self):
         helper = archive({"trace.456": HELPER_SOCKET_TRACE})
         bind = ('bind(9, {sa_family=AF_INET, sin_port=htons(40001), '
