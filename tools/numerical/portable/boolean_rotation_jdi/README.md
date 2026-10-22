@@ -41,9 +41,10 @@ versioned `/5` receipt. It derives caller bytecode locations from the staged
 artifact and checks 1,800 JDI calls against 600 worker marker steps. A
 candidate marker or audit cannot supply its own expected call sequence.
 
-The `/5` route has not run on an actual selected Gradle worker. Its source-only
-and toy controls do not establish a passing worker witness. Historical `/4`
-Boolean and `/3` Wheel receipts remain separate, unqualified evidence.
+A `/5` worker witness requires an actual selected Gradle worker capture and
+independent replay of its retained evidence. Source-only and toy controls do
+not satisfy that requirement. Historical `/4` Boolean and `/3` Wheel receipts
+remain separate, unqualified evidence.
 
 Response-file READ bytes, worker write FD destination, actual JVM loader
 bytes, and global order across threads remain separate premises. The helper
