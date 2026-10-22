@@ -82,6 +82,7 @@ PROSPECTIVE_POLICY_PATH = "tools/numerical/portable/prospective_policy_catalog.j
 PROSPECTIVE_POLICY_SHA256 = "fab269814476a5a0c1d65f268f6c4177bb942ea8e7cdf1ea5ab8d4d9dcd2e160"
 PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
 PROSPECTIVE_REPRESENTED_CHECKER_REVISION = "2bd0d70f36b521949641a5404bdb3fa5890f61d3"
+PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION = "375812a97de8cb3e439fc2a204e029de1a6de338"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_PROSPECTIVE_CHECKERS = {
@@ -99,6 +100,11 @@ APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS = {
     **APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS,
     "prospective_compare.py": "469c23f619b5b37ab79fc75d7b73328aae122d712104bbe094cf2357eda1cd07",
 }
+APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS = {
+    **APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS,
+    "prospective_compare.py": "2d254d2f2d5117ed81449000beb0c3373822af80d49424605c390ee83c90aeeb",
+}
+APPROVED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -734,7 +740,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError("prospective checker revision ancestry is unavailable")
         return checked.returncode == 0
 
-    if descends_from(PROSPECTIVE_REPRESENTED_CHECKER_REVISION):
+    if descends_from(PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION):
+        approved = APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS
+    elif descends_from(PROSPECTIVE_REPRESENTED_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS
     elif descends_from(PROSPECTIVE_CHECKER_REVISION):
         committed_comparator = subprocess.check_output(
@@ -753,7 +761,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         approved = APPROVED_PROSPECTIVE_POLICY_CHECKERS
     else:
         raise ValueError("prospective checker candidate predates approved revisions")
-    for filename, current in APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS.items():
+    for filename, current in APPROVED_PROSPECTIVE_LOCAL_CHECKERS.items():
         relative = f"{source_dir}/{filename}"
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(
