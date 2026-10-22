@@ -1912,6 +1912,77 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "bounded JDI producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, assembly)
 
+    def test_p2_corrected_jdi_bridge_window_binds_only_its_descendants(self):
+        bridge = "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py"
+        current = "e9776f80e1bd5c7f6a3e622d052adaae97c45dfb"
+        old = "481ffa64c82045be93da14f89dc4dcc3c3b30f49"
+        bounded = independent_gates.P2_BOUNDED_JDI_SOURCE_REVISION
+        old_digest = "ffe6d47cca98df6f41bb66a08995ef2b05d1235d1c65aad22540be574e78458e"
+        new_digest = "ebd32c6add81e9ea25fdaeac52056db56f428a669f15b9400854ffc5da3d1f61"
+        self.assertEqual(current, independent_gates.P2_CORRECTED_JDI_SOURCE_REVISION)
+        self.assertEqual(old_digest, independent_gates.P2_BOUNDED_JDI_DEPENDENCIES[bridge])
+        self.assertEqual({**independent_gates.P2_BOUNDED_JDI_DEPENDENCIES,
+                          bridge: new_digest},
+                         independent_gates.P2_CORRECTED_JDI_DEPENDENCIES)
+        self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                         independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
+        for revision in (current, "HEAD", old, bounded):
+            with self.subTest(revision=revision):
+                self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
+                                 independent_gates._p2_producer_binding(ROOT, revision))
+        for revision in ("aa3cd31465ebcad278001754b9a0f9ab40c4d30a",
+                         "0d1acbb7c38fed7e616c85c8efb8e4b29f699908"):
+            with self.subTest(incomplete=revision), self.assertRaisesRegex(
+                    ValueError, "bounded JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+
+        original_show = subprocess.check_output
+        stale = original_show(["git", "--no-replace-objects", "show",
+                               f"{old}:{bridge}"], cwd=ROOT)
+        revised = original_show(["git", "--no-replace-objects", "show",
+                                 f"{current}:{bridge}"], cwd=ROOT)
+        self.assertEqual(old_digest, hashlib.sha256(stale).hexdigest())
+        self.assertEqual(new_digest, hashlib.sha256(revised).hexdigest())
+
+        for revision, substitute in ((current, stale), (old, revised), (bounded, revised),
+                                     (current, revised + b"\n# altered\n")):
+            def wrong_committed(command, *args, **kwargs):
+                if "show" in command and f"{revision}:{bridge}" in command:
+                    return substitute
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(wrong_revision=revision, substitute=substitute[:12]), \
+                    mock.patch.object(subprocess, "check_output", wrong_committed):
+                with self.assertRaisesRegex(ValueError, "JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, revision)
+
+        local = ROOT / bridge
+        original_read = Path.read_bytes
+        for substitute in (stale, revised + b"\n# altered\n"):
+            with self.subTest(local=substitute[:12]), mock.patch.object(
+                    Path, "read_bytes",
+                    lambda path: substitute if path == local else original_read(path)):
+                with self.assertRaisesRegex(ValueError, "corrected JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, current)
+
+        def missing_local(path):
+            if path == local:
+                raise FileNotFoundError(path)
+            return original_read(path)
+
+        with mock.patch.object(Path, "read_bytes", missing_local):
+            with self.assertRaises(FileNotFoundError):
+                independent_gates._p2_producer_binding(ROOT, current)
+
+        def missing_committed(command, *args, **kwargs):
+            if "show" in command and f"{current}:{bridge}" in command:
+                raise subprocess.CalledProcessError(1, command)
+            return original_show(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", missing_committed):
+            with self.assertRaises(subprocess.CalledProcessError):
+                independent_gates._p2_producer_binding(ROOT, current)
+
     def test_p2_reviewed_arithmetic_assembly_rejects_stale_and_altered_bytes(self):
         current = independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION
         old = independent_gates.APPROVED_P2_COMBINED_PRODUCERS
