@@ -285,13 +285,66 @@ found 313 within the conditional envelope, four `UNPASSED_PREMISE`, and one
 `FAILED_PHYSICAL`. These are historical self-check counts for that checker.
 
 The current checker also rejects eight geometry cases whose requested center
-delta disappears in binary64 even though a rounded gap is nonzero. A bounded
-replay of all 75 indexed geometry cases found 12 `UNPASSED_PREMISE` and 63
-case-policy passes. The complete 318-case self-check has not been rerun with
-this checker. The fixed-32 rule remains operative, the Angle baseline case
-still becomes nonfinite, and every reference-only result retains
+delta disappears in binary64 even though a rounded gap is nonzero. An earlier
+bounded replay of all 75 indexed geometry cases found 12
+`UNPASSED_PREMISE` and 63 case-policy passes. The complete 318-case result is
+now recorded below. The fixed-32 rule remains operative, the Angle baseline
+case still becomes nonfinite, and every reference-only result retains
 `qualification: UNPASSED`. No candidate target was compared by either
 self-check.
+
+### Current results (2026-10-22)
+
+The full 332-case JVM baseline capture on Linux at reviewed source commit
+[`df4d240b`](https://github.com/rubixhacker/dyn4k/commit/df4d240bab63dbe96fb5cff128585619843f7867)
+recorded 735,618 states. All 15 Gradle/JUnit methods succeeded. The archive
+contains zero skipped tests, failures, or errors. Public archive verification
+accepted all 332 case slices and the recorded source, runtime, and process
+identities. Trace SHA-256
+`5d0a8c37f3cc20a55aad0765c66cb46389264538a1cca887919b85fbd3307801`
+matches the frozen catalog. Source SHA-256 is
+`8e63072200952f67ebca264ebadbfc0502d5301e1bf4f7975c88ebe4eaec63e4`.
+Capture status is `CAPTURED_WITH_FAILED_ANGLE_PHYSICAL`; capture
+qualification remains `UNPASSED`. The baseline Angle case first has
+nonfinite energy at step 87 and nonfinite angular velocity at step 171.
+
+The completed 318-case reference self-check compared the frozen-hash-verified
+reference against itself. Under the operative `fixed-32-ulps/1` rule, it
+reports 264 `PASSED_NUMERICAL_POLICY`, 41 `FAILED_DERIVED`, 12
+`UNPASSED_PREMISE`, and one `FAILED_PHYSICAL`. The 12 missing premises are
+represented geometry deltas that round away. The conditional U(N) diagnostic
+reports 305 `CONDITIONAL_DIAGNOSTIC_WITHIN`, 12 `UNPASSED_PREMISE`, and one
+`FAILED_PHYSICAL`. It remains diagnostic and does not replace fixed 32 ulps.
+The 14 frozen cases remain outside this prospective policy. The report's
+qualification and all outer case qualification fields remain `UNPASSED`.
+All 32 current Weld/Pulley reference-policy rows have
+`target_arithmetic: UNPASSED_UNBOUND_AUDIT`; the four earlier target-math
+premises remain separate open requirements. Report JSON SHA-256:
+`7c4cc34fa0e067d8551dc6e47d4d4181afc34a14a629d773118f0c91aaf4d1db`.
+The report is retained locally as `full-reference-self-check-df4d240b.json`.
+The [numerical acceptance decision](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6352333926)
+tracks the policy.
+
+Separately, the one-case actual candidate receipt at the same source records
+600 steps, 1,800 rotation calls, and 1,200 body-step receipts. Its frozen
+trace SHA-256 is
+`80c4e6c5133953eb7dd480e34b2d51a244b9c02d1d9f1d367d7b6cbf8eed2f36`.
+Its status is `UNPASSED_SOURCE_CALL_SITE`, and its qualification is
+`UNPASSED`. Runtime and loader origin, response-file READ, and file-descriptor
+destination premises remain open. The active case still fails the fixed-32
+comparison at step 231 for `joint-Revolute-LimitsEnabled-false`. This is a
+one-case candidate result, not a 332-case candidate comparison.
+
+Independent audits approve bounded archive integrity and reference
+self-comparison, and the bounded 600-step worker capture with 14 rejected
+controls. The full-reference audit holds any full-policy, physical, or target
+qualification pass. The worker-capture approval leaves
+`UNPASSED_SOURCE_CALL_SITE` and runtime, loader, response-file READ, file-
+descriptor destination, and total thread-order premises open. See the
+[audited result comment](https://github.com/rubixhacker/dyn4k/issues/7#issuecomment-6353063231).
+
+No threshold changed. Hardware, performance, signing, release, and target
+qualification requirements remain open.
 
 The original portable owner must provide reviewed target arithmetic
 instrumentation and an execution-time seal of the raw call stream, executed
