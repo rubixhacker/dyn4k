@@ -734,7 +734,7 @@ class ArchiveTest(unittest.TestCase):
         from numeric_producer import encoded, sha, FIXTURE, CLASS, METHOD, SCHEMA
         from prospective_compare import verify_numeric_probe
         from run import declared_cases, method_case_ids
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             lane = Path(directory) / "jvm"
             (lane / "cases").mkdir(parents=True)
             for case in declared_cases():
@@ -742,6 +742,10 @@ class ArchiveTest(unittest.TestCase):
             (lane / "receipt.json").write_bytes(b"{}")
             artifact = Path(directory) / "target.jar"
             artifact.write_bytes(b"artifact")
+            replay_roots = [Path(directory) / "replay-success",
+                            Path(directory) / "replay-rejected"]
+            for replay_root in replay_roots:
+                replay_root.mkdir()
             runtime = {"method_executions": 15}
             proof = {"worker_pid": "100", "parent_pids": ["1"],
                      "worker_argv_sha256": "0" * 64, "worker_exit": 0,
@@ -780,7 +784,9 @@ class ArchiveTest(unittest.TestCase):
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
             with patch("numeric_producer.load_raw", return_value={}), \
                     patch("numeric_producer._proof", return_value=proof), \
-                    patch("numeric_producer.inventory", return_value=receipt["files"]):
+                    patch("numeric_producer.inventory", return_value=receipt["files"]), \
+                    patch("numeric_producer.tempfile.mkdtemp",
+                          return_value=str(replay_roots[0])):
                 result = verify_numeric_probe(lane, "commit", "source", "trace",
                                               {"target": artifact}, runtime)
             self.assertEqual(result["status"], "PASSED_BOUND_PRODUCER")
@@ -803,6 +809,8 @@ class ArchiveTest(unittest.TestCase):
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
             with patch("numeric_producer.load_raw", return_value={}), \
                     patch("numeric_producer._proof", side_effect=Unbound("trace final record is truncated")), \
+                    patch("numeric_producer.tempfile.mkdtemp",
+                          return_value=str(replay_roots[1])), \
                     self.assertRaisesRegex(Rejected, "sealed numeric producer proof cannot be replayed") as error:
                 verify_numeric_probe(lane, "commit", "source", "trace", {"target": artifact}, runtime)
             self.assertNotIsInstance(error.exception, Unbound)
@@ -858,6 +866,123 @@ class ArchiveTest(unittest.TestCase):
                     modified = {**receipt, field: changed}
                     (lane / "numeric-probe-receipt.json").write_bytes(encoded(modified))
                     verify(lane, "commit", "source", "trace", {"target": artifact}, runtime)
+
+    def test_default_replay_scratch_does_not_change_admitted_candidate_inventory(self):
+        from numeric_producer import verify, encoded, sha, FIXTURE, CLASS, METHOD, SCHEMA
+        from prospective_compare import verify_candidate_inventory
+        from run import declared_cases, method_case_ids
+
+        def cleanup_scratch(path):
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                pass
+
+        def valid_proof():
+            return {"worker_pid": "100", "parent_pids": ["1"],
+                    "worker_argv_sha256": "0" * 64, "worker_exit": 0,
+                    "runtime_executable_sha256": "0" * 64,
+                    "classpath_sha256": "0" * 64, "class_archive_sha256": "0" * 64,
+                    "provider_origins": {
+                        name: "file:///classes" for name in (
+                            CLASS, "portable.PortableMatrixTest", "portable.NumericalRecorder",
+                            "org.dyn4j.dynamics.Body", "org.dyn4j.geometry.Geometry")},
+                    "mirror_writer_tid": "100", "mirror_fd": "4",
+                    "mirror_destination": "/work/mirror.log", "mirror_sha256": "0" * 64,
+                    "xml_sha256": "0" * 64, "gradle_log_sha256": "0" * 64,
+                    "trace_manifest_sha256": "0" * 64,
+                    "class_witness": {"schema": "class-witness/1",
+                                       "source_sha256": "0" * 64, "agent_sha256": "0" * 64,
+                                       "witness_sha256": "0" * 64,
+                                       "definition_count": 3,
+                                       "definition_inventory_sha256": "0" * 64,
+                                       "helper_provider": "file:///private/agent.jar",
+                                       "input_reads": 1, "writer_tids": ["100"],
+                                       "writer_fd": "5", "destination": "/private/witness.log"}}
+
+        with tempfile.TemporaryDirectory(dir=Path.home()) as temporary:
+            base = Path(temporary)
+            artifact = base / "target.jar"
+            artifact.write_bytes(b"artifact")
+            runtime = {"method_executions": 15}
+            cases = declared_cases()
+            expected_ids = {case["id"] for case in cases}
+            for outcome in ("success", "rejected", "explicit"):
+                with self.subTest(outcome=outcome):
+                    root = base / outcome
+                    lane = root / "jvm"
+                    (lane / "cases").mkdir(parents=True)
+                    for case in cases:
+                        (lane / "cases" / (case["id"] + ".jsonl")).write_bytes(b"case\n")
+                    (lane / "receipt.json").write_bytes(b"{}")
+                    probe = lane / "numeric-probe"
+                    probe.mkdir()
+                    (probe / "synthetic").write_bytes(b"x")
+                    files = {"synthetic": {"size": 1, "sha256": sha(b"x")}}
+                    proof = valid_proof()
+                    receipt = {"schema": SCHEMA, "candidate_commit": "commit",
+                               "source_sha256": "source", "fixture_source_sha256": FIXTURE,
+                               "trace_sha256": "trace", "primary_receipt_sha256": sha(b"{}"),
+                               "geometry_case_sha256": {
+                                   case: sha(b"case\n") for case in method_case_ids(METHOD)},
+                               "artifact_sha256": {"target": sha(b"artifact")},
+                               "runtime": runtime,
+                               "selected_test": {"class": CLASS, "method": METHOD,
+                                                 "task": "jvmTest", "host": "jvm"},
+                               "probe": {}, "files": files, "proof": proof}
+                    (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
+                    verify_candidate_inventory(lane, expected_ids, {"jvm"}, "commit", "source")
+                    self.assertEqual({path.name for path in root.iterdir()}, {"jvm"})
+
+                    replay_scratch = []
+                    explicit_scratch = base / "explicit-scratch" if outcome == "explicit" else None
+                    def fake_proof(_raw, _receipt, _cases, _artifacts, scratch):
+                        scratch = Path(scratch)
+                        replay_scratch.append(scratch)
+                        if outcome == "rejected":
+                            (scratch / "diagnostic.txt").write_text("retained")
+                            raise Unbound("synthetic proof rejection")
+                        return proof
+
+                    with patch("numeric_producer.load_raw", return_value={"synthetic": b"x"}), \
+                            patch("numeric_producer._proof", side_effect=fake_proof), \
+                            patch("numeric_producer.inventory", return_value=files):
+                        attempts = 1 if explicit_scratch else 2
+                        for attempt in range(attempts):
+                            verify_candidate_inventory(lane, expected_ids, {"jvm"},
+                                                       "commit", "source")
+                            self.assertEqual({path.name for path in root.iterdir()}, {"jvm"})
+                            try:
+                                if outcome == "rejected":
+                                    with self.assertRaisesRegex(Rejected, "cannot be replayed"):
+                                        verify(lane, "commit", "source", "trace",
+                                               {"target": artifact}, runtime)
+                                else:
+                                    options = {"scratch": explicit_scratch} if explicit_scratch else {}
+                                    self.assertEqual(verify(lane, "commit", "source", "trace",
+                                                            {"target": artifact}, runtime,
+                                                            **options)["status"],
+                                                     "PASSED_BOUND_PRODUCER")
+
+                                scratch = replay_scratch[-1]
+                                self.assertTrue(scratch.is_relative_to(Path.home().resolve()))
+                                self.assertFalse(scratch.is_relative_to(root.resolve()))
+                                if outcome == "rejected":
+                                    self.assertEqual((scratch / "diagnostic.txt").read_text(), "retained")
+                                verify_candidate_inventory(lane, expected_ids, {"jvm"},
+                                                           "commit", "source")
+                                self.assertEqual({path.name for path in root.iterdir()}, {"jvm"})
+                            finally:
+                                if not explicit_scratch and len(replay_scratch) > attempt:
+                                    cleanup_scratch(replay_scratch[-1].parent)
+                            if not explicit_scratch:
+                                self.assertFalse(replay_scratch[-1].parent.exists())
+
+                    self.assertEqual(len(replay_scratch), 1 if explicit_scratch else 2)
+                    if explicit_scratch:
+                        self.assertEqual(replay_scratch[0], explicit_scratch.resolve())
+                    else:
+                        self.assertEqual(len(set(replay_scratch)), 2)
 
     def test_raw_inventory_rejects_extra_and_linked_files(self):
         from numeric_producer import inventory
