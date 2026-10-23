@@ -191,14 +191,15 @@ def _origin_path(value):
     return Path(unquote(url.path)).resolve()
 
 
-def _class_witness(files, traces, selected, metadata, scratch, classpath):
+def _class_witness(files, traces, selected, metadata, scratch, classpath,
+                   environment):
     import tarfile
     with tarfile.open(fileobj=io.BytesIO(files["source"]), mode="r:") as archive:
         entry = archive.extractfile(OBSERVER)
         require(entry is not None, "committed observer source is missing")
         source = entry.read()
     rebuilt = build_agent(source, JDK, scratch / "rebuilt-agent.jar",
-                          scratch / "agent-compile")
+                          scratch / "agent-compile", environment=environment)
     require(rebuilt == files["agent"], "agent bytes differ from committed source")
     verify_witness_classpath(classpath, Path(metadata["agent_path"]),
                              sha(rebuilt), host="jvm")
@@ -379,6 +380,8 @@ def verify_helper_startup(raw, helper_pid, argv, argument_path):
 
 def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
            aborted):
+    from capture_actual import child_environment
+    environment = child_environment(focused=True)
     require(type(metadata) is dict and set(metadata) == {
         "schema", "command", "trace_arguments", "response_path", "agent_path",
         "witness_path", "mirror_path", "class_load_path", "argument_path",
@@ -469,7 +472,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
     with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
         witness, agent_class, witness_proof = _class_witness(
             files, traces, selected, metadata, Path(directory),
-            legacy["worker_classpath_entries"])
+            legacy["worker_classpath_entries"], environment)
     with zipfile.ZipFile(io.BytesIO(files["artifact"])) as artifact:
         transform = artifact.read("org/dyn4j/geometry/Transform.class")
     from actual_arithmetic import focused_wheel_stream
@@ -516,7 +519,8 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         require(helper_source is not None, "JDI helper committed source is missing")
         helper_source = helper_source.read()
     with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
-        _, compiled = jdi_bridge.compile_helper(helper_source, Path(directory))
+        _, compiled = jdi_bridge.compile_helper(
+            helper_source, Path(directory), environment=environment, jdk_home=JDK)
     require(compiled == files["jdi_helper_classes"],
             "JDI helper class bytes differ from committed source")
     argv = [str(JDK / "bin/java"), "--add-modules", "jdk.jdi",

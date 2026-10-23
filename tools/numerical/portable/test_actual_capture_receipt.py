@@ -14,6 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import actual_arithmetic as actual
+import actual_capture_receipt as focused_receipt
+import capture_actual
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
                                     load_version6_archive, verify_boolean_startup)
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
@@ -999,6 +1001,13 @@ class ClasspathProviderTest(unittest.TestCase):
 
 
 class EnvironmentSentinelTest(unittest.TestCase):
+    def test_receipt_rebuild_uses_focused_child_environment(self):
+        with patch.object(capture_actual, "child_environment",
+                          return_value={"TMPDIR": os.environ["TMPDIR"]}) as selected:
+            with self.assertRaises(FocusedRejected):
+                focused_receipt._proof({}, {}, {}, {}, {}, [], {}, {}, [])
+        selected.assert_called_once_with(focused=True)
+
     def test_public_v6_loader_rejects_escaped_private_trace_bytes(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             root = Path(directory)
