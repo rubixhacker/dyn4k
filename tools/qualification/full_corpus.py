@@ -55,7 +55,7 @@ def node_group_for_argv(repository, argv):
     if not isinstance(argv, list) or len(argv) < 2 or not all(
             isinstance(part, str) for part in argv):
         return None
-    argv = node_process_argv(argv)
+    argv = node_process_argv(repository, argv)
     mocha = repository / "build/js/node_modules/mocha/bin/mocha.js"
     runner = repository / ("build/js/node_modules/kotlin-web-helpers/dist/"
                            "kotlin-test-nodejs-runner.js")
@@ -77,9 +77,17 @@ def node_group_for_argv(repository, argv):
     return None
 
 
-def node_process_argv(argv):
+def node_launch_loader(repository, argv):
+    loader = Path(repository).resolve() / ("build/js/node_modules/source-map-support/"
+                                          "register.js")
+    return loader if argv[1:3] == ["--require", str(loader)] else None
+
+
+def node_process_argv(repository, argv):
     if len(argv) > 2 and argv[1] == "--experimental-wasm-modules":
-        return [argv[0], *argv[2:]]
+        argv = [argv[0], *argv[2:]]
+    if node_launch_loader(repository, argv) is not None:
+        return [argv[0], *argv[3:]]
     return argv
 
 
@@ -104,7 +112,7 @@ def observe_node_request(repository, request_file, gradle_pid, gradle_start_tick
         raise ValueError("Node request identity differs")
     observed_ns = time.time_ns()
     image = independent_linux_observer._image(pid)
-    normalized_argv = node_process_argv(image["argv"])
+    normalized_argv = node_process_argv(repository, image["argv"])
     if (normalized_argv[1:] != request["argv"][1:] or
             Path(image["argv"][0]).resolve() != Path(request["argv"][0]).resolve()):
         raise ValueError("live Node command differs from request")
@@ -146,6 +154,7 @@ def observe_node_request(repository, request_file, gradle_pid, gradle_start_tick
     if not started_ns <= payload_stat.st_mtime_ns <= observed_ns:
         raise ValueError("Node test payload predates invocation")
     relative_payload = payload.relative_to(repository).as_posix()
+    loader = node_launch_loader(repository, image["argv"])
     return {"group_id": group_id, "task": node_task(group_id),
             "pid": pid, "start_ticks": image["start_ticks"],
             "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
@@ -156,6 +165,8 @@ def observe_node_request(repository, request_file, gradle_pid, gradle_start_tick
             "requested_argv": request["argv"],
             "requested_exec_path": request["execPath"],
             "payload_path": relative_payload, "payload_sha256": digest(payload.read_bytes()),
+            "launch_loader_path": loader.relative_to(repository).as_posix() if loader else None,
+            "launch_loader_sha256": digest(loader.read_bytes()) if loader else None,
             "request_name": request_file.name, "request_sha256": digest(raw),
             "nonce": nonce}
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
@@ -348,6 +359,15 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                 raise ValueError("Node test payload bytes differ")
             if not started <= evidence_payload.stat().st_mtime_ns <= finished:
                 raise ValueError("Node test payload is outside invocation window")
+            loader = node_launch_loader(repository, row["argv"])
+            loader_path = loader.relative_to(repository).as_posix() if loader else None
+            if row["launch_loader_path"] != loader_path:
+                raise ValueError("Node launch loader differs from command")
+            if loader is not None and digest((evidence_root / loader_path).read_bytes()) != row[
+                    "launch_loader_sha256"]:
+                raise ValueError("Node launch loader bytes differ")
+            if loader is None and row["launch_loader_sha256"] is not None:
+                raise ValueError("unexpected Node launch loader hash")
             if row["report_sha256"] != canonical_digest(binding["reports"][group_id]):
                 raise ValueError("Node group raw report binding differs")
             ancestry = row["ancestry"]
@@ -380,7 +400,8 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                             "execPath": row["requested_exec_path"],
                             "version": row["version"]}):
                 raise ValueError("Node startup request differs from live observation")
-            if (row["requested_argv"][1:] != node_process_argv(row["argv"])[1:] or
+            if (row["requested_argv"][1:] !=
+                    node_process_argv(repository, row["argv"])[1:] or
                     Path(row["requested_argv"][0]).resolve() !=
                     Path(row["argv"][0]).resolve() or
                     Path(row["requested_exec_path"]).resolve() !=
@@ -1162,10 +1183,15 @@ def package_archive(repository, archive, manifest, mapping, candidate_sha, bindi
             copy(name, repository / archive_relative(name))
     if binding.get("schema") == 2:
         observation_dir = Path(binding["node_observation_dir"])
+        loader_paths = set()
         for row in binding["node_observations"]:
             for name in (row["request_name"], row["request_name"].removesuffix(".json") + ".ack"):
                 copy("node-observations/" + name, observation_dir / name)
             copy(row["payload_path"], repository / archive_relative(row["payload_path"]))
+            if row["launch_loader_path"] is not None:
+                loader_paths.add(row["launch_loader_path"])
+        for name in sorted(loader_paths):
+            copy(name, repository / archive_relative(name))
 
     files = {}
     for path in sorted(archive.rglob("*")):
@@ -1239,6 +1265,8 @@ def verify_archive(archive, repository, candidate_sha, upstream=None, require_ch
         if binding.get("schema") == 2:
             for row in binding["node_observations"]:
                 expected.add(row["payload_path"])
+                if row["launch_loader_path"] is not None:
+                    expected.add(row["launch_loader_path"])
                 expected.add("node-observations/" + row["request_name"])
                 expected.add("node-observations/" +
                              row["request_name"].removesuffix(".json") + ".ack")

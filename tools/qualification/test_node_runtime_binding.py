@@ -24,6 +24,10 @@ class NodeRuntimeSelectionTest(unittest.TestCase):
         observed_command = [command[0], "--experimental-wasm-modules", *command[1:]]
         self.assertEqual(("core-jsNode", payload),
                          full_corpus.node_group_for_argv(ROOT, observed_command))
+        loader = ROOT / "build/js/node_modules/source-map-support/register.js"
+        observed_command = [command[0], "--require", str(loader), *command[1:]]
+        self.assertEqual(("core-jsNode", payload),
+                         full_corpus.node_group_for_argv(ROOT, observed_command))
         empty = command[:-1] + [str(runner).replace("nodejs-runner", "nodejs-empty-runner")]
         self.assertIsNone(full_corpus.node_group_for_argv(ROOT, empty))
         self.assertIsNone(full_corpus.node_group_for_argv(ROOT,
@@ -121,8 +125,11 @@ class LiveNodeObservationTest(unittest.TestCase):
                                            "dist/kotlin-test-nodejs-runner.js")
                     runner.parent.mkdir(parents=True, exist_ok=True)
                     runner.write_text("module.exports = {};\n")
-                    argv = [node, "--experimental-wasm-modules", str(script),
-                            str(payload), "--require", str(runner)]
+                    loader = repository / "build/js/node_modules/source-map-support/register.js"
+                    loader.parent.mkdir(parents=True, exist_ok=True)
+                    loader.write_text("module.exports = {};\n")
+                    argv = [node, "--require", str(loader), str(script), str(payload),
+                            "--require", str(runner)]
                 elif host == "wasmJsNode":
                     payload = repository / (f"build/wasm/packages/dyn4k-{module}-test/"
                                             "static/runUnitTests.mjs")
