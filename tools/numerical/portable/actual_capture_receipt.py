@@ -79,13 +79,14 @@ def verify_launcher_input(metadata):
     digest = metadata.get("launcher_sha256")
     try:
         current = captured_file_identity(path)
-        current_sha256 = sha(path.read_bytes())
+        data = path.read_bytes()
+        current_sha256 = sha(data)
     except OSError as error:
         raise FocusedRejected("pinned JDK launcher is unavailable") from error
     require(type(expected) is dict and set(expected) == {
         "device_major", "device_minor", "inode", "size"} and
             all(type(value) is int and value >= 0 for value in expected.values()) and
-            expected == after == current and
+            expected == after == current and expected["size"] == len(data) and
             digest == current_sha256 == jdi_bridge.JSPAWNHELPER_SHA256,
             "pinned JDK launcher identity or bytes differ")
     return digest

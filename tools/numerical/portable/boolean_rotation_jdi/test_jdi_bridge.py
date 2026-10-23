@@ -1,4 +1,5 @@
 import io
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -112,14 +113,19 @@ class JdiBridgeTest(unittest.TestCase):
             b'0.999999 execve("/tmp/dyn4k-tools/jdk21/lib/jspawnhelper", '
             b'["/tmp/dyn4k-tools/jdk21/lib/jspawnhelper", '
             b'"21.0.12.1+1-LTS", "540:541:543"], 0x7f) = 0\n')
-        launcher_sha = "e3101d3a580c9ae6e973acbf2e861855e93ebceb0bbd8e5fa3ddf6abbf6fd63d"
+        launcher_bytes = b"bounded pinned launcher source test"
+        launcher_sha = hashlib.sha256(launcher_bytes).hexdigest()
+        def check_launcher(*args, **kwargs):
+            with patch.object(Path, "read_bytes", return_value=launcher_bytes), \
+                    patch.object(jdi_bridge, "JSPAWNHELPER_SHA256", launcher_sha):
+                return verify_jdi_transport_v6(*args, **kwargs)
         launched = launcher + worker
-        self.assertEqual(verify_jdi_transport_v6(
+        self.assertEqual(check_launcher(
             archive({"trace.123": launched}), archive({"trace.456": helper}),
             40001, 123, 456, HELPER_ARGS, launcher_sha256=launcher_sha,
             protected_paths={"/home/stewart/boolean-jdi-test/agent.jar"})["status"],
             "PROVED_JDI_RAW_EXCHANGE")
-        self.assertEqual(verify_jdi_transport_v6(
+        self.assertEqual(check_launcher(
             archive({"trace.123": launcher.replace(b"0.999999", b"1.000001") + worker}),
             archive({"trace.456": helper}), 40001, 123, 456, HELPER_ARGS,
             launcher_sha256=launcher_sha,
@@ -147,7 +153,7 @@ class JdiBridgeTest(unittest.TestCase):
         for label, prelude in prelude_bad:
             with self.subTest(launcher=label):
                 with self.assertRaises(EvidenceRejected):
-                    verify_jdi_transport_v6(
+                    check_launcher(
                         archive({"trace.123": prelude + worker}),
                         archive({"trace.456": helper}), 40001, 123, 456,
                         HELPER_ARGS,
@@ -155,13 +161,13 @@ class JdiBridgeTest(unittest.TestCase):
                                          else launcher_sha),
                         protected_paths={"/home/stewart/boolean-jdi-test/agent.jar"})
         with self.assertRaises(EvidenceRejected):
-            verify_jdi_transport_v6(
+            check_launcher(
                 archive({"trace.123": worker + launcher.replace(
                     b"0.999999", b"1.000015")}),
                 archive({"trace.456": helper}), 40001, 123, 456,
                 HELPER_ARGS, launcher_sha256=launcher_sha)
         with self.assertRaises(EvidenceRejected):
-            verify_jdi_transport_v6(
+            check_launcher(
                 archive({"trace.123": worker}),
                 archive({"trace.456": helper + launcher.replace(
                     b"0.999999", b"1.000015")}),
