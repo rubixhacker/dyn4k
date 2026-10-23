@@ -50,6 +50,21 @@ class TracePrivacyTest(unittest.TestCase):
 
 
 class TransportTest(unittest.TestCase):
+    def test_ordered_shared_descriptor_writes_bind_all_worker_threads(self):
+        trace = self.trace()["100"]
+        trace = trace.replace(b'1.210000 write(4</work/mirror.log>, "hello\\n", 6) = 6',
+                              b'1.205000 clone(child_stack=NULL, flags=CLONE_THREAD|CLONE_FILES) = 101\n'
+                              b'1.210000 write(4</work/mirror.log>, "he", 2) = 2')
+        traces = {"100": trace, "101": (
+            b'1.215000 write(4</work/mirror.log>, "llo\\n", 4) = 4\n'
+            b'1.230000 +++ exited with 0 +++\n')}
+        proof = verify_transport(traces, "/work/mirror.log", b"hello\n",
+                                 "/work/args.txt", b"-cp\n/a\n", shared_writers=True)
+        self.assertEqual(proof["writer_tids"], ["100", "101"])
+        with self.assertRaisesRegex(Unbound, "writer ordering"):
+            verify_transport(traces, "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"-cp\n/a\n")
+
     def test_agent_input_requires_worker_read_and_stable_identity(self):
         path = "/private/agent.jar"
         trace = {"100": (
@@ -61,6 +76,14 @@ class TransportTest(unittest.TestCase):
             b'1.200000 +++ exited with 0 +++\n')}
         identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
         self.assertEqual(verify_stable_input(trace, path, identity, "100")["reads"], 1)
+        path_stat = trace["100"].replace(
+            b'1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n',
+            b'').replace(
+                b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n',
+                b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n'
+                b'1.125000 statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, stx_dev_major=0, stx_dev_minor=1}) = 0\n')
+        self.assertEqual(verify_stable_input({"100": path_stat}, path, identity, "100")["identity_mode"],
+                         "path")
         with self.assertRaises(Rejected):
             verify_stable_input({"100": trace["100"].replace(b'"JAR", 3', b'"JAR", 3')
                                  .replace(b'O_RDONLY', b'O_RDWR')}, path, identity, "100")
@@ -415,7 +438,7 @@ class ArchiveTest(unittest.TestCase):
                                       "definition_count": 3,
                                       "definition_inventory_sha256": "0" * 64,
                                       "helper_provider": "file:///private/agent.jar", "input_reads": 1,
-                                      "writer_tid": "100", "writer_fd": "5",
+                                      "writer_tids": ["100"], "writer_fd": "5",
                                       "destination": "/private/witness.log"}
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
             with patch("numeric_producer.load_raw", return_value={}), \

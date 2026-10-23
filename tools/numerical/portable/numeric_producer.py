@@ -490,7 +490,8 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             "class witness complete JAR differs from committed source")
     input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"], worker)
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
-                                    mirror_identity=metadata["witness_identity"])
+                                    mirror_identity=metadata["witness_identity"],
+                                    shared_writers=True)
     require(output_proof["worker_pid"] == worker,
             "class witness worker differs")
     expected = {name.split("/", 1)[1].removesuffix(".class"): data
@@ -557,7 +558,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             "definition_count": len(witnessed),
             "definition_inventory_sha256": sha(encoded(result["definitions"])),
             "helper_provider": agent_path.as_uri(), "input_reads": input_proof["reads"],
-            "writer_tid": output_proof["mirror_writer_tid"],
+            "writer_tids": output_proof["writer_tids"],
             "writer_fd": output_proof["mirror_fd"],
             "destination": output_proof["mirror_destination"]}
 
@@ -692,7 +693,7 @@ def _validate_proof(proof):
     require(isinstance(witness, dict) and set(witness) == {
                 "schema", "source_sha256", "agent_sha256", "witness_sha256",
                 "definition_count", "definition_inventory_sha256", "helper_provider",
-                "input_reads", "writer_tid", "writer_fd", "destination"} and
+                "input_reads", "writer_tids", "writer_fd", "destination"} and
             witness["schema"] == WITNESS_SCHEMA and
             all(type(witness[field]) is str and re.fullmatch(r"[0-9a-f]{64}", witness[field])
                 for field in ("source_sha256", "agent_sha256", "witness_sha256",
@@ -700,7 +701,10 @@ def _validate_proof(proof):
             type(witness["definition_count"]) is int and witness["definition_count"] >= 3 and
             type(witness["input_reads"]) is int and witness["input_reads"] > 0 and
             type(witness["helper_provider"]) is str and witness["helper_provider"].startswith("file:/") and
-            pid(witness["writer_tid"]) and type(witness["writer_fd"]) is str and
+            type(witness["writer_tids"]) is list and witness["writer_tids"] and
+            all(pid(value) for value in witness["writer_tids"]) and
+            witness["writer_tids"] == sorted(set(witness["writer_tids"])) and
+            type(witness["writer_fd"]) is str and
             re.fullmatch(r"[0-9]+", witness["writer_fd"]) is not None and
             type(witness["destination"]) is str and Path(witness["destination"]).is_absolute(),
             "class witness proof field differs")

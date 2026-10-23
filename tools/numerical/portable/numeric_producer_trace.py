@@ -167,7 +167,8 @@ def verify_stable_input(traces, path, expected_identity, worker):
 
 
 def verify_transport(traces, destination, mirror, response_path=None, response=None, *,
-                     exclusive=True, ordered=True, mirror_identity=None):
+                     exclusive=True, ordered=True, mirror_identity=None,
+                     shared_writers=False):
     events = _events(traces, (destination, response_path))
     workers = []
     parents, groups, tables, exits = {}, {}, {}, {}
@@ -324,7 +325,8 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
             covered.update(range(offset, offset + len(value)))
         if covered != set(range(len(response))):
             raise Unbound("response read bytes are incomplete")
-    if not opened or not writers or (ordered and len(writers) != 1):
+    if not opened or not writers or (ordered and len(writers) != 1 and
+                                     (not shared_writers or len({fd for _, fd in writers}) != 1)):
         raise Unbound("mirror writer ordering is ambiguous")
     if (b"".join(outputs) != mirror if ordered else
             sorted(b"".join(outputs).splitlines()) != sorted(mirror.splitlines())):
@@ -347,7 +349,10 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
         current = parents[current]
         chain.append(current)
     writer, fd = sorted(writers)[0]
-    return {"worker_pid": worker, "parent_pids": chain,
-            "worker_argv_sha256": hashlib.sha256(worker_argv.encode()).hexdigest(),
-            "worker_exit": exits[worker], "mirror_writer_tid": writer, "mirror_fd": fd,
-            "mirror_destination": destination, "mirror_sha256": hashlib.sha256(mirror).hexdigest()}
+    result = {"worker_pid": worker, "parent_pids": chain,
+              "worker_argv_sha256": hashlib.sha256(worker_argv.encode()).hexdigest(),
+              "worker_exit": exits[worker], "mirror_writer_tid": writer, "mirror_fd": fd,
+              "mirror_destination": destination, "mirror_sha256": hashlib.sha256(mirror).hexdigest()}
+    if shared_writers:
+        result["writer_tids"] = sorted({tid for tid, _ in writers})
+    return result

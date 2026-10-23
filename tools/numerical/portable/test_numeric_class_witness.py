@@ -129,6 +129,20 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertIn(b"CLASS\t", witness_path.read_bytes())
             with self.assertRaises(Rejected):
                 read_witness(witness_path.read_bytes(), expected)
+            broken.write_bytes(bad)
+            shadow = root / "source" / "dyn4k" / "witness" / "NumericClassWitness.java"
+            shadow.parent.mkdir(parents=True)
+            shadow.write_text("package dyn4k.witness; public final class NumericClassWitness { "
+                              "public static void premain(String a, java.lang.instrument.Instrumentation i) "
+                              "{ throw new IllegalStateException(\"shadow\"); } }")
+            shadow_compile = subprocess.run([str(JDK / "bin/javac"), "--release", "8",
+                                             "-d", str(classes), str(shadow)],
+                                            capture_output=True, check=False)
+            self.assertEqual(shadow_compile.returncode, 0, shadow_compile.stderr.decode())
+            witness_path.unlink()
+            substituted = subprocess.run(command, capture_output=True, check=False, timeout=30)
+            self.assertNotEqual(substituted.returncode, 0)
+            self.assertFalse(witness_path.exists())
 
 
 if __name__ == "__main__":
