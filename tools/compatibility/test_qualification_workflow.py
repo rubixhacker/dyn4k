@@ -375,7 +375,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "print(\"GNU MPFR\", mpfr.version)'"),
                 ("name: Test source-only numerical regressions",
                  "set -euo pipefail umask 077 "
-                 "source_checks_tmp=\"$(mktemp -d \"$HOME/d4t.XXXXXX\")\" "
+                 "source_checks_tmp=\"$(realpath \"$(mktemp -d \"$HOME/d4t.XXXXXX\")\")\" "
                  "test -d \"$source_checks_tmp\" "
                  "test \"$(stat -c %a \"$source_checks_tmp\")\" = 700 "
                  "test \"$(stat -c %u \"$source_checks_tmp\")\" = \"$(id -u)\" "
@@ -848,7 +848,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
         self.assertEqual(
             "set -euo pipefail umask 077 "
-            "source_checks_tmp=\"$(mktemp -d \"$HOME/d4t.XXXXXX\")\" "
+            "source_checks_tmp=\"$(realpath \"$(mktemp -d \"$HOME/d4t.XXXXXX\")\")\" "
             "test -d \"$source_checks_tmp\" "
             "test \"$(stat -c %a \"$source_checks_tmp\")\" = 700 "
             "test \"$(stat -c %u \"$source_checks_tmp\")\" = \"$(id -u)\" "
@@ -902,16 +902,18 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 "#!/bin/sh\n"
                 "test \"${TMPDIR+x}\" = x || exit 81\n"
                 "test \"${#TMPDIR}\" -le 40 || exit 82\n"
-                "case \"$TMPDIR\" in \"$HOME\"/*) ;; *) exit 83 ;; esac\n"
-                "test -d \"$TMPDIR\" || exit 84\n"
-                "test \"$(stat -c %a \"$TMPDIR\")\" = 700 || exit 85\n"
-                "test \"$(stat -c %u \"$TMPDIR\")\" = \"$(id -u)\" || exit 86\n"
-                "test \"$HOME\" = \"$EXPECTED_HOME\" || exit 87\n"
+                "test \"$(realpath \"$TMPDIR\")\" = \"$TMPDIR\" || exit 83\n"
+                "home_real=\"$(realpath \"$HOME\")\" || exit 84\n"
+                "case \"$TMPDIR\" in \"$home_real\"/*) ;; *) exit 85 ;; esac\n"
+                "test -d \"$TMPDIR\" || exit 86\n"
+                "test \"$(stat -c %a \"$TMPDIR\")\" = 700 || exit 87\n"
+                "test \"$(stat -c %u \"$TMPDIR\")\" = \"$(id -u)\" || exit 88\n"
+                "test \"$HOME\" = \"$EXPECTED_HOME\" || exit 89\n"
                 "if test \"$EXPECTED_CODEX_STATE\" = unset; then\n"
-                "  test \"${CODEX_HOME+x}\" != x || exit 88\n"
+                "  test \"${CODEX_HOME+x}\" != x || exit 90\n"
                 "else\n"
-                "  test \"${CODEX_HOME+x}\" = x || exit 89\n"
-                "  test \"$CODEX_HOME\" = \"$EXPECTED_CODEX_VALUE\" || exit 90\n"
+                "  test \"${CODEX_HOME+x}\" = x || exit 91\n"
+                "  test \"$CODEX_HOME\" = \"$EXPECTED_CODEX_VALUE\" || exit 92\n"
                 "fi\n",
                 encoding="utf-8",
             )
@@ -933,7 +935,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                         environment["EXPECTED_CODEX_VALUE"] = ""
 
                     result = subprocess.run(
-                        ["bash", "--noprofile", "--norc", "-euxo", "pipefail", "-c", script],
+                        ["bash", "--noprofile", "--norc", "-euo", "pipefail", "-c", script],
                         cwd=WORKFLOW.parents[2],
                         env=environment,
                         capture_output=True,
