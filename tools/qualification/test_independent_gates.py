@@ -722,7 +722,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                         "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
                        for case in independent_gates.approved_prospective_cases(str(ROOT))]}
         exported = []
-        closure = independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
+        closure = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS
         original_extractall = tarfile.TarFile.extractall
 
         def observe(package, path, *args, **kwargs):
@@ -778,8 +778,6 @@ class IndependentGateSeamTests(unittest.TestCase):
     def test_executable_checker_window_binds_complete_committed_closure(self):
         revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
         self.assertEqual(revision, independent_gates.PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
-        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
-                                          cwd=ROOT, text=True).strip()
         closure = independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
         self.assertEqual({"numeric_producer.py", "numeric_producer_trace.py",
                           "numeric_class_witness.py", "pulley_jdi_v2.py",
@@ -799,14 +797,13 @@ class IndependentGateSeamTests(unittest.TestCase):
             committed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
             self.assertEqual(digest, hashlib.sha256(committed).hexdigest(), name)
-            self.assertEqual(digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), name)
-        for candidate in (revision, current):
-            with self.subTest(candidate=candidate):
-                bound = independent_gates._prospective_checker_binding(ROOT, candidate)
-                for name, digest in closure.items():
-                    self.assertEqual(digest, bound[f"tools/numerical/portable/{name}"])
-                for path, digest in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED.items():
-                    self.assertEqual(digest, bound[path])
+            if name != "numeric_producer.py":
+                self.assertEqual(digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), name)
+        bound = independent_gates._prospective_checker_binding(ROOT, revision)
+        for name, digest in closure.items():
+            self.assertEqual(digest, bound[f"tools/numerical/portable/{name}"])
+        for path, digest in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED.items():
+            self.assertEqual(digest, bound[path])
         build = "tools/numerical/portable/build.gradle.kts"
         self.assertEqual("fac77dd6282f67dd8593885a73f880d0bab6156eda93391a28cdbafb800fbdc3",
                          independent_gates.P2_EXECUTABLE_LOCAL_DEPENDENCIES[build])
@@ -828,6 +825,68 @@ class IndependentGateSeamTests(unittest.TestCase):
                     name: bound[f"tools/numerical/portable/{name}"] for name in expected})
                 self.assertNotIn("tools/numerical/portable/numeric_producer.py", bound)
                 self.assertNotIn("tools/numerical/portable/pulley_jdi_v2.py", bound)
+
+    def test_replay_scratch_window_selects_exact_producer_bytes(self):
+        previous = independent_gates.PROSPECTIVE_EXECUTABLE_CHECKER_REVISION
+        revision = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_REVISION
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                          cwd=ROOT, text=True).strip()
+        relative = "tools/numerical/portable/numeric_producer.py"
+        old = independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS["numeric_producer.py"]
+        new = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS[
+            "numeric_producer.py"]
+        self.assertNotEqual(old, new)
+        self.assertEqual({**independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS,
+                          "numeric_producer.py": new},
+                         independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS)
+        self.assertEqual(new, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
+        self.assertEqual(new, independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
+            "numeric_producer.py"])
+        for candidate, expected in ((previous, old), (revision, new), (current, new)):
+            with self.subTest(candidate=candidate):
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{candidate}:{relative}"],
+                    cwd=ROOT)
+                self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
+                bound = independent_gates._prospective_checker_binding(ROOT, candidate)
+                self.assertEqual(expected, bound[relative])
+                self.assertEqual(18, len(bound) - 1)
+                self.assertEqual(independent_gates.APPROVED_P2_LOCAL_PRODUCERS,
+                                 independent_gates._p2_producer_binding(ROOT, candidate))
+
+        original_read = Path.read_bytes
+        local = ROOT / relative
+        old_bytes = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{previous}:{relative}"], cwd=ROOT)
+        new_bytes = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{revision}:{relative}"], cwd=ROOT)
+        with mock.patch.object(Path, "read_bytes", lambda path: old_bytes
+                               if path == local else original_read(path)):
+            for candidate in (previous, revision):
+                with self.subTest(local_drift=candidate), self.assertRaisesRegex(
+                        ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, candidate)
+
+        original_show = subprocess.check_output
+        for candidate, replacement in ((previous, new_bytes), (revision, old_bytes)):
+            def altered(command, *args, **kwargs):
+                if command[-1] == f"{candidate}:{relative}":
+                    return replacement
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(candidate_drift=candidate), mock.patch.object(
+                    subprocess, "check_output", altered), self.assertRaisesRegex(
+                        ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, candidate)
+
+        def missing(command, *args, **kwargs):
+            if command[-1] == f"{revision}:{relative}":
+                raise subprocess.CalledProcessError(128, command)
+            return original_show(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", missing), self.assertRaisesRegex(
+                ValueError, "prospective policy/checker blob differs"):
+            independent_gates._prospective_checker_binding(ROOT, revision)
 
     def test_executable_checker_rejects_local_and_candidate_helper_drift(self):
         revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
@@ -947,7 +1006,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             self.assertEqual(prior_path, sys.path)
 
     def test_p2_host_ignores_stale_numeric_helpers_and_restores_cache_on_success(self):
-        revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
+        revision = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_REVISION
         names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness",
                  "pulley_jdi_v2", "pulley_jdi_v1", "pulley_jdi_inputs_v2", "run",
                  "frozen_weld_pulley", "exact_consistency", "physical", "compare")
@@ -1046,7 +1105,7 @@ class IndependentGateSeamTests(unittest.TestCase):
              independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS),
             ("dcc8211b51aad7bcb946417ad9019bd57cc6ecf1",
              independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS),
-            (current, independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS),
+            (current, independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS),
         )
         checker_paths = [f"tools/numerical/portable/{name}" for name in
                          independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
@@ -1152,8 +1211,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual({**independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS,
                           "prospective_compare.py": new_digest},
                          independent_gates.APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS)
-        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS,
-                         independent_gates.APPROVED_PROSPECTIVE_LOCAL_CHECKERS)
+        self.assertEqual(independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS,
+                         independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS)
         for revision, digest in ((current, new_digest),
                                  (previous, old_digest),
                                  (independent_gates.PROSPECTIVE_REPRESENTED_CHECKER_REVISION,

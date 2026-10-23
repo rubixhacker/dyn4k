@@ -85,6 +85,7 @@ PROSPECTIVE_REPRESENTED_CHECKER_REVISION = "2bd0d70f36b521949641a5404bdb3fa5890f
 PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION = "375812a97de8cb3e439fc2a204e029de1a6de338"
 PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION = "df316d8900f850d22f9c933f6aac8250b1e10ed1"
 PROSPECTIVE_EXECUTABLE_CHECKER_REVISION = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
+PROSPECTIVE_REPLAY_SCRATCH_REVISION = "122256c3bc8d998b6ad7661f69562d71061b1bb4"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_PROSPECTIVE_CHECKERS = {
@@ -125,11 +126,15 @@ APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS = {
     "physical.py": "fe7842e7712c456fb23e8d663694323bebaa7c09f708cd249c422c28ec25e9f0",
     "class_witness/NumericClassWitness.java": "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983",
 }
+PROSPECTIVE_REPLAY_SCRATCH_CHECKERS = {
+    **APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS,
+    "numeric_producer.py": "b0cf7d9adac33542b42399899a8b90d85ec2c0f0540ed2a3dfd9edbfc1c3e502",
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-APPROVED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(PROSPECTIVE_REPLAY_SCRATCH_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -771,7 +776,9 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
-    if executable_window:
+    if descends_from(PROSPECTIVE_REPLAY_SCRATCH_REVISION):
+        approved = PROSPECTIVE_REPLAY_SCRATCH_CHECKERS
+    elif executable_window:
         approved = APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
     elif descends_from(PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS
@@ -796,7 +803,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         approved = APPROVED_PROSPECTIVE_POLICY_CHECKERS
     else:
         raise ValueError("prospective checker candidate predates approved revisions")
-    for filename, current in APPROVED_PROSPECTIVE_LOCAL_CHECKERS.items():
+    for filename, current in PINNED_PROSPECTIVE_LOCAL_CHECKERS.items():
         relative = f"{source_dir}/{filename}"
         local = Path(__file__).resolve().parents[2] / relative
         try:
