@@ -45,6 +45,12 @@ public final class NumericClassWitness {
             (name.startsWith("portable/") || name.startsWith("org/dyn4j/"));
     }
 
+    private static boolean generatedLambda(Class<?> type, String name) {
+        return type.isSynthetic() &&
+            name.matches("(?:portable|org/dyn4j)/.+\\$\\$Lambda(?:\\$[1-9][0-9]*)?/" +
+                         "(?:[0-9]+|0x[0-9a-f]+)");
+    }
+
     private static void provider(Class<?> type, Path jar) throws Exception {
         CodeSource source = type.getProtectionDomain().getCodeSource();
         if (type.getClassLoader() != ClassLoader.getSystemClassLoader() || source == null ||
@@ -131,7 +137,7 @@ public final class NumericClassWitness {
             int loadedCount = 0;
             for (Class<?> type : instrument.getAllLoadedClasses()) {
                 String name = type.getName().replace('.', '/');
-                if (!relevant(name)) {
+                if (!relevant(name) || generatedLambda(type, name)) {
                     continue;
                 }
                 if (!loadedNames.add(name)) {

@@ -96,7 +96,9 @@ class ClassWitnessTest(unittest.TestCase):
             package.mkdir(parents=True)
             sources = {
                 "NumericProbeMatrixTest": "public class NumericProbeMatrixTest {}",
-                "PortableMatrixTest": "public class PortableMatrixTest { public static int answer() { return 75; } }",
+                "PortableMatrixTest": ("public class PortableMatrixTest { public static int answer() { "
+                                       "java.util.function.IntSupplier generated = () -> 75; "
+                                       "return generated.getAsInt(); } }"),
                 "NumericalRecorder": "public class NumericalRecorder {}",
                 "Ordinary$$Lambda$Name": "public class Ordinary$$Lambda$Name {}",
             }
@@ -121,7 +123,11 @@ class ClassWitnessTest(unittest.TestCase):
                        "-Xlog:class+load=info:file=" + str(root / "loads.log"),
                        "-cp", str(classes), "Main"]
             successful = subprocess.run(command, capture_output=True, check=False, timeout=30)
-            self.assertEqual(successful.returncode, 0, successful.stderr.decode())
+            lines = witness_path.read_text().splitlines()
+            callbacks = {line.split("\t")[2] for line in lines if line.startswith("CLASS\t")}
+            loaded = {line.split("\t")[2] for line in lines if line.startswith("LOADED\t")}
+            self.assertEqual(successful.returncode, 0,
+                             successful.stderr.decode() + str(sorted(loaded - callbacks)))
             self.assertEqual(successful.stdout, b"75\n")
             records = read_witness(witness_path.read_bytes(), expected)
             self.assertEqual(len(records["definitions"]), 4)
@@ -136,7 +142,11 @@ class ClassWitnessTest(unittest.TestCase):
                      "-javaagent:" + str(agent) + "=" + str(witness_path),
                      "-cp", str(classes), "Main"]
             java8_result = subprocess.run(java8, capture_output=True, check=False, timeout=30)
-            self.assertEqual(java8_result.returncode, 0, java8_result.stderr.decode())
+            lines = witness_path.read_text().splitlines()
+            callbacks = {line.split("\t")[2] for line in lines if line.startswith("CLASS\t")}
+            loaded = {line.split("\t")[2] for line in lines if line.startswith("LOADED\t")}
+            self.assertEqual(java8_result.returncode, 0,
+                             java8_result.stderr.decode() + str(sorted(loaded - callbacks)))
             self.assertEqual(java8_result.stdout, b"75\n")
             self.assertEqual(len(read_witness(witness_path.read_bytes(), expected)["loaded"]), 4)
             self.assertIn("portable.PortableMatrixTest source:",
@@ -207,7 +217,7 @@ class ClassWitnessTest(unittest.TestCase):
             package = root / "src/portable"
             package.mkdir(parents=True)
             for name in ("NumericProbeMatrixTest", "PortableMatrixTest", "NumericalRecorder",
-                         "LateRelevant"):
+                         "Late$$Lambda$Legal"):
                 (package / (name + ".java")).write_text(
                     "package portable; public class " + name + " {}")
             main = root / "src/LateMain.java"
@@ -222,7 +232,7 @@ class ClassWitnessTest(unittest.TestCase):
                                 java.nio.file.Paths.get(args[0])), "US-ASCII").contains("END\\tOK")) {
                                 Thread.sleep(5);
                             }
-                            Class.forName("portable.LateRelevant");
+                            Class.forName("portable.Late$$Lambda$Legal");
                         } catch (Exception failure) { throw new RuntimeException(failure); }
                     }));
                 }

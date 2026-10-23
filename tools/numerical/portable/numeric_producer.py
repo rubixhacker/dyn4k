@@ -32,7 +32,7 @@ PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
-OBSERVER_SHA256 = "5db19c6d04d8ede68712559f32374511425683322b832797659dc1bdd9305d8e"
+OBSERVER_SHA256 = "17ea5acd860bde82e8ac8289f2dfb43d423f85fe1881e13fe9ce95afee6dcd86"
 WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
@@ -640,7 +640,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
                 require(name not in helper, "duplicate class witness helper load")
                 helper[name] = match[3]
             elif name.startswith(("portable/", "org/dyn4j/")) and not re.fullmatch(
-                    r".+\$\$Lambda\$[0-9]+/0x[0-9a-f]+", name):
+                    r".+\$\$Lambda(?:\$[1-9][0-9]*)?/0x[0-9a-f]+", name):
                 require(name in expected and name not in loaded,
                         "class witness loaded provider inventory differs")
                 loaded[name] = match[3]
