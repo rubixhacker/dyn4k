@@ -802,27 +802,46 @@ class StartupTest(unittest.TestCase):
                 require_java8_classes({"test/portable/Test.class": major65}, jar, agent.getvalue())
 
     def test_java8_build_and_worker_are_separate_executed_runtimes(self):
-        from numeric_producer import verify_build_runtime, WITNESS_JDK
-        build = str(WITNESS_JDK / "bin/java")
-        worker = "/jdk8/bin/java"
+        import numeric_producer
+
+        build_bytes = b"synthetic JDK 21 executable fixture\n"
+
         def event(path, arguments):
             return ("1.0 execve(" + json.dumps(path) + ", " +
                     json.dumps(arguments) + ", 0x0) = 0\n").encode()
-        selected = ("3", worker, (worker,
-                    "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"))
-        traces = {
-            "1": event(build, [build, "-jar", "/repo/gradle/wrapper/gradle-wrapper.jar"]),
-            "2": event(build, [build, "org.gradle.launcher.daemon.bootstrap.GradleDaemon"]),
-            "3": event(worker, list(selected[2])),
-        }
-        self.assertEqual(verify_build_runtime(traces, selected),
-                         hashlib.sha256(Path(build).read_bytes()).hexdigest())
-        for changed in ({**traces, "2": event(worker, [worker,
-                         "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
-                        {**traces, "4": event(worker, [worker,
-                         "worker.org.gradle.process.internal.worker.GradleWorkerMain", "extra"])}):
-            with self.assertRaises(Rejected):
-                verify_build_runtime(changed, selected)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_home = root / "jdk21"
+            worker_home = root / "jdk8"
+            build = build_home / "bin/java"
+            worker_path = worker_home / "bin/java"
+            build.parent.mkdir(parents=True)
+            worker_path.parent.mkdir(parents=True)
+            build.write_bytes(build_bytes)
+            worker_path.write_bytes(b"synthetic Java 8 worker executable fixture\n")
+            build.chmod(0o755)
+            worker_path.chmod(0o755)
+            worker = str(worker_path)
+            selected = ("3", worker, (worker,
+                        "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"))
+            traces = {
+                "1": event(str(build), [str(build), "-jar",
+                                        "/repo/gradle/wrapper/gradle-wrapper.jar"]),
+                "2": event(str(build), [str(build),
+                                        "org.gradle.launcher.daemon.bootstrap.GradleDaemon"]),
+                "3": event(worker, list(selected[2])),
+            }
+            with patch.object(numeric_producer, "WITNESS_JDK", build_home):
+                self.assertEqual(numeric_producer.verify_build_runtime(traces, selected),
+                                 "81441a672a57908ea5fd3755252ed168a0c0d02bb2edc17f9cb436fd47cd0b1d")
+                for changed in ({**traces, "2": event(worker, [worker,
+                                 "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
+                                {**traces, "4": event(worker, [worker,
+                                 "worker.org.gradle.process.internal.worker.GradleWorkerMain",
+                                 "extra"])}):
+                    with self.assertRaises(Rejected):
+                        numeric_producer.verify_build_runtime(changed, selected)
 
     def test_witness_worker_requires_one_agent_and_guard_flags(self):
         from numeric_producer import verify_startup_log

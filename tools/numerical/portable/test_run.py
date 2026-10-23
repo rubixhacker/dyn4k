@@ -397,10 +397,11 @@ class ExtractionTest(unittest.TestCase):
     def test_java8_requires_real_home_and_direct_classpath(self):
         jdk8 = selected_test_jdk8_home()
         self.assertEqual(run.selected_jdk8_home(jdk8), jdk8)
-        for invalid in (None, Path("relative"), Path("/missing-jdk8"),
-                        Path("/tmp/dyn4k-tools/jdk21")):
-            with self.subTest(invalid=invalid), self.assertRaises(run.Rejected):
-                run.selected_jdk8_home(invalid)
+        with tempfile.TemporaryDirectory() as directory:
+            missing_home = Path(directory) / "missing-jdk"
+            for invalid in (None, Path("relative"), missing_home):
+                with self.subTest(invalid=invalid), self.assertRaises(run.Rejected):
+                    run.selected_jdk8_home(invalid)
         with tempfile.TemporaryDirectory() as directory:
             response = Path(directory) / "worker.args"
             response.write_text("-cp /classes")
@@ -411,9 +412,19 @@ class ExtractionTest(unittest.TestCase):
         with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": ""}):
             with self.assertRaisesRegex(RuntimeError, "DYN4K_TEST_JDK8_HOME"):
                 selected_test_jdk8_home()
-        with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": "/tmp/dyn4k-tools/jdk21"}):
-            with self.assertRaisesRegex(RuntimeError, "wrong java version"):
-                selected_test_jdk8_home()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "synthetic-jdk"
+            binary = home / "bin"
+            binary.mkdir(parents=True)
+            java = binary / "java"
+            javac = binary / "javac"
+            java.write_text('#!/bin/sh\nprintf \'openjdk version "21.0.1"\\n\' >&2\n')
+            javac.write_text("#!/bin/sh\nprintf 'javac 21.0.1\\n' >&2\n")
+            java.chmod(0o755)
+            javac.chmod(0o755)
+            with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": str(home.resolve())}):
+                with self.assertRaisesRegex(RuntimeError, "wrong java version"):
+                    selected_test_jdk8_home()
 
     def test_java_8_worker_open_proof_requires_staged_jar_in_worker_tree(self):
         with tempfile.TemporaryDirectory() as directory:
