@@ -18,6 +18,8 @@ from numeric_producer_trace import verify_transport, verify_stable_input, Unboun
 from receipt import Rejected
 
 WORKER_EXEC = ("/jdk/bin/java", ("java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"))
+TRANSPORT_EXEC = ("100", "/jdk/bin/java", (
+    "/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain"))
 
 
 class TracePrivacyTest(unittest.TestCase):
@@ -61,11 +63,11 @@ class TransportTest(unittest.TestCase):
         traces = {"100": trace, "101": (
             b'1.215000 write(4</work/mirror.log>, "llo\\n", 4) = 4\n'
             b'1.230000 +++ exited with 0 +++\n')}
-        proof = verify_transport(traces, "/work/mirror.log", b"hello\n",
+        proof = verify_transport(traces, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n", shared_writers=True)
         self.assertEqual(proof["writer_tids"], ["100", "101"])
         with self.assertRaisesRegex(Unbound, "writer ordering"):
-            verify_transport(traces, "/work/mirror.log", b"hello\n",
+            verify_transport(traces, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n")
 
     def test_agent_input_requires_worker_read_and_stable_identity(self):
@@ -286,23 +288,23 @@ class TransportTest(unittest.TestCase):
 
     def test_response_open_without_read_cannot_bind_producer(self):
         with self.assertRaisesRegex(Unbound, "response.*read"):
-            verify_transport(self.trace(False), "/work/mirror.log", b"hello\n",
+            verify_transport(self.trace(False), "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n")
 
     def test_malformed_trace_record_rejects(self):
         malformed = self.trace()["100"].replace(b"1.000000 execve", b"not-a-time execve")
         with self.assertRaisesRegex(Rejected, "trace timestamp") as error:
-            verify_transport({"100": malformed}, "/work/mirror.log", b"hello\n",
+            verify_transport({"100": malformed}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n")
         self.assertNotIsInstance(error.exception, Unbound)
 
     def test_exact_response_read_and_exclusive_output_bind_transport(self):
-        proof = verify_transport(self.trace(), "/work/mirror.log", b"hello\n",
+        proof = verify_transport(self.trace(), "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n")
         self.assertEqual(proof["worker_pid"], "100")
         self.assertEqual(proof["mirror_writer_tid"], "100")
         without_no_follow = self.trace()["100"].replace(b"O_EXCL|O_NOFOLLOW", b"O_EXCL")
-        proof = verify_transport({"100": without_no_follow}, "/work/mirror.log", b"hello\n",
+        proof = verify_transport({"100": without_no_follow}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n")
         self.assertEqual(proof["mirror_writer_tid"], "100")
 
@@ -322,7 +324,7 @@ class TransportTest(unittest.TestCase):
         for name, (old, new) in mutations.items():
             with self.subTest(name=name), self.assertRaises(Rejected):
                 verify_transport({"100": self.trace()["100"].replace(old, new)},
-                                 "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+                                 "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
 
     def test_dup_and_thread_membership_preserve_destination(self):
         trace = self.trace()
@@ -334,11 +336,11 @@ class TransportTest(unittest.TestCase):
                         b'{iov_base="\\n", iov_len=1}], 2) = 6\n'
                         b'1.215000 close(5</work/mirror.log>) = 0\n'
                         b'1.900000 +++ exited with 0 +++\n')
-        proof = verify_transport(trace, "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+        proof = verify_transport(trace, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
         self.assertEqual((proof["mirror_writer_tid"], proof["mirror_fd"]), ("101", "5"))
         trace["100"] = trace["100"].replace(b"CLONE_THREAD|CLONE_FILES", b"SIGCHLD")
         with self.assertRaises(Rejected):
-            verify_transport(trace, "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+            verify_transport(trace, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
 
     def test_parent_can_create_response_before_worker_reads_it(self):
         trace = self.trace()
@@ -348,7 +350,7 @@ class TransportTest(unittest.TestCase):
                        b'0.900000 clone(flags=SIGCHLD) = 100\n'
                        b'2.100000 unlink("/work/args.txt") = 0\n'
                        b'2.200000 +++ exited with 0 +++\n')
-        proof = verify_transport(trace, "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+        proof = verify_transport(trace, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
         self.assertEqual(proof["parent_pids"], ["99"])
 
     def test_mirror_seek_cannot_bind_sequential_output_bytes(self):
@@ -360,7 +362,7 @@ class TransportTest(unittest.TestCase):
             with self.subTest(operation=operation), self.assertRaisesRegex(Rejected, "mirror seek"):
                 trace = self.trace()["100"].replace(
                     b'1.210000 write', b'1.205000 ' + operation + b'\n1.210000 write')
-                verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                verify_transport({"100": trace}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n")
 
     def test_auxiliary_log_may_reset_empty_file_before_first_write(self):
@@ -369,16 +371,16 @@ class TransportTest(unittest.TestCase):
             b'1.205000 lseek(4</work/mirror.log>, 0, SEEK_END) = 0\n'
             b'1.206000 ftruncate(4</work/mirror.log>, 0) = 0\n'
             b'1.210000 write')
-        verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+        verify_transport({"100": trace}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                          "/work/args.txt", b"-cp\n/a\n", exclusive=False, ordered=False)
         with self.assertRaisesRegex(Rejected, "mirror seek"):
             verify_transport({"100": trace.replace(b'0, SEEK_END) = 0', b'1, SEEK_END) = 1')},
-                             "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n",
+                             "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n",
                              exclusive=False, ordered=False)
         with self.assertRaisesRegex(Rejected, "unsupported access"):
             changed = trace.replace(b'1.220000 close',
                                     b'1.215000 ftruncate(4</work/mirror.log>, 0) = 0\n1.220000 close')
-            verify_transport({"100": changed}, "/work/mirror.log", b"hello\n",
+            verify_transport({"100": changed}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n", exclusive=False, ordered=False)
 
     def test_close_range_and_untraced_writer_cannot_leave_valid_descriptor(self):
@@ -386,7 +388,7 @@ class TransportTest(unittest.TestCase):
                      b'1.205000 pwrite64(4</work/mirror.log>, "hello\\n", 6, 0) = 6\n'):
             with self.subTest(call=call), self.assertRaises(Rejected):
                 verify_transport({"100": self.trace()["100"].replace(b'1.210000 write', call + b'1.210000 write')},
-                                 "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+                                 "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
 
     def test_positioned_and_vector_reads_cover_exact_response_bytes(self):
         original = b'read(3</work/args.txt>, "-cp\\n/a\\n", 4096) = 7'
@@ -396,7 +398,7 @@ class TransportTest(unittest.TestCase):
         ):
             with self.subTest(call=replacement):
                 proof = verify_transport({"100": self.trace()["100"].replace(original, replacement)},
-                                         "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
+                                         "/work/mirror.log", b"hello\n", TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n")
                 self.assertEqual(proof["worker_exit"], 0)
 
     def test_backward_response_seek_does_not_count_repeated_bytes_twice(self):
@@ -407,7 +409,7 @@ class TransportTest(unittest.TestCase):
             b'1.125000 lseek(3</work/args.txt>, -3, SEEK_CUR) = 0\n'
             b'1.126000 read(3</work/args.txt>, "abc", 3) = 3')
         with self.assertRaisesRegex(Unbound, "response.*seek|response.*incomplete"):
-            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"abcabc")
 
     def test_mirror_identity_must_match_original_captured_file(self):
@@ -424,7 +426,7 @@ class TransportTest(unittest.TestCase):
                          (original_identity["device_major"], original_identity["device_minor"],
                           original_identity["inode"])).encode()
             relocated_trace = self.trace()["100"].replace(b'1.220000 close', stat_call + b'1.220000 close')
-            verify_transport({"100": relocated_trace}, "/work/mirror.log", archived.read_bytes(),
+            verify_transport({"100": relocated_trace}, "/work/mirror.log", archived.read_bytes(), TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n", mirror_identity=original_identity)
         trace = self.trace()["100"].replace(
             b'1.220000 close',
@@ -432,19 +434,19 @@ class TransportTest(unittest.TestCase):
             b'{st_dev=makedev(0, 1), st_ino=13, st_mode=S_IFREG|0600, st_size=6, ...}) = 0\n'
             b'1.220000 close')
         expected = {"device_major": 0, "device_minor": 1, "inode": 13, "size": 6}
-        proof = verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+        proof = verify_transport({"100": trace}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
         self.assertEqual(proof["mirror_sha256"], hashlib.sha256(b"hello\n").hexdigest())
         hexadecimal_device = trace.replace(b"makedev(0, 1)", b"makedev(0, 0x1)")
-        proof = verify_transport({"100": hexadecimal_device}, "/work/mirror.log", b"hello\n",
+        proof = verify_transport({"100": hexadecimal_device}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                                  "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
         self.assertEqual(proof["mirror_sha256"], hashlib.sha256(b"hello\n").hexdigest())
         with self.assertRaisesRegex(Rejected, "mirror file identity differs"):
-            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n",
                              mirror_identity={**expected, "inode": 14})
         with self.assertRaisesRegex(Unbound, "mirror file identity unavailable"):
-            verify_transport(self.trace(), "/work/mirror.log", b"hello\n",
+            verify_transport(self.trace(), "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
 
 
@@ -518,8 +520,72 @@ class OutputTest(unittest.TestCase):
 
 
 class StartupTest(unittest.TestCase):
+    def test_forwarding_shell_and_selected_jvm_share_transport_identity(self):
+        from numeric_producer import _startup
+        from numeric_producer_trace import select_worker_exec
+        trace = TransportTest().trace()["100"]
+        trace = trace.replace(
+            b'1.000000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0 /* 0 vars */) = 0',
+            b'0.950000 execve("/jdk/bin/sh", ["sh", "-c", "exec java worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n'
+            b'1.000000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"], 0x0 /* 0 vars */) = 0')
+        trace = trace.replace(
+            b'1.200000 openat',
+            b'1.140000 openat(AT_FDCWD, "/work/agent.jar", O_RDONLY) = 5</work/agent.jar>\n'
+            b'1.150000 fstat(5</work/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n'
+            b'1.160000 read(5</work/agent.jar>, "JAR", 3) = 3\n'
+            b'1.170000 close(5</work/agent.jar>) = 0\n'
+            b'1.200000 openat')
+        traces = {"99": b'0.900000 clone(flags=SIGCHLD) = 100\n2.100000 +++ exited with 0 +++\n',
+                  "100": trace}
+        raw = {"worker-classpath.txt": b"-cp\n/a\n"}
+        selected_exec = select_worker_exec(traces)
+        executable, argv, _, response_path, response, _ = _startup(raw, selected_exec)
+        self.assertEqual(executable, "/jdk/bin/java")
+        self.assertEqual(selected_exec[0], "100")
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
+        self.assertEqual(verify_stable_input(traces, "/work/agent.jar", identity, "100",
+                                             b"JAR", (executable, tuple(argv)))["reads"], 1)
+        proof = verify_transport(traces, "/work/mirror.log", b"hello\n", selected_exec,
+                                 response_path, response)
+        self.assertEqual((proof["worker_pid"], proof["parent_pids"]), ("100", ["99"]))
+        for destination in ("/work/witness.log", "/work/arguments.log", "/work/classes.log"):
+            changed = {**traces, "100": trace.replace(b"/work/mirror.log", destination.encode())}
+            aux = verify_transport(changed, destination, b"hello\n", selected_exec,
+                                   response_path, response, exclusive=False, ordered=False)
+            self.assertEqual(aux["worker_pid"], "100")
+        for wrong in (("99", *selected_exec[1:]),
+                      ("100", "/jdk/bin/sh", selected_exec[2]),
+                      ("100", selected_exec[1], selected_exec[2][:-1])):
+            with self.subTest(wrong=wrong), self.assertRaises(Rejected):
+                verify_transport(traces, "/work/mirror.log", b"hello\n", wrong,
+                                 response_path, response)
+        early_output = trace.replace(
+            b'1.000000 execve',
+            b'0.970000 openat(AT_FDCWD, "/work/mirror.log", O_WRONLY|O_CREAT|O_EXCL, 0600) = 6</work/mirror.log>\n'
+            b'0.980000 write(6</work/mirror.log>, "hello\\n", 6) = 6\n1.000000 execve')
+        with self.assertRaises(Rejected):
+            verify_transport({**traces, "100": early_output}, "/work/mirror.log",
+                             b"hello\n", selected_exec, response_path, response)
+        early_read = trace.replace(
+            b'1.000000 execve',
+            b'0.960000 openat(AT_FDCWD, "/work/args.txt", O_RDONLY) = 6</work/args.txt>\n'
+            b'0.970000 fstat(6</work/args.txt>, {st_dev=makedev(0, 1), st_ino=12, st_mode=S_IFREG|0600, st_size=7}) = 0\n'
+            b'0.980000 read(6</work/args.txt>, "-cp\\n/a\\n", 4096) = 7\n1.000000 execve')
+        with self.assertRaises(Rejected):
+            verify_transport({**traces, "100": early_read}, "/work/mirror.log",
+                             b"hello\n", selected_exec, response_path, response)
+        duplicate = trace.replace(
+            b'1.200000 openat',
+            b'1.180000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", '
+            b'"worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"], 0x0) = 0\n'
+            b'1.200000 openat')
+        with self.assertRaises(Rejected):
+            verify_transport({**traces, "100": duplicate}, "/work/mirror.log",
+                             b"hello\n", selected_exec, response_path, response)
+
     def test_startup_selects_complete_worker_argv(self):
         from numeric_producer import _startup, encoded
+        from numeric_producer_trace import select_worker_exec
         worker = "worker.org.gradle.process.internal.worker.GradleWorkerMain"
         argv = ["/jdk/bin/java", "-cp", "/bootstrap.jar", worker, "executor"]
         raw = {"direct-classpath.json": encoded(argv)}
@@ -528,10 +594,11 @@ class StartupTest(unittest.TestCase):
             '1.100000 execve("/jdk/bin/java", ' + json.dumps(argv) + ', 0x0) = 0',
         ]
         traces = {"100": ("\n".join(rows) + "\n").encode()}
-        self.assertEqual(_startup(traces, raw)[:3], ("/jdk/bin/java", argv, "/bootstrap.jar"))
+        self.assertEqual(_startup(raw, select_worker_exec(traces))[:3],
+                         ("/jdk/bin/java", argv, "/bootstrap.jar"))
         with self.assertRaisesRegex(Rejected, "worker invocation"):
-            _startup({"100": ("\n".join(rows + [
-                rows[1].replace('1.100000', '1.200000')]) + "\n").encode()}, raw)
+            select_worker_exec({"100": ("\n".join(rows + [
+                rows[1].replace('1.100000', '1.200000')]) + "\n").encode()})
 
     def test_public_replay_requires_reviewed_loader_relationship(self):
         from numeric_producer import verify_witness_loaders

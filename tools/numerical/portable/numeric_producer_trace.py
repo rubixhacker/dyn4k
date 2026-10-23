@@ -16,6 +16,7 @@ MAX_TRACE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_THREADS = 1024
 STRING = r'"(?:[^"\\]|\\.)*"'
 FD = r'([0-9]+)<([^>]+)>'
+WORKER_MAIN = "worker.org.gradle.process.internal.worker.GradleWorkerMain"
 
 
 def quoted(value):
@@ -38,6 +39,31 @@ def successful_execve(call):
                 tuple(quoted(item).decode("utf-8") for item in re.findall(STRING, match[2])))
     except UnicodeDecodeError as error:
         raise Rejected("worker executable or argument is not UTF-8") from error
+
+
+def worker_exec(call):
+    if not call.startswith("execve(") or not call.endswith(" = 0"):
+        return None
+    parsed = successful_execve(call)
+    if parsed is None:
+        if "GradleWorkerMain" in call:
+            raise Rejected("worker argv is truncated or malformed")
+        return None
+    return parsed if len(parsed[1]) >= 3 and parsed[1][-2] == WORKER_MAIN else None
+
+
+def select_worker_exec(traces):
+    candidates = []
+    for tid, data in traces.items():
+        for line in data.decode("utf-8").splitlines():
+            if " execve(" not in line:
+                continue
+            parsed = worker_exec(line.split(" ", 1)[1])
+            if parsed is not None:
+                candidates.append((tid, *parsed))
+    if len(candidates) != 1:
+        raise Rejected("numeric producer worker invocation differs")
+    return candidates[0]
 
 
 def _events(traces, protected):
@@ -280,10 +306,16 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
                                                   if item["reads"] or item["maps"]) else "path"}
 
 
-def verify_transport(traces, destination, mirror, response_path=None, response=None, *,
+def verify_transport(traces, destination, mirror, selected_exec, response_path=None, response=None, *,
                      exclusive=True, ordered=True, mirror_identity=None,
                      shared_writers=False):
     events = _events(traces, (destination, response_path))
+    if (not isinstance(selected_exec, tuple) or len(selected_exec) != 3 or
+            not isinstance(selected_exec[0], str) or
+            not isinstance(selected_exec[1], str) or
+            not isinstance(selected_exec[2], tuple) or
+            not all(isinstance(arg, str) for arg in selected_exec[2])):
+        raise Rejected("selected worker execution identity is malformed")
     workers = []
     parents, groups, tables, exits = {}, {}, {}, {}
     outputs, writers, response_reads, identities = [], set(), [], set()
@@ -299,11 +331,13 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
         if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0"):
             if worker is not None and groups[tid] == worker:
                 raise Rejected("worker executable changed after startup")
-            if "GradleWorkerMain" in call:
+            if successful_execve(call) == selected_exec[1:]:
+                if tid != selected_exec[0] or worker is not None:
+                    raise Rejected("selected worker execution is ambiguous")
                 workers.append(tid)
                 worker = tid
                 worker_argv = call
-                if response_path is not None and ('"@' + response_path + '"') not in call:
+                if response_path is not None and "@" + response_path not in selected_exec[2]:
                     raise Rejected("worker response argument differs")
         child = re.match(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
         if child:

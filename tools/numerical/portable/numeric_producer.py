@@ -20,7 +20,7 @@ from urllib.parse import unquote, urlparse
 
 from receipt import Rejected, digest, exact, _pairs, _reject_nonfinite
 from numeric_producer_trace import (Unbound, verify_transport, verify_stable_input,
-                                    successful_execve, quoted, STRING)
+                                    select_worker_exec, worker_exec)
 from numeric_class_witness import build_agent, read_witness, SCHEMA as WITNESS_SCHEMA
 
 SCHEMA = "portable-binary64-probe-receipt/2"
@@ -372,19 +372,8 @@ def _source(raw, commit, expected_sha):
     return source
 
 
-def _startup(traces, raw):
-    candidates = []
-    for value in traces.values():
-        for line in value.decode().splitlines():
-            if " execve(" not in line or "GradleWorkerMain" not in line or not line.endswith(" = 0"):
-                continue
-            parsed = successful_execve(line.split(" ", 1)[1])
-            require(parsed is not None, "worker argv is truncated or malformed")
-            if len(parsed[1]) >= 3 and parsed[1][-2] == (
-                    "worker.org.gradle.process.internal.worker.GradleWorkerMain"):
-                candidates.append(parsed)
-    require(len(candidates) == 1, "numeric producer worker invocation differs")
-    executable, selected_argv = candidates[0]
+def _startup(raw, selected_exec):
+    _, executable, selected_argv = selected_exec
     argv = list(selected_argv)
     response_paths = [token[1:] for token in argv if token.startswith("@")]
     if response_paths:
@@ -500,7 +489,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
         entry = archive.extractfile(OBSERVER)
         require(entry is not None, "class witness committed source is absent")
         java_source = entry.read()
-    compiler = Path(selected_exec[0]).parents[1]
+    compiler = Path(selected_exec[1]).parents[1]
     require(compiler.resolve() == Path("/tmp/dyn4k-tools/jdk21").resolve(),
             "class witness compiler runtime differs")
     rebuilt = build_agent(java_source, compiler, scratch / "witness-rebuilt.jar",
@@ -508,8 +497,9 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     require(rebuilt == raw["class-witness-agent.jar"],
             "class witness complete JAR differs from committed source")
     input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"],
-                                      worker, rebuilt, selected_exec)
+                                      worker, rebuilt, selected_exec[1:])
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
+                                    selected_exec,
                                     mirror_identity=metadata["witness_identity"],
                                     shared_writers=True)
     require(output_proof["worker_pid"] == worker,
@@ -617,12 +607,14 @@ def _proof(raw, receipt, cases, artifacts, scratch):
                 identity["size"] == len(raw[raw_name]),
                 "class witness captured file identity is malformed")
     traces = {name.split(".")[-1]: data for name, data in raw.items() if name.startswith("process/")}
-    executable, argv, startup, response_path, response, tokens = _startup(traces, raw)
+    selected_exec = select_worker_exec(traces)
+    executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec)
     runtime = receipt["runtime"]
     require(executable == runtime.get("executable") and Path(executable).is_file() and
             digest(executable) == runtime.get("executable_sha256"), "worker runtime executable differs")
-    proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], response_path,
-                             response, mirror_identity=mirror_identity)
+    proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], selected_exec,
+                             response_path, response, mirror_identity=mirror_identity)
+    require(proof["worker_pid"] == selected_exec[0], "selected worker transport identity differs")
     require(proof["parent_pids"], "worker ancestry does not reach traced invocation")
     root = proof["parent_pids"][-1]
     require(any(line.endswith(" +++ exited with 0 +++") for line in traces[root].decode().splitlines()),
@@ -651,7 +643,9 @@ def _proof(raw, receipt, cases, artifacts, scratch):
                 "-XX:+DisableAttachMechanism", "-Xshare:off")),
             "traced worker guard arguments differ")
     for field, file in (("arguments_log", "worker-arguments.log"), ("class_load_log", "class-load.log")):
-        verify_transport(traces, metadata[field], raw[file], exclusive=False, ordered=False)
+        aux = verify_transport(traces, metadata[field], raw[file], selected_exec,
+                               exclusive=False, ordered=False)
+        require(aux["worker_pid"] == selected_exec[0], "worker auxiliary log identity differs")
     from run import _java_version_line
     version = subprocess.CompletedProcess([], 0, raw["runtime-version.log"].decode(), "")
     require(_java_version_line(version) == runtime.get("version"),
@@ -676,7 +670,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(class_map(rebuilt) == payload, "independent deterministic recompilation differs")
     proof["class_witness"] = _witness(raw, source, metadata, traces, proof["worker_pid"],
                                       payload, Path(artifacts["target"]), class_root,
-                                      entries, (executable, tuple(argv)), scratch)
+                                      entries, selected_exec, scratch)
     proof.update({"runtime_executable_sha256": digest(executable),
                   "classpath_sha256": sha(encoded(entries)),
                   "class_archive_sha256": sha(raw["compiled-classes.zip"]),
@@ -839,8 +833,8 @@ def capture(output, scratch):
                 for trace in (output / "process").glob("trace.*"):
                     require(trace.stat().st_size <= MAX_TRACE_MEMBER, "capture trace member exceeds budget")
                     for line in trace.read_text(errors="strict").splitlines():
-                        if "GradleWorkerMain" in line and "execve(" in line:
-                            matches = re.findall(r'"@([^" ]+)"', line)
+                        if " execve(" in line and (parsed := worker_exec(line.split(" ", 1)[1])):
+                            matches = [arg[1:] for arg in parsed[1] if arg.startswith("@")]
                             if matches and Path(matches[0]).is_file():
                                 require(len(matches) == 1, "multiple worker response files")
                                 data = Path(matches[0]).read_bytes()
@@ -862,14 +856,8 @@ def capture(output, scratch):
     after = archive_classes(class_root)
     require(after == before, "compiled payload changed during selected invocation")
     traces = {path.name.split(".")[-1]: path.read_bytes() for path in (output / "process").glob("trace.*")}
-    calls = [(tid, line) for tid, data in traces.items() for line in data.decode().splitlines()
-             if " execve(" in line and "GradleWorkerMain" in line and line.endswith(" = 0")]
-    require(len(calls) == 1, "selected worker count differs")
-    worker, call = calls[0]
-    invocation_match = re.search(r'execve\((' + STRING + r'), \[(.*)\], .*\) = 0$', call)
-    require(invocation_match is not None, "selected worker arguments unavailable")
-    executable = quoted(invocation_match[1]).decode()
-    argv = [quoted(value).decode() for value in re.findall(STRING, invocation_match[2])]
+    worker, executable, selected_argv = select_worker_exec(traces)
+    argv = list(selected_argv)
     if not any(value.startswith("@") for value in argv):
         (output / "direct-classpath.json").write_bytes(encoded(argv))
     require((output / "worker-classpath.txt").exists() or
@@ -883,7 +871,7 @@ def capture(output, scratch):
         shutil.copyfile(source_path, output / name)
     from run import artifacts
     retained = {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()}
-    _, _, startup, _, _, _ = _startup(traces, retained)
+    _, _, startup, _, _, _ = _startup(retained, (worker, executable, selected_argv))
     observations = [decode(line[len(b"NUMERICAL_PROVIDER_JSON "):])
                     for line in retained["mirror.log"].splitlines()
                     if line.startswith(b"NUMERICAL_PROVIDER_JSON ")]
