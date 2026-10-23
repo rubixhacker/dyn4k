@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from unittest.mock import patch
 
 import actual_arithmetic as actual
 import actual_capture_receipt as focused_receipt
+import baseline_capture
 import capture_actual
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
                                     load_version6_archive, verify_boolean_startup)
@@ -1003,6 +1005,11 @@ class ClasspathProviderTest(unittest.TestCase):
 
 
 class EnvironmentSentinelTest(unittest.TestCase):
+    def test_retained_external_attestation_verifier_source_matches(self):
+        self.assertEqual(
+            baseline_capture.verifier_source_sha256(),
+            "bc8537670a471229bf93cbe03ab41e6e599dbe4d2ffd657c2d90f61a6e5ad7d5")
+
     def test_v6_disassembly_receives_receipt_environment(self):
         body = ast.parse(inspect.getsource(focused_receipt._proof))
         calls = [node for node in ast.walk(body) if isinstance(node, ast.Call)
@@ -1023,18 +1030,79 @@ class EnvironmentSentinelTest(unittest.TestCase):
                                                     environment=selected), b"source")
         self.assertEqual(launched.call_args.kwargs["env"], selected)
 
-    def test_v6_identity_uses_focused_environment(self):
+    def test_v6_identity_uses_focused_source_and_exact_archive(self):
         files = {key: b"safe" for key in FILE_NAMES}
         files.update(worker_class_load=b"safe", worker_arguments=b"safe")
         selected = {"TMPDIR": os.environ["TMPDIR"]}
+        commit = "a" * 40
         with patch.object(capture_actual, "child_environment",
                           return_value=selected) as chosen, \
-                patch.object(focused_receipt, "clean_identity",
-                             return_value=("wrong", "digest")) as identity:
-            with self.assertRaises(FocusedRejected):
-                focused_receipt.make_version6_receipt(files, "a" * 40)
+                patch.object(capture_actual, "clean_source",
+                             return_value=commit) as identity, \
+                patch.object(actual, "_source_archive", return_value=b"safe") as archive:
+            with self.assertRaisesRegex(FocusedRejected, "focused JSON is malformed"):
+                focused_receipt.make_version6_receipt(files, commit)
         chosen.assert_called_once_with(focused=True)
-        identity.assert_called_once_with(environment=selected)
+        identity.assert_called_once_with(focused=True)
+        archive.assert_called_once_with(commit, environment=selected)
+
+    def test_v6_identity_rejects_changed_commit_and_archive(self):
+        files = {key: b"safe" for key in FILE_NAMES}
+        files.update(worker_class_load=b"safe", worker_arguments=b"safe")
+        selected = {"TMPDIR": os.environ["TMPDIR"]}
+        commit = "a" * 40
+        with patch.object(capture_actual, "child_environment", return_value=selected), \
+                patch.object(capture_actual, "clean_source", return_value="b" * 40), \
+                patch.object(actual, "_source_archive", return_value=b"safe") as archive:
+            with self.assertRaisesRegex(FocusedRejected, "clean running revision"):
+                focused_receipt.make_version6_receipt(files, commit)
+        archive.assert_not_called()
+        with patch.object(capture_actual, "child_environment", return_value=selected), \
+                patch.object(capture_actual, "clean_source", return_value=commit), \
+                patch.object(actual, "_source_archive", return_value=b"other"):
+            with self.assertRaisesRegex(FocusedRejected, "clean running revision"):
+                focused_receipt.make_version6_receipt(files, commit)
+
+    def test_v6_identity_git_children_exclude_inherited_options(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            subprocess.run(("git", "init", "-q", str(root)), check=True)
+            (root / "README.md").write_text("focused source\n")
+            subprocess.run(("git", "-C", str(root), "add", "README.md"), check=True)
+            subprocess.run(("git", "-C", str(root), "-c", "user.name=Test",
+                            "-c", "user.email=test@example.invalid", "commit", "-qm",
+                            "source"), check=True)
+            commit = subprocess.check_output(("git", "-C", str(root), "rev-parse",
+                                              "HEAD"), text=True).strip()
+            files = {key: b"safe" for key in FILE_NAMES}
+            files.update(worker_class_load=b"safe", worker_arguments=b"safe")
+            original_run = subprocess.run
+            child_environments = []
+
+            def record(command, *args, **kwargs):
+                if command[0] == "git":
+                    child_environments.append(kwargs["env"])
+                return original_run(command, *args, **kwargs)
+
+            with patch.object(capture_actual, "ROOT", root), \
+                    patch.object(actual, "_ROOT", root), \
+                    patch.dict(os.environ, {
+                        "FAKE_CREDENTIAL": "synthetic-secret",
+                        "JAVA_TOOL_OPTIONS": "-Dfake=synthetic-secret"}), \
+                    patch.object(subprocess, "run", side_effect=record):
+                files["source"] = actual._source_archive(commit,
+                    environment=capture_actual.child_environment(focused=True))
+                child_environments.clear()
+                with self.assertRaisesRegex(FocusedRejected, "focused JSON is malformed"):
+                    focused_receipt.make_version6_receipt(files, commit)
+                self.assertEqual(len(child_environments), 4)
+                for child in child_environments:
+                    self.assertNotIn("FAKE_CREDENTIAL", child)
+                    self.assertNotIn("JAVA_TOOL_OPTIONS", child)
+                    self.assertEqual(child["TMPDIR"], os.environ["TMPDIR"])
+                files["source"] = b"changed archive"
+                with self.assertRaisesRegex(FocusedRejected, "clean running revision"):
+                    focused_receipt.make_version6_receipt(files, commit)
 
     def test_receipt_rebuild_uses_focused_child_environment(self):
         with patch.object(capture_actual, "child_environment",

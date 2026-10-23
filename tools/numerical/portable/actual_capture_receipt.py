@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from urllib.parse import unquote, urlparse
 
+import actual_arithmetic
 from actual_arithmetic import (CaptureRejected, _FOCUSED_BOOLEAN_CASE,
                                _FOCUSED_BOOLEAN_METHOD, _PINNED_JAVA,
                                _STAGED_JAR, _unique_object, make_capture_receipt)
@@ -25,7 +26,7 @@ from numeric_producer_trace import (_events, successful_execve,
                                     verify_stable_input, verify_transport)
 from prospective_compare import compare_host
 from receipt import Rejected
-from run import clean_identity, comparison_coverage
+from run import comparison_coverage
 
 
 class FocusedRejected(CaptureRejected):
@@ -630,9 +631,12 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
             "version 6 source file inventory differs")
     require(runtime_executable == _PINNED_JAVA,
             "focused runtime executable differs")
-    from capture_actual import child_environment
+    from capture_actual import child_environment, clean_source
     environment = child_environment(focused=True)
-    require(clean_identity(environment=environment) == (commit, sha(files["source"])),
+    require(clean_source(focused=True) == commit,
+            "focused source is not the clean running revision")
+    require(actual_arithmetic._source_archive(commit, environment=environment) ==
+            files["source"],
             "focused source is not the clean running revision")
     metadata = decoded(files["metadata"])
     require(type(metadata) is dict and set(metadata) == {
