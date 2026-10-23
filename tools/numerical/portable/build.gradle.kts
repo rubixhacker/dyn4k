@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.toolchain.JavaLanguageVersion
+import java.io.File
 
 plugins {
     kotlin("multiplatform") version "2.4.20"
@@ -123,7 +124,7 @@ if (providers.gradleProperty("portableJvm8").orNull == "true") {
 }
 
 providers.gradleProperty("portableNumericProbeMirror").orNull?.let { mirror ->
-    require(java.io.File(mirror).isAbsolute)
+    require(File(mirror).isAbsolute)
     tasks.named<Test>("jvmTest") {
         systemProperty("portable.numericProbeMirror", mirror)
         maxParallelForks = 1
