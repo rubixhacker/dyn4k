@@ -1121,7 +1121,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._p2_producer_binding(ROOT, revision)
 
     def test_private_launch_window_pins_exact_source_and_rejects_intermediates(self):
-        current = "19bfa92ea05bcae4e858722f0e5873dbdffa113a"
+        current = "9b3442efa50b7a215b2c5c2ff2584671dc14a14a"
         self.assertEqual(current, independent_gates.PRIVATE_LAUNCH_SOURCE_REVISION)
         checker = independent_gates._prospective_checker_binding(ROOT, current)
         producer = independent_gates._p2_producer_binding(ROOT, current)
@@ -1160,7 +1160,9 @@ class IndependentGateSeamTests(unittest.TestCase):
                          "542b1a7833db649c8d91568da4bdf93029ea6667",
                          "97edf52beb0a7ab15daa51382ed49205e1786893",
                          "9ab252e8e4e4f6e6a74abc66cfed3a92ad9dd85b",
-                         "db548c15511d23c8d966d78abd976ecebb9fd326"):
+                         "db548c15511d23c8d966d78abd976ecebb9fd326",
+                         "e75f3b9325b45ea5675fe95eb852f592fd6aec9c",
+                         "1f5d0647f915311ed096ce8945b4e86d3ea3fc9a"):
             with self.subTest(intermediate=revision):
                 with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                     independent_gates._prospective_checker_binding(ROOT, revision)

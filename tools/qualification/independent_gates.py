@@ -147,7 +147,7 @@ APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS = {
 }
 PROSPECTIVE_V6_SOURCE_REVISION = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
 FAILED_PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
-PRIVATE_LAUNCH_SOURCE_REVISION = "19bfa92ea05bcae4e858722f0e5873dbdffa113a"
+PRIVATE_LAUNCH_SOURCE_REVISION = "9b3442efa50b7a215b2c5c2ff2584671dc14a14a"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -379,11 +379,11 @@ PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/capture_actual.py":
         "1c6807ff810007d20ebd7dc7ba30f6f0ceee279d047447dcba699c5a7456303a",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "df16e5455113ba3941b39322b28964bb2edfb960860d902c0bfb1c0e0ddd679b",
+        "5975a217dc9fb6da83d0c1c8a78b1d14299767ca434379261bf0100beae03ea2",
     "tools/numerical/portable/actual_trace.py":
         "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "22d5f7d1fd5ac8c3f828d68799ce4a24ab698ad275b805e61c90ec9b8c62ad62",
+        "82779f2e151156420721206c07d875c756dda0f4f99610d38e362587cdefc1b7",
     "tools/numerical/portable/numeric_class_witness.py":
         "cde04945bacbbd77fcc3f37296f815e8d0fca4492950e9c7dcae3aef18888328",
 }
@@ -413,11 +413,11 @@ P2_PRIVATE_LAUNCH_DEPENDENCIES = {
     "tools/numerical/portable/numeric_producer_trace.py":
         "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "df16e5455113ba3941b39322b28964bb2edfb960860d902c0bfb1c0e0ddd679b",
+        "5975a217dc9fb6da83d0c1c8a78b1d14299767ca434379261bf0100beae03ea2",
     "tools/numerical/portable/actual_trace.py":
         "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "22d5f7d1fd5ac8c3f828d68799ce4a24ab698ad275b805e61c90ec9b8c62ad62",
+        "82779f2e151156420721206c07d875c756dda0f4f99610d38e362587cdefc1b7",
     "tools/numerical/portable/numeric_class_witness.py":
         "cde04945bacbbd77fcc3f37296f815e8d0fca4492950e9c7dcae3aef18888328",
 }
