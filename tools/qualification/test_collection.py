@@ -116,6 +116,27 @@ def central_collection_steps(workflow):
             for index, match in enumerate(matches)]
 
 
+def central_collection_commands(step):
+    marker = "        run: |\n"
+    if step.count(marker) != 1:
+        raise AssertionError("central collection must have one shell script")
+    script = step.split(marker, 1)[1]
+    commands = []
+    continued = ""
+    for physical in script.splitlines():
+        if not physical.startswith("          ") or not physical.strip():
+            raise AssertionError("central collection shell line is malformed")
+        line = physical.strip()
+        if line.endswith("\\"):
+            continued += line[:-1].rstrip() + " "
+        else:
+            commands.append(continued + line)
+            continued = ""
+    if continued:
+        raise AssertionError("central collection shell continuation is incomplete")
+    return tuple(commands)
+
+
 class CollectionTests(unittest.TestCase):
     def test_empty_collection_keeps_all_lanes_not_run_without_signature(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -317,28 +338,69 @@ class CollectionTests(unittest.TestCase):
         self.assertIn("          pattern: '*'\n", download)
         self.assertIn("          path: ${{ runner.temp }}/producer-artifacts\n", download)
         self.assertIn("          merge-multiple: false\n", download)
-        self.assertIn("        if: always()\n", collect)
-        self.assertIn("        run: |\n", collect)
-        self.assertIn(
-            '          python3 tools/qualification/collection.py --verify \\\n'
-            '            --repository "$GITHUB_WORKSPACE" \\\n'
-            '            --candidate-sha "$GITHUB_SHA" \\\n'
-            '            --artifacts-dir "$RUNNER_TEMP/producer-artifacts" \\\n'
-            '            --output "$RUNNER_TEMP/central-collection" \\\n'
-            '            > "$RUNNER_TEMP/central-logs/transport.stdout" \\\n'
-            '            2> "$RUNNER_TEMP/central-logs/transport.stderr"\n',
-            collect)
-        self.assertIn("          transport_exit=$?\n", collect)
-        self.assertIn('test "$transport_exit" -eq 0', collect)
+        self.assertEqual(
+            "      - name: Collect and independently enumerate 112 lanes\n"
+            "        if: always()\n"
+            "        env:\n"
+            "          DYN4K_DOWNLOAD_OUTCOME: ${{ steps.raw_download.outcome }}\n"
+            "          DYN4K_CROSS_RUN_ONLY: ${{ inputs.cross_run_only }}\n"
+            "          DYN4K_GITHUB_TOKEN: ${{ github.token }}\n"
+            "        run: |\n",
+            collect.split("        run: |\n", 1)[0] + "        run: |\n")
+        self.assertEqual((
+            "set +e",
+            'mkdir -p "$RUNNER_TEMP/central-logs" "$RUNNER_TEMP/producer-artifacts"',
+            "source_args=()",
+            'if [ "$DYN4K_CROSS_RUN_ONLY" = true ]; then',
+            'source_args=(--source-index "$RUNNER_TEMP/cross-run-source-index.json"',
+            '--repository-name "$GITHUB_REPOSITORY"',
+            '--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")',
+            "fi",
+            'python3 tools/qualification/collection.py '
+            '--repository "$GITHUB_WORKSPACE" --candidate-sha "$GITHUB_SHA" '
+            '--artifacts-dir "$RUNNER_TEMP/producer-artifacts" '
+            '--upstream "$RUNNER_TEMP/dyn4j-source" "${source_args[@]}" '
+            '--output "$RUNNER_TEMP/central-collection" '
+            '> "$RUNNER_TEMP/central-logs/collection.stdout" '
+            '2> "$RUNNER_TEMP/central-logs/collection.stderr"',
+            "collection_exit=$?",
+            'python3 tools/qualification/collection.py --verify '
+            '--repository "$GITHUB_WORKSPACE" --candidate-sha "$GITHUB_SHA" '
+            '--artifacts-dir "$RUNNER_TEMP/producer-artifacts" '
+            '--output "$RUNNER_TEMP/central-collection" '
+            '> "$RUNNER_TEMP/central-logs/transport.stdout" '
+            '2> "$RUNNER_TEMP/central-logs/transport.stderr"',
+            "transport_exit=$?",
+            'python3 tools/qualification/independent_gates.py '
+            '--repository "$GITHUB_WORKSPACE" --candidate-sha "$GITHUB_SHA" '
+            '--assembly "$RUNNER_TEMP/central-collection/assembly-inputs.json" '
+            '> "$RUNNER_TEMP/central-logs/independent-112.json" '
+            '2> "$RUNNER_TEMP/central-logs/independent-112.stderr"',
+            "assembly_exit=$?",
+            'python3 tools/qualification/qualify.py record '
+            '--candidate-sha "$GITHUB_SHA" '
+            '--output "$RUNNER_TEMP/central-logs/runtime-matrix.json" '
+            '> "$RUNNER_TEMP/central-logs/record.stdout" '
+            '2> "$RUNNER_TEMP/central-logs/record.stderr"',
+            "record_exit=$?",
+            r"printf 'download=%s\ncollection=%s\ntransport=%s\nassembly=%s\nrecord=%s\n' "
+            '"$DYN4K_DOWNLOAD_OUTCOME" "$collection_exit" "$transport_exit" '
+            '"$assembly_exit" "$record_exit" > "$RUNNER_TEMP/central-logs/exit-codes.txt"',
+            'if [ "$DYN4K_DOWNLOAD_OUTCOME" != success ]; then',
+            'echo "::error::Producer artifact download failed or was skipped: '
+            '$DYN4K_DOWNLOAD_OUTCOME"',
+            "fi",
+            'test "$DYN4K_DOWNLOAD_OUTCOME" = success && '
+            'test "$collection_exit" -eq 0 && test "$transport_exit" -eq 0 && '
+            'test "$assembly_exit" -eq 0 && test "$record_exit" -eq 0',
+        ), central_collection_commands(collect))
         self.assertIn("        if: always()\n", upload)
         self.assertIn("        uses: actions/upload-artifact@v4\n", upload)
         self.assertIn("          name: qualification-central-${{ github.sha }}\n", upload)
         for path in ("central-collection/", "central-logs/", "producer-artifacts/"):
             self.assertIn("            ${{ runner.temp }}/" + path + "\n", upload)
         self.assertIn("          if-no-files-found: error\n", upload)
-        for command in ("independent_gates.py", "qualify.py record",
-                        "duplicate_provider.py", "qualification-central-${{ github.sha }}"):
-            self.assertIn(command, workflow)
+        self.assertIn("duplicate_provider.py", workflow)
 
     def test_central_collection_rejects_inactive_or_misplaced_steps(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
@@ -404,6 +466,39 @@ class CollectionTests(unittest.TestCase):
                 reordered = central.replace(moved, "", 1).replace(
                     anchor, (anchor + moved if moved == download else moved + anchor), 1)
                 altered = workflow.replace(central, reordered, 1)
+                with mock.patch.object(Path, "read_text", return_value=altered):
+                    with self.assertRaises(AssertionError):
+                        self.test_workflow_runs_after_producers_and_retains_raw_results()
+
+    def test_central_collection_rejects_shell_bypasses(self):
+        workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
+        central = workflow_contract.workflow_jobs(workflow)["central-qualification-collection"]
+        mutations = [
+            ("early-success-exit", (("        run: |\n          set +e\n",
+                                     "        run: |\n          exit 0\n          set +e\n"),)),
+            ("false-conditional-verifier", (
+                ("          python3 tools/qualification/collection.py --verify \\\n",
+                 "          if false; then\n"
+                 "          python3 tools/qualification/collection.py --verify \\\n"),
+                ("          transport_exit=$?\n",
+                 "          fi\n          transport_exit=$?\n"))),
+            ("ignored-final-status", (("          test \"$assembly_exit\" -eq 0 && "
+                                      "test \"$record_exit\" -eq 0\n",
+                                      "          test \"$assembly_exit\" -eq 0 && "
+                                      "test \"$record_exit\" -eq 0 || true\n"),)),
+            ("stop-before-raw-results", (("          set +e\n", "          set -e\n"),)),
+        ]
+        mutations.extend(
+            (f"overwrite-{name}-exit",
+             ((f"          {name}_exit=$?\n", f"          {name}_exit=0\n"),))
+            for name in ("collection", "transport", "assembly", "record"))
+        for name, replacements in mutations:
+            with self.subTest(mutation=name):
+                changed = central
+                for old, new in replacements:
+                    self.assertIn(old, changed)
+                    changed = changed.replace(old, new, 1)
+                altered = workflow.replace(central, changed, 1)
                 with mock.patch.object(Path, "read_text", return_value=altered):
                     with self.assertRaises(AssertionError):
                         self.test_workflow_runs_after_producers_and_retains_raw_results()
