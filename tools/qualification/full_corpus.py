@@ -306,6 +306,24 @@ def capture_environment(repository):
             "executables": executables, "gradle_wrapper": wrapper}
 
 
+def node_capture_root(row):
+    relative = archive_relative(row["payload_path"])
+    argv = row["argv"]
+    if not isinstance(argv, list):
+        raise ValueError("Node command is absent")
+    roots = []
+    for part in argv:
+        if not isinstance(part, str):
+            raise ValueError("Node command contains a non-path argument")
+        path = Path(part)
+        if (path.is_absolute() and path == Path(os.path.normpath(part)) and
+                path.parts[-len(relative.parts):] == relative.parts):
+            roots.append(Path(*path.parts[:-len(relative.parts)]))
+    if len(roots) != 1:
+        raise ValueError("Node capture root is not unique in observed command")
+    return roots[0]
+
+
 def node_observation_problems(repository, evidence_root, binding, started, finished):
     if binding.get("schema", 1) == 1:
         return []
@@ -329,6 +347,7 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
     if not directory.is_dir() or directory.is_symlink():
         return [*problems, "Node observation raw directory is absent or linked"]
     seen_groups, seen_processes, expected_files = set(), set(), set()
+    observed_root = None
     for row in observations:
         try:
             group_id = row["group_id"]
@@ -346,26 +365,37 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                 raise ValueError("stale Node process observation")
             if row["task"] != node_task(group_id):
                 raise ValueError("Node task differs from group")
-            selection = node_group_for_argv(repository, row["argv"])
+            capture_root = node_capture_root(row)
+            if observed_root is not None and capture_root != observed_root:
+                raise ValueError("Node test processes used different capture roots")
+            observed_root = capture_root
+            selection = node_group_for_argv(capture_root, row["argv"])
             if selection is None or selection[0] != group_id:
                 raise ValueError("Node command differs from selected group")
             payload = selection[1]
-            relative_payload = payload.relative_to(repository).as_posix()
+            relative_payload = payload.relative_to(capture_root).as_posix()
             if row["payload_path"] != relative_payload:
                 raise ValueError("Node payload path differs from command")
             evidence_payload = evidence_root / relative_payload
             if (not evidence_payload.is_file() or evidence_payload.is_symlink() or
                     digest(evidence_payload.read_bytes()) != row["payload_sha256"]):
-                raise ValueError("Node test payload bytes differ")
+                raise ValueError("archived Node test payload bytes differ")
+            candidate_payload = repository / relative_payload
+            if (not candidate_payload.is_file() or candidate_payload.is_symlink() or
+                    digest(candidate_payload.read_bytes()) != row["payload_sha256"]):
+                raise ValueError("candidate Node test payload bytes differ")
             if not started <= evidence_payload.stat().st_mtime_ns <= finished:
                 raise ValueError("Node test payload is outside invocation window")
-            loader = node_launch_loader(repository, row["argv"])
-            loader_path = loader.relative_to(repository).as_posix() if loader else None
+            loader = node_launch_loader(capture_root, row["argv"])
+            loader_path = loader.relative_to(capture_root).as_posix() if loader else None
             if row["launch_loader_path"] != loader_path:
                 raise ValueError("Node launch loader differs from command")
-            if loader is not None and digest((evidence_root / loader_path).read_bytes()) != row[
-                    "launch_loader_sha256"]:
-                raise ValueError("Node launch loader bytes differ")
+            if loader is not None:
+                for root in (evidence_root, repository):
+                    candidate_loader = root / loader_path
+                    if (not candidate_loader.is_file() or candidate_loader.is_symlink() or
+                            digest(candidate_loader.read_bytes()) != row["launch_loader_sha256"]):
+                        raise ValueError("Node launch loader bytes differ")
             if loader is None and row["launch_loader_sha256"] is not None:
                 raise ValueError("unexpected Node launch loader hash")
             if row["report_sha256"] != canonical_digest(binding["reports"][group_id]):
@@ -401,7 +431,7 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                             "version": row["version"]}):
                 raise ValueError("Node startup request differs from live observation")
             if (row["requested_argv"][1:] !=
-                    node_process_argv(repository, row["argv"])[1:] or
+                    node_process_argv(capture_root, row["argv"])[1:] or
                     Path(row["requested_argv"][0]).resolve() !=
                     Path(row["argv"][0]).resolve() or
                     Path(row["requested_exec_path"]).resolve() !=

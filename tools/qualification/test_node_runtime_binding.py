@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import shutil
@@ -189,6 +190,51 @@ class LiveNodeObservationTest(unittest.TestCase):
             self.assertEqual([], full_corpus.node_observation_problems(
                 Path(os.path.relpath(repository)), Path(os.path.relpath(repository)),
                 binding, started_ns, finished_ns))
+            with tempfile.TemporaryDirectory() as replay_directory:
+                replay_root = Path(replay_directory)
+                candidate = replay_root / "candidate"
+                evidence = replay_root / "evidence"
+                shutil.copytree(repository, candidate)
+                shutil.copytree(observations, evidence / "node-observations")
+                for row in rows:
+                    for relative in (row["payload_path"], row["launch_loader_path"]):
+                        if relative is not None:
+                            target = evidence / relative
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            if not target.exists():
+                                shutil.copy2(repository / relative, target)
+                self.assertEqual([], full_corpus.node_observation_problems(
+                    candidate, evidence, binding, started_ns, finished_ns))
+                wrong_root = copy.deepcopy(binding)
+                wasm_row = next(row for row in wrong_root["node_observations"]
+                                if row["group_id"] == "core-wasmJsNode")
+                wasm_row["argv"] = [part.replace(str(repository), str(candidate))
+                                    for part in wasm_row["argv"]]
+                self.assertTrue(any("different capture roots" in problem for problem in
+                                    full_corpus.node_observation_problems(
+                                        candidate, evidence, wrong_root,
+                                        started_ns, finished_ns)))
+                selected = rows[0]["payload_path"]
+                candidate_payload = candidate / selected
+                candidate_payload.write_bytes(b"changed candidate payload")
+                self.assertTrue(full_corpus.node_observation_problems(
+                    candidate, evidence, binding, started_ns, finished_ns))
+                shutil.copy2(repository / selected, candidate_payload)
+                archived_payload = evidence / selected
+                archived_payload.write_bytes(b"changed archive payload")
+                self.assertTrue(full_corpus.node_observation_problems(
+                    candidate, evidence, binding, started_ns, finished_ns))
+                shutil.copy2(repository / selected, archived_payload)
+                loader_relative = next(row["launch_loader_path"] for row in rows
+                                       if row["launch_loader_path"] is not None)
+                candidate_loader = candidate / loader_relative
+                candidate_loader.write_bytes(b"changed candidate loader")
+                self.assertTrue(full_corpus.node_observation_problems(
+                    candidate, evidence, binding, started_ns, finished_ns))
+                shutil.copy2(repository / loader_relative, candidate_loader)
+                (candidate / full_corpus.NODE_PROBE_PATH).write_bytes(b"changed source")
+                self.assertTrue(full_corpus.node_observation_problems(
+                    candidate, evidence, binding, started_ns, finished_ns))
             mutants = (
                 ("missing", lambda value: value["node_observations"].pop()),
                 ("duplicate", lambda value: value["node_observations"].append(
@@ -236,4 +282,3 @@ class LiveNodeObservationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-import copy
