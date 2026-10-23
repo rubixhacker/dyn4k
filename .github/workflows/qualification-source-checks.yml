@@ -33,6 +33,14 @@ jobs:
         run: env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c 'from rotation_oracle import _MPFR; mpfr = _MPFR(); print("GNU MPFR", mpfr.version)'
       - name: Test source-only numerical regressions
         run: |
+          set -euo pipefail
+          umask 077
+          source_checks_tmp="$(mktemp -d "$HOME/d4t.XXXXXX")"
+          test -d "$source_checks_tmp"
+          test "$(stat -c %a "$source_checks_tmp")" = 700
+          test "$(stat -c %u "$source_checks_tmp")" = "$(id -u)"
+          test "${#source_checks_tmp}" -le 40
+          export TMPDIR="$source_checks_tmp"
           env -u OLLAMA_API_KEY \
             -u DYN4K_JDI_JDK_HOME \
             -u DYN4K_JDI_RETAINED_JAR \

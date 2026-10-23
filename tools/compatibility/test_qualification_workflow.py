@@ -374,6 +374,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
                  "print(\"GNU MPFR\", mpfr.version)'"),
                 ("name: Test source-only numerical regressions",
+                 "set -euo pipefail umask 077 "
+                 "source_checks_tmp=\"$(mktemp -d \"$HOME/d4t.XXXXXX\")\" "
+                 "test -d \"$source_checks_tmp\" "
+                 "test \"$(stat -c %a \"$source_checks_tmp\")\" = 700 "
+                 "test \"$(stat -c %u \"$source_checks_tmp\")\" = \"$(id -u)\" "
+                 "test \"${#source_checks_tmp}\" -le 40 "
+                 "export TMPDIR=\"$source_checks_tmp\" "
                  "env -u OLLAMA_API_KEY -u DYN4K_JDI_JDK_HOME "
                  "-u DYN4K_JDI_RETAINED_JAR -u DYN4K_WHEEL_ARCHIVE "
                  "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
@@ -840,6 +847,13 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         script = textwrap.dedent(step.group(1))
         command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
         self.assertEqual(
+            "set -euo pipefail umask 077 "
+            "source_checks_tmp=\"$(mktemp -d \"$HOME/d4t.XXXXXX\")\" "
+            "test -d \"$source_checks_tmp\" "
+            "test \"$(stat -c %a \"$source_checks_tmp\")\" = 700 "
+            "test \"$(stat -c %u \"$source_checks_tmp\")\" = \"$(id -u)\" "
+            "test \"${#source_checks_tmp}\" -le 40 "
+            "export TMPDIR=\"$source_checks_tmp\" "
             "env -u OLLAMA_API_KEY -u DYN4K_JDI_JDK_HOME "
             "-u DYN4K_JDI_RETAINED_JAR -u DYN4K_WHEEL_ARCHIVE "
             "-u DYN4K_WHEEL_ORIGIN -u DYN4K_GEOMETRY_BASELINE "
@@ -867,6 +881,66 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "test_numeric_producer test_run",
             command,
         )
+
+    def test_source_only_step_selects_private_home_tmp_before_python(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        job = workflow_jobs(source)["workflow-source-contracts"]
+        step = re.search(
+            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"        run: \|\n((?:          [^\n]*\n)+)",
+            job,
+        )
+        self.assertIsNotNone(step)
+        script = textwrap.dedent(step.group(1))
+
+        with tempfile.TemporaryDirectory(prefix="h", dir=os.environ["HOME"]) as temporary:
+            home = Path(temporary)
+            fake_bin = Path(temporary) / "bin"
+            fake_bin.mkdir()
+            probe = fake_bin / "python3"
+            probe.write_text(
+                "#!/bin/sh\n"
+                "test \"${TMPDIR+x}\" = x || exit 81\n"
+                "test \"${#TMPDIR}\" -le 40 || exit 82\n"
+                "case \"$TMPDIR\" in \"$HOME\"/*) ;; *) exit 83 ;; esac\n"
+                "test -d \"$TMPDIR\" || exit 84\n"
+                "test \"$(stat -c %a \"$TMPDIR\")\" = 700 || exit 85\n"
+                "test \"$(stat -c %u \"$TMPDIR\")\" = \"$(id -u)\" || exit 86\n"
+                "test \"$HOME\" = \"$EXPECTED_HOME\" || exit 87\n"
+                "if test \"$EXPECTED_CODEX_STATE\" = unset; then\n"
+                "  test \"${CODEX_HOME+x}\" != x || exit 88\n"
+                "else\n"
+                "  test \"${CODEX_HOME+x}\" = x || exit 89\n"
+                "  test \"$CODEX_HOME\" = \"$EXPECTED_CODEX_VALUE\" || exit 90\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            probe.chmod(0o700)
+
+            for codex_state in ("unset", "empty"):
+                with self.subTest(codex_home=codex_state):
+                    environment = os.environ.copy()
+                    environment.pop("TMPDIR", None)
+                    environment.pop("OLLAMA_API_KEY", None)
+                    environment["HOME"] = str(home)
+                    environment["EXPECTED_HOME"] = str(home)
+                    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+                    environment["JAVA_HOME_8_X64"] = "/unused/test-jdk8"
+                    environment["EXPECTED_CODEX_STATE"] = codex_state
+                    environment.pop("CODEX_HOME", None)
+                    if codex_state == "empty":
+                        environment["CODEX_HOME"] = ""
+                        environment["EXPECTED_CODEX_VALUE"] = ""
+
+                    result = subprocess.run(
+                        ["bash", "--noprofile", "--norc", "-euxo", "pipefail", "-c", script],
+                        cwd=WORKFLOW.parents[2],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
         observer = re.search(
             r"(?ms)^      - name: Test numeric class witness on JDK 21\n"
