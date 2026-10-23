@@ -121,3 +121,11 @@ if (providers.gradleProperty("portableJvm8").orNull == "true") {
         })
     }
 }
+
+providers.gradleProperty("portableNumericProbeMirror").orNull?.let { mirror ->
+    require(java.io.File(mirror).isAbsolute)
+    tasks.named<Test>("jvmTest") {
+        systemProperty("portable.numericProbeMirror", mirror)
+        maxParallelForks = 1
+    }
+}

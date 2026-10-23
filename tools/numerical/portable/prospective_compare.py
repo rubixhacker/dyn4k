@@ -839,9 +839,13 @@ def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
     path = lane / "numeric-probe-receipt.json"
     if not path.exists():
         return False
-    if not path.is_file():
-        raise Rejected("numeric probe receipt is not a file")
-    receipt = json.loads(path.read_text())
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
+        raise Rejected("numeric probe receipt is not a bounded regular file")
+    from numeric_producer import decode, verify as verify_bound_numeric_producer
+    receipt = decode(path.read_bytes())
+    if isinstance(receipt, dict) and receipt.get("schema") == "portable-binary64-probe-receipt/2":
+        return verify_bound_numeric_producer(lane, commit, source_sha256, trace_sha256,
+                                             artifacts, runtime_proof)
     required = {"schema", "candidate_commit", "source_sha256", "trace_sha256",
                 "artifact_sha256", "runtime", "method", "xml_sha256",
                 "gradle_log_sha256", "probe"}
@@ -1092,8 +1096,12 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
                             for row in results) else
                           "UNPASSED"),
                "qualification": "UNPASSED",
-               "numeric_probe": ("UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
+               "numeric_probe": (probe_archive_consistent["status"]
+                                 if isinstance(probe_archive_consistent, dict) else
+                                 "UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
                                  "UNPASSED_NOT_EXECUTED"),
+               "numeric_probe_reason": (probe_archive_consistent.get("reason")
+                                        if isinstance(probe_archive_consistent, dict) else None),
                "operation_binding": ("VERIFIED_ARITHMETIC_BINDING" if
                                      arithmetic_verified else "UNPASSED_NOT_EXECUTED"),
                "baseline_jar_sha256": manifest["baseline_jar_sha256"],

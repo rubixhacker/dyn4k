@@ -525,11 +525,28 @@ class ProspectiveComparisonTest(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "numeric probe target arithmetic"):
                     compare_host(baseline, lane, set(), sidecar,
                                  self.root / "arithmetic")
+            # Simulate the verifier boundary. This control does not prove producer execution.
+            with patch("prospective_compare.verify_numeric_probe", return_value={
+                    "status": "PASSED_BOUND_PRODUCER", "proof": {}}):
+                bound = compare_host(baseline, lane, set(), sidecar)
+                self.assertEqual(bound["numeric_probe"], "PASSED_BOUND_PRODUCER")
+                self.assertEqual(bound["status"], "UNPASSED")
+                self.assertEqual(bound["passed_case_policy"], 0)
+                self.assertEqual(bound["results"][0]["target_premises"], numerical["target_premises"])
+                self.assertEqual(bound["operation_binding"], "UNPASSED_NOT_EXECUTED")
             self.assertEqual(consistent["baseline_attestation_sha256"], digest(sidecar))
             with patch("baseline_capture.verify_attestation", side_effect=ValueError(
                     "wrong sidecar")):
                 with self.assertRaisesRegex(ValueError, "wrong sidecar"):
                     compare_host(baseline, lane, set(), sidecar)
+
+    def test_schema_two_cannot_assert_its_own_success(self):
+        lane, receipt, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+        receipt["schema"] = "portable-binary64-probe-receipt/2"
+        receipt["status"] = "PASSED_BOUND_PRODUCER"
+        (lane / "numeric-probe-receipt.json").write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(Exception, "numeric producer receipt schema"):
+            verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
 
     def test_arithmetic_bridge_rejects_unbound_and_checks_matrix_case(self):
         from actual_arithmetic import (CaptureRejected, make_capture_receipt,
